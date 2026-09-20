@@ -65,6 +65,10 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     transcriptPath: transcript?.transcriptPath ?? base.transcriptPath,
     state: stateOwner?.state ?? base.state,
     detail: transcript?.detail ?? conductor?.detail ?? null,
+    // Conductor is the only source for these two, so take them from it
+    // whichever observer supplied the rest of the identity.
+    contextPercent: conductor?.contextPercent ?? base.contextPercent,
+    retired: conductor?.retired ?? base.retired,
     lastActivityAt,
     pid: null,
     alive: false,

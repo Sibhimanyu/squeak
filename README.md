@@ -33,10 +33,27 @@ Open it with `/radar`. It anchors a live message in that conversation and keeps
 editing it in place.
 
 **What counts as needing you**, in priority order: blocked on an approval,
-blocked on a question, errored, then finished-but-unreviewed. Only the two
-blocked kinds send you an unsolicited message; everything else waits on the
-radar so the chat does not become a firehose. Each card offers snooze, mark
-reviewed, and — for Conductor sessions — reply and open.
+blocked on a question, errored, finished-but-unreviewed, then running low on
+context. Only the two blocked kinds send you an unsolicited message; everything
+else waits on the radar so the chat does not become a firehose. Each card
+offers snooze, mark reviewed, and — for Conductor sessions — reply and open.
+
+A session can want attention for more than one reason at once, and all of them
+are shown.
+
+### Signals only Conductor has
+
+Two things no transcript can tell you, read straight from Conductor's database:
+
+- **Context pressure.** Conductor tracks how much of the context window each
+  session has burned. Past `FLEET_CONTEXT_PRESSURE_PERCENT` (default 80) the
+  session is close to compacting, which costs it fidelity on everything it has
+  already worked out — worth knowing before it happens. Any session at 60% or
+  more shows `ctx N%` on its radar row.
+- **Retired workspaces.** A workspace Conductor has archived, or that you
+  marked done or canceled, stops asking to be reviewed. On a machine with
+  twenty-odd sessions this is most of the noise: the worktree is gone, so
+  there is nothing left to look at.
 
 ### Live signal via agent hooks
 

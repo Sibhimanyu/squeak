@@ -22,6 +22,13 @@ export interface FleetRegistrySessionRef extends ConductorSessionRef {
   directoryName: string | null;
   branch: string | null;
   repositoryName: string | null;
+  /** How much of the model's context window the session has burned, 0-100. */
+  contextUsedPercent: number | null;
+  isCompacting: number | null;
+  /** Conductor's own view of whether the workspace is still live work. */
+  derivedStatus: string | null;
+  manualStatus: string | null;
+  workspaceState: string | null;
 }
 
 interface DbSessionRow {
@@ -497,8 +504,13 @@ export class ConductorRegistryAdapter {
             s.claude_session_id as claudeSessionId,
             s.updated_at as updatedAt,
             s.last_user_message_at as lastUserMessageAt,
+            s.context_used_percent as contextUsedPercent,
+            s.is_compacting as isCompacting,
             w.directory_name as directoryName,
             w.branch as branch,
+            w.derived_status as derivedStatus,
+            w.manual_status as manualStatus,
+            w.state as workspaceState,
             r.name as repositoryName
           FROM sessions s
           JOIN workspaces w ON w.id = s.workspace_id

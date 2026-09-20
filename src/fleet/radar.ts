@@ -94,10 +94,22 @@ function originTag(session: FleetSession): string | null {
   }
 }
 
+/** Context is only worth the characters once it is high enough to matter. */
+const CONTEXT_DISPLAY_PERCENT = 60;
+
+function contextTag(session: FleetSession): string | null {
+  if (session.contextPercent === null || session.contextPercent < CONTEXT_DISPLAY_PERCENT) {
+    return null;
+  }
+  return `ctx ${Math.round(session.contextPercent)}%`;
+}
+
 function describeRow(session: FleetSession, since: string, nowMs: number): string {
   const tags = [session.agent, originTag(session)].filter((part): part is string => Boolean(part));
   const head = `${stateGlyph(session.state)} ${sessionLabel(session)}`;
-  const meta = [`${tags.join(" ")}`, formatAge(since, nowMs)].filter(Boolean).join(" · ");
+  const meta = [`${tags.join(" ")}`, formatAge(since, nowMs), contextTag(session)]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
   const detail = session.detail ? `\n    ${session.detail}` : "";
   return `${head} — ${meta}${detail}`;
 }
@@ -108,8 +120,11 @@ function describeRow(session: FleetSession, since: string, nowMs: number): strin
  * prominent rather than omitted.
  */
 export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
-  const blocking = snapshot.attention.filter((item) => item.kind !== "finished_unreviewed");
+  const blocking = snapshot.attention.filter(
+    (item) => item.kind !== "finished_unreviewed" && item.kind !== "context_pressure",
+  );
   const finished = snapshot.attention.filter((item) => item.kind === "finished_unreviewed");
+  const pressured = snapshot.attention.filter((item) => item.kind === "context_pressure");
   const working = snapshot.sessions.filter((session) => session.state === "working");
   const quiet = snapshot.sessions.filter((session) => session.state === "idle");
 
@@ -121,7 +136,9 @@ export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
         ? `${finished.length} finished, unreviewed`
         : working.length > 0
           ? `${working.length} working`
-          : "all quiet";
+          : pressured.length > 0
+            ? `${pressured.length} low on context`
+            : "all quiet";
   lines.push(`**Fleet** — ${snapshot.sessions.length} sessions · ${headline}`);
 
   if (blocking.length > 0) {
@@ -158,7 +175,18 @@ export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
     }
   }
 
-  if (blocking.length === 0 && finished.length === 0 && working.length === 0) {
+  if (pressured.length > 0) {
+    lines.push("");
+    lines.push("**Running low on context**");
+    for (const item of pressured.slice(0, MAX_QUIET_ROWS)) {
+      lines.push(describeRow(item.session, item.since, nowMs));
+    }
+    if (pressured.length > MAX_QUIET_ROWS) {
+      lines.push(`… ${pressured.length - MAX_QUIET_ROWS} more`);
+    }
+  }
+
+  if (blocking.length === 0 && finished.length === 0 && working.length === 0 && pressured.length === 0) {
     lines.push("");
     lines.push(quiet.length > 0 ? `${quiet.length} idle sessions, nothing pending.` : "No agent sessions running.");
   }

@@ -154,6 +154,9 @@ export class ClaudeTranscriptObserver {
       detail: this.describe(last, state),
       lastActivityAt,
       transcriptPath,
+      // Only Conductor knows these; a transcript cannot see either.
+      contextPercent: null,
+      retired: false,
     };
   }
 

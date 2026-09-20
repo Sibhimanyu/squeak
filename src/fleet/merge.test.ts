@@ -18,6 +18,8 @@ function observed(overrides: Partial<ObservedSession> & Pick<ObservedSession, "k
     detail: null,
     lastActivityAt: "2026-09-20T12:00:00.000Z",
     transcriptPath: null,
+    contextPercent: null,
+    retired: false,
     ...overrides,
   };
 }

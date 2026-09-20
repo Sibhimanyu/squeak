@@ -97,6 +97,8 @@ const schema = z.object({
   FLEET_ACTIVE_WINDOW_MINUTES: z.coerce.number().int().min(5).default(360),
   /** A running turn quiet for longer than this is stalled, not busy. */
   FLEET_IDLE_AFTER_MINUTES: z.coerce.number().int().min(1).default(10),
+  /** Context share past which a session is flagged as close to compacting. */
+  FLEET_CONTEXT_PRESSURE_PERCENT: z.coerce.number().int().min(10).max(100).default(80),
 });
 
 let parsed: z.infer<typeof schema>;
@@ -141,6 +143,7 @@ export const config = {
   fleetPollIntervalMs: parsed.FLEET_POLL_INTERVAL_MS,
   fleetActiveWindowMs: parsed.FLEET_ACTIVE_WINDOW_MINUTES * 60_000,
   fleetIdleAfterMs: parsed.FLEET_IDLE_AFTER_MINUTES * 60_000,
+  fleetContextPressurePercent: parsed.FLEET_CONTEXT_PRESSURE_PERCENT,
   fleetSupportDir: configBaseDir,
   envFilePath,
 };

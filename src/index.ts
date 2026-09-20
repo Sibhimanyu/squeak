@@ -527,7 +527,10 @@ export class TelegramConductorBridge {
         codex: new CodexRolloutObserver(observerWindow),
         liveness: new ProcessLivenessObserver(),
       },
-      { pollIntervalMs: config.fleetPollIntervalMs },
+      {
+        pollIntervalMs: config.fleetPollIntervalMs,
+        contextPressurePercent: config.fleetContextPressurePercent,
+      },
     );
 
     const ingress = new HookIngressServer({

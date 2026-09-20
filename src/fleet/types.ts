@@ -62,6 +62,16 @@ export interface ObservedSession {
   detail: string | null;
   lastActivityAt: string;
   transcriptPath: string | null;
+  /**
+   * Share of the context window consumed, 0-100. Only Conductor reports this;
+   * a transcript cannot tell you how close a session is to compacting.
+   */
+  contextPercent: number | null;
+  /**
+   * The workspace has been marked done, canceled, or archived. Such a session
+   * should not keep asking to be reviewed.
+   */
+  retired: boolean;
 }
 
 /** A session after the monitor has merged observers, hooks, and liveness. */
@@ -72,7 +82,12 @@ export interface FleetSession extends ObservedSession {
   stateSource: "hook" | "transcript" | "conductor";
 }
 
-export type AttentionKind = "blocked_approval" | "blocked_question" | "errored" | "finished_unreviewed";
+export type AttentionKind =
+  | "blocked_approval"
+  | "blocked_question"
+  | "errored"
+  | "finished_unreviewed"
+  | "context_pressure";
 
 export interface AttentionItem {
   session: FleetSession;

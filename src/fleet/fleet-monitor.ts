@@ -1,5 +1,11 @@
 import { logger } from "../utils/logger.js";
-import { PUSH_KINDS, classifyAttention, scoreAttention, sortAttention } from "./attention.js";
+import {
+  DEFAULT_CONTEXT_PRESSURE_PERCENT,
+  PUSH_KINDS,
+  classifyAttentions,
+  scoreAttention,
+  sortAttention,
+} from "./attention.js";
 import type { FleetStore } from "./fleet-store.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent } from "./hook-protocol.js";
@@ -29,6 +35,8 @@ export interface FleetMonitorOptions {
   hookDebounceMs?: number;
   /** Snapshots unseen for this long are forgotten. */
   snapshotTtlMs?: number;
+  /** Context share past which a session is flagged as close to compacting. */
+  contextPressurePercent?: number;
   now?: () => number;
 }
 
@@ -50,6 +58,7 @@ export class FleetMonitor {
   private readonly pollIntervalMs: number;
   private readonly hookDebounceMs: number;
   private readonly snapshotTtlMs: number;
+  private readonly contextPressurePercent: number;
   private readonly now: () => number;
 
   /** Latest hook report per agent session id. */
@@ -69,6 +78,7 @@ export class FleetMonitor {
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.hookDebounceMs = options.hookDebounceMs ?? DEFAULT_HOOK_DEBOUNCE_MS;
     this.snapshotTtlMs = options.snapshotTtlMs ?? DEFAULT_SNAPSHOT_TTL_MS;
+    this.contextPressurePercent = options.contextPressurePercent ?? DEFAULT_CONTEXT_PRESSURE_PERCENT;
     this.now = options.now ?? Date.now;
   }
 
@@ -183,8 +193,8 @@ export class FleetMonitor {
         observedAt,
       });
 
-      const kind = classifyAttention(session);
-      if (!kind) {
+      const kinds = classifyAttentions(session, this.contextPressurePercent);
+      if (kinds.length === 0) {
         continue;
       }
 
@@ -193,27 +203,29 @@ export class FleetMonitor {
         continue;
       }
 
-      const item: AttentionItem = {
-        session,
-        kind,
-        since: recorded.stateEnteredAt,
-        score: scoreAttention({ kind, since: recorded.stateEnteredAt, session, now: this.now() }),
-      };
-      attention.push(item);
+      for (const kind of kinds) {
+        const item: AttentionItem = {
+          session,
+          kind,
+          since: recorded.stateEnteredAt,
+          score: scoreAttention({ kind, since: recorded.stateEnteredAt, session, now: this.now() }),
+        };
+        attention.push(item);
 
-      // D2: only genuinely blocked sessions interrupt. Everything else waits
-      // on the radar, where it costs the user nothing to not look.
-      if (!PUSH_KINDS.has(kind) || this.isMuted(session, observedAt)) {
-        continue;
-      }
-      const claimed = this.deps.store.claimNotification({
-        sessionKey: session.key,
-        kind,
-        stateEnteredAt: recorded.stateEnteredAt,
-        notifiedAt: observedAt,
-      });
-      if (claimed) {
-        pushes.push(item);
+        // D2: only genuinely blocked sessions interrupt. Everything else waits
+        // on the radar, where it costs the user nothing to not look.
+        if (!PUSH_KINDS.has(kind) || this.isMuted(session, observedAt)) {
+          continue;
+        }
+        const claimed = this.deps.store.claimNotification({
+          sessionKey: session.key,
+          kind,
+          stateEnteredAt: recorded.stateEnteredAt,
+          notifiedAt: observedAt,
+        });
+        if (claimed) {
+          pushes.push(item);
+        }
       }
     }
 

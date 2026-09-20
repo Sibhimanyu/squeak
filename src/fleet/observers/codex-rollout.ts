@@ -142,6 +142,9 @@ export class CodexRolloutObserver {
       detail: outcome.detail,
       lastActivityAt,
       transcriptPath: rolloutPath,
+      // Only Conductor knows these; a transcript cannot see either.
+      contextPercent: null,
+      retired: false,
     };
   }
 

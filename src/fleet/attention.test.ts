@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PUSH_KINDS, classifyAttention, isActionable, scoreAttention, sortAttention } from "./attention.js";
+import { PUSH_KINDS, classifyAttentions, isActionable, scoreAttention, sortAttention } from "./attention.js";
 import type { AttentionItem, FleetSession, FleetState } from "./types.js";
 
 function session(overrides: Partial<FleetSession> = {}): FleetSession {
@@ -23,24 +23,55 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     pid: null,
     alive: true,
     stateSource: "transcript",
+    contextPercent: null,
+    retired: false,
     ...overrides,
   };
 }
 
-describe("classifyAttention", () => {
+describe("classifyAttentions", () => {
   it("maps blocked and finished states onto attention kinds", () => {
-    const cases: [FleetState, string | null][] = [
-      ["awaiting_approval", "blocked_approval"],
-      ["awaiting_input", "blocked_question"],
-      ["error", "errored"],
-      ["finished", "finished_unreviewed"],
-      ["working", null],
-      ["idle", null],
+    const cases: [FleetState, string[]][] = [
+      ["awaiting_approval", ["blocked_approval"]],
+      ["awaiting_input", ["blocked_question"]],
+      ["error", ["errored"]],
+      ["finished", ["finished_unreviewed"]],
+      ["working", []],
+      ["idle", []],
     ];
 
     for (const [state, expected] of cases) {
-      expect(classifyAttention(session({ state }))).toBe(expected);
+      expect(classifyAttentions(session({ state }))).toEqual(expected);
     }
+  });
+
+  it("flags a session that is close to compacting", () => {
+    expect(classifyAttentions(session({ state: "working", contextPercent: 90 }))).toEqual(["context_pressure"]);
+  });
+
+  it("reports both reasons when a finished session is also nearly full", () => {
+    // A session can want attention for more than one reason at once.
+    expect(classifyAttentions(session({ state: "finished", contextPercent: 90 }))).toEqual([
+      "finished_unreviewed",
+      "context_pressure",
+    ]);
+  });
+
+  it("leaves a comfortable context alone", () => {
+    expect(classifyAttentions(session({ state: "working", contextPercent: 40 }))).toEqual([]);
+  });
+
+  it("respects a custom threshold", () => {
+    expect(classifyAttentions(session({ state: "working", contextPercent: 70 }), 60)).toEqual(["context_pressure"]);
+  });
+
+  it("does not raise context pressure on a session that has gone quiet", () => {
+    // Compacting only costs you on a session you are still going to use.
+    expect(classifyAttentions(session({ state: "idle", contextPercent: 95 }))).toEqual([]);
+  });
+
+  it("stops nagging about a workspace the user already marked done", () => {
+    expect(classifyAttentions(session({ state: "finished", contextPercent: 95, retired: true }))).toEqual([]);
   });
 });
 

@@ -45,6 +45,8 @@ function observed(overrides: Partial<ObservedSession> = {}): ObservedSession {
     detail: null,
     lastActivityAt: "2026-09-20T11:59:00.000Z",
     transcriptPath: null,
+    contextPercent: null,
+    retired: false,
     ...overrides,
   };
 }
@@ -211,5 +213,34 @@ describe("FleetMonitor", () => {
     const snapshot = await harness.monitor.refresh();
 
     expect(snapshot.sessions[0]?.state).toBe("working");
+  });
+});
+
+describe("context pressure", () => {
+  it("raises it alongside the finished flag without sending a notification", async () => {
+    const harness = makeMonitor([observed({ state: "finished", contextPercent: 92 })]);
+
+    const snapshot = await harness.monitor.refresh();
+
+    expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["finished_unreviewed", "context_pressure"]);
+    // Neither kind interrupts; both wait on the radar.
+    expect(harness.pushes).toHaveLength(0);
+  });
+
+  it("says nothing about a workspace the user already marked done", async () => {
+    const harness = makeMonitor([observed({ state: "finished", contextPercent: 92, retired: true })]);
+
+    expect((await harness.monitor.refresh()).attention).toHaveLength(0);
+  });
+
+  it("still pushes a blocked session that is also low on context", async () => {
+    const harness = makeMonitor([observed({ contextPercent: 92 })]);
+    harness.monitor.ingestHookEvent(hookEvent());
+
+    const snapshot = await harness.monitor.refresh();
+
+    expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["blocked_approval", "context_pressure"]);
+    expect(harness.pushes).toHaveLength(1);
+    expect(harness.pushes[0]?.[0]?.kind).toBe("blocked_approval");
   });
 });

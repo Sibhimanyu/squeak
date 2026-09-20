@@ -9,7 +9,18 @@ const KIND_SCORE: Record<AttentionKind, number> = {
   blocked_question: 900,
   errored: 600,
   finished_unreviewed: 300,
+  context_pressure: 250,
 };
+
+/**
+ * Past this share of the context window a session is close to compacting,
+ * which costs it fidelity on everything it has already worked out. Worth
+ * knowing before it happens rather than after.
+ */
+export const DEFAULT_CONTEXT_PRESSURE_PERCENT = 80;
+
+/** States where a session is live enough that compacting would actually cost you. */
+const CONTEXT_PRESSURE_STATES = new Set(["working", "finished", "awaiting_approval", "awaiting_input"]);
 
 /** Kinds that earn an unsolicited Telegram message rather than a radar row. */
 export const PUSH_KINDS: ReadonlySet<AttentionKind> = new Set<AttentionKind>(["blocked_approval", "blocked_question"]);
@@ -20,19 +31,47 @@ const MAX_AGE_BONUS = 240;
 /** Being able to act on a session from Telegram breaks ties in its favour. */
 const ACTIONABLE_BONUS = 50;
 
-export function classifyAttention(session: FleetSession): AttentionKind | null {
+/**
+ * A session can want attention for more than one reason at once — it can have
+ * just finished *and* be nearly out of context — so this returns every reason
+ * rather than the first.
+ */
+export function classifyAttentions(
+  session: FleetSession,
+  contextPressurePercent = DEFAULT_CONTEXT_PRESSURE_PERCENT,
+): AttentionKind[] {
+  const kinds: AttentionKind[] = [];
+
   switch (session.state) {
     case "awaiting_approval":
-      return "blocked_approval";
+      kinds.push("blocked_approval");
+      break;
     case "awaiting_input":
-      return "blocked_question";
+      kinds.push("blocked_question");
+      break;
     case "error":
-      return "errored";
+      kinds.push("errored");
+      break;
     case "finished":
-      return "finished_unreviewed";
+      // Work the user already signed off on should stop asking to be reviewed.
+      if (!session.retired) {
+        kinds.push("finished_unreviewed");
+      }
+      break;
     default:
-      return null;
+      break;
   }
+
+  if (
+    !session.retired &&
+    session.contextPercent !== null &&
+    session.contextPercent >= contextPressurePercent &&
+    CONTEXT_PRESSURE_STATES.has(session.state)
+  ) {
+    kinds.push("context_pressure");
+  }
+
+  return kinds;
 }
 
 /** A session we can actually reply to, versus one we can only watch. */
@@ -70,5 +109,7 @@ export function attentionLabel(kind: AttentionKind): string {
       return "Errored";
     case "finished_unreviewed":
       return "Finished, unreviewed";
+    case "context_pressure":
+      return "Context nearly full";
   }
 }

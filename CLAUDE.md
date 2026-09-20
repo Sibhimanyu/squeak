@@ -111,8 +111,20 @@ transcripts, and ranks them by what is blocked on the human.
 - **Callback data caps at 64 bytes.** Session keys do not fit, so
   `FleetStore.handleFor` allocates short integer aliases. Never put a raw
   session key in `callback_data`.
-- Only sessions blocked on the human get pushed. Finished and errored ones go
-  to the radar. Changing that is a product decision, not a tuning knob.
+- Only sessions blocked on the human get pushed. Finished, errored, and
+  low-on-context ones go to the radar. Changing that is a product decision, not
+  a tuning knob.
+- **A session can want attention for several reasons at once**, so
+  `classifyAttentions` returns a list. Do not collapse it back to one.
+- **`workspaces.state = 'archived'` does not mean "done", it means the worktree
+  is gone** — which is still a reason to stop asking for review. On this
+  machine that is 8 of 18 workspaces, so getting it wrong either buries the
+  radar in dead work or hides live work.
+- Conductor fields that look useful but are **not populated** on a normal
+  single-user install: `sessions.unread_count`, `workspaces.unread`,
+  `sessions.queue_paused_at`. They read as all-zero; do not build on them
+  without checking a real database first. `context_used_percent` is populated
+  for roughly two thirds of sessions and is the one worth using.
 
 ## Upstream
 

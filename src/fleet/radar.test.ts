@@ -34,6 +34,8 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     pid: null,
     alive: true,
     stateSource: "transcript",
+    contextPercent: null,
+    retired: false,
     ...overrides,
   };
 }
@@ -201,5 +203,36 @@ describe("radar footer", () => {
   it("does not say 'just now ago'", () => {
     expect(renderRadar(snapshot(), now)).toContain("_updated just now_");
     expect(renderRadar(snapshot({ generatedAt: "2026-09-20T11:55:00.000Z" }), now)).toContain("_updated 5m ago_");
+  });
+});
+
+describe("context pressure on the radar", () => {
+  it("gets its own section rather than being mixed in with blocked work", () => {
+    const pressured = item({
+      session: session({ state: "working", contextPercent: 91 }),
+      kind: "context_pressure",
+      score: 250,
+    });
+    const text = renderRadar(snapshot({ sessions: [pressured.session], attention: [pressured] }), now);
+
+    expect(text).toContain("Running low on context");
+    expect(text).not.toContain("Needs you");
+    expect(text).toContain("ctx 91%");
+  });
+
+  it("does not claim nothing is running when a session is low on context", () => {
+    const pressured = item({
+      session: session({ state: "working", contextPercent: 91 }),
+      kind: "context_pressure",
+    });
+    const text = renderRadar(snapshot({ sessions: [pressured.session], attention: [pressured] }), now);
+
+    expect(text).not.toContain("No agent sessions running");
+  });
+
+  it("stays quiet about a context that is not yet worth mentioning", () => {
+    const text = renderRadar(snapshot({ sessions: [session({ contextPercent: 30 })] }), now);
+
+    expect(text).not.toContain("ctx ");
   });
 });

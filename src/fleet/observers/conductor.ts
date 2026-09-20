@@ -65,6 +65,8 @@ export class ConductorObserver {
       detail: null,
       lastActivityAt,
       transcriptPath: null,
+      contextPercent: normalizePercent(row.contextUsedPercent),
+      retired: isRetiredWorkspace(row),
     };
   }
 
@@ -87,4 +89,27 @@ export class ConductorObserver {
     const age = this.now() - Date.parse(lastActivityAt);
     return Number.isFinite(age) && age <= this.finishedWithinMs ? "finished" : "idle";
   }
+}
+
+/** Conductor stores this as a float that is sometimes absent and sometimes 0. */
+function normalizePercent(value: number | null): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, value));
+}
+
+/**
+ * A workspace the user already finished with. Conductor tracks this itself, so
+ * honour it rather than nagging about work that has been signed off.
+ */
+function isRetiredWorkspace(row: FleetRegistrySessionRef): boolean {
+  const manual = row.manualStatus?.trim().toLowerCase();
+  if (manual === "canceled" || manual === "cancelled" || manual === "done") {
+    return true;
+  }
+  if (row.workspaceState?.trim().toLowerCase() === "archived") {
+    return true;
+  }
+  return row.derivedStatus?.trim().toLowerCase() === "done";
 }
