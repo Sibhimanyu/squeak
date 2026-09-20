@@ -641,4 +641,36 @@ describe("ConductorRegistryAdapter", () => {
     // Repos with activity sort ahead of ones that have never been used.
     expect(names.indexOf("has-workspace")).toBeLessThan(names.indexOf("just-added"));
   });
+
+  it("lists a brand-new workspace branch that has no commits of its own", () => {
+    const { adapter, db, tempDir } = createRegistryFixture();
+
+    const repositoryRoot = path.join(tempDir, "fresh-repo");
+    fs.mkdirSync(repositoryRoot, { recursive: true });
+    const runGit = (args: string[], cwd: string): void => {
+      execFileSync("git", args, { cwd, stdio: "ignore" });
+    };
+    runGit(["init", "--initial-branch=main"], repositoryRoot);
+    runGit(["config", "user.name", "Test User"], repositoryRoot);
+    runGit(["config", "user.email", "test@example.com"], repositoryRoot);
+    fs.writeFileSync(path.join(repositoryRoot, "README.md"), "initial\n", "utf8");
+    runGit(["add", "README.md"], repositoryRoot);
+    runGit(["commit", "-m", "initial"], repositoryRoot);
+    // Conductor branches a workspace off the default branch and commits nothing yet,
+    // so git's --merged reports it as merged even though no work has happened.
+    runGit(["branch", "las-vegas"], repositoryRoot);
+
+    db.prepare(
+      `INSERT INTO repos (id, name, root_path, default_branch, updated_at, remote, hidden) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("repo-fresh", "fresh-repo", repositoryRoot, "main", "2026-03-29T04:00:00.000Z", "origin", 0);
+
+    db.prepare(
+      `INSERT INTO workspaces (id, repository_id, directory_name, branch, pr_title, archive_commit, active_session_id, updated_at, state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    ).run("ws-fresh", "repo-fresh", "las-vegas", "las-vegas", null, null, null, "2026-03-29T04:30:00.000Z", "ready");
+
+    const branches = adapter.listWorkspacesForRepository("repo-fresh", 10).map((workspace) => workspace.branch);
+
+    expect(branches).toContain("las-vegas");
+  });
 });

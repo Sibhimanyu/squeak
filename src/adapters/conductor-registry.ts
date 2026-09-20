@@ -267,9 +267,15 @@ export class ConductorRegistryAdapter {
       defaultBranch: row.defaultBranch,
     }));
 
-    return sortRepositoryWorkspaces(sortableRows, mergedBranchNames)
-      .filter((workspace) => !this.shouldHideWorkspaceFromRepositoryBranches(workspace, mergedBranchNames))
-      .slice(0, limit);
+    const sorted = sortRepositoryWorkspaces(sortableRows, mergedBranchNames);
+    const visible = sorted.filter(
+      (workspace) => !this.shouldHideWorkspaceFromRepositoryBranches(workspace, mergedBranchNames),
+    );
+
+    // Hiding finished branches is a convenience; making a repo unreachable is not.
+    // If every workspace would be hidden, show them anyway -- from Telegram there is
+    // no other way to get back into the repo.
+    return (visible.length > 0 ? visible : sorted).slice(0, limit);
   }
 
   private getMergedBranchNames(rootPath: string, defaultBranch: string | null | undefined): Set<string> {
@@ -289,18 +295,43 @@ export class ConductorRegistryAdapter {
             rootPath,
             "for-each-ref",
             `--merged=${targetRef}`,
-            "--format=%(refname)",
+            "--format=%(objectname) %(refname)",
             "refs/heads",
             "refs/remotes",
           ],
           { encoding: "utf8" },
         );
 
+        const entries = output
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            const spaceIndex = line.indexOf(" ");
+            return spaceIndex < 0
+              ? { objectName: "", refName: line }
+              : { objectName: line.slice(0, spaceIndex), refName: line.slice(spaceIndex + 1) };
+          });
+
+        // A branch sitting on the default branch's own commit has not been merged
+        // back -- it has no commits at all yet. Conductor creates workspace branches
+        // exactly like that, so treating them as merged hid every freshly created
+        // workspace and made the repo look empty from Telegram.
+        const targetObjectName = entries.find(
+          (entry) =>
+            entry.refName === `refs/heads/${normalizedDefaultBranch}` ||
+            entry.refName.endsWith(`/${normalizedDefaultBranch}`),
+        )?.objectName;
+
+        const isDefaultRef = (refName: string): boolean =>
+          refName === `refs/heads/${normalizedDefaultBranch}` || refName.endsWith(`/${normalizedDefaultBranch}`);
+
         const names = new Set(
-          output
-            .split("\n")
-            .map((line) => line.trim())
-            .filter(Boolean)
+          entries
+            .filter(
+              (entry) => !targetObjectName || entry.objectName !== targetObjectName || isDefaultRef(entry.refName),
+            )
+            .map((entry) => entry.refName)
             .flatMap((refName) => {
               if (refName.startsWith("refs/heads/")) {
                 return [refName.slice("refs/heads/".length)];
