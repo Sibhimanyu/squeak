@@ -52,6 +52,7 @@ export class ConductorRegistryAdapter {
   private readonly defaultFallbackModel: string;
   private readonly defaultPermissionMode: string;
   private readonly mergedBranchNamesCache = new Map<string, { expiresAt: number; names: Set<string> }>();
+  private readonly tableColumnsCache = new Map<string, Set<string>>();
 
   constructor(
     conductorDbPath: string,
@@ -509,12 +510,13 @@ export class ConductorRegistryAdapter {
       return null;
     }
 
+    const thinkingEnabledColumn = this.thinkingEnabledColumn();
     const active = this.db
       .prepare(
         `
           SELECT
             s.codex_thinking_level as codexThinkingLevel,
-            s.thinking_enabled as thinkingEnabled
+            ${thinkingEnabledColumn ? `s.${thinkingEnabledColumn}` : "NULL"} as thinkingEnabled
           FROM workspaces w
           LEFT JOIN sessions s
             ON s.id = w.active_session_id
@@ -646,12 +648,43 @@ export class ConductorRegistryAdapter {
       .run(sentAtIso, sessionId);
   }
 
+  private tableColumns(table: string): Set<string> {
+    const cached = this.tableColumnsCache.get(table);
+    if (cached) {
+      return cached;
+    }
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    const names = new Set(rows.map((row) => row.name));
+    this.tableColumnsCache.set(table, names);
+    return names;
+  }
+
+  /**
+   * Conductor renamed `thinking_enabled` to `DEPRECATED_thinking_enabled`, and an
+   * INSERT naming a column this database does not have fails outright -- new chats
+   * stopped being creatable the moment Conductor shipped that migration. Resolve
+   * the column at runtime so either spelling works, and so the column simply drops
+   * out of the statement once Conductor removes it for good.
+   */
+  private thinkingEnabledColumn(): string | null {
+    const columns = this.tableColumns("sessions");
+    if (columns.has("thinking_enabled")) {
+      return "thinking_enabled";
+    }
+    if (columns.has("DEPRECATED_thinking_enabled")) {
+      return "DEPRECATED_thinking_enabled";
+    }
+    return null;
+  }
+
   createSession(workspaceId: string, threadId: string, seed: SessionSeed): ConductorSessionRef {
     const sessionId = randomUUID();
     const normalizedThinkingLevel = seed.codexThinkingLevel?.trim() || "xhigh";
     const thinkingEnabled = normalizedThinkingLevel === "none" ? 0 : 1;
     const storedThinkingLevel = thinkingEnabled === 0 ? null : normalizedThinkingLevel;
     const agentPersonality = seed.agentPersonality?.trim() || "none";
+
+    const thinkingEnabledColumn = this.thinkingEnabledColumn();
 
     const tx = this.db.transaction(() => {
       this.db
@@ -668,12 +701,12 @@ export class ConductorRegistryAdapter {
               title,
               last_user_message_at,
               codex_thinking_level,
-              thinking_enabled,
+              ${thinkingEnabledColumn ? `${thinkingEnabledColumn},` : ""}
               agent_personality,
               created_at,
               updated_at
             )
-            VALUES (?, 'idle', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, datetime('now'), datetime('now'))
+            VALUES (?, 'idle', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ${thinkingEnabledColumn ? "?," : ""} ?, datetime('now'), datetime('now'))
           `,
         )
         .run(
@@ -685,7 +718,7 @@ export class ConductorRegistryAdapter {
           seed.permissionMode,
           seed.title,
           storedThinkingLevel,
-          thinkingEnabled,
+          ...(thinkingEnabledColumn ? [thinkingEnabled] : []),
           agentPersonality,
         );
 

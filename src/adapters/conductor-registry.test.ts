@@ -474,6 +474,64 @@ describe("ConductorRegistryAdapter", () => {
     expect(other.directoryName).toBe("berlin-v1");
   });
 
+  // Conductor renamed thinking_enabled to DEPRECATED_thinking_enabled, which made
+  // every INSERT naming the old column fail: "table sessions has no column named
+  // thinking_enabled". New chats could not be created at all from Telegram.
+  for (const [label, migrate] of [
+    ["the column is renamed", "ALTER TABLE sessions RENAME COLUMN thinking_enabled TO DEPRECATED_thinking_enabled;"],
+    ["the column is dropped", "ALTER TABLE sessions DROP COLUMN thinking_enabled;"],
+  ] as const) {
+    it(`still creates sessions when ${label}`, () => {
+      const { db, dbPath, tempDir } = createRegistryFixture();
+
+      db.prepare(
+        `
+          INSERT INTO workspaces (
+            id,
+            repository_id,
+            directory_name,
+            branch,
+            active_session_id,
+            created_at,
+            updated_at,
+            state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        `,
+      ).run(
+        "workspace-1",
+        "repo-1",
+        "telegram-bridge",
+        "master",
+        null,
+        "2026-03-29T04:00:00.000Z",
+        "2026-03-29T04:00:00.000Z",
+        "ready",
+      );
+
+      db.exec(migrate);
+
+      // A fresh adapter, because the resolved column is cached per instance.
+      const migrated = new ConductorRegistryAdapter(dbPath, {
+        workspacesRoot: path.join(tempDir, "workspaces"),
+        defaultFallbackModel: "gpt-5.4",
+        defaultPermissionMode: "default",
+      });
+
+      const session = migrated.createSession("workspace-1", "thread-1", {
+        agentType: "claude",
+        model: "opus-5-1m",
+        permissionMode: "default",
+        title: "See the handoff files?",
+      });
+
+      expect(session.id).toBeTruthy();
+      expect(session.claudeSessionId).toBe("thread-1");
+      expect(session.title).toBe("See the handoff files?");
+
+      (migrated as unknown as { db: { close: () => void } }).db.close();
+    });
+  }
+
   it("defaults new sessions to desktop-compatible thinking fields", () => {
     const { adapter, db } = createRegistryFixture();
 
