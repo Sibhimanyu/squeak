@@ -2529,7 +2529,13 @@ export class TelegramConductorBridge {
       if (!text) {
         return;
       }
-      runtime.assistantText = text;
+      // `text` is one message block. The streaming deltas have usually already
+      // appended it, so this is a resync, not an append -- assigning it would
+      // drop every earlier block from the panel. Only append when the deltas
+      // did not deliver it (an adapter that completes items without streaming).
+      if (!runtime.assistantText.endsWith(text)) {
+        runtime.assistantText = runtime.assistantText ? `${runtime.assistantText}\n\n${text}` : text;
+      }
       this.recordRuntimeEvent(runtime, null);
       this.mirror.appendAssistantMessage({
         sessionId,
