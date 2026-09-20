@@ -7,6 +7,15 @@ import { CodexAppServerAdapter } from "./adapters/codex-app-server.js";
 import { ConductorRegistryAdapter } from "./adapters/conductor-registry.js";
 import { BridgeStateStore } from "./bridge/state-store.js";
 import { config } from "./config.js";
+import { FleetController } from "./fleet/fleet-controller.js";
+import { FleetMonitor } from "./fleet/fleet-monitor.js";
+import { FleetStore } from "./fleet/fleet-store.js";
+import { defaultHookInstallPaths, fleetHooksInstalled } from "./fleet/hook-install.js";
+import { HookIngressServer } from "./fleet/hook-ingress.js";
+import { ClaudeTranscriptObserver } from "./fleet/observers/claude-transcript.js";
+import { CodexRolloutObserver } from "./fleet/observers/codex-rollout.js";
+import { ConductorObserver } from "./fleet/observers/conductor.js";
+import { ProcessLivenessObserver } from "./fleet/observers/process-liveness.js";
 import {
   isTelegramMessageNotModifiedError,
   isTransientTelegramError,
@@ -380,6 +389,8 @@ const BOT_COMMANDS: TelegramBotCommand[] = [
   { command: "context", description: "Open the recent context viewer" },
   { command: "new", description: "Create a new chat with the next message" },
   { command: "new_workspace", description: "Create a new workspace from the next message" },
+  { command: "radar", description: "Show every agent session on this Mac" },
+  { command: "hooks", description: "Check agent hook wiring for live fleet signal" },
   { command: "help", description: "Show help" },
 ];
 
@@ -409,13 +420,22 @@ function buildHelpText(): string {
     "/context [N]  Open the paginated recent context viewer",
     "/new  Make the next message create a new chat on the current branch",
     "/new_workspace  Make the next message create a new workspace in the current repo",
+    "/radar  Show every agent session on this Mac and what needs you",
+    "/hooks  Check whether agent hooks are reporting live state",
     "/help  Show help",
     "",
+    "The radar covers sessions Conductor did not start, such as a Claude Code",
+    "run in your own terminal. Those can be watched but not driven from here.",
     "You can also tap Help on the home screen.",
     "Plain text continues the currently selected chat.",
     "Short status questions like 'status' or '目前什么状态' refresh the status panel.",
     "In forum-enabled supergroups, each chat streams in its dedicated topic.",
   ].join("\n");
+}
+
+/** Fleet actions that would move a conversation onto a different chat. */
+function isFleetChatSwitchCallback(data: string): boolean {
+  return data.startsWith("fleet:open:") || data.startsWith("fleet:reply:");
 }
 
 function isReasoningEffort(value: string): value is (typeof NEW_SESSION_REASONING_EFFORTS)[number] {
@@ -465,6 +485,7 @@ export class TelegramConductorBridge {
   private readonly runtimeFinalizeTimers = new Map<string, NodeJS.Timeout>();
   private readonly finalizedTurnIds = new Map<string, string>();
   private readonly backgroundTasks = new Set<Promise<void>>();
+  private readonly fleet: FleetController | null;
   private queueTimer: NodeJS.Timeout | null = null;
   private stopped = false;
 
@@ -481,6 +502,50 @@ export class TelegramConductorBridge {
     this.stateStore = deps.stateStore ?? new BridgeStateStore(config.bridgeDbPath);
     this.telegram = deps.telegram ?? new TelegramClient(config.telegramToken);
     this.mirror = deps.mirror ?? new ConductorMirrorWriter(this.registry, this.stateStore);
+    this.fleet = config.fleetEnabled ? this.buildFleetController() : null;
+  }
+
+  /**
+   * The fleet layer watches every agent session on the machine, not only the
+   * ones Conductor spawned. It is wired up here rather than in start() so the
+   * bridge fails fast on a broken fleet configuration instead of halfway
+   * through startup.
+   */
+  private buildFleetController(): FleetController {
+    const store = new FleetStore(config.bridgeDbPath);
+    const hookPaths = defaultHookInstallPaths(config.fleetSupportDir);
+    const observerWindow = {
+      activeWithinMs: config.fleetActiveWindowMs,
+      idleAfterMs: config.fleetIdleAfterMs,
+    };
+
+    const monitor = new FleetMonitor(
+      {
+        store,
+        conductor: new ConductorObserver(this.registry, { finishedWithinMs: config.fleetActiveWindowMs }),
+        claude: new ClaudeTranscriptObserver(observerWindow),
+        codex: new CodexRolloutObserver(observerWindow),
+        liveness: new ProcessLivenessObserver(),
+      },
+      { pollIntervalMs: config.fleetPollIntervalMs },
+    );
+
+    const ingress = new HookIngressServer({
+      port: config.fleetHookPort,
+      tokenPath: hookPaths.tokenPath,
+      onEvent: (event) => monitor.ingestHookEvent(event),
+    });
+
+    return new FleetController({
+      telegram: this.telegram,
+      store,
+      monitor,
+      ingress,
+      openConductorSession: async (location, sessionId) => {
+        await this.selectChat(location, sessionId);
+      },
+      fallbackChatIds: config.allowedChatIds ? Array.from(config.allowedChatIds) : [],
+    });
   }
 
   private resolveSupportedAgentType(agentType: string | null | undefined): SupportedAgentType | null {
@@ -542,6 +607,14 @@ export class TelegramConductorBridge {
       void this.stop();
     });
 
+    if (this.fleet) {
+      try {
+        await this.fleet.start();
+      } catch (error) {
+        logger.error("failed to start the fleet monitor; continuing without it", error);
+      }
+    }
+
     logger.info("telegram conductor bridge started");
     await this.pollLoop();
   }
@@ -551,6 +624,11 @@ export class TelegramConductorBridge {
       return;
     }
     this.stopped = true;
+    if (this.fleet) {
+      await this.fleet.stop().catch((error) => {
+        logger.warn("failed to stop the fleet monitor", { error: extractErrorMessage(error) });
+      });
+    }
     if (this.queueTimer) {
       clearInterval(this.queueTimer);
       this.queueTimer = null;
@@ -686,6 +764,11 @@ export class TelegramConductorBridge {
 
     if (data.startsWith("panel:")) {
       await this.handleSessionPanelCallback(callback, location, data);
+      return;
+    }
+
+    if (data.startsWith("fleet:")) {
+      await this.handleFleetCallback(callback, location, data);
       return;
     }
 
@@ -951,6 +1034,13 @@ export class TelegramConductorBridge {
       }
       case "/new_workspace":
         await this.prepareNewWorkspace(location);
+        return;
+      case "/radar":
+      case "/fleet":
+        await this.showFleetRadar(location);
+        return;
+      case "/hooks":
+        await this.showHookStatus(location);
         return;
       case "/help":
         await this.safeSendMessage(location, buildHelpText());
@@ -1374,6 +1464,82 @@ export class TelegramConductorBridge {
       return;
     }
     await this.safeSendMessage(location, "Chats that need your attention:", inboxKeyboard(sessions));
+  }
+
+  private async showFleetRadar(location: TelegramConversationTarget): Promise<void> {
+    if (!this.fleet) {
+      await this.safeSendMessage(location, "The fleet radar is disabled. Set FLEET_ENABLED=true and restart.");
+      return;
+    }
+    await this.fleet.showRadar(location);
+  }
+
+  /**
+   * Hooks are what make the radar immediate rather than polled, so their state
+   * is worth surfacing: without them a blocked agent is invisible until the
+   * next poll, and an approval prompt is invisible entirely.
+   */
+  private async showHookStatus(location: TelegramConversationTarget): Promise<void> {
+    if (!this.fleet) {
+      await this.safeSendMessage(location, "The fleet radar is disabled. Set FLEET_ENABLED=true and restart.");
+      return;
+    }
+
+    const paths = defaultHookInstallPaths(config.fleetSupportDir);
+    const installed = fleetHooksInstalled(paths);
+    const lines = [
+      `**Agent hooks:** ${installed ? "installed" : "not installed"}`,
+      `Ingress: 127.0.0.1:${config.fleetHookPort}`,
+      "",
+    ];
+
+    if (installed) {
+      lines.push("Claude Code and Codex report state changes as they happen.");
+      lines.push("Approval prompts and idle waits reach this chat within a second.");
+      lines.push("");
+      lines.push("Remove them with `conductor-tg uninstall-hooks`.");
+    } else {
+      lines.push("Without hooks the radar falls back to reading transcripts on a");
+      lines.push(`${Math.round(config.fleetPollIntervalMs / 1000)}s poll, and cannot see approval prompts at all.`);
+      lines.push("");
+      lines.push("Install them on the machine running the bridge:");
+      lines.push("`conductor-tg install-hooks`");
+      lines.push("");
+      lines.push("It merges into your existing hook config and backs it up first.");
+    }
+
+    await this.safeSendMessage(location, lines.join("\n"));
+  }
+
+  private async handleFleetCallback(
+    callback: TelegramCallbackQuery,
+    location: TelegramConversationTarget,
+    data: string,
+  ): Promise<void> {
+    if (!this.fleet) {
+      await this.telegram.answerCallbackQuery(callback.id, "The fleet radar is disabled.");
+      return;
+    }
+
+    // Opening another chat from a radar card would silently repoint a topic
+    // that is pinned to one conversation, which is exactly what the topic
+    // lock exists to prevent. Reading the radar itself is always fine.
+    if (this.isDedicatedTopicLocation(location) && isFleetChatSwitchCallback(data)) {
+      await this.rejectTopicLockedAction(location, callback.id);
+      return;
+    }
+
+    await this.telegram.answerCallbackQuery(callback.id);
+    this.enqueueConversationTask(location, async () => {
+      const fleet = this.fleet;
+      if (!fleet) {
+        return;
+      }
+      const result = await fleet.handleCallback(location, data);
+      if (result.notice) {
+        await this.safeSendMessage(location, result.notice);
+      }
+    });
   }
 
   private async showStatus(location: TelegramConversationTarget): Promise<void> {

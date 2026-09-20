@@ -6,8 +6,70 @@ Browse repos, switch branches, resume Codex or Claude chats, create new chats an
 
 This bridge is local-first: it must run on the same Mac that already has Conductor installed and initialized. It reads the local Conductor database and launches the local Codex and Claude Code binaries from that machine. It is not a remote bridge for controlling another computer's Conductor instance.
 
+## Fleet Radar
+
+The bridge watches **every coding agent session on the Mac**, not only the ones
+Conductor started. A Claude Code run in your own terminal, a Codex thread from
+the editor, and a Conductor chat all land on one radar, ranked by what is
+actually waiting on you.
+
+```
+Fleet — 26 sessions · 1 waiting on you
+
+Needs you
+🔴 conductor-tg · ushuaia — claude · 3m
+    Claude needs your permission to use Bash
+    Waiting for approval
+
+Working
+🟢 ~ — claude terminal · just now
+    Running Bash
+
+Finished, unreviewed
+✅ greenroom · hong-kong — codex · 12m
+```
+
+Open it with `/radar`. It anchors a live message in that conversation and keeps
+editing it in place.
+
+**What counts as needing you**, in priority order: blocked on an approval,
+blocked on a question, errored, then finished-but-unreviewed. Only the two
+blocked kinds send you an unsolicited message; everything else waits on the
+radar so the chat does not become a firehose. Each card offers snooze, mark
+reviewed, and — for Conductor sessions — reply and open.
+
+### Live signal via agent hooks
+
+Without hooks the radar reads agent transcripts on a poll, which is late and
+cannot see an approval prompt at all: agents do not write those to disk.
+Installing hooks fixes both.
+
+```bash
+conductor-tg install-hooks    # merge into your existing hook config
+conductor-tg hooks-status
+conductor-tg uninstall-hooks  # removes only what this tool added
+```
+
+The hooks are additive: existing entries in `~/.claude/settings.json` and
+`~/.codex/hooks.json` are preserved, and the file is backed up before it is
+touched. The installed script backgrounds its request, times out after two
+seconds, and always exits 0 — a bridge that is down, slow, or uninstalled is
+indistinguishable from no hook at all, so it can never stall one of your
+agents. Sessions already running pick the hooks up on their next start.
+
+### What the bridge can and cannot do
+
+| Session started by | Watch | Reply, steer, approve |
+| --- | --- | --- |
+| Conductor | yes | yes |
+| Your terminal, an editor | yes | no — answer it where it runs |
+
+Sessions the bridge did not spawn have no control channel, so their cards say
+so and offer only snooze and mark-reviewed.
+
 ## Why Use It
 
+- See every agent session on the machine and what is blocked on you
 - Continue existing Conductor chats from Telegram
 - Browse repos, branches, workspaces, and chats without opening Conductor
 - Create new chats and new workspaces from Telegram

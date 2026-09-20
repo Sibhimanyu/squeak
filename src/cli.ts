@@ -6,6 +6,13 @@ import process from "node:process";
 import readline from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import {
+  defaultHookInstallPaths,
+  fleetHooksInstalled,
+  installFleetHooks,
+  uninstallFleetHooks,
+} from "./fleet/hook-install.js";
+import { HookIngressServer } from "./fleet/hook-ingress.js";
 import { resolveEnvFilePath } from "./paths.js";
 
 type EnvValues = Record<string, string>;
@@ -109,14 +116,71 @@ export function isDirectExecution(
 }
 
 function printUsage(): void {
-  console.log(`Usage: conductor-tg [start|setup|init|config-path|help]
+  console.log(`Usage: conductor-tg [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|help]
 
 Commands:
-  start        Start the bridge (default)
-  setup        Interactively create or update the config file
-  init         Create a default config file under ~/Library/Application Support/conductor-tg/.env
-  config-path  Print the config file path
-  help         Show this message`);
+  start            Start the bridge (default)
+  setup            Interactively create or update the config file
+  init             Create a default config file under ~/Library/Application Support/conductor-tg/.env
+  config-path      Print the config file path
+  install-hooks    Report agent state to the bridge live, for every session on this Mac
+  uninstall-hooks  Remove the hooks this tool installed
+  hooks-status     Show whether the hooks are installed
+  help             Show this message`);
+}
+
+/**
+ * The hook commands run without the bridge's config, because the port is the
+ * only value they need and requiring a Telegram token to wire up local hooks
+ * would be a pointless gate.
+ */
+function hookPort(): number {
+  const raw = Number.parseInt(process.env.FLEET_HOOK_PORT ?? "", 10);
+  return Number.isFinite(raw) && raw >= 1024 && raw <= 65535 ? raw : 8477;
+}
+
+function hookPaths(): ReturnType<typeof defaultHookInstallPaths> {
+  return defaultHookInstallPaths(path.dirname(resolveEnvFilePath()));
+}
+
+function installHooks(): void {
+  const paths = hookPaths();
+  // Mint the shared secret now so the script written below can read it even if
+  // the bridge has never run.
+  HookIngressServer.ensureToken(paths.tokenPath);
+  const result = installFleetHooks({ paths, port: hookPort() });
+
+  console.log(`Hook script: ${result.scriptPath}`);
+  for (const file of result.changed) {
+    console.log(`Updated ${file} (backup at ${file}.conductor-tg.bak)`);
+  }
+  for (const file of result.skipped) {
+    console.log(`Already installed in ${file}`);
+  }
+  console.log("");
+  console.log("Claude Code and Codex now report session state to the bridge as it changes.");
+  console.log("The hooks never block: they background the request, time out after 2s, and always exit 0.");
+  console.log("Sessions already running pick the hooks up on their next start.");
+}
+
+function uninstallHooks(): void {
+  const result = uninstallFleetHooks(hookPaths());
+  if (result.changed.length === 0) {
+    console.log("No conductor-tg hooks were installed.");
+    return;
+  }
+  for (const file of result.changed) {
+    console.log(`Cleaned ${file}`);
+  }
+  console.log("Other tools' hooks were left untouched.");
+}
+
+function printHooksStatus(): void {
+  const paths = hookPaths();
+  console.log(fleetHooksInstalled(paths) ? "Hooks: installed" : "Hooks: not installed");
+  console.log(`Ingress: 127.0.0.1:${hookPort()}`);
+  console.log(`Claude settings: ${paths.claudeSettingsPath}`);
+  console.log(`Codex hooks: ${paths.codexHooksPath}`);
 }
 
 function initConfig(): void {
@@ -272,6 +336,15 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case "config-path":
       console.log(resolveEnvFilePath());
+      return;
+    case "install-hooks":
+      installHooks();
+      return;
+    case "uninstall-hooks":
+      uninstallHooks();
+      return;
+    case "hooks-status":
+      printHooksStatus();
       return;
     case "help":
     case "--help":

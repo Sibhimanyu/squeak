@@ -17,6 +17,13 @@ import type {
 import { branchLookupCandidates, matchesRemoteBranchName } from "../utils/branch-name.js";
 import { sortRepositoryWorkspaces, type RepositoryWorkspacePriorityRef } from "../utils/workspace-priority.js";
 
+/** A Conductor session plus the workspace and repo it belongs to. */
+export interface FleetRegistrySessionRef extends ConductorSessionRef {
+  directoryName: string | null;
+  branch: string | null;
+  repositoryName: string | null;
+}
+
 interface DbSessionRow {
   id: string;
   workspaceId: string;
@@ -467,6 +474,42 @@ export class ConductorRegistryAdapter {
         `,
       )
       .all(limit) as ConductorSessionRef[];
+  }
+
+  /**
+   * Every non-hidden session across every repo, with the workspace and repo
+   * context the fleet radar needs, in one query. Iterating workspaces and
+   * calling `listSessions` per workspace turned the radar poll into dozens of
+   * round trips against Conductor's database.
+   */
+  listFleetSessions(limit: number): FleetRegistrySessionRef[] {
+    return this.db
+      .prepare(
+        `
+          SELECT
+            s.id,
+            s.workspace_id as workspaceId,
+            s.status,
+            s.agent_type as agentType,
+            s.model,
+            s.permission_mode as permissionMode,
+            s.title,
+            s.claude_session_id as claudeSessionId,
+            s.updated_at as updatedAt,
+            s.last_user_message_at as lastUserMessageAt,
+            w.directory_name as directoryName,
+            w.branch as branch,
+            r.name as repositoryName
+          FROM sessions s
+          JOIN workspaces w ON w.id = s.workspace_id
+          JOIN repos r ON r.id = w.repository_id
+          WHERE IFNULL(s.is_hidden, 0) = 0
+            AND IFNULL(r.hidden, 0) = 0
+          ORDER BY s.updated_at DESC
+          LIMIT ?
+        `,
+      )
+      .all(limit) as FleetRegistrySessionRef[];
   }
 
   getSessionDefaults(workspaceId: string): SessionDefaults {

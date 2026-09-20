@@ -19,6 +19,10 @@ deployment section before changing anything under `src/`.
 | `src/telegram/client.ts` | Telegram API calls, HTML rendering, retry/fallback |
 | `src/utils/tg-format.ts` | markdown to Telegram HTML, message splitting |
 | `src/bridge/state-store.ts` | the bridge's own SQLite state (`bridge.db`) |
+| `src/fleet/` | the fleet radar: every agent session on the Mac, not just Conductor's |
+| `src/fleet/observers/` | one file per discovery source; none of them know about each other |
+| `src/fleet/fleet-monitor.ts` | merges observers and hook events, decides what needs attention |
+| `src/fleet/hook-ingress.ts` | loopback HTTP endpoint the installed agent hooks report to |
 
 `src/services/bridge-service.ts` is **dead code** — an older implementation that
 still ships in the package. The live path is `cli.ts` to `index.ts`. Do not spend
@@ -82,6 +86,33 @@ test for anything you fix is expected; the suite is fast.
 - **Messages cap at 4096 characters.** Use `splitMarkdown`, never truncate.
 - A repo with no workspaces must still be selectable, otherwise a freshly added
   project can never be reached from Telegram.
+
+## The fleet layer
+
+The bridge used to see only sessions Conductor spawned. `src/fleet/` widens
+that to every Claude Code and Codex session on the machine by reading their
+transcripts, and ranks them by what is blocked on the human.
+
+- **Observers are independent and must stay that way.** Each one answers "what
+  does my source say" and nothing else; `merge.ts` is the only place that
+  reconciles them. That is what keeps them testable against fixture files.
+- **Sessions join on the agent's own session id.** Conductor stores it in
+  `sessions.claude_session_id` for both agents, despite the column name.
+- **Transcripts cannot record an approval prompt.** Blocked states only ever
+  come from hooks. Anything that infers "awaiting approval" from a file is
+  wrong.
+- **Hooks must never block.** The installed script backgrounds its request,
+  caps curl at 2s, and exits 0 unconditionally. These run inside other people's
+  agents; a bridge problem must never become their problem. There is a
+  regression test that runs the real script against a dead port.
+- **`~/.claude/settings.json` is shared.** On a typical machine it already
+  carries entries from other tools. Install merges, uninstall removes only
+  entries naming `fleet-notify.sh`, and both back the file up first.
+- **Callback data caps at 64 bytes.** Session keys do not fit, so
+  `FleetStore.handleFor` allocates short integer aliases. Never put a raw
+  session key in `callback_data`.
+- Only sessions blocked on the human get pushed. Finished and errored ones go
+  to the radar. Changing that is a product decision, not a tuning knob.
 
 ## Upstream
 

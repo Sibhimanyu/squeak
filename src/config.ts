@@ -86,6 +86,17 @@ const schema = z.object({
   PAGE_SIZE: z.coerce.number().int().min(5).max(30).default(12),
   DEFAULT_FALLBACK_MODEL: z.string().default("gpt-5.4"),
   DEFAULT_PERMISSION_MODE: z.string().default("default"),
+  // Fleet: the machine-wide view of every agent session, not just Conductor's.
+  FLEET_ENABLED: z
+    .string()
+    .default("true")
+    .transform((value) => value.trim().toLowerCase() !== "false"),
+  FLEET_HOOK_PORT: z.coerce.number().int().min(1024).max(65535).default(8477),
+  FLEET_POLL_INTERVAL_MS: z.coerce.number().int().min(2000).default(20000),
+  /** How far back a transcript counts as a session worth showing. */
+  FLEET_ACTIVE_WINDOW_MINUTES: z.coerce.number().int().min(5).default(360),
+  /** A running turn quiet for longer than this is stalled, not busy. */
+  FLEET_IDLE_AFTER_MINUTES: z.coerce.number().int().min(1).default(10),
 });
 
 let parsed: z.infer<typeof schema>;
@@ -125,5 +136,11 @@ export const config = {
   pageSize: parsed.PAGE_SIZE,
   defaultFallbackModel: parsed.DEFAULT_FALLBACK_MODEL,
   defaultPermissionMode: parsed.DEFAULT_PERMISSION_MODE,
+  fleetEnabled: parsed.FLEET_ENABLED,
+  fleetHookPort: parsed.FLEET_HOOK_PORT,
+  fleetPollIntervalMs: parsed.FLEET_POLL_INTERVAL_MS,
+  fleetActiveWindowMs: parsed.FLEET_ACTIVE_WINDOW_MINUTES * 60_000,
+  fleetIdleAfterMs: parsed.FLEET_IDLE_AFTER_MINUTES * 60_000,
+  fleetSupportDir: configBaseDir,
   envFilePath,
 };
