@@ -36,6 +36,8 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     stateSource: "transcript",
     contextPercent: null,
     retired: false,
+    baseRef: null,
+    git: null,
     ...overrides,
   };
 }
@@ -234,5 +236,41 @@ describe("context pressure on the radar", () => {
     const text = renderRadar(snapshot({ sessions: [session({ contextPercent: 30 })] }), now);
 
     expect(text).not.toContain("ctx ");
+  });
+});
+
+describe("git state on the radar", () => {
+  const git = {
+    branch: "ushuaia",
+    filesChanged: 8,
+    insertions: 312,
+    deletions: 40,
+    untracked: 0,
+    ahead: 0,
+    behind: 0,
+    hasUpstream: false,
+    aheadOfBase: 3,
+  };
+
+  it("says what the agent actually did, not just that it finished", () => {
+    const finished = item({
+      session: session({ state: "finished", detail: "Done.", git }),
+      kind: "finished_unreviewed",
+    });
+    const text = renderRadar(snapshot({ sessions: [finished.session], attention: [finished] }), now);
+
+    expect(text).toContain("+312/−40 · 8 files · 3 commits, not pushed");
+  });
+
+  it("puts it on the push card too", () => {
+    const text = renderAttentionCard(item({ session: session({ state: "awaiting_approval", git }) }), now);
+
+    expect(text).toContain("+312/−40");
+  });
+
+  it("omits the line entirely when git was not read", () => {
+    const text = renderRadar(snapshot({ sessions: [session({ state: "working" })] }), now);
+
+    expect(text).not.toContain("files");
   });
 });

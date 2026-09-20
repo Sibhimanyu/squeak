@@ -12,6 +12,7 @@ import { isSessionEndEvent } from "./hook-protocol.js";
 import type { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import type { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import type { ConductorObserver } from "./observers/conductor.js";
+import type { GitState, GitStateReader } from "./git-state.js";
 import type { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { AttentionItem, FleetSession, HookEvent, ObservedSession } from "./types.js";
 
@@ -27,6 +28,8 @@ export interface FleetMonitorDependencies {
   claude: ClaudeTranscriptObserver;
   codex: CodexRolloutObserver;
   liveness: ProcessLivenessObserver;
+  /** Optional: without it the radar simply shows no working-tree detail. */
+  git?: GitStateReader | null;
 }
 
 export interface FleetMonitorOptions {
@@ -231,11 +234,86 @@ export class FleetMonitor {
 
     this.deps.store.pruneSnapshots(seenKeys, new Date(this.now() - this.snapshotTtlMs).toISOString());
 
+    // Read git last and only for the sessions that will be rendered, then
+    // restate everything against the enriched copies — push cards are worth
+    // more with a diffstat on them, so this has to happen before they go out.
+    const enriched = await this.attachGitState(sessions, attention);
+
     if (pushes.length > 0) {
-      this.emitPush(sortAttention(pushes));
+      this.emitPush(sortAttention(pushes.map((item) => enriched.remap(item))));
     }
 
-    return { sessions, attention: sortAttention(attention), generatedAt: observedAt };
+    return {
+      sessions: enriched.sessions,
+      attention: sortAttention(attention.map((item) => enriched.remap(item))),
+      generatedAt: observedAt,
+    };
+  }
+
+  /**
+   * Attach working-tree state to the sessions a human is about to look at.
+   *
+   * Deliberately not every session: git is the most expensive thing here, and
+   * the twenty idle sessions that never reach the radar would pay for nothing.
+   */
+  private async attachGitState(
+    sessions: FleetSession[],
+    attention: AttentionItem[],
+  ): Promise<{ sessions: FleetSession[]; remap: (item: AttentionItem) => AttentionItem }> {
+    const identity = {
+      sessions,
+      remap: (item: AttentionItem): AttentionItem => item,
+    };
+    if (!this.deps.git) {
+      return identity;
+    }
+
+    const wanted = new Set(attention.map((item) => item.session.key));
+    for (const session of sessions) {
+      if (session.state === "working") {
+        wanted.add(session.key);
+      }
+    }
+    if (wanted.size === 0) {
+      return identity;
+    }
+
+    const targets = new Map<string, string | null>();
+    for (const session of sessions) {
+      if (wanted.has(session.key) && session.cwd) {
+        // Two sessions in one workspace share a working tree; read it once.
+        targets.set(session.cwd, targets.get(session.cwd) ?? session.baseRef);
+      }
+    }
+    if (targets.size === 0) {
+      return identity;
+    }
+
+    let states: Map<string, GitState>;
+    try {
+      states = await this.deps.git.read(
+        Array.from(targets, ([dir, baseRef]) => ({ dir, ...(baseRef ? { baseRef } : {}) })),
+      );
+    } catch (error) {
+      logger.warn("fleet git read failed", { error: error instanceof Error ? error.message : String(error) });
+      return identity;
+    }
+
+    const byKey = new Map<string, FleetSession>();
+    const next = sessions.map((session) => {
+      const state = wanted.has(session.key) && session.cwd ? (states.get(session.cwd) ?? null) : null;
+      const updated = state ? { ...session, git: state } : session;
+      byKey.set(session.key, updated);
+      return updated;
+    });
+
+    return {
+      sessions: next,
+      remap: (item) => {
+        const session = byKey.get(item.session.key);
+        return session ? { ...item, session } : item;
+      },
+    };
   }
 
   private isMuted(session: FleetSession, atIso: string): boolean {

@@ -47,6 +47,7 @@ function observed(overrides: Partial<ObservedSession> = {}): ObservedSession {
     transcriptPath: null,
     contextPercent: null,
     retired: false,
+    baseRef: null,
     ...overrides,
   };
 }
@@ -242,5 +243,123 @@ describe("context pressure", () => {
     expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["blocked_approval", "context_pressure"]);
     expect(harness.pushes).toHaveLength(1);
     expect(harness.pushes[0]?.[0]?.kind).toBe("blocked_approval");
+  });
+});
+
+describe("git enrichment", () => {
+  function makeGit(states: Record<string, Partial<import("./git-state.js").GitState>>, seen?: string[][]) {
+    return {
+      read: async (targets: { dir: string; baseRef?: string }[]) => {
+        seen?.push(targets.map((target) => target.dir));
+        const result = new Map<string, import("./git-state.js").GitState>();
+        for (const target of targets) {
+          const state = states[target.dir];
+          if (state) {
+            result.set(target.dir, {
+              branch: "feature",
+              filesChanged: 0,
+              insertions: 0,
+              deletions: 0,
+              untracked: 0,
+              ahead: 0,
+              behind: 0,
+              hasUpstream: true,
+              aheadOfBase: null,
+              ...state,
+            });
+          }
+        }
+        return result;
+      },
+    } as unknown as NonNullable<FleetMonitorDependencies["git"]>;
+  }
+
+  function makeMonitorWithGit(
+    sessions: ObservedSession[],
+    git: NonNullable<FleetMonitorDependencies["git"]>,
+  ): { monitor: FleetMonitor; pushes: AttentionItem[][] } {
+    const store = makeStore();
+    const pushes: AttentionItem[][] = [];
+    const monitor = new FleetMonitor(
+      {
+        store,
+        conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
+        claude: { observe: () => sessions } as unknown as FleetMonitorDependencies["claude"],
+        codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
+        liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
+        git,
+      },
+      { now: () => Date.parse("2026-09-20T12:00:00.000Z") },
+    );
+    monitor.onPush((items) => pushes.push(items));
+    return { monitor, pushes };
+  }
+
+  it("attaches working-tree state to a finished session", async () => {
+    const { monitor } = makeMonitorWithGit(
+      [observed({ state: "finished", cwd: "/repo" })],
+      makeGit({ "/repo": { filesChanged: 8, insertions: 312, deletions: 40 } }),
+    );
+
+    const snapshot = await monitor.refresh();
+
+    expect(snapshot.sessions[0]?.git?.insertions).toBe(312);
+    // The attention item must carry the enriched session, not the original.
+    expect(snapshot.attention[0]?.session.git?.insertions).toBe(312);
+  });
+
+  it("does not shell out for sessions nobody is going to look at", async () => {
+    const seen: string[][] = [];
+    const { monitor } = makeMonitorWithGit(
+      [
+        observed({ key: "a", agentSessionId: "a", state: "idle", cwd: "/quiet" }),
+        observed({ key: "b", agentSessionId: "b", state: "finished", cwd: "/loud" }),
+      ],
+      makeGit({ "/loud": {} }, seen),
+    );
+
+    await monitor.refresh();
+
+    expect(seen[0]).toEqual(["/loud"]);
+  });
+
+  it("reads a shared working tree once for two sessions in it", async () => {
+    const seen: string[][] = [];
+    const { monitor } = makeMonitorWithGit(
+      [
+        observed({ key: "a", agentSessionId: "a", state: "finished", cwd: "/repo" }),
+        observed({ key: "b", agentSessionId: "b", state: "working", cwd: "/repo" }),
+      ],
+      makeGit({ "/repo": {} }, seen),
+    );
+
+    await monitor.refresh();
+
+    expect(seen[0]).toEqual(["/repo"]);
+  });
+
+  it("puts the diffstat on the push card", async () => {
+    const { monitor, pushes } = makeMonitorWithGit(
+      [observed({ cwd: "/repo" })],
+      makeGit({ "/repo": { filesChanged: 2, insertions: 9, deletions: 1 } }),
+    );
+    monitor.ingestHookEvent(hookEvent());
+
+    await monitor.refresh();
+
+    expect(pushes[0]?.[0]?.session.git?.insertions).toBe(9);
+  });
+
+  it("still produces a snapshot when git fails entirely", async () => {
+    const { monitor } = makeMonitorWithGit([observed({ state: "finished", cwd: "/repo" })], {
+      read: async () => {
+        throw new Error("git is not installed");
+      },
+    } as unknown as NonNullable<FleetMonitorDependencies["git"]>);
+
+    const snapshot = await monitor.refresh();
+
+    expect(snapshot.sessions).toHaveLength(1);
+    expect(snapshot.sessions[0]?.git).toBeNull();
   });
 });

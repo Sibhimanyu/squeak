@@ -41,6 +41,24 @@ offers snooze, mark reviewed, and — for Conductor sessions — reply and open.
 A session can want attention for more than one reason at once, and all of them
 are shown.
 
+### What the agent actually did
+
+"Finished" tells you a turn ended, not whether it touched three lines or
+rewrote a module, and not whether any of it left the machine. Sessions on the
+radar carry their working-tree state:
+
+```
+✅ conductor-tg · ushuaia — claude · 12m
+    Done, all tests pass.
+    +283/−5 · 15 files · 2 commits, not pushed
+```
+
+Conductor branches usually have no upstream, so unpushed work is counted
+against the repo's default branch rather than reported as nothing outstanding.
+Git runs only for sessions that are actually rendered, and results are cached
+for 30 seconds — the twenty idle sessions that never reach the radar cost
+nothing.
+
 ### Signals only Conductor has
 
 Two things no transcript can tell you, read straight from Conductor's database:

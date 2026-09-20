@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { TelegramInlineKeyboard } from "../types.js";
 import { attentionLabel, isActionable } from "./attention.js";
+import { describeGitState } from "./git-state.js";
 import type { FleetSnapshot } from "./fleet-monitor.js";
 import type { AttentionItem, FleetSession, FleetState } from "./types.js";
 
@@ -110,8 +111,16 @@ function describeRow(session: FleetSession, since: string, nowMs: number): strin
   const meta = [`${tags.join(" ")}`, formatAge(since, nowMs), contextTag(session)]
     .filter((part): part is string => Boolean(part))
     .join(" · ");
-  const detail = session.detail ? `\n    ${session.detail}` : "";
-  return `${head} — ${meta}${detail}`;
+  const lines = [`${head} — ${meta}`];
+  if (session.detail) {
+    lines.push(`    ${session.detail}`);
+  }
+  // What the agent actually did to the tree, which "finished" never says.
+  const git = session.git ? describeGitState(session.git) : null;
+  if (git) {
+    lines.push(`    ${git}`);
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -237,6 +246,12 @@ export function renderAttentionCard(item: AttentionItem, nowMs: number): string 
   if (session.detail) {
     lines.push("");
     lines.push(session.detail);
+  }
+
+  const git = session.git ? describeGitState(session.git) : null;
+  if (git) {
+    lines.push("");
+    lines.push(git);
   }
 
   lines.push("");

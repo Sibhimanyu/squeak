@@ -20,6 +20,7 @@ function observed(overrides: Partial<ObservedSession> & Pick<ObservedSession, "k
     transcriptPath: null,
     contextPercent: null,
     retired: false,
+    baseRef: null,
     ...overrides,
   };
 }

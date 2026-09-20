@@ -57,7 +57,10 @@ export class ConductorObserver {
       sourceId: row.id,
       agentSessionId: row.claudeSessionId,
       conductorSessionId: row.id,
-      cwd: null,
+      // The worktree path is both where git must run and a better liveness
+      // key than nothing, so take it from Conductor rather than waiting for a
+      // transcript to supply it.
+      cwd: row.workspacePath,
       repoName: row.repositoryName,
       branch: row.branch ?? row.directoryName,
       title: row.title,
@@ -67,6 +70,7 @@ export class ConductorObserver {
       transcriptPath: null,
       contextPercent: normalizePercent(row.contextUsedPercent),
       retired: isRetiredWorkspace(row),
+      baseRef: row.defaultBranch ? `origin/${row.defaultBranch}` : null,
     };
   }
 

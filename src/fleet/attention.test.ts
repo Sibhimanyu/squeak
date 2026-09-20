@@ -25,6 +25,8 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     stateSource: "transcript",
     contextPercent: null,
     retired: false,
+    baseRef: null,
+    git: null,
     ...overrides,
   };
 }

@@ -29,6 +29,10 @@ export interface FleetRegistrySessionRef extends ConductorSessionRef {
   derivedStatus: string | null;
   manualStatus: string | null;
   workspaceState: string | null;
+  /** Absolute path of the worktree, which is where git has to be run. */
+  workspacePath: string | null;
+  /** The repo's default branch, used to count unpushed work on a fresh branch. */
+  defaultBranch: string | null;
 }
 
 interface DbSessionRow {
@@ -511,6 +515,8 @@ export class ConductorRegistryAdapter {
             w.derived_status as derivedStatus,
             w.manual_status as manualStatus,
             w.state as workspaceState,
+            w.workspace_path as workspacePath,
+            r.default_branch as defaultBranch,
             r.name as repositoryName
           FROM sessions s
           JOIN workspaces w ON w.id = s.workspace_id

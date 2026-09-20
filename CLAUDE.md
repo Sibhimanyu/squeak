@@ -23,6 +23,7 @@ deployment section before changing anything under `src/`.
 | `src/fleet/observers/` | one file per discovery source; none of them know about each other |
 | `src/fleet/fleet-monitor.ts` | merges observers and hook events, decides what needs attention |
 | `src/fleet/hook-ingress.ts` | loopback HTTP endpoint the installed agent hooks report to |
+| `src/fleet/git-state.ts` | cached working-tree reads, so "finished" says what changed |
 
 `src/services/bridge-service.ts` is **dead code** — an older implementation that
 still ships in the package. The live path is `cli.ts` to `index.ts`. Do not spend
@@ -120,6 +121,14 @@ transcripts, and ranks them by what is blocked on the human.
   is gone** — which is still a reason to stop asking for review. On this
   machine that is 8 of 18 workspaces, so getting it wrong either buries the
   radar in dead work or hides live work.
+- **Git runs only for sessions that will be rendered**, and is cached for 30
+  seconds including misses — an archived workspace whose directory is gone must
+  not be re-probed every refresh. Enrichment happens *before* push cards are
+  emitted, so the card carries the diffstat.
+- **A Conductor branch usually has no upstream**, so `@{upstream}` exits
+  non-zero and that is the normal case, not an error. Unpushed work is counted
+  against `origin/<repos.default_branch>` instead — and note that
+  `default_branch` is the real target branch, not necessarily `main`.
 - Conductor fields that look useful but are **not populated** on a normal
   single-user install: `sessions.unread_count`, `workspaces.unread`,
   `sessions.queue_paused_at`. They read as all-zero; do not build on them

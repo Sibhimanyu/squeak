@@ -69,9 +69,11 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     // whichever observer supplied the rest of the identity.
     contextPercent: conductor?.contextPercent ?? base.contextPercent,
     retired: conductor?.retired ?? base.retired,
+    baseRef: conductor?.baseRef ?? base.baseRef,
     lastActivityAt,
     pid: null,
     alive: false,
+    git: null,
     stateSource: stateOwner?.source === "conductor" ? "conductor" : "transcript",
   };
 }

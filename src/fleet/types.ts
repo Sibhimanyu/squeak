@@ -9,6 +9,8 @@
  * question only Conductor can answer.
  */
 
+import type { GitState } from "./git-state.js";
+
 export type AgentKind = "claude" | "codex";
 
 /** Who started the session. Decides which actions we can offer for it. */
@@ -72,12 +74,19 @@ export interface ObservedSession {
    * should not keep asking to be reviewed.
    */
   retired: boolean;
+  /**
+   * Branch to measure unpushed work against when the session's branch has no
+   * upstream, which is the normal state of a fresh Conductor branch.
+   */
+  baseRef: string | null;
 }
 
 /** A session after the monitor has merged observers, hooks, and liveness. */
 export interface FleetSession extends ObservedSession {
   pid: number | null;
   alive: boolean;
+  /** What the working tree actually looks like. Read lazily, so often null. */
+  git: GitState | null;
   /** Set when a hook told us the state rather than us inferring it. */
   stateSource: "hook" | "transcript" | "conductor";
 }

@@ -157,6 +157,7 @@ export class ClaudeTranscriptObserver {
       // Only Conductor knows these; a transcript cannot see either.
       contextPercent: null,
       retired: false,
+      baseRef: null,
     };
   }
 
