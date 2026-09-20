@@ -7,6 +7,7 @@ import type {
   TelegramSendMessageOptions,
   TelegramUpdate,
 } from "../types.js";
+import { markdownToTelegramHtml } from "../utils/tg-format.js";
 
 const POLL_RETRY_DELAY_MS = 750;
 const POLL_TIMEOUT_BUFFER_MS = 10_000;
@@ -239,6 +240,24 @@ async function readTelegramApiError(
   return { status, description, retryAfterSeconds };
 }
 
+/**
+ * Agent output is markdown. Telegram renders nothing unless parse_mode is set, so
+ * every outgoing message is rendered to Telegram HTML here -- one choke point, so
+ * text is never converted twice. If Telegram rejects the markup, the send is
+ * retried as plain text rather than lost.
+ */
+function isParseEntitiesError(error: unknown): boolean {
+  const description = error instanceof TelegramApiError ? (error.description?.toLowerCase() ?? "") : "";
+  return (
+    description.includes("can't parse entities") ||
+    description.includes("cant parse entities") ||
+    description.includes("unsupported start tag") ||
+    description.includes("unmatched end tag") ||
+    description.includes("can't find end tag") ||
+    description.includes("entity")
+  );
+}
+
 export class TelegramClient {
   private readonly baseUrl: string;
   private readonly retryAfterDeadlineMsByLane = new Map<TelegramRequestLane, number>();
@@ -273,18 +292,30 @@ export class TelegramClient {
   }
 
   async sendMessage(chatId: number, text: string, options?: TelegramSendMessageOptions): Promise<number | null> {
-    const response = await this.callApi<{ ok: boolean; result?: { message_id: number } }>(
-      "sendMessage",
-      {
-        chat_id: chatId,
-        text,
-        message_thread_id: options?.message_thread_id,
-        disable_web_page_preview: options?.disable_web_page_preview ?? true,
-        reply_markup: options?.reply_markup,
-      },
-      { lane: "write" },
-    );
-    return response.result?.message_id ?? null;
+    const base = {
+      chat_id: chatId,
+      message_thread_id: options?.message_thread_id,
+      disable_web_page_preview: options?.disable_web_page_preview ?? true,
+      reply_markup: options?.reply_markup,
+    };
+    try {
+      const response = await this.callApi<{ ok: boolean; result?: { message_id: number } }>(
+        "sendMessage",
+        { ...base, text: markdownToTelegramHtml(text), parse_mode: "HTML" },
+        { lane: "write" },
+      );
+      return response.result?.message_id ?? null;
+    } catch (error) {
+      if (!isParseEntitiesError(error)) {
+        throw error;
+      }
+      const response = await this.callApi<{ ok: boolean; result?: { message_id: number } }>(
+        "sendMessage",
+        { ...base, text },
+        { lane: "write" },
+      );
+      return response.result?.message_id ?? null;
+    }
   }
 
   async createForumTopic(chatId: number, name: string): Promise<TelegramForumTopic> {
@@ -305,17 +336,24 @@ export class TelegramClient {
     text: string,
     inlineKeyboard?: TelegramInlineKeyboard,
   ): Promise<void> {
-    await this.callApi(
-      "editMessageText",
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        text,
-        reply_markup: inlineKeyboard ? { inline_keyboard: inlineKeyboard } : undefined,
-        disable_web_page_preview: true,
-      },
-      { lane: "write" },
-    );
+    const base = {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: inlineKeyboard ? { inline_keyboard: inlineKeyboard } : undefined,
+      disable_web_page_preview: true,
+    };
+    try {
+      await this.callApi(
+        "editMessageText",
+        { ...base, text: markdownToTelegramHtml(text), parse_mode: "HTML" },
+        { lane: "write" },
+      );
+    } catch (error) {
+      if (!isParseEntitiesError(error)) {
+        throw error;
+      }
+      await this.callApi("editMessageText", { ...base, text }, { lane: "write" });
+    }
   }
 
   async deleteMessage(chatId: number, messageId: number): Promise<void> {

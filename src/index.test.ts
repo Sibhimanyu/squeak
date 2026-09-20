@@ -482,7 +482,9 @@ describe("TelegramConductorBridge", () => {
         planText: null,
         sessionId: "session-1",
         settling: false,
+        startedAt: Date.now(),
         status: "active",
+        steps: [{ key: "cmd:npm run build", label: "Bash  npm run build", done: false, failed: false }],
         threadId: "thread-1",
         turnId: "turn-1",
       },
@@ -490,10 +492,11 @@ describe("TelegramConductorBridge", () => {
       "Working...",
     );
 
-    expect(body).toContain("Current activity: Running command: npm run build");
-    expect(body).toContain("Last event: 2026-03-29 14:57");
-    expect(body).toContain("Latest assistant text:");
-    expect(body).toContain("Previous update");
+    // The panel body is the step log now; the reply is sent as its own message
+    // once the turn finalizes, so it no longer appears here.
+    expect(body).toContain("Bash  npm run build");
+    expect(body).not.toContain("Latest assistant text:");
+    expect(body).not.toContain("Previous update");
   });
 
   it("surfaces command execution progress in the session panel", async () => {
@@ -549,8 +552,11 @@ describe("TelegramConductorBridge", () => {
     });
 
     expect(telegram.sendMessage).toHaveBeenCalledTimes(1);
-    expect(telegram.sendMessage.mock.calls[0]?.[1]).toContain("Activity: Running command: npm run build");
-    expect(telegram.sendMessage.mock.calls[0]?.[1]).toContain("Current activity: Running command: npm run build");
+    const panel = telegram.sendMessage.mock.calls[0]?.[1] as string;
+    // A running step is marked with a hollow circle and flips to a check on completion.
+    expect(panel).toContain("\u25cb Bash  npm run build");
+    expect(panel).not.toContain("Activity:");
+    expect(panel).not.toContain("Turn:");
   });
 
   it("shows the current execution state in /queue output", async () => {

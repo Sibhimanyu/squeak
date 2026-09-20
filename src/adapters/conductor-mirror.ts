@@ -1,6 +1,16 @@
 import type { BridgeStateStore } from "../bridge/state-store.js";
 import type { ConductorRegistryAdapter } from "./conductor-registry.js";
 import type { SessionStatus, SupportedAgentType } from "../types.js";
+import { toClaudeCliModel } from "./claude-code.js";
+
+/**
+ * Conductor stores "opus-5-1m" in `sessions.model` but writes the resolved catalog
+ * id ("claude-opus-5") into the message envelope. Mirror that.
+ */
+function toConductorDisplayModel(model: string | null): string | null {
+  const cli = toClaudeCliModel(model);
+  return cli ? cli.replace(/\[1m\]$/, "") : model;
+}
 
 export class ConductorMirrorWriter {
   constructor(
@@ -69,27 +79,34 @@ export class ConductorMirrorWriter {
     threadId: string;
     turnId: string;
     text: string;
+    sentAt: string;
     model: string | null;
   }): string[] {
     if (params.agentType === "claude") {
+      // Match the envelope Conductor writes itself, exactly. Its own rows carry only
+      // role/model/content/usage under `message`; the extra null fields this used to
+      // add (id, type, stop_reason, stop_sequence, stop_details, context_management)
+      // and `usage: null` appear on no Conductor row, and its UI renders such rows as
+      // "This message could not be displayed."
       return [
         JSON.stringify({
           type: "assistant",
-          message: {
-            model: params.model,
-            id: params.turnId,
-            type: "message",
-            role: "assistant",
-            content: [{ type: "text", text: params.text }],
-            stop_reason: null,
-            stop_sequence: null,
-            stop_details: null,
-            usage: null,
-            context_management: null,
-          },
-          parent_tool_use_id: null,
-          session_id: params.threadId,
           uuid: params.turnId,
+          message: {
+            role: "assistant",
+            model: toConductorDisplayModel(params.model),
+            content: [{ type: "text", text: params.text }],
+            usage: {
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+              input_tokens: 0,
+              output_tokens: 0,
+              service_tier: "standard",
+            },
+          },
+          session_id: params.threadId,
+          timestamp: params.sentAt,
+          parent_tool_use_id: null,
         }),
       ];
     }

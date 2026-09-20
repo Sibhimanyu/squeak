@@ -48,11 +48,11 @@ import {
   formatSessionContextEntry,
   formatSessionPickerText,
   formatSessionTitle,
-  formatStatusLine,
   formatWorkspaceOptionName,
   sanitizeSessionTitle,
   truncate,
 } from "./utils/text.js";
+import { splitMarkdown } from "./utils/tg-format.js";
 
 interface PendingInputQuestion {
   id: string;
@@ -113,6 +113,13 @@ interface PendingSessionStreamUpdate {
   text: string;
 }
 
+interface RuntimeStep {
+  key: string;
+  label: string;
+  done: boolean;
+  failed: boolean;
+}
+
 interface RuntimeState {
   activityText: string | null;
   assistantText: string;
@@ -121,7 +128,9 @@ interface RuntimeState {
   planText: string | null;
   sessionId: string;
   settling: boolean;
+  startedAt: number;
   status: "active" | "cancelling" | "waiting_user_input" | "waiting_plan" | "completed" | "failed";
+  steps: RuntimeStep[];
   threadId: string;
   turnId: string;
 }
@@ -163,6 +172,100 @@ function formatRuntimeEventAt(value: string | null): string | null {
     return null;
   }
   return value.length >= 16 ? value.slice(0, 16).replace("T", " ") : value;
+}
+
+const STEP_BLOCK_MAX_CHARS = 2400;
+const PANEL_MAX_CHARS = 3800;
+const PANEL_CHUNK_CHARS = 3500;
+
+function formatTurnDuration(startedAt: number | undefined): string | null {
+  if (!startedAt) {
+    return null;
+  }
+  const totalSeconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
+}
+
+/**
+ * One short "Tool  argument" label per tool call. agentMessage/reasoning are the
+ * reply itself, not a step, so they are skipped.
+ */
+function describeRuntimeStep(item: Record<string, unknown>): { key: string; label: string } | null {
+  const itemType = asString(item.type);
+  switch (itemType) {
+    case "commandExecution": {
+      const command = asString(item.command) ?? "command";
+      return { key: `cmd:${command}`, label: `Bash  ${truncate(command, 90)}` };
+    }
+    case "mcpToolCall":
+    case "dynamicToolCall":
+    case "collabAgentToolCall": {
+      const tool = asString(item.tool) ?? asString(item.name) ?? "tool";
+      return { key: `tool:${tool}`, label: tool };
+    }
+    case "webSearch": {
+      const query = truncate(asString(item.query) ?? "query", 90);
+      return { key: `web:${query}`, label: `Search  ${query}` };
+    }
+    case "fileChange": {
+      const path = truncate(asString(item.path) ?? "file", 90);
+      return { key: `file:${path}`, label: `Edit  ${path}` };
+    }
+    default:
+      return null;
+  }
+}
+
+function formatRuntimeSteps(runtime: RuntimeState): string | null {
+  const steps = Array.isArray(runtime.steps) ? runtime.steps : [];
+  if (steps.length === 0) {
+    return null;
+  }
+  const rendered = steps.map((step) => `${step.failed ? "\u2717" : step.done ? "\u2713" : "\u25cb"} ${step.label}`);
+  // Every step is kept, but the oldest fold away if the list would eat the panel's
+  // character budget -- the newest steps are the ones worth seeing.
+  let dropped = 0;
+  while (rendered.length > 1 && rendered.join("\n").length > STEP_BLOCK_MAX_CHARS) {
+    rendered.shift();
+    dropped += 1;
+  }
+  return dropped > 0 ? `+${dropped} earlier\n${rendered.join("\n")}` : rendered.join("\n");
+}
+
+function turnStatusGlyph(runtime: RuntimeState | null | undefined): string {
+  if (!runtime) {
+    return "\u25cf";
+  }
+  if (runtime.status === "failed") {
+    return "\u2717";
+  }
+  if (runtime.status === "completed" && !runtime.settling) {
+    return "\u2713";
+  }
+  if (runtime.status === "waiting_user_input" || runtime.status === "waiting_plan") {
+    return "\u25d0";
+  }
+  return "\u25cf";
+}
+
+function formatTurnSummary(runtime: RuntimeState, workspace: { repositoryName?: string } | null): string {
+  const glyph = runtime.status === "failed" ? "\u2717" : "\u2713";
+  const repo = workspace ? formatRepositoryLabel(workspace as never) : "session";
+  const parts = [`${glyph} ${repo}`];
+  const count = Array.isArray(runtime.steps) ? runtime.steps.length : 0;
+  if (count > 0) {
+    parts.push(`${count} step${count === 1 ? "" : "s"}`);
+  }
+  const duration = formatTurnDuration(runtime.startedAt);
+  if (duration) {
+    parts.push(duration);
+  }
+  if (runtime.status === "failed") {
+    parts.push("failed");
+  }
+  return parts.join(" \u00b7 ");
 }
 
 function describeRuntimeActivity(item: Record<string, unknown>, phase: "started" | "completed"): string | null {
@@ -1664,6 +1767,8 @@ export class TelegramConductorBridge {
             planText: null,
             model: session.model,
             settling: false,
+            steps: [],
+            startedAt: Date.now(),
           };
     this.runtimes.set(session.id, runtime);
 
@@ -2354,6 +2459,7 @@ export class TelegramConductorBridge {
     if (!runtime.settling) {
       runtime.status = "active";
     }
+    this.recordRuntimeStep(runtime, item, "started");
     this.recordRuntimeEvent(runtime, describeRuntimeActivity(item, "started"));
     await this.pushRuntimeUpdate(runtime);
     if (runtime.settling) {
@@ -2450,6 +2556,7 @@ export class TelegramConductorBridge {
       return;
     }
 
+    this.recordRuntimeStep(runtime, item, "completed");
     this.recordRuntimeEvent(runtime, describeRuntimeActivity(item, "completed"));
     await this.pushRuntimeUpdate(runtime);
     if (runtime.settling) {
@@ -2607,9 +2714,39 @@ export class TelegramConductorBridge {
       lastEventAt: existing?.lastEventAt ?? null,
       planText: existing?.planText ?? null,
       model,
+      steps: existing?.turnId === turnId ? (existing.steps ?? []) : [],
+      startedAt: existing?.turnId === turnId ? (existing.startedAt ?? Date.now()) : Date.now(),
     };
     this.runtimes.set(sessionId, runtime);
     return runtime;
+  }
+
+  private recordRuntimeStep(
+    runtime: RuntimeState,
+    item: Record<string, unknown>,
+    phase: "started" | "completed",
+  ): void {
+    const step = describeRuntimeStep(item);
+    if (!step) {
+      return;
+    }
+    if (!Array.isArray(runtime.steps)) {
+      runtime.steps = [];
+    }
+    const open = [...runtime.steps].reverse().find((entry) => entry.key === step.key && !entry.done);
+    if (phase === "started") {
+      if (!open) {
+        runtime.steps.push({ key: step.key, label: step.label, done: false, failed: false });
+      }
+      return;
+    }
+    const failed = typeof item.exitCode === "number" && item.exitCode !== 0;
+    if (open) {
+      open.done = true;
+      open.failed = failed;
+      return;
+    }
+    runtime.steps.push({ key: step.key, label: step.label, done: true, failed });
   }
 
   private recordRuntimeEvent(runtime: RuntimeState, activityText?: string | null): void {
@@ -2664,6 +2801,29 @@ export class TelegramConductorBridge {
       this.mirror.updateSessionStatus(sessionId, "error");
     }
 
+    // Collapse the progress panel to a one-line summary, then send the reply as its
+    // own message so it reads like normal chat rather than a status block.
+    // Rendering must never stop the turn from being finalized -- if it throws, the
+    // queue would never drain and the session would wedge.
+    try {
+      const finishedSession = this.registry.getSessionById(sessionId);
+      const finishedWorkspace = finishedSession ? this.registry.getWorkspaceById(finishedSession.workspaceId) : null;
+      const summary = formatTurnSummary(runtime, finishedWorkspace);
+      const reply = (runtime.assistantText ?? "").trim();
+      for (const location of this.stateStore.listFollowingConversations(sessionId)) {
+        // Topic conversations own their own streamed message.
+        if (location.messageThreadId !== null) {
+          continue;
+        }
+        await this.upsertSessionPanel(location, sessionId, summary, this.sessionPanelKeyboard(undefined, false));
+        if (reply) {
+          await this.safeSendMessage(location, reply);
+        }
+      }
+    } catch (error) {
+      logger.warn("failed to finalize session panel", summarizeTelegramError(error));
+    }
+
     this.pendingInputRequests.delete(sessionId);
     this.runtimes.delete(sessionId);
     this.finalizedTurnIds.set(sessionId, turnId);
@@ -2712,33 +2872,31 @@ export class TelegramConductorBridge {
     bodyOverride: string | undefined,
     activePlaceholder: string | null,
   ): string | null {
-    const activityBlock = this.resolveRuntimeActivityBlock(runtime);
+    // The panel is a live progress view: the step log, not the reply. The reply is
+    // sent as its own message by finalizeRuntime so it reads like a normal chat
+    // message instead of being wrapped in a status header.
     if (bodyOverride !== undefined) {
-      if (!activityBlock) {
-        return bodyOverride;
-      }
-      return bodyOverride ? `${activityBlock}\n\n${bodyOverride}` : activityBlock;
+      return bodyOverride;
     }
     if (runtime.planText) {
-      return activityBlock ? `${activityBlock}\n\n${runtime.planText}` : runtime.planText;
+      return runtime.planText;
     }
-    if (runtime.assistantText) {
-      if (!activityBlock) {
-        return runtime.assistantText;
-      }
-      return `${activityBlock}\n\nLatest assistant text:\n${runtime.assistantText}`;
-    }
+    const steps = formatRuntimeSteps(runtime);
+    const withSteps = (note: string): string => (steps ? `${steps}\n\n${note}` : note);
     if (runtime.status === "waiting_user_input") {
-      return "Waiting for your reply.";
+      return withSteps("Waiting for your reply.");
     }
     if (runtime.status === "waiting_plan") {
-      return "Waiting for your plan approval.";
+      return withSteps("Waiting for your plan approval.");
     }
     if (runtime.status === "cancelling") {
-      return activityBlock ? `${activityBlock}\n\nInterrupt requested...` : "Interrupt requested...";
+      return withSteps("Interrupt requested...");
     }
-    if (activityBlock) {
-      return activityBlock;
+    if (steps) {
+      return steps;
+    }
+    if (runtime.activityText) {
+      return runtime.activityText;
     }
     return activePlaceholder;
   }
@@ -2841,10 +2999,18 @@ export class TelegramConductorBridge {
     keyboard?: TelegramInlineKeyboard,
   ): Promise<void> {
     const location = typeof target === "number" ? { chatId: target, messageThreadId: null } : target;
-    await this.telegram.sendMessage(location.chatId, truncate(text, 3800), {
-      ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
-      ...(location.messageThreadId !== null ? { message_thread_id: location.messageThreadId } : {}),
-    });
+    // Long output used to be cut at 3800 chars and the remainder discarded. Split it
+    // instead; the keyboard rides on the final part only so buttons are not repeated
+    // once per chunk.
+    const chunks = splitMarkdown(text, PANEL_CHUNK_CHARS);
+    const parts = chunks.length > 0 ? chunks : [text];
+    for (const [index, part] of parts.entries()) {
+      const isLast = index === parts.length - 1;
+      await this.telegram.sendMessage(location.chatId, part, {
+        ...(keyboard && isLast ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+        ...(location.messageThreadId !== null ? { message_thread_id: location.messageThreadId } : {}),
+      });
+    }
   }
 
   private async createSessionTopic(
@@ -2987,30 +3153,34 @@ export class TelegramConductorBridge {
     const runtime = options?.runtime ?? (session ? (this.runtimes.get(session.id) ?? null) : null);
     const queueCount = session ? this.stateStore.countQueuedPrompts(session.id) : 0;
     const body = await this.resolveSessionPanelBody(session, runtime, options?.bodyOverride);
+    // Two compact lines instead of the old Turn/Mode/Activity/Last Event dump.
+    const meta: Array<string | null> = [session ? formatSessionTitle(session.title) : selectedChatLabel(session)];
+    if (runtime?.model) {
+      meta.push(runtime.model);
+    }
+    const duration = runtime ? formatTurnDuration(runtime.startedAt) : null;
+    if (duration) {
+      meta.push(duration);
+    }
+    if (queueCount > 0) {
+      meta.push(`queued ${queueCount}`);
+    }
+    if (!runtime) {
+      meta.push(this.sessionStatusLabel(session, runtime));
+    }
     const lines = [
-      formatStatusLine(
-        workspace ? formatRepositoryLabel(workspace) : selectedRepositoryLabel(workspace),
-        session
-          ? `${selectedBranchLabel(workspace)} / ${formatSessionTitle(session.title)}`
-          : selectedChatLabel(session),
-        this.sessionStatusLabel(session, runtime),
-      ),
-      `Queued: ${queueCount}`,
-      `Mode: ${context.composeMode}`,
-    ];
-    if (runtime?.turnId) {
-      lines.push(`Turn: ${runtime.turnId}`);
+      [
+        `${turnStatusGlyph(runtime)} ${workspace ? formatRepositoryLabel(workspace) : selectedRepositoryLabel(workspace)}`,
+        session ? selectedBranchLabel(workspace) : null,
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(" \u00b7 "),
+      meta.filter((part): part is string => Boolean(part)).join(" \u00b7 "),
+    ].filter((line) => Boolean(line));
+    if (context.composeMode && context.composeMode !== "none") {
+      lines.push(`Mode: ${context.composeMode}`);
     }
-    if (runtime?.activityText) {
-      lines.push(`Activity: ${truncate(runtime.activityText, 120)}`);
-    }
-    if (runtime?.lastEventAt) {
-      lines.push(`Last Event: ${formatRuntimeEventAt(runtime.lastEventAt)}`);
-    }
-    if (location.messageThreadId !== null) {
-      lines.push(`Topic: ${location.messageThreadId}`);
-    }
-    const text = truncate(`${lines.join("\n")}\n\n${body}`, 3800);
+    const text = truncate(body ? `${lines.join("\n")}\n\n${body}` : lines.join("\n"), PANEL_MAX_CHARS);
     const keyboard = this.sessionPanelKeyboard(options?.keyboard, this.canInterruptTurn(runtime));
     await this.upsertSessionPanel(location, session?.id ?? null, text, keyboard);
   }

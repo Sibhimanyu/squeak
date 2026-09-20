@@ -7,6 +7,32 @@ import type { CodexNotification } from "../types.js";
 import { logger } from "../utils/logger.js";
 import { buildCodexChildEnv } from "./codex-app-server.js";
 
+const CLAUDE_MODEL_FAMILIES = new Set(["opus", "sonnet", "haiku", "fable"]);
+
+/**
+ * Conductor stores its own model-picker aliases in `sessions.model` ("opus-5-1m",
+ * "fable-5-1", ...). The claude CLI only knows catalog ids ("claude-opus-5[1m]")
+ * and rejects anything else with exit 1 before emitting any stream output, which
+ * fails every turn the bridge starts. Conductor itself resolves the alias the same
+ * way before spawning. Unknown aliases drop `--model` rather than kill the turn.
+ */
+export function toClaudeCliModel(model: string | null | undefined): string | null {
+  if (!model) {
+    return null;
+  }
+  const trimmed = model.trim();
+  if (!trimmed || trimmed.startsWith("claude-")) {
+    return trimmed || null;
+  }
+  const oneMillion = trimmed.endsWith("-1m");
+  const base = oneMillion ? trimmed.slice(0, -3) : trimmed;
+  if (!CLAUDE_MODEL_FAMILIES.has(base.split("-", 1)[0]!)) {
+    logger.warn("unrecognized Claude model alias, using the CLI default", { model });
+    return null;
+  }
+  return oneMillion ? `claude-${base}[1m]` : `claude-${base}`;
+}
+
 interface ResumeThreadOptions {
   threadId: string;
   cwd?: string | null;
@@ -135,6 +161,7 @@ export class ClaudeCodeAdapter extends EventEmitter {
 
   async startTurn(options: StartTurnOptions): Promise<{ turnId: string }> {
     const turnId = randomUUID();
+    const cliModel = toClaudeCliModel(options.model);
     const args = [
       "-p",
       "--verbose",
@@ -142,7 +169,7 @@ export class ClaudeCodeAdapter extends EventEmitter {
       "--include-partial-messages",
       "--permission-mode",
       "bypassPermissions",
-      ...(options.model ? ["--model", options.model] : []),
+      ...(cliModel ? ["--model", cliModel] : []),
       ...(this.pendingNewSessions.delete(options.threadId)
         ? ["--session-id", options.threadId]
         : ["--resume", options.threadId]),
