@@ -105,11 +105,14 @@ export class ConductorRegistryAdapter {
             MAX(w.updated_at) as updatedAt,
             r.default_branch as defaultBranch,
             r.remote as remote
-          FROM workspaces w
-          JOIN repos r ON r.id = w.repository_id
+          FROM repos r
+          LEFT JOIN workspaces w ON r.id = w.repository_id
           WHERE IFNULL(r.hidden, 0) = 0
           GROUP BY r.id, r.name, r.root_path, r.default_branch, r.remote
-          ORDER BY MAX(w.updated_at) DESC
+          -- LEFT JOIN so a freshly added repo with no workspaces is still listed.
+          -- An inner join made it unreachable: the only way to create a workspace
+          -- from Telegram is inside a repo you already selected.
+          ORDER BY MAX(w.updated_at) IS NULL, MAX(w.updated_at) DESC, r.name ASC
           LIMIT ?
         `,
       )

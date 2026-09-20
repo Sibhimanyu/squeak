@@ -608,4 +608,37 @@ describe("ConductorRegistryAdapter", () => {
       agentPersonality: "none",
     });
   });
+  it("lists a repository that has no workspaces yet", () => {
+    const { adapter, db } = createRegistryFixture();
+
+    const insertRepo = db.prepare(
+      `INSERT INTO repos (id, name, root_path, default_branch, updated_at, remote, hidden) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    );
+    insertRepo.run(
+      "repo-used",
+      "has-workspace",
+      "/repos/has-workspace",
+      "master",
+      "2026-03-29T04:00:00.000Z",
+      "origin",
+      0,
+    );
+    insertRepo.run("repo-fresh", "just-added", "/repos/just-added", "main", "2026-03-29T06:00:00.000Z", "origin", 0);
+    insertRepo.run("repo-hidden", "hidden-one", "/repos/hidden-one", "main", "2026-03-29T06:00:00.000Z", "origin", 1);
+
+    db.prepare(
+      `INSERT INTO workspaces (id, repository_id, directory_name, branch, pr_title, archive_commit, active_session_id, updated_at, state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    ).run("ws-1", "repo-used", "has-workspace", "master", null, null, null, "2026-03-29T04:30:00.000Z", "ready");
+
+    const names = adapter.listRepositories(10).map((repo) => repo.repositoryName);
+
+    // A freshly added repo has no workspaces; an inner join made it unreachable
+    // from Telegram, because a workspace can only be created inside a selected repo.
+    expect(names).toContain("just-added");
+    expect(names).toContain("has-workspace");
+    expect(names).not.toContain("hidden-one");
+    // Repos with activity sort ahead of ones that have never been used.
+    expect(names.indexOf("has-workspace")).toBeLessThan(names.indexOf("just-added"));
+  });
 });

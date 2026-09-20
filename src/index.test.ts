@@ -559,6 +559,62 @@ describe("TelegramConductorBridge", () => {
     expect(panel).not.toContain("Turn:");
   });
 
+  it("refines a tool step instead of listing it twice", async () => {
+    const { bridge, registry, stateStore, telegram } = createBridge();
+
+    registry.findSessionByThreadId.mockReturnValue({ id: "session-1" });
+    registry.getSessionById.mockReturnValue({
+      id: "session-1",
+      workspaceId: "workspace-1",
+      status: "working",
+      model: "gpt-5.4",
+      title: "Fix freezing issue",
+    });
+    registry.getWorkspaceById.mockReturnValue({
+      id: "workspace-1",
+      branch: "xudong963/investigate-freeze",
+      directoryName: "krakow",
+      repositoryId: "repo-1",
+      activeSessionId: "session-1",
+      updatedAt: "2026-03-29 14:57:38",
+      rootPath: "/tmp/workspaces/repo",
+      repositoryName: "conductor_mobile",
+    });
+    stateStore.getConversationContext.mockReturnValue({
+      activeSessionId: "session-1",
+      activeWorkspaceId: "workspace-1",
+      chatId: 12,
+      composeMode: "none",
+      composeTargetSessionId: null,
+      composeTargetThreadId: null,
+      composeTargetTurnId: null,
+      composeWorkspaceId: null,
+      followSessionId: "session-1",
+      messageThreadId: null,
+      updatedAt: "2026-03-29T14:57:38.107Z",
+    });
+    stateStore.listFollowingConversations.mockReturnValue([{ chatId: 12, messageThreadId: null }]);
+
+    const notify = (item: Record<string, unknown>, method: string): Promise<void> =>
+      (
+        bridge as unknown as {
+          handleCodexNotification(n: { method: string; params: Record<string, unknown> }): Promise<void>;
+        }
+      ).handleCodexNotification({ method, params: { threadId: "thread-1", turnId: "turn-1", item } });
+
+    // The Claude adapter names the tool first, then re-announces it with arguments.
+    await notify({ type: "dynamicToolCall", server: "claude", tool: "Bash", name: "Bash" }, "item/started");
+    await notify({ type: "commandExecution", command: "ls -la" }, "item/started");
+    await notify({ type: "commandExecution", command: "ls -la", exitCode: 0 }, "item/completed");
+
+    const panel = telegram.sendMessage.mock.calls.at(-1)?.[1] as string;
+    const rendered = telegram.editMessageText.mock.calls.at(-1)?.[2] ?? panel;
+    const text = String(rendered);
+    expect(text).toContain("\u2713 Bash  ls -la");
+    // One call must not leave a stray unfinished row behind.
+    expect(text).not.toMatch(/\u25cb Bash\s*$/m);
+  });
+
   it("shows the current execution state in /queue output", async () => {
     const { bridge, stateStore, telegram } = createBridge();
 

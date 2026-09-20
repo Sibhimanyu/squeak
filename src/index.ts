@@ -1076,13 +1076,16 @@ export class TelegramConductorBridge {
   }
 
   private async selectRepository(location: TelegramConversationTarget, repositoryId: string): Promise<void> {
-    const workspaces = this.registry.listWorkspacesForRepository(repositoryId, config.pageSize);
-    if (workspaces.length === 0) {
+    const repository = this.registry.getRepositoryById(repositoryId);
+    if (!repository) {
       await this.safeSendMessage(location, "Repo not found.");
       return;
     }
 
-    await this.showBranches(location, `Switched to repo: ${formatRepositoryLabel(workspaces[0])}`, repositoryId);
+    // A freshly added repo has no workspaces yet. It is still a valid selection --
+    // showBranches offers "New Workspace Here" so the first one can be created from
+    // Telegram. Reporting "Repo not found." here was both wrong and a dead end.
+    await this.showBranches(location, `Switched to repo: ${formatRepositoryLabel(repository)}`, repositoryId);
   }
 
   private async selectBranch(
@@ -1306,9 +1309,12 @@ export class TelegramConductorBridge {
 
     const workspaces = this.registry.listWorkspacesForRepository(targetRepositoryId, config.pageSize);
     if (workspaces.length === 0) {
+      // Still send the keyboard: without it there is no way to create the first
+      // workspace in a repo from Telegram.
       await this.safeSendMessage(
         location,
-        `${prefix ? `${prefix}\n\n` : ""}There are no workspaces in the current repo.`,
+        `${prefix ? `${prefix}\n\n` : ""}No workspaces in this repo yet. Tap "New Workspace Here" to create the first one.`,
+        branchesKeyboard([], { newWorkspaceRepositoryId: targetRepositoryId }),
       );
       return;
     }
@@ -2733,17 +2739,32 @@ export class TelegramConductorBridge {
     if (!Array.isArray(runtime.steps)) {
       runtime.steps = [];
     }
-    const open = [...runtime.steps].reverse().find((entry) => entry.key === step.key && !entry.done);
+    const sameKey = [...runtime.steps].reverse().find((entry) => entry.key === step.key && !entry.done);
+    const lastOpen = [...runtime.steps].reverse().find((entry) => !entry.done);
+
     if (phase === "started") {
-      if (!open) {
+      // The Claude adapter announces a tool twice: first by name when the call
+      // starts, then again with its arguments once they have streamed in. Refine
+      // the row that is already open instead of adding a second one for the same
+      // call ("Bash" then "Bash  cd ... && ls -la").
+      if (!sameKey && lastOpen && (step.label.startsWith(lastOpen.label) || lastOpen.label.startsWith(step.label))) {
+        lastOpen.key = step.key;
+        lastOpen.label = step.label;
+        return;
+      }
+      if (!sameKey) {
         runtime.steps.push({ key: step.key, label: step.label, done: false, failed: false });
       }
       return;
     }
+
     const failed = typeof item.exitCode === "number" && item.exitCode !== 0;
-    if (open) {
-      open.done = true;
-      open.failed = failed;
+    const match = sameKey ?? lastOpen;
+    if (match) {
+      match.key = step.key;
+      match.label = step.label;
+      match.done = true;
+      match.failed = failed;
       return;
     }
     runtime.steps.push({ key: step.key, label: step.label, done: true, failed });
