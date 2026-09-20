@@ -1743,6 +1743,20 @@ export class TelegramConductorBridge {
         return "permanent_failure";
       }
 
+      // Codex allows one writer per thread and holds the lock on the rollout file,
+      // so it spans processes: opening the same chat in the Conductor app takes the
+      // lock and the bridge cannot start a turn until it is closed. "Try again
+      // later" is wrong here -- nothing frees the lock on its own -- and treating it
+      // as retryable re-queues the prompt forever, because retryPrompt() has no
+      // attempt counter. Name the cause and stop.
+      if (errorMessage.includes("already has an active writer")) {
+        await this.safeSendMessage(
+          location,
+          "This chat is being written to somewhere else, usually because it is open in the Conductor app. Close it there, or pick another chat with /chats, then send this again.",
+        );
+        return "permanent_failure";
+      }
+
       if (!fromQueue) {
         await this.safeSendMessage(location, "Send failed. Please try again later.");
       }

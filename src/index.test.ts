@@ -407,6 +407,65 @@ describe("TelegramConductorBridge", () => {
     expect(safeSendMessage).not.toHaveBeenCalledWith({ chatId: 12, messageThreadId: null }, "Sent.");
   });
 
+  it("names the cause when the codex thread is locked by another writer", async () => {
+    const { bridge, codex, registry, stateStore } = createBridge();
+    const safeSendMessage = vi.fn().mockResolvedValue(undefined);
+
+    (
+      registry as unknown as {
+        resolveWorkspacePath: ReturnType<typeof vi.fn>;
+      }
+    ).resolveWorkspacePath = vi.fn().mockReturnValue("/tmp/workspaces/repo");
+    stateStore.listFollowingConversations.mockReturnValue([{ chatId: 12, messageThreadId: null }]);
+    (bridge as unknown as { safeSendMessage: typeof safeSendMessage }).safeSendMessage = safeSendMessage;
+
+    // What the codex app-server returns when the same thread is open in the
+    // Conductor app: one writer per thread, locked on the rollout file.
+    codex.startTurn.mockRejectedValue(
+      new Error('{"code":-32600,"message":"thread thread-1 already has an active writer"}'),
+    );
+
+    const submit = (fromQueue: boolean): Promise<string> =>
+      (
+        bridge as unknown as {
+          submitPrompt: (
+            location: { chatId: number; messageThreadId: number | null },
+            session: {
+              id: string;
+              workspaceId: string;
+              claudeSessionId: string | null;
+              agentType: string | null;
+              model: string | null;
+            },
+            text: string,
+            fromQueue: boolean,
+          ) => Promise<string>;
+        }
+      ).submitPrompt(
+        { chatId: 12, messageThreadId: null },
+        {
+          id: "session-1",
+          workspaceId: "workspace-1",
+          claudeSessionId: "thread-1",
+          agentType: "codex",
+          model: "gpt-5.4",
+        },
+        "A",
+        fromQueue,
+      );
+
+    // Permanent, not retryable: retryPrompt() has no attempt counter, so a
+    // queued prompt would re-queue against the held lock forever.
+    expect(await submit(false)).toBe("permanent_failure");
+    expect(await submit(true)).toBe("permanent_failure");
+
+    expect(safeSendMessage).toHaveBeenCalledTimes(2);
+    for (const call of safeSendMessage.mock.calls) {
+      expect(call[1]).toContain("open in the Conductor app");
+      expect(call[1]).not.toContain("try again later");
+    }
+  });
+
   it("routes Claude sessions through the Claude adapter", async () => {
     const { bridge, claude, codex, mirror, registry, stateStore } = createBridge();
     const pushRuntimeUpdate = vi.fn().mockResolvedValue(undefined);
