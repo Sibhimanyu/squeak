@@ -136,6 +136,7 @@ function createBridge() {
     answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
     createForumTopic: vi.fn(),
     editMessageText: vi.fn().mockResolvedValue(undefined),
+    sendChatAction: vi.fn().mockResolvedValue(undefined),
     sendMessage: vi.fn().mockResolvedValue(null),
   };
 
@@ -463,6 +464,74 @@ describe("TelegramConductorBridge", () => {
     for (const call of safeSendMessage.mock.calls) {
       expect(call[1]).toContain("open in the Conductor app");
       expect(call[1]).not.toContain("try again later");
+    }
+  });
+
+  it("shows a typing indicator while a turn runs and stops when it finalizes", async () => {
+    vi.useFakeTimers();
+    try {
+      const { bridge, registry, stateStore, telegram } = createBridge();
+      (bridge as unknown as { pushRuntimeUpdate: ReturnType<typeof vi.fn> }).pushRuntimeUpdate = vi
+        .fn()
+        .mockResolvedValue(undefined);
+      (registry as unknown as { resolveWorkspacePath: ReturnType<typeof vi.fn> }).resolveWorkspacePath = vi
+        .fn()
+        .mockReturnValue("/tmp/workspaces/repo");
+      stateStore.listFollowingConversations.mockReturnValue([{ chatId: 12, messageThreadId: null }]);
+
+      await (
+        bridge as unknown as {
+          submitPrompt: (
+            location: { chatId: number; messageThreadId: number | null },
+            session: {
+              id: string;
+              workspaceId: string;
+              claudeSessionId: string | null;
+              agentType: string | null;
+              model: string | null;
+            },
+            text: string,
+            fromQueue: boolean,
+          ) => Promise<string>;
+        }
+      ).submitPrompt(
+        { chatId: 12, messageThreadId: null },
+        {
+          id: "session-1",
+          workspaceId: "workspace-1",
+          claudeSessionId: "thread-1",
+          agentType: "codex",
+          model: "gpt-5.4",
+        },
+        "do the thing",
+        false,
+      );
+
+      // Sent immediately, not only after the first refresh interval.
+      expect(telegram.sendChatAction).toHaveBeenCalledWith(12, null);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(1);
+
+      // Telegram clears the action after ~5s, so it has to keep refreshing.
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(3);
+
+      // A turn waiting on the user is not working, and must not claim to type.
+      const runtime = (bridge as unknown as { runtimes: Map<string, { status: string }> }).runtimes.get("session-1")!;
+      runtime.status = "waiting_user_input";
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(3);
+
+      runtime.status = "active";
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(4);
+
+      (bridge as unknown as { stopTypingIndicator: (id: string) => void }).stopTypingIndicator("session-1");
+      await vi.advanceTimersByTimeAsync(20000);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
     }
   });
 

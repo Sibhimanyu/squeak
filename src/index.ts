@@ -388,6 +388,8 @@ const STREAM_EAGER_EDIT_CHARS = 220;
 const PANEL_EDIT_INTERVAL_MS = 500;
 const PANEL_EAGER_EDIT_CHARS = 180;
 const TURN_COMPLETION_SETTLE_MS = 1500;
+// Telegram drops the typing indicator after ~5s, so refresh inside that window.
+const TYPING_REFRESH_MS = 4000;
 const NEW_SESSION_MODEL_LIMIT = 6;
 const NEW_SESSION_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 const TOPIC_LOCKED_CALLBACK_TEXT = "This topic is locked to its current chat. Use the main chat.";
@@ -463,6 +465,7 @@ export class TelegramConductorBridge {
   private readonly pendingSessionStreamUpdates = new Map<string, PendingSessionStreamUpdate>();
   private readonly pendingSessionStreamFlushTimers = new Map<string, NodeJS.Timeout>();
   private readonly runtimeFinalizeTimers = new Map<string, NodeJS.Timeout>();
+  private readonly typingTimers = new Map<string, NodeJS.Timeout>();
   private readonly finalizedTurnIds = new Map<string, string>();
   private readonly backgroundTasks = new Set<Promise<void>>();
   private queueTimer: NodeJS.Timeout | null = null;
@@ -559,6 +562,10 @@ export class TelegramConductorBridge {
       clearTimeout(timer);
     }
     this.runtimeFinalizeTimers.clear();
+    for (const timer of this.typingTimers.values()) {
+      clearInterval(timer);
+    }
+    this.typingTimers.clear();
     for (const timer of this.pendingSessionPanelFlushTimers.values()) {
       clearTimeout(timer);
     }
@@ -1791,6 +1798,7 @@ export class TelegramConductorBridge {
             startedAt: Date.now(),
           };
     this.runtimes.set(session.id, runtime);
+    this.startTypingIndicator(session.id);
 
     this.mirror.updateSessionStatus(session.id, "working");
     this.mirror.appendUserMessage({
@@ -2744,6 +2752,7 @@ export class TelegramConductorBridge {
       startedAt: existing?.turnId === turnId ? (existing.startedAt ?? Date.now()) : Date.now(),
     };
     this.runtimes.set(sessionId, runtime);
+    this.startTypingIndicator(sessionId);
     return runtime;
   }
 
@@ -2803,6 +2812,53 @@ export class TelegramConductorBridge {
       return true;
     }
     return !runtime && this.finalizedTurnIds.get(sessionId) === turnId;
+  }
+
+  /**
+   * Drive Telegram's "typing..." indicator for as long as a turn is running.
+   *
+   * Telegram clears a chat action after ~5 seconds and whenever the bot posts a
+   * message, so it has to be re-sent on a timer rather than set once. The ticker
+   * reads the live runtime each tick instead of being stopped at every status
+   * transition: a turn that is waiting on the user is not working, and should not
+   * claim to be typing.
+   */
+  private startTypingIndicator(sessionId: string): void {
+    if (this.typingTimers.has(sessionId)) {
+      return;
+    }
+
+    const tick = (): void => {
+      const runtime = this.runtimes.get(sessionId);
+      if (!runtime) {
+        this.stopTypingIndicator(sessionId);
+        return;
+      }
+      if (runtime.status !== "active" && runtime.status !== "cancelling") {
+        return;
+      }
+      for (const location of this.stateStore.listFollowingConversations(sessionId)) {
+        // Cosmetic: a failed action must never surface to the user or break the turn.
+        void this.telegram
+          .sendChatAction(location.chatId, location.messageThreadId)
+          .catch((error) => logger.debug("failed to send typing indicator", summarizeTelegramError(error)));
+      }
+    };
+
+    const timer = setInterval(tick, TYPING_REFRESH_MS);
+    // Never hold the event loop open just to animate an ellipsis.
+    timer.unref?.();
+    this.typingTimers.set(sessionId, timer);
+    tick();
+  }
+
+  private stopTypingIndicator(sessionId: string): void {
+    const timer = this.typingTimers.get(sessionId);
+    if (!timer) {
+      return;
+    }
+    clearInterval(timer);
+    this.typingTimers.delete(sessionId);
   }
 
   private clearRuntimeFinalization(sessionId: string): void {
@@ -2865,6 +2921,7 @@ export class TelegramConductorBridge {
       logger.warn("failed to finalize session panel", summarizeTelegramError(error));
     }
 
+    this.stopTypingIndicator(sessionId);
     this.pendingInputRequests.delete(sessionId);
     this.runtimes.delete(sessionId);
     this.finalizedTurnIds.set(sessionId, turnId);
