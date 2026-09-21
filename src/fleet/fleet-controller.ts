@@ -3,15 +3,25 @@ import { isTelegramMessageNotModifiedError } from "../telegram/client.js";
 import type { TelegramConversationTarget, TelegramInlineKeyboard } from "../types.js";
 import { logger } from "../utils/logger.js";
 import { splitMarkdown } from "../utils/tg-format.js";
+import { DiffReader, renderDiffSummary, renderFilePatch, type WorkspaceDiff } from "./diff-view.js";
 import type { FleetMonitor, FleetSnapshot } from "./fleet-monitor.js";
 import type { FleetStore } from "./fleet-store.js";
 import type { HookIngressServer } from "./hook-ingress.js";
-import { attentionCardKeyboard, radarKeyboard, renderAttentionCard, renderRadar } from "./radar.js";
+import {
+  attentionCardKeyboard,
+  diffSummaryKeyboard,
+  radarKeyboard,
+  renderAttentionCard,
+  renderRadar,
+  sessionLabel,
+} from "./radar.js";
 import type { AttentionItem, FleetSession } from "./types.js";
 
 /** Radar edits are cheap but not free; Telegram rate-limits edits per chat. */
 const RADAR_MIN_EDIT_INTERVAL_MS = 8_000;
 const SNOOZE_MS = 60 * 60 * 1000;
+/** Paging through a diff should not re-shell git for every tap. */
+const DIFF_CACHE_TTL_MS = 60_000;
 
 export interface FleetControllerDependencies {
   telegram: TelegramClient;
@@ -22,6 +32,8 @@ export interface FleetControllerDependencies {
   openConductorSession: (location: TelegramConversationTarget, conductorSessionId: string) => Promise<void>;
   /** Chats allowed to use the bridge, used to pick a default push target. */
   fallbackChatIds: number[];
+  /** Optional: without it the Diff button is simply never offered. */
+  diff?: DiffReader | null;
   now?: () => number;
 }
 
@@ -38,6 +50,11 @@ export class FleetController {
   private readonly now: () => number;
   private readonly lastRadarText = new Map<string, string>();
   private readonly lastRadarEditAt = new Map<string, number>();
+  /**
+   * File lists behind the per-file buttons. Callback data only has room for an
+   * index, so the list it indexes into has to survive between the two taps.
+   */
+  private readonly diffCache = new Map<string, { diff: WorkspaceDiff; readAt: number }>();
   private unsubscribe: Array<() => void> = [];
 
   constructor(deps: FleetControllerDependencies) {
@@ -125,9 +142,17 @@ export class FleetController {
       return { handled: false };
     }
 
-    const [, action, argument] = data.split(":");
+    const parts = data.split(":");
+    const action = parts[1];
+    const argument = parts[2];
 
     switch (action) {
+      case "diff":
+        await this.showDiff(location, argument, parts[3]);
+        return { handled: true };
+      case "diffp":
+        await this.showDiffPage(location, argument, Number.parseInt(parts[3] ?? "0", 10));
+        return { handled: true };
       case "radar":
       case "refresh":
         await this.showRadar(location);
@@ -196,6 +221,87 @@ export class FleetController {
     return this.deps.monitor.snapshot.sessions.find((session) => session.key === key) ?? null;
   }
 
+  /**
+   * Show what a session changed. Two steps: a file list, then one file's
+   * patch, because a whole diff does not fit in a Telegram message and
+   * scrolling one is miserable anyway.
+   *
+   * This works for sessions the bridge cannot drive — reading a working tree
+   * needs no control channel — so a terminal Claude session's output is
+   * reviewable here too.
+   */
+  private async showDiff(
+    location: TelegramConversationTarget,
+    handleArgument: string | undefined,
+    fileArgument: string | undefined,
+  ): Promise<void> {
+    if (fileArgument === undefined) {
+      await this.showDiffPage(location, handleArgument, 0);
+      return;
+    }
+
+    const session = this.resolveHandle(handleArgument);
+    const reader = this.deps.diff;
+    if (!reader || !session?.cwd) {
+      await this.send(location, "That session is no longer being tracked.");
+      return;
+    }
+
+    const cached = this.diffCache.get(session.key);
+    const index = Number.parseInt(fileArgument, 10);
+    const file = cached && Number.isFinite(index) ? cached.diff.files[index] : undefined;
+    if (!file) {
+      // The list is gone or has shifted under the button; redraw it rather
+      // than showing the wrong file's patch.
+      await this.showDiffPage(location, handleArgument, 0);
+      return;
+    }
+
+    const patch = await reader.readFilePatch(session.cwd, session.baseRef, file);
+    const handle = this.deps.store.handleFor(session.key);
+    await this.send(location, renderFilePatch(file, patch ?? ""), [
+      [{ text: "Back to files", callback_data: `fleet:diff:${handle}` }],
+      [{ text: "Radar", callback_data: "fleet:radar" }],
+    ]);
+  }
+
+  /**
+   * Show what a session changed, one page of files at a time. Paging reuses
+   * the cached file list so flipping pages does not re-run git.
+   */
+  private async showDiffPage(
+    location: TelegramConversationTarget,
+    handleArgument: string | undefined,
+    page: number,
+  ): Promise<void> {
+    const reader = this.deps.diff;
+    const session = this.resolveHandle(handleArgument);
+    if (!reader || !session) {
+      await this.send(location, "That session is no longer being tracked.");
+      return;
+    }
+    if (!session.cwd) {
+      await this.send(location, "This session has no working directory on record, so there is nothing to diff.");
+      return;
+    }
+
+    const cached = this.diffCache.get(session.key);
+    const fresh = cached && this.now() - cached.readAt < DIFF_CACHE_TTL_MS ? cached.diff : null;
+    const diff = fresh ?? (await reader.readSummary(session.cwd, session.baseRef));
+    if (!diff) {
+      await this.send(location, `\`${session.cwd}\` is not a git repository, or it no longer exists.`);
+      return;
+    }
+    this.diffCache.set(session.key, { diff, readAt: fresh ? (cached?.readAt ?? this.now()) : this.now() });
+
+    const handle = this.deps.store.handleFor(session.key);
+    await this.send(
+      location,
+      renderDiffSummary(diff, sessionLabel(session), page),
+      diffSummaryKeyboard(diff, handle, page),
+    );
+  }
+
   private async sendExternalSessionDetail(location: TelegramConversationTarget, session: FleetSession): Promise<void> {
     const lines = [
       `**${session.title ?? session.sourceId.slice(0, 8)}**`,
@@ -211,10 +317,14 @@ export class FleetController {
     lines.push("");
     lines.push("_This session was not started by Conductor, so the bridge can watch it but not drive it._");
 
-    await this.send(location, lines.join("\n"), [
-      [{ text: "Snooze 1h", callback_data: `fleet:snooze:${this.deps.store.handleFor(session.key)}` }],
-      [{ text: "Radar", callback_data: "fleet:radar" }],
-    ]);
+    const handle = this.deps.store.handleFor(session.key);
+    const rows: TelegramInlineKeyboard = [];
+    if (session.cwd) {
+      rows.push([{ text: "View Diff", callback_data: `fleet:diff:${handle}` }]);
+    }
+    rows.push([{ text: "Snooze 1h", callback_data: `fleet:snooze:${handle}` }]);
+    rows.push([{ text: "Radar", callback_data: "fleet:radar" }]);
+    await this.send(location, lines.join("\n"), rows);
   }
 
   private async refreshRadars(snapshot: FleetSnapshot): Promise<void> {

@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { TelegramInlineKeyboard } from "../types.js";
 import { attentionLabel, isActionable } from "./attention.js";
+import { diffPageCount, diffPageSlice, type WorkspaceDiff } from "./diff-view.js";
 import { describeGitState } from "./git-state.js";
 import type { FleetSnapshot } from "./fleet-monitor.js";
 import type { AttentionItem, FleetSession, FleetState } from "./types.js";
@@ -277,10 +278,51 @@ export function attentionCardKeyboard(item: AttentionItem, handle: number): Tele
     ]);
   }
 
+  // Reviewing a diff needs no control channel, so this is offered even for
+  // sessions the bridge cannot drive.
+  if (item.session.cwd) {
+    rows.push([{ text: "View Diff", callback_data: `fleet:diff:${handle}` }]);
+  }
+
   rows.push([
     { text: "Snooze 1h", callback_data: `fleet:snooze:${handle}` },
     { text: "Mark Reviewed", callback_data: `fleet:reviewed:${handle}` },
   ]);
   rows.push([{ text: "Radar", callback_data: "fleet:radar" }]);
   return rows;
+}
+
+/**
+ * One button per changed file on the current page. Indices are absolute
+ * positions in the whole file list, not positions on the page, so a button
+ * still opens the right file after paging.
+ */
+export function diffSummaryKeyboard(diff: WorkspaceDiff, handle: number, page = 0): TelegramInlineKeyboard {
+  const slice = diffPageSlice(diff, page);
+  const rows: TelegramInlineKeyboard = slice.files.map((file, offset) => [
+    {
+      // Long paths are far more recognisable by their tail than their head.
+      text: truncateStart(file.path, 38),
+      callback_data: `fleet:diff:${handle}:${slice.start + offset}`,
+    },
+  ]);
+
+  const pages = diffPageCount(diff);
+  if (pages > 1) {
+    const nav: TelegramInlineKeyboard[number] = [];
+    if (slice.page > 0) {
+      nav.push({ text: "Prev", callback_data: `fleet:diffp:${handle}:${slice.page - 1}` });
+    }
+    if (slice.page < pages - 1) {
+      nav.push({ text: "More files", callback_data: `fleet:diffp:${handle}:${slice.page + 1}` });
+    }
+    rows.push(nav);
+  }
+
+  rows.push([{ text: "Radar", callback_data: "fleet:radar" }]);
+  return rows;
+}
+
+export function truncateStart(value: string, max: number): string {
+  return value.length <= max ? value : `…${value.slice(value.length - (max - 1))}`;
 }

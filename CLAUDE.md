@@ -24,6 +24,7 @@ deployment section before changing anything under `src/`.
 | `src/fleet/fleet-monitor.ts` | merges observers and hook events, decides what needs attention |
 | `src/fleet/hook-ingress.ts` | loopback HTTP endpoint the installed agent hooks report to |
 | `src/fleet/git-state.ts` | cached working-tree reads, so "finished" says what changed |
+| `src/fleet/diff-view.ts` | reads and paginates a workspace diff for review in Telegram |
 
 `src/services/bridge-service.ts` is **dead code** — an older implementation that
 still ships in the package. The live path is `cli.ts` to `index.ts`. Do not spend
@@ -102,6 +103,17 @@ transcripts, and ranks them by what is blocked on the human.
 - **Transcripts cannot record an approval prompt.** Blocked states only ever
   come from hooks. Anything that infers "awaiting approval" from a file is
   wrong.
+- **`Notification` does not fire for Conductor sessions.** Measured, not
+  assumed: with a temporary settings file, an SDK-mode run fires `PreToolUse`
+  and `Stop` but never `Notification`, because in SDK mode the permission
+  request goes to the host app rather than to a terminal user. So hooks give
+  Conductor sessions accurate finished/working state but cannot tell us they
+  are blocked on an approval. Do not add a "PreToolUse then silence" timer to
+  guess at it — a slow test run looks identical. Note also that a third of
+  Conductor sessions run `bypassPermissions` and never block on approval at
+  all.
+- Hooks *do* fire in SDK-spawned sessions: 32 of 34 `sdk-ts` transcripts on
+  this machine ran a Stop hook.
 - **Hooks must never block.** The installed script backgrounds its request,
   caps curl at 2s, and exits 0 unconditionally. These run inside other people's
   agents; a bridge problem must never become their problem. There is a
@@ -129,6 +141,20 @@ transcripts, and ranks them by what is blocked on the human.
   non-zero and that is the normal case, not an error. Unpushed work is counted
   against `origin/<repos.default_branch>` instead — and note that
   `default_branch` is the real target branch, not necessarily `main`.
+- **The diff is taken against the base branch, not HEAD**, and includes
+  untracked files. Agents create files without staging them, so a review built
+  on `git diff HEAD` alone silently omits most new code.
+- **`git diff --no-index` exits 1 when the files differ**, which for a new file
+  is always. Its stdout is the answer even though execFile rejects; read
+  `error.stdout` rather than treating it as a failure.
+- **Diff buttons carry absolute file indices**, not positions on the page, and
+  the page number is clamped — a stale button from a longer list must not open
+  the wrong file.
+- Writing to `diff_comments` is **not implemented**. Every row in that table on
+  this machine was written by an agent via the MCP DiffComment tool
+  (`author` is a model alias), so there is no example of a human-authored row
+  to copy, and Conductor renders a wrong envelope as broken. Confirm the shape
+  against a real human comment before writing one.
 - Conductor fields that look useful but are **not populated** on a normal
   single-user install: `sessions.unread_count`, `workspaces.unread`,
   `sessions.queue_paused_at`. They read as all-zero; do not build on them

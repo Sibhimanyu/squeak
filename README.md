@@ -59,6 +59,18 @@ Git runs only for sessions that are actually rendered, and results are cached
 for 30 seconds — the twenty idle sessions that never reach the radar cost
 nothing.
 
+### Reviewing the change
+
+Any session with a working directory offers **View Diff**: a paginated file
+list, then one file's patch at a time. The diff is taken against the base
+branch rather than HEAD, so it shows what the workspace produced overall
+rather than only what is still uncommitted, and it includes untracked files —
+an agent that writes a new file almost never stages it, so a review that
+skipped them would quietly omit most new code.
+
+This needs no control channel, so the output of a Claude session running in
+your own terminal is reviewable here too.
+
 ### Signals only Conductor has
 
 Two things no transcript can tell you, read straight from Conductor's database:

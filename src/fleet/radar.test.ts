@@ -4,11 +4,13 @@ import type { FleetSnapshot } from "./fleet-monitor.js";
 import {
   attentionCardKeyboard,
   formatAge,
+  diffSummaryKeyboard,
   radarKeyboard,
   renderAttentionCard,
   renderRadar,
   sessionLabel,
   shortenPath,
+  truncateStart,
 } from "./radar.js";
 import type { AttentionItem, FleetSession } from "./types.js";
 
@@ -272,5 +274,59 @@ describe("git state on the radar", () => {
     const text = renderRadar(snapshot({ sessions: [session({ state: "working" })] }), now);
 
     expect(text).not.toContain("files");
+  });
+});
+
+describe("diffSummaryKeyboard", () => {
+  function diffWith(count: number) {
+    return {
+      baseRef: "origin/main",
+      files: Array.from({ length: count }, (_, index) => ({
+        path: `src/very/deeply/nested/path/to/file${index}.ts`,
+        insertions: 1,
+        deletions: 0,
+        binary: false,
+        untracked: false,
+      })),
+      insertions: count,
+      deletions: 0,
+      truncated: false,
+    };
+  }
+
+  it("indexes buttons by absolute position so paging opens the right file", () => {
+    const rows = diffSummaryKeyboard(diffWith(20), 42, 1);
+    const fileButtons = rows.flat().filter((button) => /^fleet:diff:42:\d+$/.test(button.callback_data));
+
+    expect(fileButtons[0]?.callback_data).toBe("fleet:diff:42:8");
+  });
+
+  it("offers paging only when there is more than one page", () => {
+    const single = diffSummaryKeyboard(diffWith(3), 42, 0).flat();
+    const many = diffSummaryKeyboard(diffWith(20), 42, 0).flat();
+
+    expect(single.some((button) => button.text === "More files")).toBe(false);
+    expect(many.some((button) => button.text === "More files")).toBe(true);
+    // No Prev on the first page.
+    expect(many.some((button) => button.text === "Prev")).toBe(false);
+    expect(
+      diffSummaryKeyboard(diffWith(20), 42, 1)
+        .flat()
+        .some((button) => button.text === "Prev"),
+    ).toBe(true);
+  });
+
+  it("keeps long paths recognisable by their tail and inside Telegram's limits", () => {
+    for (const row of diffSummaryKeyboard(diffWith(20), 42, 0)) {
+      for (const button of row) {
+        expect(Buffer.byteLength(button.callback_data)).toBeLessThanOrEqual(64);
+        expect(button.text.length).toBeLessThanOrEqual(38);
+      }
+    }
+    const shortened = truncateStart("src/very/deeply/nested/path/to/file0.ts", 20);
+    expect(shortened).toBe("…ed/path/to/file0.ts");
+    expect(shortened).toHaveLength(20);
+    // A path that already fits is left exactly as it is.
+    expect(truncateStart("src/a.ts", 20)).toBe("src/a.ts");
   });
 });
