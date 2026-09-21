@@ -260,10 +260,15 @@ function cardVerb(kind: AttentionKind): string {
   }
 }
 
-export function attentionCardKeyboard(item: AttentionItem, handle: number): TelegramInlineKeyboard {
+/**
+ * `canDrive` is false for the rubber ducky, which is a notifier with no
+ * control channel of its own — offering Reply there would open a chat the
+ * bot cannot actually continue.
+ */
+export function attentionCardKeyboard(item: AttentionItem, handle: number, canDrive = true): TelegramInlineKeyboard {
   const rows: TelegramInlineKeyboard = [];
 
-  if (isActionable(item.session)) {
+  if (canDrive && isActionable(item.session)) {
     rows.push([
       { text: "Reply", callback_data: `fleet:reply:${handle}` },
       { text: "Open Chat", callback_data: `fleet:open:${handle}` },

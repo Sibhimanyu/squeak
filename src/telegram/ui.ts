@@ -10,10 +10,7 @@ export function homeKeyboard(options?: { showStop?: boolean; topicLocked?: boole
   if (options?.topicLocked) {
     const rows: TelegramInlineKeyboard = [
       [{ text: "Continue Here", callback_data: "home:continue" }],
-      [
-        { text: "Fleet Radar", callback_data: "fleet:radar" },
-        { text: "Help", callback_data: "home:help" },
-      ],
+      [{ text: "Help", callback_data: "home:help" }],
     ];
     if (options.showStop) {
       rows.splice(1, 0, [{ text: "Stop Current Turn", callback_data: "home:stop" }]);
@@ -35,10 +32,9 @@ export function homeKeyboard(options?: { showStop?: boolean; topicLocked?: boole
       { text: "Switch Chat", callback_data: "home:sessions" },
     ],
     [
-      { text: "Fleet Radar", callback_data: "fleet:radar" },
       { text: "Inbox", callback_data: "home:inbox" },
+      { text: "Help", callback_data: "home:help" },
     ],
-    [{ text: "Help", callback_data: "home:help" }],
   ];
   if (options?.showStop) {
     rows.splice(1, 0, [{ text: "Stop Current Turn", callback_data: "home:stop" }]);

@@ -1345,9 +1345,7 @@ describe("TelegramConductorBridge", () => {
       .flat()
       .map((button) => button.callback_data);
 
-    // The fleet radar stays: it only reports, and the actions that would
-    // switch this topic's chat are rejected separately.
-    expect(callbacks).toEqual(["home:continue", "home:stop", "fleet:radar", "home:help"]);
+    expect(callbacks).toEqual(["home:continue", "home:stop", "home:help"]);
   });
 
   it("falls back to a legacy following topic when bootstrapping the binding fails", () => {

@@ -28,8 +28,11 @@ export interface FleetControllerDependencies {
   store: FleetStore;
   monitor: FleetMonitor;
   ingress: HookIngressServer | null;
-  /** Hand a Conductor session back to the bridge's normal chat flow. */
-  openConductorSession: (location: TelegramConversationTarget, conductorSessionId: string) => Promise<void>;
+  /**
+   * Hand a Conductor session back to the bridge's normal chat flow. Absent
+   * for the rubber ducky, which only reports and cannot continue a chat.
+   */
+  openConductorSession?: ((location: TelegramConversationTarget, conductorSessionId: string) => Promise<void>) | null;
   /** Chats allowed to use the bridge, used to pick a default push target. */
   fallbackChatIds: number[];
   /** Optional: without it the Diff button is simply never offered. */
@@ -60,6 +63,11 @@ export class FleetController {
   constructor(deps: FleetControllerDependencies) {
     this.deps = deps;
     this.now = deps.now ?? Date.now;
+  }
+
+  /** Whether this bot can continue a Conductor chat, or only report on it. */
+  private get canDrive(): boolean {
+    return Boolean(this.deps.openConductorSession);
   }
 
   async start(): Promise<void> {
@@ -171,19 +179,21 @@ export class FleetController {
         if (!session) {
           return { handled: true, notice: "That session is no longer being tracked." };
         }
-        if (session.conductorSessionId) {
-          await this.deps.openConductorSession(location, session.conductorSessionId);
+        const open = this.deps.openConductorSession;
+        if (open && session.conductorSessionId) {
+          await open(location, session.conductorSessionId);
           return { handled: true };
         }
         await this.sendExternalSessionDetail(location, session);
         return { handled: true };
       }
       case "reply": {
+        const open = this.deps.openConductorSession;
         const session = this.resolveHandle(argument);
-        if (!session?.conductorSessionId) {
-          return { handled: true, notice: "That session cannot be replied to from Telegram." };
+        if (!open || !session?.conductorSessionId) {
+          return { handled: true, notice: "That session cannot be replied to from here." };
         }
-        await this.deps.openConductorSession(location, session.conductorSessionId);
+        await open(location, session.conductorSessionId);
         return { handled: true };
       }
       case "snooze": {
@@ -372,7 +382,7 @@ export class FleetController {
     for (const item of items) {
       const handle = this.deps.store.handleFor(item.session.key);
       const text = renderAttentionCard(item, this.now());
-      const keyboard = attentionCardKeyboard(item, handle);
+      const keyboard = attentionCardKeyboard(item, handle, this.canDrive);
       for (const target of targets) {
         await this.send(target, text, keyboard);
       }

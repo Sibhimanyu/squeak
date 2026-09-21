@@ -6,9 +6,33 @@ Browse repos, switch branches, resume Codex or Claude chats, create new chats an
 
 This bridge is local-first: it must run on the same Mac that already has Conductor installed and initialized. It reads the local Conductor database and launches the local Codex and Claude Code binaries from that machine. It is not a remote bridge for controlling another computer's Conductor instance.
 
-## Fleet Radar
+## Rubber ducky
 
-The bridge watches **every coding agent session on the Mac**, not only the ones
+A **second, separate daemon with its own Telegram bot**. The bridge above is a
+conversation — you navigate it and talk to agents through it. The ducky is a
+pager: it watches every coding agent on the Mac and messages you when one
+finishes or gets stuck, and it never tries to hold a conversation.
+
+They are deliberately apart. Status pings landing in the middle of a chat bury
+the chat, and vice versa.
+
+```bash
+rubber-ducky setup          # paste a token from @BotFather
+rubber-ducky install-hooks  # live signal; see below
+rubber-ducky                # start it
+```
+
+Its config lives at `~/Library/Application Support/rubber-ducky/.env`, its
+state at `ducky.db` beside it, and it talks to a different bot than the
+bridge. Only one of the two may run the fleet at a time — they would bind the
+same hook port and double every notification — so the bridge no longer does.
+
+**It messages you when a session is blocked on your approval, blocked on a
+question, or has finished.** Errors and sessions running low on context wait on
+the radar rather than interrupting. `/radar` shows everything at once; `/mute`
+silences for an hour.
+
+It watches **every coding agent session on the Mac**, not only the ones
 Conductor started. A Claude Code run in your own terminal, a Codex thread from
 the editor, and a Conductor chat all land on one radar, ranked by what is
 actually waiting on you.
@@ -30,7 +54,7 @@ Finished, unreviewed
 ```
 
 Open it with `/radar`. It anchors a live message in that conversation and keeps
-editing it in place.
+editing it in place, and that anchor is also where push cards are sent.
 
 **Only active sessions are shown.** A normal machine holds twenty-odd agent
 sessions and almost all of them are abandoned; listing those makes this an
@@ -116,9 +140,9 @@ cannot see an approval prompt at all: agents do not write those to disk.
 Installing hooks fixes both.
 
 ```bash
-conductor-tg install-hooks    # merge into your existing hook config
-conductor-tg hooks-status
-conductor-tg uninstall-hooks  # removes only what this tool added
+rubber-ducky install-hooks    # merge into your existing hook config
+rubber-ducky hooks-status
+rubber-ducky uninstall-hooks  # removes only what this tool added
 ```
 
 The hooks are additive: existing entries in `~/.claude/settings.json` and
