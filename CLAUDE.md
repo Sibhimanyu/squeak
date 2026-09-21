@@ -120,6 +120,11 @@ state (`squeak.db`).
   daemon uses `KeepAlive: true`; anything the user can quit from a menu uses
   `KeepAlive: { SuccessfulExit: false }`, or a deliberate Quit is restarted
   instantly and reads as the app ignoring them.
+- `install-squeak-agents.sh` writes **every** plist before unloading anything,
+  and a load failure warns rather than aborting. `launchctl bootout` is
+  asynchronous, so bootstrapping straight after it fails with "Input/output
+  error" — leaving a service booted out and nothing bootstrapped in its place,
+  which is worse than whatever the rerun was fixing.
 - **`desktop/` has its own eslint config**, run by `npm run lint`. It is
   invisible to tsc and to `eslint src/`, and two real bugs reached the user
   through that gap. Note that flat-config `files` patterns resolve against the
