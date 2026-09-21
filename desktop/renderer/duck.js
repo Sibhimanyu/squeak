@@ -71,7 +71,10 @@ async function poll() {
     if (!response.ok) {
       throw new Error(String(response.status));
     }
-    render(await response.json());
+    const state = await response.json();
+    // The main process draws the menu bar from this, so it never polls twice.
+    window.duck.reportState(state);
+    render(state);
   } catch {
     // The daemon is not running, or not running the fleet. Say so plainly
     // rather than showing a cheerful duck next to stale information.
@@ -103,6 +106,7 @@ function render(state) {
 }
 
 function renderOffline() {
+  window.duck.reportState({ duck: { mood: "offline", blockedCount: 0, workingCount: 0, justFinished: [] }, active: [] });
   els.body.dataset.offline = "true";
   els.body.dataset.mood = "asleep";
   applySprite("offline");

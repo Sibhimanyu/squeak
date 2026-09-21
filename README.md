@@ -118,6 +118,11 @@ Click it for the list of active sessions with their diffstats.
 cd desktop && npm install && npm start
 ```
 
+There is also a duck in the menu bar, showing a count when something is
+blocked on you. From there you can hide the floating duck and keep only the
+menu bar item, jump to any active session's directory, or peek at the panel
+with **⌃⌥D**.
+
 It is presentational only: it polls the bridge's loopback `/state` and renders
 the answer, so it cannot disagree with Telegram about what is happening. See
 `desktop/README.md`.

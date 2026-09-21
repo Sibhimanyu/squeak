@@ -12,6 +12,29 @@ npm start
 It needs the bridge running, because it draws what the bridge already knows.
 With no bridge it goes grey and says so rather than showing stale state.
 
+## Menu bar, hiding, and the shortcut
+
+There is a duck in the menu bar whenever the app is running. It shows a count
+beside it when something is blocked on you, and nothing at all otherwise —
+a menu-bar item that always displays a number stops being read.
+
+Click it for the active sessions (each opens its working directory), plus:
+
+- **Show duck** — uncheck to hide the floating duck and keep only the menu bar
+  item. Remembered across restarts, and the app starts hidden without
+  flashing on screen first.
+- **Peek at panel (⌃⌥D)** — global shortcut. If the duck is hidden it comes
+  back with its panel open; otherwise it just toggles the panel. It never
+  hides the duck, so the same keystroke cannot make it vanish on you.
+- **Reset duck position** — for when it ends up on a display you unplugged.
+
+Right-clicking the duck itself offers Hide, Reset position and Quit.
+
+Change the shortcut by adding `"shortcut": "Control+Alt+K"` to
+`~/Library/Application Support/conductor-tg-duck/duck.json`. If another app
+already owns the combination, the duck logs that it could not register it
+rather than failing silently.
+
 ## What it shows
 
 | duck | meaning |

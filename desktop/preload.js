@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld("duck", {
   dragEnd: () => ipcRenderer.send("duck:drag-end"),
   menu: () => ipcRenderer.send("duck:menu"),
   openPath: (target) => ipcRenderer.send("duck:open-path", target),
+  reportState: (state) => ipcRenderer.send("duck:state", state),
   onExpanded: (handler) => ipcRenderer.on("duck:expanded", (_event, value) => handler(value)),
 });

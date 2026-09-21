@@ -6,7 +6,7 @@
 // in the daemon under src/fleet/duck-mood.ts, where CI covers it. Everything
 // here is window management and drawing.
 
-const { app, BrowserWindow, Menu, ipcMain, screen, shell } = require("electron");
+const { Tray, app, BrowserWindow, Menu, globalShortcut, ipcMain, nativeImage, screen, shell } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -14,8 +14,17 @@ const COLLAPSED = { width: 132, height: 132 };
 const EXPANDED = { width: 380, height: 500 };
 const MARGIN = 24;
 
+/**
+ * ⌃⌥D by default. Avoids ⌘⌃D, which macOS uses for dictionary lookup, and
+ * anything with ⌥Space, which most launchers take.
+ */
+const DEFAULT_SHORTCUT = "Control+Alt+D";
+
 let win = null;
+let tray = null;
 let expanded = false;
+let hidden = false;
+let lastState = null;
 
 function settingsPath() {
   return path.join(app.getPath("userData"), "duck.json");
@@ -110,7 +119,111 @@ function setExpanded(next) {
   }
 }
 
+/* ---------- visibility ---------- */
+
+function setHidden(next) {
+  if (!win || next === hidden) {
+    return;
+  }
+  hidden = next;
+  if (hidden) {
+    setExpanded(false);
+    win.hide();
+  } else {
+    win.showInactive(); // never steal focus from what you are typing in
+  }
+  writeSettings({ hidden });
+  refreshTray();
+}
+
+/**
+ * The shortcut is a peek: if the duck is hidden it comes back with its panel
+ * open, otherwise it just toggles the panel. Hiding again is the tray's job,
+ * so the same keystroke never makes the duck disappear unexpectedly.
+ */
+function peek() {
+  if (hidden) {
+    setHidden(false);
+    setExpanded(true);
+    return;
+  }
+  setExpanded(!expanded);
+}
+
+/* ---------- menu bar ---------- */
+
+function trayTitle(state) {
+  if (!state) {
+    return "";
+  }
+  if (state.duck?.mood === "offline") {
+    return "";
+  }
+  // Only a count worth interrupting for earns space in the menu bar.
+  return state.duck?.blockedCount > 0 ? ` ${state.duck.blockedCount}` : "";
+}
+
+function trayTooltip(state) {
+  if (!state) {
+    return "Squeak — starting up";
+  }
+  const duck = state.duck ?? {};
+  const bits = [];
+  if (duck.blockedCount > 0) bits.push(`${duck.blockedCount} waiting on you`);
+  if (duck.workingCount > 0) bits.push(`${duck.workingCount} working`);
+  return bits.length > 0 ? `Squeak — ${bits.join(", ")}` : "Squeak — nothing running";
+}
+
+function refreshTray() {
+  if (!tray) {
+    return;
+  }
+  const state = lastState;
+  const active = state?.active ?? [];
+
+  const sessionItems = active.slice(0, 8).map((session) => ({
+    label: `${session.repoName ?? "?"} · ${session.branch ?? "?"} — ${session.state}`,
+    click: () => {
+      if (session.cwd) {
+        void shell.openPath(session.cwd);
+      }
+    },
+  }));
+
+  tray.setTitle(trayTitle(state));
+  tray.setToolTip(trayTooltip(state));
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: state ? trayTooltip(state).replace("Squeak — ", "") : "starting up", enabled: false },
+      { type: "separator" },
+      ...(sessionItems.length > 0 ? sessionItems : [{ label: "No active sessions", enabled: false }]),
+      { type: "separator" },
+      { label: "Show duck", type: "checkbox", checked: !hidden, click: () => setHidden(hidden) },
+      { label: `Peek at panel (${DEFAULT_SHORTCUT.replace("Control", "⌃").replace("Alt", "⌥").replace(/\+/g, "")})`, click: peek },
+      { label: "Reset duck position", click: resetPosition },
+      { type: "separator" },
+      { label: "Quit Squeak duck", click: () => app.quit() },
+    ]),
+  );
+}
+
+function resetPosition() {
+  const position = defaultPosition();
+  writeSettings({ position });
+  if (win) {
+    win.setBounds({ ...position, ...COLLAPSED });
+    expanded = false;
+    win.webContents.send("duck:expanded", false);
+  }
+}
+
 ipcMain.on("duck:toggle", () => setExpanded(!expanded));
+
+// The renderer already polls /state; reuse its answer rather than polling twice.
+ipcMain.on("duck:state", (_event, state) => {
+  lastState = state;
+  refreshTray();
+});
 ipcMain.on("duck:collapse", () => setExpanded(false));
 
 ipcMain.on("duck:drag", (_event, delta) => {
@@ -138,17 +251,10 @@ ipcMain.on("duck:open-path", (_event, target) => {
 
 ipcMain.on("duck:menu", () => {
   Menu.buildFromTemplate([
-    { label: "Reset position", click: () => {
-      const position = defaultPosition();
-      writeSettings({ position });
-      if (win) {
-        win.setBounds({ ...position, ...COLLAPSED });
-        expanded = false;
-        win.webContents.send("duck:expanded", false);
-      }
-    } },
+    { label: "Hide duck", click: () => setHidden(true) },
+    { label: "Reset position", click: resetPosition },
     { type: "separator" },
-    { label: "Quit duck", click: () => app.quit() },
+    { label: "Quit Squeak duck", click: () => app.quit() },
   ]).popup({ window: win ?? undefined });
 });
 
@@ -183,12 +289,29 @@ app.whenReady().then(() => {
   }
   createWindow();
 
+  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, "assets", "duckTemplate.png")));
+  tray.setIgnoreDoubleClickEvents(true);
+  tray.on("click", peek);
+  refreshTray();
+
+  const shortcut = readSettings().shortcut ?? DEFAULT_SHORTCUT;
+  if (!globalShortcut.register(shortcut, peek)) {
+    // Another app already owns it. Say so rather than failing silently.
+    console.warn(`duck: could not register ${shortcut} — something else has it`);
+  }
+
   const capturePrefix = process.env.DUCK_CAPTURE;
   if (capturePrefix && win) {
     win.webContents.once("did-finish-load", () => void captureTo(capturePrefix));
   }
 });
 
-// The duck is the whole app; closing its window means quitting, on every
-// platform including macOS.
-app.on("window-all-closed", () => app.quit());
+app.on("will-quit", () => globalShortcut.unregisterAll());
+
+// The duck can be hidden while the app keeps running for the menu bar, so a
+// closed window must not mean quit the way it did before the tray existed.
+app.on("window-all-closed", () => {
+  if (!tray) {
+    app.quit();
+  }
+});
