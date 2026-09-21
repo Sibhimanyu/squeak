@@ -60,6 +60,9 @@ function snapshot(overrides: Partial<FleetSnapshot> = {}): FleetSnapshot {
     attention: [],
     generatedAt: "2026-09-20T12:00:00.000Z",
     ...overrides,
+    // The radar renders the active set; default it to whatever the test
+    // supplied as sessions so each case reads as one list.
+    active: overrides.active ?? overrides.sessions ?? [],
   };
 }
 
@@ -78,54 +81,157 @@ describe("formatAge", () => {
 });
 
 describe("renderRadar", () => {
-  it("leads with what is blocking and says how many", () => {
-    const blocked = item();
-    const text = renderRadar(snapshot({ sessions: [blocked.session], attention: [blocked] }), now);
+  it("leads with what is blocking and counts each state", () => {
+    const blocked = session({ state: "awaiting_approval", detail: "Claude needs permission to use Bash" });
+    const text = renderRadar(snapshot({ sessions: [blocked, session({ state: "working" })] }), now);
 
-    expect(text).toContain("1 waiting on you");
-    expect(text).toContain("Needs you");
-    expect(text).toContain("Waiting for approval");
+    expect(text).toContain("1 needs you");
+    expect(text).toContain("1 working");
+    expect(text).toContain("needs approval");
     expect(text).toContain("repo · main");
-    expect(text).toContain("10m");
+  });
+
+  it("puts blocked sessions above finished ones, and finished above working", () => {
+    const text = renderRadar(
+      snapshot({
+        sessions: [
+          session({ key: "w", state: "working", repoName: "working-repo" }),
+          session({ key: "d", state: "finished", repoName: "done-repo" }),
+          session({ key: "b", state: "awaiting_input", repoName: "blocked-repo" }),
+        ],
+      }),
+      now,
+    );
+
+    // Distinct names on purpose: "repo" is a substring of "blocked-repo".
+    expect(text.indexOf("blocked-repo")).toBeLessThan(text.indexOf("done-repo"));
+    expect(text.indexOf("done-repo")).toBeLessThan(text.indexOf("working-repo"));
   });
 
   it("flags a session the bridge cannot drive", () => {
-    const text = renderRadar(snapshot({ sessions: [item().session], attention: [item()] }), now);
+    const text = renderRadar(snapshot({ sessions: [session({ state: "working" })] }), now);
 
-    expect(text).toContain("watch only");
     expect(text).toContain("terminal");
   });
 
-  it("does not flag a Conductor session as watch only", () => {
-    const actionable = item({
-      session: session({ state: "awaiting_input", conductorSessionId: "c1", origin: "conductor" }),
-      kind: "blocked_question",
-    });
-    const text = renderRadar(snapshot({ sessions: [actionable.session], attention: [actionable] }), now);
-
-    expect(text).not.toContain("watch only");
+  it("says plainly when nothing is running", () => {
+    expect(renderRadar(snapshot(), now)).toContain("No agents are running.");
+    expect(renderRadar(snapshot(), now)).toContain("nothing running");
   });
 
-  it("keeps finished work below working sessions rather than hiding it", () => {
-    const finished = item({
-      session: session({ key: "k2", state: "finished", repoName: "other" }),
-      kind: "finished_unreviewed",
-      score: 300,
-    });
-    const text = renderRadar(snapshot({ sessions: [session(), finished.session], attention: [finished] }), now);
+  it("mentions the idle sessions it is hiding without listing them", () => {
+    // Twenty-odd abandoned sessions are an archive, not a status display.
+    const live = session({ state: "working" });
+    const text = renderRadar(
+      snapshot({
+        sessions: [live, ...Array.from({ length: 12 }, (_, i) => session({ key: `idle${i}`, state: "idle" }))],
+        active: [live],
+      }),
+      now,
+    );
 
-    expect(text.indexOf("Working")).toBeLessThan(text.indexOf("Finished, unreviewed"));
+    expect(text).toContain("12 idle, hidden");
+    expect(text).toContain("1 working");
   });
 
-  it("says so plainly when nothing is running", () => {
-    expect(renderRadar(snapshot(), now)).toContain("No agent sessions running");
+  it("does not mention hidden sessions when there are none", () => {
+    expect(renderRadar(snapshot({ sessions: [session({ state: "working" })] }), now)).not.toContain("hidden");
   });
 
-  it("reports quiet sessions instead of claiming nothing is running", () => {
-    const idle = session({ state: "idle" });
-    const text = renderRadar(snapshot({ sessions: [idle] }), now);
+  it("shows context share once it is high enough to matter", () => {
+    const text = renderRadar(snapshot({ sessions: [session({ state: "working", contextPercent: 91 })] }), now);
+    expect(text).toContain("ctx 91%");
+  });
 
-    expect(text).toContain("1 idle sessions, nothing pending.");
+  it("stays quiet about a context that is not yet worth mentioning", () => {
+    expect(renderRadar(snapshot({ sessions: [session({ contextPercent: 30 })] }), now)).not.toContain("ctx ");
+  });
+
+  it("does not say 'just now ago'", () => {
+    expect(renderRadar(snapshot({ sessions: [session({ state: "working" })] }), now)).not.toContain("just now ago");
+  });
+});
+
+describe("git state on the radar", () => {
+  const git = {
+    branch: "ushuaia",
+    filesChanged: 8,
+    insertions: 312,
+    deletions: 40,
+    untracked: 0,
+    ahead: 0,
+    behind: 0,
+    hasUpstream: false,
+    aheadOfBase: 3,
+  };
+
+  it("says what the agent actually did, not just that it finished", () => {
+    const text = renderRadar(snapshot({ sessions: [session({ state: "finished", git })] }), now);
+
+    expect(text).toContain("+312/−40 · 8 files · 3 commits, not pushed");
+  });
+
+  it("does not waste a line saying a tree is clean", () => {
+    const clean = { ...git, filesChanged: 0, insertions: 0, deletions: 0, aheadOfBase: 0, hasUpstream: true };
+    const text = renderRadar(snapshot({ sessions: [session({ state: "working", git: clean })] }), now);
+
+    expect(text).not.toContain("clean");
+  });
+
+  it("omits the line entirely when git was not read", () => {
+    expect(renderRadar(snapshot({ sessions: [session({ state: "working" })] }), now)).not.toContain("files");
+  });
+});
+
+describe("renderAttentionCard", () => {
+  it("fits a phone notification in two lines", () => {
+    const text = renderAttentionCard(
+      item({ session: session({ state: "awaiting_approval", detail: "Claude needs permission to run Bash" }) }),
+      now,
+    );
+
+    expect(text.split("\n").filter(Boolean).length).toBeLessThanOrEqual(3);
+    expect(text).toContain("needs approval");
+    expect(text).toContain("Claude needs permission to run Bash");
+  });
+
+  it("reports a finish with what changed rather than prose", () => {
+    const text = renderAttentionCard(
+      item({
+        session: session({
+          state: "finished",
+          git: {
+            branch: "x",
+            filesChanged: 15,
+            insertions: 283,
+            deletions: 5,
+            untracked: 0,
+            ahead: 0,
+            behind: 0,
+            hasUpstream: true,
+            aheadOfBase: null,
+          },
+        }),
+        kind: "finished_unreviewed",
+      }),
+      now,
+    );
+
+    expect(text).toContain("done");
+    expect(text).toContain("+283/−5 · 15 files");
+  });
+
+  it("says when it cannot act on the session", () => {
+    const text = renderAttentionCard(item(), now);
+    expect(text).toContain("answer it where it runs");
+  });
+
+  it("says nothing of the sort for a Conductor session", () => {
+    const text = renderAttentionCard(
+      item({ session: session({ state: "awaiting_input", conductorSessionId: "c1" }), kind: "blocked_question" }),
+      now,
+    );
+    expect(text).not.toContain("answer it where it runs");
   });
 });
 
@@ -140,27 +246,6 @@ describe("radarKeyboard", () => {
         expect(button.text.length).toBeLessThanOrEqual(40);
       }
     }
-  });
-});
-
-describe("renderAttentionCard", () => {
-  it("carries enough context to decide without opening anything", () => {
-    const text = renderAttentionCard(
-      item({ session: session({ state: "awaiting_approval", detail: "Claude needs permission to run Bash" }) }),
-      now,
-    );
-
-    expect(text).toContain("Waiting for approval");
-    expect(text).toContain("Fix the parser");
-    expect(text).toContain("Claude needs permission to run Bash");
-    expect(text).toContain("waiting 10m");
-  });
-
-  it("tells you where to answer a session it cannot drive", () => {
-    const text = renderAttentionCard(item(), now);
-
-    expect(text).toContain("Started outside Conductor");
-    expect(text).toContain("/Users/someone/repo");
   });
 });
 
@@ -200,80 +285,6 @@ describe("sessionLabel", () => {
     );
     expect(shortenPath("/Users/someone/Downloads", home)).toBe("~/Downloads");
     expect(shortenPath("/tmp/scratch", home)).toBe("/tmp/scratch");
-  });
-});
-
-describe("radar footer", () => {
-  it("does not say 'just now ago'", () => {
-    expect(renderRadar(snapshot(), now)).toContain("_updated just now_");
-    expect(renderRadar(snapshot({ generatedAt: "2026-09-20T11:55:00.000Z" }), now)).toContain("_updated 5m ago_");
-  });
-});
-
-describe("context pressure on the radar", () => {
-  it("gets its own section rather than being mixed in with blocked work", () => {
-    const pressured = item({
-      session: session({ state: "working", contextPercent: 91 }),
-      kind: "context_pressure",
-      score: 250,
-    });
-    const text = renderRadar(snapshot({ sessions: [pressured.session], attention: [pressured] }), now);
-
-    expect(text).toContain("Running low on context");
-    expect(text).not.toContain("Needs you");
-    expect(text).toContain("ctx 91%");
-  });
-
-  it("does not claim nothing is running when a session is low on context", () => {
-    const pressured = item({
-      session: session({ state: "working", contextPercent: 91 }),
-      kind: "context_pressure",
-    });
-    const text = renderRadar(snapshot({ sessions: [pressured.session], attention: [pressured] }), now);
-
-    expect(text).not.toContain("No agent sessions running");
-  });
-
-  it("stays quiet about a context that is not yet worth mentioning", () => {
-    const text = renderRadar(snapshot({ sessions: [session({ contextPercent: 30 })] }), now);
-
-    expect(text).not.toContain("ctx ");
-  });
-});
-
-describe("git state on the radar", () => {
-  const git = {
-    branch: "ushuaia",
-    filesChanged: 8,
-    insertions: 312,
-    deletions: 40,
-    untracked: 0,
-    ahead: 0,
-    behind: 0,
-    hasUpstream: false,
-    aheadOfBase: 3,
-  };
-
-  it("says what the agent actually did, not just that it finished", () => {
-    const finished = item({
-      session: session({ state: "finished", detail: "Done.", git }),
-      kind: "finished_unreviewed",
-    });
-    const text = renderRadar(snapshot({ sessions: [finished.session], attention: [finished] }), now);
-
-    expect(text).toContain("+312/−40 · 8 files · 3 commits, not pushed");
-  });
-
-  it("puts it on the push card too", () => {
-    const text = renderAttentionCard(item({ session: session({ state: "awaiting_approval", git }) }), now);
-
-    expect(text).toContain("+312/−40");
-  });
-
-  it("omits the line entirely when git was not read", () => {
-    const text = renderRadar(snapshot({ sessions: [session({ state: "working" })] }), now);
-
-    expect(text).not.toContain("files");
   });
 });
 

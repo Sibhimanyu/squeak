@@ -32,11 +32,20 @@ Finished, unreviewed
 Open it with `/radar`. It anchors a live message in that conversation and keeps
 editing it in place.
 
+**Only active sessions are shown.** A normal machine holds twenty-odd agent
+sessions and almost all of them are abandoned; listing those makes this an
+archive rather than a status display. A session is active if it is running,
+blocked on you, finished in the last fifteen minutes, or quiet with its
+process still up. On a typical day that is four sessions out of twenty-six.
+The rest stay tracked, so one waking up is noticed, but they never reach a
+screen.
+
 **What counts as needing you**, in priority order: blocked on an approval,
 blocked on a question, errored, finished-but-unreviewed, then running low on
-context. Only the two blocked kinds send you an unsolicited message; everything
-else waits on the radar so the chat does not become a firehose. Each card
-offers snooze, mark reviewed, and — for Conductor sessions — reply and open.
+context. Only the two blocked kinds and finishing send you a message; everything
+else waits on the radar so the chat does not become a firehose. Cards are two
+lines, because they arrive as phone notifications and have to be readable on a
+lock screen; depth lives behind the buttons.
 
 A session can want attention for more than one reason at once, and all of them
 are shown.

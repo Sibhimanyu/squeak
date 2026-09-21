@@ -146,12 +146,17 @@ describe("sortAttention", () => {
 });
 
 describe("push policy", () => {
-  it("interrupts only for sessions blocked on the human", () => {
+  it("interrupts when a session is blocked on you or has finished", () => {
     expect(PUSH_KINDS.has("blocked_approval")).toBe(true);
     expect(PUSH_KINDS.has("blocked_question")).toBe(true);
-    // Finished and errored belong on the radar, not in a notification.
-    expect(PUSH_KINDS.has("finished_unreviewed")).toBe(false);
+    // "Tell me when it is done" is the main thing wanted from a phone.
+    expect(PUSH_KINDS.has("finished_unreviewed")).toBe(true);
+  });
+
+  it("does not interrupt for things that are merely worth knowing", () => {
+    // These sit on the radar; a notification for them would be noise.
     expect(PUSH_KINDS.has("errored")).toBe(false);
+    expect(PUSH_KINDS.has("context_pressure")).toBe(false);
   });
 });
 

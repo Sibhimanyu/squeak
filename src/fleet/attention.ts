@@ -22,8 +22,18 @@ export const DEFAULT_CONTEXT_PRESSURE_PERCENT = 80;
 /** States where a session is live enough that compacting would actually cost you. */
 const CONTEXT_PRESSURE_STATES = new Set(["working", "finished", "awaiting_approval", "awaiting_input"]);
 
-/** Kinds that earn an unsolicited Telegram message rather than a radar row. */
-export const PUSH_KINDS: ReadonlySet<AttentionKind> = new Set<AttentionKind>(["blocked_approval", "blocked_question"]);
+/**
+ * Kinds that earn an unsolicited Telegram message rather than a radar row.
+ *
+ * Finishing counts. "Tell me when it is done" is the main thing wanted from a
+ * phone, and it stays quiet in practice because only *active* sessions reach
+ * here — a retired workspace or a session abandoned on Tuesday never does.
+ */
+export const PUSH_KINDS: ReadonlySet<AttentionKind> = new Set<AttentionKind>([
+  "blocked_approval",
+  "blocked_question",
+  "finished_unreviewed",
+]);
 
 /** Waiting longer raises priority, but never enough to outrank a worse kind. */
 const MAX_AGE_BONUS = 240;
@@ -97,19 +107,4 @@ export function sortAttention(items: AttentionItem[]): AttentionItem[] {
     }
     return left.session.key.localeCompare(right.session.key);
   });
-}
-
-export function attentionLabel(kind: AttentionKind): string {
-  switch (kind) {
-    case "blocked_approval":
-      return "Waiting for approval";
-    case "blocked_question":
-      return "Waiting for your answer";
-    case "errored":
-      return "Errored";
-    case "finished_unreviewed":
-      return "Finished, unreviewed";
-    case "context_pressure":
-      return "Context nearly full";
-  }
 }

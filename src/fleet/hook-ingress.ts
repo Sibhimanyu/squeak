@@ -16,6 +16,12 @@ export interface HookIngressOptions {
   /** Where the shared secret lives, so installed hook scripts can read it. */
   tokenPath: string;
   onEvent: (event: HookEvent) => void;
+  /**
+   * Current fleet state, served to local UIs. The daemon already computes
+   * this for Telegram; anything else that wants to draw it should read the
+   * same answer rather than reimplementing the observers.
+   */
+  readState?: () => unknown;
 }
 
 /**
@@ -93,6 +99,16 @@ export class HookIngressServer {
   }
 
   private handle(request: http.IncomingMessage, response: http.ServerResponse): void {
+    // Read-only state for local UIs. No token: it is loopback-only and
+    // reveals nothing a process on this machine could not already read from
+    // the same files. Requiring one would mean shipping the secret into
+    // every UI for no gain.
+    if (request.method === "GET" && request.url?.startsWith("/state")) {
+      this.serveState(response);
+      request.resume();
+      return;
+    }
+
     if (request.method !== "POST" || !request.url?.startsWith("/hook")) {
       respond(response, 404, "not found");
       request.resume();
@@ -141,6 +157,28 @@ export class HookIngressServer {
     request.on("error", () => {
       aborted = true;
     });
+  }
+
+  private serveState(response: http.ServerResponse): void {
+    if (!this.options.readState) {
+      respond(response, 503, "no state available");
+      return;
+    }
+    try {
+      const body = JSON.stringify(this.options.readState());
+      response.writeHead(200, {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+        // A local UI polls this from a page origin, so it needs CORS.
+        "access-control-allow-origin": "*",
+      });
+      response.end(body);
+    } catch (error) {
+      logger.warn("fleet state serialisation failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      respond(response, 500, "state unavailable");
+    }
   }
 
   private dispatch(agent: AgentKind, body: string): void {

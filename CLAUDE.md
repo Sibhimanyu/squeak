@@ -124,9 +124,18 @@ transcripts, and ranks them by what is blocked on the human.
 - **Callback data caps at 64 bytes.** Session keys do not fit, so
   `FleetStore.handleFor` allocates short integer aliases. Never put a raw
   session key in `callback_data`.
-- Only sessions blocked on the human get pushed. Finished, errored, and
-  low-on-context ones go to the radar. Changing that is a product decision, not
-  a tuning knob.
+- **Only *active* sessions reach a screen** — running, blocked, finished in the
+  last fifteen minutes, or quiet with a live process. Everything else stays
+  tracked but hidden. On this machine that is 4 of 26; without the filter the
+  radar is an archive rather than a status display.
+- Blocked and finished sessions get pushed to Telegram; errored and
+  low-on-context ones only appear on the radar. Push cards are **two lines** —
+  they are lock-screen notifications, not documents.
+- `src/fleet/active.ts` owns the active rule. The monitor, the radar and the
+  local state endpoint all read it; do not reimplement the predicate.
+- The ingress serves `GET /state` unauthenticated on loopback for local UIs.
+  It is read-only and exposes nothing a local process could not already read
+  from the same files; hook posts still require the token.
 - **A session can want attention for several reasons at once**, so
   `classifyAttentions` returns a list. Do not collapse it back to one.
 - **`workspaces.state = 'archived'` does not mean "done", it means the worktree

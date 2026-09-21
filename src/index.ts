@@ -540,6 +540,35 @@ export class TelegramConductorBridge {
       port: config.fleetHookPort,
       tokenPath: hookPaths.tokenPath,
       onEvent: (event) => monitor.ingestHookEvent(event),
+      // Local UIs read the same snapshot the Telegram radar is drawn from.
+      readState: () => {
+        const snapshot = monitor.snapshot;
+        return {
+          generatedAt: snapshot.generatedAt,
+          trackedCount: snapshot.sessions.length,
+          active: snapshot.active.map((session) => ({
+            key: session.key,
+            agent: session.agent,
+            origin: session.origin,
+            state: session.state,
+            title: session.title,
+            repoName: session.repoName,
+            branch: session.branch,
+            cwd: session.cwd,
+            detail: session.detail,
+            lastActivityAt: session.lastActivityAt,
+            contextPercent: session.contextPercent,
+            alive: session.alive,
+            conductorSessionId: session.conductorSessionId,
+            git: session.git,
+          })),
+          attention: snapshot.attention.map((item) => ({
+            key: item.session.key,
+            kind: item.kind,
+            since: item.since,
+          })),
+        };
+      },
     });
 
     return new FleetController({

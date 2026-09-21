@@ -189,3 +189,55 @@ describe("the installed hook script", () => {
     expect(Date.now() - startedAt).toBeLessThan(2000);
   });
 });
+
+describe("local state endpoint", () => {
+  it("serves the current fleet state to a local UI without a token", async () => {
+    const dir = makeDir();
+    const port = await freePort();
+    const server = new HookIngressServer({
+      port,
+      tokenPath: path.join(dir, "hook-token"),
+      onEvent: () => undefined,
+      readState: () => ({ active: [{ key: "a", state: "working" }], trackedCount: 26 }),
+    });
+    await server.start();
+    servers.push(server);
+
+    const response = await fetch(`http://127.0.0.1:${port}/state`);
+    const body = (await response.json()) as { active: { key: string }[]; trackedCount: number };
+
+    expect(response.status).toBe(200);
+    // A page polling this needs CORS; without it the duck sees nothing.
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(body.trackedCount).toBe(26);
+    expect(body.active[0]?.key).toBe("a");
+  });
+
+  it("says so rather than crashing when no state source is wired", async () => {
+    const dir = makeDir();
+    const port = await freePort();
+    const server = new HookIngressServer({
+      port,
+      tokenPath: path.join(dir, "hook-token"),
+      onEvent: () => undefined,
+    });
+    await server.start();
+    servers.push(server);
+
+    expect((await fetch(`http://127.0.0.1:${port}/state`)).status).toBe(503);
+  });
+
+  it("does not accept a hook post on the state path", async () => {
+    const harness = await startServer();
+
+    const response = await fetch(`http://127.0.0.1:${harness.port}/state`, {
+      method: "POST",
+      headers: { "x-conductor-tg-token": harness.token, "x-conductor-tg-agent": "claude" },
+      body: JSON.stringify({ hook_event_name: "Stop", session_id: "x" }),
+    });
+    await settle();
+
+    expect(response.status).toBe(404);
+    expect(harness.events).toHaveLength(0);
+  });
+});

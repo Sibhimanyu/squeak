@@ -127,13 +127,33 @@ describe("FleetMonitor", () => {
     expect(harness.pushes[0]?.[0]?.kind).toBe("blocked_approval");
   });
 
-  it("keeps a finished session on the radar but does not interrupt for it", async () => {
+  it("tells you when a session finishes", async () => {
     const harness = makeMonitor([observed({ state: "finished", detail: "Done." })]);
 
     const snapshot = await harness.monitor.refresh();
 
     expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["finished_unreviewed"]);
+    expect(harness.pushes[0]?.[0]?.kind).toBe("finished_unreviewed");
+  });
+
+  it("says nothing about a session that finished long ago", async () => {
+    // Only recently-finished work is active; the rest is an archive.
+    const harness = makeMonitor([observed({ state: "finished", lastActivityAt: "2026-09-20T09:00:00.000Z" })]);
+
+    const snapshot = await harness.monitor.refresh();
+
+    expect(snapshot.active).toHaveLength(0);
+    expect(snapshot.attention).toHaveLength(0);
     expect(harness.pushes).toHaveLength(0);
+  });
+
+  it("keeps tracking an inactive session even though it is not shown", async () => {
+    const harness = makeMonitor([observed({ state: "idle" })]);
+
+    const snapshot = await harness.monitor.refresh();
+
+    expect(snapshot.sessions).toHaveLength(1);
+    expect(snapshot.active).toHaveLength(0);
   });
 
   it("stops surfacing a session once it is marked reviewed", async () => {
@@ -147,12 +167,13 @@ describe("FleetMonitor", () => {
   });
 
   it("honours a snooze until it expires", async () => {
-    const harness = makeMonitor([observed({ state: "finished" })]);
+    const harness = makeMonitor([observed({ state: "awaiting_input" })]);
     const first = await harness.monitor.refresh();
     harness.store.snooze(first.sessions[0]?.key ?? "", "2026-09-20T13:00:00.000Z");
 
     expect((await harness.monitor.refresh()).attention).toHaveLength(0);
 
+    // A blocked session stays active however long it waits, so it comes back.
     harness.setNow("2026-09-20T13:30:00.000Z");
     expect((await harness.monitor.refresh()).attention).toHaveLength(1);
   });
@@ -218,14 +239,13 @@ describe("FleetMonitor", () => {
 });
 
 describe("context pressure", () => {
-  it("raises it alongside the finished flag without sending a notification", async () => {
+  it("raises it alongside the finished flag, but only finishing is worth a message", async () => {
     const harness = makeMonitor([observed({ state: "finished", contextPercent: 92 })]);
 
     const snapshot = await harness.monitor.refresh();
 
     expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["finished_unreviewed", "context_pressure"]);
-    // Neither kind interrupts; both wait on the radar.
-    expect(harness.pushes).toHaveLength(0);
+    expect(harness.pushes.flat().map((entry) => entry.kind)).toEqual(["finished_unreviewed"]);
   });
 
   it("says nothing about a workspace the user already marked done", async () => {

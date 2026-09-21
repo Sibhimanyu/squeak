@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger.js";
+import { selectActiveSessions } from "./active.js";
 import {
   DEFAULT_CONTEXT_PRESSURE_PERCENT,
   PUSH_KINDS,
@@ -17,7 +18,10 @@ import type { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { AttentionItem, FleetSession, HookEvent, ObservedSession } from "./types.js";
 
 export interface FleetSnapshot {
+  /** Everything the observers found, including the long tail of dead work. */
   sessions: FleetSession[];
+  /** The handful running, stuck, or just finished. This is what gets shown. */
+  active: FleetSession[];
   attention: AttentionItem[];
   generatedAt: string;
 }
@@ -69,7 +73,12 @@ export class FleetMonitor {
   private readonly listeners = new Set<(snapshot: FleetSnapshot) => void>();
   private readonly pushListeners = new Set<(items: AttentionItem[]) => void>();
 
-  private latest: FleetSnapshot = { sessions: [], attention: [], generatedAt: new Date(0).toISOString() };
+  private latest: FleetSnapshot = {
+    sessions: [],
+    active: [],
+    attention: [],
+    generatedAt: new Date(0).toISOString(),
+  };
   private pollTimer: NodeJS.Timeout | null = null;
   private hookTimer: NodeJS.Timeout | null = null;
   private refreshing = false;
@@ -186,6 +195,9 @@ export class FleetMonitor {
     const attention: AttentionItem[] = [];
     const pushes: AttentionItem[] = [];
     const seenKeys = new Set<string>();
+    // Everything is still tracked, so a session waking up is noticed — but
+    // only the active few can ask for attention or reach a screen.
+    const activeKeys = new Set(selectActiveSessions(sessions, this.now()).map((session) => session.key));
 
     for (const session of sessions) {
       seenKeys.add(session.key);
@@ -195,6 +207,10 @@ export class FleetMonitor {
         lastActivityAt: session.lastActivityAt,
         observedAt,
       });
+
+      if (!activeKeys.has(session.key)) {
+        continue;
+      }
 
       const kinds = classifyAttentions(session, this.contextPressurePercent);
       if (kinds.length === 0) {
@@ -245,6 +261,7 @@ export class FleetMonitor {
 
     return {
       sessions: enriched.sessions,
+      active: enriched.sessions.filter((session) => activeKeys.has(session.key)),
       attention: sortAttention(attention.map((item) => enriched.remap(item))),
       generatedAt: observedAt,
     };
@@ -269,10 +286,8 @@ export class FleetMonitor {
     }
 
     const wanted = new Set(attention.map((item) => item.session.key));
-    for (const session of sessions) {
-      if (session.state === "working") {
-        wanted.add(session.key);
-      }
+    for (const session of selectActiveSessions(sessions, this.now())) {
+      wanted.add(session.key);
     }
     if (wanted.size === 0) {
       return identity;

@@ -2,15 +2,13 @@ import os from "node:os";
 import path from "node:path";
 
 import type { TelegramInlineKeyboard } from "../types.js";
-import { attentionLabel, isActionable } from "./attention.js";
+import { isActionable } from "./attention.js";
 import { diffPageCount, diffPageSlice, type WorkspaceDiff } from "./diff-view.js";
 import { describeGitState } from "./git-state.js";
 import type { FleetSnapshot } from "./fleet-monitor.js";
-import type { AttentionItem, FleetSession, FleetState } from "./types.js";
+import { isBlockedState, type AttentionItem, type AttentionKind, type FleetSession, type FleetState } from "./types.js";
 
-const MAX_ATTENTION_ROWS = 8;
-const MAX_WORKING_ROWS = 6;
-const MAX_QUIET_ROWS = 5;
+const MAX_ACTIVE_ROWS = 8;
 const MAX_ACTION_BUTTONS = 6;
 
 const STATE_GLYPH: Record<FleetState, string> = {
@@ -106,104 +104,90 @@ function contextTag(session: FleetSession): string | null {
   return `ctx ${Math.round(session.contextPercent)}%`;
 }
 
-function describeRow(session: FleetSession, since: string, nowMs: number): string {
-  const tags = [session.agent, originTag(session)].filter((part): part is string => Boolean(part));
-  const head = `${stateGlyph(session.state)} ${sessionLabel(session)}`;
-  const meta = [`${tags.join(" ")}`, formatAge(since, nowMs), contextTag(session)]
-    .filter((part): part is string => Boolean(part))
-    .join(" · ");
-  const lines = [`${head} — ${meta}`];
-  if (session.detail) {
-    lines.push(`    ${session.detail}`);
+/** Short status word for a row, so the eye lands on state before detail. */
+function stateWord(state: FleetState): string {
+  switch (state) {
+    case "awaiting_approval":
+      return "needs approval";
+    case "awaiting_input":
+      return "needs an answer";
+    case "working":
+      return "working";
+    case "finished":
+      return "done";
+    case "error":
+      return "errored";
+    case "idle":
+      return "waiting";
   }
-  // What the agent actually did to the tree, which "finished" never says.
-  const git = session.git ? describeGitState(session.git) : null;
-  if (git) {
-    lines.push(`    ${git}`);
-  }
-  return lines.join("\n");
 }
 
 /**
- * The radar message. One glance should answer "is anything waiting on me",
- * so blocked sessions come first and everything else is progressively less
- * prominent rather than omitted.
+ * The radar message.
+ *
+ * Shows only sessions that are running, stuck, or just finished. The machine
+ * usually holds twenty-odd sessions and almost all of them are abandoned;
+ * listing those makes this an archive instead of a status display.
  */
 export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
-  const blocking = snapshot.attention.filter(
-    (item) => item.kind !== "finished_unreviewed" && item.kind !== "context_pressure",
-  );
-  const finished = snapshot.attention.filter((item) => item.kind === "finished_unreviewed");
-  const pressured = snapshot.attention.filter((item) => item.kind === "context_pressure");
-  const working = snapshot.sessions.filter((session) => session.state === "working");
-  const quiet = snapshot.sessions.filter((session) => session.state === "idle");
+  const active = snapshot.active;
+  const blocked = active.filter((session) => isBlockedState(session.state));
+  const working = active.filter((session) => session.state === "working");
+  const done = active.filter((session) => session.state === "finished");
 
-  const lines: string[] = [];
-  const headline =
-    blocking.length > 0
-      ? `${blocking.length} waiting on you`
-      : finished.length > 0
-        ? `${finished.length} finished, unreviewed`
-        : working.length > 0
-          ? `${working.length} working`
-          : pressured.length > 0
-            ? `${pressured.length} low on context`
-            : "all quiet";
-  lines.push(`**Fleet** — ${snapshot.sessions.length} sessions · ${headline}`);
+  const headline = [
+    blocked.length > 0 ? `${blocked.length} needs you` : null,
+    working.length > 0 ? `${working.length} working` : null,
+    done.length > 0 ? `${done.length} done` : null,
+  ].filter((part): part is string => Boolean(part));
 
-  if (blocking.length > 0) {
+  const lines = [`**Fleet** — ${headline.length > 0 ? headline.join(" · ") : "nothing running"}`];
+
+  // One block per session, ordered by how much it wants you: blocked, then
+  // finished, then still going.
+  const ordered = [
+    ...blocked,
+    ...done,
+    ...active.filter((session) => !blocked.includes(session) && !done.includes(session)),
+  ];
+
+  for (const session of ordered.slice(0, MAX_ACTIVE_ROWS)) {
     lines.push("");
-    lines.push("**Needs you**");
-    for (const item of blocking.slice(0, MAX_ATTENTION_ROWS)) {
-      lines.push(`${describeRow(item.session, item.since, nowMs)}`);
-      lines.push(`    ${attentionLabel(item.kind)}${isActionable(item.session) ? "" : " · watch only"}`);
-    }
-    if (blocking.length > MAX_ATTENTION_ROWS) {
-      lines.push(`… ${blocking.length - MAX_ATTENTION_ROWS} more`);
+    lines.push(`${stateGlyph(session.state)} ${sessionLabel(session)}`);
+
+    const detail = [
+      stateWord(session.state),
+      session.detail,
+      formatAge(session.lastActivityAt, nowMs),
+      originTag(session),
+      contextTag(session),
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join(" · ");
+    lines.push(`    ${detail}`);
+
+    const git = session.git ? describeGitState(session.git) : null;
+    if (git && git !== "clean") {
+      lines.push(`    ${git}`);
     }
   }
 
-  if (working.length > 0) {
+  if (ordered.length > MAX_ACTIVE_ROWS) {
     lines.push("");
-    lines.push("**Working**");
-    for (const session of working.slice(0, MAX_WORKING_ROWS)) {
-      lines.push(describeRow(session, session.lastActivityAt, nowMs));
-    }
-    if (working.length > MAX_WORKING_ROWS) {
-      lines.push(`… ${working.length - MAX_WORKING_ROWS} more`);
-    }
+    lines.push(`… ${ordered.length - MAX_ACTIVE_ROWS} more active`);
   }
 
-  if (finished.length > 0) {
+  if (ordered.length === 0) {
     lines.push("");
-    lines.push("**Finished, unreviewed**");
-    for (const item of finished.slice(0, MAX_QUIET_ROWS)) {
-      lines.push(describeRow(item.session, item.since, nowMs));
-    }
-    if (finished.length > MAX_QUIET_ROWS) {
-      lines.push(`… ${finished.length - MAX_QUIET_ROWS} more`);
-    }
+    lines.push("No agents are running.");
   }
 
-  if (pressured.length > 0) {
+  const hidden = snapshot.sessions.length - active.length;
+  if (hidden > 0) {
     lines.push("");
-    lines.push("**Running low on context**");
-    for (const item of pressured.slice(0, MAX_QUIET_ROWS)) {
-      lines.push(describeRow(item.session, item.since, nowMs));
-    }
-    if (pressured.length > MAX_QUIET_ROWS) {
-      lines.push(`… ${pressured.length - MAX_QUIET_ROWS} more`);
-    }
+    lines.push(`_${hidden} idle, hidden_`);
   }
 
-  if (blocking.length === 0 && finished.length === 0 && working.length === 0 && pressured.length === 0) {
-    lines.push("");
-    lines.push(quiet.length > 0 ? `${quiet.length} idle sessions, nothing pending.` : "No agent sessions running.");
-  }
-
-  lines.push("");
-  const age = formatAge(snapshot.generatedAt, nowMs);
-  lines.push(age === "just now" ? "_updated just now_" : `_updated ${age} ago_`);
   return lines.join("\n");
 }
 
@@ -231,41 +215,49 @@ export function radarKeyboard(
 }
 
 /**
- * The push card for a single blocked session. Unlike the radar this is a new
- * message, so it carries enough context to decide without opening anything.
+ * The push card.
+ *
+ * Deliberately two lines. This arrives as a phone notification, where the
+ * whole message has to be readable on the lock screen — anything longer is
+ * read as a wall and dismissed. Depth lives behind the buttons.
  */
 export function renderAttentionCard(item: AttentionItem, nowMs: number): string {
   const session = item.session;
-  const lines = [
-    `${stateGlyph(session.state)} **${attentionLabel(item.kind)}**`,
-    `${sessionLabel(session)} · ${session.agent}${originTag(session) ? ` · ${originTag(session)}` : ""}`,
-  ];
+  const lines = [`${stateGlyph(session.state)} **${sessionLabel(session)}** — ${cardVerb(item.kind)}`];
 
-  if (session.title) {
-    lines.push(session.title);
-  }
-  if (session.detail) {
-    lines.push("");
-    lines.push(session.detail);
-  }
+  const second =
+    item.kind === "finished_unreviewed"
+      ? session.git
+        ? describeGitState(session.git)
+        : null
+      : (session.detail ?? null);
 
-  const git = session.git ? describeGitState(session.git) : null;
-  if (git) {
-    lines.push("");
-    lines.push(git);
+  if (second) {
+    lines.push(second);
+  } else if (item.kind !== "finished_unreviewed") {
+    lines.push(`waiting ${formatAge(item.since, nowMs)}`);
   }
 
-  lines.push("");
-  lines.push(`waiting ${formatAge(item.since, nowMs)}`);
   if (!isActionable(session)) {
-    lines.push(
-      session.cwd
-        ? `_Started outside Conductor — answer it in its own terminal (${session.cwd})._`
-        : "_Started outside Conductor — answer it where it is running._",
-    );
+    lines.push("_not a Conductor session — answer it where it runs_");
   }
 
   return lines.join("\n");
+}
+
+function cardVerb(kind: AttentionKind): string {
+  switch (kind) {
+    case "blocked_approval":
+      return "needs approval";
+    case "blocked_question":
+      return "needs an answer";
+    case "errored":
+      return "errored";
+    case "finished_unreviewed":
+      return "done";
+    case "context_pressure":
+      return "context nearly full";
+  }
 }
 
 export function attentionCardKeyboard(item: AttentionItem, handle: number): TelegramInlineKeyboard {
