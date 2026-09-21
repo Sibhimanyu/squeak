@@ -17,7 +17,7 @@ vi.mock("./config.js", () => ({
   },
 }));
 
-import { TelegramConductorBridge } from "./index.js";
+import { extractAssistantEnvelopeText, TelegramConductorBridge } from "./index.js";
 import { TelegramApiError } from "./telegram/client.js";
 import { homeKeyboard } from "./telegram/ui.js";
 
@@ -111,6 +111,8 @@ function createBridge() {
     resolveWorkspacePath: vi.fn().mockReturnValue("/tmp/workspace-1"),
     updateWorkspaceActiveSession: vi.fn(),
     getWorkspaceById: vi.fn(),
+    maxSessionMessageRowId: vi.fn().mockReturnValue(0),
+    listAssistantMessagesAfterRowId: vi.fn().mockReturnValue([]),
   };
   const stateStore = {
     clearConversationComposeMode: vi.fn(),
@@ -131,6 +133,11 @@ function createBridge() {
     markPromptFinished: vi.fn(),
     setConversationComposeMode: vi.fn(),
     updateConversationContext: vi.fn(),
+    listFollowedSessionIds: vi.fn().mockReturnValue([]),
+    getConductorOutboundCursor: vi.fn().mockReturnValue(null),
+    setConductorOutboundCursor: vi.fn(),
+    buildFingerprint: vi.fn((sessionId, turnId, role, content) => `${sessionId}|${turnId}|${role}|${content}`),
+    hasFingerprint: vi.fn().mockReturnValue(false),
   };
   const telegram = {
     answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
@@ -533,6 +540,117 @@ describe("TelegramConductorBridge", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("extractAssistantEnvelopeText", () => {
+    it("keeps text blocks and drops tool and thinking blocks", () => {
+      const content = JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "hmm" },
+            { type: "text", text: "First part." },
+            { type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } },
+            { type: "text", text: "Second part." },
+          ],
+        },
+      });
+      expect(extractAssistantEnvelopeText(content)).toBe("First part.\n\nSecond part.");
+    });
+
+    it("yields nothing for a tool-only row so it is skipped, not sent empty", () => {
+      const content = JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }],
+        },
+      });
+      expect(extractAssistantEnvelopeText(content)).toBeNull();
+    });
+
+    it("falls back to bare text for rows that are not envelopes", () => {
+      expect(extractAssistantEnvelopeText("just words")).toBe("just words");
+      expect(extractAssistantEnvelopeText("   ")).toBeNull();
+    });
+  });
+
+  it("forwards replies from turns the Conductor app ran itself", async () => {
+    const { bridge, registry, stateStore } = createBridge();
+    const safeSendMessage = vi.fn().mockResolvedValue(undefined);
+    (bridge as unknown as { safeSendMessage: typeof safeSendMessage }).safeSendMessage = safeSendMessage;
+
+    stateStore.listFollowedSessionIds.mockReturnValue(["session-1"]);
+    stateStore.listFollowingConversations.mockReturnValue([{ chatId: 12, messageThreadId: null }]);
+    stateStore.getConductorOutboundCursor.mockReturnValue(null);
+    registry.maxSessionMessageRowId.mockReturnValue(41);
+
+    const forward = (): Promise<void> =>
+      (bridge as unknown as { forwardConductorReplies: () => Promise<void> }).forwardConductorReplies();
+
+    // First sight of a session starts at the end; replaying history would be worse
+    // than missing it.
+    await forward();
+    expect(stateStore.setConductorOutboundCursor).toHaveBeenCalledWith("session-1", 41);
+    expect(safeSendMessage).not.toHaveBeenCalled();
+    expect(registry.listAssistantMessagesAfterRowId).not.toHaveBeenCalled();
+
+    stateStore.getConductorOutboundCursor.mockReturnValue(41);
+    registry.listAssistantMessagesAfterRowId.mockReturnValue([
+      {
+        rowId: 42,
+        turnId: "turn-app",
+        content: JSON.stringify({
+          type: "assistant",
+          message: { role: "assistant", content: [{ type: "text", text: "typed in the app" }] },
+        }),
+      },
+    ]);
+
+    await forward();
+    expect(safeSendMessage).toHaveBeenCalledWith({ chatId: 12, messageThreadId: null }, "typed in the app");
+    expect(stateStore.setConductorOutboundCursor).toHaveBeenCalledWith("session-1", 42);
+  });
+
+  it("does not echo back replies the bridge itself mirrored", async () => {
+    const { bridge, registry, stateStore } = createBridge();
+    const safeSendMessage = vi.fn().mockResolvedValue(undefined);
+    (bridge as unknown as { safeSendMessage: typeof safeSendMessage }).safeSendMessage = safeSendMessage;
+
+    stateStore.listFollowedSessionIds.mockReturnValue(["session-1"]);
+    stateStore.listFollowingConversations.mockReturnValue([{ chatId: 12, messageThreadId: null }]);
+    stateStore.getConductorOutboundCursor.mockReturnValue(10);
+    registry.listAssistantMessagesAfterRowId.mockReturnValue([
+      {
+        rowId: 11,
+        turnId: "turn-bridge",
+        content: JSON.stringify({
+          type: "assistant",
+          message: { role: "assistant", content: [{ type: "text", text: "already streamed" }] },
+        }),
+      },
+    ]);
+
+    // The mirror recorded this row, so it was already sent as a live turn.
+    stateStore.hasFingerprint.mockReturnValue(true);
+
+    await (bridge as unknown as { forwardConductorReplies: () => Promise<void> }).forwardConductorReplies();
+
+    expect(safeSendMessage).not.toHaveBeenCalled();
+    // The cursor still advances, or the row would be reconsidered forever.
+    expect(stateStore.setConductorOutboundCursor).toHaveBeenCalledWith("session-1", 11);
+  });
+
+  it("skips sessions with a bridge turn already in flight", async () => {
+    const { bridge, registry, stateStore } = createBridge();
+    stateStore.listFollowedSessionIds.mockReturnValue(["session-1"]);
+    (bridge as unknown as { runtimes: Map<string, unknown> }).runtimes.set("session-1", { turnId: "t" });
+
+    await (bridge as unknown as { forwardConductorReplies: () => Promise<void> }).forwardConductorReplies();
+
+    expect(registry.listAssistantMessagesAfterRowId).not.toHaveBeenCalled();
+    expect(stateStore.getConductorOutboundCursor).not.toHaveBeenCalled();
   });
 
   it("routes Claude sessions through the Claude adapter", async () => {

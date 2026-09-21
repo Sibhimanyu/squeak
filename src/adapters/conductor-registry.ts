@@ -988,6 +988,49 @@ export class ConductorRegistryAdapter {
     return messageId;
   }
 
+  /** The highest session_messages rowid for a session, or 0 if it has none. */
+  maxSessionMessageRowId(sessionId: string): number {
+    const row = this.db
+      .prepare(
+        `
+          SELECT COALESCE(MAX(rowid), 0) as maxRowId
+          FROM session_messages
+          WHERE session_id = ?
+        `,
+      )
+      .get(sessionId) as { maxRowId: number } | undefined;
+    return row?.maxRowId ?? 0;
+  }
+
+  /**
+   * Assistant rows written after `afterRowId`, oldest first. Used to forward
+   * replies from turns the Conductor app ran itself, which the bridge never saw
+   * as a turn because it did not start them.
+   */
+  listAssistantMessagesAfterRowId(
+    sessionId: string,
+    afterRowId: number,
+    limit: number,
+  ): Array<{ content: string; rowId: number; turnId: string | null }> {
+    return this.db
+      .prepare(
+        `
+          SELECT
+            rowid as rowId,
+            content,
+            turn_id as turnId
+          FROM session_messages
+          WHERE session_id = ?
+            AND rowid > ?
+            AND role = 'assistant'
+            AND cancelled_at IS NULL
+          ORDER BY rowid ASC
+          LIMIT ?
+        `,
+      )
+      .all(sessionId, afterRowId, limit) as Array<{ content: string; rowId: number; turnId: string | null }>;
+  }
+
   listSessionMessages(sessionId: string, limit: number): SessionMessageRecord[] {
     return this.db
       .prepare(

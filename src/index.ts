@@ -167,6 +167,41 @@ function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/**
+ * Pull the prose out of a Conductor assistant row.
+ *
+ * `content` holds the agent envelope, whose `message.content` is a block list
+ * mixing text with tool_use and thinking blocks. Only the text blocks are worth
+ * sending to Telegram; a row that is purely tool calls yields nothing, which is
+ * how a tool-only step ends up skipped rather than posted as an empty message.
+ */
+export function extractAssistantEnvelopeText(content: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    // Not an envelope. Older rows stored bare text.
+    const bare = content.trim();
+    return bare || null;
+  }
+
+  const blocks = asRecord(asRecord(parsed)?.message)?.content;
+  if (!Array.isArray(blocks)) {
+    return null;
+  }
+
+  const text = blocks
+    .map((block) => {
+      const record = asRecord(block);
+      return record && asString(record.type) === "text" ? (asString(record.text) ?? "") : "";
+    })
+    .filter((part) => part.trim())
+    .join("\n\n")
+    .trim();
+
+  return text || null;
+}
+
 function formatRuntimeEventAt(value: string | null): string | null {
   if (!value) {
     return null;
@@ -390,6 +425,10 @@ const PANEL_EAGER_EDIT_CHARS = 180;
 const TURN_COMPLETION_SETTLE_MS = 1500;
 // Telegram drops the typing indicator after ~5s, so refresh inside that window.
 const TYPING_REFRESH_MS = 4000;
+// Conductor does not notify anyone when it writes a row, so replies to turns
+// started in the app have to be discovered by polling.
+const CONDUCTOR_OUTBOUND_POLL_MS = 3000;
+const CONDUCTOR_OUTBOUND_BATCH = 20;
 const NEW_SESSION_MODEL_LIMIT = 6;
 const NEW_SESSION_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 const TOPIC_LOCKED_CALLBACK_TEXT = "This topic is locked to its current chat. Use the main chat.";
@@ -469,6 +508,7 @@ export class TelegramConductorBridge {
   private readonly finalizedTurnIds = new Map<string, string>();
   private readonly backgroundTasks = new Set<Promise<void>>();
   private queueTimer: NodeJS.Timeout | null = null;
+  private conductorOutboundTimer: NodeJS.Timeout | null = null;
   private stopped = false;
 
   constructor(deps: BridgeDependencies = {}) {
@@ -538,6 +578,13 @@ export class TelegramConductorBridge {
       logger.error("failed to drain queue", error);
     });
 
+    this.conductorOutboundTimer = setInterval(() => {
+      void this.forwardConductorReplies().catch((error) => {
+        logger.error("failed to forward conductor replies", error);
+      });
+    }, CONDUCTOR_OUTBOUND_POLL_MS);
+    this.conductorOutboundTimer.unref?.();
+
     process.on("SIGINT", () => {
       void this.stop();
     });
@@ -566,6 +613,10 @@ export class TelegramConductorBridge {
       clearInterval(timer);
     }
     this.typingTimers.clear();
+    if (this.conductorOutboundTimer) {
+      clearInterval(this.conductorOutboundTimer);
+      this.conductorOutboundTimer = null;
+    }
     for (const timer of this.pendingSessionPanelFlushTimers.values()) {
       clearTimeout(timer);
     }
@@ -2812,6 +2863,56 @@ export class TelegramConductorBridge {
       return true;
     }
     return !runtime && this.finalizedTurnIds.get(sessionId) === turnId;
+  }
+
+  /**
+   * Forward replies from turns the Conductor app ran itself.
+   *
+   * The bridge only streams turns it started. A prompt typed into Conductor is
+   * executed by Conductor's own agent process, so the bridge never sees a turn --
+   * the only trace is a row in session_messages. Poll for those rows and push them
+   * to whichever Telegram conversations follow the session.
+   *
+   * Rows the bridge itself mirrored must not come back out: they were already sent
+   * as a live turn. Two guards, because the mirror inserts the row and records its
+   * fingerprint in separate statements and a poll can land between them:
+   * sessions with a bridge turn in flight are skipped entirely, and any row whose
+   * fingerprint the mirror already recorded is dropped.
+   */
+  private async forwardConductorReplies(): Promise<void> {
+    for (const sessionId of this.stateStore.listFollowedSessionIds()) {
+      // A bridge-driven turn is already streaming to Telegram.
+      if (this.runtimes.has(sessionId)) {
+        continue;
+      }
+
+      const cursor = this.stateStore.getConductorOutboundCursor(sessionId);
+      if (cursor === null) {
+        // First sight of this session: start at the end. Replaying the whole
+        // history into Telegram would be worse than missing it.
+        this.stateStore.setConductorOutboundCursor(sessionId, this.registry.maxSessionMessageRowId(sessionId));
+        continue;
+      }
+
+      const rows = this.registry.listAssistantMessagesAfterRowId(sessionId, cursor, CONDUCTOR_OUTBOUND_BATCH);
+      if (rows.length === 0) {
+        continue;
+      }
+
+      const followers = this.stateStore.listFollowingConversations(sessionId);
+      for (const row of rows) {
+        const text = extractAssistantEnvelopeText(row.content);
+        if (text) {
+          const fingerprint = this.stateStore.buildFingerprint(sessionId, row.turnId ?? "", "assistant", row.content);
+          if (!this.stateStore.hasFingerprint(fingerprint)) {
+            for (const location of followers) {
+              await this.safeSendMessage(location, text);
+            }
+          }
+        }
+        this.stateStore.setConductorOutboundCursor(sessionId, row.rowId);
+      }
+    }
   }
 
   /**
