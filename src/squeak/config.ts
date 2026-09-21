@@ -3,7 +3,7 @@ import path from "node:path";
 import { ZodError, z } from "zod";
 
 import { expandHome } from "../paths.js";
-import { defaultDuckyDbPath, resolveDuckyEnvPath } from "./paths.js";
+import { defaultSqueakDbPath, resolveSqueakEnvPath } from "./paths.js";
 
 function loadEnvFile(filePath: string): void {
   if (!fs.existsSync(filePath)) {
@@ -30,21 +30,21 @@ function loadEnvFile(filePath: string): void {
   }
 }
 
-export class DuckyConfigError extends Error {
+export class SqueakConfigError extends Error {
   readonly envFilePath: string;
 
   constructor(message: string, envFilePath: string, cause?: unknown) {
     super(message, { cause });
-    this.name = "DuckyConfigError";
+    this.name = "SqueakConfigError";
     this.envFilePath = envFilePath;
   }
 }
 
 const schema = z.object({
   /** A bot of its own, so status pings never interleave with the bridge's chat. */
-  DUCKY_BOT_TOKEN: z.string().min(10),
-  DUCKY_ALLOWED_CHAT_IDS: z.string().optional(),
-  DUCKY_DB_PATH: z.string().optional(),
+  SQUEAK_BOT_TOKEN: z.string().min(10),
+  SQUEAK_ALLOWED_CHAT_IDS: z.string().optional(),
+  SQUEAK_DB_PATH: z.string().optional(),
   CONDUCTOR_DB_PATH: z.string().default("~/Library/Application Support/com.conductor.app/conductor.db"),
   WORKSPACES_ROOT: z.string().default("~/conductor/workspaces"),
   DEFAULT_FALLBACK_MODEL: z.string().default("gpt-5.4"),
@@ -57,7 +57,7 @@ const schema = z.object({
   FLEET_CONTEXT_PRESSURE_PERCENT: z.coerce.number().int().min(10).max(100).default(80),
 });
 
-export interface DuckyConfig {
+export interface SqueakConfig {
   botToken: string;
   allowedChatIds: Set<number> | null;
   dbPath: string;
@@ -79,8 +79,8 @@ export interface DuckyConfig {
  * Read lazily rather than at import time, so `setup` and `help` still work
  * before a token exists.
  */
-export function loadDuckyConfig(): DuckyConfig {
-  const envFilePath = resolveDuckyEnvPath();
+export function loadSqueakConfig(): SqueakConfig {
+  const envFilePath = resolveSqueakEnvPath();
   loadEnvFile(envFilePath);
   const baseDir = path.dirname(envFilePath);
 
@@ -89,8 +89,8 @@ export function loadDuckyConfig(): DuckyConfig {
     parsed = schema.parse(process.env);
   } catch (error) {
     if (error instanceof ZodError) {
-      throw new DuckyConfigError(
-        `Rubber ducky is not configured (missing DUCKY_BOT_TOKEN?). Run \`rubber-ducky setup\` or edit ${envFilePath}.`,
+      throw new SqueakConfigError(
+        `Squeak is not configured (missing SQUEAK_BOT_TOKEN?). Run \`squeak setup\` or edit ${envFilePath}.`,
         envFilePath,
         error,
       );
@@ -98,9 +98,9 @@ export function loadDuckyConfig(): DuckyConfig {
     throw error;
   }
 
-  const allowedChatIds = parsed.DUCKY_ALLOWED_CHAT_IDS
+  const allowedChatIds = parsed.SQUEAK_ALLOWED_CHAT_IDS
     ? new Set(
-        parsed.DUCKY_ALLOWED_CHAT_IDS.split(",")
+        parsed.SQUEAK_ALLOWED_CHAT_IDS.split(",")
           .map((value) => Number.parseInt(value.trim(), 10))
           .filter((value) => Number.isFinite(value)),
       )
@@ -112,9 +112,9 @@ export function loadDuckyConfig(): DuckyConfig {
   };
 
   return {
-    botToken: parsed.DUCKY_BOT_TOKEN,
+    botToken: parsed.SQUEAK_BOT_TOKEN,
     allowedChatIds,
-    dbPath: parsed.DUCKY_DB_PATH ? resolve(parsed.DUCKY_DB_PATH) : defaultDuckyDbPath(),
+    dbPath: parsed.SQUEAK_DB_PATH ? resolve(parsed.SQUEAK_DB_PATH) : defaultSqueakDbPath(),
     supportDir: baseDir,
     conductorDbPath: resolve(parsed.CONDUCTOR_DB_PATH),
     workspacesRoot: resolve(parsed.WORKSPACES_ROOT),

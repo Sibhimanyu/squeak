@@ -30,7 +30,7 @@ export interface FleetControllerDependencies {
   ingress: HookIngressServer | null;
   /**
    * Hand a Conductor session back to the bridge's normal chat flow. Absent
-   * for the rubber ducky, which only reports and cannot continue a chat.
+   * for Squeak, which only reports and cannot continue a chat.
    */
   openConductorSession?: ((location: TelegramConversationTarget, conductorSessionId: string) => Promise<void>) | null;
   /** Chats allowed to use the bridge, used to pick a default push target. */

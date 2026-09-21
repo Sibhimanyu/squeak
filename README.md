@@ -6,24 +6,29 @@ Browse repos, switch branches, resume Codex or Claude chats, create new chats an
 
 This bridge is local-first: it must run on the same Mac that already has Conductor installed and initialized. It reads the local Conductor database and launches the local Codex and Claude Code binaries from that machine. It is not a remote bridge for controlling another computer's Conductor instance.
 
-## Rubber ducky
+## Squeak
+
+Named for the noise a rubber duck makes, which is also what a pager does.
 
 A **second, separate daemon with its own Telegram bot**. The bridge above is a
-conversation — you navigate it and talk to agents through it. The ducky is a
+conversation — you navigate it and talk to agents through it. Squeak is a
 pager: it watches every coding agent on the Mac and messages you when one
 finishes or gets stuck, and it never tries to hold a conversation.
 
 They are deliberately apart. Status pings landing in the middle of a chat bury
 the chat, and vice versa.
 
+`assets/squeak.mp3` is a synthesised duck squeak, under Telegram's 5s / 300KB
+limit, for use as the bot's notification tone.
+
 ```bash
-rubber-ducky setup          # paste a token from @BotFather
-rubber-ducky install-hooks  # live signal; see below
-rubber-ducky                # start it
+squeak setup          # paste a token from @BotFather
+squeak install-hooks  # live signal; see below
+squeak                      # start it
 ```
 
-Its config lives at `~/Library/Application Support/rubber-ducky/.env`, its
-state at `ducky.db` beside it, and it talks to a different bot than the
+Its config lives at `~/Library/Application Support/squeak/.env`, its
+state at `squeak.db` beside it, and it talks to a different bot than the
 bridge. Only one of the two may run the fleet at a time — they would bind the
 same hook port and double every notification — so the bridge no longer does.
 
@@ -140,9 +145,9 @@ cannot see an approval prompt at all: agents do not write those to disk.
 Installing hooks fixes both.
 
 ```bash
-rubber-ducky install-hooks    # merge into your existing hook config
-rubber-ducky hooks-status
-rubber-ducky uninstall-hooks  # removes only what this tool added
+squeak install-hooks    # merge into your existing hook config
+squeak hooks-status
+squeak uninstall-hooks  # removes only what this tool added
 ```
 
 The hooks are additive: existing entries in `~/.claude/settings.json` and

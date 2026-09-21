@@ -38,7 +38,7 @@ export interface FleetRuntime {
 /**
  * Assemble the whole fleet stack: observers, monitor, hook ingress, git.
  *
- * Extracted from the bridge so the rubber ducky can own it instead. Only one
+ * Extracted from the bridge so Squeak can own it instead. Only one
  * process may run this at a time — two would bind the same hook port and
  * double every notification.
  */

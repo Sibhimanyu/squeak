@@ -13,13 +13,13 @@ import {
   uninstallFleetHooks,
 } from "../fleet/hook-install.js";
 import { HookIngressServer } from "../fleet/hook-ingress.js";
-import { resolveDuckyEnvPath } from "./paths.js";
+import { resolveSqueakEnvPath } from "./paths.js";
 
-const TEMPLATE = `# Rubber ducky — a status-only Telegram bot for your coding agents.
+const TEMPLATE = `# Squeak — a status-only Telegram bot for your coding agents.
 # Create a bot with @BotFather, then paste its token here.
-DUCKY_BOT_TOKEN=
-# Comma-separated chat IDs allowed to talk to the duck.
-DUCKY_ALLOWED_CHAT_IDS=
+SQUEAK_BOT_TOKEN=
+# Comma-separated chat IDs allowed to talk to Squeak.
+SQUEAK_ALLOWED_CHAT_IDS=
 
 # Loopback port the installed agent hooks report to.
 FLEET_HOOK_PORT=8477
@@ -30,10 +30,10 @@ FLEET_CONTEXT_PRESSURE_PERCENT=80
 `;
 
 function printUsage(): void {
-  console.log(`Usage: rubber-ducky [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|help]
+  console.log(`Usage: squeak [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|help]
 
 Commands:
-  start            Start the duck (default)
+  start            Start squeaking (default)
   setup            Interactively create or update the config
   init             Write a template config
   config-path      Print the config file path
@@ -44,7 +44,7 @@ Commands:
 }
 
 function hookPaths(): ReturnType<typeof defaultHookInstallPaths> {
-  return defaultHookInstallPaths(path.dirname(resolveDuckyEnvPath()));
+  return defaultHookInstallPaths(path.dirname(resolveSqueakEnvPath()));
 }
 
 function hookPort(): number {
@@ -53,7 +53,7 @@ function hookPort(): number {
 }
 
 function initConfig(): string {
-  const envPath = resolveDuckyEnvPath();
+  const envPath = resolveSqueakEnvPath();
   fs.mkdirSync(path.dirname(envPath), { recursive: true });
   if (!fs.existsSync(envPath)) {
     fs.writeFileSync(envPath, TEMPLATE, { mode: 0o600 });
@@ -93,7 +93,7 @@ function writeValues(envPath: string, values: Record<string, string>): void {
 
 async function setupConfig(): Promise<void> {
   if (!process.stdin.isTTY) {
-    throw new Error("`rubber-ducky setup` needs a terminal. Use `rubber-ducky init` and edit the file instead.");
+    throw new Error("`squeak setup` needs a terminal. Use `squeak init` and edit the file instead.");
   }
   const envPath = initConfig();
   const existing = readValues(envPath);
@@ -104,30 +104,30 @@ async function setupConfig(): Promise<void> {
   try {
     console.log(`Config: ${envPath}`);
     console.log("Create a bot with @BotFather on Telegram, then paste its token.\n");
-    const token = (await ask("Ducky bot token", existing.DUCKY_BOT_TOKEN)).trim() || existing.DUCKY_BOT_TOKEN || "";
+    const token = (await ask("Squeak bot token", existing.SQUEAK_BOT_TOKEN)).trim() || existing.SQUEAK_BOT_TOKEN || "";
     const chats =
-      (await ask("Allowed chat IDs (comma-separated)", existing.DUCKY_ALLOWED_CHAT_IDS)).trim() ||
-      existing.DUCKY_ALLOWED_CHAT_IDS ||
+      (await ask("Allowed chat IDs (comma-separated)", existing.SQUEAK_ALLOWED_CHAT_IDS)).trim() ||
+      existing.SQUEAK_ALLOWED_CHAT_IDS ||
       "";
     if (token.length < 10) {
       throw new Error("That token looks too short.");
     }
-    writeValues(envPath, { ...existing, DUCKY_BOT_TOKEN: token, DUCKY_ALLOWED_CHAT_IDS: chats });
+    writeValues(envPath, { ...existing, SQUEAK_BOT_TOKEN: token, SQUEAK_ALLOWED_CHAT_IDS: chats });
   } finally {
     rl.close();
   }
 
   console.log(`\nSaved ${envPath}`);
-  console.log("Next: `rubber-ducky install-hooks` for live signal, then `rubber-ducky`.");
+  console.log("Next: `squeak install-hooks` for live signal, then `squeak`.");
 }
 
-async function startDucky(): Promise<void> {
-  const { loadDuckyConfig, DuckyConfigError } = await import("./config.js");
-  const { DuckyApp } = await import("./app.js");
+async function startSqueak(): Promise<void> {
+  const { loadSqueakConfig, SqueakConfigError } = await import("./config.js");
+  const { SqueakApp } = await import("./app.js");
   try {
-    await new DuckyApp(loadDuckyConfig()).start();
+    await new SqueakApp(loadSqueakConfig()).start();
   } catch (error) {
-    if (error instanceof DuckyConfigError) {
+    if (error instanceof SqueakConfigError) {
       console.error(error.message);
       process.exitCode = 1;
       return;
@@ -139,7 +139,7 @@ async function startDucky(): Promise<void> {
 export async function main(argv: string[]): Promise<void> {
   switch (argv[0] ?? "start") {
     case "start":
-      await startDucky();
+      await startSqueak();
       return;
     case "setup":
       await setupConfig();
@@ -148,7 +148,7 @@ export async function main(argv: string[]): Promise<void> {
       console.log(`Wrote ${initConfig()}`);
       return;
     case "config-path":
-      console.log(resolveDuckyEnvPath());
+      console.log(resolveSqueakEnvPath());
       return;
     case "install-hooks": {
       const paths = hookPaths();

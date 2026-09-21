@@ -8,20 +8,20 @@ import type { TelegramConversationTarget, TelegramUpdate } from "../types.js";
 import { logger } from "../utils/logger.js";
 import { normalizeTelegramCommand } from "../utils/telegram-command.js";
 import { splitMarkdown } from "../utils/tg-format.js";
-import type { DuckyConfig } from "./config.js";
+import type { SqueakConfig } from "./config.js";
 
 const COMMANDS = [
   { command: "radar", description: "Show what every agent is doing right now" },
   { command: "mute", description: "Silence alerts for an hour" },
   { command: "unmute", description: "Resume alerts" },
   { command: "hooks", description: "Check whether live signal is wired up" },
-  { command: "help", description: "What the duck does" },
+  { command: "help", description: "What Squeak does" },
 ];
 
 function helpText(): string {
   return [
-    "**Rubber ducky** watches every coding agent on the Mac and pings you when one",
-    "of them wants something. It reports; it does not drive. To actually reply to a",
+    "**Squeak** watches every coding agent on the Mac and squeaks when one of them",
+    "wants something. It reports; it does not drive. To actually reply to a",
     "session, use Conductor or the conductor-tg bot.",
     "",
     "It messages you when a session:",
@@ -38,21 +38,21 @@ function helpText(): string {
 }
 
 /**
- * The rubber ducky: a notification-only daemon with its own bot.
+ * Squeak: a notification-only daemon with its own bot.
  *
  * Deliberately separate from the bridge. The bridge is a conversation — you
  * navigate it and talk to agents through it. This is a pager, and mixing the
  * two in one chat means status pings bury the conversation and vice versa.
  */
-export class DuckyApp {
-  private readonly config: DuckyConfig;
+export class SqueakApp {
+  private readonly config: SqueakConfig;
   private readonly telegram: TelegramClient;
   private readonly runtime: FleetRuntime;
   private readonly controller: FleetController;
   private lastUpdateId = 0;
   private stopped = false;
 
-  constructor(config: DuckyConfig) {
+  constructor(config: SqueakConfig) {
     this.config = config;
     this.telegram = new TelegramClient(config.botToken);
     this.runtime = createFleetRuntime({
@@ -84,13 +84,13 @@ export class DuckyApp {
   async start(): Promise<void> {
     await this.controller.start();
     await this.telegram.setMyCommands(COMMANDS).catch((error) => {
-      logger.warn("could not publish ducky commands", { error: summarizeTelegramError(error) });
+      logger.warn("could not publish squeak commands", { error: summarizeTelegramError(error) });
     });
 
     process.on("SIGINT", () => void this.stop());
     process.on("SIGTERM", () => void this.stop());
 
-    logger.info("rubber ducky started", { hookPort: this.config.hookPort });
+    logger.info("squeak started", { hookPort: this.config.hookPort });
     await this.pollLoop();
   }
 
@@ -100,7 +100,7 @@ export class DuckyApp {
     }
     this.stopped = true;
     await this.controller.stop().catch(() => undefined);
-    logger.info("rubber ducky stopped");
+    logger.info("squeak stopped");
   }
 
   private async pollLoop(): Promise<void> {
@@ -113,7 +113,7 @@ export class DuckyApp {
         }
       } catch (error) {
         if (!isTransientTelegramError(error)) {
-          logger.error("ducky poll failed", { error: summarizeTelegramError(error) });
+          logger.error("squeak poll failed", { error: summarizeTelegramError(error) });
         }
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
@@ -194,7 +194,7 @@ export class DuckyApp {
       "",
       `Without them I poll every ${Math.round(this.config.pollIntervalMs / 1000)}s and **cannot see permission prompts at all**.`,
       "",
-      "Install with `rubber-ducky install-hooks` on this Mac.",
+      "Install with `squeak install-hooks` on this Mac.",
     ].join("\n");
   }
 
@@ -205,7 +205,7 @@ export class DuckyApp {
           ...(location.messageThreadId !== null ? { message_thread_id: location.messageThreadId } : {}),
         })
         .catch((error) => {
-          logger.warn("ducky send failed", { error: summarizeTelegramError(error) });
+          logger.warn("squeak send failed", { error: summarizeTelegramError(error) });
         });
     }
   }

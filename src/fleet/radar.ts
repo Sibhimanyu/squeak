@@ -261,7 +261,7 @@ function cardVerb(kind: AttentionKind): string {
 }
 
 /**
- * `canDrive` is false for the rubber ducky, which is a notifier with no
+ * `canDrive` is false for Squeak, which is a notifier with no
  * control channel of its own — offering Reply there would open a chat the
  * bot cannot actually continue.
  */

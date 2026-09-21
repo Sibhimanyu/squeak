@@ -19,7 +19,7 @@ deployment section before changing anything under `src/`.
 | `src/telegram/client.ts` | Telegram API calls, HTML rendering, retry/fallback |
 | `src/utils/tg-format.ts` | markdown to Telegram HTML, message splitting |
 | `src/bridge/state-store.ts` | the bridge's own SQLite state (`bridge.db`) |
-| `src/ducky/` | the rubber ducky: a separate status-only daemon with its own bot |
+| `src/squeak/` | Squeak: a separate status-only daemon with its own bot |
 | `src/fleet/runtime.ts` | assembles the fleet stack; only one process may run it |
 | `src/fleet/` | the fleet radar: every agent session on the Mac, not just Conductor's |
 | `src/fleet/observers/` | one file per discovery source; none of them know about each other |
@@ -96,19 +96,19 @@ test for anything you fix is expected; the suite is fast.
 ## Two daemons, not one
 
 `conductor-tg` is the bridge: a conversation you navigate and talk to agents
-through. `rubber-ducky` is a pager: it watches every agent on the Mac and
+through. `squeak` is a pager: it watches every agent on the Mac and
 messages you when one finishes or blocks. Separate binaries, separate bots,
-separate config (`~/Library/Application Support/rubber-ducky/.env`), separate
-state (`ducky.db`).
+separate config (`~/Library/Application Support/squeak/.env`), separate
+state (`squeak.db`).
 
 - **Only one process may run the fleet.** Two would bind the same hook port
   and send every notification twice. The bridge no longer wires it up at all;
-  `createFleetRuntime` is the ducky's.
-- The ducky passes `openConductorSession: null`, which hides Reply and Open on
+  `createFleetRuntime` belongs to Squeak.
+- Squeak passes `openConductorSession: null`, which hides Reply and Open on
   its cards. It has no control channel — offering them would open a chat it
   cannot continue.
 - The desktop duck still reads `127.0.0.1:8477/state`; that is now served by
-  the ducky rather than the bridge.
+  Squeak rather than the bridge.
 
 ## The fleet layer
 

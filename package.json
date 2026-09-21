@@ -8,7 +8,7 @@
   "main": "./dist/index.js",
   "bin": {
     "conductor-tg": "dist/cli.js",
-    "rubber-ducky": "dist/ducky/cli.js"
+    "squeak": "dist/squeak/cli.js"
   },
   "files": [
     "dist",
