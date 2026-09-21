@@ -70,6 +70,8 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     contextPercent: conductor?.contextPercent ?? base.contextPercent,
     retired: conductor?.retired ?? base.retired,
     baseRef: conductor?.baseRef ?? base.baseRef,
+    // Only the transcript observer can ever have this; Conductor does not.
+    costUsd: base.costUsd,
     lastActivityAt,
     pid: null,
     alive: false,

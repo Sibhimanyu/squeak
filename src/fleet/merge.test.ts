@@ -21,6 +21,7 @@ function observed(overrides: Partial<ObservedSession> & Pick<ObservedSession, "k
     contextPercent: null,
     retired: false,
     baseRef: null,
+    costUsd: null,
     ...overrides,
   };
 }

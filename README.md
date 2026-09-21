@@ -107,6 +107,21 @@ Git runs only for sessions that are actually rendered, and results are cached
 for 30 seconds — the twenty idle sessions that never reach the radar cost
 nothing.
 
+### Usage tracking
+
+Squeak reads OpenAI's own account-wide rate-limit report straight out of
+Codex's rollout files — the 5-hour and weekly windows, and when each resets —
+at the cost of one file read, no API call and no credential of its own. It
+shows up on `/radar` once a window is worth mentioning, and pushes a one-time
+warning past a configurable threshold (`FLEET_CODEX_QUOTA_WARN_PERCENT`,
+default 85%) so you find out before you hit the wall mid-task rather than
+after.
+
+Claude Code never writes the same thing to disk — only to the live stream of
+whatever process spawned it, which for a Conductor session is Conductor
+itself, not Squeak. What Claude *does* persist is a running cost total per
+session, so that is tracked instead: real, but per-session, not a quota.
+
 ### The duck
 
 A rubber duck floats on your screen and shows the same thing the radar does.

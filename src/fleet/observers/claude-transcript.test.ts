@@ -168,6 +168,45 @@ describe("ClaudeTranscriptObserver", () => {
   });
 });
 
+describe("cost-state parsing", () => {
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+
+  it("reads the running cost total Claude Code reports", () => {
+    const projectsDir = makeProjectsDir();
+    writeTranscript(projectsDir, "session-cost", [
+      userEntry("2026-09-20T11:58:00.000Z", "go"),
+      assistantEntry("2026-09-20T11:59:00.000Z", "end_turn", [{ type: "text", text: "done" }]),
+      { type: "cost-state", sessionId: "session-cost", totalCostUSD: 0.564495, modelUsage: {} },
+    ]);
+
+    const [session] = new ClaudeTranscriptObserver({ projectsDir, now: () => now }).observe();
+
+    expect(session?.costUsd).toBe(0.564495);
+  });
+
+  it("takes the most recent figure when cost-state appears more than once", () => {
+    const projectsDir = makeProjectsDir();
+    writeTranscript(projectsDir, "session-cost2", [
+      { type: "cost-state", sessionId: "x", totalCostUSD: 0.5 },
+      userEntry("2026-09-20T11:59:00.000Z", "go"),
+      { type: "cost-state", sessionId: "x", totalCostUSD: 88.25 },
+    ]);
+
+    const [session] = new ClaudeTranscriptObserver({ projectsDir, now: () => now }).observe();
+
+    expect(session?.costUsd).toBe(88.25);
+  });
+
+  it("is null for a session that never reported a cost", () => {
+    const projectsDir = makeProjectsDir();
+    writeTranscript(projectsDir, "session-nocost", [userEntry("2026-09-20T11:58:00.000Z", "go")]);
+
+    const [session] = new ClaudeTranscriptObserver({ projectsDir, now: () => now }).observe();
+
+    expect(session?.costUsd).toBeNull();
+  });
+});
+
 describe("originFromEntrypoint", () => {
   it("separates SDK-driven sessions from hand-run ones", () => {
     expect(originFromEntrypoint("sdk-ts")).toBe("conductor");

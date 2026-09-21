@@ -48,6 +48,7 @@ function observed(overrides: Partial<ObservedSession> = {}): ObservedSession {
     contextPercent: null,
     retired: false,
     baseRef: null,
+    costUsd: null,
     ...overrides,
   };
 }
@@ -381,5 +382,89 @@ describe("git enrichment", () => {
 
     expect(snapshot.sessions).toHaveLength(1);
     expect(snapshot.sessions[0]?.git).toBeNull();
+  });
+});
+
+describe("codex quota alerts", () => {
+  function usageWith(primaryPercent: number, resetsAt = "2026-09-20T18:00:00.000Z") {
+    return {
+      planType: "team",
+      primary: { usedPercent: primaryPercent, windowMinutes: 300, resetsAt },
+      secondary: null,
+      hasCredits: false,
+      creditBalance: null,
+      observedAt: "2026-09-20T12:00:00.000Z",
+    };
+  }
+
+  function makeMonitorWithQuota(codexUsage: { read: () => ReturnType<typeof usageWith> | null }) {
+    const store = makeStore();
+    const alerts: Array<{ window: string }> = [];
+    const monitor = new FleetMonitor(
+      {
+        store,
+        conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
+        claude: { observe: () => [] } as unknown as FleetMonitorDependencies["claude"],
+        codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
+        liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
+        codexUsage: codexUsage as unknown as NonNullable<FleetMonitorDependencies["codexUsage"]>,
+      },
+      { now: () => Date.parse("2026-09-20T12:00:00.000Z") },
+    );
+    monitor.onQuotaAlert((_usage, window) => alerts.push({ window }));
+    return { monitor, alerts };
+  }
+
+  it("does not alert below the threshold", async () => {
+    const { monitor, alerts } = makeMonitorWithQuota({ read: () => usageWith(50) });
+    const snapshot = await monitor.refresh();
+
+    expect(alerts).toHaveLength(0);
+    expect(snapshot.codexUsage?.primary?.usedPercent).toBe(50);
+  });
+
+  it("alerts once when a window crosses the threshold", async () => {
+    const { monitor, alerts } = makeMonitorWithQuota({ read: () => usageWith(90) });
+
+    await monitor.refresh();
+    await monitor.refresh();
+
+    expect(alerts).toEqual([{ window: "primary" }]);
+  });
+
+  it("alerts again after the window resets and climbs past threshold once more", async () => {
+    let usage = usageWith(90, "2026-09-20T18:00:00.000Z");
+    const { monitor, alerts } = makeMonitorWithQuota({ read: () => usage });
+
+    await monitor.refresh();
+    usage = usageWith(91, "2026-09-21T18:00:00.000Z"); // window has reset
+    await monitor.refresh();
+
+    expect(alerts).toEqual([{ window: "primary" }, { window: "primary" }]);
+  });
+
+  it("does not crash the refresh when the reader throws", async () => {
+    const { monitor } = makeMonitorWithQuota({
+      read: () => {
+        throw new Error("codex home unreadable");
+      },
+    });
+
+    const snapshot = await monitor.refresh();
+
+    expect(snapshot.codexUsage).toBeNull();
+  });
+
+  it("has nothing to report when no reader is wired up", async () => {
+    const store = makeStore();
+    const monitor = new FleetMonitor({
+      store,
+      conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
+      claude: { observe: () => [] } as unknown as FleetMonitorDependencies["claude"],
+      codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
+      liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
+    });
+
+    expect((await monitor.refresh()).codexUsage).toBeNull();
   });
 });

@@ -79,6 +79,12 @@ export interface ObservedSession {
    * upstream, which is the normal state of a fresh Conductor branch.
    */
   baseRef: string | null;
+  /**
+   * What this session has cost so far, when the agent reports it locally.
+   * Only Claude Code does — Codex's spend shows up as account-wide quota
+   * instead, in FleetSnapshot.codexUsage, not per session.
+   */
+  costUsd: number | null;
 }
 
 /** A session after the monitor has merged observers, hooks, and liveness. */

@@ -25,6 +25,7 @@ function session(state: FleetState, key: string = state): FleetSession {
     contextPercent: null,
     retired: false,
     baseRef: null,
+    costUsd: null,
     pid: null,
     alive: true,
     git: null,

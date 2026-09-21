@@ -93,6 +93,23 @@ sleeping `z`s, the shadow — is drawn as an overlay, so it keeps working
 whatever the artwork is. Offline is shown by desaturating the sprite, since a
 PNG cannot be recoloured the way the fallback's fills can.
 
+## The menu bar
+
+Click the tray icon for provider usage — Codex's 5-hour and 7-day quota, and
+Claude's running spend across active sessions — plus Show/Hide, Peek, Reset
+position and Quit. It shows usage rather than the session list on purpose:
+the session list already lives in the duck's own panel, one click away.
+
+Two independent global shortcuts, kept separate deliberately:
+
+| shortcut | does |
+| --- | --- |
+| `⌃⌥D` | Peek at the panel (also unhides the duck if it was hidden) |
+| `⌃⌥H` | Show/hide the duck itself |
+
+Change either in `~/Library/Application Support/conductor-tg-duck/duck.json`
+(`"shortcut"` and `"visibilityShortcut"`).
+
 ## Floating across Spaces
 
 The window is an NSPanel pinned to all Spaces including fullscreen ones, at

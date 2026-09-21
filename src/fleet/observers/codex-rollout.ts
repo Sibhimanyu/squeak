@@ -145,7 +145,9 @@ export class CodexRolloutObserver {
       // Only Conductor knows these; a transcript cannot see either.
       contextPercent: null,
       retired: false,
+      // Codex's spend is account-wide quota, not a per-session figure.
       baseRef: null,
+      costUsd: null,
     };
   }
 

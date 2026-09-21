@@ -13,6 +13,7 @@ import { isSessionEndEvent } from "./hook-protocol.js";
 import type { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import type { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import type { ConductorObserver } from "./observers/conductor.js";
+import type { CodexUsage, CodexUsageReader } from "./codex-usage.js";
 import type { GitState, GitStateReader } from "./git-state.js";
 import type { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { AttentionItem, FleetSession, HookEvent, ObservedSession } from "./types.js";
@@ -24,6 +25,8 @@ export interface FleetSnapshot {
   active: FleetSession[];
   attention: AttentionItem[];
   generatedAt: string;
+  /** OpenAI's account-wide rate-limit state, or null if never observed. */
+  codexUsage: CodexUsage | null;
 }
 
 export interface FleetMonitorDependencies {
@@ -34,6 +37,8 @@ export interface FleetMonitorDependencies {
   liveness: ProcessLivenessObserver;
   /** Optional: without it the radar simply shows no working-tree detail. */
   git?: GitStateReader | null;
+  /** Optional: without it Codex quota is simply never shown or pushed. */
+  codexUsage?: CodexUsageReader | null;
 }
 
 export interface FleetMonitorOptions {
@@ -44,12 +49,15 @@ export interface FleetMonitorOptions {
   snapshotTtlMs?: number;
   /** Context share past which a session is flagged as close to compacting. */
   contextPressurePercent?: number;
+  /** Codex quota usage past which a one-time warning is pushed. */
+  codexQuotaWarnPercent?: number;
   now?: () => number;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 20_000;
 const DEFAULT_HOOK_DEBOUNCE_MS = 400;
 const DEFAULT_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_CODEX_QUOTA_WARN_PERCENT = 85;
 
 /**
  * Turns "what is on this machine" into "what needs you".
@@ -66,6 +74,7 @@ export class FleetMonitor {
   private readonly hookDebounceMs: number;
   private readonly snapshotTtlMs: number;
   private readonly contextPressurePercent: number;
+  private readonly codexQuotaWarnPercent: number;
   private readonly now: () => number;
 
   /** Latest hook report per agent session id. */
@@ -78,7 +87,10 @@ export class FleetMonitor {
     active: [],
     attention: [],
     generatedAt: new Date(0).toISOString(),
+    codexUsage: null,
   };
+  /** A plain event for something that has no FleetSession to attach to. */
+  private readonly quotaListeners = new Set<(usage: CodexUsage, window: "primary" | "secondary") => void>();
   private pollTimer: NodeJS.Timeout | null = null;
   private hookTimer: NodeJS.Timeout | null = null;
   private refreshing = false;
@@ -91,6 +103,7 @@ export class FleetMonitor {
     this.hookDebounceMs = options.hookDebounceMs ?? DEFAULT_HOOK_DEBOUNCE_MS;
     this.snapshotTtlMs = options.snapshotTtlMs ?? DEFAULT_SNAPSHOT_TTL_MS;
     this.contextPressurePercent = options.contextPressurePercent ?? DEFAULT_CONTEXT_PRESSURE_PERCENT;
+    this.codexQuotaWarnPercent = options.codexQuotaWarnPercent ?? DEFAULT_CODEX_QUOTA_WARN_PERCENT;
     this.now = options.now ?? Date.now;
   }
 
@@ -106,6 +119,11 @@ export class FleetMonitor {
   onPush(listener: (items: AttentionItem[]) => void): () => void {
     this.pushListeners.add(listener);
     return () => this.pushListeners.delete(listener);
+  }
+
+  onQuotaAlert(listener: (usage: CodexUsage, window: "primary" | "secondary") => void): () => void {
+    this.quotaListeners.add(listener);
+    return () => this.quotaListeners.delete(listener);
   }
 
   start(): void {
@@ -259,12 +277,63 @@ export class FleetMonitor {
       this.emitPush(sortAttention(pushes.map((item) => enriched.remap(item))));
     }
 
+    const codexUsage = this.readCodexUsage();
+    if (codexUsage) {
+      this.checkQuotaAlerts(codexUsage, observedAt);
+    }
+
     return {
       sessions: enriched.sessions,
       active: enriched.sessions.filter((session) => activeKeys.has(session.key)),
       attention: sortAttention(attention.map((item) => enriched.remap(item))),
       generatedAt: observedAt,
+      codexUsage,
     };
+  }
+
+  private readCodexUsage(): CodexUsage | null {
+    if (!this.deps.codexUsage) {
+      return null;
+    }
+    try {
+      return this.deps.codexUsage.read();
+    } catch (error) {
+      logger.warn("fleet codex usage read failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Account-wide, so this has no FleetSession to attach an AttentionItem to —
+   * it gets its own small push path rather than being forced into the
+   * per-session model. Keyed on resetsAt so it fires once per reset cycle
+   * rather than once per point of usage climbed.
+   */
+  private checkQuotaAlerts(usage: CodexUsage, observedAt: string): void {
+    const windows: Array<["primary" | "secondary", typeof usage.primary]> = [
+      ["primary", usage.primary],
+      ["secondary", usage.secondary],
+    ];
+    for (const [name, window] of windows) {
+      if (!window || window.usedPercent < this.codexQuotaWarnPercent) {
+        continue;
+      }
+      const claimed = this.deps.store.claimQuotaAlert(name, window.resetsAt, observedAt);
+      if (!claimed) {
+        continue;
+      }
+      for (const listener of this.quotaListeners) {
+        try {
+          listener(usage, name);
+        } catch (error) {
+          logger.warn("fleet quota listener threw", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
   }
 
   /**

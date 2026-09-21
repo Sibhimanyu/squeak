@@ -199,3 +199,31 @@ describe("radar anchors", () => {
     expect(store.listRadarAnchors()).toHaveLength(1);
   });
 });
+
+describe("claimQuotaAlert", () => {
+  it("fires once per reset cycle, keyed on when the window resets", () => {
+    const store = makeStore();
+
+    const first = store.claimQuotaAlert("primary", "2026-09-20T18:00:00.000Z", "2026-09-20T12:00:00.000Z");
+    const repeat = store.claimQuotaAlert("primary", "2026-09-20T18:00:00.000Z", "2026-09-20T12:05:00.000Z");
+
+    expect(first).toBe(true);
+    expect(repeat).toBe(false);
+  });
+
+  it("fires again once the window has actually reset", () => {
+    const store = makeStore();
+    store.claimQuotaAlert("primary", "2026-09-20T18:00:00.000Z", "2026-09-20T12:00:00.000Z");
+
+    const afterReset = store.claimQuotaAlert("primary", "2026-09-21T18:00:00.000Z", "2026-09-21T12:00:00.000Z");
+
+    expect(afterReset).toBe(true);
+  });
+
+  it("tracks each window independently", () => {
+    const store = makeStore();
+
+    expect(store.claimQuotaAlert("primary", "2026-09-20T18:00:00.000Z", "t")).toBe(true);
+    expect(store.claimQuotaAlert("secondary", "2026-09-27T18:00:00.000Z", "t")).toBe(true);
+  });
+});

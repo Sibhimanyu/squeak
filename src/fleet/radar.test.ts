@@ -4,9 +4,11 @@ import type { FleetSnapshot } from "./fleet-monitor.js";
 import {
   attentionCardKeyboard,
   formatAge,
+  formatCountdown,
   diffSummaryKeyboard,
   radarKeyboard,
   renderAttentionCard,
+  renderQuotaAlert,
   renderRadar,
   sessionLabel,
   shortenPath,
@@ -39,6 +41,7 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     contextPercent: null,
     retired: false,
     baseRef: null,
+    costUsd: null,
     git: null,
     ...overrides,
   };
@@ -59,6 +62,7 @@ function snapshot(overrides: Partial<FleetSnapshot> = {}): FleetSnapshot {
     sessions: [],
     attention: [],
     generatedAt: "2026-09-20T12:00:00.000Z",
+    codexUsage: null,
     ...overrides,
     // The radar renders the active set; default it to whatever the test
     // supplied as sessions so each case reads as one list.
@@ -339,5 +343,77 @@ describe("diffSummaryKeyboard", () => {
     expect(shortened).toHaveLength(20);
     // A path that already fits is left exactly as it is.
     expect(truncateStart("src/a.ts", 20)).toBe("src/a.ts");
+  });
+});
+
+describe("Codex quota on the radar", () => {
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+
+  function usage(overrides: Partial<{ primaryPercent: number; secondaryPercent: number }> = {}) {
+    return {
+      planType: "team",
+      primary: {
+        usedPercent: overrides.primaryPercent ?? 60,
+        windowMinutes: 300,
+        resetsAt: "2026-09-20T14:00:00.000Z",
+      },
+      secondary: overrides.secondaryPercent
+        ? { usedPercent: overrides.secondaryPercent, windowMinutes: 10080, resetsAt: "2026-09-27T12:00:00.000Z" }
+        : null,
+      hasCredits: false,
+      creditBalance: null,
+      observedAt: "2026-09-20T11:59:00.000Z",
+    };
+  }
+
+  it("shows a window once it is worth mentioning", () => {
+    const text = renderRadar(snapshot({ codexUsage: usage({ primaryPercent: 60 }) }), now);
+    expect(text).toContain("Codex quota: 60% (5h, resets in 2h)");
+  });
+
+  it("says nothing for a window that is not close to the limit", () => {
+    const text = renderRadar(snapshot({ codexUsage: usage({ primaryPercent: 10 }) }), now);
+    expect(text).not.toContain("Codex quota");
+  });
+
+  it("shows both windows when both matter", () => {
+    const text = renderRadar(snapshot({ codexUsage: usage({ primaryPercent: 60, secondaryPercent: 70 }) }), now);
+    expect(text).toContain("60% (5h");
+    expect(text).toContain("70% (7d");
+  });
+
+  it("says nothing when there is no usage data at all", () => {
+    expect(renderRadar(snapshot({ codexUsage: null }), now)).not.toContain("Codex quota");
+  });
+});
+
+describe("formatCountdown", () => {
+  it("counts down to a future instant rather than reporting elapsed time", () => {
+    expect(formatCountdown("2026-09-20T12:03:00.000Z", now)).toBe("3m");
+    expect(formatCountdown("2026-09-20T14:30:00.000Z", now)).toBe("2h 30m");
+    expect(formatCountdown("2026-09-22T12:00:00.000Z", now)).toBe("2d");
+  });
+
+  it("reports 'now' for an instant that has already passed", () => {
+    expect(formatCountdown("2026-09-20T11:00:00.000Z", now)).toBe("now");
+  });
+});
+
+describe("renderQuotaAlert", () => {
+  it("names the window, the percent, and when it resets", () => {
+    const text = renderQuotaAlert(
+      {
+        planType: "team",
+        primary: { usedPercent: 90, windowMinutes: 300, resetsAt: "2026-09-20T14:00:00.000Z" },
+        secondary: null,
+        hasCredits: false,
+        creditBalance: null,
+        observedAt: "2026-09-20T11:59:00.000Z",
+      },
+      "primary",
+      now,
+    );
+    expect(text).toContain("90% used (5h)");
+    expect(text).toContain("resets in 2h");
   });
 });

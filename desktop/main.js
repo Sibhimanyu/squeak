@@ -19,6 +19,9 @@ const MARGIN = 24;
  * anything with ⌥Space, which most launchers take.
  */
 const DEFAULT_SHORTCUT = "Control+Alt+D";
+/** Separate from the peek shortcut on purpose: this only ever shows/hides
+ * the duck, and never touches the panel. */
+const DEFAULT_VISIBILITY_SHORTCUT = "Control+Alt+H";
 
 let win = null;
 let tray = null;
@@ -231,21 +234,60 @@ function trayTooltip(state) {
   return bits.length > 0 ? `Squeak — ${bits.join(", ")}` : "Squeak — nothing running";
 }
 
+/** e.g. "Control+Alt+H" -> "⌃⌥H", for a menu item's keyboard hint. */
+function describeAccelerator(shortcut) {
+  return shortcut.replace("Control", "⌃").replace("Alt", "⌥").replace("Shift", "⇧").replace("Command", "⌘").replace(/\+/g, "");
+}
+
+/**
+ * The tray dropdown's job is a glance at provider usage, not a second copy
+ * of the session list — that already lives in the duck's own panel, one
+ * click away. Codex reports real account-wide quota; Claude only ever
+ * reports a per-session running cost, so it is shown as a total across
+ * whatever sessions are currently active rather than implying a quota that
+ * does not exist for it.
+ */
+function usageMenuItems(state) {
+  const items = [];
+  const usage = state?.codexUsage;
+
+  if (usage?.primary) {
+    const resets = formatCountdown(usage.primary.resetsAt);
+    items.push({ label: `Codex 5h: ${Math.round(usage.primary.usedPercent)}% · resets ${resets}`, enabled: false });
+  }
+  if (usage?.secondary) {
+    const resets = formatCountdown(usage.secondary.resetsAt);
+    items.push({ label: `Codex 7d: ${Math.round(usage.secondary.usedPercent)}% · resets ${resets}`, enabled: false });
+  }
+
+  const claudeCost = (state?.active ?? [])
+    .filter((session) => typeof session.costUsd === "number")
+    .reduce((total, session) => total + session.costUsd, 0);
+  if (claudeCost > 0) {
+    items.push({ label: `Claude: $${claudeCost.toFixed(2)} (active sessions)`, enabled: false });
+  }
+
+  return items.length > 0 ? items : [{ label: "No usage data yet", enabled: false }];
+}
+
+/** "3h", "45m" — resetsAt is always in the future, so this counts down to it. */
+function formatCountdown(iso) {
+  const remainingMs = Date.parse(iso) - Date.now();
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+    return "now";
+  }
+  const minutes = Math.ceil(remainingMs / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
 function refreshTray() {
   if (!tray) {
     return;
   }
   const state = lastState;
-  const active = state?.active ?? [];
-
-  const sessionItems = active.slice(0, 8).map((session) => ({
-    label: `${session.repoName ?? "?"} · ${session.branch ?? "?"} — ${session.state}`,
-    click: () => {
-      if (session.cwd) {
-        void shell.openPath(session.cwd);
-      }
-    },
-  }));
 
   tray.setTitle(trayTitle(state));
   tray.setToolTip(trayTooltip(state));
@@ -253,12 +295,17 @@ function refreshTray() {
     Menu.buildFromTemplate([
       { label: state ? trayTooltip(state).replace("Squeak — ", "") : "starting up", enabled: false },
       { type: "separator" },
-      ...(sessionItems.length > 0 ? sessionItems : [{ label: "No active sessions", enabled: false }]),
+      ...usageMenuItems(state),
       { type: "separator" },
       // Toggle, so pass the negation. Passing `hidden` made this a no-op:
       // setHidden returns early when the requested state already matches.
-      { label: "Show duck", type: "checkbox", checked: !hidden, click: () => setHidden(!hidden) },
-      { label: `Peek at panel (${DEFAULT_SHORTCUT.replace("Control", "⌃").replace("Alt", "⌥").replace(/\+/g, "")})`, click: peek },
+      {
+        label: `Show duck (${describeAccelerator(DEFAULT_VISIBILITY_SHORTCUT)})`,
+        type: "checkbox",
+        checked: !hidden,
+        click: () => setHidden(!hidden),
+      },
+      { label: `Peek at panel (${describeAccelerator(DEFAULT_SHORTCUT)})`, click: peek },
       { label: "Reset duck position", click: resetPosition },
       { type: "separator" },
       { label: "Quit duck (back at next login)", click: () => app.quit() },
@@ -357,15 +404,26 @@ app.whenReady().then(() => {
   }
   createWindow();
 
+  // No "click" handler here: Electron already opens the context menu itself
+  // when setContextMenu is set, and clicking the tray icon used to also fire
+  // peek() on top of that — so left-clicking to open the menu popped the
+  // agents panel open at the same time. The menu is all a tray click should do.
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, "assets", "duckTemplate.png")));
   tray.setIgnoreDoubleClickEvents(true);
-  tray.on("click", peek);
   refreshTray();
 
   const shortcut = readSettings().shortcut ?? DEFAULT_SHORTCUT;
   if (!globalShortcut.register(shortcut, peek)) {
     // Another app already owns it. Say so rather than failing silently.
     console.warn(`duck: could not register ${shortcut} — something else has it`);
+  }
+
+  // A separate shortcut from the peek above: this only ever shows or hides
+  // the duck and never touches the panel, so it cannot be confused with the
+  // click-away-to-close behaviour the panel has.
+  const visibilityShortcut = readSettings().visibilityShortcut ?? DEFAULT_VISIBILITY_SHORTCUT;
+  if (!globalShortcut.register(visibilityShortcut, () => setHidden(!hidden))) {
+    console.warn(`duck: could not register ${visibilityShortcut} — something else has it`);
   }
 
   const capturePrefix = process.env.DUCK_CAPTURE;

@@ -70,7 +70,9 @@ export class ConductorObserver {
       transcriptPath: null,
       contextPercent: normalizePercent(row.contextUsedPercent),
       retired: isRetiredWorkspace(row),
+      // Conductor does not track spend locally.
       baseRef: row.defaultBranch ? `origin/${row.defaultBranch}` : null,
+      costUsd: null,
     };
   }
 

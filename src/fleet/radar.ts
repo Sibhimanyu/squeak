@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { TelegramInlineKeyboard } from "../types.js";
 import { isActionable } from "./attention.js";
+import { describeWindowSpan, type CodexUsage } from "./codex-usage.js";
 import { diffPageCount, diffPageSlice, type WorkspaceDiff } from "./diff-view.js";
 import { describeGitState } from "./git-state.js";
 import type { FleetSnapshot } from "./fleet-monitor.js";
@@ -143,6 +144,11 @@ export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
 
   const lines = [`**Fleet** — ${headline.length > 0 ? headline.join(" · ") : "nothing running"}`];
 
+  const quotaLine = describeCodexUsage(snapshot.codexUsage, nowMs);
+  if (quotaLine) {
+    lines.push(quotaLine);
+  }
+
   // One block per session, ordered by how much it wants you: blocked, then
   // finished, then still going.
   const ordered = [
@@ -189,6 +195,59 @@ export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * One line, only when a window is worth mentioning: comfortably under the
+ * threshold is not news, and this already shares the radar with everything
+ * else that is genuinely happening.
+ */
+const CODEX_USAGE_DISPLAY_PERCENT = 50;
+
+/** The reverse of formatAge: a future instant expressed as "in 3h", not the past. */
+export function formatCountdown(toIso: string, nowMs: number): string {
+  const remaining = Date.parse(toIso) - nowMs;
+  if (!Number.isFinite(remaining) || remaining <= 0) {
+    return "now";
+  }
+  const minutes = Math.ceil(remaining / 60_000);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainderMinutes = minutes % 60;
+  if (hours < 24) {
+    return remainderMinutes > 0 ? `${hours}h ${remainderMinutes}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remainderHours = hours % 24;
+  return remainderHours > 0 ? `${days}d ${remainderHours}h` : `${days}d`;
+}
+
+export function describeCodexUsage(usage: CodexUsage | null, nowMs: number): string | null {
+  if (!usage) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (usage.primary && usage.primary.usedPercent >= CODEX_USAGE_DISPLAY_PERCENT) {
+    parts.push(
+      `${Math.round(usage.primary.usedPercent)}% (${describeWindowSpan(usage.primary.windowMinutes)}, resets in ${formatCountdown(usage.primary.resetsAt, nowMs)})`,
+    );
+  }
+  if (usage.secondary && usage.secondary.usedPercent >= CODEX_USAGE_DISPLAY_PERCENT) {
+    parts.push(
+      `${Math.round(usage.secondary.usedPercent)}% (${describeWindowSpan(usage.secondary.windowMinutes)}, resets in ${formatCountdown(usage.secondary.resetsAt, nowMs)})`,
+    );
+  }
+  return parts.length > 0 ? `_Codex quota: ${parts.join(" · ")}_` : null;
+}
+
+export function renderQuotaAlert(usage: CodexUsage, window: "primary" | "secondary", nowMs: number): string {
+  const detail = window === "primary" ? usage.primary : usage.secondary;
+  const span = detail ? describeWindowSpan(detail.windowMinutes) : window;
+  const percent = detail ? Math.round(detail.usedPercent) : 0;
+  const resets = detail ? formatCountdown(detail.resetsAt, nowMs) : "soon";
+  return `🟠 **Codex quota** — ${percent}% used (${span})\nresets in ${resets}`;
 }
 
 export function radarKeyboard(

@@ -26,6 +26,7 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     contextPercent: null,
     retired: false,
     baseRef: null,
+    costUsd: null,
     git: null,
     ...overrides,
   };

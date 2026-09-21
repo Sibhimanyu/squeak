@@ -80,6 +80,12 @@ export class FleetStore {
         session_key TEXT NOT NULL UNIQUE
       );
 
+      CREATE TABLE IF NOT EXISTS fleet_quota_alert (
+        window TEXT PRIMARY KEY,
+        resets_at TEXT NOT NULL,
+        notified_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS fleet_mute (
         scope TEXT PRIMARY KEY,
         muted_until TEXT
@@ -302,6 +308,27 @@ export class FleetStore {
 
   clearMute(scope: string): void {
     this.db.prepare(`DELETE FROM fleet_mute WHERE scope = ?`).run(scope);
+  }
+  /**
+   * True the first time a quota window is seen crossing the warn threshold
+   * for *this* reset cycle. Keyed on resetsAt rather than the percentage, so
+   * climbing from 85% to 95% within the same window does not re-alert, but
+   * crossing the threshold again after the window resets does.
+   */
+  claimQuotaAlert(window: string, resetsAt: string, notifiedAt: string): boolean {
+    const existing = this.db
+      .prepare(`SELECT resets_at as resetsAt FROM fleet_quota_alert WHERE window = ?`)
+      .get(window) as { resetsAt: string } | undefined;
+    if (existing && existing.resetsAt === resetsAt) {
+      return false;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO fleet_quota_alert (window, resets_at, notified_at) VALUES (?, ?, ?)
+         ON CONFLICT(window) DO UPDATE SET resets_at = excluded.resets_at, notified_at = excluded.notified_at`,
+      )
+      .run(window, resetsAt, notifiedAt);
+    return true;
   }
 }
 

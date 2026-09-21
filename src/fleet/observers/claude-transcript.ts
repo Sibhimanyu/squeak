@@ -22,6 +22,21 @@ const DEFAULT_IDLE_AFTER_MS = 10 * 60 * 1000;
 const MEANINGFUL_TYPES = new Set(["user", "assistant", "system"]);
 
 /**
+ * Claude Code writes one of these after (most) turns with a running total for
+ * the session. It is the only local record of what a session has cost — the
+ * account-wide quota Codex reports is never written for Claude at all.
+ */
+function readLatestCost(entries: Record<string, unknown>[]): number | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (asString(entry?.type) === "cost-state" && typeof entry?.totalCostUSD === "number") {
+      return entry.totalCostUSD;
+    }
+  }
+  return null;
+}
+
+/**
  * Claude Code writes an append-only JSONL transcript per session under
  * `~/.claude/projects/<slugified-cwd>/<session-id>.jsonl`. That file is the
  * only thing a session started outside Conductor shares with us, so it is how
@@ -158,6 +173,7 @@ export class ClaudeTranscriptObserver {
       contextPercent: null,
       retired: false,
       baseRef: null,
+      costUsd: readLatestCost(entries),
     };
   }
 

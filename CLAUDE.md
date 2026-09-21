@@ -132,6 +132,25 @@ state (`squeak.db`).
   asynchronous, so bootstrapping straight after it fails with "Input/output
   error" — leaving a service booted out and nothing bootstrapped in its place,
   which is worse than whatever the rerun was fixing.
+- **Codex quota is account-wide, not per-session.** `rate_limits` sits on
+  every `token_count` event as a sibling of `info`, not nested inside it — a
+  first attempt at `codex-usage.ts` nested it and silently returned null
+  forever. Verified against a real machine before and after the fix.
+- **Claude Code never persists its rate-limit event to disk.** `rate_limit_event`
+  only ever appears in the live stdout of whatever process spawned the CLI —
+  confirmed by dumping the raw hook payload too, which carries none of it
+  either. So Claude gets local per-session cost tracking (`cost-state`
+  entries, real and persisted) but not quota/reset tracking; do not try to
+  fake the latter from a spawned probe process, which would burn real quota
+  just to check quota.
+- The tray dropdown shows **usage, not the session list** — that already
+  lives in the duck's own panel one click away. `tray.on("click", peek)` was
+  removed: Electron already opens the context menu on a tray click by
+  itself, so the handler was firing the agents panel open *at the same time*
+  as the menu.
+- The duck has **two independent global shortcuts**: peek-at-panel and
+  show/hide. They must stay separate — a single shortcut that both reveals
+  and can hide the duck would eventually hide it when you meant to peek.
 - **`desktop/` has its own eslint config**, run by `npm run lint`. It is
   invisible to tsc and to `eslint src/`, and two real bugs reached the user
   through that gap. Note that flat-config `files` patterns resolve against the

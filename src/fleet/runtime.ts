@@ -1,4 +1,5 @@
 import { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
+import { CodexUsageReader } from "./codex-usage.js";
 import { DiffReader } from "./diff-view.js";
 import { deriveDuckState } from "./duck-mood.js";
 import { FleetMonitor } from "./fleet-monitor.js";
@@ -25,6 +26,7 @@ export interface FleetRuntimeOptions {
   activeWindowMs: number;
   idleAfterMs: number;
   contextPressurePercent: number;
+  codexQuotaWarnPercent: number;
 }
 
 export interface FleetRuntime {
@@ -33,6 +35,7 @@ export interface FleetRuntime {
   monitor: FleetMonitor;
   ingress: HookIngressServer;
   diff: DiffReader;
+  codexUsage: CodexUsageReader;
 }
 
 /**
@@ -60,10 +63,12 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       codex: new CodexRolloutObserver(observerWindow),
       liveness: new ProcessLivenessObserver(),
       git: new GitStateReader(),
+      codexUsage: new CodexUsageReader(),
     },
     {
       pollIntervalMs: options.pollIntervalMs,
       contextPressurePercent: options.contextPressurePercent,
+      codexQuotaWarnPercent: options.codexQuotaWarnPercent,
     },
   );
 
@@ -74,7 +79,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     readState: () => serializeState(monitor),
   });
 
-  return { registry, store, monitor, ingress, diff: new DiffReader() };
+  return { registry, store, monitor, ingress, diff: new DiffReader(), codexUsage: new CodexUsageReader() };
 }
 
 /**
@@ -87,6 +92,7 @@ export function serializeState(monitor: FleetMonitor): unknown {
     generatedAt: snapshot.generatedAt,
     trackedCount: snapshot.sessions.length,
     duck: deriveDuckState(snapshot.active, snapshot.attention, Date.now()),
+    codexUsage: snapshot.codexUsage,
     active: snapshot.active.map((session) => ({
       key: session.key,
       agent: session.agent,
@@ -102,6 +108,7 @@ export function serializeState(monitor: FleetMonitor): unknown {
       alive: session.alive,
       conductorSessionId: session.conductorSessionId,
       git: session.git,
+      costUsd: session.costUsd,
     })),
     attention: snapshot.attention.map((item) => ({
       key: item.session.key,

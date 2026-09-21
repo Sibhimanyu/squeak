@@ -67,6 +67,7 @@ export class SqueakApp {
       activeWindowMs: config.activeWindowMs,
       idleAfterMs: config.idleAfterMs,
       contextPressurePercent: config.contextPressurePercent,
+      codexQuotaWarnPercent: config.codexQuotaWarnPercent,
     });
 
     this.controller = new FleetController({

@@ -27,6 +27,8 @@ FLEET_POLL_INTERVAL_MS=20000
 FLEET_ACTIVE_WINDOW_MINUTES=360
 FLEET_IDLE_AFTER_MINUTES=10
 FLEET_CONTEXT_PRESSURE_PERCENT=80
+# Codex quota used-percent past which a one-time warning is pushed.
+FLEET_CODEX_QUOTA_WARN_PERCENT=85
 `;
 
 function printUsage(): void {

@@ -12,6 +12,7 @@ import {
   diffSummaryKeyboard,
   radarKeyboard,
   renderAttentionCard,
+  renderQuotaAlert,
   renderRadar,
   sessionLabel,
 } from "./radar.js";
@@ -101,8 +102,34 @@ export class FleetController {
         });
       }),
     );
+    this.unsubscribe.push(
+      this.deps.monitor.onQuotaAlert((usage, window) => {
+        void this.pushQuotaAlert(usage, window).catch((error) => {
+          logger.warn("fleet quota push failed", { error: error instanceof Error ? error.message : String(error) });
+        });
+      }),
+    );
 
     this.deps.monitor.start();
+  }
+
+  /**
+   * Account-wide, so unlike an AttentionItem there is no session to attach
+   * this to — it goes to the same targets an attention card would, just
+   * rendered from renderQuotaAlert instead.
+   */
+  private async pushQuotaAlert(
+    usage: Parameters<Parameters<FleetMonitor["onQuotaAlert"]>[0]>[0],
+    window: "primary" | "secondary",
+  ): Promise<void> {
+    const targets = this.pushTargets();
+    if (targets.length === 0) {
+      return;
+    }
+    const text = renderQuotaAlert(usage, window, this.now());
+    for (const target of targets) {
+      await this.send(target, text);
+    }
   }
 
   async stop(): Promise<void> {
