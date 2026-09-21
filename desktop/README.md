@@ -93,6 +93,13 @@ sleeping `z`s, the shadow — is drawn as an overlay, so it keeps working
 whatever the artwork is. Offline is shown by desaturating the sprite, since a
 PNG cannot be recoloured the way the fallback's fills can.
 
+## Floating across Spaces
+
+The window is an NSPanel pinned to all Spaces including fullscreen ones. Both
+of those matter: a normal always-on-top window gets animated between Spaces
+and visibly disappears and reappears when you swipe between fullscreen
+desktops.
+
 ## How it is wired
 
 The duck is presentational and decides nothing. It polls

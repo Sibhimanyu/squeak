@@ -193,6 +193,15 @@ transcripts, and ranks them by what is blocked on the human.
 - Expansion state lives in the Electron **main** process, which also owns the
   window size; the renderer only reacts to `duck:expanded`. Tracking it in
   both was a desync waiting to happen.
+- The duck window is an **NSPanel** (`type: "panel"`) and passes
+  `skipTransformProcessType: true`. Both are about Space transitions: a normal
+  always-on-top window is animated between Spaces and visibly vanishes when
+  swiping between fullscreen desktops, and the process-type transform Electron
+  does by default "will hide the window and dock for a short time" by its own
+  documentation. The dock is hidden before the window is built, so the app is
+  already a UIElementApplication and the transform buys nothing. A panel can
+  still take focus, which click-away-to-close needs — checked before changing
+  it, since that is easy to break and not obvious from reading the code.
 - To see the duck without Screen Recording permission, use
   `DUCK_CAPTURE=<prefix>` — the window photographs itself.
 - The ingress serves `GET /state` unauthenticated on loopback for local UIs.

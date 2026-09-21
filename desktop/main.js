@@ -87,6 +87,12 @@ function createWindow() {
     // it visible and calling hide() afterwards can still flash a frame.
     show: false,
     fullscreenable: false,
+    // An NSPanel rather than a normal window. macOS treats panels as utility
+    // windows and leaves them in place across Space transitions instead of
+    // animating them between Spaces, which is what made the duck vanish and
+    // reappear when swiping between fullscreen desktops. Checked that a panel
+    // can still take focus, which click-away-to-close depends on.
+    type: "panel",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -96,7 +102,12 @@ function createWindow() {
 
   // Float above everything, including other apps' fullscreen spaces.
   win.setAlwaysOnTop(true, "screen-saver");
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // skipTransformProcessType: without it Electron flips the process between
+  // UIElementApplication and ForegroundApplication, which by its own
+  // documentation "will hide the window and dock for a short time". The dock
+  // is hidden before this window is built, so the app is already a
+  // UIElementApplication and that transform is pure cost.
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
 
   // Clicking anywhere else dismisses the panel, the way a popover does.
   win.on("blur", () => {
