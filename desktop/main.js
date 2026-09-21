@@ -25,6 +25,8 @@ let tray = null;
 let expanded = false;
 let hidden = false;
 let lastState = null;
+/** Suppressed while a context menu is up, and while capturing screenshots. */
+let suppressBlurClose = false;
 
 function settingsPath() {
   return path.join(app.getPath("userData"), "duck.json");
@@ -81,6 +83,9 @@ function createWindow() {
     movable: false, // Dragging is handled manually so a click stays a click.
     skipTaskbar: true,
     alwaysOnTop: true,
+    // Shown explicitly once we know whether it was hidden last time. Creating
+    // it visible and calling hide() afterwards can still flash a frame.
+    show: false,
     fullscreenable: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -92,8 +97,26 @@ function createWindow() {
   // Float above everything, including other apps' fullscreen spaces.
   win.setAlwaysOnTop(true, "screen-saver");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  // Clicking anywhere else dismisses the panel, the way a popover does.
+  win.on("blur", () => {
+    if (expanded && !suppressBlurClose) {
+      setExpanded(false);
+    }
+  });
+
+  hidden = readSettings().hidden === true;
+
   const port = process.env.FLEET_HOOK_PORT || "8477";
   win.loadFile(path.join(__dirname, "renderer", "index.html"), { query: { port } });
+
+  // Reveal only once there is something to draw, and only if it was not
+  // hidden last time. showInactive keeps focus where the user left it.
+  win.once("ready-to-show", () => {
+    if (!hidden) {
+      win.showInactive();
+    }
+  });
 }
 
 /**
@@ -114,6 +137,14 @@ function setExpanded(next) {
   win.setBounds({ ...placed, width: size.width, height: size.height });
   expanded = next;
   win.webContents.send("duck:expanded", expanded);
+
+  // Behave like a popover: an open panel takes focus, which is what makes
+  // clicking anywhere else dismiss it. Collapsed, the duck must never steal
+  // focus from whatever you are typing in.
+  if (next) {
+    win.focus();
+  }
+
   if (!next) {
     writeSettings({ position: { x: placed.x + size.width - COLLAPSED.width, y: placed.y + size.height - COLLAPSED.height } });
   }
@@ -250,12 +281,19 @@ ipcMain.on("duck:open-path", (_event, target) => {
 });
 
 ipcMain.on("duck:menu", () => {
+  // A context menu takes focus away; that is not clicking off the panel.
+  suppressBlurClose = true;
   Menu.buildFromTemplate([
     { label: "Hide duck", click: () => setHidden(true) },
     { label: "Reset position", click: resetPosition },
     { type: "separator" },
     { label: "Quit Squeak duck", click: () => app.quit() },
-  ]).popup({ window: win ?? undefined });
+  ]).popup({
+    window: win ?? undefined,
+    callback: () => {
+      suppressBlurClose = false;
+    },
+  });
 });
 
 /**
@@ -266,6 +304,8 @@ async function captureTo(prefix) {
   if (!win) {
     return;
   }
+  // Screenshots hold the panel open deliberately, with nothing else focused.
+  suppressBlurClose = true;
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   await wait(2500); // let the first poll land and the idle animation settle
 

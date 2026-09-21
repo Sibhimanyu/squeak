@@ -28,6 +28,10 @@ Click it for the active sessions (each opens its working directory), plus:
   hides the duck, so the same keystroke cannot make it vanish on you.
 - **Reset duck position** — for when it ends up on a display you unplugged.
 
+The panel closes when you click anywhere else, the way a macOS popover does.
+That is why an open panel takes focus — without it there is no click-away to
+detect. A collapsed duck never takes focus.
+
 Right-clicking the duck itself offers Hide, Reset position and Quit.
 
 Change the shortcut by adding `"shortcut": "Control+Alt+K"` to
