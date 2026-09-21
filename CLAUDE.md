@@ -193,15 +193,24 @@ transcripts, and ranks them by what is blocked on the human.
 - Expansion state lives in the Electron **main** process, which also owns the
   window size; the renderer only reacts to `duck:expanded`. Tracking it in
   both was a desync waiting to happen.
-- The duck window is an **NSPanel** (`type: "panel"`) and passes
-  `skipTransformProcessType: true`. Both are about Space transitions: a normal
-  always-on-top window is animated between Spaces and visibly vanishes when
-  swiping between fullscreen desktops, and the process-type transform Electron
-  does by default "will hide the window and dock for a short time" by its own
-  documentation. The dock is hidden before the window is built, so the app is
-  already a UIElementApplication and the transform buys nothing. A panel can
-  still take focus, which click-away-to-close needs — checked before changing
-  it, since that is easy to break and not obvious from reading the code.
+- The duck window is an **NSPanel** (`type: "panel"`) at **`"floating"`**
+  always-on-top level, not `"screen-saver"`. `"screen-saver"` is the level real
+  screensavers use; WindowServer plausibly special-cases it during the Mission
+  Control Space-swipe animation, which is why the duck still vanished and
+  reappeared on swipe after becoming a panel. `"floating"` sits above ordinary
+  windows, which is all the duck needs, without that apparent special-casing.
+  `applyFloatingBehavior` also re-applies both settings on `ready-to-show`,
+  since several Electron issues report the collection-behavior flags not
+  reliably sticking when set immediately after construction, before the
+  window has a backing NSWindow.
+- `skipTransformProcessType: true` on `setVisibleOnAllWorkspaces`: without it
+  Electron flips the process between UIElementApplication and
+  ForegroundApplication, which by its own documentation "will hide the window
+  and dock for a short time". The dock is hidden before the window is built,
+  so the app is already a UIElementApplication and the transform buys nothing.
+- A panel can still take focus, which click-away-to-close needs — checked with
+  a standalone probe before *and after* changing the always-on-top level,
+  since both are easy to break silently and not obvious from reading the code.
 - To see the duck without Screen Recording permission, use
   `DUCK_CAPTURE=<prefix>` — the window photographs itself.
 - The ingress serves `GET /state` unauthenticated on loopback for local UIs.

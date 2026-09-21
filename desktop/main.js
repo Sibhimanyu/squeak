@@ -100,14 +100,7 @@ function createWindow() {
     },
   });
 
-  // Float above everything, including other apps' fullscreen spaces.
-  win.setAlwaysOnTop(true, "screen-saver");
-  // skipTransformProcessType: without it Electron flips the process between
-  // UIElementApplication and ForegroundApplication, which by its own
-  // documentation "will hide the window and dock for a short time". The dock
-  // is hidden before this window is built, so the app is already a
-  // UIElementApplication and that transform is pure cost.
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  applyFloatingBehavior(win);
 
   // Clicking anywhere else dismisses the panel, the way a popover does.
   win.on("blur", () => {
@@ -124,10 +117,32 @@ function createWindow() {
   // Reveal only once there is something to draw, and only if it was not
   // hidden last time. showInactive keeps focus where the user left it.
   win.once("ready-to-show", () => {
+    // Re-apply after the native window actually exists. Several Electron
+    // issues report the collection-behavior flags not sticking reliably when
+    // set immediately after construction, before the window has a backing
+    // NSWindow; re-asserting once it is realized is a documented mitigation.
+    applyFloatingBehavior(win);
     if (!hidden) {
       win.showInactive();
     }
   });
+}
+
+/**
+ * "screen-saver" is the level real screensavers use, and WindowServer is
+ * believed to special-case that level during the Mission Control Space-swipe
+ * animation — plausibly why the duck vanished and reappeared on swipe even
+ * after switching to a panel. "floating" still sits above ordinary windows
+ * (which is all the duck needs) without that special handling.
+ */
+function applyFloatingBehavior(win) {
+  win.setAlwaysOnTop(true, "floating");
+  // skipTransformProcessType: without it Electron flips the process between
+  // UIElementApplication and ForegroundApplication, which by its own
+  // documentation "will hide the window and dock for a short time". The dock
+  // is hidden before this window is built, so the app is already a
+  // UIElementApplication and that transform is pure cost.
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
 }
 
 /**

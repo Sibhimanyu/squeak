@@ -95,10 +95,14 @@ PNG cannot be recoloured the way the fallback's fills can.
 
 ## Floating across Spaces
 
-The window is an NSPanel pinned to all Spaces including fullscreen ones. Both
-of those matter: a normal always-on-top window gets animated between Spaces
-and visibly disappears and reappears when you swipe between fullscreen
-desktops.
+The window is an NSPanel pinned to all Spaces including fullscreen ones, at
+the `"floating"` always-on-top level rather than `"screen-saver"`. All three
+matter: a normal always-on-top window is animated between Spaces and visibly
+disappears and reappears when you swipe between fullscreen desktops, a panel
+is not; and `"screen-saver"` — the level real screensavers use — is
+plausibly special-cased by macOS during that same swipe animation even once
+the window is a panel, which `"floating"` avoids while still sitting above
+ordinary windows.
 
 ## How it is wired
 
