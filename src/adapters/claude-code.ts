@@ -396,13 +396,19 @@ export class ClaudeCodeAdapter extends EventEmitter {
       turn.blocks.delete(index);
 
       if (block.type === "text") {
-        if (turn.assistantText) {
+        // One item per text block, not the turn-wide accumulator. A turn that
+        // emits text, calls a tool, then emits more text has two text blocks;
+        // sending `turn.assistantText` here made the second item repeat the
+        // first block verbatim, and Conductor mirrored it as a second row that
+        // restarted the whole reply from the top.
+        const text = block.currentText ?? "";
+        if (text) {
           this.emitNotification("item/completed", {
             threadId: turn.threadId,
             turnId: turn.turnId,
             item: {
               type: "agentMessage",
-              text: turn.assistantText,
+              text,
             },
           });
         }

@@ -179,6 +179,41 @@ function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/**
+ * Pull the prose out of a Conductor assistant row.
+ *
+ * `content` holds the agent envelope, whose `message.content` is a block list
+ * mixing text with tool_use and thinking blocks. Only the text blocks are worth
+ * sending to Telegram; a row that is purely tool calls yields nothing, which is
+ * how a tool-only step ends up skipped rather than posted as an empty message.
+ */
+export function extractAssistantEnvelopeText(content: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    // Not an envelope. Older rows stored bare text.
+    const bare = content.trim();
+    return bare || null;
+  }
+
+  const blocks = asRecord(asRecord(parsed)?.message)?.content;
+  if (!Array.isArray(blocks)) {
+    return null;
+  }
+
+  const text = blocks
+    .map((block) => {
+      const record = asRecord(block);
+      return record && asString(record.type) === "text" ? (asString(record.text) ?? "") : "";
+    })
+    .filter((part) => part.trim())
+    .join("\n\n")
+    .trim();
+
+  return text || null;
+}
+
 function formatRuntimeEventAt(value: string | null): string | null {
   if (!value) {
     return null;
@@ -402,6 +437,12 @@ const STREAM_EAGER_EDIT_CHARS = 220;
 const PANEL_EDIT_INTERVAL_MS = 500;
 const PANEL_EAGER_EDIT_CHARS = 180;
 const TURN_COMPLETION_SETTLE_MS = 1500;
+// Telegram drops the typing indicator after ~5s, so refresh inside that window.
+const TYPING_REFRESH_MS = 4000;
+// Conductor does not notify anyone when it writes a row, so replies to turns
+// started in the app have to be discovered by polling.
+const CONDUCTOR_OUTBOUND_POLL_MS = 3000;
+const CONDUCTOR_OUTBOUND_BATCH = 20;
 const NEW_SESSION_MODEL_LIMIT = 6;
 const NEW_SESSION_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 const TOPIC_LOCKED_CALLBACK_TEXT = "This topic is locked to its current chat. Use the main chat.";
@@ -486,10 +527,12 @@ export class TelegramConductorBridge {
   private readonly pendingSessionStreamUpdates = new Map<string, PendingSessionStreamUpdate>();
   private readonly pendingSessionStreamFlushTimers = new Map<string, NodeJS.Timeout>();
   private readonly runtimeFinalizeTimers = new Map<string, NodeJS.Timeout>();
+  private readonly typingTimers = new Map<string, NodeJS.Timeout>();
   private readonly finalizedTurnIds = new Map<string, string>();
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly fleet: FleetController | null;
   private queueTimer: NodeJS.Timeout | null = null;
+  private conductorOutboundTimer: NodeJS.Timeout | null = null;
   private stopped = false;
 
   constructor(deps: BridgeDependencies = {}) {
@@ -640,6 +683,13 @@ export class TelegramConductorBridge {
       logger.error("failed to drain queue", error);
     });
 
+    this.conductorOutboundTimer = setInterval(() => {
+      void this.forwardConductorReplies().catch((error) => {
+        logger.error("failed to forward conductor replies", error);
+      });
+    }, CONDUCTOR_OUTBOUND_POLL_MS);
+    this.conductorOutboundTimer.unref?.();
+
     process.on("SIGINT", () => {
       void this.stop();
     });
@@ -677,6 +727,14 @@ export class TelegramConductorBridge {
       clearTimeout(timer);
     }
     this.runtimeFinalizeTimers.clear();
+    for (const timer of this.typingTimers.values()) {
+      clearInterval(timer);
+    }
+    this.typingTimers.clear();
+    if (this.conductorOutboundTimer) {
+      clearInterval(this.conductorOutboundTimer);
+      this.conductorOutboundTimer = null;
+    }
     for (const timer of this.pendingSessionPanelFlushTimers.values()) {
       clearTimeout(timer);
     }
@@ -1949,6 +2007,20 @@ export class TelegramConductorBridge {
         return "permanent_failure";
       }
 
+      // Codex allows one writer per thread and holds the lock on the rollout file,
+      // so it spans processes: opening the same chat in the Conductor app takes the
+      // lock and the bridge cannot start a turn until it is closed. "Try again
+      // later" is wrong here -- nothing frees the lock on its own -- and treating it
+      // as retryable re-queues the prompt forever, because retryPrompt() has no
+      // attempt counter. Name the cause and stop.
+      if (errorMessage.includes("already has an active writer")) {
+        await this.safeSendMessage(
+          location,
+          "This chat is being written to somewhere else, usually because it is open in the Conductor app. Close it there, or pick another chat with /chats, then send this again.",
+        );
+        return "permanent_failure";
+      }
+
       if (!fromQueue) {
         await this.safeSendMessage(location, "Send failed. Please try again later.");
       }
@@ -1983,6 +2055,7 @@ export class TelegramConductorBridge {
             startedAt: Date.now(),
           };
     this.runtimes.set(session.id, runtime);
+    this.startTypingIndicator(session.id);
 
     this.mirror.updateSessionStatus(session.id, "working");
     this.mirror.appendUserMessage({
@@ -2735,7 +2808,13 @@ export class TelegramConductorBridge {
       if (!text) {
         return;
       }
-      runtime.assistantText = text;
+      // `text` is one message block. The streaming deltas have usually already
+      // appended it, so this is a resync, not an append -- assigning it would
+      // drop every earlier block from the panel. Only append when the deltas
+      // did not deliver it (an adapter that completes items without streaming).
+      if (!runtime.assistantText.endsWith(text)) {
+        runtime.assistantText = runtime.assistantText ? `${runtime.assistantText}\n\n${text}` : text;
+      }
       this.recordRuntimeEvent(runtime, null);
       this.mirror.appendAssistantMessage({
         sessionId,
@@ -2930,6 +3009,7 @@ export class TelegramConductorBridge {
       startedAt: existing?.turnId === turnId ? (existing.startedAt ?? Date.now()) : Date.now(),
     };
     this.runtimes.set(sessionId, runtime);
+    this.startTypingIndicator(sessionId);
     return runtime;
   }
 
@@ -2989,6 +3069,103 @@ export class TelegramConductorBridge {
       return true;
     }
     return !runtime && this.finalizedTurnIds.get(sessionId) === turnId;
+  }
+
+  /**
+   * Forward replies from turns the Conductor app ran itself.
+   *
+   * The bridge only streams turns it started. A prompt typed into Conductor is
+   * executed by Conductor's own agent process, so the bridge never sees a turn --
+   * the only trace is a row in session_messages. Poll for those rows and push them
+   * to whichever Telegram conversations follow the session.
+   *
+   * Rows the bridge itself mirrored must not come back out: they were already sent
+   * as a live turn. Two guards, because the mirror inserts the row and records its
+   * fingerprint in separate statements and a poll can land between them:
+   * sessions with a bridge turn in flight are skipped entirely, and any row whose
+   * fingerprint the mirror already recorded is dropped.
+   */
+  private async forwardConductorReplies(): Promise<void> {
+    for (const sessionId of this.stateStore.listFollowedSessionIds()) {
+      // A bridge-driven turn is already streaming to Telegram.
+      if (this.runtimes.has(sessionId)) {
+        continue;
+      }
+
+      const cursor = this.stateStore.getConductorOutboundCursor(sessionId);
+      if (cursor === null) {
+        // First sight of this session: start at the end. Replaying the whole
+        // history into Telegram would be worse than missing it.
+        this.stateStore.setConductorOutboundCursor(sessionId, this.registry.maxSessionMessageRowId(sessionId));
+        continue;
+      }
+
+      const rows = this.registry.listAssistantMessagesAfterRowId(sessionId, cursor, CONDUCTOR_OUTBOUND_BATCH);
+      if (rows.length === 0) {
+        continue;
+      }
+
+      const followers = this.stateStore.listFollowingConversations(sessionId);
+      for (const row of rows) {
+        const text = extractAssistantEnvelopeText(row.content);
+        if (text) {
+          const fingerprint = this.stateStore.buildFingerprint(sessionId, row.turnId ?? "", "assistant", row.content);
+          if (!this.stateStore.hasFingerprint(fingerprint)) {
+            for (const location of followers) {
+              await this.safeSendMessage(location, text);
+            }
+          }
+        }
+        this.stateStore.setConductorOutboundCursor(sessionId, row.rowId);
+      }
+    }
+  }
+
+  /**
+   * Drive Telegram's "typing..." indicator for as long as a turn is running.
+   *
+   * Telegram clears a chat action after ~5 seconds and whenever the bot posts a
+   * message, so it has to be re-sent on a timer rather than set once. The ticker
+   * reads the live runtime each tick instead of being stopped at every status
+   * transition: a turn that is waiting on the user is not working, and should not
+   * claim to be typing.
+   */
+  private startTypingIndicator(sessionId: string): void {
+    if (this.typingTimers.has(sessionId)) {
+      return;
+    }
+
+    const tick = (): void => {
+      const runtime = this.runtimes.get(sessionId);
+      if (!runtime) {
+        this.stopTypingIndicator(sessionId);
+        return;
+      }
+      if (runtime.status !== "active" && runtime.status !== "cancelling") {
+        return;
+      }
+      for (const location of this.stateStore.listFollowingConversations(sessionId)) {
+        // Cosmetic: a failed action must never surface to the user or break the turn.
+        void this.telegram
+          .sendChatAction(location.chatId, location.messageThreadId)
+          .catch((error) => logger.debug("failed to send typing indicator", summarizeTelegramError(error)));
+      }
+    };
+
+    const timer = setInterval(tick, TYPING_REFRESH_MS);
+    // Never hold the event loop open just to animate an ellipsis.
+    timer.unref?.();
+    this.typingTimers.set(sessionId, timer);
+    tick();
+  }
+
+  private stopTypingIndicator(sessionId: string): void {
+    const timer = this.typingTimers.get(sessionId);
+    if (!timer) {
+      return;
+    }
+    clearInterval(timer);
+    this.typingTimers.delete(sessionId);
   }
 
   private clearRuntimeFinalization(sessionId: string): void {
@@ -3051,6 +3228,7 @@ export class TelegramConductorBridge {
       logger.warn("failed to finalize session panel", summarizeTelegramError(error));
     }
 
+    this.stopTypingIndicator(sessionId);
     this.pendingInputRequests.delete(sessionId);
     this.runtimes.delete(sessionId);
     this.finalizedTurnIds.set(sessionId, turnId);

@@ -43,7 +43,9 @@ interface TelegramApiResponse {
   parameters?: TelegramApiParameters;
 }
 
-type TelegramRequestLane = "callback" | "control" | "poll" | "write";
+// "typing" is deliberately its own lane: chat actions are cosmetic and sent on a
+// timer, so a 429 on one must never defer the lane that carries real messages.
+type TelegramRequestLane = "callback" | "control" | "poll" | "typing" | "write";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -364,6 +366,23 @@ export class TelegramClient {
         message_id: messageId,
       },
       { lane: "write" },
+    );
+  }
+
+  /**
+   * Show the "typing..." indicator. Telegram clears it after ~5 seconds or as
+   * soon as the bot posts a message, so callers refresh it on a timer for as
+   * long as the turn runs.
+   */
+  async sendChatAction(chatId: number, messageThreadId: number | null, action = "typing"): Promise<void> {
+    await this.callApi(
+      "sendChatAction",
+      {
+        chat_id: chatId,
+        message_thread_id: messageThreadId ?? undefined,
+        action,
+      },
+      { lane: "typing" },
     );
   }
 

@@ -62,6 +62,16 @@ export class BridgeStateStore {
         PRIMARY KEY (chat_id, conductor_session_id)
       );
 
+      -- How far the bridge has read Conductor's own session_messages, so replies
+      -- to a turn started in the Conductor app can be forwarded to Telegram.
+      -- session_messages.rowid is monotonic per insert, which sent_at (second
+      -- resolution, ties on fast turns) is not.
+      CREATE TABLE IF NOT EXISTS conductor_outbound_cursor (
+        conductor_session_id TEXT PRIMARY KEY,
+        last_row_id INTEGER NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
       CREATE TABLE IF NOT EXISTS message_fingerprints (
         fingerprint TEXT PRIMARY KEY,
         conductor_session_id TEXT NOT NULL,
@@ -458,6 +468,48 @@ export class BridgeStateStore {
       composeTargetThreadId: null,
       composeTargetTurnId: null,
     });
+  }
+
+  /** Every session some Telegram conversation is following. */
+  listFollowedSessionIds(): string[] {
+    const rows = this.db
+      .prepare(
+        `
+          SELECT DISTINCT follow_session_id as sessionId
+          FROM conversation_context
+          WHERE follow_session_id IS NOT NULL
+            AND follow_session_id <> ''
+        `,
+      )
+      .all() as Array<{ sessionId: string }>;
+    return rows.map((row) => row.sessionId);
+  }
+
+  getConductorOutboundCursor(sessionId: string): number | null {
+    const row = this.db
+      .prepare(
+        `
+          SELECT last_row_id as lastRowId
+          FROM conductor_outbound_cursor
+          WHERE conductor_session_id = ?
+        `,
+      )
+      .get(sessionId) as { lastRowId: number } | undefined;
+    return row ? row.lastRowId : null;
+  }
+
+  setConductorOutboundCursor(sessionId: string, lastRowId: number): void {
+    this.db
+      .prepare(
+        `
+          INSERT INTO conductor_outbound_cursor (conductor_session_id, last_row_id)
+          VALUES (?, ?)
+          ON CONFLICT(conductor_session_id) DO UPDATE SET
+            last_row_id = excluded.last_row_id,
+            updated_at = datetime('now')
+        `,
+      )
+      .run(sessionId, lastRowId);
   }
 
   listFollowingConversations(sessionId: string): TelegramConversationTarget[] {

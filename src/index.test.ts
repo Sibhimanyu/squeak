@@ -17,7 +17,7 @@ vi.mock("./config.js", () => ({
   },
 }));
 
-import { TelegramConductorBridge } from "./index.js";
+import { extractAssistantEnvelopeText, TelegramConductorBridge } from "./index.js";
 import { TelegramApiError } from "./telegram/client.js";
 import { homeKeyboard } from "./telegram/ui.js";
 
@@ -111,6 +111,8 @@ function createBridge() {
     resolveWorkspacePath: vi.fn().mockReturnValue("/tmp/workspace-1"),
     updateWorkspaceActiveSession: vi.fn(),
     getWorkspaceById: vi.fn(),
+    maxSessionMessageRowId: vi.fn().mockReturnValue(0),
+    listAssistantMessagesAfterRowId: vi.fn().mockReturnValue([]),
   };
   const stateStore = {
     clearConversationComposeMode: vi.fn(),
@@ -131,11 +133,17 @@ function createBridge() {
     markPromptFinished: vi.fn(),
     setConversationComposeMode: vi.fn(),
     updateConversationContext: vi.fn(),
+    listFollowedSessionIds: vi.fn().mockReturnValue([]),
+    getConductorOutboundCursor: vi.fn().mockReturnValue(null),
+    setConductorOutboundCursor: vi.fn(),
+    buildFingerprint: vi.fn((sessionId, turnId, role, content) => `${sessionId}|${turnId}|${role}|${content}`),
+    hasFingerprint: vi.fn().mockReturnValue(false),
   };
   const telegram = {
     answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
     createForumTopic: vi.fn(),
     editMessageText: vi.fn().mockResolvedValue(undefined),
+    sendChatAction: vi.fn().mockResolvedValue(undefined),
     sendMessage: vi.fn().mockResolvedValue(null),
   };
 
@@ -405,6 +413,244 @@ describe("TelegramConductorBridge", () => {
     );
     expect(pushRuntimeUpdate).toHaveBeenCalledTimes(1);
     expect(safeSendMessage).not.toHaveBeenCalledWith({ chatId: 12, messageThreadId: null }, "Sent.");
+  });
+
+  it("names the cause when the codex thread is locked by another writer", async () => {
+    const { bridge, codex, registry, stateStore } = createBridge();
+    const safeSendMessage = vi.fn().mockResolvedValue(undefined);
+
+    (
+      registry as unknown as {
+        resolveWorkspacePath: ReturnType<typeof vi.fn>;
+      }
+    ).resolveWorkspacePath = vi.fn().mockReturnValue("/tmp/workspaces/repo");
+    stateStore.listFollowingConversations.mockReturnValue([{ chatId: 12, messageThreadId: null }]);
+    (bridge as unknown as { safeSendMessage: typeof safeSendMessage }).safeSendMessage = safeSendMessage;
+
+    // What the codex app-server returns when the same thread is open in the
+    // Conductor app: one writer per thread, locked on the rollout file.
+    codex.startTurn.mockRejectedValue(
+      new Error('{"code":-32600,"message":"thread thread-1 already has an active writer"}'),
+    );
+
+    const submit = (fromQueue: boolean): Promise<string> =>
+      (
+        bridge as unknown as {
+          submitPrompt: (
+            location: { chatId: number; messageThreadId: number | null },
+            session: {
+              id: string;
+              workspaceId: string;
+              claudeSessionId: string | null;
+              agentType: string | null;
+              model: string | null;
+            },
+            text: string,
+            fromQueue: boolean,
+          ) => Promise<string>;
+        }
+      ).submitPrompt(
+        { chatId: 12, messageThreadId: null },
+        {
+          id: "session-1",
+          workspaceId: "workspace-1",
+          claudeSessionId: "thread-1",
+          agentType: "codex",
+          model: "gpt-5.4",
+        },
+        "A",
+        fromQueue,
+      );
+
+    // Permanent, not retryable: retryPrompt() has no attempt counter, so a
+    // queued prompt would re-queue against the held lock forever.
+    expect(await submit(false)).toBe("permanent_failure");
+    expect(await submit(true)).toBe("permanent_failure");
+
+    expect(safeSendMessage).toHaveBeenCalledTimes(2);
+    for (const call of safeSendMessage.mock.calls) {
+      expect(call[1]).toContain("open in the Conductor app");
+      expect(call[1]).not.toContain("try again later");
+    }
+  });
+
+  it("shows a typing indicator while a turn runs and stops when it finalizes", async () => {
+    vi.useFakeTimers();
+    try {
+      const { bridge, registry, stateStore, telegram } = createBridge();
+      (bridge as unknown as { pushRuntimeUpdate: ReturnType<typeof vi.fn> }).pushRuntimeUpdate = vi
+        .fn()
+        .mockResolvedValue(undefined);
+      (registry as unknown as { resolveWorkspacePath: ReturnType<typeof vi.fn> }).resolveWorkspacePath = vi
+        .fn()
+        .mockReturnValue("/tmp/workspaces/repo");
+      stateStore.listFollowingConversations.mockReturnValue([{ chatId: 12, messageThreadId: null }]);
+
+      await (
+        bridge as unknown as {
+          submitPrompt: (
+            location: { chatId: number; messageThreadId: number | null },
+            session: {
+              id: string;
+              workspaceId: string;
+              claudeSessionId: string | null;
+              agentType: string | null;
+              model: string | null;
+            },
+            text: string,
+            fromQueue: boolean,
+          ) => Promise<string>;
+        }
+      ).submitPrompt(
+        { chatId: 12, messageThreadId: null },
+        {
+          id: "session-1",
+          workspaceId: "workspace-1",
+          claudeSessionId: "thread-1",
+          agentType: "codex",
+          model: "gpt-5.4",
+        },
+        "do the thing",
+        false,
+      );
+
+      // Sent immediately, not only after the first refresh interval.
+      expect(telegram.sendChatAction).toHaveBeenCalledWith(12, null);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(1);
+
+      // Telegram clears the action after ~5s, so it has to keep refreshing.
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(3);
+
+      // A turn waiting on the user is not working, and must not claim to type.
+      const runtime = (bridge as unknown as { runtimes: Map<string, { status: string }> }).runtimes.get("session-1")!;
+      runtime.status = "waiting_user_input";
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(3);
+
+      runtime.status = "active";
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(4);
+
+      (bridge as unknown as { stopTypingIndicator: (id: string) => void }).stopTypingIndicator("session-1");
+      await vi.advanceTimersByTimeAsync(20000);
+      expect(telegram.sendChatAction).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe("extractAssistantEnvelopeText", () => {
+    it("keeps text blocks and drops tool and thinking blocks", () => {
+      const content = JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "hmm" },
+            { type: "text", text: "First part." },
+            { type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } },
+            { type: "text", text: "Second part." },
+          ],
+        },
+      });
+      expect(extractAssistantEnvelopeText(content)).toBe("First part.\n\nSecond part.");
+    });
+
+    it("yields nothing for a tool-only row so it is skipped, not sent empty", () => {
+      const content = JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }],
+        },
+      });
+      expect(extractAssistantEnvelopeText(content)).toBeNull();
+    });
+
+    it("falls back to bare text for rows that are not envelopes", () => {
+      expect(extractAssistantEnvelopeText("just words")).toBe("just words");
+      expect(extractAssistantEnvelopeText("   ")).toBeNull();
+    });
+  });
+
+  it("forwards replies from turns the Conductor app ran itself", async () => {
+    const { bridge, registry, stateStore } = createBridge();
+    const safeSendMessage = vi.fn().mockResolvedValue(undefined);
+    (bridge as unknown as { safeSendMessage: typeof safeSendMessage }).safeSendMessage = safeSendMessage;
+
+    stateStore.listFollowedSessionIds.mockReturnValue(["session-1"]);
+    stateStore.listFollowingConversations.mockReturnValue([{ chatId: 12, messageThreadId: null }]);
+    stateStore.getConductorOutboundCursor.mockReturnValue(null);
+    registry.maxSessionMessageRowId.mockReturnValue(41);
+
+    const forward = (): Promise<void> =>
+      (bridge as unknown as { forwardConductorReplies: () => Promise<void> }).forwardConductorReplies();
+
+    // First sight of a session starts at the end; replaying history would be worse
+    // than missing it.
+    await forward();
+    expect(stateStore.setConductorOutboundCursor).toHaveBeenCalledWith("session-1", 41);
+    expect(safeSendMessage).not.toHaveBeenCalled();
+    expect(registry.listAssistantMessagesAfterRowId).not.toHaveBeenCalled();
+
+    stateStore.getConductorOutboundCursor.mockReturnValue(41);
+    registry.listAssistantMessagesAfterRowId.mockReturnValue([
+      {
+        rowId: 42,
+        turnId: "turn-app",
+        content: JSON.stringify({
+          type: "assistant",
+          message: { role: "assistant", content: [{ type: "text", text: "typed in the app" }] },
+        }),
+      },
+    ]);
+
+    await forward();
+    expect(safeSendMessage).toHaveBeenCalledWith({ chatId: 12, messageThreadId: null }, "typed in the app");
+    expect(stateStore.setConductorOutboundCursor).toHaveBeenCalledWith("session-1", 42);
+  });
+
+  it("does not echo back replies the bridge itself mirrored", async () => {
+    const { bridge, registry, stateStore } = createBridge();
+    const safeSendMessage = vi.fn().mockResolvedValue(undefined);
+    (bridge as unknown as { safeSendMessage: typeof safeSendMessage }).safeSendMessage = safeSendMessage;
+
+    stateStore.listFollowedSessionIds.mockReturnValue(["session-1"]);
+    stateStore.listFollowingConversations.mockReturnValue([{ chatId: 12, messageThreadId: null }]);
+    stateStore.getConductorOutboundCursor.mockReturnValue(10);
+    registry.listAssistantMessagesAfterRowId.mockReturnValue([
+      {
+        rowId: 11,
+        turnId: "turn-bridge",
+        content: JSON.stringify({
+          type: "assistant",
+          message: { role: "assistant", content: [{ type: "text", text: "already streamed" }] },
+        }),
+      },
+    ]);
+
+    // The mirror recorded this row, so it was already sent as a live turn.
+    stateStore.hasFingerprint.mockReturnValue(true);
+
+    await (bridge as unknown as { forwardConductorReplies: () => Promise<void> }).forwardConductorReplies();
+
+    expect(safeSendMessage).not.toHaveBeenCalled();
+    // The cursor still advances, or the row would be reconsidered forever.
+    expect(stateStore.setConductorOutboundCursor).toHaveBeenCalledWith("session-1", 11);
+  });
+
+  it("skips sessions with a bridge turn already in flight", async () => {
+    const { bridge, registry, stateStore } = createBridge();
+    stateStore.listFollowedSessionIds.mockReturnValue(["session-1"]);
+    (bridge as unknown as { runtimes: Map<string, unknown> }).runtimes.set("session-1", { turnId: "t" });
+
+    await (bridge as unknown as { forwardConductorReplies: () => Promise<void> }).forwardConductorReplies();
+
+    expect(registry.listAssistantMessagesAfterRowId).not.toHaveBeenCalled();
+    expect(stateStore.getConductorOutboundCursor).not.toHaveBeenCalled();
   });
 
   it("routes Claude sessions through the Claude adapter", async () => {

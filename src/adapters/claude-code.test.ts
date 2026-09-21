@@ -250,4 +250,81 @@ describe("ClaudeCodeAdapter", () => {
 
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
   });
+
+  it("emits one item per text block so a tool-split turn does not repeat itself", async () => {
+    const child = createFakeChild();
+    spawnMock.mockReturnValue(child);
+
+    const adapter = new ClaudeCodeAdapter("/tmp/claude");
+    const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
+    adapter.on("notification", (notification) => notifications.push(notification));
+
+    const startPromise = adapter.startTurn({
+      threadId: "thread-4",
+      cwd: "/tmp/workspace",
+      model: "opus-1m",
+      input: "check the plist",
+    });
+
+    child.emit("spawn");
+    await startPromise;
+
+    // First text block.
+    writeJsonLine(child, {
+      type: "stream_event",
+      event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    });
+    writeJsonLine(child, {
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "already running" } },
+    });
+    writeJsonLine(child, { type: "stream_event", event: { type: "content_block_stop", index: 0 } });
+
+    // A tool call splits the turn.
+    writeJsonLine(child, {
+      type: "stream_event",
+      event: {
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "tool_use", id: "tool-9", name: "Bash", input: {} },
+      },
+    });
+    writeJsonLine(child, {
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "input_json_delta", partial_json: '{"command":"ls"}' },
+      },
+    });
+    writeJsonLine(child, { type: "stream_event", event: { type: "content_block_stop", index: 1 } });
+
+    // Second text block.
+    writeJsonLine(child, {
+      type: "stream_event",
+      event: { type: "content_block_start", index: 2, content_block: { type: "text", text: "" } },
+    });
+    writeJsonLine(child, {
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 2, delta: { type: "text_delta", text: "and healthy" } },
+    });
+    writeJsonLine(child, { type: "stream_event", event: { type: "content_block_stop", index: 2 } });
+
+    writeJsonLine(child, { type: "result", subtype: "success", is_error: false, result: "already runningand healthy" });
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const messages = notifications
+      .filter(
+        (notification) =>
+          notification.method === "item/completed" &&
+          (notification.params.item as { type?: string }).type === "agentMessage",
+      )
+      .map((notification) => (notification.params.item as { text?: string }).text);
+
+    // Each block stands alone. Emitting the turn-wide accumulator here made the
+    // second item "already runningand healthy", which Conductor mirrored as a
+    // duplicate row restating the first block.
+    expect(messages).toEqual(["already running", "and healthy"]);
+  });
 });
