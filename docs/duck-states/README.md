@@ -18,10 +18,10 @@ Order matters: do `asleep` first. If that one comes back consistent with the
 base, the rest will too. If it does not, fix the style before generating five
 more.
 
-## What to save
+## What to save, and where
 
-The app picks the sprite up automatically on restart. Filenames are exact —
-note the underscore in `needs_you`.
+**Every image goes in `desktop/renderer/`.** The app picks them up on restart.
+Filenames are exact — note the underscore in `needs_you`.
 
 | file | state | when it shows |
 | --- | --- | --- |
@@ -32,11 +32,25 @@ note the underscore in `needs_you`.
 | `duck-needs_you.png` | needs you | an agent is blocked waiting on you |
 | `duck-offline.png` | offline | *optional* — Squeak is not running |
 
-Save them into `desktop/renderer/`, then restart the duck. Any file you skip
-falls back to `duck.png`, so you can add them one at a time.
+Save them into **`desktop/renderer/`**, then restart the duck:
+
+```bash
+cd desktop && npm start
+```
+
+Any file you skip falls back to `duck.png`, so you can add them one at a time.
+
+### PNG only — no SVG
+
+Ask for **flat PNG images and nothing else**. Generators like to offer SVG,
+vector source, or code, and none of it is usable here: the app loads a raster
+image with `<img src="duck-asleep.png">`. There is no SVG anywhere in this
+pipeline and nothing to convert. Every prompt in this folder says so, but it
+is worth repeating if the model starts producing markup instead of pictures.
 
 ## Technical requirements, every image
 
+- **A PNG image, not SVG or vector source.**
 - **Transparent background.** ChatGPT often returns white even when asked; if
   so, reply "give me that as a PNG with a genuine transparent background".
 - **Square**, duck centred, roughly 8% padding.

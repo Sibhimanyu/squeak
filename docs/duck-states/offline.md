@@ -1,5 +1,7 @@
 # offline → `duck-offline.png` *(optional)*
 
+**Save as:** `desktop/renderer/duck-offline.png`
+
 Shown when the duck cannot reach Squeak — the daemon is not running, or the
 port is wrong. Without this file the app just desaturates whichever sprite is
 showing, which works fine. Generate it only if you want the nicer version.
@@ -16,6 +18,9 @@ showing, which works fine. Generate it only if you want the nicer version.
 >
 > Do not add plugs, cables, power symbols, error marks, or text. Just the
 > duck, transparent background, same framing.
+>
+> A flat PNG image is all I need — **do not** give me SVG, vector source, a
+> layered file, or code. Just the picture.
 
 ## Notes
 
@@ -23,3 +28,15 @@ showing, which works fine. Generate it only if you want the nicer version.
   read as a mood rather than as "not connected".
 - If this looks worse than the automatic desaturation, delete the file; the
   app falls straight back.
+
+## Where it goes
+
+Save the image as `duck-offline.png` in **`desktop/renderer/`** — the same
+folder as the duck you uploaded. Then restart the duck:
+
+```bash
+cd desktop && npm start
+```
+
+PNG only. The app loads a raster image; there is nothing to convert and no
+SVG anywhere in this pipeline.

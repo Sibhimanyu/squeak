@@ -1,5 +1,7 @@
 # needs you → `duck-needs_you.png`
 
+**Save as:** `desktop/renderer/duck-needs_you.png`
+
 **Note the underscore in the filename.** It matches the internal state name.
 
 Shown when an agent is blocked waiting on you — a permission prompt or a
@@ -20,6 +22,9 @@ also draws a red ring and a count badge around it.
 > exclamation marks, question marks, speech bubbles, sweat drops, or a red
 > ring — the app draws the ring and the badge. Just the duck, transparent
 > background, same framing.
+>
+> A flat PNG image is all I need — **do not** give me SVG, vector source, a
+> layered file, or code. Just the picture.
 
 ## Notes
 
@@ -27,3 +32,15 @@ also draws a red ring and a count badge around it.
   this one looks at you.
 - Do not make it alarmed. This fires often, and a panicking duck is stressful
   rather than useful.
+
+## Where it goes
+
+Save the image as `duck-needs_you.png` in **`desktop/renderer/`** — the same
+folder as the duck you uploaded. Then restart the duck:
+
+```bash
+cd desktop && npm start
+```
+
+PNG only. The app loads a raster image; there is nothing to convert and no
+SVG anywhere in this pipeline.

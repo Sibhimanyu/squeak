@@ -1,5 +1,7 @@
 # idle → `duck.png` *(already exists)*
 
+**Lives at:** `desktop/renderer/duck.png`
+
 The base duck, and the one every other state is a variation of. Shown when
 sessions are open but nothing is happening.
 
@@ -18,3 +20,15 @@ upswept tail, thick dark-brown keyline.
 Regenerate **all six** states in the same conversation afterwards. A base that
 does not match its variations is worse than the current single-sprite
 situation, because the duck will appear to change species when it wakes up.
+
+## Where it goes
+
+It already sits at `desktop/renderer/duck.png`. That is the file to upload to
+ChatGPT, and the file to overwrite if you redraw the base. After any change:
+
+```bash
+cd desktop && npm start
+```
+
+PNG only. The app loads a raster image; there is nothing to convert and no
+SVG anywhere in this pipeline.
