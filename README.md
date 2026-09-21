@@ -24,8 +24,18 @@ limit, for use as the bot's notification tone.
 ```bash
 squeak setup          # paste a token from @BotFather
 squeak install-hooks  # live signal; see below
-squeak                      # start it
+squeak                # start it
 ```
+
+To have Squeak and the duck start at login and restart if they die:
+
+```bash
+./scripts/install-squeak-agents.sh
+```
+
+It points the agents at the main checkout, never a Conductor worktree — those
+are archived when a workspace is finished, and a login item that depends on
+one breaks quietly some weeks later. Logs land in `~/Library/Logs/squeak/`.
 
 Its config lives at `~/Library/Application Support/squeak/.env`, its
 state at `squeak.db` beside it, and it talks to a different bot than the
