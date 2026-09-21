@@ -124,15 +124,16 @@ transcripts, and ranks them by what is blocked on the human.
 - **Transcripts cannot record an approval prompt.** Blocked states only ever
   come from hooks. Anything that infers "awaiting approval" from a file is
   wrong.
-- **`Notification` does not fire for Conductor sessions.** Measured, not
-  assumed: with a temporary settings file, an SDK-mode run fires `PreToolUse`
-  and `Stop` but never `Notification`, because in SDK mode the permission
-  request goes to the host app rather than to a terminal user. So hooks give
-  Conductor sessions accurate finished/working state but cannot tell us they
-  are blocked on an approval. Do not add a "PreToolUse then silence" timer to
-  guess at it — a slow test run looks identical. Note also that a third of
-  Conductor sessions run `bypassPermissions` and never block on approval at
-  all.
+- **Use `PermissionRequest`, not `Notification`, to detect blocked-on-approval.**
+  Both measured with a temporary settings file against a real SDK-mode run:
+  `Notification` never fires there, because the prompt goes to the host app
+  rather than to a terminal user — but `PermissionRequest` does. So Conductor
+  sessions *can* report that they are waiting on an approval, which an earlier
+  version of this file wrongly said was impossible. `Notification` is still
+  installed, because it also covers idle-waiting-for-input on terminal agents.
+  Do not try to infer approval from a "PreToolUse then silence" timer — a slow
+  test run looks identical. Note that a third of Conductor sessions run
+  `bypassPermissions` and never block on approval at all.
 - Hooks *do* fire in SDK-spawned sessions: 32 of 34 `sdk-ts` transcripts on
   this machine ran a Stop hook.
 - **Hooks must never block.** The installed script backgrounds its request,

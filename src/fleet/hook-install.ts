@@ -12,7 +12,16 @@ export const HOOK_MARKER = "conductor-tg-fleet";
  * waiting on the human. That single event is the reason to install hooks at
  * all; the rest just make the radar exact instead of polled.
  */
-export const CLAUDE_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "Notification", "Stop", "SessionEnd"] as const;
+export const CLAUDE_HOOK_EVENTS = [
+  "SessionStart",
+  "UserPromptSubmit",
+  // The two that mean "blocked on a human". `PermissionRequest` is the
+  // explicit one; `Notification` also covers idle-waiting-for-input.
+  "PermissionRequest",
+  "Notification",
+  "Stop",
+  "SessionEnd",
+] as const;
 
 export const CODEX_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "Stop", "Interrupt", "SessionEnd"] as const;
 

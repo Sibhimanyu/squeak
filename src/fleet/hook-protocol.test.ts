@@ -81,3 +81,13 @@ describe("stateFromHookEvent", () => {
     expect(isSessionEndEvent(event({ event: "Stop" }))).toBe(false);
   });
 });
+
+describe("PermissionRequest", () => {
+  it("is treated as blocked on approval without inspecting the message", () => {
+    // Unlike Notification, this event means one thing only.
+    expect(stateFromHookEvent(event({ event: "PermissionRequest", message: null }))).toBe("awaiting_approval");
+    expect(stateFromHookEvent(event({ event: "PermissionRequest", message: "anything at all" }))).toBe(
+      "awaiting_approval",
+    );
+  });
+});

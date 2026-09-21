@@ -47,6 +47,9 @@ export function normalizeHookPayload(
  */
 export function stateFromHookEvent(event: HookEvent): FleetState | null {
   switch (event.event) {
+    // Unambiguous: the agent is asking to be allowed to do something.
+    case "PermissionRequest":
+      return "awaiting_approval";
     case "Notification":
       return classifyNotification(event.message);
     case "Stop":
