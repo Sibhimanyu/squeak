@@ -193,9 +193,39 @@ body.expanded #panel {
   cursor: grabbing;
 }
 
-#duck {
+#duck-anim {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transform-origin: 50% 72%;
+  animation: bob 3.4s ease-in-out infinite;
+}
+
+#duck-fallback {
   overflow: visible;
+}
+
+#duck-sprite,
+#duck-sprite-asleep {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  -webkit-user-drag: none;
+}
+
+#duck-anim > * {
   filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
+
+/* Effects overlay: same box as the duck, never intercepts the pointer. */
+#fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
 }
 
 #body,
@@ -256,24 +286,19 @@ body.expanded #panel {
 
 /* bobbing, one animation per mood */
 
-#body-group {
-  transform-origin: 50px 70px;
-  animation: bob 3.4s ease-in-out infinite;
-}
-
-body[data-mood="working"] #body-group {
+body[data-mood="working"] #duck-anim {
   animation: bob 1.1s ease-in-out infinite;
 }
 
-body[data-mood="needs_you"] #body-group {
+body[data-mood="needs_you"] #duck-anim {
   animation: alarm 0.6s ease-in-out infinite;
 }
 
-body[data-mood="celebrating"] #body-group {
+body[data-mood="celebrating"] #duck-anim {
   animation: hop 0.55s cubic-bezier(0.3, -0.5, 0.4, 1.6) infinite;
 }
 
-body[data-mood="asleep"] #body-group {
+body[data-mood="asleep"] #duck-anim {
   animation: bob 5s ease-in-out infinite;
 }
 
@@ -284,6 +309,28 @@ body[data-mood="asleep"] #eye {
 body[data-mood="asleep"] #eye-shut,
 body[data-mood="asleep"] .z {
   display: block;
+}
+
+/* With a generated sprite the hand-drawn duck steps aside entirely. */
+body.has-sprite #duck-fallback {
+  display: none;
+}
+
+body.has-sprite #duck-sprite {
+  display: block;
+}
+
+body.has-sprite.has-asleep-sprite[data-mood="asleep"] #duck-sprite {
+  display: none;
+}
+
+body.has-sprite.has-asleep-sprite[data-mood="asleep"] #duck-sprite-asleep {
+  display: block;
+}
+
+/* A sprite cannot be recoloured, so say "offline" by draining it instead. */
+body.has-sprite[data-offline="true"] #duck-sprite {
+  filter: grayscale(1) brightness(0.65) drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
 }
 
 body[data-mood="celebrating"] .spark {
@@ -307,7 +354,7 @@ body[data-offline="true"] #beak {
   fill: #71717a;
 }
 
-body[data-offline="true"] #body-group {
+body[data-offline="true"] #duck-anim {
   animation: none;
 }
 

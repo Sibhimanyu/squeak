@@ -16,6 +16,26 @@ const els = {
   wrap: document.getElementById("duck-wrap"),
 };
 
+/* ---------- the duck drawing ---------- */
+
+/**
+ * Use a generated sprite if one has been dropped next to this file, and the
+ * hand-drawn fallback otherwise. Probing rather than requiring it means the
+ * app always has a duck, and replacing the art is just saving a PNG.
+ */
+function loadSprite(id, file, bodyClass) {
+  const img = document.getElementById(id);
+  const probe = new Image();
+  probe.addEventListener("load", () => {
+    img.src = file;
+    document.body.classList.add(bodyClass);
+  });
+  probe.src = file;
+}
+
+loadSprite("duck-sprite", "duck.png", "has-sprite");
+loadSprite("duck-sprite-asleep", "duck-asleep.png", "has-asleep-sprite");
+
 /* ---------- polling ---------- */
 
 async function poll() {

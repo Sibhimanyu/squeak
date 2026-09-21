@@ -26,6 +26,23 @@ Click to open the panel, click again to close. Drag it anywhere; it remembers
 where. Right-click for reset-position and quit. Clicking a session's name
 opens its working directory.
 
+## Replacing the artwork
+
+The hand-drawn duck is a fallback. Drop a PNG at `renderer/duck.png` and the
+app uses that instead — no code change, just restart it. Optionally add
+`renderer/duck-asleep.png` (same duck, eye closed) and it will be swapped in
+when nothing is running.
+
+What the image needs: transparent background, square, the duck centred with a
+little padding, and a keyline or otherwise enough contrast to read against
+both a white editor and a dark terminal. It is displayed at 96px, so detail
+below roughly 3px of the source will disappear.
+
+Everything that is not the duck — the badge, the alert ring, the sparkles, the
+sleeping `z`s, the shadow — is drawn as an overlay, so it keeps working
+whatever the artwork is. Offline is shown by desaturating the sprite, since a
+PNG cannot be recoloured the way the fallback's fills can.
+
 ## How it is wired
 
 The duck is presentational and decides nothing. It polls
