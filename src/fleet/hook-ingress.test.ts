@@ -53,9 +53,22 @@ async function startServer(): Promise<Harness> {
   return { port, tokenPath, token: fs.readFileSync(tokenPath, "utf8").trim(), events };
 }
 
-/** The handler acknowledges before dispatching, so give it a tick to land. */
+/**
+ * The handler acknowledges before dispatching, and the installed hook script
+ * backgrounds its curl, so delivery is asynchronous by design. Wait for the
+ * outcome rather than for a fixed number of milliseconds — a fixed sleep
+ * passes on an idle machine and fails on a busy one.
+ */
+async function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** For the cases that assert nothing arrived, where there is no edge to wait on. */
 async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await new Promise((resolve) => setTimeout(resolve, 150));
 }
 
 afterEach(async () => {
@@ -84,7 +97,7 @@ describe("HookIngressServer", () => {
         message: "Claude needs your permission to use Bash",
       }),
     });
-    await settle();
+    await waitFor(() => harness.events.length > 0);
 
     expect(response.status).toBe(200);
     expect(harness.events).toHaveLength(1);
@@ -163,7 +176,7 @@ describe("the installed hook script", () => {
       "-c",
       `printf '%s' '${JSON.stringify({ hook_event_name: "Stop", session_id: "xyz" })}' | ${scriptPath}`,
     ]);
-    await settle();
+    await waitFor(() => harness.events.length > 0);
 
     expect(harness.events).toHaveLength(1);
     expect(harness.events[0]?.event).toBe("Stop");
