@@ -229,11 +229,13 @@ function refreshTray() {
       { type: "separator" },
       ...(sessionItems.length > 0 ? sessionItems : [{ label: "No active sessions", enabled: false }]),
       { type: "separator" },
-      { label: "Show duck", type: "checkbox", checked: !hidden, click: () => setHidden(hidden) },
+      // Toggle, so pass the negation. Passing `hidden` made this a no-op:
+      // setHidden returns early when the requested state already matches.
+      { label: "Show duck", type: "checkbox", checked: !hidden, click: () => setHidden(!hidden) },
       { label: `Peek at panel (${DEFAULT_SHORTCUT.replace("Control", "⌃").replace("Alt", "⌥").replace(/\+/g, "")})`, click: peek },
       { label: "Reset duck position", click: resetPosition },
       { type: "separator" },
-      { label: "Quit Squeak duck", click: () => app.quit() },
+      { label: "Quit duck (back at next login)", click: () => app.quit() },
     ]),
   );
 }
@@ -287,7 +289,7 @@ ipcMain.on("duck:menu", () => {
     { label: "Hide duck", click: () => setHidden(true) },
     { label: "Reset position", click: resetPosition },
     { type: "separator" },
-    { label: "Quit Squeak duck", click: () => app.quit() },
+    { label: "Quit duck (back at next login)", click: () => app.quit() },
   ]).popup({
     window: win ?? undefined,
     callback: () => {

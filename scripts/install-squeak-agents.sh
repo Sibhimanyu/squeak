@@ -20,8 +20,11 @@ LOGDIR="$HOME/Library/Logs/squeak"
 [ -f "$REPO_ROOT/dist/squeak/cli.js" ] || die "no built squeak at $REPO_ROOT/dist -- ship first"
 mkdir -p "$AGENTS" "$LOGDIR"
 
+# keep_alive: "always" for the daemon, "unless-quit" for anything the user can
+# quit from a menu. KeepAlive=true restarts on *any* exit, so a deliberate Quit
+# comes straight back and looks like the app ignoring you.
 write_agent() {
-  local label="$1" logname="$2"; shift 2
+  local label="$1" logname="$2" keep_alive="$3"; shift 3
   local args="" arg
   for arg in "$@"; do args+="        <string>${arg}</string>"$'\n'; done
 
@@ -38,7 +41,7 @@ $args    </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+$( [ "$keep_alive" = "always" ] && printf '    <true/>' || printf '    <dict>\n        <key>SuccessfulExit</key>\n        <false/>\n    </dict>' )
     <key>ThrottleInterval</key>
     <integer>10</integer>
     <key>StandardOutPath</key>
@@ -55,15 +58,17 @@ PLIST
   say "loaded $label"
 }
 
-write_agent com.squeak.daemon squeak "$NODE" "$REPO_ROOT/dist/squeak/cli.js" start
+write_agent com.squeak.daemon squeak always "$NODE" "$REPO_ROOT/dist/squeak/cli.js" start
 
 ELECTRON="$REPO_ROOT/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
 if [ -x "$ELECTRON" ]; then
-  write_agent com.squeak.duck duck "$ELECTRON" "$REPO_ROOT/desktop"
+  write_agent com.squeak.duck duck unless-quit "$ELECTRON" "$REPO_ROOT/desktop"
 else
   say "skipping the duck: no electron at $ELECTRON (run: cd $REPO_ROOT/desktop && npm install)"
 fi
 
 say ""
 say "logs: $LOGDIR"
-say "stop: launchctl bootout gui/\$(id -u)/com.squeak.daemon"
+say "stop:  launchctl bootout gui/\$(id -u)/com.squeak.daemon"
+say "duck:  quit it from the menu bar; it returns at next login, or now with"
+say "       launchctl kickstart gui/\$(id -u)/com.squeak.duck"

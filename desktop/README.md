@@ -34,6 +34,14 @@ detect. A collapsed duck never takes focus.
 
 Right-clicking the duck itself offers Hide, Reset position and Quit.
 
+Quitting stops it until your next login. Its launch agent restarts it only if
+it *crashed*, not if you deliberately quit — otherwise Quit would look like
+the app ignoring you. To get it back sooner:
+
+```bash
+launchctl kickstart gui/$(id -u)/com.squeak.duck
+```
+
 Change the shortcut by adding `"shortcut": "Control+Alt+K"` to
 `~/Library/Application Support/conductor-tg-duck/duck.json`. If another app
 already owns the combination, the duck logs that it could not register it
