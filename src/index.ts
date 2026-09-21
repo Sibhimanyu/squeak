@@ -11,6 +11,7 @@ import { FleetController } from "./fleet/fleet-controller.js";
 import { FleetMonitor } from "./fleet/fleet-monitor.js";
 import { FleetStore } from "./fleet/fleet-store.js";
 import { DiffReader } from "./fleet/diff-view.js";
+import { deriveDuckState } from "./fleet/duck-mood.js";
 import { GitStateReader } from "./fleet/git-state.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "./fleet/hook-install.js";
 import { HookIngressServer } from "./fleet/hook-ingress.js";
@@ -546,6 +547,9 @@ export class TelegramConductorBridge {
         return {
           generatedAt: snapshot.generatedAt,
           trackedCount: snapshot.sessions.length,
+          // Derived here so the desktop UI stays presentational and cannot
+          // disagree with Telegram about what is going on.
+          duck: deriveDuckState(snapshot.active, snapshot.attention, Date.now()),
           active: snapshot.active.map((session) => ({
             key: session.key,
             agent: session.agent,

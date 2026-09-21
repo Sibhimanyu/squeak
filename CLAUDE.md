@@ -25,6 +25,8 @@ deployment section before changing anything under `src/`.
 | `src/fleet/hook-ingress.ts` | loopback HTTP endpoint the installed agent hooks report to |
 | `src/fleet/git-state.ts` | cached working-tree reads, so "finished" says what changed |
 | `src/fleet/diff-view.ts` | reads and paginates a workspace diff for review in Telegram |
+| `src/fleet/duck-mood.ts` | what the desktop duck is doing, derived where CI can test it |
+| `desktop/` | the Electron duck: a separate package, plain JS, no build step |
 
 `src/services/bridge-service.ts` is **dead code** — an older implementation that
 still ships in the package. The live path is `cli.ts` to `index.ts`. Do not spend
@@ -133,6 +135,18 @@ transcripts, and ranks them by what is blocked on the human.
   they are lock-screen notifications, not documents.
 - `src/fleet/active.ts` owns the active rule. The monitor, the radar and the
   local state endpoint all read it; do not reimplement the predicate.
+- **The duck decides nothing.** Mood, the active set and every rendered field
+  come from `/state`; the renderer only draws. Putting logic in
+  `desktop/renderer/` means it escapes CI and can start disagreeing with
+  Telegram about what is happening.
+- `desktop/` is a **separate package on purpose**: `conductor-tg` is published
+  to npm and must not carry Electron as a dependency. It is excluded from
+  `package.json` `files`, from `tsconfig`, and from `eslint src/`.
+- Expansion state lives in the Electron **main** process, which also owns the
+  window size; the renderer only reacts to `duck:expanded`. Tracking it in
+  both was a desync waiting to happen.
+- To see the duck without Screen Recording permission, use
+  `DUCK_CAPTURE=<prefix>` — the window photographs itself.
 - The ingress serves `GET /state` unauthenticated on loopback for local UIs.
   It is read-only and exposes nothing a local process could not already read
   from the same files; hook posts still require the token.

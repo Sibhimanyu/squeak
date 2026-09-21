@@ -1,0 +1,13 @@
+{
+  "name": "conductor-tg-duck",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A rubber duck that floats on your screen and tells you what your coding agents are doing.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^34.0.0"
+  }
+}

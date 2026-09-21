@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src http://127.0.0.1:*" />
+    <title>duck</title>
+    <link rel="stylesheet" href="duck.css" />
+  </head>
+  <body>
+    <section id="panel" aria-live="polite">
+      <header>
+        <span id="panel-title">Agents</span>
+        <span id="panel-sub"></span>
+      </header>
+      <div id="sessions"></div>
+      <footer id="panel-foot"></footer>
+    </section>
+
+    <div id="duck-wrap" title="Your agents">
+      <div id="badge" hidden></div>
+      <svg id="duck" viewBox="0 0 100 100" width="96" height="96" aria-hidden="true">
+        <ellipse id="shadow" cx="50" cy="90" rx="26" ry="5" />
+        <g id="body-group">
+          <!-- tail -->
+          <path id="tail" d="M20 56c-6-5-9-11-8-15 5 0 11 3 15 8z" />
+          <!-- body -->
+          <ellipse id="body" cx="47" cy="63" rx="30" ry="21" />
+          <!-- head -->
+          <circle id="head" cx="69" cy="35" r="17" />
+          <!-- neck join, so head and body read as one animal -->
+          <path id="neck" d="M56 48c4 5 10 8 16 8 -4 6-12 9-20 7z" />
+          <!-- beak -->
+          <path id="beak" d="M85 33c6 0 10 2 10 5s-4 5-10 5c-3 0-5-1-6-2 1-2 1-5 0-7 1-1 3-1 6-1z" />
+          <!-- wing -->
+          <ellipse id="wing" cx="44" cy="66" rx="14" ry="9" />
+          <!-- cheek -->
+          <circle id="cheek" cx="62" cy="43" r="4.5" />
+          <!-- eye -->
+          <circle id="eye" cx="73" cy="29" r="3.4" />
+          <circle id="glint" cx="74.2" cy="27.8" r="1.1" />
+          <rect id="eye-shut" x="69.4" y="28.3" width="7.2" height="2" rx="1" />
+        </g>
+        <g id="zzz">
+          <text x="80" y="20" class="z z1">z</text>
+          <text x="88" y="12" class="z z2">z</text>
+        </g>
+        <g id="sparks">
+          <circle class="spark s1" cx="20" cy="30" r="2.4" />
+          <circle class="spark s2" cx="82" cy="52" r="2" />
+          <circle class="spark s3" cx="50" cy="14" r="2.2" />
+        </g>
+        <circle id="alert-ring" cx="50" cy="52" r="42" />
+      </svg>
+    </div>
+
+    <script src="duck.js"></script>
+  </body>
+</html>

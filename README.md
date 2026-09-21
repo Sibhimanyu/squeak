@@ -68,6 +68,21 @@ Git runs only for sessions that are actually rendered, and results are cached
 for 30 seconds — the twenty idle sessions that never reach the radar cost
 nothing.
 
+### The duck
+
+A rubber duck floats on your screen and shows the same thing the radar does.
+It sleeps when nothing is running, bobs faster while an agent works, wears a
+red ring when something is blocked on you, and hops when something finishes.
+Click it for the list of active sessions with their diffstats.
+
+```bash
+cd desktop && npm install && npm start
+```
+
+It is presentational only: it polls the bridge's loopback `/state` and renders
+the answer, so it cannot disagree with Telegram about what is happening. See
+`desktop/README.md`.
+
 ### Reviewing the change
 
 Any session with a working directory offers **View Diff**: a paginated file
