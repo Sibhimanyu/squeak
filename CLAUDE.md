@@ -120,6 +120,13 @@ state (`squeak.db`).
   daemon uses `KeepAlive: true`; anything the user can quit from a menu uses
   `KeepAlive: { SuccessfulExit: false }`, or a deliberate Quit is restarted
   instantly and reads as the app ignoring them.
+- **Exactly one bridge may poll the bot.** Two instances make Telegram return
+  409 and messages land in whichever won the race — visible only as noise in
+  the log, so it can persist for days. `ship.sh` decides how to restart by
+  whether the launch agent's plist *exists*, not by whether `launchctl list`
+  currently shows it (it is briefly empty during a reload, and the manual
+  branch then starts a second bridge), and reaps any process launchd does not
+  own after restarting.
 - `install-squeak-agents.sh` writes **every** plist before unloading anything,
   and a load failure warns rather than aborting. `launchctl bootout` is
   asynchronous, so bootstrapping straight after it fails with "Input/output

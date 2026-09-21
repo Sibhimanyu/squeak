@@ -80,15 +80,36 @@ cat > "$REPO_ROOT/.ship-restart.sh" <<RESTART
 set -uo pipefail
 sleep $RESTART_DELAY
 
+# Decide by whether the launch agent is *installed*, not by whether launchctl
+# currently lists it. `launchctl list` is momentarily empty while an agent is
+# being reloaded, and taking the manual branch then starts a second bridge
+# alongside the one launchd brings back. Two pollers on one bot token means
+# Telegram 409s and messages landing in whichever instance won the race.
 restart_bridge() {
-  if launchctl list 2>/dev/null | grep -q "$LABEL"; then
-    launchctl kickstart -k "gui/\$(id -u)/$LABEL" >/dev/null 2>&1
-  else
-    pkill -f "conductor-tg/dist/cli.js" >/dev/null 2>&1
-    sleep 3
-    cd "$CONFIG_DIR" || exit 1
-    nohup node "$REPO_ROOT/dist/cli.js" start >> "$LOG" 2>&1 &
+  if [ -f "$HOME/Library/LaunchAgents/$LABEL.plist" ]; then
+    launchctl kickstart -k "gui/\$(id -u)/$LABEL" >/dev/null 2>&1 && return
+    launchctl bootstrap "gui/\$(id -u)" "$HOME/Library/LaunchAgents/$LABEL.plist" >/dev/null 2>&1
+    return
   fi
+  pkill -f "conductor-tg/dist/cli.js" >/dev/null 2>&1
+  sleep 3
+  cd "$CONFIG_DIR" || exit 1
+  nohup node "$REPO_ROOT/dist/cli.js" start >> "$LOG" 2>&1 &
+}
+
+# Belt and braces: whatever route we took, leave exactly one bridge running.
+# A duplicate is silent apart from 409s buried in the log, so it can persist
+# for days.
+reap_duplicate_bridges() {
+  local managed others
+  managed="\$(launchctl list 2>/dev/null | awk -v l="$LABEL" '\$3 == l { print \$1 }')"
+  others="\$(pgrep -f "conductor-tg/dist/cli.js" 2>/dev/null || true)"
+  for pid in \$others; do
+    if [ -n "\$managed" ] && [ "\$pid" != "\$managed" ]; then
+      echo "===== ship: killing duplicate bridge \$pid (launchd owns \$managed) =====" >> "$LOG"
+      kill "\$pid" 2>/dev/null || true
+    fi
+  done
 }
 
 healthy() {
@@ -98,6 +119,7 @@ healthy() {
 echo "===== ship: restarting \$(date) =====" >> "$LOG"
 restart_bridge
 sleep $HEALTH_WAIT
+reap_duplicate_bridges
 
 if healthy; then
   echo "===== ship: bridge healthy =====" >> "$LOG"
