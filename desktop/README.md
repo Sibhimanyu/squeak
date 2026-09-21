@@ -33,6 +33,11 @@ app uses that instead — no code change, just restart it. Optionally add
 `renderer/duck-asleep.png` (same duck, eye closed) and it will be swapped in
 when nothing is running.
 
+The current `duck.png` was generated from the prompt in the project README and
+normalised: trimmed to its content, re-centred on a square canvas with even
+padding, and resized to 512px (4x the display size). Generators frame things
+inconsistently, so normalising is what makes the sprite sit predictably.
+
 What the image needs: transparent background, square, the duck centred with a
 little padding, and a keyline or otherwise enough contrast to read against
 both a white editor and a dark terminal. It is displayed at 96px, so detail
