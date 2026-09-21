@@ -26,6 +26,16 @@ Click to open the panel, click again to close. Drag it anywhere; it remembers
 where. Right-click for reset-position and quit. Clicking a session's name
 opens its working directory.
 
+## Artwork and states
+
+The duck has six states and wants a drawing for each. Only `duck.png` exists
+so far, so the others fall back to it — which is why the sleeping duck is
+wide awake. Animation carries tempo; it cannot close an eye.
+
+`docs/duck-states/` has a pasteable prompt per state and the exact filenames.
+Drop the PNGs into `renderer/` and restart; missing ones fall back to
+`duck.png`, so they can be added one at a time.
+
 ## Replacing the artwork
 
 The hand-drawn duck is a fallback. Drop a PNG at `renderer/duck.png` and the

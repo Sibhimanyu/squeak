@@ -19,24 +19,51 @@ const els = {
 /* ---------- the duck drawing ---------- */
 
 /**
- * Use a generated sprite if one has been dropped next to this file, and the
- * hand-drawn fallback otherwise. Probing rather than requiring it means the
- * app always has a duck, and replacing the art is just saving a PNG.
+ * One sprite per mood, with `duck.png` as the base.
+ *
+ * Every mood used to share a single image, so "asleep" was a wide-awake duck
+ * bobbing slowly. Animation can convey tempo but it cannot close an eye.
+ * Whichever files exist are used; the rest fall back to the base duck, and
+ * with no files at all the hand-drawn SVG is shown instead.
  */
-function loadSprite(id, file, bodyClass) {
-  const img = document.getElementById(id);
+const MOODS = ["asleep", "idle", "working", "celebrating", "needs_you", "offline"];
+
+const sprites = new Set();
+let currentSrc = null;
+
+function registerSprite(name, file) {
   const probe = new Image();
   probe.addEventListener("load", () => {
-    img.src = file;
-    document.body.classList.add(bodyClass);
+    sprites.add(name);
+    if (name === "base") {
+      document.body.classList.add("has-sprite");
+    }
+    // A sprite may finish loading after the first render.
+    applySprite(document.body.dataset.mood ?? "idle");
   });
   probe.src = file;
 }
 
-loadSprite("duck-sprite", "duck.png", "has-sprite");
-loadSprite("duck-sprite-asleep", "duck-asleep.png", "has-asleep-sprite");
+registerSprite("base", "duck.png");
+for (const mood of MOODS) {
+  registerSprite(mood, `duck-${mood}.png`);
+}
 
-/* ---------- polling ---------- */
+function applySprite(mood) {
+  if (!sprites.has("base") && !sprites.has(mood)) {
+    return;
+  }
+  const file = sprites.has(mood) ? `duck-${mood}.png` : "duck.png";
+  if (file === currentSrc) {
+    return;
+  }
+  currentSrc = file;
+  document.getElementById("duck-sprite").src = file;
+  // Only desaturate as a stand-in when there is no offline artwork.
+  document.body.classList.toggle("sprite-is-generic-offline", mood === "offline" && !sprites.has("offline"));
+}
+
+/* ---------- polling ---------- *//* ---------- polling ---------- */
 
 async function poll() {
   try {
@@ -60,6 +87,7 @@ function render(state) {
 
   els.body.dataset.offline = "false";
   els.body.dataset.mood = duck.mood;
+  applySprite(duck.mood);
 
   renderBadge(duck);
   els.sub.textContent = summarize(duck, active.length);
@@ -77,6 +105,7 @@ function render(state) {
 function renderOffline() {
   els.body.dataset.offline = "true";
   els.body.dataset.mood = "asleep";
+  applySprite("offline");
   els.badge.hidden = true;
   els.sub.textContent = "bridge offline";
   els.foot.textContent = `no daemon on 127.0.0.1:${port}`;

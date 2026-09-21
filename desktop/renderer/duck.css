@@ -206,8 +206,7 @@ body.expanded #panel {
   overflow: visible;
 }
 
-#duck-sprite,
-#duck-sprite-asleep {
+#duck-sprite {
   width: 96px;
   height: 96px;
   object-fit: contain;
@@ -320,17 +319,16 @@ body.has-sprite #duck-sprite {
   display: block;
 }
 
-body.has-sprite.has-asleep-sprite[data-mood="asleep"] #duck-sprite {
-  display: none;
-}
-
-body.has-sprite.has-asleep-sprite[data-mood="asleep"] #duck-sprite-asleep {
-  display: block;
-}
-
-/* A sprite cannot be recoloured, so say "offline" by draining it instead. */
-body.has-sprite[data-offline="true"] #duck-sprite {
+/* Without dedicated offline artwork, drain the colour out of whatever is
+   showing instead. */
+body.has-sprite.sprite-is-generic-offline #duck-sprite {
   filter: grayscale(1) brightness(0.65) drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
+
+/* The eye-shut overlay belongs to the hand-drawn duck only: a sprite says
+   whether it is asleep with its own artwork. */
+body.has-sprite #eye-shut {
+  display: none;
 }
 
 body[data-mood="celebrating"] .spark {
