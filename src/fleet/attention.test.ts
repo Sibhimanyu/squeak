@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { PUSH_KINDS, classifyAttentions, isActionable, scoreAttention, sortAttention } from "./attention.js";
+import {
+  PUSH_KINDS,
+  classifyAttentions,
+  isActionable,
+  scoreAttention,
+  shouldPush,
+  sortAttention,
+} from "./attention.js";
 import type { AttentionItem, FleetSession, FleetState } from "./types.js";
 
 function session(overrides: Partial<FleetSession> = {}): FleetSession {
@@ -158,6 +165,25 @@ describe("push policy", () => {
     // These sit on the radar; a notification for them would be noise.
     expect(PUSH_KINDS.has("errored")).toBe(false);
     expect(PUSH_KINDS.has("context_pressure")).toBe(false);
+  });
+
+  it("only announces a finish for a Conductor chat", () => {
+    const conductor = session({ state: "finished", conductorSessionId: "c1" });
+    const terminal = session({ state: "finished" });
+
+    expect(shouldPush("finished_unreviewed", conductor)).toBe(true);
+    // A terminal session ending a turn is not work the user handed off.
+    expect(shouldPush("finished_unreviewed", terminal)).toBe(false);
+  });
+
+  it("still announces a blocked session wherever it runs", () => {
+    expect(shouldPush("blocked_approval", session({ state: "awaiting_approval" }))).toBe(true);
+    expect(shouldPush("blocked_question", session({ state: "awaiting_input" }))).toBe(true);
+  });
+
+  it("never announces a radar-only kind, Conductor or not", () => {
+    expect(shouldPush("errored", session({ conductorSessionId: "c1" }))).toBe(false);
+    expect(shouldPush("context_pressure", session({ conductorSessionId: "c1" }))).toBe(false);
   });
 });
 

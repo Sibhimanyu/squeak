@@ -84,6 +84,23 @@ export function classifyAttentions(
   return kinds;
 }
 
+/**
+ * Whether this reason is worth an unsolicited message, for this session.
+ *
+ * A finish only interrupts when it is a Conductor chat. Every agent on the Mac
+ * ends turns all day — a scratch session in a terminal finishing is not news,
+ * and it was the bulk of what arrived. A Conductor session finishing is work
+ * the user handed off and is waiting on, and it is the only kind they can open
+ * and review from the phone. Blocked sessions still always push: being stuck
+ * is urgent wherever it happens.
+ */
+export function shouldPush(kind: AttentionKind, session: FleetSession): boolean {
+  if (!PUSH_KINDS.has(kind)) {
+    return false;
+  }
+  return kind === "finished_unreviewed" ? isActionable(session) : true;
+}
+
 /** A session we can actually reply to, versus one we can only watch. */
 export function isActionable(session: FleetSession): boolean {
   return session.conductorSessionId !== null;

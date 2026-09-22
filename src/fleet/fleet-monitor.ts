@@ -2,7 +2,7 @@ import { logger } from "../utils/logger.js";
 import { selectActiveSessions } from "./active.js";
 import {
   DEFAULT_CONTEXT_PRESSURE_PERCENT,
-  PUSH_KINDS,
+  shouldPush,
   classifyAttentions,
   scoreAttention,
   sortAttention,
@@ -254,7 +254,7 @@ export class FleetMonitor {
 
         // D2: only genuinely blocked sessions interrupt. Everything else waits
         // on the radar, where it costs the user nothing to not look.
-        if (!PUSH_KINDS.has(kind) || this.isMuted(session, observedAt)) {
+        if (!shouldPush(kind, session) || this.isMuted(session, observedAt)) {
           continue;
         }
         const claimed = this.deps.store.claimNotification({

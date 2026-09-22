@@ -91,6 +91,17 @@ restart_bridge() {
     launchctl bootstrap "gui/\$(id -u)" "$HOME/Library/LaunchAgents/$LABEL.plist" >/dev/null 2>&1
     return
   fi
+  # The plist is absent from the active directory for one of two reasons:
+  # this is a fresh install that has never registered the agent, or the
+  # bridge was deliberately stopped and its plist moved to
+  # LaunchAgents/disabled/ (see CLAUDE.md -> "Two daemons, not one"). The
+  # manual nohup fallback below exists for the first case; it must not fire
+  # for the second, or shipping any change silently resurrects a bridge the
+  # user asked to keep off.
+  if [ -f "$HOME/Library/LaunchAgents/disabled/$LABEL.plist" ]; then
+    echo "===== ship: $LABEL is intentionally disabled -- not starting it =====" >> "$LOG"
+    return
+  fi
   pkill -f "conductor-tg/dist/cli.js" >/dev/null 2>&1
   sleep 3
   cd "$CONFIG_DIR" || exit 1
@@ -116,25 +127,37 @@ healthy() {
   pgrep -f "conductor-tg/dist/cli.js" >/dev/null 2>&1
 }
 
-echo "===== ship: restarting \$(date) =====" >> "$LOG"
-restart_bridge
-sleep $HEALTH_WAIT
-reap_duplicate_bridges
+bridge_disabled() {
+  [ -f "$HOME/Library/LaunchAgents/disabled/$LABEL.plist" ]
+}
 
-if healthy; then
-  echo "===== ship: bridge healthy =====" >> "$LOG"
+echo "===== ship: restarting \$(date) =====" >> "$LOG"
+
+if bridge_disabled; then
+  # Deliberately off: no process to check, and "not running" here is success,
+  # not a failed deploy. The rollback dance below exists to protect a bridge
+  # that is supposed to be up; it must not fire just because this one is not.
+  echo "===== ship: $LABEL is intentionally disabled -- dist swapped, bridge left off =====" >> "$LOG"
 else
-  echo "===== ship: bridge did not come up, rolling back =====" >> "$LOG"
-  if [ -d "$REPO_ROOT/dist.prev" ]; then
-    rm -rf "$REPO_ROOT/dist.failed"
-    mv "$REPO_ROOT/dist" "$REPO_ROOT/dist.failed"
-    mv "$REPO_ROOT/dist.prev" "$REPO_ROOT/dist"
-    restart_bridge
-    sleep $HEALTH_WAIT
-    if healthy; then
-      echo "===== ship: rolled back, bridge healthy (bad build at dist.failed) =====" >> "$LOG"
-    else
-      echo "===== ship: ROLLBACK FAILED -- bridge is down =====" >> "$LOG"
+  restart_bridge
+  sleep $HEALTH_WAIT
+  reap_duplicate_bridges
+
+  if healthy; then
+    echo "===== ship: bridge healthy =====" >> "$LOG"
+  else
+    echo "===== ship: bridge did not come up, rolling back =====" >> "$LOG"
+    if [ -d "$REPO_ROOT/dist.prev" ]; then
+      rm -rf "$REPO_ROOT/dist.failed"
+      mv "$REPO_ROOT/dist" "$REPO_ROOT/dist.failed"
+      mv "$REPO_ROOT/dist.prev" "$REPO_ROOT/dist"
+      restart_bridge
+      sleep $HEALTH_WAIT
+      if healthy; then
+        echo "===== ship: rolled back, bridge healthy (bad build at dist.failed) =====" >> "$LOG"
+      else
+        echo "===== ship: ROLLBACK FAILED -- bridge is down =====" >> "$LOG"
+      fi
     fi
   fi
 fi

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { FleetSnapshot } from "./fleet-monitor.js";
 import {
   attentionCardKeyboard,
+  cardLabel,
   formatAge,
   formatCountdown,
   diffSummaryKeyboard,
@@ -188,7 +189,19 @@ describe("git state on the radar", () => {
 });
 
 describe("renderAttentionCard", () => {
-  it("fits a phone notification in two lines", () => {
+  const git = {
+    branch: "x",
+    filesChanged: 15,
+    insertions: 283,
+    deletions: 5,
+    untracked: 0,
+    ahead: 0,
+    behind: 0,
+    hasUpstream: false,
+    aheadOfBase: 34,
+  };
+
+  it("fits a phone notification in three lines", () => {
     const text = renderAttentionCard(
       item({ session: session({ state: "awaiting_approval", detail: "Claude needs permission to run Bash" }) }),
       now,
@@ -199,30 +212,68 @@ describe("renderAttentionCard", () => {
     expect(text).toContain("Claude needs permission to run Bash");
   });
 
-  it("reports a finish with what changed rather than prose", () => {
+  it("says what the agent did, not only that the tree changed", () => {
     const text = renderAttentionCard(
       item({
         session: session({
           state: "finished",
-          git: {
-            branch: "x",
-            filesChanged: 15,
-            insertions: 283,
-            deletions: 5,
-            untracked: 0,
-            ahead: 0,
-            behind: 0,
-            hasUpstream: true,
-            aheadOfBase: null,
-          },
+          conductorSessionId: "c1",
+          detail: "**Done!** Rewrote the push card so it says what changed. Tests pass.",
+          git,
         }),
         kind: "finished_unreviewed",
       }),
       now,
     );
 
-    expect(text).toContain("done");
+    expect(text).toContain("Rewrote the push card so it says what changed.");
+    expect(text).not.toContain("**Done!**");
     expect(text).toContain("+283/−5 · 15 files");
+  });
+
+  it("does not count commits at a lock screen, only says the work is still local", () => {
+    const text = renderAttentionCard(
+      item({ session: session({ state: "finished", conductorSessionId: "c1", git }), kind: "finished_unreviewed" }),
+      now,
+    );
+
+    expect(text).toContain("not pushed");
+    expect(text).not.toContain("34 commits");
+  });
+
+  it("spends no line on a clean tree", () => {
+    const clean = { ...git, filesChanged: 0, insertions: 0, deletions: 0, aheadOfBase: 0 };
+    const text = renderAttentionCard(
+      item({
+        session: session({ state: "finished", conductorSessionId: "c1", detail: "Nothing to change.", git: clean }),
+        kind: "finished_unreviewed",
+      }),
+      now,
+    );
+
+    expect(text).not.toContain("clean");
+  });
+
+  it("keeps the heading to one phone line", () => {
+    const text = renderAttentionCard(
+      item({
+        session: session({
+          state: "finished",
+          conductorSessionId: "c1",
+          repoName: "conductor-tg",
+          branch: "blume-style-session-hub",
+          git,
+        }),
+        kind: "finished_unreviewed",
+      }),
+      now,
+    );
+
+    const heading = text.split("\n")[0] ?? "";
+    expect(heading.length).toBeLessThanOrEqual(56);
+    // The branch is what identifies the work; the repo is what gets dropped.
+    expect(heading).toContain("blume-style-session-hub");
+    expect(heading).not.toContain("conductor-tg");
   });
 
   it("says when it cannot act on the session", () => {
@@ -236,6 +287,18 @@ describe("renderAttentionCard", () => {
       now,
     );
     expect(text).not.toContain("answer it where it runs");
+  });
+});
+
+describe("cardLabel", () => {
+  it("keeps repo and branch when both fit", () => {
+    expect(cardLabel(session({ repoName: "repo", branch: "ushuaia" }), "/Users/someone")).toBe("repo · ushuaia");
+  });
+
+  it("drops the repo rather than wrapping", () => {
+    expect(cardLabel(session({ repoName: "conductor-tg", branch: "blume-style-session-hub" }), "/Users/someone")).toBe(
+      "blume-style-session-hub",
+    );
   });
 });
 
@@ -263,8 +326,18 @@ describe("attentionCardKeyboard", () => {
 
     expect(external.some((button) => button.text === "Reply")).toBe(false);
     expect(conductorBacked.some((button) => button.text === "Reply")).toBe(true);
-    // Snooze and review are always available, even for watch-only sessions.
-    expect(external.some((button) => button.text === "Snooze 1h")).toBe(true);
+    // Reviewing is available even for sessions the bot cannot drive.
+    expect(external.some((button) => button.text === "Mark Reviewed")).toBe(true);
+  });
+
+  it("repeats no button that is already a command", () => {
+    const buttons = attentionCardKeyboard(
+      item({ session: session({ state: "finished", conductorSessionId: "c1" }), kind: "finished_unreviewed" }),
+      1,
+    ).flat();
+
+    expect(buttons.some((button) => button.text === "Snooze 1h")).toBe(false);
+    expect(buttons.some((button) => button.text === "Radar")).toBe(false);
   });
 });
 

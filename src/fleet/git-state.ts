@@ -222,7 +222,9 @@ export function describeGitState(state: GitState, options: GitStateTextOptions =
     }
   } else if (state.aheadOfBase && state.aheadOfBase > 0) {
     // No tracking branch at all, so the whole branch is unpushed.
-    parts.push(countCommits ? `${state.aheadOfBase} commit${state.aheadOfBase === 1 ? "" : "s"}, not pushed` : "not pushed");
+    parts.push(
+      countCommits ? `${state.aheadOfBase} commit${state.aheadOfBase === 1 ? "" : "s"}, not pushed` : "not pushed",
+    );
   }
 
   return parts.join(" · ");

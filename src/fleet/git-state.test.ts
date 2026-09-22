@@ -96,6 +96,13 @@ describe("describeGitState", () => {
     expect(describeGitState(gitState())).toBe("clean");
   });
 
+  it("names the fact a branch is unpushed without counting commits, for a card", () => {
+    expect(describeGitState(gitState({ hasUpstream: false, aheadOfBase: 34 }), { countCommits: false })).toBe(
+      "clean · not pushed",
+    );
+    expect(describeGitState(gitState({ ahead: 3, behind: 2 }), { countCommits: false })).toBe("clean · not pushed");
+  });
+
   it("mentions being behind", () => {
     expect(describeGitState(gitState({ ahead: 1, behind: 2 }))).toBe("clean · 1 unpushed · 2 behind");
   });

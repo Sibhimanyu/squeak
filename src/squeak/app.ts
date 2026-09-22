@@ -12,7 +12,9 @@ import type { SqueakConfig } from "./config.js";
 
 const COMMANDS = [
   { command: "radar", description: "Show what every agent is doing right now" },
-  { command: "mute", description: "Silence alerts for an hour" },
+  // /mute still works — it is what the button and the older habit say — but one
+  // of the two is enough in the menu.
+  { command: "snooze", description: "Silence alerts for an hour" },
   { command: "unmute", description: "Resume alerts" },
   { command: "hooks", description: "Check whether live signal is wired up" },
   { command: "help", description: "What Squeak does" },
@@ -27,12 +29,12 @@ function helpText(): string {
     "It messages you when a session:",
     "· is blocked waiting for your approval",
     "· is blocked waiting for an answer",
-    "· has finished",
+    "· is a Conductor chat and has finished",
     "",
     "Everything else — errors, sessions running low on context — waits on the radar.",
     "",
     "/radar  what is running right now",
-    "/mute  silence for an hour · /unmute  resume",
+    "/snooze  silence for an hour · /unmute  resume",
     "/hooks  check live-signal wiring",
   ].join("\n");
 }
@@ -159,9 +161,10 @@ export class SqueakApp {
       case "/status":
         await this.controller.showRadar(location);
         return;
+      case "/snooze":
       case "/mute":
         await this.controller.handleCallback(location, "fleet:mute:60");
-        await this.send(location, "Muted for an hour.");
+        await this.send(location, "Snoozed for an hour.");
         return;
       case "/unmute":
         await this.controller.handleCallback(location, "fleet:unmute");

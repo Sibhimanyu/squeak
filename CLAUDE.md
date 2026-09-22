@@ -114,7 +114,16 @@ via `install-squeak-agents.sh`, which installs both together.
 `~/Library/LaunchAgents/com.conductor-tg.bridge.plist` *exists on disk* — not
 whether it is loaded. Moving the plist out of that directory is exactly what
 stops a future `ship.sh` run in this worktree from silently bringing the
-bridge back via its bootstrap fallback. If the user ever wants it back:
+bridge back via its bootstrap fallback.
+
+`ship.sh` itself now checks for `~/Library/LaunchAgents/disabled/<label>.plist`
+before touching the bridge at all — both in `restart_bridge`'s manual-start
+fallback and, separately, before the health-check/rollback block runs. Without
+that second check, shipping *any* change (not just one touching `src/index.ts`)
+would have looked like a failed deploy the moment the bridge stayed down on
+purpose, and triggered a rollback that reverted a perfectly good build back to
+`dist.prev` for no reason. If the bridge is ever re-enabled, delete or rename
+that marker file, not just move the plist back. If the user ever wants it back:
 `mv ~/Library/LaunchAgents/disabled/com.conductor-tg.bridge.plist
 ~/Library/LaunchAgents/` then `launchctl bootstrap gui/$(id -u)
 ~/Library/LaunchAgents/com.conductor-tg.bridge.plist`.
