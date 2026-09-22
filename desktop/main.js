@@ -14,6 +14,17 @@ const COLLAPSED = { width: 132, height: 132 };
 const EXPANDED = { width: 380, height: 500 };
 const MARGIN = 24;
 
+// Duck geometry, in CSS px — must match duck.css (#duck-wrap, #duck-sprite).
+// Collapsed, the duck sits bottom-right; expanded-right, bottom-left. Its
+// center is not the same distance from the window's left edge in the two
+// layouts, so opening to the right has to nudge the window by the difference
+// to keep the duck itself pixel-still on screen.
+const DUCK_WRAP_PX = 108;
+const DUCK_SPRITE_PX = 96;
+const COLLAPSED_DUCK_CENTER = COLLAPSED.width - DUCK_WRAP_PX + DUCK_WRAP_PX / 2;
+const EXPANDED_RIGHT_DUCK_CENTER = (DUCK_WRAP_PX - DUCK_SPRITE_PX) / 2 + DUCK_SPRITE_PX / 2;
+const RIGHT_SHIFT = COLLAPSED_DUCK_CENTER - EXPANDED_RIGHT_DUCK_CENTER;
+
 /**
  * ⌃⌥D by default. Avoids ⌘⌃D, which macOS uses for dictionary lookup, and
  * anything with ⌥Space, which most launchers take.
@@ -163,7 +174,10 @@ function applyFloatingBehavior(win) {
  * Except when there is no room on the left: a duck parked against the left
  * edge would be shoved across the screen by the clamp below. Then the panel
  * opens to the right instead and the renderer mirrors the duck to the
- * bottom-left corner, so it still does not move.
+ * bottom-left corner. The corners are not symmetric — the duck's center sits
+ * RIGHT_SHIFT further right in the collapsed layout — so the window is nudged
+ * by exactly that much and the duck stays pixel-still; a 24px panel slide
+ * reads as the window opening, while the duck teleporting reads as a glitch.
  */
 function setExpanded(next) {
   if (!win) {
@@ -175,17 +189,16 @@ function setExpanded(next) {
     return;
   }
   if (!next) {
-    // Collapse back onto the duck, pinning whichever edge it sits on.
-    // Resize first, notify after: at 132px the two duck corners are 24px
-    // apart, so a frame of the old layout barely reads. Opening is the
-    // reverse — see finishExpand — because there the corners are 248px apart.
+    // Collapse back onto the duck, pinning it where it sits on screen.
     const bounds = win.getBounds();
-    const x = expandSide === "left" ? bounds.x + bounds.width - COLLAPSED.width : bounds.x;
+    const x = bounds.x + (expandSide === "left" ? bounds.width - COLLAPSED.width : -RIGHT_SHIFT);
     const y = bounds.y + bounds.height - COLLAPSED.height;
     const placed = clampToDisplay(x, y, COLLAPSED.width, COLLAPSED.height);
     win.setBounds({ ...placed, width: COLLAPSED.width, height: COLLAPSED.height });
     expanded = false;
     win.webContents.send("duck:expanded", { expanded: false, side: expandSide });
+    // placed.x is already the collapsed-equivalent position: both branches
+    // above derive it by pinning the duck, just from opposite edges.
     writeSettings({ position: { x: placed.x, y: placed.y } });
     return;
   }
@@ -195,9 +208,12 @@ function setExpanded(next) {
   const need = EXPANDED.width - bounds.width;
   const roomLeft = bounds.x - area.x;
   const roomRight = area.x + area.width - (bounds.x + bounds.width);
-  expandSide = roomLeft >= need || roomRight < need ? "left" : "right";
+  expandSide = roomLeft >= need || roomRight < need + RIGHT_SHIFT ? "left" : "right";
   const placed = clampToDisplay(
-    expandSide === "left" ? bounds.x - need : bounds.x,
+    // Opening right, the window itself slides RIGHT_SHIFT so the duck — which
+    // sits closer to the window's left edge in this layout — lands exactly
+    // where it was. Collapsing mirrors it back (see above).
+    expandSide === "left" ? bounds.x - need : bounds.x + RIGHT_SHIFT,
     bounds.y + bounds.height - EXPANDED.height,
     EXPANDED.width,
     EXPANDED.height,
