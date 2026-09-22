@@ -28,6 +28,11 @@ let tray = null;
 let expanded = false;
 /** Which way the panel opens: "left" pins the duck to the window's right edge. */
 let expandSide = "left";
+/** A resize waiting on the renderer to stage the matching layout. */
+let pendingExpand = null;
+
+/** Give up waiting for the renderer and open anyway, rather than wedging. */
+const EXPAND_READY_TIMEOUT_MS = 250;
 let hidden = false;
 let lastState = null;
 /** Suppressed while a context menu is up, and while capturing screenshots. */
@@ -161,40 +166,83 @@ function applyFloatingBehavior(win) {
  * bottom-left corner, so it still does not move.
  */
 function setExpanded(next) {
-  if (!win || next === expanded) {
+  if (!win) {
     return;
   }
-  const size = next ? EXPANDED : COLLAPSED;
-  const bounds = win.getBounds();
-  const y = bounds.y + bounds.height - size.height;
-  let x;
-  if (next) {
-    const area = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea;
-    const need = size.width - bounds.width;
-    const roomLeft = bounds.x - area.x;
-    const roomRight = area.x + area.width - (bounds.x + bounds.width);
-    expandSide = roomLeft >= need || roomRight < need ? "left" : "right";
-    x = expandSide === "left" ? bounds.x - need : bounds.x;
-  } else {
-    // Collapse back onto the duck, pinning whichever edge it sits on.
-    x = expandSide === "left" ? bounds.x + bounds.width - size.width : bounds.x;
+  // A toggle-twice during the staging window must not strand the old timer.
+  cancelPendingExpand();
+  if (next === expanded) {
+    return;
   }
-  const placed = clampToDisplay(x, y, size.width, size.height);
+  if (!next) {
+    // Collapse back onto the duck, pinning whichever edge it sits on.
+    // Resize first, notify after: at 132px the two duck corners are 24px
+    // apart, so a frame of the old layout barely reads. Opening is the
+    // reverse — see finishExpand — because there the corners are 248px apart.
+    const bounds = win.getBounds();
+    const x = expandSide === "left" ? bounds.x + bounds.width - COLLAPSED.width : bounds.x;
+    const y = bounds.y + bounds.height - COLLAPSED.height;
+    const placed = clampToDisplay(x, y, COLLAPSED.width, COLLAPSED.height);
+    win.setBounds({ ...placed, width: COLLAPSED.width, height: COLLAPSED.height });
+    expanded = false;
+    win.webContents.send("duck:expanded", { expanded: false, side: expandSide });
+    writeSettings({ position: { x: placed.x, y: placed.y } });
+    return;
+  }
 
-  win.setBounds({ ...placed, width: size.width, height: size.height });
-  expanded = next;
-  win.webContents.send("duck:expanded", { expanded, side: expandSide });
+  const bounds = win.getBounds();
+  const area = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea;
+  const need = EXPANDED.width - bounds.width;
+  const roomLeft = bounds.x - area.x;
+  const roomRight = area.x + area.width - (bounds.x + bounds.width);
+  expandSide = roomLeft >= need || roomRight < need ? "left" : "right";
+  const placed = clampToDisplay(
+    expandSide === "left" ? bounds.x - need : bounds.x,
+    bounds.y + bounds.height - EXPANDED.height,
+    EXPANDED.width,
+    EXPANDED.height,
+  );
+
+  // The window grows synchronously but the renderer repaints a frame or two
+  // later. Growing first would show the old layout stretched across the new
+  // size — on expand-right that is the duck sitting in the wrong corner and
+  // then jumping. So the renderer stages the matching layout first and the
+  // resize lands on top of it. The timeout is the backstop, not the path:
+  // the renderer answers after a frame, in single-digit milliseconds.
+  pendingExpand = { x: placed.x, y: placed.y };
+  win.webContents.send("duck:will-expand", { side: expandSide });
+  pendingExpand.timer = setTimeout(() => finishExpand(), EXPAND_READY_TIMEOUT_MS);
+}
+
+/**
+ * Grow the window onto the layout the renderer has staged. Idempotent: the
+ * ack and the timeout race, and the loser finds nothing to do.
+ */
+function finishExpand() {
+  if (!pendingExpand || !win || expanded) {
+    pendingExpand = null;
+    return;
+  }
+  const { x, y, timer } = pendingExpand;
+  pendingExpand = null;
+  if (timer) {
+    clearTimeout(timer);
+  }
+  win.setBounds({ x, y, width: EXPANDED.width, height: EXPANDED.height });
+  expanded = true;
+  win.webContents.send("duck:expanded", { expanded: true, side: expandSide });
 
   // Behave like a popover: an open panel takes focus, which is what makes
   // clicking anywhere else dismiss it. Collapsed, the duck must never steal
   // focus from whatever you are typing in.
-  if (next) {
-    win.focus();
-  }
+  win.focus();
+}
 
-  if (!next) {
-    writeSettings({ position: { x: placed.x + size.width - COLLAPSED.width, y: placed.y + size.height - COLLAPSED.height } });
+function cancelPendingExpand() {
+  if (pendingExpand?.timer) {
+    clearTimeout(pendingExpand.timer);
   }
+  pendingExpand = null;
 }
 
 /* ---------- visibility ---------- */
@@ -339,6 +387,7 @@ function resetPosition() {
   const position = defaultPosition();
   writeSettings({ position });
   if (win) {
+    cancelPendingExpand();
     win.setBounds({ ...position, ...COLLAPSED });
     expanded = false;
     win.webContents.send("duck:expanded", false);
@@ -346,6 +395,8 @@ function resetPosition() {
 }
 
 ipcMain.on("duck:toggle", () => setExpanded(!expanded));
+// The renderer staged the layout the pending resize needs; grow onto it.
+ipcMain.on("duck:expand-ready", () => finishExpand());
 
 // The renderer already polls /state; reuse its answer rather than polling twice.
 ipcMain.on("duck:state", (_event, state) => {
@@ -357,6 +408,12 @@ ipcMain.on("duck:collapse", () => setExpanded(false));
 ipcMain.on("duck:drag", (_event, delta) => {
   if (!win) {
     return;
+  }
+  // A drag during the staging window wins over the pending open: unstage the
+  // layout and stay collapsed rather than teleporting on the ack.
+  if (pendingExpand) {
+    cancelPendingExpand();
+    win.webContents.send("duck:expanded", { expanded: false, side: expandSide });
   }
   const bounds = win.getBounds();
   const placed = clampToDisplay(bounds.x + delta.dx, bounds.y + delta.dy, bounds.width, bounds.height);

@@ -309,11 +309,23 @@ els.wrap.addEventListener("contextmenu", (event) => {
 
 // The main process owns whether the panel is open, because it also owns the
 // window size; the renderer just reflects what it is told.
-window.duck.onExpanded((value) => {
+function applyExpanded(value) {
   const state = typeof value === "boolean" ? { expanded: value, side: "left" } : value;
   const open = Boolean(state && state.expanded);
   els.body.classList.toggle("expanded", open);
   els.body.classList.toggle("expand-right", open && state.side === "right");
+}
+
+window.duck.onExpanded(applyExpanded);
+
+// Opening is staged: the window grows synchronously but repaints later, so
+// the main process lets the new layout land first and only then resizes.
+// Without this the old layout shows stretched across the new size for a frame
+// — on expand-right, the duck visibly jumps corners. Answer after a frame so
+// style and layout have settled, not just been queued.
+window.duck.onWillExpand((value) => {
+  applyExpanded({ expanded: true, side: value && value.side });
+  requestAnimationFrame(() => window.duck.expandReady());
 });
 
 /* ---------- go ---------- */

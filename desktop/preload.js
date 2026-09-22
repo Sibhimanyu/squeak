@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-// The renderer gets exactly these five verbs and no Node access.
+// The renderer gets exactly these verbs and no Node access.
 contextBridge.exposeInMainWorld("duck", {
   toggle: () => ipcRenderer.send("duck:toggle"),
   collapse: () => ipcRenderer.send("duck:collapse"),
@@ -10,4 +10,6 @@ contextBridge.exposeInMainWorld("duck", {
   openPath: (target) => ipcRenderer.send("duck:open-path", target),
   reportState: (state) => ipcRenderer.send("duck:state", state),
   onExpanded: (handler) => ipcRenderer.on("duck:expanded", (_event, value) => handler(value)),
+  onWillExpand: (handler) => ipcRenderer.on("duck:will-expand", (_event, value) => handler(value)),
+  expandReady: () => ipcRenderer.send("duck:expand-ready"),
 });

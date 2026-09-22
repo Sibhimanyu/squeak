@@ -17,6 +17,7 @@ const nodeGlobals = {
   process: "readonly",
   console: "readonly",
   setTimeout: "readonly",
+  clearTimeout: "readonly",
   Buffer: "readonly",
 };
 
@@ -29,6 +30,7 @@ const browserGlobals = {
   URLSearchParams: "readonly",
   setInterval: "readonly",
   setTimeout: "readonly",
+  requestAnimationFrame: "readonly",
   console: "readonly",
 };
 
