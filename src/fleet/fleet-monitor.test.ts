@@ -128,13 +128,22 @@ describe("FleetMonitor", () => {
     expect(harness.pushes[0]?.[0]?.kind).toBe("blocked_approval");
   });
 
-  it("tells you when a session finishes", async () => {
-    const harness = makeMonitor([observed({ state: "finished", detail: "Done." })]);
+  it("tells you when a Conductor session finishes", async () => {
+    const harness = makeMonitor([observed({ state: "finished", detail: "Done.", conductorSessionId: "c1" })]);
 
     const snapshot = await harness.monitor.refresh();
 
     expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["finished_unreviewed"]);
     expect(harness.pushes[0]?.[0]?.kind).toBe("finished_unreviewed");
+  });
+
+  it("leaves a terminal session finishing on the radar rather than messaging about it", async () => {
+    const harness = makeMonitor([observed({ state: "finished", detail: "Done." })]);
+
+    const snapshot = await harness.monitor.refresh();
+
+    expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["finished_unreviewed"]);
+    expect(harness.pushes).toHaveLength(0);
   });
 
   it("says nothing about a session that finished long ago", async () => {
@@ -241,7 +250,7 @@ describe("FleetMonitor", () => {
 
 describe("context pressure", () => {
   it("raises it alongside the finished flag, but only finishing is worth a message", async () => {
-    const harness = makeMonitor([observed({ state: "finished", contextPercent: 92 })]);
+    const harness = makeMonitor([observed({ state: "finished", contextPercent: 92, conductorSessionId: "c1" })]);
 
     const snapshot = await harness.monitor.refresh();
 

@@ -253,9 +253,20 @@ transcripts, and ranks them by what is blocked on the human.
   last fifteen minutes, or quiet with a live process. Everything else stays
   tracked but hidden. On this machine that is 4 of 26; without the filter the
   radar is an archive rather than a status display.
-- Blocked and finished sessions get pushed to Telegram; errored and
-  low-on-context ones only appear on the radar. Push cards are **two lines** —
-  they are lock-screen notifications, not documents.
+- Blocked sessions get pushed to Telegram wherever they run; a **finish only
+  pushes for a Conductor session** (`shouldPush` in `attention.ts`). Every
+  agent on the Mac ends turns all day and those finishes were the bulk of the
+  noise. Errored and low-on-context ones only appear on the radar.
+- Push cards are **three short lines at most** — which session, what the agent
+  said it did, what changed on disk — and the last one is only on a finish.
+  They are lock-screen notifications, not documents: no commit counts
+  (`describeGitState(state, { countCommits: false })`), and the heading drops
+  the repo rather than wrapping, since the branch identifies the work. The
+  agent's own last message is the point of the card; `card-text.ts` strips its
+  markdown, because Telegram would otherwise show `##` and `**` literally.
+- **A card carries no button that is also a command.** Snooze and Radar sat on
+  every card and read as chrome repeated down the chat; they are `/snooze` and
+  `/radar`. Only per-session actions stay.
 - `src/fleet/active.ts` owns the active rule. The monitor, the radar and the
   local state endpoint all read it; do not reimplement the predicate.
 - **The duck decides nothing.** Mood, the active set and every rendered field

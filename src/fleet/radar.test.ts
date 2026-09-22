@@ -276,6 +276,17 @@ describe("renderAttentionCard", () => {
     expect(heading).not.toContain("conductor-tg");
   });
 
+  it("keeps a diffstat off a blocked card, where the question is the point", () => {
+    const text = renderAttentionCard(
+      item({
+        session: session({ state: "awaiting_approval", conductorSessionId: "c1", detail: "Run `rm -rf dist`?", git }),
+      }),
+      now,
+    );
+
+    expect(text).not.toContain("15 files");
+  });
+
   it("says when it cannot act on the session", () => {
     const text = renderAttentionCard(item(), now);
     expect(text).toContain("answer it where it runs");

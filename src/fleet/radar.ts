@@ -299,10 +299,14 @@ export function renderAttentionCard(item: AttentionItem, nowMs: number): string 
     lines.push(`waiting ${formatAge(item.since, nowMs)}`);
   }
 
-  // Commit counts are left out on purpose: see GitStateTextOptions.
-  const git = session.git ? describeGitState(session.git, { countCommits: false }) : null;
-  if (git && git !== "clean") {
-    lines.push(`_${git}_`);
+  // Only on a finish: on a blocked card the question is the whole point, and a
+  // diffstat under it is one more thing to read before answering.
+  // Commit counts are left out on purpose — see GitStateTextOptions.
+  if (item.kind === "finished_unreviewed") {
+    const git = session.git ? describeGitState(session.git, { countCommits: false }) : null;
+    if (git && git !== "clean") {
+      lines.push(`_${git}_`);
+    }
   }
 
   if (!isActionable(session)) {
@@ -362,17 +366,19 @@ export function attentionCardKeyboard(item: AttentionItem, handle: number, canDr
     ]);
   }
 
-  // Reviewing a diff needs no control channel, so this is offered even for
-  // sessions the bridge cannot drive.
+  // Snooze and Radar used to have a row each, on every card. Neither is about
+  // this session — they were the same two buttons repeated down the whole chat
+  // — and both are a command away (/snooze, /radar), so the card keeps only
+  // what acts on the session in front of you, on one row.
+  //
+  // Reviewing a diff needs no control channel, so it is offered even for
+  // sessions the bot cannot drive.
+  const review: TelegramInlineKeyboard[number] = [];
   if (item.session.cwd) {
-    rows.push([{ text: "View Diff", callback_data: `fleet:diff:${handle}` }]);
+    review.push({ text: "View Diff", callback_data: `fleet:diff:${handle}` });
   }
-
-  // Snooze and Radar used to sit here, on every card. They are not about this
-  // session — they are the same two buttons repeated down the whole chat — and
-  // both are a command away (/snooze, /radar), so the card keeps only what
-  // acts on the session in front of you.
-  rows.push([{ text: "Mark Reviewed", callback_data: `fleet:reviewed:${handle}` }]);
+  review.push({ text: "Mark Reviewed", callback_data: `fleet:reviewed:${handle}` });
+  rows.push(review);
   return rows;
 }
 
