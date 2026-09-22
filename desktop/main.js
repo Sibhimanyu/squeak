@@ -26,6 +26,8 @@ const DEFAULT_VISIBILITY_SHORTCUT = "Control+Alt+H";
 let win = null;
 let tray = null;
 let expanded = false;
+/** Which way the panel opens: "left" pins the duck to the window's right edge. */
+let expandSide = "left";
 let hidden = false;
 let lastState = null;
 /** Suppressed while a context menu is up, and while capturing screenshots. */
@@ -152,6 +154,11 @@ function applyFloatingBehavior(win) {
  * Grow up and to the left so the duck itself does not move when the panel
  * opens. The duck sits at the bottom-right of the window in both sizes, so
  * shifting the origin by the size difference pins it in place.
+ *
+ * Except when there is no room on the left: a duck parked against the left
+ * edge would be shoved across the screen by the clamp below. Then the panel
+ * opens to the right instead and the renderer mirrors the duck to the
+ * bottom-left corner, so it still does not move.
  */
 function setExpanded(next) {
   if (!win || next === expanded) {
@@ -159,13 +166,24 @@ function setExpanded(next) {
   }
   const size = next ? EXPANDED : COLLAPSED;
   const bounds = win.getBounds();
-  const x = bounds.x + bounds.width - size.width;
   const y = bounds.y + bounds.height - size.height;
+  let x;
+  if (next) {
+    const area = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea;
+    const need = size.width - bounds.width;
+    const roomLeft = bounds.x - area.x;
+    const roomRight = area.x + area.width - (bounds.x + bounds.width);
+    expandSide = roomLeft >= need || roomRight < need ? "left" : "right";
+    x = expandSide === "left" ? bounds.x - need : bounds.x;
+  } else {
+    // Collapse back onto the duck, pinning whichever edge it sits on.
+    x = expandSide === "left" ? bounds.x + bounds.width - size.width : bounds.x;
+  }
   const placed = clampToDisplay(x, y, size.width, size.height);
 
   win.setBounds({ ...placed, width: size.width, height: size.height });
   expanded = next;
-  win.webContents.send("duck:expanded", expanded);
+  win.webContents.send("duck:expanded", { expanded, side: expandSide });
 
   // Behave like a popover: an open panel takes focus, which is what makes
   // clicking anywhere else dismiss it. Collapsed, the duck must never steal

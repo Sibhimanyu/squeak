@@ -58,6 +58,13 @@ body.expanded #panel {
   display: flex;
 }
 
+/* When the panel opens to the right of the duck (no room on the left), the
+   duck sits at the bottom-left of the window instead, so it stays where it
+   was on screen. The panel itself always fills the full width. */
+body.expand-right #duck-wrap {
+  align-self: flex-start;
+}
+
 #panel header {
   display: flex;
   align-items: baseline;

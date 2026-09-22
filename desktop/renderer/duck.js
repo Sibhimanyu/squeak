@@ -310,7 +310,10 @@ els.wrap.addEventListener("contextmenu", (event) => {
 // The main process owns whether the panel is open, because it also owns the
 // window size; the renderer just reflects what it is told.
 window.duck.onExpanded((value) => {
-  els.body.classList.toggle("expanded", Boolean(value));
+  const state = typeof value === "boolean" ? { expanded: value, side: "left" } : value;
+  const open = Boolean(state && state.expanded);
+  els.body.classList.toggle("expanded", open);
+  els.body.classList.toggle("expand-right", open && state.side === "right");
 });
 
 /* ---------- go ---------- */
