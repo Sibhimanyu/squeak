@@ -311,7 +311,15 @@ transcripts, and ranks them by what is blocked on the human.
   a standalone probe before *and after* changing the always-on-top level,
   since both are easy to break silently and not obvious from reading the code.
 - To see the duck without Screen Recording permission, use
-  `DUCK_CAPTURE=<prefix>` — the window photographs itself.
+  `DUCK_CAPTURE=<prefix>` — the window photographs itself. Note it photographs
+  the *page*, not the composited window: it shows transparency correctly even
+  when the native window has lost it, so it cannot verify a white-background
+  report. Only eyes on the menubar can.
+- **Keep the duck on Electron >= 35.1.3.** On 34 and earlier a transparent
+  window at or below ~128-160px renders as an opaque white rounded square
+  (upstream #38630 / #44884, fixed by #46353) — which is exactly the collapsed
+  duck at 132x132. It reads as "a white card behind the duck" and is easy to
+  misdiagnose as CSS or a bad sprite, both of which photograph fine.
 - The ingress serves `GET /state` unauthenticated on loopback for local UIs.
   It is read-only and exposes nothing a local process could not already read
   from the same files; hook posts still require the token.
