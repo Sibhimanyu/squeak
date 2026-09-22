@@ -6,7 +6,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ConductorRegistryAdapter } from "./conductor-registry.js";
+import { ConductorRegistryAdapter, conductorTimestampToIso } from "./conductor-registry.js";
 
 const cleanups: Array<() => void> = [];
 
@@ -45,6 +45,8 @@ function createRegistryFixture(): {
       codex_thinking_level TEXT,
       thinking_enabled INTEGER DEFAULT 1,
       agent_personality TEXT,
+      context_used_percent FLOAT,
+      is_compacting INTEGER DEFAULT 0,
       created_at TEXT,
       updated_at TEXT,
       is_hidden INTEGER DEFAULT 0
@@ -62,7 +64,10 @@ function createRegistryFixture(): {
       active_session_id TEXT,
       created_at TEXT,
       updated_at TEXT NOT NULL,
-      state TEXT
+      state TEXT,
+      derived_status TEXT,
+      manual_status TEXT,
+      workspace_path TEXT
     );
   `);
 
@@ -730,5 +735,41 @@ describe("ConductorRegistryAdapter", () => {
     const branches = adapter.listWorkspacesForRepository("repo-fresh", 10).map((workspace) => workspace.branch);
 
     expect(branches).toContain("las-vegas");
+  });
+
+  it("reads the trigger's naive UTC datetimes as UTC, not local time", () => {
+    expect(conductorTimestampToIso("2026-09-22 04:11:37")).toBe("2026-09-22T04:11:37Z");
+    expect(conductorTimestampToIso("2026-09-22 04:11:37.677")).toBe("2026-09-22T04:11:37.677Z");
+    expect(conductorTimestampToIso("2026-09-22T04:11:37.677Z")).toBe("2026-09-22T04:11:37.677Z");
+    expect(conductorTimestampToIso(null)).toBeNull();
+    expect(conductorTimestampToIso("not a timestamp")).toBe("not a timestamp");
+  });
+
+  it("normalizes fleet session timestamps and orders by recency across spellings", () => {
+    const { adapter, db } = createRegistryFixture();
+
+    db.prepare(
+      `INSERT INTO repos (id, name, root_path, default_branch, updated_at, remote, hidden) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("repo-1", "repo", "/repos/repo", "main", "2026-09-22T04:00:00.000Z", "origin", 0);
+    const insertWorkspace = db.prepare(
+      `INSERT INTO workspaces (id, repository_id, directory_name, branch, updated_at, state, derived_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    );
+    insertWorkspace.run("ws-old", "repo-1", "old", "old", "2026-09-22T03:00:00.000Z", "ready", "in-progress");
+    insertWorkspace.run("ws-new", "repo-1", "new", "new", "2026-09-22T04:00:00.000Z", "ready", "in-progress");
+    const insertSession = db.prepare(
+      `INSERT INTO sessions (id, workspace_id, status, agent_type, updated_at, last_user_message_at)
+       VALUES (?, ?, ?, ?, ?, ?);`,
+    );
+    // Older in real time, ISO spelling.
+    insertSession.run("s-old", "ws-old", "idle", "acp", "2026-09-22T04:10:00.000Z", "2026-09-22T04:09:00.000Z");
+    // Newer in real time, trigger spelling. A raw string sort would put the
+    // space (' ') before the 'T' and order these backwards.
+    insertSession.run("s-new", "ws-new", "idle", "acp", "2026-09-22 04:11:37", null);
+
+    const sessions = adapter.listFleetSessions(10);
+    expect(sessions.map((session) => session.id)).toEqual(["s-new", "s-old"]);
+    expect(sessions[0]?.updatedAt).toBe("2026-09-22T04:11:37Z");
+    expect(sessions[1]?.updatedAt).toBe("2026-09-22T04:10:00.000Z");
   });
 });

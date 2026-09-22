@@ -63,6 +63,27 @@ interface DbRepositoryRow extends RepositoryRef {
 
 const MERGED_BRANCH_CACHE_TTL_MS = 3_000;
 
+/**
+ * Conductor writes timestamps two ways: the app writes ISO-8601 with an
+ * offset (`2026-09-22T03:01:12.257Z`), but its `update_sessions_updated_at`
+ * trigger rewrites `updated_at` with `datetime('now')` — a UTC wall time with
+ * no offset (`2026-09-22 04:11:37`). `Date.parse` reads a string like that in
+ * the *local* zone, so on a UTC+5:30 machine every trigger-touched row parses
+ * five and a half hours stale: finished sessions permanently miss the
+ * 15-minute active window and the fleet never pushes them. Normalize naive
+ * Conductor datetimes to UTC on the way out; anything else passes through.
+ */
+export function conductorTimestampToIso(value: string | null): string | null {
+  if (!value) {
+    return value;
+  }
+  const naive = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/.exec(value.trim());
+  if (!naive) {
+    return value;
+  }
+  return `${naive[1]}T${naive[2]}Z`;
+}
+
 export class ConductorRegistryAdapter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly db: any;
@@ -495,7 +516,7 @@ export class ConductorRegistryAdapter {
    * round trips against Conductor's database.
    */
   listFleetSessions(limit: number): FleetRegistrySessionRef[] {
-    return this.db
+    const rows = this.db
       .prepare(
         `
           SELECT
@@ -524,11 +545,18 @@ export class ConductorRegistryAdapter {
           JOIN repos r ON r.id = w.repository_id
           WHERE IFNULL(s.is_hidden, 0) = 0
             AND IFNULL(r.hidden, 0) = 0
-          ORDER BY s.updated_at DESC
+          -- datetime() understands both of Conductor's timestamp spellings,
+          -- so recency order does not depend on which one a row carries.
+          ORDER BY datetime(s.updated_at) DESC
           LIMIT ?
         `,
       )
       .all(limit) as FleetRegistrySessionRef[];
+    return rows.map((row) => ({
+      ...row,
+      updatedAt: conductorTimestampToIso(row.updatedAt) ?? row.updatedAt,
+      lastUserMessageAt: conductorTimestampToIso(row.lastUserMessageAt),
+    }));
   }
 
   getSessionDefaults(workspaceId: string): SessionDefaults {

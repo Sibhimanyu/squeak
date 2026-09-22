@@ -1,5 +1,4 @@
 import type { ConductorRegistryAdapter, FleetRegistrySessionRef } from "../../adapters/conductor-registry.js";
-import type { SessionStatus } from "../../types.js";
 import type { FleetState, ObservedSession } from "../types.js";
 
 export interface ConductorObserverOptions {
@@ -64,7 +63,7 @@ export class ConductorObserver {
       repoName: row.repositoryName,
       branch: row.branch ?? row.directoryName,
       title: row.title,
-      state: this.toFleetState(row.status, lastActivityAt),
+      state: this.toFleetState(row, row.updatedAt),
       detail: null,
       lastActivityAt,
       transcriptPath: null,
@@ -76,8 +75,8 @@ export class ConductorObserver {
     };
   }
 
-  private toFleetState(status: SessionStatus | string, lastActivityAt: string): FleetState {
-    switch (status) {
+  private toFleetState(row: FleetRegistrySessionRef, lastActivityAt: string): FleetState {
+    switch (row.status) {
       case "working":
       case "cancelling":
         return "working";
@@ -88,6 +87,12 @@ export class ConductorObserver {
         return "error";
       default:
         break;
+    }
+
+    // A chat the user never spoke in never ran, so its "recent idle" is a
+    // creation, not a finish — without this every new chat pushes "done".
+    if (!row.lastUserMessageAt) {
+      return "idle";
     }
 
     // Conductor collapses "just answered you" and "untouched since Tuesday"

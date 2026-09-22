@@ -323,6 +323,18 @@ transcripts, and ranks them by what is blocked on the human.
 - The ingress serves `GET /state` unauthenticated on loopback for local UIs.
   It is read-only and exposes nothing a local process could not already read
   from the same files; hook posts still require the token.
+- **Conductor writes two timestamp spellings.** The app writes ISO-8601 with an
+  offset, but its `update_sessions_updated_at` trigger rewrites `updated_at`
+  with `datetime('now')` — a UTC wall time with no offset. `Date.parse` reads
+  that in local time, so on a UTC+5:30 machine every trigger-touched row looked
+  5.5h stale: finished sessions permanently missed the 15-minute active window
+  and the fleet never pushed them, while brand-new chats (still carrying the
+  app-written ISO stamp) pushed a bogus "done" at creation. `listFleetSessions`
+  normalizes via `conductorTimestampToIso` (and orders by `datetime()` so both
+  spellings sort by real recency); the conductor observer additionally reports
+  a session with no `last_user_message_at` as idle, since a chat nobody spoke
+  in never ran. Do not compare raw `updated_at` strings across rows — the `' '`
+  in the naive spelling sorts before the `'T'` in ISO and inverts recency.
 - **A session can want attention for several reasons at once**, so
   `classifyAttentions` returns a list. Do not collapse it back to one.
 - **`workspaces.state = 'archived'` does not mean "done", it means the worktree
