@@ -272,7 +272,20 @@ transcripts, and ranks them by what is blocked on the human.
 - **The duck decides nothing.** Mood, the active set and every rendered field
   come from `/state`; the renderer only draws. Putting logic in
   `desktop/renderer/` means it escapes CI and can start disagreeing with
-  Telegram about what is happening.
+  Telegram about what is happening. Formatting an existing field (agent name,
+  a context-percent warning glyph) is fine and duplicated on both sides on
+  purpose; a real computation across sessions (the title-collision check
+  below) is not, and belongs server-side in `radar.ts` so both surfaces stay
+  in sync instead of drifting.
+- **Two sessions can share repo, branch, *and* agent** — Conductor allows a
+  second chat on the same workspace, and this is not hypothetical: this
+  session and an earlier one in it were, on this machine, simultaneously
+  "conductor-tg · blume-style-session-hub" with nothing to tell them apart.
+  `renderRadar` disambiguates by appending each session's own title, but only
+  once two rows actually collide (`labelCounts` in `radar.ts`) — the same
+  discipline `formatWorkspaceLabel` already uses for repo names, applied here
+  because most rows never collide and don't need the extra text. Conductor's
+  own "Untitled" placeholder counts as no title.
 - `desktop/` is a **separate package on purpose**: `conductor-tg` is published
   to npm and must not carry Electron as a dependency. It is excluded from
   `package.json` `files`, from `tsconfig`, and from `eslint src/`.

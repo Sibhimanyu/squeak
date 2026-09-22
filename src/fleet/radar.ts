@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { TelegramInlineKeyboard } from "../types.js";
-import { isActionable } from "./attention.js";
+import { DEFAULT_CONTEXT_PRESSURE_PERCENT, isActionable } from "./attention.js";
 import { summarizeOutcome } from "./card-text.js";
 import { describeWindowSpan, type CodexUsage } from "./codex-usage.js";
 import { diffPageCount, diffPageSlice, type WorkspaceDiff } from "./diff-view.js";
@@ -69,6 +69,19 @@ export function sessionLabel(session: FleetSession, homeDir = os.homedir()): str
   return session.title ?? session.sourceId.slice(0, 8);
 }
 
+const DISAMBIGUATING_TITLE_MAX_CHARS = 34;
+
+/** A session's own title, short enough for a parenthetical, or null when it carries no information. */
+function disambiguatingTitle(session: FleetSession): string | null {
+  const title = session.title?.trim();
+  if (!title || title === "Untitled") {
+    return null;
+  }
+  return title.length > DISAMBIGUATING_TITLE_MAX_CHARS
+    ? `${title.slice(0, DISAMBIGUATING_TITLE_MAX_CHARS - 1).trimEnd()}…`
+    : title;
+}
+
 export function shortenPath(target: string, homeDir = os.homedir()): string {
   const normalized = path.normalize(target).replace(/\/$/, "");
   if (normalized === homeDir) {
@@ -82,7 +95,7 @@ export function shortenPath(target: string, homeDir = os.homedir()): string {
   return `…/${segments.slice(-2).join("/")}`;
 }
 
-/** Where the session came from, shown only when it is not Conductor. */
+/** Where the session came from, appended after the agent when it is not Conductor. */
 function originTag(session: FleetSession): string | null {
   switch (session.origin) {
     case "terminal":
@@ -96,6 +109,17 @@ function originTag(session: FleetSession): string | null {
   }
 }
 
+/**
+ * "claude", or "codex terminal" — always present, unlike origin. Two sessions
+ * pointed at the same workspace (a Claude chat and a Codex chat both open on
+ * one branch, which Conductor allows) used to render as identical rows with
+ * nothing to tell them apart; the agent name is the one thing that never is.
+ */
+function agentTag(session: FleetSession): string {
+  const place = originTag(session);
+  return place ? `${session.agent} ${place}` : session.agent;
+}
+
 /** Context is only worth the characters once it is high enough to matter. */
 const CONTEXT_DISPLAY_PERCENT = 60;
 
@@ -103,7 +127,10 @@ function contextTag(session: FleetSession): string | null {
   if (session.contextPercent === null || session.contextPercent < CONTEXT_DISPLAY_PERCENT) {
     return null;
   }
-  return `ctx ${Math.round(session.contextPercent)}%`;
+  const percent = Math.round(session.contextPercent);
+  // Past the same threshold that triggers a context-pressure alert elsewhere,
+  // this is worth a glance rather than blending into the rest of the line.
+  return percent >= DEFAULT_CONTEXT_PRESSURE_PERCENT ? `⚠️ ctx ${percent}%` : `ctx ${percent}%`;
 }
 
 /** Short status word for a row, so the eye lands on state before detail. */
@@ -158,15 +185,32 @@ export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
     ...active.filter((session) => !blocked.includes(session) && !done.includes(session)),
   ];
 
+  // Two sessions can share a repo, branch, *and* agent — a Claude chat and
+  // another Claude chat both open on one workspace, which Conductor allows.
+  // The agent tag cannot separate those; the session's own title can, and
+  // Conductor titles are usually distinct even when everything else matches.
+  // Only shown on an actual collision, the same way a workspace label only
+  // grows a directory suffix when its repo name is ambiguous.
+  const labelCounts = new Map<string, number>();
+  for (const session of ordered) {
+    const label = sessionLabel(session);
+    labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+  }
+
   for (const session of ordered.slice(0, MAX_ACTIVE_ROWS)) {
     lines.push("");
-    lines.push(`${stateGlyph(session.state)} ${sessionLabel(session)}`);
+    const label = sessionLabel(session);
+    const distinctTitle = (labelCounts.get(label) ?? 0) > 1 ? disambiguatingTitle(session) : null;
+    // Bold, so the heading a session is filed under is the thing the eye
+    // lands on first, with the plain detail line beneath it visually lighter.
+    const heading = distinctTitle ? `**${label}** _(${distinctTitle})_` : `**${label}**`;
+    lines.push(`${stateGlyph(session.state)} ${heading}`);
 
     const detail = [
+      agentTag(session),
       stateWord(session.state),
       session.detail,
       formatAge(session.lastActivityAt, nowMs),
-      originTag(session),
       contextTag(session),
     ]
       .filter((part): part is string => Boolean(part))
@@ -258,9 +302,14 @@ export function radarKeyboard(
   const rows: TelegramInlineKeyboard = [];
 
   for (const item of snapshot.attention.slice(0, MAX_ACTION_BUTTONS)) {
+    // Truncate the label, not the whole string: a bare .slice(0, 40) cut mid
+    // word with no ellipsis ("...session-hu"), which read as broken rather
+    // than shortened. Keeping the tail matches sessionLabel's own repo ·
+    // branch order — the branch is almost always the more distinguishing half.
+    const label = truncateStart(sessionLabel(item.session), 38);
     rows.push([
       {
-        text: `${stateGlyph(item.session.state)} ${sessionLabel(item.session)}`.slice(0, 40),
+        text: `${stateGlyph(item.session.state)} ${label}`,
         callback_data: `fleet:open:${handleFor(item.session.key)}`,
       },
     ]);

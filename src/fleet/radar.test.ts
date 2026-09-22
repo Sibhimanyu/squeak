@@ -86,6 +86,84 @@ describe("formatAge", () => {
 });
 
 describe("renderRadar", () => {
+  it("always names the agent, so two sessions on the same branch are never identical rows", () => {
+    // Conductor allows a Claude chat and a Codex chat open on the same
+    // workspace at once; before this, two such rows rendered with nothing to
+    // tell them apart.
+    const text = renderRadar(
+      snapshot({
+        sessions: [
+          session({ key: "a", agent: "claude", origin: "conductor" }),
+          session({ key: "b", agent: "codex", origin: "conductor" }),
+        ],
+      }),
+      now,
+    );
+
+    expect(text).toContain("claude");
+    expect(text).toContain("codex");
+  });
+
+  it("still appends where the session came from, after the agent", () => {
+    const text = renderRadar(snapshot({ sessions: [session({ agent: "claude", origin: "terminal" })] }), now);
+    expect(text).toContain("claude terminal");
+  });
+
+  it("bolds the session heading so it stands out from the detail line beneath it", () => {
+    const text = renderRadar(snapshot({ sessions: [session({ repoName: "repo", branch: "main" })] }), now);
+    expect(text).toContain("**repo · main**");
+  });
+
+  it("adds each session's own title only once two rows share a label", () => {
+    // Same repo, same branch, same agent — a real, current scenario: two
+    // Claude chats open on one Conductor workspace. Agent identity cannot
+    // separate these; only the sessions' own titles can.
+    const text = renderRadar(
+      snapshot({
+        sessions: [
+          session({ key: "a", title: "Blume Conductor Master App" }),
+          session({ key: "b", title: "Telegram Squeak message improve" }),
+        ],
+      }),
+      now,
+    );
+
+    expect(text).toContain("(Blume Conductor Master App)");
+    expect(text).toContain("(Telegram Squeak message improve)");
+  });
+
+  it("does not add a title when there is nothing to disambiguate", () => {
+    const text = renderRadar(snapshot({ sessions: [session({ title: "Blume Conductor Master App" })] }), now);
+    expect(text).not.toContain("(Blume Conductor Master App)");
+  });
+
+  it("treats Conductor's own 'Untitled' placeholder as no title at all", () => {
+    const text = renderRadar(
+      snapshot({ sessions: [session({ key: "a", title: "Untitled" }), session({ key: "b", title: "Untitled" })] }),
+      now,
+    );
+    expect(text).not.toContain("(Untitled)");
+  });
+
+  it("truncates a long title rather than letting one row run on", () => {
+    const long = "A very long session title that goes on for quite a while describing everything";
+    const text = renderRadar(
+      snapshot({ sessions: [session({ key: "a", title: long }), session({ key: "b", title: "Short" })] }),
+      now,
+    );
+    expect(text).toContain("…)");
+    expect(text).not.toContain(long);
+  });
+
+  it("flags context usage past the pressure threshold instead of blending it into the line", () => {
+    const calm = renderRadar(snapshot({ sessions: [session({ contextPercent: 65 })] }), now);
+    const hot = renderRadar(snapshot({ sessions: [session({ contextPercent: 88 })] }), now);
+
+    expect(calm).toContain("ctx 65%");
+    expect(calm).not.toContain("⚠️");
+    expect(hot).toContain("⚠️ ctx 88%");
+  });
+
   it("leads with what is blocking and counts each state", () => {
     const blocked = session({ state: "awaiting_approval", detail: "Claude needs permission to use Bash" });
     const text = renderRadar(snapshot({ sessions: [blocked, session({ state: "working" })] }), now);
@@ -324,6 +402,19 @@ describe("radarKeyboard", () => {
         expect(button.text.length).toBeLessThanOrEqual(40);
       }
     }
+  });
+
+  it("truncates a long label with an ellipsis rather than cutting mid-word", () => {
+    const long = item({
+      session: session({ repoName: "conductor-tg", branch: "blume-style-session-hub-that-runs-long" }),
+    });
+    const keyboard = radarKeyboard(snapshot({ attention: [long] }), () => 1);
+
+    const text = keyboard[0]?.[0]?.text ?? "";
+    // The old `.slice(0, 40)` produced "...session-hu" — a word cut in half
+    // with nothing to show it was shortened.
+    expect(text).toContain("…");
+    expect(text.endsWith("hu")).toBe(false);
   });
 });
 

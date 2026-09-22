@@ -178,13 +178,15 @@ function sessionRow(session) {
   const meta = document.createElement("div");
   meta.className = "meta";
   meta.textContent = [
+    // Always shown, unlike origin below: two sessions on the same workspace
+    // (a Claude chat and a Codex chat both open on one branch, which
+    // Conductor allows) used to render with nothing telling them apart.
+    session.agent,
     STATE_WORD[session.state] ?? session.state,
     session.detail,
     age(session.lastActivityAt),
     session.origin === "conductor" ? null : session.origin,
-    session.contextPercent !== null && session.contextPercent >= 60
-      ? `ctx ${Math.round(session.contextPercent)}%`
-      : null,
+    contextLabel(session.contextPercent),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -201,6 +203,18 @@ function sessionRow(session) {
 
   row.append(dot, main);
   return row;
+}
+
+/** 80 mirrors the backend's context-pressure threshold (src/fleet/attention.ts). */
+const CONTEXT_DISPLAY_PERCENT = 60;
+const CONTEXT_WARN_PERCENT = 80;
+
+function contextLabel(contextPercent) {
+  if (contextPercent === null || contextPercent < CONTEXT_DISPLAY_PERCENT) {
+    return null;
+  }
+  const percent = Math.round(contextPercent);
+  return percent >= CONTEXT_WARN_PERCENT ? `⚠️ ctx ${percent}%` : `ctx ${percent}%`;
 }
 
 function label(session) {
