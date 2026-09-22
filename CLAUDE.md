@@ -93,13 +93,29 @@ test for anything you fix is expected; the suite is fast.
 - A repo with no workspaces must still be selectable, otherwise a freshly added
   project can never be reached from Telegram.
 
-## Two daemons, not one
+## Two daemons, not one — and only one is meant to run
 
 `conductor-tg` is the bridge: a conversation you navigate and talk to agents
 through. `squeak` is a pager: it watches every agent on the Mac and
 messages you when one finishes or blocks. Separate binaries, separate bots,
 separate config (`~/Library/Application Support/squeak/.env`), separate
 state (`squeak.db`).
+
+**As of 2026-09-22 the user asked for the bridge to stop running entirely.**
+`com.conductor-tg.bridge` was booted out and its plist moved to
+`~/Library/LaunchAgents/disabled/`. Only `com.squeak.daemon` and
+`com.squeak.duck` should be running now — the duck comes bundled with Squeak
+via `install-squeak-agents.sh`, which installs both together.
+
+**Do not re-enable the bridge without being asked.** `ship.sh`'s
+`restart_bridge` decides whether to kickstart or bootstrap based on whether
+`~/Library/LaunchAgents/com.conductor-tg.bridge.plist` *exists on disk* — not
+whether it is loaded. Moving the plist out of that directory is exactly what
+stops a future `ship.sh` run in this worktree from silently bringing the
+bridge back via its bootstrap fallback. If the user ever wants it back:
+`mv ~/Library/LaunchAgents/disabled/com.conductor-tg.bridge.plist
+~/Library/LaunchAgents/` then `launchctl bootstrap gui/$(id -u)
+~/Library/LaunchAgents/com.conductor-tg.bridge.plist`.
 
 - **Only one process may run the fleet.** Two would bind the same hook port
   and send every notification twice. The bridge no longer wires it up at all;
