@@ -14,6 +14,7 @@ import type { ClaudeTranscriptObserver } from "./observers/claude-transcript.js"
 import type { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import type { ConductorObserver } from "./observers/conductor.js";
 import type { CodexUsage, CodexUsageReader } from "./codex-usage.js";
+import type { ClaudeCostReader } from "./claude-cost.js";
 import type { GitState, GitStateReader } from "./git-state.js";
 import type { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { AttentionItem, FleetSession, HookEvent, ObservedSession } from "./types.js";
@@ -37,6 +38,8 @@ export interface FleetMonitorDependencies {
   liveness: ProcessLivenessObserver;
   /** Optional: without it the radar simply shows no working-tree detail. */
   git?: GitStateReader | null;
+  /** Optional: without it a session's cost only ever shows what Claude Code itself reported. */
+  claudeCost?: ClaudeCostReader | null;
   /** Optional: without it Codex quota is simply never shown or pushed. */
   codexUsage?: CodexUsageReader | null;
 }
@@ -271,10 +274,14 @@ export class FleetMonitor {
     // Read git last and only for the sessions that will be rendered, then
     // restate everything against the enriched copies — push cards are worth
     // more with a diffstat on them, so this has to happen before they go out.
-    const enriched = await this.attachGitState(sessions, attention);
+    const gitEnriched = await this.attachGitState(sessions, attention);
+    const enriched = this.attachClaudeCost(
+      gitEnriched.sessions,
+      attention.map((item) => gitEnriched.remap(item)),
+    );
 
     if (pushes.length > 0) {
-      this.emitPush(sortAttention(pushes.map((item) => enriched.remap(item))));
+      this.emitPush(sortAttention(pushes.map((item) => enriched.remap(gitEnriched.remap(item)))));
     }
 
     const codexUsage = this.readCodexUsage();
@@ -285,7 +292,7 @@ export class FleetMonitor {
     return {
       sessions: enriched.sessions,
       active: enriched.sessions.filter((session) => activeKeys.has(session.key)),
-      attention: sortAttention(attention.map((item) => enriched.remap(item))),
+      attention: sortAttention(attention.map((item) => enriched.remap(gitEnriched.remap(item)))),
       generatedAt: observedAt,
       codexUsage,
     };
@@ -387,6 +394,58 @@ export class FleetMonitor {
     const next = sessions.map((session) => {
       const state = wanted.has(session.key) && session.cwd ? (states.get(session.cwd) ?? null) : null;
       const updated = state ? { ...session, git: state } : session;
+      byKey.set(session.key, updated);
+      return updated;
+    });
+
+    return {
+      sessions: next,
+      remap: (item) => {
+        const session = byKey.get(item.session.key);
+        return session ? { ...item, session } : item;
+      },
+    };
+  }
+
+  /**
+   * Fills in a session's cost when Claude Code never reported one itself —
+   * the common case for anything Conductor drives. Reading a whole transcript
+   * to sum it is real work, so this runs only for the sessions about to be
+   * rendered, the same discipline attachGitState uses.
+   */
+  private attachClaudeCost(
+    sessions: FleetSession[],
+    attention: AttentionItem[],
+  ): { sessions: FleetSession[]; remap: (item: AttentionItem) => AttentionItem } {
+    const identity = { sessions, remap: (item: AttentionItem): AttentionItem => item };
+    if (!this.deps.claudeCost) {
+      return identity;
+    }
+
+    const wanted = new Set(attention.map((item) => item.session.key));
+    for (const session of selectActiveSessions(sessions, this.now())) {
+      wanted.add(session.key);
+    }
+    if (wanted.size === 0) {
+      return identity;
+    }
+
+    const byKey = new Map<string, FleetSession>();
+    const next = sessions.map((session) => {
+      if (!wanted.has(session.key) || session.agent !== "claude" || !session.transcriptPath) {
+        byKey.set(session.key, session);
+        return session;
+      }
+      let costUsd: number | null;
+      try {
+        costUsd = this.deps.claudeCost!.read(session.transcriptPath, session.costUsd);
+      } catch (error) {
+        logger.warn("fleet claude cost read failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        costUsd = session.costUsd;
+      }
+      const updated = costUsd === session.costUsd ? session : { ...session, costUsd };
       byKey.set(session.key, updated);
       return updated;
     });

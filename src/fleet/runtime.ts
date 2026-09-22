@@ -4,6 +4,7 @@ import { DiffReader } from "./diff-view.js";
 import { deriveDuckState } from "./duck-mood.js";
 import { FleetMonitor } from "./fleet-monitor.js";
 import { FleetStore } from "./fleet-store.js";
+import { ClaudeCostReader } from "./claude-cost.js";
 import { GitStateReader } from "./git-state.js";
 import { HookIngressServer } from "./hook-ingress.js";
 import { defaultHookInstallPaths } from "./hook-install.js";
@@ -64,6 +65,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       liveness: new ProcessLivenessObserver(),
       git: new GitStateReader(),
       codexUsage: new CodexUsageReader(),
+      claudeCost: new ClaudeCostReader(),
     },
     {
       pollIntervalMs: options.pollIntervalMs,

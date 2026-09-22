@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { TelegramInlineKeyboard } from "../types.js";
 import { isActionable } from "./attention.js";
+import { summarizeOutcome } from "./card-text.js";
 import { describeWindowSpan, type CodexUsage } from "./codex-usage.js";
 import { diffPageCount, diffPageSlice, type WorkspaceDiff } from "./diff-view.js";
 import { describeGitState } from "./git-state.js";
@@ -276,25 +277,32 @@ export function radarKeyboard(
 /**
  * The push card.
  *
- * Deliberately two lines. This arrives as a phone notification, where the
- * whole message has to be readable on the lock screen — anything longer is
- * read as a wall and dismissed. Depth lives behind the buttons.
+ * This is a lock-screen notification, so it gets three short lines at most and
+ * every one of them has to earn its place:
+ *
+ *   1. which session — as few characters as still identify it, because a
+ *      wrapped bold heading is most of a phone notification and says nothing
+ *      the next line would not;
+ *   2. what happened, in the agent's own words. A finish used to show only a
+ *      diffstat, which says a turn ended but never what it did;
+ *   3. what changed on disk, and whether it has left the machine — which is
+ *      the thing left to do.
  */
 export function renderAttentionCard(item: AttentionItem, nowMs: number): string {
   const session = item.session;
-  const lines = [`${stateGlyph(session.state)} **${sessionLabel(session)}** — ${cardVerb(item.kind)}`];
+  const lines = [`${stateGlyph(session.state)} **${cardLabel(session)}** — ${cardVerb(item.kind)}`];
 
-  const second =
-    item.kind === "finished_unreviewed"
-      ? session.git
-        ? describeGitState(session.git)
-        : null
-      : (session.detail ?? null);
-
-  if (second) {
-    lines.push(second);
+  const outcome = summarizeOutcome(session.detail);
+  if (outcome) {
+    lines.push(outcome);
   } else if (item.kind !== "finished_unreviewed") {
     lines.push(`waiting ${formatAge(item.since, nowMs)}`);
+  }
+
+  // Commit counts are left out on purpose: see GitStateTextOptions.
+  const git = session.git ? describeGitState(session.git, { countCommits: false }) : null;
+  if (git && git !== "clean") {
+    lines.push(`_${git}_`);
   }
 
   if (!isActionable(session)) {
@@ -302,6 +310,26 @@ export function renderAttentionCard(item: AttentionItem, nowMs: number): string 
   }
 
   return lines.join("\n");
+}
+
+/** How much of a card's width the name of the session may take. */
+const CARD_LABEL_MAX = 34;
+
+/**
+ * The session name, sized for a notification rather than a list.
+ *
+ * `sessionLabel` prints repo and branch, which on a Conductor workspace is
+ * routinely sixty characters and wraps to two bold lines. The branch alone
+ * identifies the work — the repo is usually implied by it — so the repo is
+ * the part that gets dropped when both will not fit.
+ */
+export function cardLabel(session: FleetSession, homeDir = os.homedir()): string {
+  const branch = session.branch && session.branch !== "HEAD" ? session.branch : null;
+  if (!branch) {
+    return truncateStart(sessionLabel(session, homeDir), CARD_LABEL_MAX);
+  }
+  const full = session.repoName ? `${session.repoName} · ${branch}` : branch;
+  return full.length <= CARD_LABEL_MAX ? full : truncateStart(branch, CARD_LABEL_MAX);
 }
 
 function cardVerb(kind: AttentionKind): string {
@@ -340,11 +368,11 @@ export function attentionCardKeyboard(item: AttentionItem, handle: number, canDr
     rows.push([{ text: "View Diff", callback_data: `fleet:diff:${handle}` }]);
   }
 
-  rows.push([
-    { text: "Snooze 1h", callback_data: `fleet:snooze:${handle}` },
-    { text: "Mark Reviewed", callback_data: `fleet:reviewed:${handle}` },
-  ]);
-  rows.push([{ text: "Radar", callback_data: "fleet:radar" }]);
+  // Snooze and Radar used to sit here, on every card. They are not about this
+  // session — they are the same two buttons repeated down the whole chat — and
+  // both are a command away (/snooze, /radar), so the card keeps only what
+  // acts on the session in front of you.
+  rows.push([{ text: "Mark Reviewed", callback_data: `fleet:reviewed:${handle}` }]);
   return rows;
 }
 

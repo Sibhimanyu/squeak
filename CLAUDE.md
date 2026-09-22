@@ -28,6 +28,8 @@ deployment section before changing anything under `src/`.
 | `src/fleet/git-state.ts` | cached working-tree reads, so "finished" says what changed |
 | `src/fleet/diff-view.ts` | reads and paginates a workspace diff for review in Telegram |
 | `src/fleet/duck-mood.ts` | what the desktop duck is doing, derived where CI can test it |
+| `src/fleet/claude-pricing.ts` | per-token dollar rates; a model missing here returns null, never a guess |
+| `src/fleet/claude-cost.ts` | whole-file, cached, lazy Claude cost estimate — see the note below on why |
 | `desktop/` | the Electron duck: a separate package, plain JS, no build step |
 
 `src/services/bridge-service.ts` is **dead code** — an older implementation that
@@ -152,6 +154,35 @@ bridge back via its bootstrap fallback. If the user ever wants it back:
   every `token_count` event as a sibling of `info`, not nested inside it — a
   first attempt at `codex-usage.ts` nested it and silently returned null
   forever. Verified against a real machine before and after the fix.
+- **`cost-state` is almost never written for a Conductor-driven session.**
+  Measured on a real machine: 1/37 `sdk-ts` transcripts and 1/18 `sdk-cli`
+  transcripts had one, against 2/3 for terminal (`cli`) sessions. So the
+  original per-session cost tracking was correct but invisible for the
+  overwhelming majority of real usage.
+- **`src/fleet/claude-pricing.ts` estimates cost from raw token counts**
+  instead, since every entrypoint writes those on every assistant message
+  regardless of `cost-state`. Rates and the cache write/read multipliers
+  (1.25x / 2x for 5-min / 1-hour TTL writes, 0.1x for reads) come from the
+  `claude-api` skill, not memory — pricing drifts and a stale number here
+  would be worse than admitting the model is unpriced (`rateForModel`
+  returns `null` for anything not in the table, on purpose).
+- **This needed a whole-file read, which is a different cost class from
+  everything else in `src/fleet/`.** State detection only needs the *last*
+  entry, which the 256KB tail read easily contains; cost needs a *sum* across
+  the entire session. A real 22MB transcript only has ~1% of itself in that
+  tail window — computing the estimate from the tail alone would have
+  silently under-reported exactly the longest, most expensive sessions by
+  orders of magnitude. `src/fleet/claude-cost.ts` (`ClaudeCostReader`) reads
+  the whole file instead, but only for sessions about to be rendered (same
+  discipline as `GitStateReader`), caches by `(path, mtime)`, and returns
+  `null` above a 16MB size cap rather than a silently partial sum.
+- **Claude Code writes the same assistant message more than once as it
+  streams**, each occurrence carrying the *full* usage for that message, not
+  a delta. Summing every occurrence instead of deduplicating by
+  `message.id` overcounted a real session's cost by ~85% against Anthropic's
+  own authoritative `cost-state` total — caught by checking the estimate
+  against that one real number before trusting it anywhere else. Keep only
+  the last occurrence per id.
 - **Claude Code never persists its rate-limit event to disk.** `rate_limit_event`
   only ever appears in the live stdout of whatever process spawned the CLI —
   confirmed by dumping the raw hook payload too, which carries none of it

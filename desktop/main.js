@@ -264,7 +264,11 @@ function usageMenuItems(state) {
     .filter((session) => typeof session.costUsd === "number")
     .reduce((total, session) => total + session.costUsd, 0);
   if (claudeCost > 0) {
-    items.push({ label: `Claude: $${claudeCost.toFixed(2)} (active sessions)`, enabled: false });
+    // Almost always our own estimate from token counts, not Anthropic's own
+    // figure — Claude Code only reports a real cost for the interactive CLI,
+    // essentially never for a Conductor-driven session. Said plainly so it
+    // does not read as a precise bill.
+    items.push({ label: `Claude: ~$${claudeCost.toFixed(2)} est. (active sessions)`, enabled: false });
   }
 
   return items.length > 0 ? items : [{ label: "No usage data yet", enabled: false }];

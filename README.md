@@ -119,8 +119,15 @@ after.
 
 Claude Code never writes the same thing to disk — only to the live stream of
 whatever process spawned it, which for a Conductor session is Conductor
-itself, not Squeak. What Claude *does* persist is a running cost total per
-session, so that is tracked instead: real, but per-session, not a quota.
+itself, not Squeak. What Claude *does* persist for the CLI is a running cost total per session —
+but Conductor drives Claude through the SDK, and that entry almost never
+appears there (1/37 real SDK sessions on this machine had one). So Squeak
+estimates it instead, from the token counts every entrypoint writes on every
+message: real per-token rates, the same cache-write/read multipliers Anthropic
+publishes, deduplicated against Claude Code's own habit of writing one
+streamed message more than once. It is an estimate, labelled as one in the
+tray (`~$X.XX est.`) — not Anthropic's own figure, which the tray uses
+whenever Claude Code did report it.
 
 ### The duck
 

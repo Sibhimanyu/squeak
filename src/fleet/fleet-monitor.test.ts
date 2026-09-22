@@ -468,3 +468,86 @@ describe("codex quota alerts", () => {
     expect((await monitor.refresh()).codexUsage).toBeNull();
   });
 });
+
+describe("claude cost enrichment", () => {
+  function makeMonitorWithClaudeCost(
+    sessions: ObservedSession[],
+    claudeCost: { read: (path: string, authoritative: number | null) => number | null },
+  ) {
+    const store = makeStore();
+    const monitor = new FleetMonitor(
+      {
+        store,
+        conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
+        claude: { observe: () => sessions } as unknown as FleetMonitorDependencies["claude"],
+        codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
+        liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
+        claudeCost: claudeCost as unknown as NonNullable<FleetMonitorDependencies["claudeCost"]>,
+      },
+      { now: () => Date.parse("2026-09-20T12:00:00.000Z") },
+    );
+    return monitor;
+  }
+
+  it("fills in a cost estimate for an active session with none", async () => {
+    const monitor = makeMonitorWithClaudeCost([observed({ state: "working", transcriptPath: "/tmp/x.jsonl" })], {
+      read: (_p, authoritative) => authoritative ?? 12.5,
+    });
+
+    const snapshot = await monitor.refresh();
+
+    expect(snapshot.sessions[0]?.costUsd).toBe(12.5);
+  });
+
+  it("does not enrich a session that will not be shown", async () => {
+    const seen: string[] = [];
+    const monitor = makeMonitorWithClaudeCost([observed({ state: "idle", transcriptPath: "/tmp/x.jsonl" })], {
+      read: (p) => {
+        seen.push(p);
+        return 99;
+      },
+    });
+
+    await monitor.refresh();
+
+    expect(seen).toHaveLength(0);
+  });
+
+  it("passes through Claude Code's own authoritative figure unchanged", async () => {
+    let calledWith: number | null = -1;
+    const monitor = makeMonitorWithClaudeCost(
+      [observed({ state: "working", transcriptPath: "/tmp/x.jsonl", costUsd: 88.25 })],
+      {
+        read: (_p, authoritative) => {
+          calledWith = authoritative;
+          return authoritative;
+        },
+      },
+    );
+
+    const snapshot = await monitor.refresh();
+
+    expect(calledWith).toBe(88.25);
+    expect(snapshot.sessions[0]?.costUsd).toBe(88.25);
+  });
+
+  it("leaves a session with no transcript path alone", async () => {
+    const monitor = makeMonitorWithClaudeCost([observed({ state: "working", transcriptPath: null })], {
+      read: () => 99,
+    });
+
+    expect((await monitor.refresh()).sessions[0]?.costUsd).toBeNull();
+  });
+
+  it("survives the reader throwing", async () => {
+    const monitor = makeMonitorWithClaudeCost([observed({ state: "working", transcriptPath: "/tmp/x.jsonl" })], {
+      read: () => {
+        throw new Error("boom");
+      },
+    });
+
+    const snapshot = await monitor.refresh();
+
+    expect(snapshot.sessions).toHaveLength(1);
+  });
+});

@@ -184,11 +184,22 @@ export function countUntracked(statusOutput: string): number {
   return statusOutput.split("\n").filter((line) => line.startsWith("??")).length;
 }
 
+export interface GitStateTextOptions {
+  /**
+   * Whether to print how many commits are ahead. The radar wants the number —
+   * it is a size, and the rows sit next to each other. A push card does not:
+   * "34 commits, not pushed" answers a question nobody asked from a lock
+   * screen, where the only thing that matters is that the work is still local.
+   */
+  countCommits?: boolean;
+}
+
 /**
  * One line, phone-width. Says what changed and whether it has left the
  * machine, because those are the two questions worth answering from a radar.
  */
-export function describeGitState(state: GitState): string | null {
+export function describeGitState(state: GitState, options: GitStateTextOptions = {}): string | null {
+  const countCommits = options.countCommits ?? true;
   const parts: string[] = [];
 
   if (state.insertions > 0 || state.deletions > 0) {
@@ -204,14 +215,14 @@ export function describeGitState(state: GitState): string | null {
 
   if (state.hasUpstream) {
     if (state.ahead > 0) {
-      parts.push(`${state.ahead} unpushed`);
+      parts.push(countCommits ? `${state.ahead} unpushed` : "not pushed");
     }
-    if (state.behind > 0) {
+    if (state.behind > 0 && countCommits) {
       parts.push(`${state.behind} behind`);
     }
   } else if (state.aheadOfBase && state.aheadOfBase > 0) {
     // No tracking branch at all, so the whole branch is unpushed.
-    parts.push(`${state.aheadOfBase} commit${state.aheadOfBase === 1 ? "" : "s"}, not pushed`);
+    parts.push(countCommits ? `${state.aheadOfBase} commit${state.aheadOfBase === 1 ? "" : "s"}, not pushed` : "not pushed");
   }
 
   return parts.join(" · ");
