@@ -231,15 +231,6 @@ export class FleetController {
         this.deps.store.snooze(key, new Date(this.now() + SNOOZE_MS).toISOString());
         return { handled: true, notice: "Snoozed for an hour." };
       }
-      case "reviewed": {
-        const key = this.resolveHandleKey(argument);
-        if (!key) {
-          return { handled: true, notice: "That session is no longer being tracked." };
-        }
-        this.deps.store.markReviewed(key, new Date(this.now()).toISOString());
-        void this.deps.monitor.refresh();
-        return { handled: true, notice: "Marked reviewed." };
-      }
       default:
         return { handled: true, notice: "Unknown fleet action." };
     }

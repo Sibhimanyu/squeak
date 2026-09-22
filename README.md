@@ -171,7 +171,7 @@ Two things no transcript can tell you, read straight from Conductor's database:
   already worked out — worth knowing before it happens. Any session at 60% or
   more shows `ctx N%` on its radar row.
 - **Retired workspaces.** A workspace Conductor has archived, or that you
-  marked done or canceled, stops asking to be reviewed. On a machine with
+  marked done or canceled, drops off the radar. On a machine with
   twenty-odd sessions this is most of the noise: the worktree is gone, so
   there is nothing left to look at.
 
@@ -201,8 +201,8 @@ agents. Sessions already running pick the hooks up on their next start.
 | Conductor | yes | yes |
 | Your terminal, an editor | yes | no — answer it where it runs |
 
-Sessions the bridge did not spawn have no control channel, so their cards say
-so and offer only snooze and mark-reviewed.
+Sessions the bridge did not spawn have no control channel, so their cards
+say so and offer only the diff viewer.
 
 ## Why Use It
 

@@ -422,12 +422,9 @@ export function attentionCardKeyboard(item: AttentionItem, handle: number, canDr
   //
   // Reviewing a diff needs no control channel, so it is offered even for
   // sessions the bot cannot drive.
-  const review: TelegramInlineKeyboard[number] = [];
   if (item.session.cwd) {
-    review.push({ text: "View Diff", callback_data: `fleet:diff:${handle}` });
+    rows.push([{ text: "View Diff", callback_data: `fleet:diff:${handle}` }]);
   }
-  review.push({ text: "Mark Reviewed", callback_data: `fleet:reviewed:${handle}` });
-  rows.push(review);
   return rows;
 }
 

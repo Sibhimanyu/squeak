@@ -428,8 +428,9 @@ describe("attentionCardKeyboard", () => {
 
     expect(external.some((button) => button.text === "Reply")).toBe(false);
     expect(conductorBacked.some((button) => button.text === "Reply")).toBe(true);
-    // Reviewing is available even for sessions the bot cannot drive.
-    expect(external.some((button) => button.text === "Mark Reviewed")).toBe(true);
+    // The diff needs no control channel, so it is offered even for
+    // sessions the bot cannot drive — and it is the only card button left.
+    expect(external.some((button) => button.text === "View Diff")).toBe(true);
   });
 
   it("repeats no button that is already a command", () => {

@@ -166,16 +166,6 @@ describe("FleetMonitor", () => {
     expect(snapshot.active).toHaveLength(0);
   });
 
-  it("stops surfacing a session once it is marked reviewed", async () => {
-    const harness = makeMonitor([observed({ state: "finished" })]);
-    const first = await harness.monitor.refresh();
-    harness.store.markReviewed(first.sessions[0]?.key ?? "", "2026-09-20T12:00:01.000Z");
-
-    const second = await harness.monitor.refresh();
-
-    expect(second.attention).toHaveLength(0);
-  });
-
   it("honours a snooze until it expires", async () => {
     const harness = makeMonitor([observed({ state: "awaiting_input" })]);
     const first = await harness.monitor.refresh();

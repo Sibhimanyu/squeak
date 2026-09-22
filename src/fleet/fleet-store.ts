@@ -15,7 +15,6 @@ export interface FleetSnapshotRow {
 
 export interface FleetReviewRow {
   sessionKey: string;
-  reviewedAt: string | null;
   /** ISO instant before which this session stays out of the attention list. */
   snoozedUntil: string | null;
 }
@@ -55,7 +54,6 @@ export class FleetStore {
 
       CREATE TABLE IF NOT EXISTS fleet_review (
         session_key TEXT PRIMARY KEY,
-        reviewed_at TEXT,
         snoozed_until TEXT
       );
 
@@ -137,8 +135,8 @@ export class FleetStore {
       )
       .run(params.sessionKey, params.state, stateEnteredAt, params.observedAt, params.lastActivityAt);
 
-    // Leaving a state means whatever the human did about it no longer applies:
-    // a session they reviewed and then poked again is unreviewed once more.
+    // Leaving a state means a snooze no longer applies: a session that was
+    // snoozed and then started doing something new is worth surfacing again.
     if (changed) {
       this.db.prepare(`DELETE FROM fleet_review WHERE session_key = ?`).run(params.sessionKey);
     }
@@ -193,28 +191,18 @@ export class FleetStore {
   getReview(sessionKey: string): FleetReviewRow | null {
     const row = this.db
       .prepare(
-        `SELECT session_key as sessionKey, reviewed_at as reviewedAt, snoozed_until as snoozedUntil
+        `SELECT session_key as sessionKey, snoozed_until as snoozedUntil
          FROM fleet_review WHERE session_key = ?`,
       )
       .get(sessionKey) as FleetReviewRow | undefined;
     return row ?? null;
   }
 
-  markReviewed(sessionKey: string, reviewedAt: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO fleet_review (session_key, reviewed_at, snoozed_until)
-         VALUES (?, ?, NULL)
-         ON CONFLICT(session_key) DO UPDATE SET reviewed_at = excluded.reviewed_at`,
-      )
-      .run(sessionKey, reviewedAt);
-  }
-
   snooze(sessionKey: string, snoozedUntil: string): void {
     this.db
       .prepare(
-        `INSERT INTO fleet_review (session_key, reviewed_at, snoozed_until)
-         VALUES (?, NULL, ?)
+        `INSERT INTO fleet_review (session_key, snoozed_until)
+         VALUES (?, ?)
          ON CONFLICT(session_key) DO UPDATE SET snoozed_until = excluded.snoozed_until`,
       )
       .run(sessionKey, snoozedUntil);

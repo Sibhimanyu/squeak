@@ -67,7 +67,7 @@ describe("recordState", () => {
     expect(changed.stateEnteredAt).toBe("2026-09-20T12:05:00.000Z");
   });
 
-  it("forgets a review once the session moves on", () => {
+  it("forgets a snooze once the session moves on", () => {
     const store = makeStore();
     store.recordState({
       sessionKey: "k",
@@ -75,7 +75,7 @@ describe("recordState", () => {
       lastActivityAt: "2026-09-20T12:00:00.000Z",
       observedAt: "2026-09-20T12:00:00.000Z",
     });
-    store.markReviewed("k", "2026-09-20T12:01:00.000Z");
+    store.snooze("k", "2026-09-20T12:01:00.000Z");
     store.recordState({
       sessionKey: "k",
       state: "working",
@@ -83,7 +83,7 @@ describe("recordState", () => {
       observedAt: "2026-09-20T12:02:00.000Z",
     });
 
-    // A session you reviewed and then poked again is unreviewed once more.
+    // A session you snoozed and then poked again is worth surfacing once more.
     expect(store.getReview("k")).toBeNull();
   });
 });

@@ -239,7 +239,7 @@ export class FleetMonitor {
       }
 
       const review = this.deps.store.getReview(session.key);
-      if (review?.reviewedAt || (review?.snoozedUntil && review.snoozedUntil > observedAt)) {
+      if (review?.snoozedUntil && review.snoozedUntil > observedAt) {
         continue;
       }
 
