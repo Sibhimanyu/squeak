@@ -46,7 +46,8 @@ export class ConductorObserver {
 
   private toObserved(row: FleetRegistrySessionRef): ObservedSession {
     const agent = row.agentType === "codex" ? "codex" : "claude";
-    const lastActivityAt = row.updatedAt;
+    const state = this.toFleetState(row);
+    const lastActivityAt = activityTime(row, state);
 
     return {
       key: `conductor:${row.id}`,
@@ -63,7 +64,7 @@ export class ConductorObserver {
       repoName: row.repositoryName,
       branch: row.branch ?? row.directoryName,
       title: row.title,
-      state: this.toFleetState(row, row.updatedAt),
+      state,
       detail: null,
       lastActivityAt,
       transcriptPath: null,
@@ -75,7 +76,7 @@ export class ConductorObserver {
     };
   }
 
-  private toFleetState(row: FleetRegistrySessionRef, lastActivityAt: string): FleetState {
+  private toFleetState(row: FleetRegistrySessionRef): FleetState {
     switch (row.status) {
       case "working":
       case "cancelling":
@@ -95,11 +96,46 @@ export class ConductorObserver {
       return "idle";
     }
 
-    // Conductor collapses "just answered you" and "untouched since Tuesday"
-    // into a single idle status. Recency is the only thing separating them.
-    const age = this.now() - Date.parse(lastActivityAt);
+    // Conductor collapses "just answered you", "failed the moment you sent
+    // it" and "untouched since Tuesday" into one idle status. `updated_at`
+    // cannot tell them apart: Conductor's trigger bumps it on any write to the
+    // row, including touching old chats in bulk, and a turn that errors out
+    // in a second is as recent as one that completed. Only the row the agent
+    // writes when a turn ends says a turn finished, and how.
+    const endedAt = row.lastTurnEndedAt ?? null;
+    if (!endedAt || row.lastTurnOutcome === "aborted") {
+      return "idle";
+    }
+    // You spoke after the last turn ended, and nothing ended since: that turn
+    // was stopped or dropped, not finished.
+    if (Date.parse(row.lastUserMessageAt) > Date.parse(endedAt)) {
+      return "idle";
+    }
+    if (row.lastTurnOutcome === "failed") {
+      return "error";
+    }
+    const age = this.now() - Date.parse(endedAt);
     return Number.isFinite(age) && age <= this.finishedWithinMs ? "finished" : "idle";
   }
+}
+
+/**
+ * When the session last did something. A running session is moving, so its
+ * row's `updated_at` is the best clock; a resting one is timed by its
+ * content — the last turn end or message — so that a write that changes
+ * nothing (a bulk touch, a rename) cannot make a week-old chat look fresh.
+ */
+function activityTime(row: FleetRegistrySessionRef, state: FleetState): string {
+  if (state === "working" || state === "awaiting_input") {
+    return row.updatedAt;
+  }
+  const candidates = [row.lastTurnEndedAt, row.lastUserMessageAt].filter(
+    (value): value is string => typeof value === "string" && Number.isFinite(Date.parse(value)),
+  );
+  if (candidates.length === 0) {
+    return row.updatedAt;
+  }
+  return candidates.reduce((latest, value) => (Date.parse(value) > Date.parse(latest) ? value : latest));
 }
 
 /** Conductor stores this as a float that is sometimes absent and sometimes 0. */

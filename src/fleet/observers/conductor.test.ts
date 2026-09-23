@@ -28,6 +28,9 @@ function row(overrides: Partial<FleetRegistrySessionRef> = {}): FleetRegistrySes
     workspaceState: "ready",
     workspacePath: "/tmp/test",
     defaultBranch: "main",
+    // Asked five minutes ago, answered four minutes ago.
+    lastTurnEndedAt: new Date(NOW - 4 * 60_000).toISOString(),
+    lastTurnOutcome: "success",
     ...overrides,
   };
 }
@@ -57,5 +60,55 @@ describe("ConductorObserver", () => {
       row({ id: "e", status: "error" }),
     ]);
     expect(sessions.map((session) => session.state)).toEqual(["working", "awaiting_input", "error"]);
+  });
+
+  it("does not call a chat finished just because its row was touched", () => {
+    // Conductor's trigger bumps updated_at on any write. A chat last answered
+    // on Sep 17 was touched today along with two others in the same second.
+    const [session] = observe([
+      row({
+        updatedAt: new Date(NOW - 10_000).toISOString(),
+        lastUserMessageAt: "2026-09-17T06:16:00.000Z",
+        lastTurnEndedAt: "2026-09-17T06:16:32.494Z",
+      }),
+    ]);
+    expect(session?.state).toBe("idle");
+    // And its activity is timed by content, so it does not look fresh either.
+    expect(session?.lastActivityAt).toBe("2026-09-17T06:16:32.494Z");
+  });
+
+  it("reports a turn that failed straight away as an error, not a finish", () => {
+    // Seen on a real machine: message sent, `error` row a second later,
+    // status back to idle — and the duck celebrated a completion.
+    const [session] = observe([
+      row({
+        lastUserMessageAt: new Date(NOW - 6_000).toISOString(),
+        lastTurnEndedAt: new Date(NOW - 5_000).toISOString(),
+        lastTurnOutcome: "failed",
+      }),
+    ]);
+    expect(session?.state).toBe("error");
+  });
+
+  it("treats a turn the user stopped as idle", () => {
+    const [session] = observe([row({ lastTurnOutcome: "aborted" })]);
+    expect(session?.state).toBe("idle");
+  });
+
+  it("treats a message with no turn end after it as idle, not finished", () => {
+    // The last turn to end is older than the last message: that message's
+    // turn was dropped or interrupted, so nothing has just completed.
+    const [session] = observe([
+      row({
+        lastUserMessageAt: new Date(NOW - 60_000).toISOString(),
+        lastTurnEndedAt: new Date(NOW - 30 * 60_000).toISOString(),
+      }),
+    ]);
+    expect(session?.state).toBe("idle");
+  });
+
+  it("reports an idle chat with no turn end at all as idle", () => {
+    const [session] = observe([row({ lastTurnEndedAt: null, lastTurnOutcome: null })]);
+    expect(session?.state).toBe("idle");
   });
 });

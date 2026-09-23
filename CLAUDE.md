@@ -373,6 +373,19 @@ transcripts, and ranks them by what is blocked on the human.
   a session with no `last_user_message_at` as idle, since a chat nobody spoke
   in never ran. Do not compare raw `updated_at` strings across rows — the `' '`
   in the naive spelling sorts before the `'T'` in ISO and inverts recency.
+- **An idle Conductor chat is "finished" only if its last turn *ended*.**
+  The observer used to infer a finish from `sessions.updated_at` being recent,
+  but Conductor's trigger bumps that on any write to the row: closing a chat
+  (`is_hidden`), touching several at once, a rename. And a turn that errors a
+  second after you send it is just as recent as one that completed. Both made
+  the duck celebrate and Telegram push "done" with nothing done — seen on a
+  real machine for a user-aborted turn, an "OpenCode 2 required" failure, and
+  a chat idle since the week before. The turn-end record is the `result` /
+  `error` row every agent writes (Claude and Codex both), read per chat in
+  `listFleetSessions` via the `session_id` index (~20ms for the whole list).
+  `{"type":"error","content":"aborted by user"}` is you pressing stop, so idle;
+  other `error` rows or `is_error: 1` are `error`. A resting chat's
+  `lastActivityAt` is its content time, never `updated_at`.
 - **A session can want attention for several reasons at once**, so
   `classifyAttentions` returns a list. Do not collapse it back to one.
 - **`workspaces.state = 'archived'` does not mean "done", it means the worktree

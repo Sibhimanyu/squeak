@@ -52,6 +52,18 @@ function createRegistryFixture(): {
       is_hidden INTEGER DEFAULT 0
     );
 
+    CREATE TABLE session_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      sent_at TEXT,
+      turn_id TEXT,
+      model TEXT,
+      created_at TEXT,
+      cancelled_at TEXT
+    );
+
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY,
       repository_id TEXT,
@@ -771,5 +783,55 @@ describe("ConductorRegistryAdapter", () => {
     expect(sessions.map((session) => session.id)).toEqual(["s-new", "s-old"]);
     expect(sessions[0]?.updatedAt).toBe("2026-09-22T04:11:37Z");
     expect(sessions[1]?.updatedAt).toBe("2026-09-22T04:10:00.000Z");
+  });
+
+  it("reports how each chat's latest turn ended, from the row the agent writes at the end of it", () => {
+    const { adapter, db } = createRegistryFixture();
+    db.prepare(
+      `INSERT INTO repos (id, name, root_path, default_branch, updated_at, remote, hidden) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("repo-1", "repo", "/repos/repo", "main", "2026-09-22T04:00:00.000Z", "origin", 0);
+    db.prepare(
+      `INSERT INTO workspaces (id, repository_id, directory_name, branch, updated_at, state, derived_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("ws", "repo-1", "ws", "ws", "2026-09-22T04:00:00.000Z", "ready", "in-progress");
+    const insertSession = db.prepare(
+      `INSERT INTO sessions (id, workspace_id, status, agent_type, updated_at, last_user_message_at) VALUES (?, ?, ?, ?, ?, ?);`,
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO session_messages (id, session_id, role, content, sent_at) VALUES (?, ?, ?, ?, ?);`,
+    );
+    const at = "2026-09-22T04:10:00.000Z";
+    for (const [id, content] of [
+      ["ok", '{"type":"result","subtype":"success","is_error":false}'],
+      ["codex", '{"type":"result","session_id":"x"}'],
+      ["failed", '{"type":"error","content":"API Error: 500"}'],
+      ["flagged", '{"type":"result","subtype":"success","is_error":1}'],
+      ["aborted", '{"type":"error","content":"aborted by user"}'],
+      ["never", '{"type":"assistant","message":{"content":[]}}'],
+    ] as const) {
+      insertSession.run(id, "ws", "idle", "claude", at, at);
+      // An earlier success must not mask how the latest turn ended.
+      insertMessage.run(
+        `${id}-0`,
+        id,
+        "assistant",
+        '{"type":"result","subtype":"success"}',
+        "2026-09-22T04:00:00.000Z",
+      );
+      if (id === "never") {
+        db.prepare(`DELETE FROM session_messages WHERE session_id = ?`).run(id);
+      }
+      insertMessage.run(`${id}-1`, id, "assistant", content, at);
+    }
+
+    const byId = new Map(adapter.listFleetSessions(10).map((session) => [session.id, session]));
+    expect(byId.get("ok")?.lastTurnOutcome).toBe("success");
+    expect(byId.get("ok")?.lastTurnEndedAt).toBe(at);
+    expect(byId.get("codex")?.lastTurnOutcome).toBe("success");
+    expect(byId.get("failed")?.lastTurnOutcome).toBe("failed");
+    expect(byId.get("flagged")?.lastTurnOutcome).toBe("failed");
+    expect(byId.get("aborted")?.lastTurnOutcome).toBe("aborted");
+    expect(byId.get("never")?.lastTurnEndedAt).toBeNull();
+    expect(byId.get("never")?.lastTurnOutcome).toBeNull();
   });
 });

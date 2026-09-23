@@ -33,6 +33,14 @@ export interface FleetRegistrySessionRef extends ConductorSessionRef {
   workspacePath: string | null;
   /** The repo's default branch, used to count unpushed work on a fresh branch. */
   defaultBranch: string | null;
+  /**
+   * When the chat's latest turn ended, from the `result` or `error` row the
+   * agent writes at the end of every turn — the only record of a turn
+   * actually finishing. Null when no turn ever ended.
+   */
+  lastTurnEndedAt?: string | null;
+  /** How that turn ended. */
+  lastTurnOutcome?: "success" | "failed" | "aborted" | null;
 }
 
 interface DbSessionRow {
@@ -539,7 +547,23 @@ export class ConductorRegistryAdapter {
             w.state as workspaceState,
             w.workspace_path as workspacePath,
             r.default_branch as defaultBranch,
-            r.name as repositoryName
+            r.name as repositoryName,
+            -- One row per turn end, newest first. Covered by the session_id
+            -- index, so this stays in the tens of milliseconds for the list.
+            (
+              SELECT m.sent_at || '|' || CASE
+                WHEN m.content LIKE '{"type":"error","content":"aborted by user"%' THEN 'aborted'
+                WHEN m.content LIKE '{"type":"error"%' THEN 'failed'
+                WHEN json_valid(m.content) AND json_extract(m.content, '$.is_error') = 1 THEN 'failed'
+                ELSE 'success'
+              END
+              FROM session_messages m
+              WHERE m.session_id = s.id
+                AND m.role = 'assistant'
+                AND (m.content LIKE '{"type":"result"%' OR m.content LIKE '{"type":"error"%')
+              ORDER BY m.rowid DESC
+              LIMIT 1
+            ) as lastTurnEnd
           FROM sessions s
           JOIN workspaces w ON w.id = s.workspace_id
           JOIN repos r ON r.id = w.repository_id
@@ -551,12 +575,17 @@ export class ConductorRegistryAdapter {
           LIMIT ?
         `,
       )
-      .all(limit) as FleetRegistrySessionRef[];
-    return rows.map((row) => ({
-      ...row,
-      updatedAt: conductorTimestampToIso(row.updatedAt) ?? row.updatedAt,
-      lastUserMessageAt: conductorTimestampToIso(row.lastUserMessageAt),
-    }));
+      .all(limit) as Array<FleetRegistrySessionRef & { lastTurnEnd: string | null }>;
+    return rows.map(({ lastTurnEnd, ...row }) => {
+      const [endedAt, outcome] = lastTurnEnd ? lastTurnEnd.split("|") : [null, null];
+      return {
+        ...row,
+        updatedAt: conductorTimestampToIso(row.updatedAt) ?? row.updatedAt,
+        lastUserMessageAt: conductorTimestampToIso(row.lastUserMessageAt),
+        lastTurnEndedAt: conductorTimestampToIso(endedAt ?? null),
+        lastTurnOutcome: outcome === "success" || outcome === "failed" || outcome === "aborted" ? outcome : null,
+      };
+    });
   }
 
   getSessionDefaults(workspaceId: string): SessionDefaults {
