@@ -296,7 +296,7 @@ export class FleetController {
       return true;
     }
     this.afterReplyStarted();
-    await this.send(location, `Sent to **${target.label}**. I'll message you when it answers.`);
+    await this.send(location, deliveredText(`Sent to **${target.label}**`, outcome));
     return true;
   }
 
@@ -322,20 +322,22 @@ export class FleetController {
     }
     this.afterReplyStarted();
 
-    const answered: TelegramInlineKeyboard = [
-      [{ text: `✓ Sent ${letter} — waiting for the answer`, callback_data: "fleet:noop" }],
-    ];
+    const where = outcome.via === "conductor" ? "in Conductor" : "in the background";
+    const answered: TelegramInlineKeyboard = [[{ text: `✓ Sent ${letter} ${where}`, callback_data: "fleet:noop" }]];
     if (messageId !== null) {
       try {
         await this.deps.telegram.editMessageReplyMarkup(location.chatId, messageId, answered);
-        return { handled: true };
+        // A background send also needs its reason, which does not fit a button.
+        return outcome.via === "conductor"
+          ? { handled: true }
+          : { handled: true, notice: deliveredText(`Sent **${letter}** to **${label}**`, outcome) };
       } catch (error) {
         logger.debug("could not mark card as answered", {
           error: error instanceof Error ? error.message : String(error),
         });
       }
     }
-    return { handled: true, notice: `Sent **${letter}** to **${label}**. I'll message you when it answers.` };
+    return { handled: true, notice: deliveredText(`Sent **${letter}** to **${label}**`, outcome) };
   }
 
   /**
@@ -653,6 +655,19 @@ export class FleetController {
     }
     return lastId;
   }
+}
+
+/**
+ * Whether it went through Conductor's window matters to the reader: only
+ * then is it already visible there. A background reply is not, until
+ * Conductor reloads the chat.
+ */
+function deliveredText(sent: string, outcome: Extract<ReplyOutcome, { status: "started" }>): string {
+  if (outcome.via === "conductor") {
+    return `${sent} in Conductor. I'll message you when it answers.`;
+  }
+  const why = outcome.fallbackReason ? ` because ${outcome.fallbackReason}` : "";
+  return `${sent} in the background${why}. Conductor will show it the next time it loads the chat. I'll message you when it answers.`;
 }
 
 function anchorKey(chatId: number, messageThreadId: number | null): string {

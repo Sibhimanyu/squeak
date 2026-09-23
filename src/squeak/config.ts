@@ -52,6 +52,11 @@ const schema = z.object({
   /** The agent binaries Conductor ships, used to continue a chat from Telegram. */
   CLAUDE_BIN: z.string().default("~/Library/Application Support/com.conductor.app/bin/claude"),
   CODEX_BIN: z.string().default("~/Library/Application Support/com.conductor.app/bin/codex"),
+  /**
+   * The helper that types replies into Conductor's window. Set to "off" to
+   * always reply in the background instead.
+   */
+  SQUEAK_HANDS_APP: z.string().default("~/Library/Application Support/squeak/Squeak Hands.app"),
   POLL_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(50).default(30),
   FLEET_HOOK_PORT: z.coerce.number().int().min(1024).max(65535).default(8477),
   FLEET_POLL_INTERVAL_MS: z.coerce.number().int().min(2000).default(20000),
@@ -73,6 +78,8 @@ export interface SqueakConfig {
   defaultPermissionMode: string;
   claudeBin: string;
   codexBin: string;
+  /** Null when switched off. */
+  handsAppPath: string | null;
   pollTimeoutSeconds: number;
   hookPort: number;
   pollIntervalMs: number;
@@ -130,6 +137,7 @@ export function loadSqueakConfig(): SqueakConfig {
     defaultPermissionMode: parsed.DEFAULT_PERMISSION_MODE,
     claudeBin: resolve(parsed.CLAUDE_BIN),
     codexBin: resolve(parsed.CODEX_BIN),
+    handsAppPath: parsed.SQUEAK_HANDS_APP === "off" ? null : resolve(parsed.SQUEAK_HANDS_APP),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
     hookPort: parsed.FLEET_HOOK_PORT,
     pollIntervalMs: parsed.FLEET_POLL_INTERVAL_MS,

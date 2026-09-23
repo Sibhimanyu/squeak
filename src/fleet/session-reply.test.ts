@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import type { ConductorSessionRef, SessionMessageRecord } from "../types.js";
+import type { ConductorUiSender, UiSendResult } from "./conductor-ui.js";
 import { busyReason, ConductorReplier, type ReplyAgentAdapter } from "./session-reply.js";
 
 class FakeAdapter extends EventEmitter implements ReplyAgentAdapter {
@@ -64,7 +65,11 @@ function assistantRow(turnId: string, blocks: unknown[], type = "assistant"): Se
   } as SessionMessageRecord;
 }
 
-function fixture(current: ConductorSessionRef = session(), messages: SessionMessageRecord[] = []) {
+function fixture(
+  current: ConductorSessionRef = session(),
+  messages: SessionMessageRecord[] = [],
+  ui: ConductorUiSender | null = null,
+) {
   const appended: Array<{ role: string; content: string }> = [];
   const statuses: string[] = [];
   const registry = {
@@ -80,7 +85,7 @@ function fixture(current: ConductorSessionRef = session(), messages: SessionMess
   } as unknown as ConductorRegistryAdapter;
   const claude = new FakeAdapter();
   const codex = new FakeAdapter();
-  const replier = new ConductorReplier({ registry, claude, codex });
+  const replier = new ConductorReplier({ registry, claude, codex, ui, confirmTimeoutMs: 0, sleep: async () => {} });
   return { replier, claude, codex, appended, statuses };
 }
 
@@ -89,7 +94,7 @@ describe("ConductorReplier.send", () => {
     const { replier, claude, appended, statuses } = fixture();
     const outcome = await replier.send("s1", "  A  ", () => undefined);
 
-    expect(outcome).toEqual({ status: "started" });
+    expect(outcome).toEqual({ status: "started", via: "background", fallbackReason: null });
     expect(claude.turns).toEqual([{ threadId: "thread-1", input: "A", cwd: "/work/farm", model: "opus-5-1m" }]);
     expect(appended).toEqual([{ role: "user", content: "A" }]);
     expect(statuses).toEqual(["working"]);
@@ -180,5 +185,79 @@ describe("busyReason", () => {
     for (const status of ["working", "cancelling", "needs_user_input", "needs_plan_response"]) {
       expect(busyReason(status)).not.toBeNull();
     }
+  });
+});
+
+function fakeUi(result: UiSendResult): ConductorUiSender & { requests: unknown[] } {
+  const requests: unknown[] = [];
+  return {
+    requests,
+    send: async (request) => {
+      requests.push(request);
+      return result;
+    },
+  };
+}
+
+describe("ConductorReplier.send through Conductor's window", () => {
+  it("types into Conductor and leaves the chat to Conductor, with no mirroring", async () => {
+    const ui = fakeUi({ ok: true });
+    const { replier, claude, appended, statuses } = fixture(session(), [], ui);
+
+    expect(await replier.send("s1", "A", () => undefined)).toEqual({ status: "started", via: "conductor" });
+    expect(ui.requests).toEqual([{ workspaceId: "w1", sessionId: "s1", sessionTitle: "Farm", text: "A" }]);
+    expect(claude.turns).toHaveLength(0);
+    expect(appended).toEqual([]);
+    expect(statuses).toEqual([]);
+  });
+
+  it("goes through the window even while Conductor is working, since Conductor queues it itself", async () => {
+    const ui = fakeUi({ ok: true });
+    const { replier } = fixture(session({ status: "working" }), [], ui);
+    expect((await replier.send("s1", "A", () => undefined)).status).toBe("started");
+  });
+
+  it("falls back to the background, with the reason, when nothing was typed", async () => {
+    const ui = fakeUi({ ok: false, error: "locked" });
+    const { replier, claude } = fixture(session(), [], ui);
+
+    expect(await replier.send("s1", "A", () => undefined)).toEqual({
+      status: "started",
+      via: "background",
+      fallbackReason: "the Mac is locked",
+    });
+    expect(claude.turns).toHaveLength(1);
+  });
+
+  it("never sends a second time when the window may already have sent it", async () => {
+    const ui = fakeUi({ ok: false, error: "unconfirmed" });
+    const { replier, claude } = fixture(session(), [], ui);
+
+    const outcome = await replier.send("s1", "A", () => undefined);
+    expect(outcome.status).toBe("refused");
+    expect(claude.turns).toHaveLength(0);
+  });
+
+  it("counts an unconfirmed send as sent once Conductor has recorded it", async () => {
+    const ui = fakeUi({ ok: false, error: "unconfirmed" });
+    const recorded = {
+      role: "user",
+      content: "A",
+      sentAt: "2999-01-01T00:00:00.000Z",
+      turnId: "t9",
+      model: null,
+    } as unknown as SessionMessageRecord;
+    const { replier, claude } = fixture(session(), [recorded], ui);
+
+    expect(await replier.send("s1", "A", () => undefined)).toEqual({ status: "started", via: "conductor" });
+    expect(claude.turns).toHaveLength(0);
+  });
+
+  it("still refuses a question held open inside Conductor, without touching the window", async () => {
+    const ui = fakeUi({ ok: true });
+    const { replier } = fixture(session({ status: "needs_user_input" }), [], ui);
+
+    expect((await replier.send("s1", "A", () => undefined)).status).toBe("refused");
+    expect(ui.requests).toEqual([]);
   });
 });

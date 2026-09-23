@@ -3,6 +3,7 @@ import process from "node:process";
 import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import { FleetController } from "../fleet/fleet-controller.js";
+import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
@@ -36,8 +37,10 @@ function helpText(): string {
     "**Answering a finished Conductor chat**",
     "· tap a letter when it asked you to pick one",
     "· tap Reply, or swipe left on the card, and type",
-    "The answer comes back here as a new card. Conductor shows the exchange",
-    "the next time it loads that chat.",
+    "It is typed into Conductor's own window, so it shows there live. If the",
+    "Mac is locked or the chat is not open as a tab, it runs in the background",
+    "instead and Conductor shows it on its next reload. Either way the answer",
+    "comes back here as a new card.",
     "",
     "Everything else — errors, sessions running low on context — waits on the radar.",
     "",
@@ -85,6 +88,7 @@ export class SqueakApp {
       registry: this.runtime.registry,
       claude: new ClaudeCodeAdapter(config.claudeBin),
       codex: new CodexAppServerAdapter(config.codexBin),
+      ui: config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null,
     });
 
     this.controller = new FleetController({

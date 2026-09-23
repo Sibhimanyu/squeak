@@ -105,7 +105,7 @@ async function fixture(options: { outcome?: ReplyOutcome; lastText?: string | nu
     lastTurnText: () => (options.lastText === undefined ? DECISION : options.lastText),
     send: async (sessionId, text) => {
       sends.push({ sessionId, text });
-      return options.outcome ?? { status: "started" };
+      return options.outcome ?? { status: "started", via: "conductor" };
     },
   };
 
@@ -165,7 +165,7 @@ describe("FleetController replies", () => {
     expect(sends).toEqual([{ sessionId: "s1", text: "B" }]);
     expect(result).toEqual({ handled: true });
     expect(telegram.editMessageReplyMarkup).toHaveBeenCalledWith(42, 100, [
-      [expect.objectContaining({ text: expect.stringContaining("Sent B") })],
+      [expect.objectContaining({ text: "✓ Sent B in Conductor" })],
     ]);
     expect(monitor.refresh).toHaveBeenCalled();
   });

@@ -5,6 +5,7 @@ import { ConductorMirrorWriter, type MirrorFingerprints } from "../adapters/cond
 import type { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import type { CodexNotification, SupportedAgentType } from "../types.js";
 import { extractAssistantEnvelopeText } from "../utils/conductor-envelope.js";
+import { describeUiFailure, mayHaveSent, type ConductorUiSender } from "./conductor-ui.js";
 import { logger } from "../utils/logger.js";
 
 /** A JSON-RPC request the Codex app-server sends to its client. */
@@ -28,7 +29,15 @@ export interface ReplyAgentAdapter extends EventEmitter {
   respondError?(id: CodexServerRequest["id"], error: { code: number; message: string }): Promise<void>;
 }
 
-export type ReplyOutcome = { status: "started" } | { status: "refused"; reason: string };
+/**
+ * `conductor`: typed into Conductor's window, so it shows and streams there.
+ * `background`: run by the local CLI and mirrored, so Conductor shows it on
+ * its next reload — `fallbackReason` says why the window was not used.
+ */
+export type ReplyOutcome =
+  | { status: "started"; via: "conductor" }
+  | { status: "started"; via: "background"; fallbackReason: string | null }
+  | { status: "refused"; reason: string };
 
 /** Called once if a turn this replier started ends in failure. */
 export type ReplyFailureHandler = (message: string) => void;
@@ -46,6 +55,11 @@ export interface ConductorReplierDependencies {
   registry: ConductorRegistryAdapter;
   claude: ReplyAgentAdapter;
   codex: ReplyAgentAdapter;
+  /** Types into Conductor's own window. Without it every reply runs in the background. */
+  ui?: ConductorUiSender | null;
+  /** How long to look for a message the window may or may not have sent. */
+  confirmTimeoutMs?: number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** How far back to look for the text of the latest turn. Tool rows are many. */
@@ -126,6 +140,40 @@ export class ConductorReplier {
     if (!session) {
       return { status: "refused", reason: "That chat no longer exists in Conductor." };
     }
+    // A question or plan held open inside Conductor is answered there, by
+    // either route: typing into the composer would not answer it either.
+    if (session.status === "needs_user_input" || session.status === "needs_plan_response") {
+      return { status: "refused", reason: busyReason(session.status)! };
+    }
+
+    let fallbackReason: string | null = null;
+    if (this.deps.ui && !this.isReplying(sessionId)) {
+      const startedAt = new Date().toISOString();
+      const result = await this.deps.ui.send({
+        workspaceId: session.workspaceId,
+        sessionId,
+        sessionTitle: session.title,
+        text: input,
+      });
+      if (result.ok) {
+        return { status: "started", via: "conductor" };
+      }
+      if (mayHaveSent(result)) {
+        // It may be in the chat already. Sending it again another way could
+        // deliver it twice, so only Conductor's own record decides.
+        if (await this.confirmUserMessage(sessionId, input, startedAt)) {
+          return { status: "started", via: "conductor" };
+        }
+        logger.warn("reply through Conductor's window is unconfirmed", { sessionId, detail: result.detail });
+        return {
+          status: "refused",
+          reason: "I typed it into Conductor but could not confirm it was sent. Check that chat before sending again.",
+        };
+      }
+      fallbackReason = describeUiFailure(result.error);
+      logger.info("reply falling back to the background", { sessionId, error: result.error, detail: result.detail });
+    }
+
     const agentType = session.agentType === "claude" || session.agentType === "codex" ? session.agentType : null;
     if (!agentType) {
       return {
@@ -192,7 +240,24 @@ export class ConductorReplier {
     const sentAt = new Date().toISOString();
     this.mirror.updateSessionStatus(sessionId, "working");
     this.mirror.appendUserMessage({ sessionId, turnId: reply.turnId, text: input, sentAt });
-    return { status: "started" };
+    return { status: "started", via: "background", fallbackReason };
+  }
+
+  /** Whether Conductor recorded `text` as a user message in this chat since `sinceIso`. */
+  private async confirmUserMessage(sessionId: string, text: string, sinceIso: string): Promise<boolean> {
+    const sleep = this.deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+    const deadline = Date.now() + (this.deps.confirmTimeoutMs ?? 6_000);
+    const wanted = text.trim();
+    for (;;) {
+      const rows = this.deps.registry.listSessionMessages(sessionId, 10);
+      const found = rows.some(
+        (row) => row.role === "user" && row.content.trim() === wanted && (row.sentAt ?? "") >= sinceIso.slice(0, 19),
+      );
+      if (found || Date.now() >= deadline) {
+        return found;
+      }
+      await sleep(500);
+    }
   }
 
   /**

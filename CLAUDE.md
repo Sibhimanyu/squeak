@@ -140,7 +140,26 @@ that marker file, not just move the plist back. If the user ever wants it back:
   free text. Routing is by the replied-to message id, stored in
   `fleet_reply_target` so it survives restarts — never guess the target from
   loose text, several chats may be waiting.
-- **A reply runs `claude -p --resume` (or the codex app-server) itself**, with
+- **A reply is typed into Conductor's own window first**, so it shows and
+  streams live. Conductor's API (`conductor message create`) is cloud-only and
+  the documented `conductor://` links cannot open an existing chat, so there is
+  no other live route. `helpers/squeak-hands/` is a tiny Swift app that alone
+  holds the Accessibility grant; build it with
+  `helpers/squeak-hands/build.sh ~/Library/Application\ Support/squeak`.
+  It is signed with the Apple Development identity on purpose: an ad-hoc
+  signature changes every build and silently revokes the grant. It is launched
+  through `open` so macOS attributes it to its own grant, not to node.
+  - It proves which chat is on screen from the web area's `AXURL` (Conductor's
+    router: `…/workspace/<id>?activeTabType=session&sessionId=<id>`), never
+    from a tab label — two chats in one workspace can share a title, and this
+    happens on a real machine. Tabs are tried until the route names the session.
+  - Conductor's sidecar shares the app's bundle id; pick the `.regular`
+    process or AX sees no windows about half the time.
+  - Every failure except `unconfirmed`/`helper-failed` guarantees nothing was
+    typed, and only then does the reply fall back to the background CLI. A
+    possibly-sent message is confirmed against `session_messages`, never
+    re-sent. It refuses to paste over an existing draft.
+- **The background fallback runs `claude -p --resume` (or the codex app-server)**, with
   the adapters' `bypassPermissions` / approvals-off, and mirrors both sides
   into `conductor.db`. It refuses — never queues — when the Conductor session
   is `working`, `cancelling`, `needs_user_input` or `needs_plan_response`:
