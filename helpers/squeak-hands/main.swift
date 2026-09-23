@@ -289,7 +289,10 @@ case "probe":
     // Web content only builds its tree for assistive clients that ask.
     AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
     AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-    Thread.sleep(forTimeInterval: 1.0)
+    // The window list is briefly empty while WebKit rebuilds its tree for
+    // the client that just asked; wait for it rather than report nothing.
+    _ = waitFor(5) { !((attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []).isEmpty }
+    Thread.sleep(forTimeInterval: 0.5)
     var nodes: [[String: Any]] = []
     for window in (attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? [] {
         dump(window, depth: 0, into: &nodes)
