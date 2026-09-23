@@ -12,10 +12,17 @@ function toConductorDisplayModel(model: string | null): string | null {
   return cli ? cli.replace(/\[1m\]$/, "") : model;
 }
 
+/**
+ * What the mirror needs to avoid writing a row twice. The bridge backs it with
+ * bridge.db; Squeak, which only mirrors the turns it starts itself, keeps it in
+ * memory.
+ */
+export type MirrorFingerprints = Pick<BridgeStateStore, "buildFingerprint" | "hasFingerprint" | "addFingerprint">;
+
 export class ConductorMirrorWriter {
   constructor(
     private readonly registry: ConductorRegistryAdapter,
-    private readonly stateStore: BridgeStateStore,
+    private readonly stateStore: MirrorFingerprints,
   ) {}
 
   appendUserMessage(params: { sessionId: string; turnId: string; text: string; sentAt: string }): "ok" | "duplicate" {

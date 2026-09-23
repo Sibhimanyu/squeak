@@ -84,6 +84,15 @@ export class FleetStore {
         notified_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS fleet_reply_target (
+        chat_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        conductor_session_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (chat_id, message_id)
+      );
+
       CREATE TABLE IF NOT EXISTS fleet_mute (
         scope TEXT PRIMARY KEY,
         muted_until TEXT
@@ -186,6 +195,35 @@ export class FleetStore {
       | { sessionKey: string }
       | undefined;
     return row?.sessionKey ?? null;
+  }
+
+  /**
+   * Remember which Conductor chat a message belongs to, so a swipe-reply to it
+   * — which carries only the message id — can be routed. Stored rather than
+   * held in memory so a card still answers after Squeak restarts.
+   */
+  setReplyTarget(chatId: number, messageId: number, conductorSessionId: string, label: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO fleet_reply_target (chat_id, message_id, conductor_session_id, label)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(chat_id, message_id) DO UPDATE SET
+           conductor_session_id = excluded.conductor_session_id,
+           label = excluded.label`,
+      )
+      .run(chatId, messageId, conductorSessionId, label);
+    // A card nobody answered in a month is not coming back.
+    this.db.prepare(`DELETE FROM fleet_reply_target WHERE created_at < datetime('now', '-30 days')`).run();
+  }
+
+  getReplyTarget(chatId: number, messageId: number): { conductorSessionId: string; label: string } | null {
+    const row = this.db
+      .prepare(
+        `SELECT conductor_session_id as conductorSessionId, label
+         FROM fleet_reply_target WHERE chat_id = ? AND message_id = ?`,
+      )
+      .get(chatId, messageId) as { conductorSessionId: string; label: string } | undefined;
+    return row ?? null;
   }
 
   getReview(sessionKey: string): FleetReviewRow | null {

@@ -358,6 +358,50 @@ export class TelegramClient {
     }
   }
 
+  /**
+   * Send a prompt that opens the reply box on the user's side, already quoting
+   * this message — so what they type next comes back with `reply_to_message`
+   * pointing at it, and the bot knows who it is for.
+   */
+  async sendForceReply(
+    chatId: number,
+    text: string,
+    options: { placeholder?: string; messageThreadId?: number | null } = {},
+  ): Promise<number | null> {
+    const response = await this.callApi<{ ok: boolean; result?: { message_id: number } }>(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        message_thread_id: options.messageThreadId ?? undefined,
+        text: markdownToTelegramHtml(text),
+        parse_mode: "HTML",
+        reply_markup: {
+          force_reply: true,
+          ...(options.placeholder ? { input_field_placeholder: options.placeholder.slice(0, 64) } : {}),
+        },
+      },
+      { lane: "write" },
+    );
+    return response.result?.message_id ?? null;
+  }
+
+  /** Swap a message's buttons without touching its text, which may have been sent as HTML. */
+  async editMessageReplyMarkup(
+    chatId: number,
+    messageId: number,
+    inlineKeyboard: TelegramInlineKeyboard,
+  ): Promise<void> {
+    await this.callApi(
+      "editMessageReplyMarkup",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: inlineKeyboard },
+      },
+      { lane: "write" },
+    );
+  }
+
   async deleteMessage(chatId: number, messageId: number): Promise<void> {
     await this.callApi(
       "deleteMessage",

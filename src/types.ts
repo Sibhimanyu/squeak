@@ -147,6 +147,8 @@ export interface TelegramMessage {
   text?: string;
   is_topic_message?: boolean;
   message_thread_id?: number;
+  /** Set when the user swiped to reply to one of the bot's messages. */
+  reply_to_message?: TelegramMessage;
 }
 
 export interface TelegramCallbackQuery {

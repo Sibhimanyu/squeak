@@ -49,6 +49,9 @@ const schema = z.object({
   WORKSPACES_ROOT: z.string().default("~/conductor/workspaces"),
   DEFAULT_FALLBACK_MODEL: z.string().default("gpt-5.4"),
   DEFAULT_PERMISSION_MODE: z.string().default("default"),
+  /** The agent binaries Conductor ships, used to continue a chat from Telegram. */
+  CLAUDE_BIN: z.string().default("~/Library/Application Support/com.conductor.app/bin/claude"),
+  CODEX_BIN: z.string().default("~/Library/Application Support/com.conductor.app/bin/codex"),
   POLL_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(50).default(30),
   FLEET_HOOK_PORT: z.coerce.number().int().min(1024).max(65535).default(8477),
   FLEET_POLL_INTERVAL_MS: z.coerce.number().int().min(2000).default(20000),
@@ -68,6 +71,8 @@ export interface SqueakConfig {
   workspacesRoot: string;
   defaultFallbackModel: string;
   defaultPermissionMode: string;
+  claudeBin: string;
+  codexBin: string;
   pollTimeoutSeconds: number;
   hookPort: number;
   pollIntervalMs: number;
@@ -123,6 +128,8 @@ export function loadSqueakConfig(): SqueakConfig {
     workspacesRoot: resolve(parsed.WORKSPACES_ROOT),
     defaultFallbackModel: parsed.DEFAULT_FALLBACK_MODEL,
     defaultPermissionMode: parsed.DEFAULT_PERMISSION_MODE,
+    claudeBin: resolve(parsed.CLAUDE_BIN),
+    codexBin: resolve(parsed.CODEX_BIN),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
     hookPort: parsed.FLEET_HOOK_PORT,
     pollIntervalMs: parsed.FLEET_POLL_INTERVAL_MS,

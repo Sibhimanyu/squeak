@@ -19,7 +19,9 @@ deployment section before changing anything under `src/`.
 | `src/telegram/client.ts` | Telegram API calls, HTML rendering, retry/fallback |
 | `src/utils/tg-format.ts` | markdown to Telegram HTML, message splitting |
 | `src/bridge/state-store.ts` | the bridge's own SQLite state (`bridge.db`) |
-| `src/squeak/` | Squeak: a separate status-only daemon with its own bot |
+| `src/squeak/` | Squeak: a separate pager daemon with its own bot; it can answer a finished Conductor chat |
+| `src/fleet/session-reply.ts` | continues a Conductor chat from a Squeak card: resume, mirror, refuse when busy |
+| `src/fleet/choices.ts` | reads lettered options out of an agent's last message, for one-tap answers |
 | `src/fleet/runtime.ts` | assembles the fleet stack; only one process may run it |
 | `src/fleet/` | the fleet radar: every agent session on the Mac, not just Conductor's |
 | `src/fleet/observers/` | one file per discovery source; none of them know about each other |
@@ -131,9 +133,26 @@ that marker file, not just move the plist back. If the user ever wants it back:
 - **Only one process may run the fleet.** Two would bind the same hook port
   and send every notification twice. The bridge no longer wires it up at all;
   `createFleetRuntime` belongs to Squeak.
-- Squeak passes `openConductorSession: null`, which hides Reply and Open on
-  its cards. It has no control channel — offering them would open a chat it
-  cannot continue.
+- Squeak passes `openConductorSession: null` (no Open Chat — it has no
+  conversation view) but does pass a `replier`, so a **finished** Conductor
+  card carries Reply, Full message, and one button per lettered option.
+  A letter tap sends just that letter; a swipe-reply or a Reply prompt sends
+  free text. Routing is by the replied-to message id, stored in
+  `fleet_reply_target` so it survives restarts — never guess the target from
+  loose text, several chats may be waiting.
+- **A reply runs `claude -p --resume` (or the codex app-server) itself**, with
+  the adapters' `bypassPermissions` / approvals-off, and mirrors both sides
+  into `conductor.db`. It refuses — never queues — when the Conductor session
+  is `working`, `cancelling`, `needs_user_input` or `needs_plan_response`:
+  Conductor's own process holds that chat and a second writer would talk
+  past it. Blocked cards therefore get no Reply. The answer is not streamed;
+  it comes back as the next finish card, and Conductor only shows the
+  exchange once it reloads the chat.
+- **The card's `detail` is a 180-char summary**, useless for reading options.
+  `ConductorReplier.lastTurnText` reads the full text from `session_messages`
+  instead, newest turn only — role `assistant` rows there also hold tool
+  calls, tool results, `result` and `system` events, and a turn that has
+  just started must not resurface the previous turn's question.
 - The desktop duck still reads `127.0.0.1:8477/state`; that is now served by
   Squeak rather than the bridge.
 

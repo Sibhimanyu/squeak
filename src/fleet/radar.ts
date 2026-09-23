@@ -4,6 +4,7 @@ import path from "node:path";
 import type { TelegramInlineKeyboard } from "../types.js";
 import { DEFAULT_CONTEXT_PRESSURE_PERCENT, isActionable } from "./attention.js";
 import { summarizeOutcome } from "./card-text.js";
+import type { ParsedChoices } from "./choices.js";
 import { describeWindowSpan, type CodexUsage } from "./codex-usage.js";
 import { diffPageCount, diffPageSlice, type WorkspaceDiff } from "./diff-view.js";
 import { describeGitState } from "./git-state.js";
@@ -337,15 +338,24 @@ export function radarKeyboard(
  *   3. what changed on disk, and whether it has left the machine — which is
  *      the thing left to do.
  */
-export function renderAttentionCard(item: AttentionItem, nowMs: number): string {
+export function renderAttentionCard(item: AttentionItem, nowMs: number, choices: ParsedChoices | null = null): string {
   const session = item.session;
-  const lines = [`${stateGlyph(session.state)} **${cardLabel(session)}** — ${cardVerb(item.kind)}`];
+  const verb = choices ? "needs a decision" : cardVerb(item.kind);
+  const lines = [`${stateGlyph(session.state)} **${cardLabel(session)}** — ${verb}`];
 
-  const outcome = summarizeOutcome(session.detail);
+  // A decision card trades the summary for the question and its options: the
+  // summary of a message that ends on a choice is its preamble, and the
+  // options are what the buttons under the card mean.
+  const outcome = choices ? (choices.question ?? summarizeOutcome(session.detail)) : summarizeOutcome(session.detail);
   if (outcome) {
     lines.push(outcome);
   } else if (item.kind !== "finished_unreviewed") {
     lines.push(`waiting ${formatAge(item.since, nowMs)}`);
+  }
+  if (choices) {
+    for (const option of choices.options) {
+      lines.push(`**${option.letter}** · ${option.title}`);
+    }
   }
 
   // Only on a finish: on a blocked card the question is the whole point, and a
@@ -405,20 +415,61 @@ function cardVerb(kind: AttentionKind): string {
  * control channel of its own — offering Reply there would open a chat the
  * bot cannot actually continue.
  */
-export function attentionCardKeyboard(item: AttentionItem, handle: number, canDrive = true): TelegramInlineKeyboard {
-  const rows: TelegramInlineKeyboard = [];
+/** What a card may offer. The controller decides; the keyboard only draws. */
+export interface CardActions {
+  /** Continue the chat from Telegram. */
+  reply: boolean;
+  /** Hand the chat to the bridge's own conversation view. */
+  open: boolean;
+  /** Send the agent's whole last message, for a card that only shows its gist. */
+  full?: boolean;
+  /** Lettered options found in the last message, each becoming a button. */
+  choices?: ParsedChoices | null;
+}
 
-  if (canDrive && isActionable(item.session)) {
-    rows.push([
-      { text: "Reply", callback_data: `fleet:reply:${handle}` },
-      { text: "Open Chat", callback_data: `fleet:open:${handle}` },
-    ]);
+const CHOICE_BUTTONS_PER_ROW = 4;
+
+export function attentionCardKeyboard(
+  item: AttentionItem,
+  handle: number,
+  actions: boolean | CardActions = true,
+): TelegramInlineKeyboard {
+  const allowed: CardActions = typeof actions === "boolean" ? { reply: actions, open: actions } : actions;
+  const rows: TelegramInlineKeyboard = [];
+  const actionable = isActionable(item.session);
+
+  // The options go first and one tap sends the letter, which is what the
+  // agent asked for. The names are on the card; the buttons only need the
+  // letter, which keeps a three-way choice on one row.
+  const choices = actionable && allowed.reply ? allowed.choices : null;
+  if (choices) {
+    const buttons = choices.options.map((option) => ({
+      text: option.letter === choices.recommended ? `${option.letter} ★` : option.letter,
+      callback_data: `fleet:pick:${handle}:${option.letter}`,
+    }));
+    for (let index = 0; index < buttons.length; index += CHOICE_BUTTONS_PER_ROW) {
+      rows.push(buttons.slice(index, index + CHOICE_BUTTONS_PER_ROW));
+    }
+  }
+
+  const conversation: TelegramInlineKeyboard[number] = [];
+  if (actionable && allowed.reply) {
+    conversation.push({ text: "Reply", callback_data: `fleet:reply:${handle}` });
+  }
+  if (actionable && allowed.open) {
+    conversation.push({ text: "Open Chat", callback_data: `fleet:open:${handle}` });
+  }
+  if (actionable && allowed.full) {
+    conversation.push({ text: "Full message", callback_data: `fleet:full:${handle}` });
+  }
+  if (conversation.length > 0) {
+    rows.push(conversation);
   }
 
   // Snooze and Radar used to have a row each, on every card. Neither is about
   // this session — they were the same two buttons repeated down the whole chat
   // — and both are a command away (/snooze, /radar), so the card keeps only
-  // what acts on the session in front of you, on one row.
+  // what acts on the session in front of you.
   //
   // Reviewing a diff needs no control channel, so it is offered even for
   // sessions the bot cannot drive.

@@ -1,6 +1,9 @@
 import process from "node:process";
 
+import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
+import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import { FleetController } from "../fleet/fleet-controller.js";
+import { ConductorReplier } from "../fleet/session-reply.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
@@ -23,13 +26,18 @@ const COMMANDS = [
 function helpText(): string {
   return [
     "**Squeak** watches every coding agent on the Mac and squeaks when one of them",
-    "wants something. It reports; it does not drive. To actually reply to a",
-    "session, use Conductor or the conductor-tg bot.",
+    "wants something.",
     "",
     "It messages you when a session:",
     "· is blocked waiting for your approval",
     "· is blocked waiting for an answer",
     "· is a Conductor chat and has finished",
+    "",
+    "**Answering a finished Conductor chat**",
+    "· tap a letter when it asked you to pick one",
+    "· tap Reply, or swipe left on the card, and type",
+    "The answer comes back here as a new card. Conductor shows the exchange",
+    "the next time it loads that chat.",
     "",
     "Everything else — errors, sessions running low on context — waits on the radar.",
     "",
@@ -51,6 +59,7 @@ export class SqueakApp {
   private readonly telegram: TelegramClient;
   private readonly runtime: FleetRuntime;
   private readonly controller: FleetController;
+  private readonly replier: ConductorReplier;
   private lastUpdateId = 0;
   private stopped = false;
 
@@ -72,14 +81,22 @@ export class SqueakApp {
       codexQuotaWarnPercent: config.codexQuotaWarnPercent,
     });
 
+    this.replier = new ConductorReplier({
+      registry: this.runtime.registry,
+      claude: new ClaudeCodeAdapter(config.claudeBin),
+      codex: new CodexAppServerAdapter(config.codexBin),
+    });
+
     this.controller = new FleetController({
       telegram: this.telegram,
       store: this.runtime.store,
       monitor: this.runtime.monitor,
       ingress: this.runtime.ingress,
       diff: this.runtime.diff,
-      // No control channel: this bot reports and nothing more.
+      // No conversation view to hand a chat to — but a finished chat can be
+      // answered in place, which is what the replier is for.
       openConductorSession: null,
+      replier: this.replier,
       fallbackChatIds: config.allowedChatIds ? Array.from(config.allowedChatIds) : [],
     });
   }
@@ -102,6 +119,7 @@ export class SqueakApp {
       return;
     }
     this.stopped = true;
+    await this.replier.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);
     logger.info("squeak stopped");
   }
@@ -138,7 +156,11 @@ export class SqueakApp {
         messageThreadId: message.message_thread_id ?? null,
       };
       await this.telegram.answerCallbackQuery(update.callback_query.id).catch(() => undefined);
-      const result = await this.controller.handleCallback(location, update.callback_query.data ?? "");
+      const result = await this.controller.handleCallback(
+        location,
+        update.callback_query.data ?? "",
+        message.message_id,
+      );
       if (result.notice) {
         await this.send(location, result.notice);
       }
@@ -153,6 +175,13 @@ export class SqueakApp {
       chatId: message.chat.id,
       messageThreadId: message.message_thread_id ?? null,
     };
+
+    // A swipe-reply to a card, or text typed into a Reply prompt, is an answer
+    // for that card's chat — even if it happens to start with a slash.
+    const replyTo = message.reply_to_message?.message_id;
+    if (replyTo !== undefined && (await this.controller.handleReplyMessage(location, replyTo, message.text))) {
+      return;
+    }
 
     const command = normalizeTelegramCommand(message.text.trim());
     switch (command) {
@@ -177,8 +206,14 @@ export class SqueakApp {
         await this.send(location, helpText());
         return;
       default:
-        // Everything that is not a command is a person talking to a pager.
-        await this.send(location, "I only report. Try /radar, or /help.");
+        // Loose text has no addressee: there may be several chats waiting, and
+        // guessing which one it was for would put words in the wrong chat.
+        await this.send(
+          location,
+          replyTo !== undefined
+            ? "That message is not one I can answer through. Reply to a card, or tap its Reply button."
+            : "To answer a chat, swipe left on its card and reply, or tap Reply. /radar shows what is running.",
+        );
     }
   }
 

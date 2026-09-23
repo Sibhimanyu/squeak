@@ -7,8 +7,10 @@ import { DiffReader, renderDiffSummary, renderFilePatch, type WorkspaceDiff } fr
 import type { FleetMonitor, FleetSnapshot } from "./fleet-monitor.js";
 import type { FleetStore } from "./fleet-store.js";
 import type { HookIngressServer } from "./hook-ingress.js";
+import { parseChoices, type ParsedChoices } from "./choices.js";
 import {
   attentionCardKeyboard,
+  cardLabel,
   diffSummaryKeyboard,
   radarKeyboard,
   renderAttentionCard,
@@ -16,6 +18,7 @@ import {
   renderRadar,
   sessionLabel,
 } from "./radar.js";
+import type { ReplyFailureHandler, ReplyOutcome } from "./session-reply.js";
 import type { AttentionItem, FleetSession } from "./types.js";
 
 /** Radar edits are cheap but not free; Telegram rate-limits edits per chat. */
@@ -24,6 +27,12 @@ const SNOOZE_MS = 60 * 60 * 1000;
 /** Paging through a diff should not re-shell git for every tap. */
 const DIFF_CACHE_TTL_MS = 60_000;
 
+/** What the controller needs from ConductorReplier; narrow so tests can fake it. */
+export interface FleetReplier {
+  lastTurnText(conductorSessionId: string): string | null;
+  send(conductorSessionId: string, text: string, onFailed: ReplyFailureHandler): Promise<ReplyOutcome>;
+}
+
 export interface FleetControllerDependencies {
   telegram: TelegramClient;
   store: FleetStore;
@@ -31,9 +40,16 @@ export interface FleetControllerDependencies {
   ingress: HookIngressServer | null;
   /**
    * Hand a Conductor session back to the bridge's normal chat flow. Absent
-   * for Squeak, which only reports and cannot continue a chat.
+   * for Squeak, which has no conversation view — it answers through
+   * `replier` instead.
    */
   openConductorSession?: ((location: TelegramConversationTarget, conductorSessionId: string) => Promise<void>) | null;
+  /**
+   * Continue a Conductor chat from Telegram. With it, finish cards carry
+   * Reply and one button per lettered option, and a swipe-reply to a card is
+   * delivered to that chat. Without it the bot only reports.
+   */
+  replier?: FleetReplier | null;
   /** Chats allowed to use the bridge, used to pick a default push target. */
   fallbackChatIds: number[];
   /** Optional: without it the Diff button is simply never offered. */
@@ -66,7 +82,7 @@ export class FleetController {
     this.now = deps.now ?? Date.now;
   }
 
-  /** Whether this bot can continue a Conductor chat, or only report on it. */
+  /** Whether this bot can hand a Conductor chat to a conversation view of its own. */
   private get canDrive(): boolean {
     return Boolean(this.deps.openConductorSession);
   }
@@ -172,6 +188,8 @@ export class FleetController {
   async handleCallback(
     location: TelegramConversationTarget,
     data: string,
+    /** The message the button was on, so a choice can mark its card as answered. */
+    messageId: number | null = null,
   ): Promise<{ handled: boolean; notice?: string }> {
     if (!data.startsWith("fleet:")) {
       return { handled: false };
@@ -215,14 +233,36 @@ export class FleetController {
         return { handled: true };
       }
       case "reply": {
-        const open = this.deps.openConductorSession;
         const session = this.resolveHandle(argument);
+        if (this.deps.replier && session?.conductorSessionId) {
+          await this.promptForReply(location, session);
+          return { handled: true };
+        }
+        const open = this.deps.openConductorSession;
         if (!open || !session?.conductorSessionId) {
           return { handled: true, notice: "That session cannot be replied to from here." };
         }
         await open(location, session.conductorSessionId);
         return { handled: true };
       }
+      case "pick": {
+        const session = this.resolveHandle(argument);
+        const letter = parts[3];
+        if (!this.deps.replier || !session?.conductorSessionId || !letter || !/^[A-H]$/.test(letter)) {
+          return { handled: true, notice: "That session cannot be replied to from here." };
+        }
+        return this.sendChoice(location, session, letter, messageId);
+      }
+      case "full": {
+        const session = this.resolveHandle(argument);
+        if (!this.deps.replier || !session?.conductorSessionId) {
+          return { handled: true, notice: "That session is no longer being tracked." };
+        }
+        await this.sendFullMessage(location, session);
+        return { handled: true };
+      }
+      case "noop":
+        return { handled: true };
       case "snooze": {
         const key = this.resolveHandleKey(argument);
         if (!key) {
@@ -234,6 +274,133 @@ export class FleetController {
       default:
         return { handled: true, notice: "Unknown fleet action." };
     }
+  }
+
+  /**
+   * A message the user swiped to reply to. Returns false when it was not
+   * replying to anything this controller sent, so the caller can say so.
+   */
+  async handleReplyMessage(
+    location: TelegramConversationTarget,
+    replyToMessageId: number,
+    text: string,
+  ): Promise<boolean> {
+    const replier = this.deps.replier;
+    const target = replier ? this.deps.store.getReplyTarget(location.chatId, replyToMessageId) : null;
+    if (!replier || !target) {
+      return false;
+    }
+    const outcome = await replier.send(target.conductorSessionId, text, this.failureNotifier(location, target.label));
+    if (outcome.status === "refused") {
+      await this.send(location, outcome.reason);
+      return true;
+    }
+    this.afterReplyStarted();
+    await this.send(location, `Sent to **${target.label}**. I'll message you when it answers.`);
+    return true;
+  }
+
+  /**
+   * One tap on a lettered button sends that letter, which is exactly what the
+   * agent asked for. The card's buttons then collapse to a record of the
+   * answer, so the same choice cannot be sent twice by a second tap.
+   */
+  private async sendChoice(
+    location: TelegramConversationTarget,
+    session: FleetSession,
+    letter: string,
+    messageId: number | null,
+  ): Promise<{ handled: boolean; notice?: string }> {
+    const label = cardLabel(session);
+    const outcome = await this.deps.replier!.send(
+      session.conductorSessionId!,
+      letter,
+      this.failureNotifier(location, label),
+    );
+    if (outcome.status === "refused") {
+      return { handled: true, notice: outcome.reason };
+    }
+    this.afterReplyStarted();
+
+    const answered: TelegramInlineKeyboard = [
+      [{ text: `✓ Sent ${letter} — waiting for the answer`, callback_data: "fleet:noop" }],
+    ];
+    if (messageId !== null) {
+      try {
+        await this.deps.telegram.editMessageReplyMarkup(location.chatId, messageId, answered);
+        return { handled: true };
+      } catch (error) {
+        logger.debug("could not mark card as answered", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return { handled: true, notice: `Sent **${letter}** to **${label}**. I'll message you when it answers.` };
+  }
+
+  /**
+   * Open the reply box on the user's side, already quoting this prompt, so
+   * whatever they type comes back addressed to the right chat.
+   */
+  private async promptForReply(location: TelegramConversationTarget, session: FleetSession): Promise<void> {
+    const label = cardLabel(session);
+    try {
+      const messageId = await this.deps.telegram.sendForceReply(location.chatId, `Reply to **${label}**:`, {
+        placeholder: `Message for ${label}`,
+        messageThreadId: location.messageThreadId,
+      });
+      if (messageId !== null) {
+        this.deps.store.setReplyTarget(location.chatId, messageId, session.conductorSessionId!, label);
+      }
+    } catch (error) {
+      logger.warn("fleet reply prompt failed", { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /** The agent's whole last message, for when the card's gist is not enough to decide. */
+  private async sendFullMessage(location: TelegramConversationTarget, session: FleetSession): Promise<void> {
+    const text = this.deps.replier!.lastTurnText(session.conductorSessionId!);
+    if (!text) {
+      await this.send(location, "There is no finished message to show — the chat may be working again.");
+      return;
+    }
+    const handle = this.deps.store.handleFor(session.key);
+    const choices = parseChoices(text);
+    const keyboard: TelegramInlineKeyboard = [];
+    if (choices) {
+      keyboard.push(
+        ...attentionCardKeyboard(
+          { session: { ...session, cwd: null }, kind: "finished_unreviewed", since: "", score: 0 },
+          handle,
+          {
+            reply: true,
+            open: false,
+            choices,
+          },
+        ),
+      );
+    } else {
+      keyboard.push([{ text: "Reply", callback_data: `fleet:reply:${handle}` }]);
+    }
+    const messageId = await this.send(location, `**${cardLabel(session)}**\n\n${text}`, keyboard);
+    if (messageId !== null) {
+      this.deps.store.setReplyTarget(location.chatId, messageId, session.conductorSessionId!, cardLabel(session));
+    }
+  }
+
+  private failureNotifier(location: TelegramConversationTarget, label: string): ReplyFailureHandler {
+    return (message) => {
+      void this.send(location, `❗ **${label}** — the reply did not go through: ${message}`);
+    };
+  }
+
+  /**
+   * Look again straight away. The turn just started, and recording it as
+   * working now is what lets its finish register as a new state — and so push
+   * a new card — even if the whole turn is over before the next poll.
+   */
+  private afterReplyStarted(): void {
+    void this.deps.monitor.refresh().catch(() => undefined);
   }
 
   private resolveHandleKey(argument: string | undefined): string | null {
@@ -399,11 +566,47 @@ export class FleetController {
 
     for (const item of items) {
       const handle = this.deps.store.handleFor(item.session.key);
-      const text = renderAttentionCard(item, this.now());
-      const keyboard = attentionCardKeyboard(item, handle, this.canDrive);
+      const replyable = this.canReplyFrom(item);
+      const choices = replyable ? this.readChoices(item.session) : null;
+      const text = renderAttentionCard(item, this.now(), choices);
+      const keyboard = attentionCardKeyboard(item, handle, {
+        reply: replyable || (this.canDrive && !this.deps.replier),
+        open: this.canDrive,
+        full: replyable,
+        choices,
+      });
       for (const target of targets) {
-        await this.send(target, text, keyboard);
+        const messageId = await this.send(target, text, keyboard);
+        if (replyable && messageId !== null) {
+          this.deps.store.setReplyTarget(
+            target.chatId,
+            messageId,
+            item.session.conductorSessionId!,
+            cardLabel(item.session),
+          );
+        }
       }
+    }
+  }
+
+  /**
+   * Only a finish can be answered from here. A blocked Conductor session is
+   * holding its question open inside Conductor's own process, and a second
+   * writer would talk past it.
+   */
+  private canReplyFrom(item: AttentionItem): boolean {
+    return Boolean(this.deps.replier && item.session.conductorSessionId && item.kind === "finished_unreviewed");
+  }
+
+  private readChoices(session: FleetSession): ParsedChoices | null {
+    try {
+      return parseChoices(this.deps.replier!.lastTurnText(session.conductorSessionId!));
+    } catch (error) {
+      // A card without buttons is still a card; never lose the push over this.
+      logger.warn("could not read the last message for choices", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
     }
   }
 
@@ -424,17 +627,19 @@ export class FleetController {
     return this.deps.fallbackChatIds.map((chatId) => ({ chatId, messageThreadId: null }));
   }
 
+  /** Returns the id of the last message sent — the one carrying the keyboard. */
   private async send(
     location: TelegramConversationTarget,
     text: string,
     keyboard?: TelegramInlineKeyboard,
-  ): Promise<void> {
+  ): Promise<number | null> {
     const parts = splitMarkdown(text);
     const chunks = parts.length > 0 ? parts : [text];
+    let lastId: number | null = null;
     for (const [index, chunk] of chunks.entries()) {
       const isLast = index === chunks.length - 1;
       try {
-        await this.deps.telegram.sendMessage(location.chatId, chunk, {
+        lastId = await this.deps.telegram.sendMessage(location.chatId, chunk, {
           ...(keyboard && isLast ? { reply_markup: { inline_keyboard: keyboard } } : {}),
           ...(location.messageThreadId !== null ? { message_thread_id: location.messageThreadId } : {}),
         });
@@ -443,9 +648,10 @@ export class FleetController {
           chatId: location.chatId,
           error: error instanceof Error ? error.message : String(error),
         });
-        return;
+        return null;
       }
     }
+    return lastId;
   }
 }
 
