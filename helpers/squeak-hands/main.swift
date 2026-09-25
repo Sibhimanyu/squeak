@@ -310,11 +310,15 @@ case "press":
     // press <request.json> <result.json>: press the one control whose title or
     // description is exactly `match` (optionally inside `within`), wait, and
     // dump the tree — to read what a menu or sheet offers before acting on it.
-    struct PressRequest: Decodable { let match: String; let role: String?; let wait: Double?; let setValue: String?; let byDomId: Bool? }
+    struct PressRequest: Decodable {
+        let match: String; let role: String?; let wait: Double?; let setValue: String?; let byDomId: Bool?
+        /// Another app than Conductor — e.g. the iOS Simulator, for tests.
+        let bundleId: String?
+    }
     let resultPath = args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json"
     guard let data = FileManager.default.contents(atPath: outPath),
           let request = try? JSONDecoder().decode(PressRequest.self, from: data),
-          let running = conductorProcess()
+          let running = request.bundleId.flatMap({ NSRunningApplication.runningApplications(withBundleIdentifier: $0).first }) ?? conductorProcess()
     else {
         write(["ok": false, "error": "bad-request"], to: resultPath)
         exit(65)
