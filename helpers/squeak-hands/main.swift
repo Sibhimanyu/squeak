@@ -280,7 +280,7 @@ let args = CommandLine.arguments
 let mode = args.count > 1 ? args[1] : "probe"
 let outPath = args.count > 2 ? args[2] : "/tmp/squeak-hands.json"
 // Where errors go: the probe writes to its only path, send to its second.
-let errorPath = mode == "send" ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
+let errorPath = (mode == "send" || mode == "press" || mode == "choose-file") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
 
 let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
 if !trusted {
@@ -306,6 +306,101 @@ case "probe":
         dump(window, depth: 0, into: &nodes)
     }
     write(["ok": true, "nodes": nodes], to: outPath)
+case "press":
+    // press <request.json> <result.json>: press the one control whose title or
+    // description is exactly `match` (optionally inside `within`), wait, and
+    // dump the tree — to read what a menu or sheet offers before acting on it.
+    struct PressRequest: Decodable { let match: String; let role: String?; let wait: Double?; let setValue: String?; let byDomId: Bool? }
+    let resultPath = args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json"
+    guard let data = FileManager.default.contents(atPath: outPath),
+          let request = try? JSONDecoder().decode(PressRequest.self, from: data),
+          let running = conductorProcess()
+    else {
+        write(["ok": false, "error": "bad-request"], to: resultPath)
+        exit(65)
+    }
+    let app = AXUIElementCreateApplication(running.processIdentifier)
+    AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    _ = waitFor(5) { !((attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []).isEmpty }
+    running.activate()
+    Thread.sleep(forTimeInterval: 0.4)
+    let windows = (attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+    let matches = windows.flatMap { window in
+        findAll(window) { element in
+            (request.byDomId == true
+                ? str(element, "AXDOMIdentifier") == request.match
+                : (str(element, kAXTitleAttribute) == request.match || str(element, kAXDescriptionAttribute) == request.match))
+                && (request.role == nil || role(element) == request.role)
+        }
+    }
+    guard matches.count == 1, let target = matches.first else {
+        write(["ok": false, "error": matches.isEmpty ? "no-match" : "ambiguous", "count": matches.count], to: resultPath)
+        exit(3)
+    }
+    if let value = request.setValue {
+        AXUIElementSetAttributeValue(target, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(target, kAXValueAttribute as CFString, value as CFString)
+    } else {
+        AXUIElementPerformAction(target, kAXPressAction as CFString)
+    }
+    Thread.sleep(forTimeInterval: request.wait ?? 1.0)
+    var nodes: [[String: Any]] = []
+    for window in (attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? [] { dump(window, depth: 0, into: &nodes) }
+    write(["ok": true, "nodes": nodes], to: resultPath)
+case "choose-file":
+    // choose-file <request.json> <result.json>: press `match` (a button that
+    // opens the standard file picker), then pick `path` in it via ⌘⇧G.
+    struct ChooseRequest: Decodable { let match: String; let path: String }
+    let resultPath = args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json"
+    guard let data = FileManager.default.contents(atPath: outPath),
+          let request = try? JSONDecoder().decode(ChooseRequest.self, from: data),
+          FileManager.default.fileExists(atPath: request.path),
+          let running = conductorProcess()
+    else {
+        write(["ok": false, "error": "bad-request"], to: resultPath)
+        exit(65)
+    }
+    let app = AXUIElementCreateApplication(running.processIdentifier)
+    AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    _ = waitFor(5) { !((attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []).isEmpty }
+    running.activate()
+    Thread.sleep(forTimeInterval: 0.4)
+    let buttons = ((attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []).flatMap { window in
+        findAll(window) { str($0, kAXTitleAttribute) == request.match && role($0) == "AXButton" }
+    }
+    guard buttons.count == 1 else {
+        write(["ok": false, "error": buttons.isEmpty ? "no-match" : "ambiguous"], to: resultPath)
+        exit(3)
+    }
+    AXUIElementPerformAction(buttons[0], kAXPressAction as CFString)
+    // Wait for the open panel: a new window (or sheet) on the app.
+    let before = ((attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []).count
+    guard waitFor(5, { ((attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []).count > before
+        || findAll(app) { role($0) == "AXSheet" }.count > 0 })
+    else {
+        write(["ok": false, "error": "no-file-panel"], to: resultPath)
+        exit(4)
+    }
+    Thread.sleep(forTimeInterval: 0.6)
+    func key(_ code: CGKeyCode, _ flags: CGEventFlags = []) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        for down in [true, false] {
+            let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down)
+            event?.flags = flags
+            event?.post(tap: .cghidEventTap)
+        }
+        Thread.sleep(forTimeInterval: 0.15)
+    }
+    key(5 /* g */, [.maskCommand, .maskShift])
+    Thread.sleep(forTimeInterval: 0.6)
+    withClipboard(request.path) { key(9 /* v */, .maskCommand) }
+    Thread.sleep(forTimeInterval: 0.5)
+    key(36 /* return: go to the file */)
+    Thread.sleep(forTimeInterval: 0.9)
+    key(36 /* return: open it */)
+    Thread.sleep(forTimeInterval: 1.5)
+    let after = ((attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []).count
+    write(["ok": after <= before, "windowsBefore": before, "windowsAfter": after], to: resultPath)
 case "send":
     // send <request.json> <result.json>
     let requestPath = outPath

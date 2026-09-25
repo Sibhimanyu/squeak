@@ -6,10 +6,10 @@
 #
 #   scripts/move-checkout.sh [new-path]      # default: ~/conductor/repos/squeak
 #
-# Run it from Terminal, not from inside a Conductor workspace. Afterwards,
-# tell Conductor where the repository went (it keeps its own record of the
-# path): Conductor settings -> remove the old repository -> add the new
-# folder. Workspaces made after that live under the new name.
+# Run it from Terminal, not from inside a Conductor workspace. Conductor keeps
+# its own record of the path and name: quit Conductor and run
+# scripts/rename-in-conductor.py afterwards, which updates it in place and
+# keeps every workspace and chat.
 
 set -euo pipefail
 
@@ -67,6 +67,6 @@ say "re-pointing the launch agents..."
 ( cd "$NEW" && ./scripts/install-squeak-agents.sh )
 
 say ""
-say "done. One step left, in Conductor: remove the old repository and add"
-say "  $NEW"
-say "so new workspaces are made from the new folder and name."
+say "done. One step left: quit Conductor, then run"
+say "  $NEW/scripts/rename-in-conductor.py"
+say "so Conductor's own records carry the new path and name."

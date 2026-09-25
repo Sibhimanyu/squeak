@@ -44,6 +44,7 @@ deployment section before changing anything under `src/` or `desktop/`.
 | `scripts/ship.sh` | put a worktree's branch live and restart Squeak |
 | `scripts/build-squeak-app.sh` | packages `~/Applications/Squeak.app` (icon, bundle id, signing) |
 | `scripts/install-squeak-agents.sh` | the launch agents for the daemon and the app |
+| `scripts/move-checkout.sh`, `scripts/rename-in-conductor.py` | move the checkout; rename the repo in Conductor's records (Conductor quit) keeping every chat |
 | `DESIGN.md` | the brand and design system every surface follows; tokens in §11 |
 | `docs/remote-channel.md` | the phone channel's threat model and design — read before touching it |
 
