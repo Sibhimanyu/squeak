@@ -52,8 +52,12 @@ check "no service account bundled"    '! find "$APP" -iname "*adminsdk*" -o -ina
 
 mkdir -p build/ipa/Payload
 cp -R "$APP" build/ipa/Payload/
-IPA="Squeak-$VERSION-$BUILD.ipa"
-rm -f "$PUBLIC"/*.ipa
+# Published as .zip: new Firebase projects on the free Spark plan refuse
+# "executable" uploads, .ipa included. An .ipa is a zip archive, and SideStore
+# downloads downloadURL to a file of its own naming, so the bytes are what
+# matter, not the extension.
+IPA="Squeak-$VERSION-$BUILD.zip"
+rm -f "$PUBLIC"/*.ipa "$PUBLIC"/*.zip
 (cd build/ipa && COPYFILE_DISABLE=1 zip -qry "../../$PUBLIC/$IPA" Payload)
 SIZE=$(stat -f%z "$PUBLIC/$IPA")
 SHA=$(shasum -a 256 "$PUBLIC/$IPA" | cut -d' ' -f1)
@@ -102,7 +106,7 @@ code{background:#18181b;border:1px solid #27272a;border-radius:6px;padding:2px 6
 <img src="icon.png" alt=""><h1>Squeak</h1>
 <p>Version $VERSION ($BUILD). $(printf '%s' "$NOTES" | sed 's/&/\&amp;/g; s/</\&lt;/g')</p>
 <a class="btn" href="sidestore://source?url=$SITE/source.json">Add to SideStore</a>
-<a class="alt" href="$IPA">Download the .ipa</a>
+<a class="alt" href="$IPA">Download the app file (an .ipa, served as .zip)</a>
 <p>Needs SideStore on the phone first. Or add this source in SideStore by hand:<br><code>$SITE/source.json</code></p>
 </main></body></html>
 HTML

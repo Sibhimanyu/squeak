@@ -1,6 +1,7 @@
 # Step 4 — The remote channel (design, before any code)
 
-> Status: proposal · 2026-09-25 · Roadmap step 4 in `DESIGN.md` §13.
+> Status: **built** · 2026-09-25 · Roadmap steps 4–5 in `DESIGN.md` §13.
+> Firebase project `squeak-5c9gvo` (Firestore in asia-south1), iOS via SideStore.
 >
 > This is the first step where a device that is not your Mac can make agents
 > on your Mac *do things*. That is remote code execution with extra steps: an
@@ -127,3 +128,23 @@ one codebase on both platforms and first-class FCM support.
    not the codebase.)
 4. **Scope check:** step 4 lets a paired phone *reply to existing Conductor
    chats* and nothing else. Anything you want in or out?
+
+## As built (2026-09-25)
+
+Decisions: Firebase, iPhone only, a new project, reply-only scope.
+
+- **No push notifications on the phone.** A free Apple ID (SideStore) cannot
+  use APNs, so Telegram stays the notification channel; the app is where you
+  look and answer. The app polls only while it is on screen.
+- **No Firebase Auth.** Access is by capability: the channel id (128 random
+  bits) is only in the QR code, everything is AES-256-GCM encrypted, and
+  commands are signed. The rules (`firebase/firestore.rules`) allow nothing
+  else and were checked against the live database.
+- **Presence throttles cost.** The phone writes an encrypted presence ping
+  every 20s while open; the Mac polls every 2s then, every 15s otherwise, and
+  publishes the snapshot every 3s (open) or 60s (not) when it changed.
+- **Compatibility is pinned by fixtures** both ways (`src/remote/fixtures`,
+  `ios/SqueakCore/Tests/…/Fixtures`), and `scripts/e2e-remote.ts` pairs and
+  replies over the live project with both real implementations.
+- **The .ipa is published as .zip**: new projects on Spark refuse executable
+  uploads. SideStore installs from the bytes, not the extension.

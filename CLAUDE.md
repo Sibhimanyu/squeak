@@ -37,6 +37,10 @@ deployment section before changing anything under `src/`.
 | `desktop/squeak-service.js` | the window's only way out: /state, token-gated control routes, launchctl, Squeak Hands |
 | `scripts/build-squeak-app.sh` | packages `~/Applications/Squeak.app` (icon, bundle id, signing) |
 | `DESIGN.md` | the brand and design system every surface follows; tokens in §11 |
+| `src/remote/` | the phone channel's Mac side: crypto, Firestore REST, `RemoteBridge` |
+| `ios/` | Squeak for iPhone (SwiftUI, xcodegen) and `SqueakCore` (`swift test`) |
+| `firebase/` | project `squeak-5c9gvo`: Firestore rules, and Hosting for the SideStore source |
+| `docs/remote-channel.md` | the phone channel's threat model and design — read before touching it |
 
 `src/services/bridge-service.ts` is **dead code** — an older implementation that
 still ships in the package. The live path is `cli.ts` to `index.ts`. Do not spend
@@ -284,6 +288,25 @@ that marker file, not just move the plist back. If the user ever wants it back:
   through that gap. Note that flat-config `files` patterns resolve against the
   directory eslint runs from, so they must be repo-relative — a config whose
   patterns match nothing passes everything, which is worse than no linter.
+
+## The phone channel (docs/remote-channel.md)
+
+- **The Mac trusts a key, not a server.** `RemoteBridge.handleCommand` runs a
+  reply only if a paired, unrevoked device's P-256 key signed the exact box,
+  it has not expired (≤10 min), its nonce is new, it names the chat's
+  *current* turn, and it is a plain reply. Keep every check; add tests for
+  any new one. Pairing always waits for the human to approve on the Mac.
+- **Swift and Node must agree byte-for-byte.** Change a shape on one side and
+  regenerate the fixtures (`swift run -c release squeak-fixtures
+  ../../src/remote/fixtures/swift-command.json` in `ios/SqueakCore`; the Mac
+  fixture from a `RemoteBridge.phoneView()`), then run both test suites and
+  `npx tsx scripts/e2e-remote.ts`.
+- The iPhone app is released with `ios/scripts/release.sh "notes"`; bump
+  `MARKETING_VERSION` in `ios/project.yml` or SideStore never offers it. The
+  file is served as `.zip` because Spark refuses `.ipa` on new projects.
+- `SQUEAK_REMOTE_PROJECT` in Squeak's `.env` turns the channel on. The
+  channel secret lives only in `~/Library/Application Support/squeak/remote.json`
+  (0600) and in paired phones' Keychains.
 
 ## The fleet layer
 
