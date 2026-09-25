@@ -12,6 +12,8 @@ let package = Package(
         .target(name: "SqueakCore"),
         // Writes the fixtures the Mac's tests verify against (src/remote/fixtures).
         .executableTarget(name: "squeak-fixtures", dependencies: ["SqueakCore"]),
+        // A phone in a terminal: pairs and replies over real Firestore (scripts/e2e-remote.sh).
+        .executableTarget(name: "squeak-e2e", dependencies: ["SqueakCore"]),
         .testTarget(name: "SqueakCoreTests", dependencies: ["SqueakCore"], resources: [.copy("Fixtures")]),
     ]
 )

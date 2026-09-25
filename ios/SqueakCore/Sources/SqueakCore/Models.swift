@@ -5,18 +5,23 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public struct Duck: Codable, Equatable, Sendable {
         public let blockedCount: Int
         public let workingCount: Int
+        public init(blockedCount: Int, workingCount: Int) { self.blockedCount = blockedCount; self.workingCount = workingCount }
     }
 
     public struct Option: Codable, Equatable, Sendable, Identifiable {
         public let letter: String
         public let title: String
         public var id: String { letter }
+        public init(letter: String, title: String) { self.letter = letter; self.title = title }
     }
 
     public struct Choices: Codable, Equatable, Sendable {
         public let question: String?
         public let options: [Option]
         public let recommended: String?
+        public init(question: String?, options: [Option], recommended: String?) {
+            self.question = question; self.options = options; self.recommended = recommended
+        }
     }
 
     public struct Session: Codable, Equatable, Sendable, Identifiable {
@@ -69,6 +74,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public let generatedAt: String
     public let duck: Duck
     public let sessions: [Session]
+
+    public init(v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session]) {
+        self.v = v; self.mac = mac; self.generatedAt = generatedAt; self.duck = duck; self.sessions = sessions
+    }
 
     /// Attention order, DESIGN.md §8.2.
     public static let groups: [(title: String, states: [String])] = [
