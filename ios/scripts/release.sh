@@ -113,6 +113,8 @@ HTML
 
 echo "==> $PUBLIC/$IPA ($((SIZE / 1024)) KB)"
 if [[ $DEPLOY == 1 ]]; then
+  # The hand-written pages (the Telegram "Open in Squeak" hand-off) ship with every deploy.
+  cp -R ../firebase/pages/. "$PUBLIC/"
   (cd ../firebase && firebase deploy --only hosting --project "$PROJECT" -m "Squeak $VERSION ($BUILD)")
   echo "==> $SITE/source.json now offers $VERSION ($BUILD)"
 fi

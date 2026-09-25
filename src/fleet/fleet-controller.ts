@@ -50,6 +50,11 @@ export interface FleetControllerDependencies {
    * delivered to that chat. Without it the bot only reports.
    */
   replier?: FleetReplier | null;
+  /**
+   * The https link that opens a Conductor session on the paired phone, or
+   * null when no phone is paired (then the button is not offered at all).
+   */
+  phoneLink?: ((conductorSessionId: string) => string | null) | null;
   /** Chats allowed to use the bridge, used to pick a default push target. */
   fallbackChatIds: number[];
   /** Optional: without it the Diff button is simply never offered. */
@@ -571,11 +576,13 @@ export class FleetController {
       const replyable = this.canReplyFrom(item);
       const choices = replyable ? this.readChoices(item.session) : null;
       const text = renderAttentionCard(item, this.now(), choices);
+      const conductorSessionId = item.session.conductorSessionId;
       const keyboard = attentionCardKeyboard(item, handle, {
         reply: replyable || (this.canDrive && !this.deps.replier),
         open: this.canDrive,
         full: replyable,
         choices,
+        phoneLink: conductorSessionId ? (this.deps.phoneLink?.(conductorSessionId) ?? null) : null,
       });
       for (const target of targets) {
         const messageId = await this.send(target, text, keyboard);

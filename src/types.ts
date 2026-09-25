@@ -158,10 +158,8 @@ export interface TelegramCallbackQuery {
   data?: string;
 }
 
-export interface TelegramInlineKeyboardButton {
-  text: string;
-  callback_data: string;
-}
+/** A button that calls back into the bot, or one that opens a link (https only, per Telegram). */
+export type TelegramInlineKeyboardButton = { text: string; callback_data: string } | { text: string; url: string };
 
 export type TelegramInlineKeyboard = TelegramInlineKeyboardButton[][];
 

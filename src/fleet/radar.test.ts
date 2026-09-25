@@ -1,3 +1,4 @@
+import type { TelegramInlineKeyboardButton } from "../types.js";
 import { describe, expect, it } from "vitest";
 
 import type { FleetSnapshot } from "./fleet-monitor.js";
@@ -19,6 +20,11 @@ import {
 import type { AttentionItem, FleetSession } from "./types.js";
 
 const now = Date.parse("2026-09-20T12:00:00.000Z");
+
+/** The callback of a callback button; "" for a link button. */
+function callbackData(button: TelegramInlineKeyboardButton | undefined): string {
+  return button && "callback_data" in button ? button.callback_data : "";
+}
 
 function session(overrides: Partial<FleetSession> = {}): FleetSession {
   return {
@@ -400,7 +406,7 @@ describe("radarKeyboard", () => {
 
     for (const row of keyboard) {
       for (const button of row) {
-        expect(Buffer.byteLength(button.callback_data)).toBeLessThanOrEqual(64);
+        expect(Buffer.byteLength(callbackData(button))).toBeLessThanOrEqual(64);
         expect(button.text.length).toBeLessThanOrEqual(40);
       }
     }
@@ -487,9 +493,9 @@ describe("diffSummaryKeyboard", () => {
 
   it("indexes buttons by absolute position so paging opens the right file", () => {
     const rows = diffSummaryKeyboard(diffWith(20), 42, 1);
-    const fileButtons = rows.flat().filter((button) => /^fleet:diff:42:\d+$/.test(button.callback_data));
+    const fileButtons = rows.flat().filter((button) => /^fleet:diff:42:\d+$/.test(callbackData(button)));
 
-    expect(fileButtons[0]?.callback_data).toBe("fleet:diff:42:8");
+    expect(callbackData(fileButtons[0])).toBe("fleet:diff:42:8");
   });
 
   it("offers paging only when there is more than one page", () => {
@@ -510,7 +516,7 @@ describe("diffSummaryKeyboard", () => {
   it("keeps long paths recognisable by their tail and inside Telegram's limits", () => {
     for (const row of diffSummaryKeyboard(diffWith(20), 42, 0)) {
       for (const button of row) {
-        expect(Buffer.byteLength(button.callback_data)).toBeLessThanOrEqual(64);
+        expect(Buffer.byteLength(callbackData(button))).toBeLessThanOrEqual(64);
         expect(button.text.length).toBeLessThanOrEqual(38);
       }
     }

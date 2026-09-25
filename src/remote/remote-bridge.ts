@@ -139,6 +139,11 @@ export class RemoteBridge {
     }
   }
 
+  /** Whether any phone could act on a link to one of its sessions right now. */
+  hasPairedPhone(): boolean {
+    return Boolean(this.config?.devices.some((device) => !device.revokedAt));
+  }
+
   /* ---------- what the Mac app shows and does ---------- */
 
   status(): unknown {

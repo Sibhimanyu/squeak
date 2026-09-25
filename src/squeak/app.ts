@@ -154,6 +154,12 @@ export class SqueakApp {
       // answered in place, which is what the replier is for.
       openConductorSession: null,
       replier: this.replier,
+      // Telegram buttons only open https links, so the card points at a page
+      // on the channel's own Firebase site that hands off to the phone app.
+      phoneLink: (conductorSessionId) =>
+        this.remote?.hasPairedPhone() && config.remoteProjectId
+          ? `https://${config.remoteProjectId}.web.app/open/#s=${encodeURIComponent(conductorSessionId)}`
+          : null,
       fallbackChatIds: config.allowedChatIds ? Array.from(config.allowedChatIds) : [],
     });
   }

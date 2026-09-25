@@ -32,3 +32,18 @@ final class ChannelCryptoTests: XCTestCase {
         XCTAssertEqual(ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963).count, 6)
     }
 }
+
+final class SqueakLinkTests: XCTestCase {
+    func testReadsTheSessionFromAnyHostAppsScheme() {
+        let id = "289014c4-b06d-4bae-92c6-7ed94912e6bd"
+        XCTAssertEqual(SqueakLink.sessionId(from: URL(string: "snof://squeak?s=\(id)")!), id)
+        XCTAssertEqual(SqueakLink.sessionId(from: URL(string: "other://squeak?s=\(id)")!), id)
+    }
+
+    func testIgnoresEverythingElse() {
+        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "snof://farm?s=289014c4")!))
+        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "snof://squeak")!))
+        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "snof://squeak?s=../../etc")!))
+        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "snof://squeak?s=abc")!))
+    }
+}

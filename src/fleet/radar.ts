@@ -445,6 +445,11 @@ export interface CardActions {
   full?: boolean;
   /** Lettered options found in the last message, each becoming a button. */
   choices?: ParsedChoices | null;
+  /**
+   * An https link that opens this session on the paired phone. Telegram's
+   * notification opens Telegram, so this is the one tap from there to the app.
+   */
+  phoneLink?: string | null;
 }
 
 const CHOICE_BUTTONS_PER_ROW = 4;
@@ -484,6 +489,9 @@ export function attentionCardKeyboard(
   }
   if (conversation.length > 0) {
     rows.push(conversation);
+  }
+  if (actionable && allowed.phoneLink) {
+    rows.push([{ text: "Open in Squeak", url: allowed.phoneLink }]);
   }
 
   // Snooze and Radar used to have a row each, on every card. Neither is about

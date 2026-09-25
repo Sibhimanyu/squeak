@@ -5,12 +5,17 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TelegramClient } from "../telegram/client.js";
-import type { TelegramInlineKeyboard } from "../types.js";
+import type { TelegramInlineKeyboard, TelegramInlineKeyboardButton } from "../types.js";
 import { FleetController, type FleetReplier } from "./fleet-controller.js";
 import type { FleetMonitor } from "./fleet-monitor.js";
 import { FleetStore } from "./fleet-store.js";
 import type { ReplyOutcome } from "./session-reply.js";
 import type { AttentionItem, FleetSession } from "./types.js";
+
+/** The callback of a callback button; "" for a link button. */
+function callbackData(button: TelegramInlineKeyboardButton | undefined): string {
+  return button && "callback_data" in button ? button.callback_data : "";
+}
 
 const DECISION = [
   "**D1 — Arm device control on the farm?** (reply with a letter)",
@@ -64,7 +69,9 @@ afterEach(() => {
   }
 });
 
-async function fixture(options: { outcome?: ReplyOutcome; lastText?: string | null } = {}) {
+async function fixture(
+  options: { outcome?: ReplyOutcome; lastText?: string | null; phoneLink?: (id: string) => string | null } = {},
+) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-controller-"));
   dirs.push(dir);
   const store = new FleetStore(path.join(dir, "squeak.db"));
@@ -116,6 +123,7 @@ async function fixture(options: { outcome?: ReplyOutcome; lastText?: string | nu
     ingress: null,
     openConductorSession: null,
     replier,
+    phoneLink: options.phoneLink ?? null,
     fallbackChatIds: [42],
   });
   await controller.start();
@@ -143,7 +151,7 @@ describe("FleetController replies", () => {
     expect(buttons.map((button) => button.text)).toEqual(["A ★", "B", "C", "Reply", "Full message"]);
     // Callback data is capped at 64 bytes.
     for (const button of buttons) {
-      expect(Buffer.byteLength(button.callback_data)).toBeLessThanOrEqual(64);
+      expect(Buffer.byteLength(callbackData(button))).toBeLessThanOrEqual(64);
     }
   });
 
@@ -160,7 +168,7 @@ describe("FleetController replies", () => {
     await pushFinish();
     const pick = sent[0]!.keyboard!.flat().find((button) => button.text === "B")!;
 
-    const result = await controller.handleCallback(location, pick.callback_data, 100);
+    const result = await controller.handleCallback(location, callbackData(pick), 100);
 
     expect(sends).toEqual([{ sessionId: "s1", text: "B" }]);
     expect(result).toEqual({ handled: true });
@@ -177,7 +185,7 @@ describe("FleetController replies", () => {
     await pushFinish();
     const pick = sent[0]!.keyboard!.flat().find((button) => button.text === "A ★")!;
 
-    const result = await controller.handleCallback(location, pick.callback_data, 100);
+    const result = await controller.handleCallback(location, callbackData(pick), 100);
 
     expect(result.notice).toBe("That chat is still working in Conductor.");
     expect(telegram.editMessageReplyMarkup).not.toHaveBeenCalled();
@@ -199,7 +207,7 @@ describe("FleetController replies", () => {
     await pushFinish();
     const reply = sent[0]!.keyboard!.flat().find((button) => button.text === "Reply")!;
 
-    await controller.handleCallback(location, reply.callback_data, 100);
+    await controller.handleCallback(location, callbackData(reply), 100);
     const promptId = 101;
     expect(sent.at(-1)!.text).toContain("Reply to");
 
@@ -218,10 +226,23 @@ describe("FleetController replies", () => {
     await pushFinish();
     const full = sent[0]!.keyboard!.flat().find((button) => button.text === "Full message")!;
 
-    await controller.handleCallback(location, full.callback_data, 100);
+    await controller.handleCallback(location, callbackData(full), 100);
 
     const message = sent.at(-1)!;
     expect(message.text).toContain("Completeness: 10/10");
     expect(message.keyboard!.flat().map((button) => button.text)).toContain("C");
+  });
+
+  it("links the card to the session on the paired phone", async () => {
+    const { sent, pushFinish } = await fixture({ phoneLink: (id) => `https://example.web.app/open#s=${id}` });
+    await pushFinish();
+    const link = sent[0]!.keyboard!.flat().find((button) => button.text === "Open in Squeak");
+    expect(link).toEqual({ text: "Open in Squeak", url: "https://example.web.app/open#s=s1" });
+  });
+
+  it("offers no phone link while no phone is paired", async () => {
+    const { sent, pushFinish } = await fixture({ phoneLink: () => null });
+    await pushFinish();
+    expect(sent[0]!.keyboard!.flat().some((button) => button.text === "Open in Squeak")).toBe(false);
   });
 });
