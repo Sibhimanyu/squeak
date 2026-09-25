@@ -266,7 +266,10 @@ Rules:
 - The app icon is the working duck on a `#18181B` rounded-square ground,
   facing right, occupying ~70% of the tile. No text, no gradients.
 - The menu-bar mark is the monochrome outline in
-  `desktop/assets/duckTemplate.svg` (a template image, so macOS tints it).
+  `desktop/assets/duckTemplate.png` (a template image, so macOS tints it),
+  generated from the duck artwork by `desktop/build/make-tray-icon.py` — its
+  silhouette with the eye, wing and beak lines cut out — so it is always the
+  same duck. Never hand-draw it.
 
 ### 6.2 Icons
 
