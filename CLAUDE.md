@@ -265,6 +265,13 @@ test for anything you fix is expected; the suite is fast.
   ../../src/remote/fixtures/swift-command.json` in `ios/SqueakCore`; the Mac
   fixture from a `RemoteBridge.phoneView()`), then run both test suites and
   `npx tsx scripts/e2e-remote.ts`.
+- **The iPhone UI also ships inside SNOF**, as an owner-only tab: a free
+  Apple ID allows three sideloaded apps. `SqueakRootView` (module `SqueakUI`)
+  is the whole UI in one view; `ios/scripts/vendor-into.sh <snof>/ios/SqueakKit`
+  copies it and `SqueakCore` into SNOF, which shows it only to the owner's
+  account (`SqueakAccess.swift` there). After changing anything under
+  `ios/SqueakCore/Sources`, re-vendor into SNOF, or its tab keeps the old code.
+  Launch flags are `-squeak-*` so they never collide with a host app's own.
 - The iPhone app is released with `ios/scripts/release.sh "notes"`; bump
   `MARKETING_VERSION` in `ios/project.yml` or SideStore never offers it. The
   file is served as `.zip` because Spark refuses `.ipa` on new projects.
