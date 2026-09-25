@@ -73,6 +73,25 @@ export function sessionLabel(session: FleetSession, homeDir = os.homedir()): str
 const DISAMBIGUATING_TITLE_MAX_CHARS = 34;
 
 /** A session's own title, short enough for a parenthetical, or null when it carries no information. */
+/**
+ * For each session whose label collides with another's, the title that tells
+ * them apart; null for the rest. One implementation, so the radar, the duck
+ * and the Squeak window all disambiguate the same rows the same way.
+ */
+export function distinctTitles(sessions: FleetSession[]): Map<string, string | null> {
+  const labelCounts = new Map<string, number>();
+  for (const session of sessions) {
+    const label = sessionLabel(session);
+    labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+  }
+  return new Map(
+    sessions.map((session) => [
+      session.key,
+      (labelCounts.get(sessionLabel(session)) ?? 0) > 1 ? disambiguatingTitle(session) : null,
+    ]),
+  );
+}
+
 function disambiguatingTitle(session: FleetSession): string | null {
   const title = session.title?.trim();
   if (!title || title === "Untitled") {
@@ -192,16 +211,12 @@ export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
   // Conductor titles are usually distinct even when everything else matches.
   // Only shown on an actual collision, the same way a workspace label only
   // grows a directory suffix when its repo name is ambiguous.
-  const labelCounts = new Map<string, number>();
-  for (const session of ordered) {
-    const label = sessionLabel(session);
-    labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
-  }
+  const titles = distinctTitles(ordered);
 
   for (const session of ordered.slice(0, MAX_ACTIVE_ROWS)) {
     lines.push("");
     const label = sessionLabel(session);
-    const distinctTitle = (labelCounts.get(label) ?? 0) > 1 ? disambiguatingTitle(session) : null;
+    const distinctTitle = titles.get(session.key) ?? null;
     // Bold, so the heading a session is filed under is the thing the eye
     // lands on first, with the plain detail line beneath it visually lighter.
     const heading = distinctTitle ? `**${label}** _(${distinctTitle})_` : `**${label}**`;
@@ -354,7 +369,8 @@ export function renderAttentionCard(item: AttentionItem, nowMs: number, choices:
   }
   if (choices) {
     for (const option of choices.options) {
-      lines.push(`**${option.letter}** · ${option.title}`);
+      const recommended = option.letter === choices.recommended ? " _(recommended)_" : "";
+      lines.push(`**${option.letter}** · ${option.title}${recommended}`);
     }
   }
 

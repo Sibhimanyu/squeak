@@ -254,3 +254,66 @@ describe("local state endpoint", () => {
     expect(harness.events).toHaveLength(0);
   });
 });
+
+describe("HookIngressServer control routes", () => {
+  async function withControl() {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const replies: Array<{ id: string; text: string }> = [];
+    server.setControl({
+      sessionMessage: (id) => ({ id, text: "A) yes\nB) no" }),
+      reply: async (id, text) => {
+        replies.push({ id, text });
+        return { status: "started", via: "conductor" };
+      },
+    });
+    const base = `http://127.0.0.1:${harness.port}/control/session/abc-123`;
+    const auth = { "x-conductor-tg-token": harness.token };
+    return { harness, base, auth, replies };
+  }
+
+  it("refuses control requests without the token", async () => {
+    const { base, replies } = await withControl();
+    expect((await fetch(`${base}/message`)).status).toBe(403);
+    const reply = await fetch(`${base}/reply`, { method: "POST", body: JSON.stringify({ text: "A" }) });
+    expect(reply.status).toBe(403);
+    expect(replies).toEqual([]);
+  });
+
+  it("serves a chat's message to a caller with the token, without opening it to web pages", async () => {
+    const { base, auth } = await withControl();
+    const response = await fetch(`${base}/message`, { headers: auth });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ id: "abc-123", text: "A) yes\nB) no" });
+    // No CORS header: a browser page must not be able to read this.
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("passes a reply through and returns its outcome", async () => {
+    const { base, auth, replies } = await withControl();
+    const response = await fetch(`${base}/reply`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ text: "B" }),
+    });
+    expect(await response.json()).toEqual({ status: "started", via: "conductor" });
+    expect(replies).toEqual([{ id: "abc-123", text: "B" }]);
+  });
+
+  it("rejects an empty reply and an unknown route", async () => {
+    const { base, auth, replies } = await withControl();
+    const empty = await fetch(`${base}/reply`, { method: "POST", headers: auth, body: JSON.stringify({ text: "  " }) });
+    expect(empty.status).toBe(400);
+    const odd = await fetch(`${base.replace("abc-123", "../etc")}/message`, { headers: auth });
+    expect(odd.status).toBe(404);
+    expect(replies).toEqual([]);
+  });
+
+  it("says so when nothing can answer yet", async () => {
+    const harness = await startServer();
+    const response = await fetch(`http://127.0.0.1:${harness.port}/control/session/x/message`, {
+      headers: { "x-conductor-tg-token": harness.token },
+    });
+    expect(response.status).toBe(503);
+  });
+});

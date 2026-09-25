@@ -4,6 +4,7 @@ import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import { FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
+import { parseChoices } from "../fleet/choices.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
@@ -89,6 +90,19 @@ export class SqueakApp {
       claude: new ClaudeCodeAdapter(config.claudeBin),
       codex: new CodexAppServerAdapter(config.codexBin),
       ui: config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null,
+    });
+
+    // The Mac app answers chats through the same replier as Telegram, over
+    // the loopback ingress, gated by the hook token.
+    this.runtime.ingress.setControl({
+      sessionMessage: (sessionId) => {
+        const text = this.replier.lastTurnText(sessionId);
+        return { text, choices: parseChoices(text) };
+      },
+      reply: (sessionId, text) =>
+        this.replier.send(sessionId, text, (message) => {
+          logger.warn("reply from the Mac app failed", { sessionId, message });
+        }),
     });
 
     this.controller = new FleetController({

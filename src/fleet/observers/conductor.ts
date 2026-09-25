@@ -57,6 +57,7 @@ export class ConductorObserver {
       sourceId: row.id,
       agentSessionId: row.claudeSessionId,
       conductorSessionId: row.id,
+      conductorWorkspaceId: row.workspaceId,
       // The worktree path is both where git must run and a better liveness
       // key than nothing, so take it from Conductor rather than waiting for a
       // transcript to supply it.

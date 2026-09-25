@@ -55,6 +55,8 @@ export interface ObservedSession {
    */
   agentSessionId: string | null;
   conductorSessionId: string | null;
+  /** Conductor's workspace for the chat, which is what its sidebar links by. */
+  conductorWorkspaceId?: string | null;
   cwd: string | null;
   repoName: string | null;
   branch: string | null;

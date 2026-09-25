@@ -56,6 +56,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     key: base.key,
     agentSessionId: base.agentSessionId ?? conductor?.agentSessionId ?? null,
     conductorSessionId: conductor?.conductorSessionId ?? base.conductorSessionId,
+    conductorWorkspaceId: conductor?.conductorWorkspaceId ?? base.conductorWorkspaceId ?? null,
     origin: conductor ? "conductor" : base.origin,
     // Conductor names things better than a transcript's first prompt does.
     title: conductor?.title ?? base.title,

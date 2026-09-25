@@ -2,6 +2,7 @@ import { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import { CodexUsageReader } from "./codex-usage.js";
 import { DiffReader } from "./diff-view.js";
 import { deriveDuckState } from "./duck-mood.js";
+import { distinctTitles } from "./radar.js";
 import { FleetMonitor } from "./fleet-monitor.js";
 import { FleetStore } from "./fleet-store.js";
 import { ClaudeCostReader } from "./claude-cost.js";
@@ -90,6 +91,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
  */
 export function serializeState(monitor: FleetMonitor): unknown {
   const snapshot = monitor.snapshot;
+  const titles = distinctTitles(snapshot.active);
   return {
     generatedAt: snapshot.generatedAt,
     trackedCount: snapshot.sessions.length,
@@ -109,6 +111,9 @@ export function serializeState(monitor: FleetMonitor): unknown {
       contextPercent: session.contextPercent,
       alive: session.alive,
       conductorSessionId: session.conductorSessionId,
+      conductorWorkspaceId: session.conductorWorkspaceId ?? null,
+      /** Set only when another active row would read the same. */
+      distinctTitle: titles.get(session.key) ?? null,
       git: session.git,
       costUsd: session.costUsd,
     })),

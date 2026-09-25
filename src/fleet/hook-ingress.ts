@@ -25,6 +25,18 @@ export interface HookIngressOptions {
 }
 
 /**
+ * What a local app may do beyond reading state: read a chat's full last
+ * message and answer it. Both routes require the hook token, unlike /state —
+ * any web page the user has open can reach 127.0.0.1, and neither the text of
+ * a conversation nor the ability to send an agent instructions may be
+ * readable or usable from there.
+ */
+export interface IngressControl {
+  sessionMessage(conductorSessionId: string): unknown;
+  reply(conductorSessionId: string, text: string): Promise<unknown>;
+}
+
+/**
  * A loopback-only HTTP endpoint that installed agent hooks POST to.
  *
  * Every handler answers immediately and does the real work afterwards: these
@@ -37,6 +49,7 @@ export class HookIngressServer {
   private readonly options: HookIngressOptions;
   private server: http.Server | null = null;
   private token: string;
+  private control: IngressControl | null = null;
 
   constructor(options: HookIngressOptions) {
     this.options = options;
@@ -58,6 +71,11 @@ export class HookIngressServer {
     fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
     fs.writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
     return token;
+  }
+
+  /** Set after construction: the replier is built by whoever owns the bot. */
+  setControl(control: IngressControl | null): void {
+    this.control = control;
   }
 
   async start(): Promise<void> {
@@ -109,6 +127,11 @@ export class HookIngressServer {
       return;
     }
 
+    if (request.url?.startsWith("/control/")) {
+      this.handleControl(request, response);
+      return;
+    }
+
     if (request.method !== "POST" || !request.url?.startsWith("/hook")) {
       respond(response, 404, "not found");
       request.resume();
@@ -157,6 +180,89 @@ export class HookIngressServer {
     request.on("error", () => {
       aborted = true;
     });
+  }
+
+  /**
+   * `GET  /control/session/<conductorSessionId>/message`
+   * `POST /control/session/<conductorSessionId>/reply` with `{ "text": "..." }`
+   */
+  private handleControl(request: http.IncomingMessage, response: http.ServerResponse): void {
+    const provided = headerValue(request, TOKEN_HEADER);
+    if (!provided || !this.token || !safeEquals(provided, this.token)) {
+      respond(response, 403, "forbidden");
+      request.resume();
+      return;
+    }
+    const control = this.control;
+    if (!control) {
+      respond(response, 503, "control unavailable");
+      request.resume();
+      return;
+    }
+
+    const match = /^\/control\/session\/([A-Za-z0-9-]{1,80})\/(message|reply)$/.exec(
+      (request.url ?? "").split("?")[0] ?? "",
+    );
+    if (!match) {
+      respond(response, 404, "not found");
+      request.resume();
+      return;
+    }
+    const [, sessionId, action] = match as unknown as [string, string, "message" | "reply"];
+
+    if (action === "message" && request.method === "GET") {
+      request.resume();
+      try {
+        respondJson(response, 200, control.sessionMessage(sessionId));
+      } catch (error) {
+        logger.warn("control message read failed", { error: error instanceof Error ? error.message : String(error) });
+        respond(response, 500, "unavailable");
+      }
+      return;
+    }
+
+    if (action === "reply" && request.method === "POST") {
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let text: unknown;
+        try {
+          text = (JSON.parse(body || "{}") as { text?: unknown }).text;
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        if (typeof text !== "string" || !text.trim()) {
+          respond(response, 400, "text required");
+          return;
+        }
+        control
+          .reply(sessionId, text)
+          .then((outcome) => respondJson(response, 200, outcome))
+          .catch((error: unknown) => {
+            logger.warn("control reply failed", { error: error instanceof Error ? error.message : String(error) });
+            respond(response, 500, "reply failed");
+          });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    respond(response, 405, "method not allowed");
+    request.resume();
   }
 
   private serveState(response: http.ServerResponse): void {
@@ -231,6 +337,11 @@ function safeEquals(left: string, right: string): boolean {
     return false;
   }
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function respondJson(response: http.ServerResponse, status: number, value: unknown): void {
+  response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+  response.end(JSON.stringify(value ?? null));
 }
 
 function respond(response: http.ServerResponse, status: number, text: string): void {

@@ -68,6 +68,8 @@ struct SendRequest: Decodable {
     let text: String
     /// Do everything except press Return, then clear the composer again.
     let dryRun: Bool?
+    /// Only bring the chat on screen; type nothing. `text` is ignored.
+    let navigateOnly: Bool?
 }
 
 /// Every way a send can end. Only "sent" and "unconfirmed" may have reached
@@ -198,8 +200,10 @@ func send(_ request: SendRequest) -> (ok: Bool, error: SendError?, detail: Strin
 
     let previous = NSWorkspace.shared.frontmostApplication
     running.activate()
+    // Opening a chat is the point when navigating; otherwise hand focus back.
+    let restoreFocus = request.navigateOnly != true
     defer {
-        if let previous, previous.processIdentifier != running.processIdentifier { previous.activate() }
+        if restoreFocus, let previous, previous.processIdentifier != running.processIdentifier { previous.activate() }
     }
 
     // 1. The workspace, by id — sidebar links carry their route.
@@ -223,6 +227,10 @@ func send(_ request: SendRequest) -> (ok: Bool, error: SendError?, detail: Strin
             if waitFor(1.5, { conductor.sessionId == request.sessionId }) { reached = true; break }
         }
         guard reached else { return (false, .chatNotOpen, nil) }
+    }
+
+    if request.navigateOnly == true {
+        return (true, nil, "opened")
     }
 
     // 3. The composer, which must be empty: a half-typed message is the

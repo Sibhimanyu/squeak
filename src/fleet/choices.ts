@@ -75,7 +75,12 @@ export function parseChoices(text: string | null): ParsedChoices | null {
 
   return {
     question: findQuestion(lines.slice(0, options[0]!.index)),
-    options: parsed,
+    // The recommendation is carried by `recommended`; left in the title too,
+    // every surface would say it twice ("Arm it now (recommended) ★").
+    options: parsed.map((option) => ({
+      ...option,
+      title: option.title.replace(/\s*\((?:recommended|suggested)\)\s*/i, " ").trim(),
+    })),
     recommended,
   };
 }

@@ -19,6 +19,8 @@ const nodeGlobals = {
   setTimeout: "readonly",
   clearTimeout: "readonly",
   Buffer: "readonly",
+  fetch: "readonly",
+  AbortSignal: "readonly",
 };
 
 const browserGlobals = {
@@ -36,7 +38,15 @@ const browserGlobals = {
 
 export default [
   {
-    files: ["desktop/main.js", "desktop/preload.js"],
+    // Every main-process and preload file, by name: a new file left out of
+    // this list is a file nothing checks.
+    files: [
+      "desktop/main.js",
+      "desktop/preload.js",
+      "desktop/app-preload.js",
+      "desktop/app-window.js",
+      "desktop/squeak-service.js",
+    ],
     languageOptions: { ecmaVersion: 2022, sourceType: "commonjs", globals: nodeGlobals },
     rules: { "no-undef": "error", "no-unused-vars": "error" },
   },

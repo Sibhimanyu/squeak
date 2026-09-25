@@ -218,8 +218,10 @@ function contextLabel(contextPercent) {
 }
 
 function label(session) {
+  // distinctTitle comes from the daemon, which decides when two rows collide.
+  const suffix = session.distinctTitle ? ` (${session.distinctTitle})` : "";
   if (session.repoName && session.branch && session.branch !== "HEAD") {
-    return `${session.repoName} · ${session.branch}`;
+    return `${session.repoName} · ${session.branch}${suffix}`;
   }
   if (session.cwd) {
     const parts = session.cwd.split("/").filter(Boolean);

@@ -10,6 +10,30 @@ const { Tray, app, BrowserWindow, Menu, globalShortcut, ipcMain, nativeImage, sc
 const fs = require("node:fs");
 const path = require("node:path");
 
+const { openAppWindow, registerAppIpc } = require("./app-window");
+const service = require("./squeak-service");
+
+// Packaged as "Squeak", Electron would move settings to a new folder and
+// forget where the duck was parked. Keep the folder the duck has always used;
+// it also makes the single-instance lock below shared with the old launcher.
+app.setPath(
+  "userData",
+  // A capture run is a test: it must not share settings, or the lock, with
+  // the duck already running.
+  process.env.SQUEAK_CAPTURE
+    ? fs.mkdtempSync(path.join(require("node:os").tmpdir(), "squeak-capture-"))
+    : path.join(app.getPath("appData"), "conductor-tg-duck"),
+);
+
+// One Squeak. Opening it again (Finder, Spotlight, the Dock) must reach the
+// running copy and show its window, not start a second duck.
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+}
+
+/** Started by launchd at login: duck and menu bar only, no window. */
+const STARTED_IN_BACKGROUND = process.argv.includes("--background");
+
 const COLLAPSED = { width: 132, height: 132 };
 const EXPANDED = { width: 380, height: 500 };
 const MARGIN = 24;
@@ -369,6 +393,38 @@ function formatCountdown(iso) {
   return `${Math.floor(hours / 24)}d`;
 }
 
+/**
+ * The window gets a Dock icon and a ⌘-Tab entry while it is open; the duck on
+ * its own stays out of both, as a pet should. Switching activation policy
+ * briefly hides every window, so the duck's floating behaviour is re-applied
+ * after each switch (see applyFloatingBehavior).
+ */
+function openSqueak() {
+  const appWindow = openAppWindow();
+  if (process.platform === "darwin" && app.dock && !app.dock.isVisible()) {
+    void app.dock.show().then(() => {
+      if (win) applyFloatingBehavior(win);
+      appWindow.focus();
+    });
+  }
+  if (!appWindow.__squeakDockHook) {
+    appWindow.__squeakDockHook = true;
+    appWindow.on("closed", () => {
+      if (process.platform === "darwin" && app.dock) {
+        app.dock.hide();
+        if (win) {
+          applyFloatingBehavior(win);
+          if (!hidden) win.showInactive();
+        }
+      }
+    });
+  }
+}
+
+async function restartServiceFromMenu() {
+  await service.restartService();
+}
+
 function refreshTray() {
   if (!tray) {
     return;
@@ -380,6 +436,7 @@ function refreshTray() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: state ? trayTooltip(state).replace("Squeak — ", "") : "starting up", enabled: false },
+      { label: "Open Squeak…", click: openSqueak },
       { type: "separator" },
       ...usageMenuItems(state),
       { type: "separator" },
@@ -394,6 +451,7 @@ function refreshTray() {
       { label: `Peek at panel (${describeAccelerator(DEFAULT_SHORTCUT)})`, click: peek },
       { label: "Reset duck position", click: resetPosition },
       { type: "separator" },
+      { label: "Restart Squeak service", click: () => void restartServiceFromMenu() },
       { label: "Quit duck (back at next login)", click: () => app.quit() },
     ]),
   );
@@ -454,6 +512,8 @@ ipcMain.on("duck:menu", () => {
   // A context menu takes focus away; that is not clicking off the panel.
   suppressBlurClose = true;
   Menu.buildFromTemplate([
+    { label: "Open Squeak…", click: openSqueak },
+    { type: "separator" },
     { label: "Hide duck", click: () => setHidden(true) },
     { label: "Reset position", click: resetPosition },
     { type: "separator" },
@@ -492,12 +552,21 @@ async function captureTo(prefix) {
   app.quit();
 }
 
+registerAppIpc({ showDuck: () => setHidden(false) });
+
+app.on("second-instance", () => openSqueak());
+// Clicking Squeak in Finder or the Dock while it is already running.
+app.on("activate", () => openSqueak());
+
 app.whenReady().then(() => {
   // A pet does not belong in the dock or the app switcher.
   if (process.platform === "darwin" && app.dock) {
     app.dock.hide();
   }
   createWindow();
+  if (!STARTED_IN_BACKGROUND && !process.env.DUCK_CAPTURE) {
+    openSqueak();
+  }
 
   // No "click" handler here: Electron already opens the context menu itself
   // when setContextMenu is set, and clicking the tray icon used to also fire

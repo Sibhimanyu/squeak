@@ -29,7 +29,7 @@ describe("parseChoices", () => {
     expect(parseChoices(DECISION)).toEqual({
       question: "D1 — Arm device control on the farm?",
       options: [
-        { letter: "A", title: "Arm it now (recommended)" },
+        { letter: "A", title: "Arm it now" },
         { letter: "B", title: "Arm it, but only after you are physically near the hardware" },
         { letter: "C", title: "Leave it off" },
       ],
