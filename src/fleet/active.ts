@@ -37,8 +37,9 @@ export function isActiveSession(session: FleetSession, nowMs: number, options: A
       // abandoned on Tuesday. Not so for Conductor: its sidecar keeps a warm
       // agent process per recently used chat for hours, so a live process
       // says nothing about you, and Conductor reports the chat's status
-      // itself.
-      return session.alive && session.origin !== "conductor";
+      // itself. Any other SDK harness is a program holding a process, not
+      // someone at a prompt, so the same goes for it.
+      return session.alive && session.origin !== "conductor" && session.origin !== "sdk";
     default:
       return false;
   }

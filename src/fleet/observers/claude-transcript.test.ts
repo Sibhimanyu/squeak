@@ -209,10 +209,17 @@ describe("cost-state parsing", () => {
 
 describe("originFromEntrypoint", () => {
   it("separates SDK-driven sessions from hand-run ones", () => {
-    expect(originFromEntrypoint("sdk-ts")).toBe("conductor");
-    expect(originFromEntrypoint("sdk-cli")).toBe("conductor");
+    // Not "conductor": every harness uses the SDK. Only a joined Conductor
+    // row can say a session is Conductor's.
+    expect(originFromEntrypoint("sdk-ts")).toBe("sdk");
+    expect(originFromEntrypoint("sdk-cli")).toBe("sdk");
     expect(originFromEntrypoint("cli")).toBe("terminal");
-    expect(originFromEntrypoint("claude-desktop")).toBe("ide");
+  });
+
+  it("recognises both Claude Desktop surfaces", () => {
+    expect(originFromEntrypoint("claude-desktop")).toBe("desktop");
+    expect(originFromEntrypoint("local-agent")).toBe("cowork");
+    expect(originFromEntrypoint("claude-vscode")).toBe("ide");
     expect(originFromEntrypoint(null)).toBe("unknown");
   });
 });

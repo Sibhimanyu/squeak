@@ -2,13 +2,14 @@ import { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import { CodexUsageReader } from "./codex-usage.js";
 import { DiffReader } from "./diff-view.js";
 import { deriveDuckState } from "./duck-mood.js";
-import { distinctTitles } from "./radar.js";
+import { distinctTitles, originLabel } from "./radar.js";
 import { FleetMonitor } from "./fleet-monitor.js";
 import { FleetStore } from "./fleet-store.js";
 import { ClaudeCostReader } from "./claude-cost.js";
 import { GitStateReader } from "./git-state.js";
 import { HookIngressServer } from "./hook-ingress.js";
 import { defaultHookInstallPaths } from "./hook-install.js";
+import { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
 import { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import { ConductorObserver } from "./observers/conductor.js";
@@ -63,6 +64,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       conductor: new ConductorObserver(registry, { finishedWithinMs: options.activeWindowMs }),
       claude: new ClaudeTranscriptObserver(observerWindow),
       codex: new CodexRolloutObserver(observerWindow),
+      cowork: new ClaudeCoworkObserver(observerWindow),
       liveness: new ProcessLivenessObserver(),
       git: new GitStateReader(),
       codexUsage: new CodexUsageReader(),
@@ -101,6 +103,8 @@ export function serializeState(monitor: FleetMonitor): unknown {
       key: session.key,
       agent: session.agent,
       origin: session.origin,
+      /** How the surfaces name the origin; null for Conductor, which is the default. */
+      originLabel: originLabel(session),
       state: session.state,
       title: session.title,
       repoName: session.repoName,

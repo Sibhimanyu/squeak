@@ -243,16 +243,24 @@ function describeItem(payload: Record<string, unknown> | null): string | null {
  * reports itself as vscode; anything else is somebody at a terminal.
  */
 export function originFromOriginator(originator: string | null, source: string | null): SessionOrigin {
-  // Originator wins over source: Conductor drives Codex through the TS SDK but
-  // still reports `source: "vscode"`, so checking source first would file every
-  // Conductor session under "ide".
+  // Originator wins over source: an SDK harness (Conductor's among them) and
+  // the Codex desktop app both still report `source: "vscode"`, so checking
+  // source first would file either under "ide". Which harness is not written
+  // down; a Conductor chat is recognised by joining its row instead.
   if (originator?.includes("sdk")) {
-    return "conductor";
+    return "sdk";
+  }
+  if (originator?.includes("desktop")) {
+    return "desktop";
   }
   if (source === "vscode" || source === "cursor") {
     return "ide";
   }
-  if (originator?.includes("cli")) {
+  // `codex exec` is a script or another tool, not a person at a prompt.
+  if (source === "exec" || originator === "codex_exec") {
+    return "sdk";
+  }
+  if (originator?.includes("cli") || originator?.includes("tui")) {
     return "terminal";
   }
   return "unknown";

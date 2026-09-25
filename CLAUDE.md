@@ -16,7 +16,7 @@ deployment section before changing anything under `src/` or `desktop/`.
 | --- | --- |
 | `src/squeak/` | the daemon: config, CLI (`squeak start`, `setup`, `install-hooks`), the Telegram bot |
 | `src/fleet/` | the fleet radar: every agent session on the Mac, not just Conductor's |
-| `src/fleet/observers/` | one file per discovery source; none of them know about each other |
+| `src/fleet/observers/` | one file per discovery source (Conductor, Claude transcripts, Claude Desktop Cowork, Codex rollouts, processes); none of them know about each other |
 | `src/fleet/fleet-monitor.ts` | merges observers and hook events, decides what needs attention |
 | `src/fleet/runtime.ts` | assembles the fleet stack; only one process may run it |
 | `src/fleet/hook-ingress.ts` | loopback HTTP: agent hooks, `/state`, token-gated control routes |
@@ -288,6 +288,23 @@ transcripts, and ranks them by what is blocked on the human.
 - **Observers are independent and must stay that way.** Each one answers "what
   does my source say" and nothing else; `merge.ts` is the only place that
   reconciles them. That is what keeps them testable against fixture files.
+- **A transcript cannot say a session is Conductor's.** `sdk-*` entrypoints
+  (Claude) and `*sdk*` originators (Codex) are any harness — Superset, gstack
+  and `codex exec` runs appear on a real machine beside Conductor's. They are
+  origin `sdk` ("headless"); only `mergeObservations` joining a Conductor row
+  makes a session `conductor`. Codex's interactive CLI writes
+  `originator: "codex-tui"`, and the Codex desktop app `codex_work_desktop`
+  with `source: "vscode"`, so originator is checked before source.
+- **Claude Desktop has two surfaces.** The Code tab writes ordinary
+  transcripts to `~/.claude/projects` (`entrypoint: "claude-desktop"`,
+  origin `desktop`). Cowork (`entrypoint: "local-agent"`) runs Claude Code
+  with a config folder per session under `Application Support/Claude/
+  local-agent-mode-sessions/<account>/<org>/local_<id>/`, so its transcripts
+  and hooks never touch `~/.claude` — `claude-cowork.ts` finds them, takes
+  the title and `isArchived` from the sibling `local_<id>.json` (~300KB,
+  parsed only when a transcript is recent), and follows `cliSessionId` since
+  one session can hold several transcripts. No hooks means Cowork can never
+  report being blocked on an approval.
 - **Sessions join on the agent's own session id.** Conductor stores it in
   `sessions.claude_session_id` for both agents, despite the column name.
 - **Transcripts cannot record an approval prompt.** Blocked states only ever

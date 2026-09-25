@@ -141,14 +141,25 @@ describe("CodexRolloutObserver", () => {
 });
 
 describe("originFromOriginator", () => {
-  it("files a Conductor-driven session under conductor even though it reports vscode", () => {
-    // Conductor drives Codex through the TS SDK but leaves source as vscode.
-    expect(originFromOriginator("codex_sdk_ts", "vscode")).toBe("conductor");
+  it("files an SDK-driven session under sdk even though it reports vscode", () => {
+    // Conductor (and any other harness) drives Codex through the TS SDK but
+    // leaves source as vscode. Which harness is only known by joining rows.
+    expect(originFromOriginator("codex_sdk_ts", "vscode")).toBe("sdk");
+  });
+
+  it("recognises the Codex desktop app, which also reports vscode", () => {
+    expect(originFromOriginator("codex_work_desktop", "vscode")).toBe("desktop");
+    expect(originFromOriginator("codex_work_desktop", null)).toBe("desktop");
+  });
+
+  it("treats codex exec as driven by a program, not a person", () => {
+    expect(originFromOriginator("codex_exec", "exec")).toBe("sdk");
   });
 
   it("separates the editor extension from a terminal run", () => {
     expect(originFromOriginator("codex_vscode", "vscode")).toBe("ide");
     expect(originFromOriginator("codex_cli_rs", "cli")).toBe("terminal");
+    expect(originFromOriginator("codex-tui", "cli")).toBe("terminal");
     expect(originFromOriginator(null, null)).toBe("unknown");
   });
 });

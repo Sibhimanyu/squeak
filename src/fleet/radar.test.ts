@@ -8,6 +8,7 @@ import {
   formatAge,
   formatCountdown,
   diffSummaryKeyboard,
+  originLabel,
   radarKeyboard,
   renderAttentionCard,
   renderQuotaAlert,
@@ -114,6 +115,15 @@ describe("renderRadar", () => {
   it("still appends where the session came from, after the agent", () => {
     const text = renderRadar(snapshot({ sessions: [session({ agent: "claude", origin: "terminal" })] }), now);
     expect(text).toContain("claude terminal");
+  });
+
+  it("names every origin but Conductor's, in one place for every surface", () => {
+    expect(originLabel({ origin: "terminal", conductorSessionId: null })).toBe("terminal");
+    expect(originLabel({ origin: "desktop", conductorSessionId: null })).toBe("desktop");
+    expect(originLabel({ origin: "cowork", conductorSessionId: null })).toBe("cowork");
+    expect(originLabel({ origin: "sdk", conductorSessionId: null })).toBe("headless");
+    expect(originLabel({ origin: "conductor", conductorSessionId: "c1" })).toBeNull();
+    expect(originLabel({ origin: "unknown", conductorSessionId: null })).toBe("external");
   });
 
   it("bolds the session heading so it stands out from the detail line beneath it", () => {

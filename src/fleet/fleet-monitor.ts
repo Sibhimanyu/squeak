@@ -10,6 +10,7 @@ import {
 import type { FleetStore } from "./fleet-store.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent } from "./hook-protocol.js";
+import type { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
 import type { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import type { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import type { ConductorObserver } from "./observers/conductor.js";
@@ -35,6 +36,8 @@ export interface FleetMonitorDependencies {
   conductor: ConductorObserver;
   claude: ClaudeTranscriptObserver;
   codex: CodexRolloutObserver;
+  /** Optional: without it Claude Desktop's Cowork sessions are simply not seen. */
+  cowork?: ClaudeCoworkObserver | null;
   liveness: ProcessLivenessObserver;
   /** Optional: without it the radar simply shows no working-tree detail. */
   git?: GitStateReader | null;
@@ -208,6 +211,7 @@ export class FleetMonitor {
       ...safeObserve(() => this.deps.conductor.observe(), "conductor"),
       ...safeObserve(() => this.deps.claude.observe(), "claude-transcript"),
       ...safeObserve(() => this.deps.codex.observe(), "codex-rollout"),
+      ...safeObserve(() => this.deps.cowork?.observe() ?? [], "claude-cowork"),
     ];
 
     const processes = await this.deps.liveness.observe();

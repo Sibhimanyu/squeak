@@ -45,6 +45,8 @@ describe("mergeObservations", () => {
         key: "claude-transcript:agent-1",
         source: "claude-transcript",
         sourceId: "agent-1",
+        // All a transcript can say: something drove it through the SDK.
+        origin: "sdk",
         cwd: "/Users/someone/repo",
         state: "finished",
         detail: "Done.",
@@ -52,6 +54,7 @@ describe("mergeObservations", () => {
     ]);
 
     expect(merged).toHaveLength(1);
+    expect(merged[0]?.origin).toBe("conductor");
     expect(merged[0]?.conductorSessionId).toBe("c1");
     expect(merged[0]?.repoName).toBe("squeak");
     expect(merged[0]?.cwd).toBe("/Users/someone/repo");

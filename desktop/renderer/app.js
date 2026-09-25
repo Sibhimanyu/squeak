@@ -120,7 +120,7 @@ function metaLine(session) {
     session.agent,
     STATE_WORD[session.state] ?? session.state,
     age(session.lastActivityAt),
-    session.origin === "conductor" ? null : session.origin,
+    "originLabel" in session ? session.originLabel : session.origin === "conductor" ? null : session.origin,
     typeof session.contextPercent === "number" && session.contextPercent >= 60
       ? `ctx ${Math.round(session.contextPercent)}%`
       : null,

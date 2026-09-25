@@ -66,6 +66,12 @@ describe("isActiveSession", () => {
     expect(isActiveSession(session({ state: "idle", alive: true, origin: "conductor" }), now)).toBe(false);
   });
 
+  it("does not count an idle SDK-driven session for its live process either", () => {
+    // Another harness holding a warm process is no more you at a prompt than
+    // Conductor's sidecar is.
+    expect(isActiveSession(session({ state: "idle", alive: true, origin: "sdk" }), now)).toBe(false);
+  });
+
   it("drops a quiet session with no process behind it", () => {
     expect(isActiveSession(session({ state: "idle", alive: false }), now)).toBe(false);
   });

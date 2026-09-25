@@ -13,8 +13,14 @@ import type { GitState } from "./git-state.js";
 
 export type AgentKind = "claude" | "codex";
 
-/** Who started the session. Decides which actions we can offer for it. */
-export type SessionOrigin = "conductor" | "terminal" | "ide" | "unknown";
+/**
+ * Who started the session. Decides which actions we can offer for it.
+ *
+ * Only `mergeObservations` assigns `conductor`, and only when a Conductor row
+ * joins: a transcript can say it was driven through an SDK (`sdk`), but so
+ * are Superset's, gstack's and every other harness's, so it cannot say whose.
+ */
+export type SessionOrigin = "conductor" | "terminal" | "ide" | "desktop" | "cowork" | "sdk" | "unknown";
 
 export type FleetState =
   /** A turn is in flight. */
@@ -43,7 +49,7 @@ export function isBlockedState(state: FleetState): boolean {
 export interface ObservedSession {
   /** Stable across polls. `${source}:${sourceId}`. */
   key: string;
-  source: "conductor" | "claude-transcript" | "codex-rollout";
+  source: "conductor" | "claude-transcript" | "claude-cowork" | "codex-rollout";
   agent: AgentKind;
   origin: SessionOrigin;
   /** Identifier within the observer's own namespace. */

@@ -185,7 +185,7 @@ function sessionRow(session) {
     STATE_WORD[session.state] ?? session.state,
     session.detail,
     age(session.lastActivityAt),
-    session.origin === "conductor" ? null : session.origin,
+    "originLabel" in session ? session.originLabel : session.origin === "conductor" ? null : session.origin,
     contextLabel(session.contextPercent),
   ]
     .filter(Boolean)

@@ -110,177 +110,204 @@ export class ClaudeTranscriptObserver {
   }
 
   private readSession(transcriptPath: string): ObservedSession | null {
-    const entries = parseJsonLines(readTailLines(transcriptPath));
-    if (entries.length === 0) {
-      return null;
-    }
-
-    const sessionId = path.basename(transcriptPath, ".jsonl");
-    let cwd: string | null = null;
-    let branch: string | null = null;
-    let entrypoint: string | null = null;
-    let title: string | null = null;
-    let lastTimestamp: string | null = null;
-    let last: Record<string, unknown> | null = null;
-
-    for (const entry of entries) {
-      const type = asString(entry.type);
-      if (type === "ai-title") {
-        title = asString(entry.aiTitle) ?? title;
-        continue;
-      }
-      if (!type || !MEANINGFUL_TYPES.has(type)) {
-        continue;
-      }
-      // Subagent transcripts interleave into the same file. A subagent
-      // finishing is not the session finishing, so they must not set state.
-      if (entry.isSidechain === true) {
-        continue;
-      }
-
-      cwd = asString(entry.cwd) ?? cwd;
-      branch = asString(entry.gitBranch) ?? branch;
-      entrypoint = asString(entry.entrypoint) ?? entrypoint;
-      lastTimestamp = asString(entry.timestamp) ?? lastTimestamp;
-      last = entry;
-    }
-
-    if (!last) {
-      return null;
-    }
-
-    const mtimeIso = this.transcriptMtimeIso(transcriptPath);
-    const lastActivityAt = lastTimestamp ?? mtimeIso;
-    const state = this.deriveState(last, lastActivityAt);
-
-    return {
-      key: `claude-transcript:${sessionId}`,
-      source: this.source,
-      agent: "claude",
-      origin: originFromEntrypoint(entrypoint),
-      sourceId: sessionId,
-      agentSessionId: sessionId,
-      conductorSessionId: null,
-      cwd,
-      repoName: cwd ? path.basename(cwd) : null,
-      branch,
-      title: title ?? this.firstUserPrompt(entries),
-      state,
-      detail: this.describe(last, state),
-      lastActivityAt,
-      transcriptPath,
-      // Only Conductor knows these; a transcript cannot see either.
-      contextPercent: null,
-      retired: false,
-      baseRef: null,
-      costUsd: readLatestCost(entries),
-    };
+    return readClaudeTranscript(transcriptPath, { now: this.now, idleAfterMs: this.idleAfterMs });
   }
+}
 
-  private transcriptMtimeIso(transcriptPath: string): string {
-    try {
-      return new Date(fs.statSync(transcriptPath).mtimeMs).toISOString();
-    } catch {
-      return new Date(this.now()).toISOString();
-    }
-  }
+export interface ClaudeTranscriptReadOptions {
+  now: () => number;
+  idleAfterMs: number;
+}
 
-  /**
-   * Transcripts record what happened, not what is being waited on — an
-   * approval prompt never lands in the file. So the states we can infer here
-   * are "the turn ended", "the turn is in flight", and "in flight but stalled".
-   * Blocked states come from hooks.
-   */
-  private deriveState(last: Record<string, unknown>, lastActivityAt: string): FleetState {
-    const type = asString(last.type);
-
-    if (type === "system" && asString(last.subtype) === "api_error") {
-      return "error";
-    }
-
-    if (type === "assistant") {
-      const message = asRecord(last.message);
-      const stopReason = message ? asString(message.stop_reason) : null;
-      if (stopReason === "end_turn" || stopReason === "stop_sequence") {
-        return "finished";
-      }
-    }
-
-    // Anything else means a turn was still running when the file was last
-    // written. If that was a while ago, the process is stalled or gone.
-    const age = this.now() - Date.parse(lastActivityAt);
-    return Number.isFinite(age) && age > this.idleAfterMs ? "idle" : "working";
-  }
-
-  private describe(last: Record<string, unknown>, state: FleetState): string | null {
-    if (state === "error") {
-      const error = asString(last.error);
-      return error ? summarize(error) : "API error";
-    }
-
-    const message = asRecord(last.message);
-    const content = message ? asArray(message.content) : [];
-
-    if (state === "finished") {
-      for (let index = content.length - 1; index >= 0; index -= 1) {
-        const block = asRecord(content[index]);
-        const text = block && asString(block.type) === "text" ? asString(block.text) : null;
-        if (text) {
-          return summarize(text);
-        }
-      }
-      return "Turn finished";
-    }
-
-    for (let index = content.length - 1; index >= 0; index -= 1) {
-      const block = asRecord(content[index]);
-      if (block && asString(block.type) === "tool_use") {
-        const name = asString(block.name);
-        return name ? `Running ${name}` : null;
-      }
-    }
+/**
+ * One Claude Code transcript, read from its tail. Exported because Claude
+ * Code writes the same format wherever it runs — Cowork keeps its transcripts
+ * inside each session's own folder rather than under `~/.claude/projects`.
+ */
+export function readClaudeTranscript(
+  transcriptPath: string,
+  options: ClaudeTranscriptReadOptions,
+): ObservedSession | null {
+  const entries = parseJsonLines(readTailLines(transcriptPath));
+  if (entries.length === 0) {
     return null;
   }
 
-  private firstUserPrompt(entries: Record<string, unknown>[]): string | null {
-    for (const entry of entries) {
-      if (asString(entry.type) !== "user" || entry.isSidechain === true) {
-        continue;
-      }
-      const message = asRecord(entry.message);
-      if (!message) {
-        continue;
-      }
-      const content = message.content;
-      if (typeof content === "string") {
-        return summarize(content, 60);
-      }
-      for (const raw of asArray(content)) {
-        const block = asRecord(raw);
-        const text = block && asString(block.type) === "text" ? asString(block.text) : null;
-        if (text) {
-          return summarize(text, 60);
-        }
-      }
+  const sessionId = path.basename(transcriptPath, ".jsonl");
+  let cwd: string | null = null;
+  let branch: string | null = null;
+  let entrypoint: string | null = null;
+  let title: string | null = null;
+  let lastTimestamp: string | null = null;
+  let last: Record<string, unknown> | null = null;
+
+  for (const entry of entries) {
+    const type = asString(entry.type);
+    if (type === "ai-title") {
+      title = asString(entry.aiTitle) ?? title;
+      continue;
     }
+    if (!type || !MEANINGFUL_TYPES.has(type)) {
+      continue;
+    }
+    // Subagent transcripts interleave into the same file. A subagent
+    // finishing is not the session finishing, so they must not set state.
+    if (entry.isSidechain === true) {
+      continue;
+    }
+
+    cwd = asString(entry.cwd) ?? cwd;
+    branch = asString(entry.gitBranch) ?? branch;
+    entrypoint = asString(entry.entrypoint) ?? entrypoint;
+    lastTimestamp = asString(entry.timestamp) ?? lastTimestamp;
+    last = entry;
+  }
+
+  if (!last) {
     return null;
+  }
+
+  const mtimeIso = transcriptMtimeIso(transcriptPath, options.now);
+  const lastActivityAt = lastTimestamp ?? mtimeIso;
+  const state = deriveState(last, lastActivityAt, options);
+
+  return {
+    key: `claude-transcript:${sessionId}`,
+    source: "claude-transcript",
+    agent: "claude",
+    origin: originFromEntrypoint(entrypoint),
+    sourceId: sessionId,
+    agentSessionId: sessionId,
+    conductorSessionId: null,
+    cwd,
+    repoName: cwd ? path.basename(cwd) : null,
+    branch,
+    title: title ?? firstUserPrompt(entries),
+    state,
+    detail: describe(last, state),
+    lastActivityAt,
+    transcriptPath,
+    // Only Conductor knows these; a transcript cannot see either.
+    contextPercent: null,
+    retired: false,
+    baseRef: null,
+    costUsd: readLatestCost(entries),
+  };
+}
+
+function transcriptMtimeIso(transcriptPath: string, now: () => number): string {
+  try {
+    return new Date(fs.statSync(transcriptPath).mtimeMs).toISOString();
+  } catch {
+    return new Date(now()).toISOString();
   }
 }
 
 /**
- * Conductor drives Claude Code through the SDK, a terminal user runs the CLI.
- * The transcript records which, and that decides whether we can offer actions
- * or only visibility.
+ * Transcripts record what happened, not what is being waited on — an
+ * approval prompt never lands in the file. So the states we can infer here
+ * are "the turn ended", "the turn is in flight", and "in flight but stalled".
+ * Blocked states come from hooks.
+ */
+function deriveState(
+  last: Record<string, unknown>,
+  lastActivityAt: string,
+  options: ClaudeTranscriptReadOptions,
+): FleetState {
+  const type = asString(last.type);
+
+  if (type === "system" && asString(last.subtype) === "api_error") {
+    return "error";
+  }
+
+  if (type === "assistant") {
+    const message = asRecord(last.message);
+    const stopReason = message ? asString(message.stop_reason) : null;
+    if (stopReason === "end_turn" || stopReason === "stop_sequence") {
+      return "finished";
+    }
+  }
+
+  // Anything else means a turn was still running when the file was last
+  // written. If that was a while ago, the process is stalled or gone.
+  const age = options.now() - Date.parse(lastActivityAt);
+  return Number.isFinite(age) && age > options.idleAfterMs ? "idle" : "working";
+}
+
+function describe(last: Record<string, unknown>, state: FleetState): string | null {
+  if (state === "error") {
+    const error = asString(last.error);
+    return error ? summarize(error) : "API error";
+  }
+
+  const message = asRecord(last.message);
+  const content = message ? asArray(message.content) : [];
+
+  if (state === "finished") {
+    for (let index = content.length - 1; index >= 0; index -= 1) {
+      const block = asRecord(content[index]);
+      const text = block && asString(block.type) === "text" ? asString(block.text) : null;
+      if (text) {
+        return summarize(text);
+      }
+    }
+    return "Turn finished";
+  }
+
+  for (let index = content.length - 1; index >= 0; index -= 1) {
+    const block = asRecord(content[index]);
+    if (block && asString(block.type) === "tool_use") {
+      const name = asString(block.name);
+      return name ? `Running ${name}` : null;
+    }
+  }
+  return null;
+}
+
+function firstUserPrompt(entries: Record<string, unknown>[]): string | null {
+  for (const entry of entries) {
+    if (asString(entry.type) !== "user" || entry.isSidechain === true) {
+      continue;
+    }
+    const message = asRecord(entry.message);
+    if (!message) {
+      continue;
+    }
+    const content = message.content;
+    if (typeof content === "string") {
+      return summarize(content, 60);
+    }
+    for (const raw of asArray(content)) {
+      const block = asRecord(raw);
+      const text = block && asString(block.type) === "text" ? asString(block.text) : null;
+      if (text) {
+        return summarize(text, 60);
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The transcript records which program ran Claude Code. `sdk-*` is any
+ * harness driving it — Conductor's among them, but not only Conductor's, so
+ * a Conductor chat is recognised by joining its row, never from here.
  */
 export function originFromEntrypoint(entrypoint: string | null): SessionOrigin {
   if (!entrypoint) {
     return "unknown";
   }
   if (entrypoint.startsWith("sdk")) {
-    return "conductor";
+    return "sdk";
   }
-  if (entrypoint === "cli") {
-    return "terminal";
+  switch (entrypoint) {
+    case "cli":
+      return "terminal";
+    case "claude-desktop":
+      return "desktop";
+    case "local-agent":
+      return "cowork";
+    default:
+      return "ide";
   }
-  return "ide";
 }
