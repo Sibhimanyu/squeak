@@ -97,9 +97,17 @@ load_plist() {
 
 write_plist com.squeak.daemon squeak always "$NODE" "$REPO_ROOT/dist/squeak/cli.js" start
 
+# Prefer Squeak.app (scripts/build-squeak-app.sh): same code, but it is a real
+# app with a name and an icon, so the login item, Activity Monitor and the
+# menu bar all say "Squeak". --background: at login, duck and menu bar only,
+# no window.
+SQUEAK_APP="$HOME/Applications/Squeak.app/Contents/MacOS/Electron"
 ELECTRON="$REPO_ROOT/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
-if [ -x "$ELECTRON" ]; then
-  write_plist com.squeak.duck duck unless-quit "$ELECTRON" "$REPO_ROOT/desktop"
+if [ -x "$SQUEAK_APP" ]; then
+  ELECTRON="$SQUEAK_APP"
+  write_plist com.squeak.duck duck unless-quit "$SQUEAK_APP" --background
+elif [ -x "$ELECTRON" ]; then
+  write_plist com.squeak.duck duck unless-quit "$ELECTRON" "$REPO_ROOT/desktop" --background
 else
   say "skipping the duck: no electron at $ELECTRON (run: cd $REPO_ROOT/desktop && npm install)"
 fi
@@ -112,7 +120,7 @@ load_plist com.squeak.daemon || failed=1
 say ""
 say "logs: $LOGDIR"
 say "stop:  launchctl bootout gui/\$(id -u)/com.squeak.daemon"
-say "duck:  quit it from the menu bar; it returns at next login, or now with"
-say "       launchctl kickstart gui/\$(id -u)/com.squeak.duck"
+say "duck:  quit it from the menu bar; it returns at next login, or open"
+say "       Squeak from Spotlight or ~/Applications to bring it back"
 
 [ "$failed" -eq 0 ] || die "one or more agents did not load (see above)"

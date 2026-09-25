@@ -599,7 +599,7 @@ None are applied yet; they land with the desktop app (step 2).
 Step by step, each step shippable on its own:
 
 1. **Brand & design guidelines** — this document. ✅
-2. **Squeak for Mac.** A real `.app` in `/Applications` with a Dock/menu-bar
+2. **Squeak for Mac.** ✅ A real `.app` (in `~/Applications`) with a Dock/menu-bar
    presence that starts and stops the daemon and the duck (no more
    `launchctl`), and a main window: every session grouped by state, session
    detail with the agent's last message, diff review, reply and decisions. It

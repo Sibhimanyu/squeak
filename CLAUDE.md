@@ -32,7 +32,11 @@ deployment section before changing anything under `src/`.
 | `src/fleet/duck-mood.ts` | what the desktop duck is doing, derived where CI can test it |
 | `src/fleet/claude-pricing.ts` | per-token dollar rates; a model missing here returns null, never a guess |
 | `src/fleet/claude-cost.ts` | whole-file, cached, lazy Claude cost estimate — see the note below on why |
-| `desktop/` | the Electron duck: a separate package, plain JS, no build step |
+| `desktop/` | Squeak for Mac: the duck plus the main window; a separate package, plain JS, no build step |
+| `desktop/app-window.js`, `desktop/renderer/app.*` | the Squeak window: sessions, full messages, decisions, replies, service control |
+| `desktop/squeak-service.js` | the window's only way out: /state, token-gated control routes, launchctl, Squeak Hands |
+| `scripts/build-squeak-app.sh` | packages `~/Applications/Squeak.app` (icon, bundle id, signing) |
+| `DESIGN.md` | the brand and design system every surface follows; tokens in §11 |
 
 `src/services/bridge-service.ts` is **dead code** — an older implementation that
 still ships in the package. The live path is `cli.ts` to `index.ts`. Do not spend
@@ -174,6 +178,34 @@ that marker file, not just move the plist back. If the user ever wants it back:
   just started must not resurface the previous turn's question.
 - The desktop duck still reads `127.0.0.1:8477/state`; that is now served by
   Squeak rather than the bridge.
+- **Squeak for Mac is the duck's Electron app with a window.** One process,
+  one instance (`requestSingleInstanceLock`): opening Squeak from Spotlight or
+  Finder while it runs shows the window. launchd starts it with
+  `--background` (duck and menu bar only). `Squeak.app` is Electron plus a
+  two-line loader that `require`s the **main checkout's** `desktop/main.js`,
+  so `ship.sh` updates the app without rebuilding it; rebuild only for icon,
+  metadata or Electron changes. It lives in `~/Applications` because
+  `/Applications` needs admin. `SQUEAK_DESKTOP_MAIN` points the bundle at a
+  worktree for testing.
+- The app keeps the old `conductor-tg-duck` userData folder on purpose
+  (`app.setPath` before ready): packaged as "Squeak", Electron would move it
+  and lose the duck's position, and the single-instance lock would stop
+  matching an older running copy.
+- **Control routes are token-gated and carry no CORS header.**
+  `/control/session/<id>/message` and `/reply` on the ingress let the window
+  read a chat's full message and answer it through the same `ConductorReplier`
+  as Telegram. Any web page can reach 127.0.0.1, so unlike `/state` these must
+  never be readable or callable from a browser. Note `/state` itself still
+  sends `access-control-allow-origin: *`, which lets any web page read session
+  titles, paths and summaries — the duck's `file://` page needs *some* CORS;
+  moving its fetch into the main process would let that header go.
+- The window's renderer never gets the token, a shell, or a URL: everything
+  goes through `app-preload.js` to `squeak-service.js` in the main process.
+  Agent messages are rendered with `textContent` only — they are untrusted.
+- `SQUEAK_CAPTURE=<prefix>` photographs the window (loaded, each row, and a
+  decision tap) and quits, using its own temp userData so it cannot collide
+  with the running duck. Capture turns off background throttling and floats
+  the window, or shots of a covered window come out as empty files.
 
 - **Native modules must match the running Node.** `better-sqlite3` is built
   for one ABI; `node` here is v22 (`NODE_MODULE_VERSION` 127) but Homebrew
