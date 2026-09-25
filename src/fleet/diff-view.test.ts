@@ -70,10 +70,10 @@ describe("renderDiffSummary", () => {
         deletions: 8,
         truncated: false,
       },
-      "conductor-tg · ushuaia",
+      "squeak · ushuaia",
     );
 
-    expect(text).toContain("conductor-tg · ushuaia");
+    expect(text).toContain("squeak · ushuaia");
     expect(text).toContain("diff vs `origin/main`");
     expect(text).toContain("+123/−8 across 2 files");
     expect(text).toContain("src/a.ts");

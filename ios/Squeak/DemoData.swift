@@ -19,7 +19,7 @@ enum DemoData {
                                            .init(letter: "B", title: "Arm it, but only after you are physically near the hardware"),
                                            .init(letter: "C", title: "Leave it off")],
                                  recommended: "A")),
-            .init(key: "c", conductorSessionId: "s2", label: "conductor-tg · session-hub", agent: "claude", state: "working",
+            .init(key: "c", conductorSessionId: "s2", label: "squeak · session-hub", agent: "claude", state: "working",
                   lastActivityAt: now(-8), detail: "Running npm run ci", git: "+311/−10 · 20 files", contextPercent: nil,
                   turnId: "t2", message: nil, choices: nil),
             .init(key: "d", conductorSessionId: "s3", label: "snof · irrigation-pull-to-refresh", agent: "claude", state: "working",

@@ -1,4 +1,3 @@
-import type { BridgeStateStore } from "../bridge/state-store.js";
 import type { ConductorRegistryAdapter } from "./conductor-registry.js";
 import type { SessionStatus, SupportedAgentType } from "../types.js";
 import { toClaudeCliModel } from "./claude-code.js";
@@ -13,11 +12,14 @@ function toConductorDisplayModel(model: string | null): string | null {
 }
 
 /**
- * What the mirror needs to avoid writing a row twice. The bridge backs it with
- * bridge.db; Squeak, which only mirrors the turns it starts itself, keeps it in
- * memory.
+ * What the mirror needs to avoid writing a row twice. Squeak only mirrors the
+ * turns it starts itself, so it keeps these in memory.
  */
-export type MirrorFingerprints = Pick<BridgeStateStore, "buildFingerprint" | "hasFingerprint" | "addFingerprint">;
+export interface MirrorFingerprints {
+  buildFingerprint(sessionId: string, turnId: string, role: string, content: string): string;
+  hasFingerprint(fingerprint: string): boolean;
+  addFingerprint(fingerprint: string, sessionId: string, turnId: string, role: string): void;
+}
 
 export class ConductorMirrorWriter {
   constructor(

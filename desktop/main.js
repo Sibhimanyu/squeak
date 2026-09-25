@@ -13,16 +13,15 @@ const path = require("node:path");
 const { openAppWindow, registerAppIpc } = require("./app-window");
 const service = require("./squeak-service");
 
-// Packaged as "Squeak", Electron would move settings to a new folder and
-// forget where the duck was parked. Keep the folder the duck has always used;
-// it also makes the single-instance lock below shared with the old launcher.
+// One settings folder whether it runs from Squeak.app or from the checkout,
+// so the duck's position and the single-instance lock below are shared.
 app.setPath(
   "userData",
   // A capture run is a test: it must not share settings, or the lock, with
   // the duck already running.
   process.env.SQUEAK_CAPTURE || process.env.DUCK_CAPTURE
     ? fs.mkdtempSync(path.join(require("node:os").tmpdir(), "squeak-capture-"))
-    : path.join(app.getPath("appData"), "conductor-tg-duck"),
+    : path.join(app.getPath("appData"), "Squeak"),
 );
 
 // One Squeak. Opening it again (Finder, Spotlight, the Dock) must reach the

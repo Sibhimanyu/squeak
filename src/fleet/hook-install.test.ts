@@ -27,9 +27,21 @@ afterEach(() => {
   }
 });
 
-const ourCommand = { type: "command", command: "CONDUCTOR_TG_AGENT=claude /tmp/hooks/fleet-notify.sh", timeout: 5 };
+const ourCommand = { type: "command", command: "SQUEAK_AGENT=claude /tmp/hooks/fleet-notify.sh", timeout: 5 };
 
 describe("mergeHookConfig", () => {
+  it("upgrades an entry an older install wrote, instead of leaving it stale", () => {
+    // An install from before a rename set a different variable; the new
+    // script would not see it and would report the wrong agent.
+    const stale = { type: "command", command: "OLD_AGENT=codex /tmp/hooks/fleet-notify.sh", timeout: 5 };
+    const other = { type: "command", command: "/usr/local/bin/some-other-tool", timeout: 5 };
+    const existing = { hooks: { Stop: [{ hooks: [stale, other] }] } };
+    const { config, changed } = mergeHookConfig(existing, ["Stop"], ourCommand);
+    expect(changed).toBe(true);
+    const entries = (config.hooks as Record<string, Array<{ hooks: Array<{ command: string }> }>>).Stop![0]!.hooks;
+    expect(entries.map((entry) => entry.command)).toEqual([ourCommand.command, other.command]);
+  });
+
   it("adds our hook alongside hooks other tools already installed", () => {
     const existing = {
       model: "opus[1m]",
@@ -111,7 +123,7 @@ describe("installFleetHooks", () => {
 
     expect(fs.existsSync(result.scriptPath)).toBe(true);
     expect(fs.statSync(result.scriptPath).mode & 0o111).toBeGreaterThan(0);
-    expect(fs.existsSync(`${paths.claudeSettingsPath}.conductor-tg.bak`)).toBe(true);
+    expect(fs.existsSync(`${paths.claudeSettingsPath}.squeak.bak`)).toBe(true);
     expect(fleetHooksInstalled(paths)).toBe(true);
 
     const settings = JSON.parse(fs.readFileSync(paths.claudeSettingsPath, "utf8")) as Record<string, unknown>;

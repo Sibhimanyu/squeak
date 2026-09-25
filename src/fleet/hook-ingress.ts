@@ -8,8 +8,8 @@ import { normalizeHookPayload } from "./hook-protocol.js";
 import type { AgentKind, HookEvent } from "./types.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
-const TOKEN_HEADER = "x-conductor-tg-token";
-const AGENT_HEADER = "x-conductor-tg-agent";
+const TOKEN_HEADER = "x-squeak-token";
+const AGENT_HEADER = "x-squeak-agent";
 
 export interface HookIngressOptions {
   port: number;

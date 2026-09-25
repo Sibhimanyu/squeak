@@ -1,12 +1,13 @@
 import os from "node:os";
 import path from "node:path";
 
-/**
- * Squeak keeps its own support directory. It is a separate daemon with a
- * separate bot and separate state, and sharing the bridge's config would make
- * "which token is this" ambiguous the first time something goes wrong.
- */
+/** Squeak's config, state and secrets live in one support directory. */
 export const squeakSupportDirectoryName = "squeak";
+
+/** `~/x` to an absolute path; anything else unchanged. */
+export function expandHome(input: string, homeDir = os.homedir()): string {
+  return input.startsWith("~") ? path.join(homeDir, input.slice(1)) : input;
+}
 
 export function defaultSqueakSupportDir(homeDir = os.homedir()): string {
   return path.join(homeDir, "Library", "Application Support", squeakSupportDirectoryName);

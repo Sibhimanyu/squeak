@@ -459,7 +459,7 @@ Use these words, consistently, everywhere:
 | Situation | Yes | No |
 | --- | --- | --- |
 | Blocked | `🔴 snof · irrigation — needs approval` | `⚠️ ACTION REQUIRED: Agent awaiting permission!` |
-| Finished | `✅ conductor-tg · session-hub — done` / `Fixed the stale finish detection.` / `_3 files changed_` | `🎉 Great news! Your agent completed its task successfully!` |
+| Finished | `✅ squeak · session-hub — done` / `Fixed the stale finish detection.` / `_3 files changed_` | `🎉 Great news! Your agent completed its task successfully!` |
 | Reply sent | `Sent B to snof · irrigation in Conductor.` | `Your response has been submitted.` |
 | Failure | `The reply did not go through: claude exited (1).` | `Oops, something went wrong. Please try again.` |
 

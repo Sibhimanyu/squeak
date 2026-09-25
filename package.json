@@ -1,25 +1,20 @@
 {
-  "name": "conductor-tg",
-  "version": "1.1.0",
-  "description": "Telegram bridge for controlling a local Conductor installation on the same Mac.",
-  "publishConfig": {
-    "access": "public"
-  },
-  "main": "./dist/index.js",
+  "name": "squeak",
+  "version": "2.0.0",
+  "private": true,
+  "description": "A pager for your coding agents: a Mac app, a menu-bar duck, an iPhone app and Telegram cards that tell you what needs you and let you answer.",
+  "type": "module",
   "bin": {
-    "conductor-tg": "dist/cli.js",
     "squeak": "dist/squeak/cli.js"
   },
   "files": [
-    "dist",
-    ".env.example"
+    "dist"
   ],
   "scripts": {
     "test": "vitest run",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "dev": "tsx watch src/cli.ts start",
-    "start": "tsx src/cli.ts start",
-    "prepack": "npm run build",
+    "dev": "tsx watch src/squeak/cli.ts start",
+    "start": "tsx src/squeak/cli.ts start",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/ && npm run lint:desktop",
     "format:check": "prettier --check src/",
@@ -28,22 +23,23 @@
     "lint:desktop": "eslint --config desktop/eslint.config.mjs desktop/*.js desktop/renderer"
   },
   "keywords": [
-    "telegram",
-    "conductor",
+    "coding-agents",
+    "claude",
     "codex",
-    "bridge"
+    "conductor",
+    "telegram",
+    "pager"
   ],
-  "author": "xudong963",
+  "author": "Sibhimanyu",
   "license": "Apache-2.0",
-  "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/xudong963/conductor_mobile.git"
+    "url": "git+https://github.com/Sibhimanyu/squeak.git"
   },
   "bugs": {
-    "url": "https://github.com/xudong963/conductor_mobile/issues"
+    "url": "https://github.com/Sibhimanyu/squeak/issues"
   },
-  "homepage": "https://github.com/xudong963/conductor_mobile#readme",
+  "homepage": "https://github.com/Sibhimanyu/squeak#readme",
   "engines": {
     "node": ">=22"
   },

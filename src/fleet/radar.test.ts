@@ -339,7 +339,8 @@ describe("renderAttentionCard", () => {
         session: session({
           state: "finished",
           conductorSessionId: "c1",
-          repoName: "conductor-tg",
+          // Long enough that repo and branch together overflow a card line.
+          repoName: "squeak-agent-pager",
           branch: "blume-style-session-hub",
           git,
         }),
@@ -352,7 +353,7 @@ describe("renderAttentionCard", () => {
     expect(heading.length).toBeLessThanOrEqual(56);
     // The branch is what identifies the work; the repo is what gets dropped.
     expect(heading).toContain("blume-style-session-hub");
-    expect(heading).not.toContain("conductor-tg");
+    expect(heading).not.toContain("squeak-agent-pager");
   });
 
   it("keeps a diffstat off a blocked card, where the question is the point", () => {
@@ -386,9 +387,9 @@ describe("cardLabel", () => {
   });
 
   it("drops the repo rather than wrapping", () => {
-    expect(cardLabel(session({ repoName: "conductor-tg", branch: "blume-style-session-hub" }), "/Users/someone")).toBe(
-      "blume-style-session-hub",
-    );
+    expect(
+      cardLabel(session({ repoName: "squeak-agent-pager", branch: "blume-style-session-hub" }), "/Users/someone"),
+    ).toBe("blume-style-session-hub");
   });
 });
 
@@ -407,7 +408,7 @@ describe("radarKeyboard", () => {
 
   it("truncates a long label with an ellipsis rather than cutting mid-word", () => {
     const long = item({
-      session: session({ repoName: "conductor-tg", branch: "blume-style-session-hub-that-runs-long" }),
+      session: session({ repoName: "squeak", branch: "blume-style-session-hub-that-runs-long" }),
     });
     const keyboard = radarKeyboard(snapshot({ attention: [long] }), () => 1);
 
@@ -449,7 +450,7 @@ describe("sessionLabel", () => {
   const home = "/Users/someone";
 
   it("uses repo and branch when the session has both", () => {
-    expect(sessionLabel(session({ repoName: "conductor-tg", branch: "ushuaia" }), home)).toBe("conductor-tg · ushuaia");
+    expect(sessionLabel(session({ repoName: "squeak", branch: "ushuaia" }), home)).toBe("squeak · ushuaia");
   });
 
   it("falls back to the path rather than naming the user's home directory as a repo", () => {
@@ -461,9 +462,7 @@ describe("sessionLabel", () => {
   });
 
   it("shortens a deep path to its last two segments", () => {
-    expect(shortenPath("/Users/someone/conductor/workspaces/conductor-tg/ushuaia", home)).toBe(
-      "…/conductor-tg/ushuaia",
-    );
+    expect(shortenPath("/Users/someone/conductor/workspaces/squeak/ushuaia", home)).toBe("…/squeak/ushuaia");
     expect(shortenPath("/Users/someone/Downloads", home)).toBe("~/Downloads");
     expect(shortenPath("/tmp/scratch", home)).toBe("/tmp/scratch");
   });

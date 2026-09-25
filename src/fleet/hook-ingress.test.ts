@@ -88,8 +88,8 @@ describe("HookIngressServer", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-conductor-tg-token": harness.token,
-        "x-conductor-tg-agent": "claude",
+        "x-squeak-token": harness.token,
+        "x-squeak-agent": "claude",
       },
       body: JSON.stringify({
         hook_event_name: "Notification",
@@ -110,7 +110,7 @@ describe("HookIngressServer", () => {
 
     const response = await fetch(`http://127.0.0.1:${harness.port}/hook`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-conductor-tg-agent": "claude" },
+      headers: { "content-type": "application/json", "x-squeak-agent": "claude" },
       body: "{}",
     });
     await settle();
@@ -125,8 +125,8 @@ describe("HookIngressServer", () => {
     const response = await fetch(`http://127.0.0.1:${harness.port}/hook`, {
       method: "POST",
       headers: {
-        "x-conductor-tg-token": `${harness.token.slice(0, -1)}x`,
-        "x-conductor-tg-agent": "claude",
+        "x-squeak-token": `${harness.token.slice(0, -1)}x`,
+        "x-squeak-agent": "claude",
       },
       body: "{}",
     });
@@ -139,7 +139,7 @@ describe("HookIngressServer", () => {
 
     const response = await fetch(`http://127.0.0.1:${harness.port}/hook`, {
       method: "POST",
-      headers: { "x-conductor-tg-token": harness.token, "x-conductor-tg-agent": "claude" },
+      headers: { "x-squeak-token": harness.token, "x-squeak-agent": "claude" },
       body: "not json at all",
     });
     await settle();
@@ -245,7 +245,7 @@ describe("local state endpoint", () => {
 
     const response = await fetch(`http://127.0.0.1:${harness.port}/state`, {
       method: "POST",
-      headers: { "x-conductor-tg-token": harness.token, "x-conductor-tg-agent": "claude" },
+      headers: { "x-squeak-token": harness.token, "x-squeak-agent": "claude" },
       body: JSON.stringify({ hook_event_name: "Stop", session_id: "x" }),
     });
     await settle();
@@ -268,7 +268,7 @@ describe("HookIngressServer control routes", () => {
       },
     });
     const base = `http://127.0.0.1:${harness.port}/control/session/abc-123`;
-    const auth = { "x-conductor-tg-token": harness.token };
+    const auth = { "x-squeak-token": harness.token };
     return { harness, base, auth, replies };
   }
 
@@ -312,7 +312,7 @@ describe("HookIngressServer control routes", () => {
   it("says so when nothing can answer yet", async () => {
     const harness = await startServer();
     const response = await fetch(`http://127.0.0.1:${harness.port}/control/session/x/message`, {
-      headers: { "x-conductor-tg-token": harness.token },
+      headers: { "x-squeak-token": harness.token },
     });
     expect(response.status).toBe(503);
   });
@@ -332,7 +332,7 @@ describe("HookIngressServer remote routes", () => {
       },
     });
     const base = `http://127.0.0.1:${harness.port}/control/remote`;
-    const auth = { "x-conductor-tg-token": harness.token };
+    const auth = { "x-squeak-token": harness.token };
 
     expect((await fetch(`${base}/status`)).status).toBe(403);
     expect(await (await fetch(`${base}/status`, { headers: auth })).json()).toEqual({ action: "status", id: null });

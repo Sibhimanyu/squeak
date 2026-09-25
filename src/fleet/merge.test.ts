@@ -35,7 +35,7 @@ describe("mergeObservations", () => {
         sourceId: "c1",
         conductorSessionId: "c1",
         origin: "conductor",
-        repoName: "conductor-tg",
+        repoName: "squeak",
         branch: "ushuaia",
         title: "Build the radar",
         state: "working",
@@ -53,7 +53,7 @@ describe("mergeObservations", () => {
 
     expect(merged).toHaveLength(1);
     expect(merged[0]?.conductorSessionId).toBe("c1");
-    expect(merged[0]?.repoName).toBe("conductor-tg");
+    expect(merged[0]?.repoName).toBe("squeak");
     expect(merged[0]?.cwd).toBe("/Users/someone/repo");
     // Conductor's row is newer, so its status wins over transcript inference.
     expect(merged[0]?.state).toBe("working");

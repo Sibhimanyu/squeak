@@ -1,77 +1,76 @@
-# conductor-tg
+# Squeak
 
-A Telegram bridge for driving a local Conductor installation. It reads Conductor's
-SQLite database, spawns the local `codex` / `claude` binaries, and mirrors the
-conversation back into Conductor.
+A pager for your coding agents: a daemon that watches every Claude Code and
+Codex session on the Mac (Conductor's and the terminal's), plus the surfaces
+that show it and let you answer — Squeak for Mac (`desktop/`), the menu-bar
+duck, Squeak for iPhone (`ios/`) and Telegram cards. It reads Conductor's
+SQLite database and agent transcripts, and answers Conductor chats by typing
+into Conductor's own window. The design system is `DESIGN.md`.
 
-**You are very likely running inside the thing you are editing.** Read the
-deployment section before changing anything under `src/`.
+**You are very likely running inside something this repo deploys.** Read the
+deployment section before changing anything under `src/` or `desktop/`.
 
 ## Layout
 
 | path | what it is |
 | --- | --- |
-| `src/index.ts` | the bridge: Telegram handling, session panel, runtime state |
-| `src/adapters/claude-code.ts` | spawns `claude`, parses its stream-json output |
-| `src/adapters/codex-app-server.ts` | JSON-RPC client for the codex app-server |
-| `src/adapters/conductor-registry.ts` | all reads/writes against `conductor.db` |
-| `src/adapters/conductor-mirror.ts` | writes the conversation back into Conductor |
-| `src/telegram/client.ts` | Telegram API calls, HTML rendering, retry/fallback |
-| `src/utils/tg-format.ts` | markdown to Telegram HTML, message splitting |
-| `src/bridge/state-store.ts` | the bridge's own SQLite state (`bridge.db`) |
-| `src/squeak/` | Squeak: a separate pager daemon with its own bot; it can answer a finished Conductor chat |
-| `src/fleet/session-reply.ts` | continues a Conductor chat from a Squeak card: resume, mirror, refuse when busy |
-| `src/fleet/choices.ts` | reads lettered options out of an agent's last message, for one-tap answers |
-| `src/fleet/runtime.ts` | assembles the fleet stack; only one process may run it |
+| `src/squeak/` | the daemon: config, CLI (`squeak start`, `setup`, `install-hooks`), the Telegram bot |
 | `src/fleet/` | the fleet radar: every agent session on the Mac, not just Conductor's |
 | `src/fleet/observers/` | one file per discovery source; none of them know about each other |
 | `src/fleet/fleet-monitor.ts` | merges observers and hook events, decides what needs attention |
-| `src/fleet/hook-ingress.ts` | loopback HTTP endpoint the installed agent hooks report to |
+| `src/fleet/runtime.ts` | assembles the fleet stack; only one process may run it |
+| `src/fleet/hook-ingress.ts` | loopback HTTP: agent hooks, `/state`, token-gated control routes |
+| `src/fleet/session-reply.ts` | answers a Conductor chat: Conductor's window first, background CLI second |
+| `src/fleet/conductor-ui.ts` | drives Squeak Hands, the helper that types into Conductor |
+| `src/fleet/choices.ts` | reads lettered options out of an agent's last message, for one-tap answers |
 | `src/fleet/git-state.ts` | cached working-tree reads, so "finished" says what changed |
 | `src/fleet/diff-view.ts` | reads and paginates a workspace diff for review in Telegram |
-| `src/fleet/duck-mood.ts` | what the desktop duck is doing, derived where CI can test it |
+| `src/fleet/duck-mood.ts` | what the duck is doing, derived where CI can test it |
 | `src/fleet/claude-pricing.ts` | per-token dollar rates; a model missing here returns null, never a guess |
 | `src/fleet/claude-cost.ts` | whole-file, cached, lazy Claude cost estimate — see the note below on why |
-| `desktop/` | Squeak for Mac: the duck plus the main window; a separate package, plain JS, no build step |
-| `desktop/app-window.js`, `desktop/renderer/app.*` | the Squeak window: sessions, full messages, decisions, replies, service control |
-| `desktop/squeak-service.js` | the window's only way out: /state, token-gated control routes, launchctl, Squeak Hands |
-| `scripts/build-squeak-app.sh` | packages `~/Applications/Squeak.app` (icon, bundle id, signing) |
-| `DESIGN.md` | the brand and design system every surface follows; tokens in §11 |
 | `src/remote/` | the phone channel's Mac side: crypto, Firestore REST, `RemoteBridge` |
+| `src/adapters/claude-code.ts` | spawns `claude`, parses its stream-json output |
+| `src/adapters/codex-app-server.ts` | JSON-RPC client for the codex app-server |
+| `src/adapters/conductor-registry.ts` | all reads/writes against `conductor.db` |
+| `src/adapters/conductor-mirror.ts` | writes a background reply into Conductor |
+| `src/telegram/client.ts` | Telegram API calls, HTML rendering, retry/fallback |
+| `src/utils/tg-format.ts` | markdown to Telegram HTML, message splitting |
+| `desktop/` | Squeak for Mac: the duck plus the main window; a separate package, plain JS, no build step |
+| `desktop/app-window.js`, `desktop/renderer/app.*` | the Squeak window: sessions, full messages, decisions, replies, iPhone pairing |
+| `desktop/squeak-service.js` | the window's only way out: /state, token-gated control routes, launchctl, Squeak Hands |
+| `helpers/squeak-hands/` | the signed Swift helper that alone holds the Accessibility grant |
 | `ios/` | Squeak for iPhone (SwiftUI, xcodegen) and `SqueakCore` (`swift test`) |
 | `firebase/` | project `squeak-5c9gvo`: Firestore rules, and Hosting for the SideStore source |
+| `scripts/ship.sh` | put a worktree's branch live and restart Squeak |
+| `scripts/build-squeak-app.sh` | packages `~/Applications/Squeak.app` (icon, bundle id, signing) |
+| `scripts/install-squeak-agents.sh` | the launch agents for the daemon and the app |
+| `DESIGN.md` | the brand and design system every surface follows; tokens in §11 |
 | `docs/remote-channel.md` | the phone channel's threat model and design — read before touching it |
 
-`src/services/bridge-service.ts` is **dead code** — an older implementation that
-still ships in the package. The live path is `cli.ts` to `index.ts`. Do not spend
-time editing it.
+## Deployment
 
-## Deployment, and why you must not restart the bridge yourself
-
-The running bridge is launched from the **main checkout**
-(`~/conductor/repos/conductor-tg/dist`). Conductor workspaces are **git worktrees**
-on their own branches, so your edits are isolated from the live process. Nothing
-you do reaches the bridge until it is shipped.
-
-Shipping is a single command, run from your worktree:
+Everything on the Mac runs from the **main checkout** (`~/conductor/repos/squeak`):
+the daemon (`com.squeak.daemon`, `dist/squeak/cli.js`), and Squeak.app, whose
+loader `require`s the checkout's `desktop/main.js` (`com.squeak.duck`).
+Conductor workspaces are **git worktrees** on their own branches, so your edits
+are isolated from the live processes. Nothing you do reaches them until it is
+shipped:
 
 ```bash
 ./scripts/ship.sh
 ```
 
 It runs CI, merges your branch into the live branch, builds beside the live
-`dist` rather than over it, smoke-tests that the build imports, swaps it in, and
-then restarts the bridge **detached and delayed** so your reply is delivered
-before the process handling it is killed. If the bridge does not come back up it
-restores the previous `dist` automatically and leaves the bad build at
-`dist.failed`.
+`dist` rather than over it, smoke-tests that the build imports, swaps it in,
+refreshes `desktop/` dependencies if the lockfile moved, then restarts the
+daemon and the app. If Squeak does not answer on `127.0.0.1:8477` it restores
+the previous `dist` and leaves the bad build at `dist.failed`. The iPhone app
+ships separately with `ios/scripts/release.sh`.
 
 Rules:
 
 - **Never** run `npm run build` against the live checkout. It does `rm -rf dist`,
-  and a failed compile would leave the bridge with no code to restart into.
-- **Never** `pkill` the bridge or run `launchctl kickstart` directly. You will
-  kill the process delivering your own reply, and the user will see nothing.
+  and a failed compile would leave Squeak with no code to restart into.
 - Only ship when the user asks. Editing and testing freely in the worktree is
   fine and expected; putting code live is their call.
 - Commit before shipping — `ship.sh` refuses a dirty worktree.
@@ -80,8 +79,9 @@ Rules:
 
 ```bash
 npm install
-npm run ci      # typecheck + lint + format:check + test -- must pass before shipping
+npm run ci      # typecheck + lint (src/ and desktop/) + format:check + test
 npm run build   # safe in a worktree, never in the live checkout
+(cd ios/SqueakCore && swift test)
 ```
 
 Tests are vitest and live beside the code as `*.test.ts`. Adding a regression
@@ -97,50 +97,16 @@ test for anything you fix is expected; the suite is fast.
   fields or `usage: null` make Conductor's UI render the message as "This message
   could not be displayed."
 - **Conductor does not live-reload.** Rows written to `conductor.db` only appear
-  after it reloads the session; there is no IPC to notify it.
+  after it reloads the session; there is no IPC to notify it. That is why
+  replies are typed into Conductor's window when they can be.
 - **Telegram needs `parse_mode`.** Without it markdown arrives as literal `##`
   and `**`. Everything goes out as HTML via `markdownToTelegramHtml`, with a
   plain-text retry if Telegram rejects the markup.
 - **Messages cap at 4096 characters.** Use `splitMarkdown`, never truncate.
-- A repo with no workspaces must still be selectable, otherwise a freshly added
-  project can never be reached from Telegram.
-
-## Two daemons, not one — and only one is meant to run
-
-`conductor-tg` is the bridge: a conversation you navigate and talk to agents
-through. `squeak` is a pager: it watches every agent on the Mac and
-messages you when one finishes or blocks. Separate binaries, separate bots,
-separate config (`~/Library/Application Support/squeak/.env`), separate
-state (`squeak.db`).
-
-**As of 2026-09-22 the user asked for the bridge to stop running entirely.**
-`com.conductor-tg.bridge` was booted out and its plist moved to
-`~/Library/LaunchAgents/disabled/`. Only `com.squeak.daemon` and
-`com.squeak.duck` should be running now — the duck comes bundled with Squeak
-via `install-squeak-agents.sh`, which installs both together.
-
-**Do not re-enable the bridge without being asked.** `ship.sh`'s
-`restart_bridge` decides whether to kickstart or bootstrap based on whether
-`~/Library/LaunchAgents/com.conductor-tg.bridge.plist` *exists on disk* — not
-whether it is loaded. Moving the plist out of that directory is exactly what
-stops a future `ship.sh` run in this worktree from silently bringing the
-bridge back via its bootstrap fallback.
-
-`ship.sh` itself now checks for `~/Library/LaunchAgents/disabled/<label>.plist`
-before touching the bridge at all — both in `restart_bridge`'s manual-start
-fallback and, separately, before the health-check/rollback block runs. Without
-that second check, shipping *any* change (not just one touching `src/index.ts`)
-would have looked like a failed deploy the moment the bridge stayed down on
-purpose, and triggered a rollback that reverted a perfectly good build back to
-`dist.prev` for no reason. If the bridge is ever re-enabled, delete or rename
-that marker file, not just move the plist back. If the user ever wants it back:
-`mv ~/Library/LaunchAgents/disabled/com.conductor-tg.bridge.plist
-~/Library/LaunchAgents/` then `launchctl bootstrap gui/$(id -u)
-~/Library/LaunchAgents/com.conductor-tg.bridge.plist`.
 
 - **Only one process may run the fleet.** Two would bind the same hook port
-  and send every notification twice. The bridge no longer wires it up at all;
-  `createFleetRuntime` belongs to Squeak.
+  and send every notification twice. `createFleetRuntime` belongs to the
+  daemon alone.
 - Squeak passes `openConductorSession: null` (no Open Chat — it has no
   conversation view) but does pass a `replier`, so a **finished** Conductor
   card carries Reply, Full message, and one button per lettered option.
@@ -180,8 +146,7 @@ that marker file, not just move the plist back. If the user ever wants it back:
   instead, newest turn only — role `assistant` rows there also hold tool
   calls, tool results, `result` and `system` events, and a turn that has
   just started must not resurface the previous turn's question.
-- The desktop duck still reads `127.0.0.1:8477/state`; that is now served by
-  Squeak rather than the bridge.
+- The duck and the window read `127.0.0.1:8477/state` from the daemon.
 - **Squeak for Mac is the duck's Electron app with a window.** One process,
   one instance (`requestSingleInstanceLock`): opening Squeak from Spotlight or
   Finder while it runs shows the window. launchd starts it with
@@ -191,10 +156,9 @@ that marker file, not just move the plist back. If the user ever wants it back:
   metadata or Electron changes. It lives in `~/Applications` because
   `/Applications` needs admin. `SQUEAK_DESKTOP_MAIN` points the bundle at a
   worktree for testing.
-- The app keeps the old `conductor-tg-duck` userData folder on purpose
-  (`app.setPath` before ready): packaged as "Squeak", Electron would move it
-  and lose the duck's position, and the single-instance lock would stop
-  matching an older running copy.
+- The app pins its userData folder to `Application Support/Squeak`
+  (`app.setPath` before ready), whether it runs from Squeak.app or from the
+  checkout, so the duck's position and the single-instance lock are shared.
 - **Control routes are token-gated and carry no CORS header.**
   `/control/session/<id>/message` and `/reply` on the ingress let the window
   read a chat's full message and answer it through the same `ConductorReplier`
@@ -209,8 +173,8 @@ that marker file, not just move the plist back. If the user ever wants it back:
 - `SQUEAK_CAPTURE=<prefix>` photographs the window (loaded, each row, the
   iPhone view before pairing) and quits. The decision tap **sends a reply**, so
   it runs only with `SQUEAK_CAPTURE_TAP=1` and never on the live port 8477 —
-  point `FLEET_HOOK_PORT` at a test endpoint. The capture using its own temp userData so it cannot collide
-  with the running duck. Capture turns off background throttling and floats
+  point `FLEET_HOOK_PORT` at a test endpoint. A capture uses its own temp
+  userData so it cannot collide with the running app. Capture turns off background throttling and floats
   the window, or shots of a covered window come out as empty files.
 
 - **Native modules must match the running Node.** `better-sqlite3` is built
@@ -223,13 +187,10 @@ that marker file, not just move the plist back. If the user ever wants it back:
   daemon uses `KeepAlive: true`; anything the user can quit from a menu uses
   `KeepAlive: { SuccessfulExit: false }`, or a deliberate Quit is restarted
   instantly and reads as the app ignoring them.
-- **Exactly one bridge may poll the bot.** Two instances make Telegram return
-  409 and messages land in whichever won the race — visible only as noise in
-  the log, so it can persist for days. `ship.sh` decides how to restart by
-  whether the launch agent's plist *exists*, not by whether `launchctl list`
-  currently shows it (it is briefly empty during a reload, and the manual
-  branch then starts a second bridge), and reaps any process launchd does not
-  own after restarting.
+- **Exactly one process may poll a bot.** Two make Telegram return 409 and
+  messages land in whichever won the race — visible only as noise in the log,
+  so it can persist for days. Squeak runs only under launchd; never start a
+  second `squeak start` by hand while the agent is loaded.
 - `install-squeak-agents.sh` writes **every** plist before unloading anything,
   and a load failure warns rather than aborting. `launchctl bootout` is
   asynchronous, so bootstrapping straight after it fails with "Input/output
@@ -310,7 +271,7 @@ that marker file, not just move the plist back. If the user ever wants it back:
 
 ## The fleet layer
 
-The bridge used to see only sessions Conductor spawned. `src/fleet/` widens
+`src/fleet/` sees far more than the sessions Conductor spawned: it widens
 that to every Claude Code and Codex session on the machine by reading their
 transcripts, and ranks them by what is blocked on the human.
 
@@ -336,7 +297,7 @@ transcripts, and ranks them by what is blocked on the human.
   this machine ran a Stop hook.
 - **Hooks must never block.** The installed script backgrounds its request,
   caps curl at 2s, and exits 0 unconditionally. These run inside other people's
-  agents; a bridge problem must never become their problem. There is a
+  agents; a Squeak problem must never become their problem. There is a
   regression test that runs the real script against a dead port.
 - **`~/.claude/settings.json` is shared.** On a typical machine it already
   carries entries from other tools. Install merges, uninstall removes only
@@ -375,14 +336,15 @@ transcripts, and ranks them by what is blocked on the human.
 - **Two sessions can share repo, branch, *and* agent** — Conductor allows a
   second chat on the same workspace, and this is not hypothetical: this
   session and an earlier one in it were, on this machine, simultaneously
-  "conductor-tg · blume-style-session-hub" with nothing to tell them apart.
-  `renderRadar` disambiguates by appending each session's own title, but only
-  once two rows actually collide (`labelCounts` in `radar.ts`) — the same
+  "squeak · blume-style-session-hub" with nothing to tell them apart.
+  `distinctTitles` in `radar.ts` appends each session's own title, but only
+  once two rows actually collide, and `/state` carries the result so the duck,
+  the window and Telegram disambiguate identically — the same
   discipline `formatWorkspaceLabel` already uses for repo names, applied here
   because most rows never collide and don't need the extra text. Conductor's
   own "Untitled" placeholder counts as no title.
-- `desktop/` is a **separate package on purpose**: `conductor-tg` is published
-  to npm and must not carry Electron as a dependency. It is excluded from
+- `desktop/` is a **separate package on purpose**: the daemon must not carry
+  Electron as a dependency. It is excluded from
   `package.json` `files`, from `tsconfig`, and from `eslint src/`.
 - Expansion state lives in the Electron **main** process, which also owns the
   window size; the renderer only reacts to `duck:expanded`. Tracking it in
@@ -489,5 +451,7 @@ transcripts, and ranks them by what is blocked on the human.
 
 ## Upstream
 
-Forked from `xudong963/conductor_mobile` (Apache-2.0), kept as the `upstream`
-remote. `origin` is a private repo.
+Began as a fork of `xudong963/conductor_mobile` (Apache-2.0), kept as the
+`upstream` remote and credited in `NOTICE`. `origin` is the private
+`Sibhimanyu/squeak`. The package is `private` in `package.json`: the npm name
+`squeak` belongs to someone else, so nothing here is published to npm.

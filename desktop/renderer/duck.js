@@ -111,10 +111,10 @@ function renderOffline() {
   els.body.dataset.mood = "asleep";
   applySprite("offline");
   els.badge.hidden = true;
-  els.sub.textContent = "bridge offline";
+  els.sub.textContent = "offline";
   els.foot.textContent = `no daemon on 127.0.0.1:${port}`;
-  els.sessions.innerHTML = `<div class="empty">Can't reach the bridge.<br />Is conductor-tg running?</div>`;
-  els.wrap.title = "conductor-tg is not running";
+  els.sessions.innerHTML = `<div class="empty">Can't reach Squeak on this Mac.<br />Is it running?</div>`;
+  els.wrap.title = "Squeak is not running";
 }
 
 function renderBadge(duck) {

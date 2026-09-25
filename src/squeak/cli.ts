@@ -158,7 +158,7 @@ export async function main(argv: string[]): Promise<void> {
       const result = installFleetHooks({ paths, port: hookPort() });
       console.log(`Hook script: ${result.scriptPath}`);
       for (const file of result.changed) {
-        console.log(`Updated ${file} (backup at ${file}.conductor-tg.bak)`);
+        console.log(`Updated ${file} (backup at ${file}.squeak.bak)`);
       }
       for (const file of result.skipped) {
         console.log(`Already installed in ${file}`);

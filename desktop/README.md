@@ -9,8 +9,8 @@ npm install
 npm start
 ```
 
-It needs the bridge running, because it draws what the bridge already knows.
-With no bridge it goes grey and says so rather than showing stale state.
+It needs the Squeak service running, because it draws what Squeak already knows.
+Without it the duck goes grey and says so rather than showing stale state.
 
 ## Menu bar, hiding, and the shortcut
 
@@ -43,7 +43,7 @@ launchctl kickstart gui/$(id -u)/com.squeak.duck
 ```
 
 Change the shortcut by adding `"shortcut": "Control+Alt+K"` to
-`~/Library/Application Support/conductor-tg-duck/duck.json`. If another app
+`~/Library/Application Support/Squeak/duck.json`. If another app
 already owns the combination, the duck logs that it could not register it
 rather than failing silently.
 
@@ -107,7 +107,7 @@ Two independent global shortcuts, kept separate deliberately:
 | `⌃⌥D` | Peek at the panel (also unhides the duck if it was hidden) |
 | `⌃⌥H` | Show/hide the duck itself |
 
-Change either in `~/Library/Application Support/conductor-tg-duck/duck.json`
+Change either in `~/Library/Application Support/Squeak/duck.json`
 (`"shortcut"` and `"visibilityShortcut"`).
 
 ## Floating across Spaces
@@ -124,21 +124,20 @@ ordinary windows.
 ## How it is wired
 
 The duck is presentational and decides nothing. It polls
-`http://127.0.0.1:8477/state` on the bridge's loopback server every two
+`http://127.0.0.1:8477/state` on Squeak's loopback server every two
 seconds and renders the answer. Which sessions count as active, what each one
 is doing, and which mood the duck is in are all computed in the daemon
 (`src/fleet/active.ts`, `src/fleet/duck-mood.ts`) where CI covers them — so the
 duck and Telegram can never tell you different stories.
 
-Set `FLEET_HOOK_PORT` if the bridge is on another port.
+Set `FLEET_HOOK_PORT` if Squeak is on another port.
 
 ## Why there is no build step
 
 This is a small personal UI in plain JavaScript. A bundler between "edit the
 duck" and "see the duck" would cost more than it returns, and everything worth
 testing lives in the daemon instead. It is also why `desktop/` is a separate
-package: `conductor-tg` is published to npm, and a CLI should not carry a GUI
-framework as a dependency.
+package: the Squeak service should not carry a GUI framework as a dependency.
 
 ## Screenshots without permission
 

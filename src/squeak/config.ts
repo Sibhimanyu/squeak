@@ -2,8 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ZodError, z } from "zod";
 
-import { expandHome } from "../paths.js";
-import { defaultSqueakDbPath, resolveSqueakEnvPath } from "./paths.js";
+import { defaultSqueakDbPath, expandHome, resolveSqueakEnvPath } from "./paths.js";
 
 function loadEnvFile(filePath: string): void {
   if (!fs.existsSync(filePath)) {

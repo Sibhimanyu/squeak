@@ -5,7 +5,7 @@ import path from "node:path";
 import type { AgentKind } from "./types.js";
 
 /** Every entry we write carries this, so uninstall can find exactly ours. */
-export const HOOK_MARKER = "conductor-tg-fleet";
+export const HOOK_MARKER = "squeak-fleet";
 
 /**
  * Claude Code fires `Notification` when it needs permission or has gone quiet
@@ -56,16 +56,16 @@ export interface HookInstallResult {
  */
 export function renderHookScript(params: { agent: AgentKind; port: number; tokenPath: string }): string {
   return `#!/bin/sh
-# Installed by conductor-tg (${HOOK_MARKER}). Reports agent state to the local
+# Installed by Squeak (${HOOK_MARKER}). Reports agent state to the local
 # Telegram bridge. Fire-and-forget by design: never blocks, never fails a turn.
 payload=$(cat)
-url="\${CONDUCTOR_TG_HOOK_URL:-http://127.0.0.1:${params.port}/hook}"
+url="\${SQUEAK_HOOK_URL:-http://127.0.0.1:${params.port}/hook}"
 token=$(cat "${params.tokenPath}" 2>/dev/null)
 [ -n "$token" ] || exit 0
 printf '%s' "$payload" | curl -sS -m 2 -X POST "$url" \\
   -H 'Content-Type: application/json' \\
-  -H "X-Conductor-TG-Token: $token" \\
-  -H "X-Conductor-TG-Agent: \${CONDUCTOR_TG_AGENT:-${params.agent}}" \\
+  -H "X-Squeak-Token: $token" \\
+  -H "X-Squeak-Agent: \${SQUEAK_AGENT:-${params.agent}}" \\
   --data-binary @- >/dev/null 2>&1 &
 exit 0
 `;
@@ -83,7 +83,7 @@ interface HookGroup {
 }
 
 function hookCommandFor(scriptPath: string, agent: AgentKind): HookCommand {
-  return { type: "command", command: `CONDUCTOR_TG_AGENT=${agent} ${shellQuote(scriptPath)}`, timeout: 5 };
+  return { type: "command", command: `SQUEAK_AGENT=${agent} ${shellQuote(scriptPath)}`, timeout: 5 };
 }
 
 function shellQuote(value: string): string {
@@ -115,6 +115,28 @@ export function mergeHookConfig(
       (group) => Array.isArray(group?.hooks) && group.hooks.some((entry) => isOurs(entry?.command)),
     );
     if (alreadyInstalled) {
+      // Ours, but written by an older install (a renamed variable, a moved
+      // script): rewrite it in place. Leaving it would keep the old command
+      // running against the new script — e.g. Codex reporting as Claude.
+      let upgraded = false;
+      const next = groups.map((group) =>
+        Array.isArray(group?.hooks)
+          ? {
+              ...group,
+              hooks: group.hooks.map((entry) => {
+                if (isOurs(entry?.command) && entry?.command !== command.command) {
+                  upgraded = true;
+                  return { ...entry, ...command };
+                }
+                return entry;
+              }),
+            }
+          : group,
+      );
+      if (upgraded) {
+        hooks[event] = next;
+        changed = true;
+      }
       continue;
     }
     groups.push({ hooks: [command] });
@@ -181,9 +203,9 @@ function writeJsonObject(filePath: string, value: Record<string, unknown>): void
   if (fs.existsSync(filePath)) {
     // These are files the user hand-edits and other tools also write. Keep a
     // copy before touching them.
-    fs.copyFileSync(filePath, `${filePath}.conductor-tg.bak`);
+    fs.copyFileSync(filePath, `${filePath}.squeak.bak`);
   }
-  const temporaryPath = `${filePath}.conductor-tg.tmp`;
+  const temporaryPath = `${filePath}.squeak.tmp`;
   fs.writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`);
   fs.renameSync(temporaryPath, filePath);
 }

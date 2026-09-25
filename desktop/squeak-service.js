@@ -15,7 +15,7 @@ const TOKEN_PATH = path.join(SUPPORT_DIR, "hook-token");
 const HANDS_APP = path.join(SUPPORT_DIR, "Squeak Hands.app");
 const DAEMON_LABEL = "com.squeak.daemon";
 const DAEMON_PLIST = path.join(os.homedir(), "Library", "LaunchAgents", `${DAEMON_LABEL}.plist`);
-const TOKEN_HEADER = "x-conductor-tg-token";
+const TOKEN_HEADER = "x-squeak-token";
 
 /** Conductor ids are UUIDs; anything else never reaches a URL or a file. */
 const SESSION_ID = /^[A-Za-z0-9-]{1,80}$/;
