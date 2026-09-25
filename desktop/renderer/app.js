@@ -154,7 +154,8 @@ function inline(text) {
     const token = match[0];
     if (token.startsWith("`")) fragment.append(el("code", null, token.slice(1, -1)));
     else if (token.startsWith("**")) fragment.append(el("strong", null, token.slice(2, -2)));
-    else if (token.startsWith("!")) fragment.append(el("span", "image-note", `image: ${/^!\[([^\]]*)\]/.exec(token)[1] || "untitled"}`));
+    else if (token.startsWith("!"))
+      fragment.append(el("span", "image-note", `image: ${/^!\[([^\]]*)\]/.exec(token)[1] || "untitled"}`));
     else fragment.append(/^\[([^\]]+)\]/.exec(token)[1]);
     last = match.index + token.length;
   }
@@ -322,11 +323,21 @@ function select(key) {
   void renderDetail();
 }
 
+/**
+ * What the daemon addresses this session's messages and replies by: its
+ * Conductor chat, or a terminal agent it can type into. An older daemon sends
+ * no `replyTarget`, and then only Conductor chats can be answered.
+ */
+function replyTargetOf(session) {
+  return session.replyTarget ?? session.conductorSessionId ?? null;
+}
+
 async function loadMessage(session) {
-  if (!session.conductorSessionId) return null;
+  const target = replyTargetOf(session);
+  if (!target) return null;
   const cacheKey = `${session.key}|${session.lastActivityAt}`;
   if (!messageCache.has(cacheKey)) {
-    messageCache.set(cacheKey, await window.squeak.message(session.conductorSessionId));
+    messageCache.set(cacheKey, await window.squeak.message(target));
   }
   return messageCache.get(cacheKey);
 }
@@ -334,7 +345,10 @@ async function loadMessage(session) {
 function receiptText(session, outcome, sent) {
   const what = sent.length <= 3 ? `**${sent}**` : "your reply";
   if (outcome.status === "refused") return outcome.reason;
-  if (outcome.via === "conductor") return `Sent ${what} to ${label(session)} in Conductor. The answer will show up here.`;
+  if (outcome.via === "conductor")
+    return `Sent ${what} to ${label(session)} in Conductor. The answer will show up here.`;
+  if (outcome.via === "terminal")
+    return `Sent ${what} to ${label(session)} in its terminal. The answer will show up here.`;
   const why = outcome.fallbackReason ? ` because ${outcome.fallbackReason}` : "";
   return `Sent ${what} to ${label(session)} in the background${why}. Conductor shows it the next time it loads the chat.`;
 }
@@ -345,7 +359,7 @@ async function sendReply(session, text) {
   receipts.set(session.key, { pending: true, text: trimmed });
   lastDetailSignature = "";
   void renderDetail();
-  const outcome = await window.squeak.reply(session.conductorSessionId, trimmed);
+  const outcome = await window.squeak.reply(replyTargetOf(session), trimmed);
   receipts.set(session.key, { outcome, text: trimmed, atActivity: session.lastActivityAt });
   if (outcome.status !== "refused") drafts.delete(session.key);
   lastDetailSignature = "";
@@ -468,7 +482,13 @@ async function renderPhone() {
     const row = el("div", "device");
     const text = el("div");
     text.append(el("div", "name", device.name));
-    text.append(el("div", "meta", device.revokedAt ? `revoked ${formatWhen(device.revokedAt)}` : `paired ${formatWhen(device.pairedAt)}`));
+    text.append(
+      el(
+        "div",
+        "meta",
+        device.revokedAt ? `revoked ${formatWhen(device.revokedAt)}` : `paired ${formatWhen(device.pairedAt)}`,
+      ),
+    );
     row.append(text);
     if (!device.revokedAt) {
       row.append(
@@ -498,7 +518,13 @@ async function renderPhone() {
     }
     pair.append(img, steps);
     nodes.push(pair);
-    nodes.push(el("p", "muted-note", "Anyone who scans this code can read your sessions until you approve or reset, so keep it on this screen."));
+    nodes.push(
+      el(
+        "p",
+        "muted-note",
+        "Anyone who scans this code can read your sessions until you approve or reset, so keep it on this screen.",
+      ),
+    );
   } else {
     nodes.push(
       button("Pair an iPhone", "primary pair-button", async () => {
@@ -616,10 +642,13 @@ async function renderDetail() {
   const delivered = receipt?.outcome && receipt.outcome.status !== "refused";
   if (delivered) {
     // Nothing more to offer until the agent answers.
-  } else if (!session.conductorSessionId) {
-    answer.push(el("p", "muted-note", "Not a Conductor session — answer it where it runs."));
-  } else if (blocked) {
+  } else if (!replyTargetOf(session)) {
+    answer.push(el("p", "muted-note", "Squeak can't answer this session — answer it where it runs."));
+  } else if (session.conductorSessionId && blocked) {
     answer.push(el("p", "muted-note", "This chat is waiting inside Conductor. Answer it there."));
+  } else if (session.state === "awaiting_approval") {
+    // Typed text would answer the approval prompt itself.
+    answer.push(el("p", "muted-note", "Waiting on an approval in its terminal. Answer it there."));
   } else {
     // While it works there is no question to answer yet, but a message typed
     // into Conductor is queued there, which is how you steer a running agent.

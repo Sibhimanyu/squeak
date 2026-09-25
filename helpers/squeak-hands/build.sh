@@ -6,7 +6,7 @@ out="${1:?output dir}"
 app="$out/Squeak Hands.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
-swiftc -O -o "$app/Contents/MacOS/squeak-hands" "$here/main.swift" -framework AppKit -framework ApplicationServices
+swiftc -O -o "$app/Contents/MacOS/squeak-hands" "$here/main.swift" -framework AppKit -framework ApplicationServices -framework CryptoKit
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -17,6 +17,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSUIElement</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>Squeak Hands types your replies into the Terminal tab where that agent is running.</string>
 </dict></plist>
 PLIST
 # Sign with a real identity when there is one. macOS ties an Accessibility

@@ -272,6 +272,22 @@ describe("HookIngressServer control routes", () => {
     return { harness, base, auth, replies };
   }
 
+  it("accepts a terminal agent's fleet key as the target, as /state hands it out", async () => {
+    const { harness, auth, replies } = await withControl();
+    const base = `http://127.0.0.1:${harness.port}/control/session/claude-transcript:8ed8b2c9-29d6-443e-ab31-85495508d53d`;
+    const response = await fetch(`${base}/reply`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ text: "B" }),
+    });
+    expect(response.status).toBe(200);
+    expect(replies).toEqual([{ id: "claude-transcript:8ed8b2c9-29d6-443e-ab31-85495508d53d", text: "B" }]);
+    // Still nothing that could climb out of the route.
+    expect(
+      (await fetch(`http://127.0.0.1:${harness.port}/control/session/a%2F..%2Fb/message`, { headers: auth })).status,
+    ).toBe(404);
+  });
+
   it("refuses control requests without the token", async () => {
     const { base, replies } = await withControl();
     expect((await fetch(`${base}/message`)).status).toBe(403);

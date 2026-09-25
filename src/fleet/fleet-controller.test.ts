@@ -70,13 +70,19 @@ afterEach(() => {
 });
 
 async function fixture(
-  options: { outcome?: ReplyOutcome; lastText?: string | null; phoneLink?: (id: string) => string | null } = {},
+  options: {
+    outcome?: ReplyOutcome;
+    lastText?: string | null;
+    phoneLink?: (id: string) => string | null;
+    session?: FleetSession;
+    canReply?: (session: FleetSession) => boolean;
+  } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-controller-"));
   dirs.push(dir);
   const store = new FleetStore(path.join(dir, "squeak.db"));
 
-  const sessions = [conductorSession()];
+  const sessions = [options.session ?? conductorSession()];
   let push: ((items: AttentionItem[]) => void) | null = null;
   const monitor = {
     snapshot: { sessions, active: sessions, attention: [], generatedAt: "", codexUsage: null },
@@ -114,6 +120,7 @@ async function fixture(
       sends.push({ sessionId, text });
       return options.outcome ?? { status: "started", via: "conductor" };
     },
+    ...(options.canReply ? { canReply: options.canReply } : {}),
   };
 
   const controller = new FleetController({
@@ -128,8 +135,8 @@ async function fixture(
   });
   await controller.start();
 
-  const pushFinish = async () => {
-    push!([{ session: sessions[0]!, kind: "finished_unreviewed", since: "2026-09-23T02:29:51.000Z", score: 1 }]);
+  const pushFinish = async (kind: AttentionItem["kind"] = "finished_unreviewed") => {
+    push!([{ session: sessions[0]!, kind, since: "2026-09-23T02:29:51.000Z", score: 1 }]);
     await new Promise((resolve) => setTimeout(resolve, 0));
   };
 
@@ -244,5 +251,69 @@ describe("FleetController replies", () => {
     const { sent, pushFinish } = await fixture({ phoneLink: () => null });
     await pushFinish();
     expect(sent[0]!.keyboard!.flat().some((button) => button.text === "Open in Squeak")).toBe(false);
+  });
+});
+
+function terminalSession(overrides: Partial<FleetSession> = {}): FleetSession {
+  return conductorSession({
+    key: "claude-transcript:thread-9",
+    source: "claude-transcript",
+    origin: "terminal",
+    sourceId: "thread-9",
+    agentSessionId: "thread-9",
+    conductorSessionId: null,
+    transcriptPath: "/tmp/thread-9.jsonl",
+    repoName: "farm",
+    branch: "shed",
+    state: "awaiting_input",
+    ...overrides,
+  });
+}
+
+describe("FleetController replies to a terminal agent", () => {
+  it("offers Reply on a terminal session waiting for input, addressed by its fleet key", async () => {
+    const { controller, sends, sent, pushFinish } = await fixture({
+      session: terminalSession(),
+      lastText: "Which shed light should I wire first?",
+      canReply: () => true,
+      outcome: { status: "started", via: "terminal" },
+    });
+    await pushFinish("blocked_question");
+
+    const buttons = sent[0]!.keyboard!.flat().map((button) => button.text);
+    expect(buttons).toContain("Reply");
+    expect(buttons).toContain("Full message");
+    // Conductor-only actions stay off a terminal card.
+    expect(buttons).not.toContain("Open Chat");
+
+    expect(await controller.handleReplyMessage(location, 100, "the north one")).toBe(true);
+    expect(sends).toEqual([{ sessionId: "claude-transcript:thread-9", text: "the north one" }]);
+    expect(sent.at(-1)!.text).toContain("in its terminal");
+  });
+
+  it("never offers Reply on a terminal session waiting on an approval", async () => {
+    // A typed digit would answer the approval prompt itself.
+    const { sent, pushFinish } = await fixture({
+      session: terminalSession({ state: "awaiting_approval" }),
+      canReply: () => true,
+    });
+    await pushFinish("blocked_approval");
+
+    expect(sent[0]!.keyboard?.flat().some((button) => button.text === "Reply") ?? false).toBe(false);
+  });
+
+  it("offers nothing when the replier cannot answer that session", async () => {
+    const { sent, pushFinish } = await fixture({ session: terminalSession(), canReply: () => false });
+    await pushFinish("blocked_question");
+
+    expect(sent[0]!.keyboard?.flat().some((button) => button.text === "Reply") ?? false).toBe(false);
+  });
+
+  it("still offers nothing for a terminal session when the replier cannot tell", async () => {
+    // A replier without canReply predates terminal replies: Conductor only.
+    const { sent, pushFinish } = await fixture({ session: terminalSession() });
+    await pushFinish("blocked_question");
+
+    expect(sent[0]!.keyboard?.flat().some((button) => button.text === "Reply") ?? false).toBe(false);
   });
 });

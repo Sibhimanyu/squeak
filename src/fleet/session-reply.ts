@@ -31,11 +31,13 @@ export interface ReplyAgentAdapter extends EventEmitter {
 
 /**
  * `conductor`: typed into Conductor's window, so it shows and streams there.
+ * `terminal`: typed into the Terminal tab running the agent, likewise live.
  * `background`: run by the local CLI and mirrored, so Conductor shows it on
  * its next reload — `fallbackReason` says why the window was not used.
  */
 export type ReplyOutcome =
   | { status: "started"; via: "conductor" }
+  | { status: "started"; via: "terminal" }
   | { status: "started"; via: "background"; fallbackReason: string | null }
   | { status: "refused"; reason: string };
 

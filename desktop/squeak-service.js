@@ -18,7 +18,9 @@ const DAEMON_PLIST = path.join(os.homedir(), "Library", "LaunchAgents", `${DAEMO
 const TOKEN_HEADER = "x-squeak-token";
 
 /** Conductor ids are UUIDs; anything else never reaches a URL or a file. */
-const SESSION_ID = /^[A-Za-z0-9-]{1,80}$/;
+// A Conductor chat id, or a terminal agent's fleet key (`claude-transcript:<uuid>`);
+// the same shape the ingress accepts.
+const SESSION_ID = /^[A-Za-z0-9_:-]{1,120}$/;
 
 function run(command, args, timeoutMs = 10_000) {
   return new Promise((resolve) => {
@@ -77,9 +79,9 @@ async function sessionMessage(sessionId) {
 }
 
 /**
- * A reply types into Conductor through Squeak Hands, which can take several
- * seconds, and may confirm against the database afterwards — hence the long
- * timeout. The outcome is Squeak's own: started (and how) or refused (and why).
+ * A reply types into Conductor or a terminal through Squeak Hands, which can
+ * take several seconds, and confirms against the database or transcript
+ * afterwards — hence the long timeout. The outcome is Squeak's own: started (and how) or refused (and why).
  */
 async function reply(sessionId, text) {
   if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId) || typeof text !== "string" || !text.trim()) {
@@ -88,7 +90,10 @@ async function reply(sessionId, text) {
   try {
     return await control(`session/${sessionId}/reply`, { method: "POST", body: JSON.stringify({ text }) }, 60_000);
   } catch (error) {
-    return { status: "refused", reason: `Squeak did not answer: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      status: "refused",
+      reason: `Squeak did not answer: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 
@@ -124,7 +129,9 @@ async function restartService() {
     return { ok: true, message: "Started." };
   }
   const kick = await run("/bin/launchctl", ["kickstart", "-k", `gui/${uid}/${DAEMON_LABEL}`]);
-  return kick.ok ? { ok: true, message: status.running ? "Restarted." : "Started." } : { ok: false, message: kick.stderr.trim() };
+  return kick.ok
+    ? { ok: true, message: status.running ? "Restarted." : "Started." }
+    : { ok: false, message: kick.stderr.trim() };
 }
 
 /**

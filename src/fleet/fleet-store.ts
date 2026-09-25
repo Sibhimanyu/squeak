@@ -202,7 +202,12 @@ export class FleetStore {
    * — which carries only the message id — can be routed. Stored rather than
    * held in memory so a card still answers after Squeak restarts.
    */
-  setReplyTarget(chatId: number, messageId: number, conductorSessionId: string, label: string): void {
+  /**
+   * `target` is `replyTargetFor(session)`: a Conductor chat id or a fleet key.
+   * The column keeps its first name; every row written before terminals could
+   * be answered holds a Conductor id, which is still a valid target.
+   */
+  setReplyTarget(chatId: number, messageId: number, target: string, label: string): void {
     this.db
       .prepare(
         `INSERT INTO fleet_reply_target (chat_id, message_id, conductor_session_id, label)
@@ -211,18 +216,18 @@ export class FleetStore {
            conductor_session_id = excluded.conductor_session_id,
            label = excluded.label`,
       )
-      .run(chatId, messageId, conductorSessionId, label);
+      .run(chatId, messageId, target, label);
     // A card nobody answered in a month is not coming back.
     this.db.prepare(`DELETE FROM fleet_reply_target WHERE created_at < datetime('now', '-30 days')`).run();
   }
 
-  getReplyTarget(chatId: number, messageId: number): { conductorSessionId: string; label: string } | null {
+  getReplyTarget(chatId: number, messageId: number): { target: string; label: string } | null {
     const row = this.db
       .prepare(
-        `SELECT conductor_session_id as conductorSessionId, label
+        `SELECT conductor_session_id as target, label
          FROM fleet_reply_target WHERE chat_id = ? AND message_id = ?`,
       )
-      .get(chatId, messageId) as { conductorSessionId: string; label: string } | undefined;
+      .get(chatId, messageId) as { target: string; label: string } | undefined;
     return row ?? null;
   }
 

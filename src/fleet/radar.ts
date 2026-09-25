@@ -459,6 +459,12 @@ export interface CardActions {
    * notification opens Telegram, so this is the one tap from there to the app.
    */
   phoneLink?: string | null;
+  /**
+   * The controller vouches that this session, though not Conductor's, can be
+   * answered (a terminal agent). Reply, Full message and the options are then
+   * offered; Open Chat and the phone link stay Conductor-only.
+   */
+  external?: boolean;
 }
 
 const CHOICE_BUTTONS_PER_ROW = 4;
@@ -471,11 +477,12 @@ export function attentionCardKeyboard(
   const allowed: CardActions = typeof actions === "boolean" ? { reply: actions, open: actions } : actions;
   const rows: TelegramInlineKeyboard = [];
   const actionable = isActionable(item.session);
+  const answerable = actionable || allowed.external === true;
 
   // The options go first and one tap sends the letter, which is what the
   // agent asked for. The names are on the card; the buttons only need the
   // letter, which keeps a three-way choice on one row.
-  const choices = actionable && allowed.reply ? allowed.choices : null;
+  const choices = answerable && allowed.reply ? allowed.choices : null;
   if (choices) {
     const buttons = choices.options.map((option) => ({
       text: option.letter === choices.recommended ? `${option.letter} ★` : option.letter,
@@ -487,13 +494,13 @@ export function attentionCardKeyboard(
   }
 
   const conversation: TelegramInlineKeyboard[number] = [];
-  if (actionable && allowed.reply) {
+  if (answerable && allowed.reply) {
     conversation.push({ text: "Reply", callback_data: `fleet:reply:${handle}` });
   }
   if (actionable && allowed.open) {
     conversation.push({ text: "Open Chat", callback_data: `fleet:open:${handle}` });
   }
-  if (actionable && allowed.full) {
+  if (answerable && allowed.full) {
     conversation.push({ text: "Full message", callback_data: `fleet:full:${handle}` });
   }
   if (conversation.length > 0) {

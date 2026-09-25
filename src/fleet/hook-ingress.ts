@@ -32,8 +32,8 @@ export interface HookIngressOptions {
  * readable or usable from there.
  */
 export interface IngressControl {
-  sessionMessage(conductorSessionId: string): unknown;
-  reply(conductorSessionId: string, text: string): Promise<unknown>;
+  sessionMessage(replyTarget: string): unknown;
+  reply(replyTarget: string, text: string): Promise<unknown>;
   /** The phone channel: status, pair, approve, reject, revoke, reset. */
   remote?(action: string, deviceId: string | null): Promise<unknown>;
 }
@@ -185,8 +185,11 @@ export class HookIngressServer {
   }
 
   /**
-   * `GET  /control/session/<conductorSessionId>/message`
-   * `POST /control/session/<conductorSessionId>/reply` with `{ "text": "..." }`
+   * `GET  /control/session/<replyTarget>/message`
+   * `POST /control/session/<replyTarget>/reply` with `{ "text": "..." }`
+   *
+   * `replyTarget` is a Conductor chat id or a terminal agent's fleet key, as
+   * `/state` hands it out.
    */
   private handleControl(request: http.IncomingMessage, response: http.ServerResponse): void {
     const provided = headerValue(request, TOKEN_HEADER);
@@ -222,7 +225,8 @@ export class HookIngressServer {
       return;
     }
 
-    const match = /^\/control\/session\/([A-Za-z0-9-]{1,80})\/(message|reply)$/.exec(
+    // A Conductor chat id, or the fleet key of a terminal agent (`claude-transcript:<uuid>`).
+    const match = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply)$/.exec(
       (request.url ?? "").split("?")[0] ?? "",
     );
     if (!match) {

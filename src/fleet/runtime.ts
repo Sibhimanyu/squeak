@@ -3,6 +3,7 @@ import { CodexUsageReader } from "./codex-usage.js";
 import { DiffReader } from "./diff-view.js";
 import { deriveDuckState } from "./duck-mood.js";
 import { distinctTitles, originLabel } from "./radar.js";
+import { replyTargetFor } from "./reply-router.js";
 import { FleetMonitor } from "./fleet-monitor.js";
 import { FleetStore } from "./fleet-store.js";
 import { ClaudeCostReader } from "./claude-cost.js";
@@ -14,6 +15,7 @@ import { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import { ConductorObserver } from "./observers/conductor.js";
 import { ProcessLivenessObserver } from "./observers/process-liveness.js";
+import type { FleetSession } from "./types.js";
 
 export interface FleetRuntimeOptions {
   conductorDbPath: string;
@@ -39,6 +41,11 @@ export interface FleetRuntime {
   ingress: HookIngressServer;
   diff: DiffReader;
   codexUsage: CodexUsageReader;
+  /**
+   * Which sessions outside Conductor can be answered, so `/state` can say so.
+   * Set by whoever owns the replier; until then only Conductor chats can.
+   */
+  setCanReply(canReply: ((session: FleetSession) => boolean) | null): void;
 }
 
 /**
@@ -81,17 +88,31 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     port: options.hookPort,
     tokenPath: defaultHookInstallPaths(options.supportDir).tokenPath,
     onEvent: (event) => monitor.ingestHookEvent(event),
-    readState: () => serializeState(monitor),
+    readState: () => serializeState(monitor, canReply),
   });
 
-  return { registry, store, monitor, ingress, diff: new DiffReader(), codexUsage: new CodexUsageReader() };
+  let canReply: ((session: FleetSession) => boolean) | null = null;
+  return {
+    registry,
+    store,
+    monitor,
+    ingress,
+    diff: new DiffReader(),
+    codexUsage: new CodexUsageReader(),
+    setCanReply: (next) => {
+      canReply = next;
+    },
+  };
 }
 
 /**
  * The payload the desktop duck renders. Everything it needs is computed here,
  * so the renderer stays presentational and cannot disagree with Telegram.
  */
-export function serializeState(monitor: FleetMonitor): unknown {
+export function serializeState(
+  monitor: FleetMonitor,
+  canReply: ((session: FleetSession) => boolean) | null = null,
+): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
   return {
@@ -116,6 +137,16 @@ export function serializeState(monitor: FleetMonitor): unknown {
       alive: session.alive,
       conductorSessionId: session.conductorSessionId,
       conductorWorkspaceId: session.conductorWorkspaceId ?? null,
+      /**
+       * What the window addresses a reply or message read to: the Conductor
+       * chat, or the fleet key of a terminal agent it can type into; null
+       * when neither applies.
+       */
+      replyTarget: session.conductorSessionId
+        ? session.conductorSessionId
+        : canReply?.(session)
+          ? replyTargetFor(session)
+          : null,
       /** Set only when another active row would read the same. */
       distinctTitle: titles.get(session.key) ?? null,
       git: session.git,

@@ -99,39 +99,58 @@ export class SqueakHandsSender implements ConductorUiSender {
   }
 
   private async run(request: UiSendRequest): Promise<UiSendResult> {
-    if (!fs.existsSync(this.appPath)) {
+    const outcome = await runHands(this.appPath, "send", request);
+    if (outcome.status === "missing") {
       return { ok: false, error: "helper-missing" };
     }
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-hands-"));
-    const requestPath = path.join(dir, "request.json");
-    const resultPath = path.join(dir, "result.json");
-    try {
-      fs.writeFileSync(requestPath, JSON.stringify(request), { mode: 0o600 });
-      // Launched through LaunchServices so macOS attributes it to Squeak
-      // Hands' own grant, not to whoever spawned it.
-      const launched = await new Promise<boolean>((resolve) => {
-        execFile(
-          "/usr/bin/open",
-          ["-W", "-n", this.appPath, "--args", "send", requestPath, resultPath],
-          { timeout: HELPER_TIMEOUT_MS },
-          (error) => resolve(!error),
-        );
-      });
-      const raw = fs.existsSync(resultPath) ? fs.readFileSync(resultPath, "utf8") : null;
-      if (!raw) {
-        // No verdict: it may have died halfway through typing.
-        return { ok: false, error: "helper-failed", detail: launched ? "no result" : "launch failed or timed out" };
-      }
-      const parsed = JSON.parse(raw) as { ok?: boolean; error?: UiSendError; detail?: string };
-      if (parsed.ok) {
-        return { ok: true };
-      }
-      return { ok: false, error: parsed.error ?? "helper-failed", ...(parsed.detail ? { detail: parsed.detail } : {}) };
-    } catch (error) {
-      logger.warn("squeak hands failed", { error: error instanceof Error ? error.message : String(error) });
-      return { ok: false, error: "helper-failed" };
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+    if (outcome.status === "no-result") {
+      // No verdict: it may have died halfway through typing.
+      return { ok: false, error: "helper-failed", detail: outcome.detail };
     }
+    const parsed = outcome.result as { ok?: boolean; error?: UiSendError; detail?: string };
+    if (parsed.ok) {
+      return { ok: true };
+    }
+    return { ok: false, error: parsed.error ?? "helper-failed", ...(parsed.detail ? { detail: parsed.detail } : {}) };
+  }
+}
+
+export type HandsOutcome =
+  | { status: "missing" }
+  | { status: "no-result"; detail: string }
+  | { status: "result"; result: Record<string, unknown> };
+
+/**
+ * One run of Squeak Hands in `mode`, with `request` handed over as a 0600
+ * file. Launched through LaunchServices so macOS attributes it to Squeak
+ * Hands' own grants, not to whoever spawned it.
+ */
+export async function runHands(appPath: string, mode: string, request: unknown): Promise<HandsOutcome> {
+  if (!fs.existsSync(appPath)) {
+    return { status: "missing" };
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-hands-"));
+  const requestPath = path.join(dir, "request.json");
+  const resultPath = path.join(dir, "result.json");
+  try {
+    fs.writeFileSync(requestPath, JSON.stringify(request), { mode: 0o600 });
+    const launched = await new Promise<boolean>((resolve) => {
+      execFile(
+        "/usr/bin/open",
+        ["-W", "-n", appPath, "--args", mode, requestPath, resultPath],
+        { timeout: HELPER_TIMEOUT_MS },
+        (error) => resolve(!error),
+      );
+    });
+    const raw = fs.existsSync(resultPath) ? fs.readFileSync(resultPath, "utf8") : null;
+    if (!raw) {
+      return { status: "no-result", detail: launched ? "no result" : "launch failed or timed out" };
+    }
+    return { status: "result", result: JSON.parse(raw) as Record<string, unknown> };
+  } catch (error) {
+    logger.warn("squeak hands failed", { mode, error: error instanceof Error ? error.message : String(error) });
+    return { status: "no-result", detail: "unreadable result" };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 }

@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import CryptoKit
 import Foundation
 
 // Squeak Hands: the one process that holds Accessibility permission, so that
@@ -276,14 +277,161 @@ func send(_ request: SendRequest) -> (ok: Bool, error: SendError?, detail: Strin
     return (false, .unconfirmed, nil)
 }
 
+// MARK: Terminal.app
+//
+// Answering an agent that runs in Terminal. This needs the Automation grant
+// for Terminal rather than Accessibility, and it lives here for the same
+// reason the Accessibility grant does: controlling Terminal can run any
+// command, and granting that to node would grant it to every script on the
+// Mac. The node side proves which process and tty belong to the session and
+// that the screen shows an empty prompt; this side finds the one tab on that
+// tty, and types only if the screen is still exactly what was approved and
+// an agent — never a shell — is the tty's foreground process.
+
+let terminalBundleId = "com.apple.Terminal"
+
+let terminalScriptSource = """
+on tabsFor(ttyName)
+  tell application "Terminal"
+    set found to {}
+    repeat with w in windows
+      set wid to id of w
+      repeat with i from 1 to (count of tabs of w)
+        if tty of tab i of w is ttyName then set end of found to {wid, i}
+      end repeat
+    end repeat
+    return found
+  end tell
+end tabsFor
+on readTab(wid, i)
+  tell application "Terminal" to return contents of tab i of window id wid
+end readTab
+on typeInto(wid, i, body)
+  tell application "Terminal" to do script body in tab i of window id wid
+end typeInto
+"""
+
+enum TerminalError: String { case terminalNotRunning = "terminal-not-running", noTab = "no-tab", ambiguousTab = "ambiguous-tab", notAuthorized = "not-authorized", scriptFailed = "script-failed", screenChanged = "screen-changed", notAgentForeground = "not-agent-foreground" }
+
+struct TerminalFailure: Error { let error: TerminalError; let detail: String? }
+
+/// Call one handler of the compiled script with real parameters, so reply
+/// text is never spliced into AppleScript source.
+func callTerminal(_ script: NSAppleScript, _ handler: String, _ params: [NSAppleEventDescriptor]) throws -> NSAppleEventDescriptor {
+    let fourCC: (String) -> UInt32 = { $0.utf8.reduce(0) { ($0 << 8) | UInt32($1) } }
+    let event = NSAppleEventDescriptor(eventClass: fourCC("ascr"), eventID: fourCC("psbr"),
+                                       targetDescriptor: NSAppleEventDescriptor.currentProcess(),
+                                       returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+    event.setParam(NSAppleEventDescriptor(string: handler.lowercased()), forKeyword: fourCC("snam"))
+    let list = NSAppleEventDescriptor.list()
+    for (index, param) in params.enumerated() { list.insert(param, at: index + 1) }
+    event.setParam(list, forKeyword: fourCC("----"))
+    var error: NSDictionary?
+    let result = script.executeAppleEvent(event, error: &error)
+    if let error = error {
+        let code = (error[NSAppleScript.errorNumber] as? Int) ?? 0
+        let message = (error[NSAppleScript.errorMessage] as? String) ?? "\(code)"
+        // -1743: the user has not allowed Squeak Hands to control Terminal.
+        throw TerminalFailure(error: code == -1743 ? .notAuthorized : .scriptFailed, detail: message)
+    }
+    return result
+}
+
+func terminalTab(_ script: NSAppleScript, tty: String) throws -> (Int32, Int32) {
+    let found = try callTerminal(script, "tabsFor", [NSAppleEventDescriptor(string: "/dev/\(tty)")])
+    guard found.numberOfItems == 1, let pair = found.atIndex(1), pair.numberOfItems == 2,
+          let window = pair.atIndex(1)?.int32Value, let tab = pair.atIndex(2)?.int32Value
+    else { throw TerminalFailure(error: found.numberOfItems == 0 ? .noTab : .ambiguousTab, detail: nil) }
+    return (window, tab)
+}
+
+func readTerminal(_ script: NSAppleScript, _ tab: (Int32, Int32)) throws -> String {
+    try callTerminal(script, "readTab", [NSAppleEventDescriptor(int32: tab.0), NSAppleEventDescriptor(int32: tab.1)]).stringValue ?? ""
+}
+
+func sha256(_ text: String) -> String {
+    SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+}
+
+/// Whether the foreground process group of `tty` holds an agent, read from
+/// `ps` at the last moment. A shell in the foreground would run the text.
+func agentOwnsForeground(tty: String) -> Bool {
+    let ps = Process()
+    ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+    ps.arguments = ["-t", tty, "-o", "pgid=,tpgid=,comm="]
+    let pipe = Pipe()
+    ps.standardOutput = pipe
+    do { try ps.run() } catch { return false }
+    ps.waitUntilExit()
+    let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    for line in output.split(separator: "\n") {
+        let fields = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+        guard fields.count == 3, fields[0] == fields[1] else { continue }
+        let name = (String(fields[2]) as NSString).lastPathComponent
+        if name == "claude" || name == "codex" { return true }
+    }
+    return false
+}
+
+func runTerminal(mode: String, requestPath: String, resultPath: String) {
+    struct TerminalRequest: Decodable { let tty: String; let text: String?; let expectSha256: String? }
+    guard let data = FileManager.default.contents(atPath: requestPath),
+          let request = try? JSONDecoder().decode(TerminalRequest.self, from: data),
+          request.tty.range(of: "^ttys[0-9]{3,4}$", options: .regularExpression) != nil
+    else {
+        write(["ok": false, "error": "bad-request"], to: resultPath)
+        exit(65)
+    }
+    // Asking Terminal anything would launch it; an agent in a closed Terminal
+    // has nothing to type into anyway.
+    guard !NSRunningApplication.runningApplications(withBundleIdentifier: terminalBundleId).isEmpty else {
+        write(["ok": false, "error": TerminalError.terminalNotRunning.rawValue], to: resultPath)
+        exit(3)
+    }
+    guard let script = NSAppleScript(source: terminalScriptSource) else {
+        write(["ok": false, "error": TerminalError.scriptFailed.rawValue, "detail": "compile"], to: resultPath)
+        exit(70)
+    }
+    do {
+        let tab = try terminalTab(script, tty: request.tty)
+        let contents = try readTerminal(script, tab)
+        if mode == "terminal-read" {
+            write(["ok": true, "contents": contents, "sha256": sha256(contents)], to: resultPath)
+            return
+        }
+        guard let text = request.text, !text.isEmpty, let expected = request.expectSha256 else {
+            write(["ok": false, "error": "bad-request"], to: resultPath)
+            exit(65)
+        }
+        guard sha256(contents) == expected else { throw TerminalFailure(error: .screenChanged, detail: nil) }
+        guard agentOwnsForeground(tty: request.tty) else { throw TerminalFailure(error: .notAgentForeground, detail: nil) }
+        // Bracketed paste keeps a multi-line reply one message; `do script`
+        // adds the Enter that sends it.
+        let escape = "\u{1b}"
+        _ = try callTerminal(script, "typeInto", [NSAppleEventDescriptor(int32: tab.0), NSAppleEventDescriptor(int32: tab.1),
+                                                   NSAppleEventDescriptor(string: "\(escape)[200~\(text)\(escape)[201~")])
+        write(["ok": true], to: resultPath)
+    } catch let failure as TerminalFailure {
+        var payload: [String: Any] = ["ok": false, "error": failure.error.rawValue]
+        if let detail = failure.detail { payload["detail"] = detail }
+        write(payload, to: resultPath)
+        exit(3)
+    } catch {
+        write(["ok": false, "error": TerminalError.scriptFailed.rawValue], to: resultPath)
+        exit(70)
+    }
+}
+
 let args = CommandLine.arguments
 let mode = args.count > 1 ? args[1] : "probe"
 let outPath = args.count > 2 ? args[2] : "/tmp/squeak-hands.json"
 // Where errors go: the probe writes to its only path, send to its second.
 let errorPath = (mode == "send" || mode == "press" || mode == "choose-file") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
+let terminalModes: Set<String> = ["terminal-read", "terminal-type"]
 
-let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
-if !trusted {
+// Terminal is driven by Apple Events, which need Automation, not Accessibility.
+if !terminalModes.contains(mode),
+   !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
     write(["ok": false, "error": "not-trusted"], to: errorPath)
     exit(2)
 }
@@ -420,6 +568,9 @@ case "send":
     if let error = result.error { payload["error"] = error.rawValue }
     if let detail = result.detail { payload["detail"] = detail }
     write(payload, to: resultPath)
+case "terminal-read", "terminal-type":
+    // terminal-read|terminal-type <request.json> <result.json>
+    runTerminal(mode: mode, requestPath: outPath, resultPath: args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json")
 default:
     write(["ok": false, "error": "unknown-mode"], to: outPath)
     exit(64)

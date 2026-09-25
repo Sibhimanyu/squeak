@@ -30,6 +30,12 @@ holding the Accessibility permission. When the Mac is locked or the chat is
 not open, the reply runs in the background instead and Conductor shows it the
 next time it loads the chat.
 
+An agent running in **Terminal** — `claude` or `codex` started by hand — is
+answered the same way, typed into its own tab by Squeak Hands. It only types
+at the agent's empty prompt, never into a question, a permission prompt, a
+picker or a shell, and confirms from the transcript that the agent took it.
+Sessions in other terminals, Claude Desktop and Cowork stay watch-only.
+
 The iPhone talks to the Mac through Firebase, which only ever relays
 encrypted data: replies are signed by a key in the phone's Secure Enclave and
 the Mac acts only on signatures from phones you approved. See
@@ -51,7 +57,10 @@ helpers/squeak-hands/build.sh ~/Library/Application\ Support/squeak   # live rep
 ```
 
 Then grant **Squeak Hands** Accessibility in System Settings → Privacy &
-Security.
+Security. The first reply to a Terminal agent asks to let Squeak Hands
+control Terminal (Privacy & Security → Automation). Rebuild Squeak Hands with
+the same command after pulling changes to `helpers/squeak-hands/`; `ship.sh`
+does not.
 
 ### iPhone
 

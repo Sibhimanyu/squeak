@@ -6,7 +6,9 @@ import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import { FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { parseChoices } from "../fleet/choices.js";
+import { FleetReplyRouter } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
+import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
@@ -67,6 +69,8 @@ export class SqueakApp {
   private readonly runtime: FleetRuntime;
   private readonly controller: FleetController;
   private readonly replier: ConductorReplier;
+  /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
+  private readonly router: FleetReplyRouter;
   private readonly remote: RemoteBridge | null;
   private lastUpdateId = 0;
   private stopped = false;
@@ -95,6 +99,16 @@ export class SqueakApp {
       codex: new CodexAppServerAdapter(config.codexBin),
       ui: config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null,
     });
+    this.router = new FleetReplyRouter({
+      conductor: this.replier,
+      // Typing into Terminal goes through Squeak Hands too, which holds the
+      // Automation grant for it; without Hands, terminal agents stay watch-only.
+      terminal: config.handsAppPath
+        ? new TerminalReplier({ screen: new SqueakHandsTerminal(config.handsAppPath) })
+        : null,
+      sessions: () => this.runtime.monitor.snapshot.sessions,
+    });
+    this.runtime.setCanReply((session) => this.router.canReply(session));
 
     // The phone channel, when a Firebase project is configured. Same replier,
     // same busy rules; the bridge adds pairing and signature checks on top.
@@ -134,13 +148,13 @@ export class SqueakApp {
             return { ok: false };
         }
       },
-      sessionMessage: (sessionId) => {
-        const text = this.replier.lastTurnText(sessionId);
+      sessionMessage: (target) => {
+        const text = this.router.lastTurnText(target);
         return { text, choices: parseChoices(text) };
       },
-      reply: (sessionId, text) =>
-        this.replier.send(sessionId, text, (message) => {
-          logger.warn("reply from the Mac app failed", { sessionId, message });
+      reply: (target, text) =>
+        this.router.send(target, text, (message) => {
+          logger.warn("reply from the Mac app failed", { target, message });
         }),
     });
 
@@ -153,7 +167,7 @@ export class SqueakApp {
       // No conversation view to hand a chat to — but a finished chat can be
       // answered in place, which is what the replier is for.
       openConductorSession: null,
-      replier: this.replier,
+      replier: this.router,
       // Telegram buttons only open https links, so the card points at a page
       // on the channel's own Firebase site that hands off to the phone app.
       phoneLink: (conductorSessionId) =>

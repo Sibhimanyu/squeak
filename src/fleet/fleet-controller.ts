@@ -18,6 +18,7 @@ import {
   renderRadar,
   sessionLabel,
 } from "./radar.js";
+import { replyTargetFor } from "./reply-router.js";
 import type { ReplyFailureHandler, ReplyOutcome } from "./session-reply.js";
 import type { AttentionItem, FleetSession } from "./types.js";
 
@@ -27,10 +28,16 @@ const SNOOZE_MS = 60 * 60 * 1000;
 /** Paging through a diff should not re-shell git for every tap. */
 const DIFF_CACHE_TTL_MS = 60_000;
 
-/** What the controller needs from ConductorReplier; narrow so tests can fake it. */
+/**
+ * What the controller needs from a replier; narrow so tests can fake it.
+ * `target` is `replyTargetFor(session)`: a Conductor chat's id, or a fleet
+ * key for a session outside Conductor.
+ */
 export interface FleetReplier {
-  lastTurnText(conductorSessionId: string): string | null;
-  send(conductorSessionId: string, text: string, onFailed: ReplyFailureHandler): Promise<ReplyOutcome>;
+  lastTurnText(target: string): string | null;
+  send(target: string, text: string, onFailed: ReplyFailureHandler): Promise<ReplyOutcome>;
+  /** Whether a session outside Conductor can be answered at all. Absent: only Conductor chats can. */
+  canReply?(session: FleetSession): boolean;
 }
 
 export interface FleetControllerDependencies {
@@ -239,7 +246,7 @@ export class FleetController {
       }
       case "reply": {
         const session = this.resolveHandle(argument);
-        if (this.deps.replier && session?.conductorSessionId) {
+        if (session && this.canAnswer(session)) {
           await this.promptForReply(location, session);
           return { handled: true };
         }
@@ -253,14 +260,14 @@ export class FleetController {
       case "pick": {
         const session = this.resolveHandle(argument);
         const letter = parts[3];
-        if (!this.deps.replier || !session?.conductorSessionId || !letter || !/^[A-H]$/.test(letter)) {
+        if (!session || !this.canAnswer(session) || !letter || !/^[A-H]$/.test(letter)) {
           return { handled: true, notice: "That session cannot be replied to from here." };
         }
         return this.sendChoice(location, session, letter, messageId);
       }
       case "full": {
         const session = this.resolveHandle(argument);
-        if (!this.deps.replier || !session?.conductorSessionId) {
+        if (!session || !this.canAnswer(session)) {
           return { handled: true, notice: "That session is no longer being tracked." };
         }
         await this.sendFullMessage(location, session);
@@ -295,7 +302,7 @@ export class FleetController {
     if (!replier || !target) {
       return false;
     }
-    const outcome = await replier.send(target.conductorSessionId, text, this.failureNotifier(location, target.label));
+    const outcome = await replier.send(target.target, text, this.failureNotifier(location, target.label));
     if (outcome.status === "refused") {
       await this.send(location, outcome.reason);
       return true;
@@ -318,7 +325,7 @@ export class FleetController {
   ): Promise<{ handled: boolean; notice?: string }> {
     const label = cardLabel(session);
     const outcome = await this.deps.replier!.send(
-      session.conductorSessionId!,
+      replyTargetFor(session),
       letter,
       this.failureNotifier(location, label),
     );
@@ -327,13 +334,18 @@ export class FleetController {
     }
     this.afterReplyStarted();
 
-    const where = outcome.via === "conductor" ? "in Conductor" : "in the background";
+    const where =
+      outcome.via === "conductor"
+        ? "in Conductor"
+        : outcome.via === "terminal"
+          ? "in its terminal"
+          : "in the background";
     const answered: TelegramInlineKeyboard = [[{ text: `✓ Sent ${letter} ${where}`, callback_data: "fleet:noop" }]];
     if (messageId !== null) {
       try {
         await this.deps.telegram.editMessageReplyMarkup(location.chatId, messageId, answered);
         // A background send also needs its reason, which does not fit a button.
-        return outcome.via === "conductor"
+        return outcome.via !== "background"
           ? { handled: true }
           : { handled: true, notice: deliveredText(`Sent **${letter}** to **${label}**`, outcome) };
       } catch (error) {
@@ -357,7 +369,7 @@ export class FleetController {
         messageThreadId: location.messageThreadId,
       });
       if (messageId !== null) {
-        this.deps.store.setReplyTarget(location.chatId, messageId, session.conductorSessionId!, label);
+        this.deps.store.setReplyTarget(location.chatId, messageId, replyTargetFor(session), label);
       }
     } catch (error) {
       logger.warn("fleet reply prompt failed", { error: error instanceof Error ? error.message : String(error) });
@@ -366,7 +378,7 @@ export class FleetController {
 
   /** The agent's whole last message, for when the card's gist is not enough to decide. */
   private async sendFullMessage(location: TelegramConversationTarget, session: FleetSession): Promise<void> {
-    const text = this.deps.replier!.lastTurnText(session.conductorSessionId!);
+    const text = this.deps.replier!.lastTurnText(replyTargetFor(session));
     if (!text) {
       await this.send(location, "There is no finished message to show — the chat may be working again.");
       return;
@@ -383,6 +395,7 @@ export class FleetController {
             reply: true,
             open: false,
             choices,
+            external: !session.conductorSessionId,
           },
         ),
       );
@@ -391,7 +404,7 @@ export class FleetController {
     }
     const messageId = await this.send(location, `**${cardLabel(session)}**\n\n${text}`, keyboard);
     if (messageId !== null) {
-      this.deps.store.setReplyTarget(location.chatId, messageId, session.conductorSessionId!, cardLabel(session));
+      this.deps.store.setReplyTarget(location.chatId, messageId, replyTargetFor(session), cardLabel(session));
     }
   }
 
@@ -516,11 +529,22 @@ export class FleetController {
       lines.push("");
       lines.push(session.detail);
     }
+    const answerable = this.canAnswer(session);
     lines.push("");
-    lines.push("_This session was not started by Conductor, so the bridge can watch it but not drive it._");
+    lines.push(
+      answerable
+        ? "_This session runs in a terminal. A reply is typed into it there._"
+        : "_This session was not started by Conductor, so the bridge can watch it but not drive it._",
+    );
 
     const handle = this.deps.store.handleFor(session.key);
     const rows: TelegramInlineKeyboard = [];
+    if (answerable) {
+      rows.push([
+        { text: "Reply", callback_data: `fleet:reply:${handle}` },
+        { text: "Full message", callback_data: `fleet:full:${handle}` },
+      ]);
+    }
     if (session.cwd) {
       rows.push([{ text: "View Diff", callback_data: `fleet:diff:${handle}` }]);
     }
@@ -582,6 +606,7 @@ export class FleetController {
         open: this.canDrive,
         full: replyable,
         choices,
+        external: replyable && !conductorSessionId,
         phoneLink: conductorSessionId ? (this.deps.phoneLink?.(conductorSessionId) ?? null) : null,
       });
       for (const target of targets) {
@@ -590,7 +615,7 @@ export class FleetController {
           this.deps.store.setReplyTarget(
             target.chatId,
             messageId,
-            item.session.conductorSessionId!,
+            replyTargetFor(item.session),
             cardLabel(item.session),
           );
         }
@@ -599,17 +624,34 @@ export class FleetController {
   }
 
   /**
-   * Only a finish can be answered from here. A blocked Conductor session is
-   * holding its question open inside Conductor's own process, and a second
-   * writer would talk past it.
+   * A Conductor chat is answered only from a finish: a blocked one is holding
+   * its question open inside Conductor's own process, and a second writer
+   * would talk past it. A terminal agent is typed into, so one waiting for
+   * input can be answered too — but never one waiting on an approval, whose
+   * prompt a typed digit would answer. The send checks again either way.
    */
   private canReplyFrom(item: AttentionItem): boolean {
-    return Boolean(this.deps.replier && item.session.conductorSessionId && item.kind === "finished_unreviewed");
+    if (!this.canAnswer(item.session)) {
+      return false;
+    }
+    if (item.session.conductorSessionId) {
+      return item.kind === "finished_unreviewed";
+    }
+    return item.kind === "finished_unreviewed" || item.kind === "blocked_question";
+  }
+
+  /** Whether the replier can answer this session at all, whatever it is doing now. */
+  private canAnswer(session: FleetSession): boolean {
+    const replier = this.deps.replier;
+    if (!replier) {
+      return false;
+    }
+    return session.conductorSessionId ? true : (replier.canReply?.(session) ?? false);
   }
 
   private readChoices(session: FleetSession): ParsedChoices | null {
     try {
-      return parseChoices(this.deps.replier!.lastTurnText(session.conductorSessionId!));
+      return parseChoices(this.deps.replier!.lastTurnText(replyTargetFor(session)));
     } catch (error) {
       // A card without buttons is still a card; never lose the push over this.
       logger.warn("could not read the last message for choices", {
@@ -672,6 +714,9 @@ export class FleetController {
 function deliveredText(sent: string, outcome: Extract<ReplyOutcome, { status: "started" }>): string {
   if (outcome.via === "conductor") {
     return `${sent} in Conductor. I'll message you when it answers.`;
+  }
+  if (outcome.via === "terminal") {
+    return `${sent} in its terminal.`;
   }
   const why = outcome.fallbackReason ? ` because ${outcome.fallbackReason}` : "";
   return `${sent} in the background${why}. Conductor will show it the next time it loads the chat. I'll message you when it answers.`;
