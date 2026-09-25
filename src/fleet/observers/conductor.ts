@@ -151,6 +151,10 @@ function normalizePercent(value: number | null): number | null {
  * honour it rather than nagging about work that has been signed off.
  */
 function isRetiredWorkspace(row: FleetRegistrySessionRef): boolean {
+  // A chat you closed is done with, whatever its workspace says.
+  if (row.isHidden) {
+    return true;
+  }
   const manual = row.manualStatus?.trim().toLowerCase();
   if (manual === "canceled" || manual === "cancelled" || manual === "done") {
     return true;

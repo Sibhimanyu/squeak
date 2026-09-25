@@ -834,4 +834,24 @@ describe("ConductorRegistryAdapter", () => {
     expect(byId.get("never")?.lastTurnEndedAt).toBeNull();
     expect(byId.get("never")?.lastTurnOutcome).toBeNull();
   });
+
+  it("returns closed chats flagged as hidden instead of dropping them", () => {
+    const { adapter, db } = createRegistryFixture();
+    db.prepare(
+      `INSERT INTO repos (id, name, root_path, default_branch, updated_at, remote, hidden) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("repo-1", "repo", "/repos/repo", "main", "2026-09-22T04:00:00.000Z", "origin", 0);
+    db.prepare(
+      `INSERT INTO workspaces (id, repository_id, directory_name, branch, updated_at, state, derived_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("ws", "repo-1", "ws", "ws", "2026-09-22T04:00:00.000Z", "ready", "in-progress");
+    const insert = db.prepare(
+      `INSERT INTO sessions (id, workspace_id, status, agent_type, updated_at, is_hidden) VALUES (?, ?, ?, ?, ?, ?);`,
+    );
+    insert.run("open", "ws", "idle", "claude", "2026-09-22T04:10:00.000Z", 0);
+    insert.run("closed", "ws", "idle", "claude", "2026-09-22T04:09:00.000Z", 1);
+
+    const byId = new Map(adapter.listFleetSessions(10).map((session) => [session.id, session]));
+    expect(byId.get("open")?.isHidden).toBe(false);
+    expect(byId.get("closed")?.isHidden).toBe(true);
+  });
 });

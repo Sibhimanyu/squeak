@@ -107,6 +107,13 @@ describe("ConductorObserver", () => {
     expect(session?.state).toBe("idle");
   });
 
+  it("keeps a closed chat as Conductor's, but retired", () => {
+    // Left out entirely, its transcript resurfaced as an anonymous session.
+    const [session] = observe([row({ isHidden: true, status: "working" })]);
+    expect(session?.conductorSessionId).toBe("session-1");
+    expect(session?.retired).toBe(true);
+  });
+
   it("reports an idle chat with no turn end at all as idle", () => {
     const [session] = observe([row({ lastTurnEndedAt: null, lastTurnOutcome: null })]);
     expect(session?.state).toBe("idle");

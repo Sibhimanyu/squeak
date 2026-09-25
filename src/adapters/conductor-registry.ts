@@ -41,6 +41,8 @@ export interface FleetRegistrySessionRef extends ConductorSessionRef {
   lastTurnEndedAt?: string | null;
   /** How that turn ended. */
   lastTurnOutcome?: "success" | "failed" | "aborted" | null;
+  /** The chat was closed in Conductor, or its repo hidden. */
+  isHidden?: boolean;
 }
 
 interface DbSessionRow {
@@ -563,20 +565,22 @@ export class ConductorRegistryAdapter {
                 AND (m.content LIKE '{"type":"result"%' OR m.content LIKE '{"type":"error"%')
               ORDER BY m.rowid DESC
               LIMIT 1
-            ) as lastTurnEnd
+            ) as lastTurnEnd,
+            -- Closed chats are returned, flagged, rather than left out: left
+            -- out, their transcripts still exist, and the fleet rediscovers
+            -- them as anonymous non-Conductor sessions.
+            (IFNULL(s.is_hidden, 0) != 0 OR IFNULL(r.hidden, 0) != 0) as hidden
           FROM sessions s
           JOIN workspaces w ON w.id = s.workspace_id
           JOIN repos r ON r.id = w.repository_id
-          WHERE IFNULL(s.is_hidden, 0) = 0
-            AND IFNULL(r.hidden, 0) = 0
           -- datetime() understands both of Conductor's timestamp spellings,
           -- so recency order does not depend on which one a row carries.
           ORDER BY datetime(s.updated_at) DESC
           LIMIT ?
         `,
       )
-      .all(limit) as Array<FleetRegistrySessionRef & { lastTurnEnd: string | null }>;
-    return rows.map(({ lastTurnEnd, ...row }) => {
+      .all(limit) as Array<FleetRegistrySessionRef & { lastTurnEnd: string | null; hidden: number }>;
+    return rows.map(({ lastTurnEnd, hidden, ...row }) => {
       const [endedAt, outcome] = lastTurnEnd ? lastTurnEnd.split("|") : [null, null];
       return {
         ...row,
@@ -584,6 +588,7 @@ export class ConductorRegistryAdapter {
         lastUserMessageAt: conductorTimestampToIso(row.lastUserMessageAt),
         lastTurnEndedAt: conductorTimestampToIso(endedAt ?? null),
         lastTurnOutcome: outcome === "success" || outcome === "failed" || outcome === "aborted" ? outcome : null,
+        isHidden: hidden === 1,
       };
     });
   }

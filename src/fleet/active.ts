@@ -32,10 +32,13 @@ export function isActiveSession(session: FleetSession, nowMs: number, options: A
     case "error":
       return nowMs - Date.parse(session.lastActivityAt) < (options.recentlyFinishedMs ?? DEFAULT_RECENTLY_FINISHED_MS);
     case "idle":
-      // A quiet session whose process is still up is one you have open and are
-      // about to type into, which is very different from one abandoned on
-      // Tuesday.
-      return session.alive;
+      // A quiet terminal session whose process is still up is one you have
+      // open and are about to type into, which is very different from one
+      // abandoned on Tuesday. Not so for Conductor: its sidecar keeps a warm
+      // agent process per recently used chat for hours, so a live process
+      // says nothing about you, and Conductor reports the chat's status
+      // itself.
+      return session.alive && session.origin !== "conductor";
     default:
       return false;
   }

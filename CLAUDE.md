@@ -386,6 +386,16 @@ transcripts, and ranks them by what is blocked on the human.
   `{"type":"error","content":"aborted by user"}` is you pressing stop, so idle;
   other `error` rows or `is_error: 1` are `error`. A resting chat's
   `lastActivityAt` is its content time, never `updated_at`.
+- **Closed Conductor chats stay in the Conductor observation, flagged.**
+  `listFleetSessions` used to skip `is_hidden` chats, but their transcripts
+  still exist, so the fleet rediscovered each one as an anonymous
+  non-Conductor session (labelled by folder, not repo). They are returned with
+  `isHidden` and the observer marks them retired. Hidden repos likewise.
+- **An idle Conductor chat is never active because of a live process.**
+  Conductor's sidecar keeps a warm `claude` process per recently used chat
+  for many hours (four at once on a real machine, all idle 16h), so "quiet
+  with a live process" — the right signal for a terminal agent — means nothing
+  for a Conductor chat, whose status Conductor reports itself.
 - **A session can want attention for several reasons at once**, so
   `classifyAttentions` returns a list. Do not collapse it back to one.
 - **`workspaces.state = 'archived'` does not mean "done", it means the worktree

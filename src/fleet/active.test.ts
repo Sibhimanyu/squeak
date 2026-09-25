@@ -60,6 +60,12 @@ describe("isActiveSession", () => {
     expect(isActiveSession(session({ state: "idle", alive: true }), now)).toBe(true);
   });
 
+  it("does not count an idle Conductor chat just because Conductor keeps its process warm", () => {
+    // Seen on a real machine: four chats idle for 16h, each with a claude
+    // process under Conductor's sidecar, all listed as active.
+    expect(isActiveSession(session({ state: "idle", alive: true, origin: "conductor" }), now)).toBe(false);
+  });
+
   it("drops a quiet session with no process behind it", () => {
     expect(isActiveSession(session({ state: "idle", alive: false }), now)).toBe(false);
   });
