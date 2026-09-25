@@ -77,6 +77,18 @@ async function captureTo(target, prefix) {
     await wait(1800);
     await shot(`${index + 1}-row`);
   }
+  // The iPhone view, before pairing — never pressing Pair, so no QR code
+  // (which carries the channel key) ever lands in a screenshot.
+  await target.webContents.executeJavaScript("document.getElementById('open-phone').click()");
+  await wait(1500);
+  await shot("phone");
+  // Tapping an option SENDS A REPLY. Only against a test endpoint, only when
+  // asked: a capture of the live app must never be able to answer an agent.
+  const port = process.env.FLEET_HOOK_PORT || "8477";
+  if (process.env.SQUEAK_CAPTURE_TAP !== "1" || port === "8477") {
+    app.quit();
+    return;
+  }
   // If the first row asks a lettered question, answer B and photograph the receipt.
   await target.webContents.executeJavaScript("document.querySelectorAll('.row')[0]?.click()");
   await wait(1500);

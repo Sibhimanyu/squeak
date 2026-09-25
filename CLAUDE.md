@@ -202,8 +202,10 @@ that marker file, not just move the plist back. If the user ever wants it back:
 - The window's renderer never gets the token, a shell, or a URL: everything
   goes through `app-preload.js` to `squeak-service.js` in the main process.
   Agent messages are rendered with `textContent` only — they are untrusted.
-- `SQUEAK_CAPTURE=<prefix>` photographs the window (loaded, each row, and a
-  decision tap) and quits, using its own temp userData so it cannot collide
+- `SQUEAK_CAPTURE=<prefix>` photographs the window (loaded, each row, the
+  iPhone view before pairing) and quits. The decision tap **sends a reply**, so
+  it runs only with `SQUEAK_CAPTURE_TAP=1` and never on the live port 8477 —
+  point `FLEET_HOOK_PORT` at a test endpoint. The capture using its own temp userData so it cannot collide
   with the running duck. Capture turns off background throttling and floats
   the window, or shots of a covered window come out as empty files.
 
