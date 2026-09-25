@@ -608,7 +608,7 @@ Step by step, each step shippable on its own:
    so there is one desktop codebase.
 3. **Tokens as code.** ✅ Extract §11 into a shared package consumed by the Mac
    app and the duck; apply the §12 changes.
-4. **Remote channel.** A way for a phone to see state and send replies
+4. **Remote channel.** Designed in `docs/remote-channel.md`; waiting on your decisions there. A way for a phone to see state and send replies
    without the Mac being reachable directly. Firebase (Firestore + FCM push +
    Auth) is the default candidate; the key design constraint is that this
    channel can make agents on your Mac *do things*, so it needs real
