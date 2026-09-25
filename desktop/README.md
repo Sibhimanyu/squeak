@@ -43,7 +43,7 @@ launchctl kickstart gui/$(id -u)/com.squeak.duck
 ```
 
 Change the shortcut by adding `"shortcut": "Control+Alt+K"` to
-`~/Library/Application Support/Squeak/duck.json`. If another app
+`~/Library/Application Support/squeak/desktop/duck.json`. If another app
 already owns the combination, the duck logs that it could not register it
 rather than failing silently.
 
@@ -107,7 +107,7 @@ Two independent global shortcuts, kept separate deliberately:
 | `⌃⌥D` | Peek at the panel (also unhides the duck if it was hidden) |
 | `⌃⌥H` | Show/hide the duck itself |
 
-Change either in `~/Library/Application Support/Squeak/duck.json`
+Change either in `~/Library/Application Support/squeak/desktop/duck.json`
 (`"shortcut"` and `"visibilityShortcut"`).
 
 ## Floating across Spaces

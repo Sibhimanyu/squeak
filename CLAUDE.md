@@ -156,9 +156,11 @@ test for anything you fix is expected; the suite is fast.
   metadata or Electron changes. It lives in `~/Applications` because
   `/Applications` needs admin. `SQUEAK_DESKTOP_MAIN` points the bundle at a
   worktree for testing.
-- The app pins its userData folder to `Application Support/Squeak`
+- The app pins its userData folder to `Application Support/squeak/desktop`
   (`app.setPath` before ready), whether it runs from Squeak.app or from the
   checkout, so the duck's position and the single-instance lock are shared.
+  Not a sibling `Squeak`: macOS paths are case-insensitive, and that *is* the
+  daemon's `squeak` folder.
 - **Control routes are token-gated and carry no CORS header.**
   `/control/session/<id>/message` and `/reply` on the ingress let the window
   read a chat's full message and answer it through the same `ConductorReplier`

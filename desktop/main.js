@@ -21,7 +21,10 @@ app.setPath(
   // the duck already running.
   process.env.SQUEAK_CAPTURE || process.env.DUCK_CAPTURE
     ? fs.mkdtempSync(path.join(require("node:os").tmpdir(), "squeak-capture-"))
-    : path.join(app.getPath("appData"), "Squeak"),
+    : // Inside the daemon's folder rather than beside it: macOS paths are
+      // case-insensitive, so a sibling "Squeak" would be the daemon's
+      // "squeak" folder, and Chromium's caches would land among its secrets.
+      path.join(app.getPath("appData"), "squeak", "desktop"),
 );
 
 // One Squeak. Opening it again (Finder, Spotlight, the Dock) must reach the
