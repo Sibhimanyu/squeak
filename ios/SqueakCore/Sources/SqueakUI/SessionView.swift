@@ -1,3 +1,4 @@
+#if os(iOS)
 import SqueakCore
 import SwiftUI
 
@@ -190,3 +191,4 @@ struct MessageText: View {
         return result
     }
 }
+#endif

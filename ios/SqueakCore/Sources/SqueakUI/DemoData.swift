@@ -1,7 +1,8 @@
+#if os(iOS)
 import Foundation
 import SqueakCore
 
-/// Launch with `-demo` to see the app without a Mac: screenshots and design review only.
+/// Launch with `-squeak-demo` to see the app without a Mac: screenshots and design review only.
 enum DemoData {
     static let snapshot = PhoneSnapshot(
         v: 1, mac: "Sibhi's MacBook", generatedAt: now(-4),
@@ -33,3 +34,4 @@ enum DemoData {
         return formatter.string(from: Date().addingTimeInterval(offset))
     }
 }
+#endif

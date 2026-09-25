@@ -1,3 +1,4 @@
+#if os(iOS)
 import CryptoKit
 import Foundation
 import Security
@@ -61,3 +62,4 @@ enum KeyStore {
         }
     }
 }
+#endif

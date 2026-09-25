@@ -1,3 +1,4 @@
+#if os(iOS)
 import Foundation
 import LocalAuthentication
 import SqueakCore
@@ -34,7 +35,7 @@ final class AppModel: ObservableObject {
     let demo: Bool
 
     init() {
-        demo = ProcessInfo.processInfo.arguments.contains("-demo")
+        demo = ProcessInfo.processInfo.arguments.contains("-squeak-demo")
         signer = demo ? SoftwareSigner() : KeyStore.signer()
         if demo {
             snapshot = DemoData.snapshot
@@ -183,3 +184,4 @@ final class AppModel: ObservableObject {
         return (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
     }
 }
+#endif

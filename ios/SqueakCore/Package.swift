@@ -7,9 +7,15 @@ import PackageDescription
 let package = Package(
     name: "SqueakCore",
     platforms: [.iOS(.v17), .macOS(.v14)],
-    products: [.library(name: "SqueakCore", targets: ["SqueakCore"])],
+    products: [
+        .library(name: "SqueakCore", targets: ["SqueakCore"]),
+        // The iPhone screens, embeddable in any app: the Squeak app itself,
+        // or a tab inside another one (see SqueakRootView).
+        .library(name: "SqueakUI", targets: ["SqueakUI"]),
+    ],
     targets: [
         .target(name: "SqueakCore"),
+        .target(name: "SqueakUI", dependencies: ["SqueakCore"], resources: [.process("Resources")]),
         // Writes the fixtures the Mac's tests verify against (src/remote/fixtures).
         .executableTarget(name: "squeak-fixtures", dependencies: ["SqueakCore"]),
         // A phone in a terminal: pairs and replies over real Firestore (scripts/e2e-remote.sh).

@@ -1,3 +1,5 @@
+#if os(iOS)
+import SqueakCore
 import SwiftUI
 import VisionKit
 
@@ -10,7 +12,7 @@ struct PairView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Image("duck")
+                Image("duck", bundle: .module)
                     .resizable().scaledToFit().frame(width: 96, height: 96)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 40)
@@ -132,3 +134,4 @@ struct QRScanner: UIViewControllerRepresentable {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if os(iOS)
 import SqueakCore
 import SwiftUI
 
@@ -5,10 +6,10 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject var model: AppModel
     @State private var confirmingUnpair = false
-    /// `-open <key>` starts inside a session: screenshots of the demo only.
+    /// `-squeak-open <key>` starts inside a session: screenshots of the demo only.
     @State private var path: [String] = {
         let args = ProcessInfo.processInfo.arguments
-        guard let index = args.firstIndex(of: "-open"), index + 1 < args.count else { return [] }
+        guard let index = args.firstIndex(of: "-squeak-open"), index + 1 < args.count else { return [] }
         return [args[index + 1]]
     }()
 
@@ -70,7 +71,7 @@ struct HomeView: View {
 
     private var empty: some View {
         VStack(spacing: 12) {
-            Image("duck-asleep").resizable().scaledToFit().frame(width: 88, height: 88).accessibilityHidden(true)
+            Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: 88, height: 88).accessibilityHidden(true)
             Text("Nothing's running. The duck is resting.").foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
@@ -140,3 +141,4 @@ enum Age {
         return hours < 24 ? "\(hours)h" : "\(hours / 24)d"
     }
 }
+#endif

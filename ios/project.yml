@@ -27,6 +27,7 @@ targets:
       - path: Squeak
     dependencies:
       - package: SqueakCore
+        product: SqueakUI
     info:
       path: Squeak/Info.plist
       properties:

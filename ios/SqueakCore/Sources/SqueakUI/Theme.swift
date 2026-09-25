@@ -1,3 +1,5 @@
+#if os(iOS)
+import SqueakCore
 import SwiftUI
 import UIKit
 
@@ -81,3 +83,4 @@ struct PrimaryButtonStyle: ButtonStyle {
             )
     }
 }
+#endif
