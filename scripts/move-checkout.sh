@@ -41,11 +41,18 @@ for _ in $(seq 1 40); do
   sleep 0.25
 done
 
+# Listed before the move: afterwards each worktree's link names the old path,
+# and repair can only fix the ones it is told about.
+WORKTREES=()
+while IFS= read -r line; do
+  case "$line" in "worktree "*) [ "${line#worktree }" != "$OLD" ] && WORKTREES+=("${line#worktree }") ;; esac
+done < <(git -C "$OLD" worktree list --porcelain)
+
 mkdir -p "$(dirname "$NEW")"
 mv "$OLD" "$NEW"
 
 # Every linked worktree records the main checkout's path; repair rewrites them.
-git -C "$NEW" worktree repair
+git -C "$NEW" worktree repair ${WORKTREES[@]+"${WORKTREES[@]}"}
 
 # The app first: its loader names the checkout's path, and the launch agent
 # starts it the moment it is loaded.
