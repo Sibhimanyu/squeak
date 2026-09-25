@@ -20,7 +20,7 @@ app.setPath(
   "userData",
   // A capture run is a test: it must not share settings, or the lock, with
   // the duck already running.
-  process.env.SQUEAK_CAPTURE
+  process.env.SQUEAK_CAPTURE || process.env.DUCK_CAPTURE
     ? fs.mkdtempSync(path.join(require("node:os").tmpdir(), "squeak-capture-"))
     : path.join(app.getPath("appData"), "conductor-tg-duck"),
 );

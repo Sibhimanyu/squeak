@@ -579,8 +579,9 @@ JSON.
 
 ## 12. Changes from what ships today
 
-This guide deliberately changes a few things in the current duck and cards.
-None are applied yet; they land with the desktop app (step 2).
+This guide deliberately changed a few things in the duck and cards. All of
+them are applied (step 3): the duck's panel reads `tokens.css`, and the
+Telegram glyphs follow §3.3.
 
 | Where | Today | This guide | Why |
 | --- | --- | --- | --- |
@@ -605,7 +606,7 @@ Step by step, each step shippable on its own:
    detail with the agent's last message, diff review, reply and decisions. It
    reads the same `/state` the duck does. Built on the existing Electron duck
    so there is one desktop codebase.
-3. **Tokens as code.** Extract §11 into a shared package consumed by the Mac
+3. **Tokens as code.** ✅ Extract §11 into a shared package consumed by the Mac
    app and the duck; apply the §12 changes.
 4. **Remote channel.** A way for a phone to see state and send replies
    without the Mac being reachable directly. Firebase (Firestore + FCM push +

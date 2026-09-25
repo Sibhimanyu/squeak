@@ -14,10 +14,14 @@ import { isBlockedState, type AttentionItem, type AttentionKind, type FleetSessi
 const MAX_ACTIVE_ROWS = 8;
 const MAX_ACTION_BUTTONS = 6;
 
+/**
+ * DESIGN.md §3.3: both blocked states are "needs you" and share the only red;
+ * yellow belongs to the duck, so error is violet.
+ */
 const STATE_GLYPH: Record<FleetState, string> = {
   awaiting_approval: "🔴",
-  awaiting_input: "🟡",
-  error: "❗",
+  awaiting_input: "🔴",
+  error: "🟣",
   working: "🟢",
   finished: "✅",
   idle: "⚪",

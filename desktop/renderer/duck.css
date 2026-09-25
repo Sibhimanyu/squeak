@@ -1,15 +1,17 @@
 /* The window is transparent and frameless: everything visible is drawn here,
    and anything not painted lets the desktop through. */
 :root {
-  --ink: #f4f4f5;
-  --muted: #a1a1aa;
-  --panel: rgba(24, 24, 27, 0.92);
-  --line: rgba(255, 255, 255, 0.08);
-  --duck: #ffd23f;
-  --duck-dark: #f0b429;
-  --beak: #f97316;
-  --alert: #ef4444;
-  --busy: #22c55e;
+  /* Aliases onto the shared tokens (tokens.css, DESIGN.md §11), so the duck
+     and the Squeak window cannot drift apart. */
+  --ink: var(--sq-ink);
+  --muted: var(--sq-muted);
+  --panel: var(--sq-panel-translucent);
+  --line: var(--sq-line);
+  --duck: var(--sq-duck);
+  --duck-dark: var(--sq-duck-wing);
+  --beak: var(--sq-beak);
+  --alert: var(--sq-needs-you);
+  --busy: var(--sq-working);
 }
 
 * {
@@ -23,7 +25,7 @@ body {
   height: 100%;
   background: transparent;
   overflow: hidden;
-  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font: 13px/1.45 var(--sq-font);
   color: var(--ink);
   -webkit-user-select: none;
   user-select: none;
@@ -142,11 +144,11 @@ body.expand-right #duck-wrap {
 }
 
 .session.finished .dot {
-  background: #38bdf8;
+  background: var(--sq-done);
 }
 
 .session.error .dot {
-  background: #f59e0b;
+  background: var(--sq-error);
 }
 
 .session .name {
@@ -441,5 +443,5 @@ body[data-offline="true"] #duck-anim {
 }
 
 #badge.done {
-  background: #38bdf8;
+  background: var(--sq-done);
 }

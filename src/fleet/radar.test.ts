@@ -13,6 +13,7 @@ import {
   renderRadar,
   sessionLabel,
   shortenPath,
+  stateGlyph,
   truncateStart,
 } from "./radar.js";
 import type { AttentionItem, FleetSession } from "./types.js";
@@ -591,5 +592,15 @@ describe("renderQuotaAlert", () => {
     );
     expect(text).toContain("90% used (5h)");
     expect(text).toContain("resets in 2h");
+  });
+});
+
+describe("stateGlyph", () => {
+  it("follows DESIGN.md: one red for needs-you, violet for error, no yellow", () => {
+    expect(stateGlyph("awaiting_approval")).toBe("🔴");
+    expect(stateGlyph("awaiting_input")).toBe("🔴");
+    expect(stateGlyph("error")).toBe("🟣");
+    expect(stateGlyph("working")).toBe("🟢");
+    expect(stateGlyph("finished")).toBe("✅");
   });
 });

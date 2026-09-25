@@ -392,7 +392,7 @@ export class FleetController {
 
   private failureNotifier(location: TelegramConversationTarget, label: string): ReplyFailureHandler {
     return (message) => {
-      void this.send(location, `❗ **${label}** — the reply did not go through: ${message}`);
+      void this.send(location, `🟣 **${label}** — the reply did not go through: ${message}`);
     };
   }
 
