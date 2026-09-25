@@ -1,0 +1,38 @@
+rules_version = '2';
+
+// Squeak's remote channel. See docs/remote-channel.md.
+//
+// Firestore is an untrusted pipe here, by design. Every document body is
+// AES-256-GCM encrypted with a key that exists only on the Mac and on paired
+// phones, and every command is additionally signed by a paired device's
+// Secure Enclave key, which the Mac verifies before acting. These rules only
+// keep the pipe tidy: one shape of document, under an unguessable channel id
+// (128 random bits, shared through the pairing QR code), and nothing else in
+// the database readable or writable at all.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /channels/{channel}/{kind}/{doc} {
+      allow get, list: if validChannel(channel) && validKind(kind);
+      allow create, update: if validChannel(channel) && validKind(kind) && validBody();
+      allow delete: if validChannel(channel) && validKind(kind);
+    }
+
+    function validChannel(channel) {
+      return channel.matches('^[A-Za-z0-9_-]{22,64}$');
+    }
+
+    function validKind(kind) {
+      return kind in ['state', 'pairing', 'commands', 'results'];
+    }
+
+    function validBody() {
+      let body = request.resource.data;
+      return body.keys().hasOnly(['box', 'sig', 'device', 'at'])
+        && body.box is string
+        && body.box.size() < 900000
+        && (!('sig' in body) || body.sig is string)
+        && (!('device' in body) || (body.device is string && body.device.size() < 64))
+        && (!('at' in body) || body.at is int);
+    }
+  }
+}

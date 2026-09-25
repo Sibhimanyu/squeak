@@ -45,7 +45,13 @@ const els = {
   serviceText: document.getElementById("service-text"),
   serviceRestart: document.getElementById("service-restart"),
   showDuck: document.getElementById("show-duck"),
+  openPhone: document.getElementById("open-phone"),
 };
+
+/** The detail pane shows the phone view instead of a session. */
+const PHONE = "__phone__";
+/** The pairing QR, as an image the main process drew. Cleared once paired. */
+let pairingImage = null;
 
 let state = null;
 let offline = false;
@@ -385,7 +391,160 @@ function composer(session, locked) {
   return wrap;
 }
 
+/* ---------- iPhone (docs/remote-channel.md) ---------- */
+
+function formatWhen(iso) {
+  return iso ? `${age(iso)}${age(iso) === "just now" ? "" : " ago"}` : "";
+}
+
+async function renderPhone() {
+  const status = await window.squeak.remote("status");
+  if (selectedKey !== PHONE) return;
+  const signature = JSON.stringify([PHONE, status, Boolean(pairingImage), Math.floor(Date.now() / 60000)]);
+  if (signature === lastDetailSignature) return;
+  lastDetailSignature = signature;
+
+  const nodes = [];
+  const head = el("div", "detail-head");
+  const titles = el("div");
+  titles.append(el("h2", null, "iPhone"));
+  titles.append(
+    el(
+      "div",
+      "state-line",
+      status.available
+        ? status.phoneOpen
+          ? "Squeak is open on a paired phone right now."
+          : "Answer your agents from your phone. Telegram still sends the notifications."
+        : "The phone channel is off on this Mac.",
+    ),
+  );
+  head.append(titles);
+  nodes.push(head);
+
+  if (!status.available) {
+    nodes.push(
+      el(
+        "p",
+        "muted-note",
+        "Set SQUEAK_REMOTE_PROJECT in ~/Library/Application Support/squeak/.env to your Firebase project id, then restart Squeak.",
+      ),
+    );
+    els.detail.replaceChildren(wrapScroll(nodes));
+    return;
+  }
+
+  // Waiting for approval: the one moment that needs you here.
+  for (const request of status.pending ?? []) {
+    const card = el("div", "decision");
+    card.append(el("h3", null, `${request.name} wants to pair`));
+    const code = `${request.code.slice(0, 3)} ${request.code.slice(3)}`;
+    card.append(el("p", "pair-code", code));
+    card.append(el("p", "muted-note", "Approve only if your phone shows exactly this code."));
+    const actions = el("div", "actions");
+    actions.append(
+      button("Approve", "primary", async () => {
+        await window.squeak.remote("approve", request.id);
+        pairingImage = null;
+        lastDetailSignature = "";
+        void renderPhone();
+      }),
+      button("Reject", "secondary", async () => {
+        await window.squeak.remote("reject", request.id);
+        lastDetailSignature = "";
+        void renderPhone();
+      }),
+    );
+    card.append(actions);
+    nodes.push(card);
+  }
+
+  nodes.push(el("h3", "section-title", "Paired phones"));
+  const devices = status.devices ?? [];
+  if (devices.length === 0) {
+    nodes.push(el("p", "muted-note", "None yet."));
+  }
+  for (const device of devices) {
+    const row = el("div", "device");
+    const text = el("div");
+    text.append(el("div", "name", device.name));
+    text.append(el("div", "meta", device.revokedAt ? `revoked ${formatWhen(device.revokedAt)}` : `paired ${formatWhen(device.pairedAt)}`));
+    row.append(text);
+    if (!device.revokedAt) {
+      row.append(
+        button("Revoke", "destructive", async () => {
+          if (!window.confirm(`Stop ${device.name} from answering your agents?`)) return;
+          await window.squeak.remote("revoke", device.id);
+          lastDetailSignature = "";
+          void renderPhone();
+        }),
+      );
+    }
+    nodes.push(row);
+  }
+
+  if (pairingImage) {
+    const pair = el("div", "pairing");
+    const img = el("img", "qr");
+    img.src = pairingImage;
+    img.alt = "Pairing code";
+    const steps = el("ol");
+    for (const step of [
+      "Open Squeak on your iPhone and tap Pair with a Mac.",
+      "Scan this code.",
+      "Check both screens show the same six digits, then approve here.",
+    ]) {
+      steps.append(el("li", null, step));
+    }
+    pair.append(img, steps);
+    nodes.push(pair);
+    nodes.push(el("p", "muted-note", "Anyone who scans this code can read your sessions until you approve or reset, so keep it on this screen."));
+  } else {
+    nodes.push(
+      button("Pair an iPhone", "primary pair-button", async () => {
+        const result = await window.squeak.pairingQr();
+        pairingImage = result.ok ? result.image : null;
+        if (!result.ok) showToast(result.message);
+        lastDetailSignature = "";
+        void renderPhone();
+      }),
+    );
+  }
+
+  const activity = status.activity ?? [];
+  if (activity.length > 0) {
+    nodes.push(el("h3", "section-title", "Recent"));
+    for (const entry of activity) {
+      nodes.push(el("p", `activity ${entry.outcome}`, `${formatWhen(entry.at)} · ${entry.device} · ${entry.detail}`));
+    }
+  }
+
+  if (devices.length > 0) {
+    nodes.push(
+      button("Forget every phone and start over", "quiet reset", async () => {
+        if (!window.confirm("Unpair every phone and make a new pairing code? Phones will have to pair again.")) return;
+        await window.squeak.remote("reset");
+        pairingImage = null;
+        lastDetailSignature = "";
+        void renderPhone();
+      }),
+    );
+  }
+
+  els.detail.replaceChildren(wrapScroll(nodes));
+}
+
+function wrapScroll(nodes) {
+  const scroll = el("div", "detail-scroll");
+  scroll.append(...nodes);
+  return scroll;
+}
+
 async function renderDetail() {
+  if (selectedKey === PHONE) {
+    await renderPhone();
+    return;
+  }
   const session = selectedSession();
   const receipt = session ? receipts.get(session.key) : null;
   const signature = JSON.stringify([
@@ -527,7 +686,7 @@ async function poll() {
     if (!receipt.pending && (!session || session.lastActivityAt !== receipt.atActivity)) receipts.delete(key);
   }
 
-  if (!selectedKey || !selectedSession()) {
+  if (selectedKey !== PHONE && (!selectedKey || !selectedSession())) {
     const first = GROUPS.flatMap((group) => (state?.active ?? []).filter((s) => group.states.includes(s.state)))[0];
     selectedKey = first?.key ?? null;
   }
@@ -538,6 +697,7 @@ async function poll() {
 
 els.serviceRestart.addEventListener("click", () => void restartService());
 els.showDuck.addEventListener("click", () => window.squeak.showDuck());
+els.openPhone.addEventListener("click", () => select(PHONE));
 
 void poll();
 void refreshService();

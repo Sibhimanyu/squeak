@@ -1,0 +1,8 @@
+{
+  "firestore": { "rules": "firestore.rules" },
+  "hosting": {
+    "public": "public",
+    "ignore": ["**/.*"],
+    "headers": [{ "source": "**/*.json", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }]
+  }
+}

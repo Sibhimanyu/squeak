@@ -1,3 +1,4 @@
+import path from "node:path";
 import process from "node:process";
 
 import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
@@ -6,6 +7,8 @@ import { FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { parseChoices } from "../fleet/choices.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
+import { FirestoreRest } from "../remote/firestore-rest.js";
+import { RemoteBridge } from "../remote/remote-bridge.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
@@ -64,6 +67,7 @@ export class SqueakApp {
   private readonly runtime: FleetRuntime;
   private readonly controller: FleetController;
   private readonly replier: ConductorReplier;
+  private readonly remote: RemoteBridge | null;
   private lastUpdateId = 0;
   private stopped = false;
 
@@ -92,9 +96,44 @@ export class SqueakApp {
       ui: config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null,
     });
 
+    // The phone channel, when a Firebase project is configured. Same replier,
+    // same busy rules; the bridge adds pairing and signature checks on top.
+    this.remote = config.remoteProjectId
+      ? new RemoteBridge({
+          configPath: path.join(config.supportDir, "remote.json"),
+          projectId: config.remoteProjectId,
+          store: new FirestoreRest(config.remoteProjectId),
+          replier: this.replier,
+          snapshot: () => this.runtime.monitor.snapshot,
+        })
+      : null;
+
     // The Mac app answers chats through the same replier as Telegram, over
     // the loopback ingress, gated by the hook token.
     this.runtime.ingress.setControl({
+      remote: async (action, deviceId) => {
+        const remote = this.remote;
+        if (!remote) {
+          return { configured: false, available: false };
+        }
+        switch (action) {
+          case "status":
+            return { available: true, ...(remote.status() as object) };
+          case "pair":
+            return remote.startPairing();
+          case "approve":
+            return { ok: deviceId ? await remote.approve(deviceId) : false };
+          case "reject":
+            return { ok: deviceId ? await remote.reject(deviceId) : false };
+          case "revoke":
+            return { ok: deviceId ? remote.revoke(deviceId) : false };
+          case "reset":
+            remote.reset();
+            return { ok: true };
+          default:
+            return { ok: false };
+        }
+      },
       sessionMessage: (sessionId) => {
         const text = this.replier.lastTurnText(sessionId);
         return { text, choices: parseChoices(text) };
@@ -121,6 +160,7 @@ export class SqueakApp {
 
   async start(): Promise<void> {
     await this.controller.start();
+    this.remote?.start();
     await this.telegram.setMyCommands(COMMANDS).catch((error) => {
       logger.warn("could not publish squeak commands", { error: summarizeTelegramError(error) });
     });
@@ -137,6 +177,7 @@ export class SqueakApp {
       return;
     }
     this.stopped = true;
+    this.remote?.stop();
     await this.replier.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);
     logger.info("squeak stopped");

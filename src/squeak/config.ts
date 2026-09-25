@@ -57,6 +57,8 @@ const schema = z.object({
    * always reply in the background instead.
    */
   SQUEAK_HANDS_APP: z.string().default("~/Library/Application Support/squeak/Squeak Hands.app"),
+  /** Firebase project for the phone channel (docs/remote-channel.md). Unset: no phone. */
+  SQUEAK_REMOTE_PROJECT: z.string().optional(),
   POLL_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(50).default(30),
   FLEET_HOOK_PORT: z.coerce.number().int().min(1024).max(65535).default(8477),
   FLEET_POLL_INTERVAL_MS: z.coerce.number().int().min(2000).default(20000),
@@ -80,6 +82,7 @@ export interface SqueakConfig {
   codexBin: string;
   /** Null when switched off. */
   handsAppPath: string | null;
+  remoteProjectId: string | null;
   pollTimeoutSeconds: number;
   hookPort: number;
   pollIntervalMs: number;
@@ -138,6 +141,7 @@ export function loadSqueakConfig(): SqueakConfig {
     claudeBin: resolve(parsed.CLAUDE_BIN),
     codexBin: resolve(parsed.CODEX_BIN),
     handsAppPath: parsed.SQUEAK_HANDS_APP === "off" ? null : resolve(parsed.SQUEAK_HANDS_APP),
+    remoteProjectId: parsed.SQUEAK_REMOTE_PROJECT?.trim() || null,
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
     hookPort: parsed.FLEET_HOOK_PORT,
     pollIntervalMs: parsed.FLEET_POLL_INTERVAL_MS,

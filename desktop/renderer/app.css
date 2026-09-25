@@ -557,3 +557,78 @@ main {
     transition: none !important;
   }
 }
+
+/* ---------- iPhone ---------- */
+
+.destructive {
+  background: var(--sq-surface-raised);
+  border-color: var(--sq-line);
+  color: var(--sq-needs-you);
+}
+
+.pair-code {
+  margin: 4px 0 8px;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.decision .actions {
+  margin-top: 12px;
+}
+
+.device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 72ch;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--sq-line);
+}
+
+.pair-button {
+  height: 34px;
+  margin-top: 20px;
+}
+
+.pairing {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 20px;
+}
+
+.pairing .qr {
+  width: 220px;
+  height: 220px;
+  border-radius: var(--sq-radius-card);
+  background: #fff;
+  padding: 8px;
+  image-rendering: pixelated;
+}
+
+.pairing ol {
+  padding-left: 18px;
+  color: var(--sq-ink);
+}
+
+.pairing li {
+  margin-bottom: 8px;
+}
+
+.activity {
+  color: var(--sq-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity.rejected {
+  color: var(--sq-error);
+}
+
+.reset {
+  margin-top: 24px;
+}

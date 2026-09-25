@@ -97,6 +97,8 @@ function registerAppIpc({ showDuck }) {
   ipcMain.handle("squeak:message", (_event, sessionId) => service.sessionMessage(sessionId));
   ipcMain.handle("squeak:reply", (_event, sessionId, text) => service.reply(sessionId, text));
   ipcMain.handle("squeak:open-in-conductor", (_event, target) => service.openInConductor(target));
+  ipcMain.handle("squeak:remote", (_event, action, deviceId) => service.remote(action, deviceId ?? null));
+  ipcMain.handle("squeak:pairing-qr", () => service.pairingQr());
   ipcMain.on("squeak:show-duck", () => showDuck());
 }
 

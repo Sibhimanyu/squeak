@@ -9,5 +9,8 @@
   },
   "devDependencies": {
     "electron": "^35.0.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
   }
 }

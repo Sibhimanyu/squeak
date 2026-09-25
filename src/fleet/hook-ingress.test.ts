@@ -317,3 +317,30 @@ describe("HookIngressServer control routes", () => {
     expect(response.status).toBe(503);
   });
 });
+
+describe("HookIngressServer remote routes", () => {
+  it("routes pairing actions to the remote handler, token-gated, with the right methods", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const calls: Array<[string, string | null]> = [];
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      remote: async (action, id) => {
+        calls.push([action, id]);
+        return { action, id };
+      },
+    });
+    const base = `http://127.0.0.1:${harness.port}/control/remote`;
+    const auth = { "x-conductor-tg-token": harness.token };
+
+    expect((await fetch(`${base}/status`)).status).toBe(403);
+    expect(await (await fetch(`${base}/status`, { headers: auth })).json()).toEqual({ action: "status", id: null });
+    expect((await fetch(`${base}/approve/phone-1`, { headers: auth })).status).toBe(405);
+    await fetch(`${base}/approve/phone-1`, { method: "POST", headers: auth });
+    expect(calls).toEqual([
+      ["status", null],
+      ["approve", "phone-1"],
+    ]);
+  });
+});

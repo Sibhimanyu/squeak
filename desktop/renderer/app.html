@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'"
+      content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:"
     />
     <title>Squeak</title>
     <link rel="stylesheet" href="tokens.css" />
@@ -22,6 +22,7 @@
       <div class="service">
         <span id="service-status" class="pill"><span class="pip"></span><span id="service-text">Checking…</span></span>
         <button id="service-restart" class="secondary" type="button">Restart</button>
+        <button id="open-phone" class="secondary" type="button">iPhone</button>
         <button id="show-duck" class="quiet" type="button">Show duck</button>
       </div>
     </header>

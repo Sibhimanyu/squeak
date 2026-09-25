@@ -34,6 +34,8 @@ export interface HookIngressOptions {
 export interface IngressControl {
   sessionMessage(conductorSessionId: string): unknown;
   reply(conductorSessionId: string, text: string): Promise<unknown>;
+  /** The phone channel: status, pair, approve, reject, revoke, reset. */
+  remote?(action: string, deviceId: string | null): Promise<unknown>;
 }
 
 /**
@@ -197,6 +199,26 @@ export class HookIngressServer {
     if (!control) {
       respond(response, 503, "control unavailable");
       request.resume();
+      return;
+    }
+
+    const remote = /^\/control\/remote\/(status|pair|approve|reject|revoke|reset)(?:\/([A-Za-z0-9_-]{1,64}))?$/.exec(
+      (request.url ?? "").split("?")[0] ?? "",
+    );
+    if (remote) {
+      request.resume();
+      const expectedMethod = remote[1] === "status" ? "GET" : "POST";
+      if (request.method !== expectedMethod || !control.remote) {
+        respond(response, control.remote ? 405 : 503, control.remote ? "method not allowed" : "remote unavailable");
+        return;
+      }
+      control
+        .remote(remote[1]!, remote[2] ?? null)
+        .then((value) => respondJson(response, 200, value))
+        .catch((error: unknown) => {
+          logger.warn("control remote failed", { error: error instanceof Error ? error.message : String(error) });
+          respond(response, 500, "remote failed");
+        });
       return;
     }
 

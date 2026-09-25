@@ -126,6 +126,15 @@ export class ConductorReplier {
     return parts[0] ?? null;
   }
 
+  /**
+   * The chat's latest turn, whichever side started it. A remote command
+   * names the turn it answers, and is refused once this has moved on — a
+   * letter tapped for an old question must not land on a new one.
+   */
+  lastTurnId(sessionId: string): string | null {
+    return this.deps.registry.listSessionMessages(sessionId, 1)[0]?.turnId ?? null;
+  }
+
   isReplying(sessionId: string): boolean {
     return [...this.active.values()].some((reply) => reply.sessionId === sessionId);
   }

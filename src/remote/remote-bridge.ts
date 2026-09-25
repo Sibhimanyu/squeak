@@ -1,0 +1,524 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { logger } from "../utils/logger.js";
+import type { ParsedChoices } from "../fleet/choices.js";
+import { parseChoices } from "../fleet/choices.js";
+import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
+import { describeGitState } from "../fleet/git-state.js";
+import { distinctTitles, sessionLabel } from "../fleet/radar.js";
+import type { ReplyOutcome } from "../fleet/session-reply.js";
+import type { ChannelDoc } from "./firestore-rest.js";
+import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
+
+/**
+ * Squeak's side of the remote channel (docs/remote-channel.md): publish an
+ * encrypted snapshot for paired phones, take pairing requests, and run the
+ * commands those phones send — after checking every one of them.
+ *
+ * The one rule everything here serves: **the Mac trusts a key, not a
+ * server.** Firestore can drop, delay or invent documents; none of that can
+ * make this code send a reply that a paired phone did not sign, for a turn
+ * that is still current, within the last few minutes, exactly once.
+ */
+
+/** What is kept on the Mac, never in the cloud. Mode 0600. */
+export interface RemoteConfig {
+  projectId: string;
+  channelId: string;
+  key: string;
+  devices: PairedDevice[];
+}
+
+export interface PairedDevice {
+  id: string;
+  name: string;
+  publicKey: string;
+  pairedAt: string;
+  revokedAt?: string | null;
+}
+
+export interface PendingPairing {
+  id: string;
+  name: string;
+  publicKey: string;
+  code: string;
+  requestedAt: string;
+}
+
+/** What a phone sends. Signed as the exact box string it arrives in. */
+export interface RemoteCommand {
+  v: 1;
+  sessionId: string;
+  /** The turn the phone was looking at; refused if the chat has moved on. */
+  answersTurn: string | null;
+  text: string;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+export interface RemoteActivity {
+  at: string;
+  device: string;
+  outcome: "sent" | "refused" | "rejected";
+  detail: string;
+}
+
+export interface ChannelStore {
+  get(path: string): Promise<ChannelDoc | null>;
+  set(path: string, doc: ChannelDoc): Promise<void>;
+  list(collection: string): Promise<Array<{ id: string; doc: ChannelDoc }>>;
+  delete(path: string): Promise<void>;
+}
+
+export interface RemoteReplier {
+  lastTurnText(sessionId: string): string | null;
+  lastTurnId(sessionId: string): string | null;
+  send(sessionId: string, text: string, onFailed: (message: string) => void): Promise<ReplyOutcome>;
+}
+
+export interface RemoteBridgeDependencies {
+  configPath: string;
+  projectId: string;
+  /** Built per config, since a reset changes nothing but the channel path. */
+  store: ChannelStore;
+  replier: RemoteReplier;
+  snapshot: () => FleetSnapshot;
+  now?: () => number;
+  macName?: string;
+}
+
+/** A command older than this is refused even if nothing else is wrong. */
+export const MAX_COMMAND_LIFETIME_MS = 10 * 60_000;
+/** How long a phone counts as "open" after its last presence ping. */
+const PRESENCE_WINDOW_MS = 60_000;
+const ACTIVE_POLL_MS = 2_000;
+const IDLE_POLL_MS = 15_000;
+const ACTIVE_PUBLISH_MS = 3_000;
+const IDLE_PUBLISH_MS = 60_000;
+/** Pairing is only listened for while the Mac app's pairing sheet is open. */
+const PAIRING_WINDOW_MS = 10 * 60_000;
+const MESSAGE_MAX_CHARS = 8_000;
+const ACTIVITY_LIMIT = 50;
+
+export class RemoteBridge {
+  private readonly deps: RemoteBridgeDependencies;
+  private readonly now: () => number;
+  private config: RemoteConfig | null;
+  private readonly pending = new Map<string, PendingPairing>();
+  private readonly seenNonces = new Map<string, number>();
+  private readonly activity: RemoteActivity[] = [];
+  private readonly messageCache = new Map<string, { text: string | null; choices: ParsedChoices | null }>();
+  private pairingOpenUntil = 0;
+  private phoneSeenAt = 0;
+  private lastPublishedAt = 0;
+  private lastPublished = "";
+  private timer: NodeJS.Timeout | null = null;
+  private busy = false;
+  private stopped = false;
+
+  constructor(deps: RemoteBridgeDependencies) {
+    this.deps = deps;
+    this.now = deps.now ?? Date.now;
+    this.config = readConfig(deps.configPath);
+  }
+
+  start(): void {
+    this.stopped = false;
+    this.schedule(0);
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+
+  /* ---------- what the Mac app shows and does ---------- */
+
+  status(): unknown {
+    const config = this.config;
+    return {
+      configured: Boolean(config),
+      projectId: this.deps.projectId,
+      phoneOpen: this.phoneOpen(),
+      pairingOpen: this.pairingOpenUntil > this.now(),
+      devices: (config?.devices ?? []).map(({ id, name, pairedAt, revokedAt }) => ({ id, name, pairedAt, revokedAt })),
+      pending: [...this.pending.values()].map(({ id, name, code, requestedAt }) => ({ id, name, code, requestedAt })),
+      activity: this.activity.slice(-20).reverse(),
+    };
+  }
+
+  /**
+   * Open the pairing window and return the QR payload. Makes the channel on
+   * first use. The payload is the one secret that lets a phone read.
+   */
+  startPairing(): { url: string } {
+    const config = this.config ?? this.createChannel();
+    this.pairingOpenUntil = this.now() + PAIRING_WINDOW_MS;
+    this.schedule(0);
+    const payload = Buffer.from(
+      JSON.stringify({ v: 1, p: config.projectId, c: config.channelId, k: config.key, n: this.macName() }),
+    ).toString("base64url");
+    return { url: `squeak://pair?d=${payload}` };
+  }
+
+  async approve(deviceId: string): Promise<boolean> {
+    const request = this.pending.get(deviceId);
+    const config = this.config;
+    if (!request || !config) {
+      return false;
+    }
+    config.devices = config.devices.filter((device) => device.id !== deviceId);
+    config.devices.push({
+      id: request.id,
+      name: request.name,
+      publicKey: request.publicKey,
+      pairedAt: new Date(this.now()).toISOString(),
+    });
+    this.save();
+    this.pending.delete(deviceId);
+    await this.answerPairing(deviceId, true);
+    this.log(request.name, "sent", "paired");
+    return true;
+  }
+
+  async reject(deviceId: string): Promise<boolean> {
+    if (!this.pending.delete(deviceId)) {
+      return false;
+    }
+    await this.answerPairing(deviceId, false);
+    return true;
+  }
+
+  revoke(deviceId: string): boolean {
+    const device = this.config?.devices.find((candidate) => candidate.id === deviceId);
+    if (!device) {
+      return false;
+    }
+    device.revokedAt = new Date(this.now()).toISOString();
+    this.save();
+    this.log(device.name, "rejected", "revoked on this Mac");
+    return true;
+  }
+
+  /**
+   * Forget every phone and start a new channel. The old QR code, and any
+   * copy of the old key, can no longer read anything new.
+   */
+  reset(): void {
+    this.config = null;
+    this.pending.clear();
+    try {
+      fs.rmSync(this.deps.configPath, { force: true });
+    } catch {
+      // Nothing to remove.
+    }
+  }
+
+  /* ---------- the loop ---------- */
+
+  private schedule(delayMs: number): void {
+    if (this.stopped) {
+      return;
+    }
+    if (this.timer) {
+      clearTimeout(this.timer);
+    }
+    this.timer = setTimeout(() => void this.tick(), delayMs);
+  }
+
+  /** One pass: presence, pairing, commands, snapshot. Never throws. */
+  async tick(): Promise<void> {
+    if (this.busy) {
+      return;
+    }
+    this.busy = true;
+    try {
+      const config = this.config;
+      if (config) {
+        await this.readPresence(config);
+        if (this.pairingOpenUntil > this.now()) {
+          await this.readPairing(config);
+        }
+        if (config.devices.some((device) => !device.revokedAt)) {
+          await this.readCommands(config);
+          await this.publish(config);
+        }
+      }
+    } catch (error) {
+      logger.warn("remote channel pass failed", { error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      this.busy = false;
+      this.schedule(this.phoneOpen() || this.pairingOpenUntil > this.now() ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+    }
+  }
+
+  private phoneOpen(): boolean {
+    return this.now() - this.phoneSeenAt < PRESENCE_WINDOW_MS;
+  }
+
+  private channel(config: RemoteConfig, kind: string, id?: string): string {
+    return id ? `channels/${config.channelId}/${kind}/${id}` : `channels/${config.channelId}/${kind}`;
+  }
+
+  private async readPresence(config: RemoteConfig): Promise<void> {
+    const doc = await this.deps.store.get(this.channel(config, "state", "presence"));
+    if (!doc) {
+      return;
+    }
+    try {
+      const presence = open<{ at: number }>(config.key, doc.box);
+      // A phone's clock is not ours; only trust it not to be in the future.
+      this.phoneSeenAt = Math.max(this.phoneSeenAt, Math.min(presence.at, this.now()));
+    } catch {
+      // Not ours — ignore it.
+    }
+  }
+
+  private async readPairing(config: RemoteConfig): Promise<void> {
+    for (const { id, doc } of await this.deps.store.list(this.channel(config, "pairing"))) {
+      if (this.pending.has(id) || config.devices.some((device) => device.id === id && !device.revokedAt)) {
+        continue;
+      }
+      try {
+        const request = open<{ name: string; publicKey: string }>(config.key, doc.box);
+        if (typeof request.publicKey !== "string" || typeof request.name !== "string") {
+          continue;
+        }
+        this.pending.set(id, {
+          id,
+          name: request.name.slice(0, 60),
+          publicKey: request.publicKey,
+          code: pairingCode(request.publicKey),
+          requestedAt: new Date(this.now()).toISOString(),
+        });
+      } catch {
+        // Undecryptable: not from a phone that scanned this Mac's code.
+      }
+    }
+  }
+
+  private async answerPairing(deviceId: string, approved: boolean): Promise<void> {
+    const config = this.config;
+    if (!config) {
+      return;
+    }
+    await this.deps.store.set(this.channel(config, "results", `pair-${deviceId}`), {
+      box: seal(config.key, { approved, mac: this.macName() }),
+      at: this.now(),
+    });
+    await this.deps.store.delete(this.channel(config, "pairing", deviceId)).catch(() => undefined);
+  }
+
+  private async readCommands(config: RemoteConfig): Promise<void> {
+    for (const { id, doc } of await this.deps.store.list(this.channel(config, "commands"))) {
+      const verdict = await this.handleCommand(config, id, doc);
+      // Deleted whatever the verdict, so nothing is ever looked at twice.
+      await this.deps.store.delete(this.channel(config, "commands", id)).catch(() => undefined);
+      if (verdict.write) {
+        await this.deps.store
+          .set(this.channel(config, "results", id), { box: seal(config.key, verdict.result), at: this.now() })
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  /** Every check from docs/remote-channel.md, in order; the first failure wins. */
+  async handleCommand(
+    config: RemoteConfig,
+    id: string,
+    doc: ChannelDoc,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const device = config.devices.find((candidate) => candidate.id === doc.device);
+    // 1. A paired, unrevoked device signed exactly this box.
+    if (!device || device.revokedAt || !doc.sig || !verifyDeviceSignature(device.publicKey, doc.box, doc.sig)) {
+      this.log(device?.name ?? "unknown device", "rejected", "signature did not verify");
+      // No result: an unsigned writer learns nothing, not even that it failed.
+      return { write: false, result: {} };
+    }
+
+    let command: RemoteCommand;
+    try {
+      command = open<RemoteCommand>(config.key, doc.box);
+    } catch {
+      this.log(device.name, "rejected", "could not be decrypted");
+      return { write: false, result: {} };
+    }
+
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", reason);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+
+    // 2. Fresh, and never seen before.
+    const now = this.now();
+    this.forgetOldNonces(now);
+    if (
+      typeof command.expiresAt !== "number" ||
+      command.expiresAt < now ||
+      command.expiresAt > now + MAX_COMMAND_LIFETIME_MS
+    ) {
+      return refuse("That reply expired before this Mac saw it. Send it again.");
+    }
+    if (typeof command.nonce !== "string" || command.nonce.length < 16 || this.seenNonces.has(command.nonce)) {
+      return refuse("That reply was already received.");
+    }
+    this.seenNonces.set(command.nonce, command.expiresAt);
+
+    // 3. The only action there is: a reply to an existing chat.
+    if (command.v !== 1 || typeof command.sessionId !== "string" || typeof command.text !== "string") {
+      return refuse("Not a reply this Mac understands.");
+    }
+    const text = command.text.trim();
+    if (!text || text.length > 20_000) {
+      return refuse("There is nothing to send.");
+    }
+
+    // 4. Still answering the question the phone was looking at.
+    const currentTurn = this.deps.replier.lastTurnId(command.sessionId);
+    if (command.answersTurn !== currentTurn) {
+      return refuse("That chat has moved on since your phone last looked. Check it and reply again.");
+    }
+
+    // 5. The same busy rules as Telegram and the Mac window.
+    const outcome = await this.deps.replier.send(command.sessionId, text, (message) => {
+      this.log(device.name, "refused", `the reply failed: ${message}`);
+    });
+    if (outcome.status === "refused") {
+      this.log(device.name, "refused", outcome.reason);
+      return { write: true, result: { id, status: "refused", reason: outcome.reason } };
+    }
+    this.log(device.name, "sent", `${text.length <= 3 ? text : "a reply"} to ${command.sessionId.slice(0, 8)}`);
+    return {
+      write: true,
+      result: {
+        id,
+        status: "sent",
+        via: outcome.via,
+        ...(outcome.via === "background" ? { fallbackReason: outcome.fallbackReason } : {}),
+      },
+    };
+  }
+
+  private forgetOldNonces(now: number): void {
+    for (const [nonce, expiresAt] of this.seenNonces) {
+      if (expiresAt < now) {
+        this.seenNonces.delete(nonce);
+      }
+    }
+  }
+
+  /** The phone's whole view, encrypted. Written only when it changed. */
+  private async publish(config: RemoteConfig): Promise<void> {
+    const interval = this.phoneOpen() ? ACTIVE_PUBLISH_MS : IDLE_PUBLISH_MS;
+    if (this.now() - this.lastPublishedAt < interval) {
+      return;
+    }
+    const view = this.phoneView();
+    const serialized = JSON.stringify(view.sessions) + JSON.stringify(view.duck);
+    if (serialized === this.lastPublished) {
+      return;
+    }
+    await this.deps.store.set(this.channel(config, "state", "snapshot"), {
+      box: seal(config.key, view),
+      at: this.now(),
+    });
+    this.lastPublished = serialized;
+    this.lastPublishedAt = this.now();
+  }
+
+  phoneView() {
+    const snapshot = this.deps.snapshot();
+    const titles = distinctTitles(snapshot.active);
+    const blocked = snapshot.active.filter((session) => session.state.startsWith("awaiting")).length;
+    const working = snapshot.active.filter((session) => session.state === "working").length;
+    return {
+      v: 1,
+      mac: this.macName(),
+      generatedAt: new Date(this.now()).toISOString(),
+      duck: { blockedCount: blocked, workingCount: working },
+      sessions: snapshot.active.map((session) => {
+        const conductorSessionId = session.conductorSessionId;
+        const title = titles.get(session.key);
+        const message = conductorSessionId ? this.message(conductorSessionId, session.lastActivityAt) : null;
+        const git = session.git ? describeGitState(session.git, { countCommits: false }) : null;
+        return {
+          key: session.key,
+          conductorSessionId,
+          label: title ? `${sessionLabel(session)} (${title})` : sessionLabel(session),
+          agent: session.agent,
+          state: session.state,
+          lastActivityAt: session.lastActivityAt,
+          detail: session.detail,
+          git: git && git !== "clean" ? git : null,
+          contextPercent: session.contextPercent,
+          turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
+          message: message?.text ?? null,
+          choices: message?.choices ?? null,
+        };
+      }),
+    };
+  }
+
+  private message(sessionId: string, activity: string): { text: string | null; choices: ParsedChoices | null } {
+    const key = `${sessionId}|${activity}`;
+    const cached = this.messageCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    const full = this.deps.replier.lastTurnText(sessionId);
+    const text = full && full.length > MESSAGE_MAX_CHARS ? `${full.slice(0, MESSAGE_MAX_CHARS)}…` : full;
+    const value = { text, choices: parseChoices(full) };
+    if (this.messageCache.size > 200) {
+      this.messageCache.clear();
+    }
+    this.messageCache.set(key, value);
+    return value;
+  }
+
+  /* ---------- bookkeeping ---------- */
+
+  private createChannel(): RemoteConfig {
+    const { channelId, key } = generateChannel();
+    this.config = { projectId: this.deps.projectId, channelId, key, devices: [] };
+    this.save();
+    return this.config;
+  }
+
+  private save(): void {
+    if (!this.config) {
+      return;
+    }
+    fs.mkdirSync(path.dirname(this.deps.configPath), { recursive: true });
+    const temp = `${this.deps.configPath}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(this.config, null, 2), { mode: 0o600 });
+    fs.renameSync(temp, this.deps.configPath);
+  }
+
+  private log(device: string, outcome: RemoteActivity["outcome"], detail: string): void {
+    this.activity.push({ at: new Date(this.now()).toISOString(), device, outcome, detail });
+    if (this.activity.length > ACTIVITY_LIMIT) {
+      this.activity.shift();
+    }
+    logger.info("remote command", { device, outcome, detail });
+  }
+
+  private macName(): string {
+    return this.deps.macName ?? os.hostname().replace(/\.local$/, "");
+  }
+}
+
+function readConfig(configPath: string): RemoteConfig | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8")) as RemoteConfig;
+    return parsed.channelId && parsed.key ? { ...parsed, devices: parsed.devices ?? [] } : null;
+  } catch {
+    return null;
+  }
+}

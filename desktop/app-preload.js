@@ -11,4 +11,6 @@ contextBridge.exposeInMainWorld("squeak", {
   openInConductor: (target) => ipcRenderer.invoke("squeak:open-in-conductor", target),
   openPath: (target) => ipcRenderer.send("duck:open-path", target),
   showDuck: () => ipcRenderer.send("squeak:show-duck"),
+  remote: (action, deviceId) => ipcRenderer.invoke("squeak:remote", action, deviceId ?? null),
+  pairingQr: () => ipcRenderer.invoke("squeak:pairing-qr"),
 });

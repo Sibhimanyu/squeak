@@ -170,4 +170,44 @@ async function openInConductor(target) {
   }
 }
 
-module.exports = { openInConductor, readState, reply, restartService, serviceStatus, sessionMessage };
+const REMOTE_ACTIONS = new Set(["status", "approve", "reject", "revoke", "reset"]);
+
+/** Pairing and device management for the phone channel (docs/remote-channel.md). */
+async function remote(action, deviceId) {
+  if (!REMOTE_ACTIONS.has(action) || (deviceId != null && !/^[A-Za-z0-9_-]{1,64}$/.test(deviceId))) {
+    return { ok: false };
+  }
+  try {
+    return await control(`remote/${action}${deviceId ? `/${deviceId}` : ""}`, {
+      method: action === "status" ? "GET" : "POST",
+    });
+  } catch (error) {
+    return { available: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Open the pairing window and draw its QR code. The code carries the channel
+ * key, so it is made here and handed to the window as an image, never as text
+ * a web page could lift.
+ */
+async function pairingQr() {
+  try {
+    const { url } = await control("remote/pair", { method: "POST" });
+    const QRCode = require("qrcode");
+    return { ok: true, image: await QRCode.toDataURL(url, { margin: 1, width: 360, errorCorrectionLevel: "M" }) };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+module.exports = {
+  openInConductor,
+  pairingQr,
+  readState,
+  remote,
+  reply,
+  restartService,
+  serviceStatus,
+  sessionMessage,
+};
