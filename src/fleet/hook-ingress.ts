@@ -34,6 +34,11 @@ export interface HookIngressOptions {
 export interface IngressControl {
   sessionMessage(replyTarget: string): unknown;
   reply(replyTarget: string, text: string): Promise<unknown>;
+  /**
+   * The current turn of a session, step by step, by its fleet key. Token-gated
+   * like the rest: thinking and tool calls are the session's content.
+   */
+  activity?(sessionKey: string): unknown;
   /** The phone channel: status, pair, approve, reject, revoke, reset. */
   remote?(action: string, deviceId: string | null): Promise<unknown>;
 }
@@ -187,6 +192,7 @@ export class HookIngressServer {
   /**
    * `GET  /control/session/<replyTarget>/message`
    * `POST /control/session/<replyTarget>/reply` with `{ "text": "..." }`
+   * `GET  /control/session/<sessionKey>/activity`
    *
    * `replyTarget` is a Conductor chat id or a terminal agent's fleet key, as
    * `/state` hands it out.
@@ -226,7 +232,7 @@ export class HookIngressServer {
     }
 
     // A Conductor chat id, or the fleet key of a terminal agent (`claude-transcript:<uuid>`).
-    const match = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply)$/.exec(
+    const match = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity)$/.exec(
       (request.url ?? "").split("?")[0] ?? "",
     );
     if (!match) {
@@ -234,7 +240,7 @@ export class HookIngressServer {
       request.resume();
       return;
     }
-    const [, sessionId, action] = match as unknown as [string, string, "message" | "reply"];
+    const [, sessionId, action] = match as unknown as [string, string, "message" | "reply" | "activity"];
 
     if (action === "message" && request.method === "GET") {
       request.resume();
@@ -242,6 +248,21 @@ export class HookIngressServer {
         respondJson(response, 200, control.sessionMessage(sessionId));
       } catch (error) {
         logger.warn("control message read failed", { error: error instanceof Error ? error.message : String(error) });
+        respond(response, 500, "unavailable");
+      }
+      return;
+    }
+
+    if (action === "activity" && request.method === "GET") {
+      request.resume();
+      if (!control.activity) {
+        respond(response, 503, "activity unavailable");
+        return;
+      }
+      try {
+        respondJson(response, 200, control.activity(sessionId));
+      } catch (error) {
+        logger.warn("control activity read failed", { error: error instanceof Error ? error.message : String(error) });
         respond(response, 500, "unavailable");
       }
       return;

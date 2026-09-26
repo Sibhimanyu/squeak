@@ -405,6 +405,52 @@ main {
   font-weight: 600;
 }
 
+/* What it's doing: the turn so far, newest last. */
+.activity {
+  max-width: 72ch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.activity .step {
+  display: flex;
+  gap: 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--sq-line);
+  color: var(--sq-ink);
+  word-break: break-word;
+}
+
+.activity .step.tool {
+  border-left-color: var(--sq-working);
+  color: var(--sq-muted);
+}
+
+.activity .step.thinking {
+  color: var(--sq-muted);
+  font-style: italic;
+}
+
+.activity .step.more,
+.activity .step.empty {
+  border-left: none;
+  padding-left: 0;
+  color: var(--sq-muted);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.activity .step-tag {
+  flex: none;
+  color: var(--sq-subtle);
+  font-style: normal;
+  font-size: 11px;
+}
+
 .message {
   max-width: 72ch;
   color: var(--sq-ink);

@@ -5,6 +5,7 @@ import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import { FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
+import { readActivity } from "../fleet/activity.js";
 import { parseChoices } from "../fleet/choices.js";
 import { FleetReplyRouter } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
@@ -151,6 +152,10 @@ export class SqueakApp {
       sessionMessage: (target) => {
         const text = this.router.lastTurnText(target);
         return { text, choices: parseChoices(text) };
+      },
+      activity: (key) => {
+        const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
+        return session?.transcriptPath ? readActivity(session.agent, session.transcriptPath) : { steps: [], total: 0 };
       },
       reply: (target, text) =>
         this.router.send(target, text, (message) => {

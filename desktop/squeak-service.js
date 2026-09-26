@@ -78,6 +78,18 @@ async function sessionMessage(sessionId) {
   }
 }
 
+/** The current turn of a session, step by step; empty when it cannot be read. */
+async function sessionActivity(sessionKey) {
+  if (typeof sessionKey !== "string" || !SESSION_ID.test(sessionKey)) {
+    return { steps: [], total: 0 };
+  }
+  try {
+    return await control(`session/${sessionKey}/activity`);
+  } catch {
+    return { steps: [], total: 0 };
+  }
+}
+
 /**
  * A reply types into Conductor or a terminal through Squeak Hands, which can
  * take several seconds, and confirms against the database or transcript
@@ -216,5 +228,6 @@ module.exports = {
   reply,
   restartService,
   serviceStatus,
+  sessionActivity,
   sessionMessage,
 };

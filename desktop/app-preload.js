@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("squeak", {
   service: () => ipcRenderer.invoke("squeak:service"),
   restartService: () => ipcRenderer.invoke("squeak:restart-service"),
   message: (sessionId) => ipcRenderer.invoke("squeak:message", sessionId),
+  activity: (sessionKey) => ipcRenderer.invoke("squeak:activity", sessionKey),
   reply: (sessionId, text) => ipcRenderer.invoke("squeak:reply", sessionId, text),
   openInConductor: (target) => ipcRenderer.invoke("squeak:open-in-conductor", target),
   openPath: (target) => ipcRenderer.send("duck:open-path", target),

@@ -262,6 +262,7 @@ describe("HookIngressServer control routes", () => {
     const replies: Array<{ id: string; text: string }> = [];
     server.setControl({
       sessionMessage: (id) => ({ id, text: "A) yes\nB) no" }),
+      activity: (key) => ({ key, steps: [{ kind: "tool", text: "Run tests", at: null }], total: 1 }),
       reply: async (id, text) => {
         replies.push({ id, text });
         return { status: "started", via: "conductor" };
@@ -286,6 +287,20 @@ describe("HookIngressServer control routes", () => {
     expect(
       (await fetch(`http://127.0.0.1:${harness.port}/control/session/a%2F..%2Fb/message`, { headers: auth })).status,
     ).toBe(404);
+  });
+
+  it("serves a session's activity only with the token, and never to a web page", async () => {
+    const { harness, auth } = await withControl();
+    const url = `http://127.0.0.1:${harness.port}/control/session/claude-transcript:t1/activity`;
+    expect((await fetch(url)).status).toBe(403);
+    const response = await fetch(url, { headers: auth });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      key: "claude-transcript:t1",
+      steps: [{ kind: "tool", text: "Run tests", at: null }],
+      total: 1,
+    });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 
   it("refuses control requests without the token", async () => {

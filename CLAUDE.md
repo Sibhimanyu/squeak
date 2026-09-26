@@ -25,6 +25,7 @@ deployment section before changing anything under `src/` or `desktop/`.
 | `src/fleet/reply-router.ts` | one replier for every Mac-side surface: Conductor chats one way, terminal agents the other |
 | `src/fleet/terminal-reply.ts` | answers a `claude`/`codex` running in Terminal by typing into its tab |
 | `src/fleet/terminal-process.ts`, `terminal-screen.ts` | proves which process and tty a session is; reads its screen for an empty prompt |
+| `src/fleet/activity.ts` | a working session's current turn, step by step, for the window's "What it's doing" |
 | `src/fleet/choices.ts` | reads lettered options out of an agent's last message, for one-tap answers |
 | `src/fleet/git-state.ts` | cached working-tree reads, so "finished" says what changed |
 | `src/fleet/diff-view.ts` | reads and paginates a workspace diff for review in Telegram |
@@ -191,6 +192,18 @@ test for anything you fix is expected; the suite is fast.
   instead, newest turn only — role `assistant` rows there also hold tool
   calls, tool results, `result` and `system` events, and a turn that has
   just started must not resurface the previous turn's question.
+- **"What it's doing" reads the transcript, not the card.** `activity.ts`
+  lists the current turn: Claude's thinking summaries (present because
+  Conductor runs `--thinking-display summarized`), its notes between steps,
+  and each tool call as a plain label — never the raw input. Claude writes
+  each block of a message as its own entry under one message id, so blocks
+  are keyed by tool id or content, not position (keying by position merged
+  thinking, text and tool into one). A `<task-notification>` is a worker
+  reporting in, part of the turn; any other user text starts a new one.
+  Codex's reasoning is encrypted with an empty summary, so its feed is notes
+  and commands. It is served on the token-gated
+  `/control/session/<key>/activity`, since thinking is session content, and
+  the window refreshes only the feed each poll so drafts and scroll survive.
 - The duck and the window read `127.0.0.1:8477/state` from the daemon.
 - **Squeak for Mac is the duck's Electron app with a window.** One process,
   one instance (`requestSingleInstanceLock`): opening Squeak from Spotlight or

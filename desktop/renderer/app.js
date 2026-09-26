@@ -64,6 +64,8 @@ const drafts = new Map();
 const receipts = new Map();
 /** Full messages, keyed by session and activity, so polling does not refetch. */
 const messageCache = new Map();
+/** What the open feed last drew, so a poll with nothing new leaves it alone. */
+let lastActivitySignature = "";
 
 /* ---------- small DOM helpers ---------- */
 
@@ -573,10 +575,12 @@ async function renderDetail() {
   }
   const session = selectedSession();
   const receipt = session ? receipts.get(session.key) : null;
+  // A working session's feed refreshes in place (refreshActivity), so its
+  // every step must not rebuild the pane and throw away the scroll position.
   const signature = JSON.stringify([
     selectedKey,
     session?.state,
-    session?.lastActivityAt,
+    session?.state === "working" ? null : session?.lastActivityAt,
     receipt ? [receipt.pending, receipt.outcome?.status] : null,
   ]);
   if (signature === lastDetailSignature) return;
@@ -627,12 +631,19 @@ async function renderDetail() {
   if (typeof session.costUsd === "number") facts.append(el("span", null, `~$${session.costUsd.toFixed(2)} est.`));
   nodes.push(facts);
 
-  // What it said.
-  nodes.push(el("h3", "section-title", "What it said"));
-  const message = await loadMessage(session);
-  if (selectedKey !== session.key) return; // moved on while loading
-  const text = message?.text ?? session.detail;
-  nodes.push(text ? renderMessage(text) : el("p", "muted-note", "Nothing to show yet."));
+  // What it is doing, while it works; what it said, once it has.
+  let message = null;
+  if (session.state === "working") {
+    nodes.push(el("h3", "section-title", "What it's doing"));
+    nodes.push(el("ol", "activity"));
+    lastActivitySignature = "";
+  } else {
+    nodes.push(el("h3", "section-title", "What it said"));
+    message = await loadMessage(session);
+    if (selectedKey !== session.key) return; // moved on while loading
+    const text = message?.text ?? session.detail;
+    nodes.push(text ? renderMessage(text) : el("p", "muted-note", "Nothing to show yet."));
+  }
 
   // Answering it.
   const blocked = session.state === "awaiting_approval" || session.state === "awaiting_input";
@@ -670,6 +681,45 @@ async function renderDetail() {
   pinned.append(...answer);
   els.detail.replaceChildren(scroll, pinned);
   if (focused) els.detail.querySelector("textarea")?.focus();
+}
+
+/** How each kind of step reads in the feed; the words are the agent's own. */
+const STEP_LABEL = { thinking: "Thinking", note: null, tool: null, background: "Worker done" };
+
+/**
+ * Redraw the open feed from the daemon's reading of the transcript. Only the
+ * feed changes, so a draft, a selection or the scroll position survive, and
+ * it follows the newest step only when you were already at the bottom.
+ */
+async function refreshActivity() {
+  const session = selectedSession();
+  const feed = els.detail.querySelector(".activity");
+  if (!session || session.state !== "working" || !feed) return;
+  const activity = await window.squeak.activity(session.key);
+  if (selectedSession()?.key !== session.key || !feed.isConnected) return;
+  const steps = activity?.steps ?? [];
+  const signature = JSON.stringify([session.key, activity?.total, steps.at(-1)?.text]);
+  if (signature === lastActivitySignature) return;
+  lastActivitySignature = signature;
+
+  const scroll = els.detail.querySelector(".detail-scroll");
+  const atBottom = !scroll || scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24;
+  if (steps.length === 0) {
+    feed.replaceChildren(el("li", "step empty", "Nothing written yet for this turn."));
+  } else {
+    const rows = steps.map((step) => {
+      const row = el("li", `step ${step.kind}`);
+      const tag = STEP_LABEL[step.kind];
+      if (tag) row.append(el("span", "step-tag", tag));
+      row.append(el("span", "step-text", step.text));
+      return row;
+    });
+    if (activity.total > steps.length) {
+      rows.unshift(el("li", "step more", `The latest ${steps.length} of ${activity.total} steps this turn.`));
+    }
+    feed.replaceChildren(...rows);
+  }
+  if (scroll && atBottom) scroll.scrollTop = scroll.scrollHeight;
 }
 
 function showToast(text) {
@@ -722,6 +772,7 @@ async function poll() {
   renderTitle();
   renderList();
   await renderDetail();
+  await refreshActivity();
 }
 
 els.serviceRestart.addEventListener("click", () => void restartService());
