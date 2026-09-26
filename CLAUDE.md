@@ -320,8 +320,13 @@ test for anything you fix is expected; the suite is fast.
 - **Swift and Node must agree byte-for-byte.** Change a shape on one side and
   regenerate the fixtures (`swift run -c release squeak-fixtures
   ../../src/remote/fixtures/swift-command.json` in `ios/SqueakCore`; the Mac
-  fixture from a `RemoteBridge.phoneView()`), then run both test suites and
-  `npx tsx scripts/e2e-remote.ts`.
+  fixture with `npx tsx scripts/make-mac-fixture.ts`, from a real
+  `RemoteBridge.phoneView()`), then run both test suites and
+  `npx tsx scripts/e2e-remote.ts`. New fields are optional on the phone, so a
+  phone updated before its Mac keeps decoding.
+- **The phone gets less of a working turn than the Mac window**: the newest
+  six steps, each clipped to 200 characters, no timestamps, and only while
+  the session works — what leaves the Mac is only what the phone renders.
 - **The iPhone UI also ships inside SNOF**, as an owner-only tab: a free
   Apple ID allows three sideloaded apps. `SqueakRootView` (module `SqueakUI`)
   is the whole UI in one view; `ios/scripts/vendor-into.sh <snof>/ios/SqueakKit`

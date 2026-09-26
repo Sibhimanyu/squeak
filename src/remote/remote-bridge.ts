@@ -10,6 +10,8 @@ import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import { describeGitState } from "../fleet/git-state.js";
 import { distinctTitles, sessionLabel } from "../fleet/radar.js";
 import type { ReplyOutcome } from "../fleet/session-reply.js";
+import type { Activity } from "../fleet/activity.js";
+import type { FleetSession } from "../fleet/types.js";
 import type { ChannelDoc } from "./firestore-rest.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
 
@@ -87,6 +89,11 @@ export interface RemoteBridgeDependencies {
   store: ChannelStore;
   replier: RemoteReplier;
   snapshot: () => FleetSnapshot;
+  /**
+   * A working session's current turn (fleet/activity.ts). Without it the
+   * phone shows only the last message, as before.
+   */
+  activity?: ((session: FleetSession) => Activity | null) | null;
   now?: () => number;
   macName?: string;
 }
@@ -102,6 +109,13 @@ const IDLE_PUBLISH_MS = 60_000;
 /** Pairing is only listened for while the Mac app's pairing sheet is open. */
 const PAIRING_WINDOW_MS = 10 * 60_000;
 const MESSAGE_MAX_CHARS = 8_000;
+/**
+ * The phone gets less of a turn than the Mac window does: what leaves the Mac
+ * is only what the phone must render (docs/remote-channel.md), so the newest
+ * few steps, each clipped, and only while the session works.
+ */
+const PHONE_ACTIVITY_STEPS = 6;
+const PHONE_ACTIVITY_STEP_CHARS = 200;
 const ACTIVITY_LIMIT = 50;
 
 export class RemoteBridge {
@@ -112,6 +126,7 @@ export class RemoteBridge {
   private readonly seenNonces = new Map<string, number>();
   private readonly activity: RemoteActivity[] = [];
   private readonly messageCache = new Map<string, { text: string | null; choices: ParsedChoices | null }>();
+  private readonly activityCache = new Map<string, PhoneActivity | null>();
   private pairingOpenUntil = 0;
   private phoneSeenAt = 0;
   private lastPublishedAt = 0;
@@ -466,9 +481,47 @@ export class RemoteBridge {
           turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
           message: message?.text ?? null,
           choices: message?.choices ?? null,
+          activity: session.state === "working" ? this.activityFor(session) : null,
         };
       }),
     };
+  }
+
+  /** Read once per step: the key moves with the session's activity. */
+  private activityFor(session: FleetSession): PhoneActivity | null {
+    const read = this.deps.activity;
+    if (!read) {
+      return null;
+    }
+    const key = `${session.key}|${session.lastActivityAt}`;
+    if (this.activityCache.has(key)) {
+      return this.activityCache.get(key) ?? null;
+    }
+    let value: PhoneActivity | null = null;
+    try {
+      const activity = read(session);
+      if (activity && activity.steps.length > 0) {
+        value = {
+          total: activity.total,
+          steps: activity.steps.slice(-PHONE_ACTIVITY_STEPS).map((step) => ({
+            kind: step.kind,
+            text:
+              step.text.length > PHONE_ACTIVITY_STEP_CHARS
+                ? `${step.text.slice(0, PHONE_ACTIVITY_STEP_CHARS - 1).trimEnd()}…`
+                : step.text,
+          })),
+        };
+      }
+    } catch (error) {
+      logger.debug("could not read activity for the phone", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (this.activityCache.size > 200) {
+      this.activityCache.clear();
+    }
+    this.activityCache.set(key, value);
+    return value;
   }
 
   private message(sessionId: string, activity: string): { text: string | null; choices: ParsedChoices | null } {
@@ -517,6 +570,12 @@ export class RemoteBridge {
   private macName(): string {
     return this.deps.macName ?? os.hostname().replace(/\.local$/, "");
   }
+}
+
+/** What the phone gets of a turn: no timestamps, fewer and shorter steps. */
+interface PhoneActivity {
+  total: number;
+  steps: Array<{ kind: string; text: string }>;
 }
 
 function readConfig(configPath: string): RemoteConfig | null {

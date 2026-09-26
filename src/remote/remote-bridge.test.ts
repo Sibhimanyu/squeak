@@ -302,3 +302,51 @@ describe("RemoteBridge snapshot", () => {
     expect(f.store.docs.has(`${f.channel}/state/snapshot`)).toBe(false);
   });
 });
+
+describe("RemoteBridge phone view activity", () => {
+  function viewWith(sessions: FleetSession[], steps: number) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-activity-"));
+    dirs.push(dir);
+    const snapshot = { sessions, active: sessions, attention: [], generatedAt: "", codexUsage: null } as FleetSnapshot;
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store: new MemoryStore(),
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => snapshot,
+      activity: () => ({
+        total: steps,
+        steps: Array.from({ length: steps }, (_, index) => ({
+          kind: index % 2 ? ("tool" as const) : ("thinking" as const),
+          text: `step ${index} ${"x".repeat(index === steps - 1 ? 400 : 0)}`.trim(),
+          at: "2026-09-25T02:59:00.000Z",
+        })),
+      }),
+      now: () => NOW,
+      macName: "Test Mac",
+    });
+    return bridge.phoneView();
+  }
+
+  it("sends a working session's newest steps, clipped, without timestamps", () => {
+    const view = viewWith([session({ state: "working" })], 9);
+    const activity = view.sessions[0]!.activity!;
+
+    expect(activity.total).toBe(9);
+    expect(activity.steps.map((step) => step.text.slice(0, 6))).toEqual([
+      "step 3",
+      "step 4",
+      "step 5",
+      "step 6",
+      "step 7",
+      "step 8",
+    ]);
+    expect(activity.steps.at(-1)!.text.length).toBe(200);
+    expect(activity.steps.at(-1)!.text.endsWith("…")).toBe(true);
+    expect(Object.keys(activity.steps[0]!)).toEqual(["kind", "text"]);
+  });
+
+  it("sends no activity for a session that is not working", () => {
+    expect(viewWith([session({ state: "finished" })], 3).sessions[0]!.activity).toBeNull();
+  });
+});

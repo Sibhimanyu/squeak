@@ -41,6 +41,25 @@ final class MacInteropTests: XCTestCase {
         XCTAssertEqual(session.choices?.recommended, "A")
     }
 
+    func testDecodesAWorkingSessionsActivityAndNoneForAFinishedOne() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let snapshot = try ChannelCrypto.open(PhoneSnapshot.self, box: f.snapshotBox, key: key)
+        XCTAssertNil(snapshot.sessions.first?.activity)
+        let working = try XCTUnwrap(snapshot.sessions.first { $0.state == "working" })
+        let activity = try XCTUnwrap(working.activity)
+        XCTAssertEqual(activity.total, 9)
+        XCTAssertEqual(activity.steps.map(\.kind), ["thinking", "note", "tool", "background"])
+        XCTAssertEqual(activity.steps[2].text, "Edit timer.ts")
+    }
+
+    func testStillDecodesASnapshotFromAMacThatSendsNoActivity() throws {
+        // A phone updated before its Mac must keep working.
+        let json = #"{"v":1,"mac":"M","generatedAt":"x","duck":{"blockedCount":0,"workingCount":1},"sessions":[{"key":"k","conductorSessionId":null,"label":"l","agent":"claude","state":"working","lastActivityAt":"x","detail":null,"git":null,"contextPercent":null,"turnId":null,"message":null,"choices":null}]}"#
+        let snapshot = try JSONDecoder().decode(PhoneSnapshot.self, from: Data(json.utf8))
+        XCTAssertNil(snapshot.sessions.first?.activity)
+    }
+
     func testDecodesResultsAndThePairingAnswer() throws {
         let f = try fixture()
         let key = try PairingPayload.parse(f.pairingURL).k
