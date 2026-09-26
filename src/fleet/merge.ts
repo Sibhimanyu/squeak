@@ -28,6 +28,9 @@ export function mergeObservations(observations: ObservedSession[]): FleetSession
   return Array.from(groups.values()).map((group) => mergeGroup(group));
 }
 
+/** See `mergeGroup`: how far behind the transcript a working Conductor status may be and still hold. */
+const CONDUCTOR_WORKING_GRACE_MS = 30_000;
+
 function mergeGroup(group: ObservedSession[]): FleetSession {
   const conductor = group.find((entry) => entry.source === "conductor") ?? null;
   const transcript = group.find((entry) => entry.source !== "conductor") ?? null;
@@ -44,9 +47,16 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
 
   // Conductor knows the session's status first-hand; the transcript is
   // inference. Where both exist and Conductor is not behind, Conductor wins.
+  // "Behind" allows Conductor a grace window while it says working: when a
+  // background task reports in, Claude Code runs a short turn by itself that
+  // ends in an ordinary `end_turn`, and Conductor's status write (`waiting`,
+  // then `working` again) lands a moment later in whole seconds — so a plain
+  // newer-wins let that `end_turn` through as a finish. A status minutes
+  // behind the transcript is still stale and still loses.
+  const conductorGraceMs = conductor?.state === "working" ? CONDUCTOR_WORKING_GRACE_MS : 0;
   const stateOwner =
     conductor && transcript
-      ? conductor.lastActivityAt >= transcript.lastActivityAt
+      ? Date.parse(conductor.lastActivityAt) + conductorGraceMs >= Date.parse(transcript.lastActivityAt)
         ? conductor
         : transcript
       : (conductor ?? transcript);
@@ -78,6 +88,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     alive: false,
     git: null,
     stateSource: stateOwner?.source === "conductor" ? "conductor" : "transcript",
+    conductorState: conductor?.state ?? null,
   };
 }
 
@@ -98,6 +109,13 @@ export function applyHookEvents(sessions: FleetSession[], hookEvents: Map<string
 
     const state = stateFromHookEvent(event);
     if (!state || event.receivedAt < session.lastActivityAt) {
+      return session;
+    }
+    // Stop fires at the end of every turn, including the ones Claude Code
+    // starts by itself as background tasks report in. Conductor, which runs
+    // the chat, knows whether it is actually done; a blocked state from a
+    // hook is still news and still applies.
+    if (state === "finished" && session.conductorState === "working") {
       return session;
     }
 

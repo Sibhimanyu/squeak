@@ -79,8 +79,15 @@ export class ConductorObserver {
 
   private toFleetState(row: FleetRegistrySessionRef): FleetState {
     switch (row.status) {
+      // `waiting`: the turn ended but background work it started —
+      // subagents, a background shell — is still running, and Conductor shows
+      // the chat as not done. Claude Code starts a short turn by itself each
+      // time one of those finishes, and every such turn writes an ordinary
+      // turn end; read as finishes, one fan-out of nine workers pushed six
+      // "done" cards in ten minutes.
       case "working":
       case "cancelling":
+      case "waiting":
         return "working";
       case "needs_user_input":
       case "needs_plan_response":

@@ -343,6 +343,8 @@ export function busyReason(status: string): string | null {
     case "working":
     case "cancelling":
       return "That chat is still working in Conductor. Wait for it to finish, then reply.";
+    case "waiting":
+      return "That chat is still running background work in Conductor. Wait for it to finish, then reply.";
     case "needs_user_input":
       return "That chat is waiting on a question inside Conductor. Answer it there.";
     case "needs_plan_response":

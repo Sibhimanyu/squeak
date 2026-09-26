@@ -476,6 +476,21 @@ transcripts, and ranks them by what is blocked on the human.
   `{"type":"error","content":"aborted by user"}` is you pressing stop, so idle;
   other `error` rows or `is_error: 1` are `error`. A resting chat's
   `lastActivityAt` is its content time, never `updated_at`.
+- **A turn ending is not the chat being done when background work is
+  running.** A Claude chat that fans out background subagents ends its turn
+  ("waiting on the workers"), and each time one reports in (a
+  `<task-notification>` user entry) Claude Code runs a short turn by itself
+  that also ends with `end_turn`, fires Stop, and writes a `result` row to
+  Conductor. Read as finishes, one fan-out of nine workers pushed six "done"
+  cards in ten minutes on a real machine. Conductor alone knows better: its
+  status is `working` during those turns and `waiting` between them (and
+  while a background shell it started is still alive). So `waiting` maps to
+  working, a Stop hook cannot finish a chat Conductor says is working, and a
+  working Conductor status gets a 30s grace over a newer transcript — its
+  status write lands a moment after the `end_turn`, in whole seconds. A
+  status minutes behind still loses, as a stale one should. Terminal
+  sessions have no such referee and can still flicker "finished" on the
+  radar between workers; they never push a finish, so it stays visual.
 - **Closed Conductor chats stay in the Conductor observation, flagged.**
   `listFleetSessions` used to skip `is_hidden` chats, but their transcripts
   still exist, so the fleet rediscovered each one as an anonymous

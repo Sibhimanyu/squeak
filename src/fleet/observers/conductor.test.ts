@@ -62,6 +62,15 @@ describe("ConductorObserver", () => {
     expect(sessions.map((session) => session.state)).toEqual(["working", "awaiting_input", "error"]);
   });
 
+  it("reports a chat still running background work as working, not finished", () => {
+    // Seen on a real machine: nine background workers, each reporting in
+    // started a short turn that wrote an ordinary turn end, and Conductor
+    // showed the chat as `waiting` in between. Read as idle-with-a-fresh-turn-
+    // end, every one of them pushed "done".
+    const [session] = observe([row({ status: "waiting" })]);
+    expect(session?.state).toBe("working");
+  });
+
   it("does not call a chat finished just because its row was touched", () => {
     // Conductor's trigger bumps updated_at on any write. A chat last answered
     // on Sep 17 was touched today along with two others in the same second.

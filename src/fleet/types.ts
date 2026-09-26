@@ -103,6 +103,11 @@ export interface FleetSession extends ObservedSession {
   git: GitState | null;
   /** Set when a hook told us the state rather than us inferring it. */
   stateSource: "hook" | "transcript" | "conductor";
+  /**
+   * What Conductor's own row says, for a session it runs; null otherwise.
+   * While it says working, nothing else may call the turn finished.
+   */
+  conductorState?: FleetState | null;
 }
 
 export type AttentionKind =

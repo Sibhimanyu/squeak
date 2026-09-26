@@ -2,7 +2,18 @@ export type ComposeMode = "none" | "new_session" | "new_workspace" | "plan_feedb
 
 export type QueueKind = "normal" | "new_session";
 
-export type SessionStatus = "idle" | "working" | "needs_user_input" | "needs_plan_response" | "error" | "cancelling";
+/**
+ * `waiting`: the turn ended but background work it started is still running
+ * (seen with a background shell alive); Conductor shows the chat as not done.
+ */
+export type SessionStatus =
+  | "idle"
+  | "working"
+  | "waiting"
+  | "needs_user_input"
+  | "needs_plan_response"
+  | "error"
+  | "cancelling";
 
 export type SupportedAgentType = "codex" | "claude";
 

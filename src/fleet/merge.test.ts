@@ -84,6 +84,33 @@ describe("mergeObservations", () => {
     expect(merged[0]?.lastActivityAt).toBe("2026-09-20T12:05:00.000Z");
   });
 
+  it("does not let a background task's short turn end count as a finish while Conductor says working", () => {
+    // The turn Claude Code starts when a worker reports in ends with end_turn
+    // at 02:42:56.9; Conductor's status write lands in whole seconds, so it
+    // can read as a moment older than the transcript.
+    const merged = mergeObservations([
+      observed({
+        key: "conductor:c1",
+        source: "conductor",
+        conductorSessionId: "c1",
+        state: "working",
+        lastActivityAt: "2026-09-26T02:42:56.000Z",
+      }),
+      observed({
+        key: "claude-transcript:agent-1",
+        source: "claude-transcript",
+        state: "finished",
+        detail: "Scene 03 is done. The other eight are still working.",
+        lastActivityAt: "2026-09-26T02:42:56.986Z",
+      }),
+    ]);
+
+    expect(merged[0]?.state).toBe("working");
+    expect(merged[0]?.conductorState).toBe("working");
+    // The agent's own words still describe it.
+    expect(merged[0]?.detail).toContain("still working");
+  });
+
   it("keeps a session Conductor never saw", () => {
     const merged = mergeObservations([
       observed({
@@ -141,6 +168,22 @@ describe("applyHookEvents", () => {
     const applied = applyHookEvents(sessions, new Map([["agent-1", hookEvent({ event: "Stop" })]]));
 
     expect(applied[0]?.state).toBe("working");
+  });
+
+  it("ignores Stop while Conductor says the chat is still working, but not a blocked state", () => {
+    // Stop fires at the end of every turn, including those a background task
+    // starts by itself; only Conductor knows whether the chat is done.
+    const sessions = mergeObservations([
+      observed({ key: "conductor:c1", source: "conductor", conductorSessionId: "c1", state: "working" }),
+    ]);
+
+    expect(applyHookEvents(sessions, new Map([["agent-1", hookEvent({ event: "Stop" })]]))[0]?.state).toBe("working");
+    expect(applyHookEvents(sessions, new Map([["agent-1", hookEvent()]]))[0]?.state).toBe("awaiting_approval");
+  });
+
+  it("still takes Stop for a session outside Conductor", () => {
+    const sessions = mergeObservations([observed({ key: "k", source: "claude-transcript", state: "working" })]);
+    expect(applyHookEvents(sessions, new Map([["agent-1", hookEvent({ event: "Stop" })]]))[0]?.state).toBe("finished");
   });
 
   it("leaves a session alone when no hook mentions it", () => {
