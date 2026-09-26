@@ -93,6 +93,14 @@ export interface ObservedSession {
    * instead, in FleetSnapshot.codexUsage, not per session.
    */
   costUsd: number | null;
+  /**
+   * What the turn is waiting on, per the transcript's last entry (Claude
+   * only): a running tool, the model, or an API retry; null once it ended.
+   * Waited since `lastActivityAt` of the transcript observation.
+   */
+  waitingOn?: "model" | "api" | "tool" | null;
+  /** When the transcript's last entry was written, which `waitingOn` has waited since. */
+  waitingSince?: string | null;
 }
 
 /** A session after the monitor has merged observers, hooks, and liveness. */
@@ -113,6 +121,8 @@ export interface FleetSession extends ObservedSession {
 export type AttentionKind =
   | "blocked_approval"
   | "blocked_question"
+  /** Working, but the model has not answered for far longer than it ever takes. */
+  | "stalled"
   | "errored"
   | "finished_unreviewed"
   | "context_pressure";

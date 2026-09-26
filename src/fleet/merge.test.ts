@@ -111,6 +111,31 @@ describe("mergeObservations", () => {
     expect(merged[0]?.detail).toContain("still working");
   });
 
+  it("keeps a chat Conductor says is working as working when its transcript merely went quiet", () => {
+    // Quiet reads as idle for a terminal agent whose process may be gone;
+    // Conductor knows its chat is still running, stuck or not.
+    const merged = mergeObservations([
+      observed({
+        key: "conductor:c1",
+        source: "conductor",
+        conductorSessionId: "c1",
+        state: "working",
+        lastActivityAt: "2026-09-20T12:00:00.000Z",
+      }),
+      observed({
+        key: "claude-transcript:agent-1",
+        source: "claude-transcript",
+        state: "idle",
+        waitingOn: "model",
+        waitingSince: "2026-09-20T12:20:00.000Z",
+        lastActivityAt: "2026-09-20T12:20:00.000Z",
+      }),
+    ]);
+
+    expect(merged[0]?.state).toBe("working");
+    expect(merged[0]?.waitingOn).toBe("model");
+  });
+
   it("keeps a session Conductor never saw", () => {
     const merged = mergeObservations([
       observed({

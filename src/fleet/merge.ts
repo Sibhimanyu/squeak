@@ -53,10 +53,15 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
   // then `working` again) lands a moment later in whole seconds — so a plain
   // newer-wins let that `end_turn` through as a finish. A status minutes
   // behind the transcript is still stale and still loses.
+  //
+  // A transcript that has merely gone quiet reads as idle, which is the right
+  // guess for a terminal agent whose process may be gone — but Conductor
+  // knows its chat is still working, stuck or not, so its word stands.
   const conductorGraceMs = conductor?.state === "working" ? CONDUCTOR_WORKING_GRACE_MS : 0;
   const stateOwner =
     conductor && transcript
-      ? Date.parse(conductor.lastActivityAt) + conductorGraceMs >= Date.parse(transcript.lastActivityAt)
+      ? Date.parse(conductor.lastActivityAt) + conductorGraceMs >= Date.parse(transcript.lastActivityAt) ||
+        (conductor.state === "working" && transcript.state === "idle")
         ? conductor
         : transcript
       : (conductor ?? transcript);

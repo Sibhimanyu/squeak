@@ -106,6 +106,34 @@ function hookEvent(overrides: Partial<HookEvent> = {}): HookEvent {
 }
 
 describe("FleetMonitor", () => {
+  it("pushes once when a working session stops hearing from the model, and again for a new stall", async () => {
+    const harness = makeMonitor([
+      observed({
+        waitingOn: "model",
+        waitingSince: "2026-09-20T11:48:00.000Z",
+        lastActivityAt: "2026-09-20T11:48:00.000Z",
+      }),
+    ]);
+
+    const first = await harness.monitor.refresh();
+    await harness.monitor.refresh();
+
+    expect(first.attention.map((item) => item.kind)).toEqual(["stalled"]);
+    expect(harness.pushes.flat().map((item) => item.kind)).toEqual(["stalled"]);
+
+    // It came back, then stalled again later: a new episode, a new card.
+    harness.setClaude([
+      observed({
+        waitingOn: "model",
+        waitingSince: "2026-09-20T12:10:00.000Z",
+        lastActivityAt: "2026-09-20T12:10:00.000Z",
+      }),
+    ]);
+    harness.setNow("2026-09-20T12:25:00.000Z");
+    await harness.monitor.refresh();
+    expect(harness.pushes.flat().map((item) => item.kind)).toEqual(["stalled", "stalled"]);
+  });
+
   it("does not raise attention for a session that is simply working", async () => {
     const harness = makeMonitor([observed()]);
 

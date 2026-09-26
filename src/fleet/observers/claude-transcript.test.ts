@@ -99,6 +99,37 @@ describe("ClaudeTranscriptObserver", () => {
     expect(session?.state).toBe("idle");
   });
 
+  it("says what an unfinished turn is waiting on, and since when", () => {
+    const projectsDir = makeProjectsDir();
+    const toolResult = {
+      type: "user",
+      timestamp: "2026-09-20T11:50:00.000Z",
+      message: { content: [{ type: "tool_result" }] },
+    };
+    writeTranscript(projectsDir, "wait-model", [userEntry("2026-09-20T11:40:00.000Z", "go"), toolResult]);
+    writeTranscript(projectsDir, "wait-tool", [
+      userEntry("2026-09-20T11:40:00.000Z", "go"),
+      assistantEntry("2026-09-20T11:41:00.000Z", "tool_use", [{ type: "tool_use", name: "Bash" }]),
+    ]);
+    writeTranscript(projectsDir, "wait-api", [
+      userEntry("2026-09-20T11:40:00.000Z", "go"),
+      { type: "system", subtype: "api_error", timestamp: "2026-09-20T11:52:00.000Z", error: "overloaded" },
+    ]);
+    writeTranscript(projectsDir, "wait-none", [
+      userEntry("2026-09-20T11:40:00.000Z", "go"),
+      assistantEntry("2026-09-20T11:41:00.000Z", "end_turn", [{ type: "text", text: "Done." }]),
+    ]);
+
+    const byId = new Map(
+      new ClaudeTranscriptObserver({ projectsDir, now: () => now }).observe().map((s) => [s.sourceId, s]),
+    );
+
+    expect(byId.get("wait-model")).toMatchObject({ waitingOn: "model", waitingSince: "2026-09-20T11:50:00.000Z" });
+    expect(byId.get("wait-tool")?.waitingOn).toBe("tool");
+    expect(byId.get("wait-api")?.waitingOn).toBe("api");
+    expect(byId.get("wait-none")?.waitingOn).toBeNull();
+  });
+
   it("ignores subagent entries when deciding state", () => {
     const projectsDir = makeProjectsDir();
     // A subagent finishing must not make the parent session look finished.

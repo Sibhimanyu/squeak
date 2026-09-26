@@ -192,7 +192,36 @@ export function readClaudeTranscript(
     retired: false,
     baseRef: null,
     costUsd: readLatestCost(entries),
+    waitingOn: waitingOn(last),
+    waitingSince: lastActivityAt,
   };
+}
+
+/**
+ * What the turn is waiting on, from its last entry: a tool still running, the
+ * model to answer (after a prompt, a tool result or a worker reporting in, or
+ * mid-message), or an API retry. Null once the turn has ended. How long it has
+ * waited is `lastActivityAt`, the entry's own time.
+ */
+function waitingOn(last: Record<string, unknown>): "model" | "api" | "tool" | null {
+  const type = asString(last.type);
+  if (type === "system") {
+    return asString(last.subtype) === "api_error" ? "api" : null;
+  }
+  if (type === "user") {
+    return "model";
+  }
+  if (type === "assistant") {
+    const message = asRecord(last.message);
+    const stopReason = message ? asString(message.stop_reason) : null;
+    if (stopReason === "end_turn" || stopReason === "stop_sequence") {
+      return null;
+    }
+    const content = message ? asArray(message.content) : [];
+    const lastBlock = asRecord(content[content.length - 1]);
+    return lastBlock && asString(lastBlock.type) === "tool_use" ? "tool" : "model";
+  }
+  return null;
 }
 
 function transcriptMtimeIso(transcriptPath: string, now: () => number): string {

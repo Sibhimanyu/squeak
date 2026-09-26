@@ -509,6 +509,19 @@ transcripts, and ranks them by what is blocked on the human.
   status minutes behind still loses, as a stale one should. Terminal
   sessions have no such referee and can still flicker "finished" on the
   radar between workers; they never push a finish, so it stays visual.
+- **"Seems stuck" is timed from the transcript's last entry, not the session's
+  activity.** The Claude observer records what an unfinished turn waits on
+  (`waitingOn`: a running tool, the model, or an API retry) and since when;
+  `isStalled` flags a working session (by Squeak's or Conductor's word) waiting
+  on the model 10 min or API retries 5 min, never a running tool. Measured
+  over 1,580 turns: 17 of 48 long waits after a tool result ended inside 5
+  min and thinking alone ran to 10, while 26 went past 10 — sessions that
+  never came back; long tools (builds, renders, 66 cases, median 10 min) are
+  legitimate. A newer hook is a sign of life; Conductor's `updated_at` is not
+  (its trigger bumps it on any write). Each stall is its own episode, keyed by
+  `waitingSince`, so it pushes once. Merged `lastActivityAt` includes
+  Conductor's row, so do not time a stall from it. And a quiet transcript no
+  longer makes a chat Conductor says is working look idle.
 - **Closed Conductor chats stay in the Conductor observation, flagged.**
   `listFleetSessions` used to skip `is_hidden` chats, but their transcripts
   still exist, so the fleet rediscovered each one as an anonymous

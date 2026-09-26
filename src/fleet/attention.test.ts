@@ -4,6 +4,7 @@ import {
   PUSH_KINDS,
   classifyAttentions,
   isActionable,
+  isStalled,
   scoreAttention,
   shouldPush,
   sortAttention,
@@ -191,5 +192,50 @@ describe("isActionable", () => {
   it("is true only when the bridge has a Conductor session to drive", () => {
     expect(isActionable(session({ conductorSessionId: "c1" }))).toBe(true);
     expect(isActionable(session())).toBe(false);
+  });
+});
+
+describe("isStalled", () => {
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+  const minutesAgo = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
+
+  it("flags a turn waiting on the model for over ten minutes", () => {
+    expect(isStalled(session({ waitingOn: "model", waitingSince: minutesAgo(11) }), now)).toBe(true);
+    // Thinking alone ran up to ten minutes on a real machine.
+    expect(isStalled(session({ waitingOn: "model", waitingSince: minutesAgo(9) }), now)).toBe(false);
+  });
+
+  it("flags API retries sooner, at five minutes", () => {
+    expect(isStalled(session({ waitingOn: "api", waitingSince: minutesAgo(6) }), now)).toBe(true);
+    expect(isStalled(session({ waitingOn: "api", waitingSince: minutesAgo(4) }), now)).toBe(false);
+  });
+
+  it("never flags a running tool, however long: builds and test suites take time", () => {
+    expect(isStalled(session({ waitingOn: "tool", waitingSince: minutesAgo(90) }), now)).toBe(false);
+  });
+
+  it("only flags a session that is working, by Squeak's word or Conductor's", () => {
+    const quiet = { waitingOn: "model" as const, waitingSince: minutesAgo(30) };
+    expect(isStalled(session({ ...quiet, state: "idle" }), now)).toBe(false);
+    expect(isStalled(session({ ...quiet, state: "error", conductorState: "working" }), now)).toBe(true);
+    expect(isStalled(session({ ...quiet, retired: true }), now)).toBe(false);
+  });
+
+  it("takes a hook heard since the last entry as a sign of life", () => {
+    const quiet = session({
+      waitingOn: "model",
+      waitingSince: minutesAgo(30),
+      stateSource: "hook",
+      lastActivityAt: minutesAgo(1),
+    });
+    expect(isStalled(quiet, now)).toBe(false);
+  });
+
+  it("is pushed, and outranks a finish", () => {
+    expect(PUSH_KINDS.has("stalled")).toBe(true);
+    const stalled = session({ waitingOn: "model", waitingSince: minutesAgo(12) });
+    expect(classifyAttentions(stalled, 80, now)).toEqual(["stalled"]);
+    // Without a clock, nothing is timed.
+    expect(classifyAttentions(stalled)).toEqual([]);
   });
 });

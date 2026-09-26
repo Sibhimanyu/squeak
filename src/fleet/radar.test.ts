@@ -284,6 +284,28 @@ describe("git state on the radar", () => {
 });
 
 describe("renderAttentionCard", () => {
+  it("says a stuck session seems stuck, what it waits on and for how long", () => {
+    const text = renderAttentionCard(
+      item({
+        kind: "stalled",
+        since: "2026-09-20T11:46:00.000Z",
+        session: session({ state: "working", waitingOn: "model", detail: "Running Bash" }),
+      }),
+      now,
+    );
+    expect(text).toContain("— seems stuck");
+    expect(text).toContain("No response from the model for 14m.");
+    const api = renderAttentionCard(
+      item({
+        kind: "stalled",
+        since: "2026-09-20T11:53:00.000Z",
+        session: session({ state: "error", waitingOn: "api" }),
+      }),
+      now,
+    );
+    expect(api).toContain("Retrying API errors for 7m.");
+  });
+
   const git = {
     branch: "x",
     filesChanged: 15,

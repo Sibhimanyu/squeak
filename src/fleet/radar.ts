@@ -374,7 +374,11 @@ export function renderAttentionCard(item: AttentionItem, nowMs: number, choices:
   // A decision card trades the summary for the question and its options: the
   // summary of a message that ends on a choice is its preamble, and the
   // options are what the buttons under the card mean.
-  const outcome = choices ? (choices.question ?? summarizeOutcome(session.detail)) : summarizeOutcome(session.detail);
+  const outcome = choices
+    ? (choices.question ?? summarizeOutcome(session.detail))
+    : item.kind === "stalled"
+      ? stalledLine(session, item.since, nowMs)
+      : summarizeOutcome(session.detail);
   if (outcome) {
     lines.push(outcome);
   } else if (item.kind !== "finished_unreviewed") {
@@ -424,12 +428,20 @@ export function cardLabel(session: FleetSession, homeDir = os.homedir()): string
   return full.length <= CARD_LABEL_MAX ? full : truncateStart(branch, CARD_LABEL_MAX);
 }
 
+/** Numbers over adjectives (DESIGN.md §9): what it is waiting on, and for how long. */
+function stalledLine(session: FleetSession, since: string, nowMs: number): string {
+  const age = formatAge(since, nowMs);
+  return session.waitingOn === "api" ? `Retrying API errors for ${age}.` : `No response from the model for ${age}.`;
+}
+
 function cardVerb(kind: AttentionKind): string {
   switch (kind) {
     case "blocked_approval":
       return "needs approval";
     case "blocked_question":
       return "needs an answer";
+    case "stalled":
+      return "seems stuck";
     case "errored":
       return "errored";
     case "finished_unreviewed":

@@ -7,6 +7,7 @@ import type { AttentionItem, AttentionKind, FleetSession } from "./types.js";
 const KIND_SCORE: Record<AttentionKind, number> = {
   blocked_approval: 1000,
   blocked_question: 900,
+  stalled: 700,
   errored: 600,
   finished_unreviewed: 300,
   context_pressure: 250,
@@ -32,8 +33,39 @@ const CONTEXT_PRESSURE_STATES = new Set(["working", "finished", "awaiting_approv
 export const PUSH_KINDS: ReadonlySet<AttentionKind> = new Set<AttentionKind>([
   "blocked_approval",
   "blocked_question",
+  "stalled",
   "finished_unreviewed",
 ]);
+
+/**
+ * How long a turn may wait before it "seems stuck". Measured over 1,580 turns
+ * on a real machine: after a tool result the model answered within 5 minutes
+ * in 17 of 48 long waits and thinking alone ran up to 10, while 26 waits went
+ * past 10 minutes — sessions that never came back. Nobody sits in API retries
+ * for 5 minutes on a healthy day. A long-running tool never counts: builds,
+ * renders and test suites legitimately run for many minutes.
+ */
+export const STALLED_AFTER_MS = { model: 10 * 60_000, api: 5 * 60_000 } as const;
+
+/**
+ * Working, by Squeak's or Conductor's word, but waiting on the model (or an
+ * API retry) for longer than `STALLED_AFTER_MS` allows. A hook heard since the
+ * transcript's last entry is a sign of life, so it does not count as quiet.
+ */
+export function isStalled(session: FleetSession, nowMs: number): boolean {
+  const waitingOn = session.waitingOn;
+  if (session.retired || (waitingOn !== "model" && waitingOn !== "api") || !session.waitingSince) {
+    return false;
+  }
+  if (session.state !== "working" && session.conductorState !== "working") {
+    return false;
+  }
+  if (session.stateSource === "hook" && session.lastActivityAt > session.waitingSince) {
+    return false;
+  }
+  const quietMs = nowMs - Date.parse(session.waitingSince);
+  return Number.isFinite(quietMs) && quietMs >= STALLED_AFTER_MS[waitingOn];
+}
 
 /** Waiting longer raises priority, but never enough to outrank a worse kind. */
 const MAX_AGE_BONUS = 240;
@@ -49,8 +81,13 @@ const ACTIONABLE_BONUS = 50;
 export function classifyAttentions(
   session: FleetSession,
   contextPressurePercent = DEFAULT_CONTEXT_PRESSURE_PERCENT,
+  nowMs: number | null = null,
 ): AttentionKind[] {
   const kinds: AttentionKind[] = [];
+
+  if (nowMs !== null && isStalled(session, nowMs)) {
+    kinds.push("stalled");
+  }
 
   switch (session.state) {
     case "awaiting_approval":

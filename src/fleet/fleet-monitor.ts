@@ -237,7 +237,7 @@ export class FleetMonitor {
         continue;
       }
 
-      const kinds = classifyAttentions(session, this.contextPressurePercent);
+      const kinds = classifyAttentions(session, this.contextPressurePercent, this.now());
       if (kinds.length === 0) {
         continue;
       }
@@ -248,11 +248,14 @@ export class FleetMonitor {
       }
 
       for (const kind of kinds) {
+        // A stall is timed from the last thing the agent wrote, so each stall
+        // is its own episode (one card each), not the whole working stretch.
+        const since = kind === "stalled" ? (session.waitingSince ?? recorded.stateEnteredAt) : recorded.stateEnteredAt;
         const item: AttentionItem = {
           session,
           kind,
-          since: recorded.stateEnteredAt,
-          score: scoreAttention({ kind, since: recorded.stateEnteredAt, session, now: this.now() }),
+          since,
+          score: scoreAttention({ kind, since, session, now: this.now() }),
         };
         attention.push(item);
 
@@ -264,7 +267,7 @@ export class FleetMonitor {
         const claimed = this.deps.store.claimNotification({
           sessionKey: session.key,
           kind,
-          stateEnteredAt: recorded.stateEnteredAt,
+          stateEnteredAt: since,
           notifiedAt: observedAt,
         });
         if (claimed) {
