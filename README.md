@@ -8,12 +8,12 @@ tells you, at a glance, which ones need you. When an agent finishes or stops
 to ask something, you can read what it said and answer it from your Mac, your
 iPhone, or Telegram.
 
-| Surface | What it does |
-| --- | --- |
+| Surface                                          | What it does                                                                                                                                           |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Squeak for Mac** (`~/Applications/Squeak.app`) | Every session grouped by what needs you; the agent's full last message; one-tap answers to lettered questions; replies; start and restart the service. |
-| **The duck** | A floating rubber duck and menu-bar icon: its mood says whether anything is working, finished, or waiting on you. |
-| **Squeak for iPhone** | The same list and answers, from anywhere. Installed through SideStore. |
-| **Telegram** | Push cards when an agent is blocked or a Conductor chat finishes, with buttons to answer. |
+| **The duck**                                     | A floating rubber duck and menu-bar icon: its mood says whether anything is working, finished, or waiting on you.                                      |
+| **Squeak for iPhone**                            | The same list and answers, from anywhere. Installed through SideStore.                                                                                 |
+| **Telegram**                                     | Push cards when an agent is blocked or a Conductor chat finishes, with buttons to answer.                                                              |
 
 The design system every surface follows is in [`DESIGN.md`](DESIGN.md).
 
@@ -71,13 +71,20 @@ and scan the code with the iPhone app. Releases are built with
 
 ### Zoho Cliq (optional, one-way)
 
-Set `SQUEAK_CLIQ_WEBHOOK_URL` in Squeak's `.env` to a Cliq incoming-webhook
-URL — a bot's (`https://cliq.zoho.com/api/v2/bots/<bot>/incoming?zapikey=…`)
-or a channel's — and restart Squeak. Every push card that goes to Telegram
-(blocked, finished, seems stuck, Codex quota) is posted there too, without
-buttons: Cliq sends taps and replies to Zoho's servers, which cannot reach
-the Mac. Answer from Squeak, Telegram or the iPhone. The `zapikey` is a
-credential; it stays in `.env` and is redacted from logs.
+Create a bot in Cliq (Integrations → Bots), subscribe to it, and generate a
+webhook token (Integrations → Webhook Tokens). Set `SQUEAK_CLIQ_WEBHOOK_URL`
+in Squeak's `.env` to the bot's **API Endpoint** plus the token —
+`https://cliq.zoho.in/api/v2/bots/<bot>/message?zapikey=…`, on your own data
+centre's host — and restart Squeak. Not the Incoming Webhook Endpoint
+(`…/incoming`): that runs the bot's incoming-webhook handler and, with none
+written, answers 200 and shows nothing. A channel's
+`…/channelsbyname/<channel>/message` URL works too.
+
+Every push card that goes to Telegram (blocked, finished, seems stuck, Codex
+quota) is posted there too, without buttons: Cliq sends taps and replies to
+Zoho's servers, which cannot reach the Mac. Answer from Squeak, Telegram or
+the iPhone. The `zapikey` is a credential; it stays in `.env` and is redacted
+from logs.
 
 ## Development
 

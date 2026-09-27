@@ -54,7 +54,9 @@ export function markdownToCliq(text: string): string {
 }
 
 /**
- * Posts to a Cliq incoming webhook (a bot's or a channel's). One-way: Cliq
+ * Posts to a bot's or a channel's `/message` endpoint. Not a bot's
+ * `/incoming`: that runs the bot's own handler, and with none written it
+ * answers 200 and shows nothing. One-way: Cliq
  * delivers button taps and replies to handlers on Zoho's servers, which
  * cannot reach this Mac, so nothing here reads anything back.
  */

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CliqWebhook, markdownToCliq, parseCliqWebhookUrl } from "./client.js";
 
-const URL_OK = "https://cliq.zoho.com/api/v2/bots/squeak/incoming?zapikey=secret123";
+const URL_OK = "https://cliq.zoho.com/api/v2/bots/squeak/message?zapikey=secret123";
 
 function ok(): Response {
   return new Response(null, { status: 204 });
