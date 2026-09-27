@@ -14,6 +14,7 @@ function sanitizeLogString(value: string): string {
   return value
     .replace(/\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_TELEGRAM_BOT_TOKEN]")
     .replace(/(TELEGRAM_BOT_TOKEN=)\S+/g, "$1[REDACTED]")
+    .replace(/(zapikey=)[^&\s"']+/gi, "$1[REDACTED]")
     .replace(/\/Users\/[^/\s]+/g, "/Users/[REDACTED]");
 }
 

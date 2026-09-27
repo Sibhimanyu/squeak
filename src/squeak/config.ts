@@ -58,6 +58,11 @@ const schema = z.object({
   SQUEAK_HANDS_APP: z.string().default("~/Library/Application Support/squeak/Squeak Hands.app"),
   /** Firebase project for the phone channel (docs/remote-channel.md). Unset: no phone. */
   SQUEAK_REMOTE_PROJECT: z.string().optional(),
+  /**
+   * A Zoho Cliq incoming-webhook URL (a bot's or a channel's, with its
+   * zapikey). Set: push cards go to Cliq too. One-way; see src/cliq/.
+   */
+  SQUEAK_CLIQ_WEBHOOK_URL: z.string().optional(),
   POLL_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(50).default(30),
   FLEET_HOOK_PORT: z.coerce.number().int().min(1024).max(65535).default(8477),
   FLEET_POLL_INTERVAL_MS: z.coerce.number().int().min(2000).default(20000),
@@ -82,6 +87,7 @@ export interface SqueakConfig {
   /** Null when switched off. */
   handsAppPath: string | null;
   remoteProjectId: string | null;
+  cliqWebhookUrl: string | null;
   pollTimeoutSeconds: number;
   hookPort: number;
   pollIntervalMs: number;
@@ -141,6 +147,7 @@ export function loadSqueakConfig(): SqueakConfig {
     codexBin: resolve(parsed.CODEX_BIN),
     handsAppPath: parsed.SQUEAK_HANDS_APP === "off" ? null : resolve(parsed.SQUEAK_HANDS_APP),
     remoteProjectId: parsed.SQUEAK_REMOTE_PROJECT?.trim() || null,
+    cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
     hookPort: parsed.FLEET_HOOK_PORT,
     pollIntervalMs: parsed.FLEET_POLL_INTERVAL_MS,

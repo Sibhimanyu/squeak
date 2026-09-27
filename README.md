@@ -69,6 +69,16 @@ Set `SQUEAK_REMOTE_PROJECT` in Squeak's `.env` to your Firebase project id
 and scan the code with the iPhone app. Releases are built with
 `ios/scripts/release.sh` and installed through SideStore.
 
+### Zoho Cliq (optional, one-way)
+
+Set `SQUEAK_CLIQ_WEBHOOK_URL` in Squeak's `.env` to a Cliq incoming-webhook
+URL — a bot's (`https://cliq.zoho.com/api/v2/bots/<bot>/incoming?zapikey=…`)
+or a channel's — and restart Squeak. Every push card that goes to Telegram
+(blocked, finished, seems stuck, Codex quota) is posted there too, without
+buttons: Cliq sends taps and replies to Zoho's servers, which cannot reach
+the Mac. Answer from Squeak, Telegram or the iPhone. The `zapikey` is a
+credential; it stays in `.env` and is redacted from logs.
+
 ## Development
 
 ```bash
