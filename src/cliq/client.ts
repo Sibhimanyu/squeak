@@ -1,5 +1,6 @@
 import { logger } from "../utils/logger.js";
 import { splitMarkdown } from "../utils/tg-format.js";
+import { canonicalMessageId } from "./inbox.js";
 
 /** Cliq's own cap is higher; staying under it leaves room for the markup conversion. */
 const CLIQ_MESSAGE_MAX = 4000;
@@ -45,6 +46,17 @@ export function parseCliqWebhookUrl(raw: string): URL {
 }
 
 /**
+ * A card button. Tapping it runs the Cliq function `name` (owned by
+ * `owner`) with this `key`; the function writes it to the inbox for the
+ * Mac to act on.
+ */
+export interface CliqButton {
+  label: string;
+  key: string;
+  function: { name: string; owner: string };
+}
+
+/**
  * The fleet's cards are written in the common markdown dialect Telegram's
  * renderer reads. Cliq bolds with a single asterisk, so `**x**` would arrive
  * as `*x*` wrapped in stray stars. Italics (`_x_`) and code already agree.
@@ -56,9 +68,8 @@ export function markdownToCliq(text: string): string {
 /**
  * Posts to a bot's or a channel's `/message` endpoint. Not a bot's
  * `/incoming`: that runs the bot's own handler, and with none written it
- * answers 200 and shows nothing. One-way: Cliq
- * delivers button taps and replies to handlers on Zoho's servers, which
- * cannot reach this Mac, so nothing here reads anything back.
+ * answers 200 and shows nothing. Sending only: what comes back from Cliq
+ * arrives through the inbox (`inbox.ts`).
  */
 export class CliqWebhook {
   private readonly url: URL;
@@ -73,39 +84,48 @@ export class CliqWebhook {
     this.retryDelayMs = options.retryDelayMs ?? RETRY_DELAY_MS;
   }
 
-  /** Long text is split, never truncated. Resolves once every part is posted. */
-  post(markdown: string): Promise<void> {
+  /**
+   * Long text is split, never truncated; buttons go on the last part.
+   * Resolves to that part's message id, so a tap or a reply on it can be
+   * traced back to its card, or null when Cliq did not say.
+   */
+  post(markdown: string, options: { buttons?: CliqButton[] } = {}): Promise<string | null> {
     const parts = splitMarkdown(markdownToCliq(markdown), CLIQ_MESSAGE_MAX);
     const run = this.queue.then(async () => {
-      for (const part of parts) {
-        await this.postOnce(part);
+      let lastId: string | null = null;
+      for (const [index, part] of parts.entries()) {
+        const buttons = index === parts.length - 1 ? options.buttons : undefined;
+        lastId = await this.postOnce(messagePayload(part, buttons));
       }
+      return lastId;
     });
-    this.queue = run.catch(() => undefined);
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
     return run;
   }
 
-  private async postOnce(text: string): Promise<void> {
+  private async postOnce(payload: Record<string, unknown>): Promise<string | null> {
     try {
-      await this.request(text);
+      return await this.request(payload);
     } catch (error) {
       // A 429 or a 5xx is worth one more try; a 4xx means the URL or key is wrong.
       if (error instanceof CliqWebhookError && (error.status === null || error.status === 429 || error.status >= 500)) {
         await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs));
-        await this.request(text);
-        return;
+        return this.request(payload);
       }
       throw error;
     }
   }
 
-  private async request(text: string): Promise<void> {
+  private async request(payload: Record<string, unknown>): Promise<string | null> {
     let response: Response;
     try {
       response = await this.fetchImpl(this.url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(payload),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (error) {
@@ -116,7 +136,30 @@ export class CliqWebhook {
       const body = await response.text().catch(() => "");
       throw new CliqWebhookError(`Cliq returned ${response.status}: ${body.slice(0, 200)}`, response.status);
     }
+    const body = (await response.json().catch(() => null)) as {
+      message_details?: Record<string, { message_id?: string }>;
+    } | null;
+    // A personal bot has one subscriber, so there is one entry.
+    const first = body?.message_details ? Object.values(body.message_details)[0] : undefined;
+    return canonicalMessageId(first?.message_id);
   }
+}
+
+/** `sync_message` is what makes Cliq return the new message's id. */
+function messagePayload(text: string, buttons: CliqButton[] | undefined): Record<string, unknown> {
+  const payload: Record<string, unknown> = { text, sync_message: true };
+  if (buttons && buttons.length > 0) {
+    payload.buttons = buttons.map((button) => ({
+      label: button.label,
+      type: "+",
+      key: button.key,
+      // Cliq documents the key both on the button and as its argument; the
+      // handler reads either.
+      arguments: { key: button.key },
+      action: { type: "invoke.function", data: { name: button.function.name, owner: button.function.owner } },
+    }));
+  }
+  return payload;
 }
 
 export function logCliqFailure(what: string, error: unknown): void {

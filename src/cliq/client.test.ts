@@ -41,7 +41,32 @@ describe("CliqWebhook", () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(String(url)).toBe(URL_OK);
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body as string)).toEqual({ text: "*done*" });
+    expect(JSON.parse(init.body as string)).toEqual({ text: "*done*", sync_message: true });
+  });
+
+  it("returns the new message's id, and puts buttons on the last part only", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          user_ids: ["1"],
+          message_details: { "1": { chat_id: "CT_1", message_id: "1790492118179%2033850494115" } },
+        }),
+        { status: 200 },
+      ),
+    );
+    const id = await new CliqWebhook(URL_OK, { fetch: fetchMock }).post("hi", {
+      buttons: [{ label: "Reply", key: "reply", function: { name: "squeakbutton", owner: "o@example.com" } }],
+    });
+    expect(id).toBe("1790492118179_33850494115");
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string).buttons).toEqual([
+      {
+        label: "Reply",
+        type: "+",
+        key: "reply",
+        arguments: { key: "reply" },
+        action: { type: "invoke.function", data: { name: "squeakbutton", owner: "o@example.com" } },
+      },
+    ]);
   });
 
   it("splits long text rather than truncating it", async () => {
@@ -78,7 +103,7 @@ describe("CliqWebhook", () => {
       .mockResolvedValueOnce(ok());
     const webhook = new CliqWebhook(URL_OK, { fetch: fetchMock, retryDelayMs: 0 });
     await expect(webhook.post("one")).rejects.toThrow();
-    await expect(webhook.post("two")).resolves.toBeUndefined();
+    await expect(webhook.post("two")).resolves.toBeNull();
   });
 
   it("reports an unreachable host without the URL", async () => {

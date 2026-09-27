@@ -38,7 +38,7 @@ deployment section before changing anything under `src/` or `desktop/`.
 | `src/adapters/conductor-registry.ts` | all reads/writes against `conductor.db` |
 | `src/adapters/conductor-mirror.ts` | writes a background reply into Conductor |
 | `src/telegram/client.ts` | Telegram API calls, HTML rendering, retry/fallback |
-| `src/cliq/` | optional one-way Zoho Cliq copy of every push card, posted to the bot's `/message` endpoint, not `/incoming`, which answers 200 and shows nothing (`SQUEAK_CLIQ_WEBHOOK_URL`) |
+| `src/cliq/` | Zoho Cliq: cards out through the bot's `/message` endpoint (not `/incoming`, which answers 200 and shows nothing); taps and replies back through a Cliq database the bot's Deluge handlers write and the Mac polls. Read `docs/cliq.md` first |
 | `src/utils/tg-format.ts` | markdown to Telegram HTML, message splitting |
 | `desktop/` | Squeak for Mac: the duck plus the main window; a separate package, plain JS, no build step |
 | `desktop/app-window.js`, `desktop/renderer/app.*` | the Squeak window: sessions, full messages, decisions, replies, iPhone pairing |

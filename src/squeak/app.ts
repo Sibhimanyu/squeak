@@ -3,8 +3,10 @@ import process from "node:process";
 
 import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
-import { CliqWebhook } from "../cliq/client.js";
-import { CliqNotifier } from "../cliq/notifier.js";
+import { CliqChannel } from "../cliq/channel.js";
+import { CliqWebhook, parseCliqWebhookUrl } from "../cliq/client.js";
+import { CliqInbox } from "../cliq/inbox.js";
+import { accountsHostFor, ZohoOAuth } from "../cliq/oauth.js";
 import { FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { readActivity } from "../fleet/activity.js";
@@ -75,7 +77,7 @@ export class SqueakApp {
   /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
   private readonly router: FleetReplyRouter;
   private readonly remote: RemoteBridge | null;
-  private readonly cliq: CliqNotifier | null;
+  private readonly cliq: CliqChannel | null;
   private lastUpdateId = 0;
   private stopped = false;
 
@@ -167,7 +169,7 @@ export class SqueakApp {
         }),
     });
 
-    this.cliq = createCliqNotifier(config.cliqWebhookUrl, this.runtime.monitor);
+    this.cliq = this.createCliq();
 
     this.controller = new FleetController({
       telegram: this.telegram,
@@ -310,6 +312,42 @@ export class SqueakApp {
     }
   }
 
+  /**
+   * A bad URL turns Cliq off rather than failing startup: launchd would
+   * restart the daemon in a loop, and Telegram and the duck with it.
+   */
+  private createCliq(): CliqChannel | null {
+    const url = this.config.cliqWebhookUrl;
+    if (!url) {
+      return null;
+    }
+    try {
+      const webhook = new CliqWebhook(url);
+      const twoWay = this.config.cliqTwoWay;
+      const cliqHost = parseCliqWebhookUrl(url).hostname;
+      return new CliqChannel({
+        webhook,
+        monitor: this.runtime.monitor,
+        store: this.runtime.store,
+        inbound: twoWay
+          ? {
+              inbox: new CliqInbox({
+                cliqHost,
+                oauth: new ZohoOAuth({ accountsHost: accountsHostFor(cliqHost), ...twoWay }),
+              }),
+              replier: this.router,
+              ownerId: twoWay.ownerId,
+              ownerEmail: twoWay.ownerEmail,
+              hookStatus: () => this.hookStatus(),
+            }
+          : null,
+      });
+    } catch (error) {
+      logger.warn("cliq disabled", { error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  }
+
   private hookStatus(): string {
     const installed = fleetHooksInstalled(defaultHookInstallPaths(this.config.supportDir));
     if (installed) {
@@ -340,21 +378,5 @@ export class SqueakApp {
           logger.warn("squeak send failed", { error: summarizeTelegramError(error) });
         });
     }
-  }
-}
-
-/**
- * A bad URL turns Cliq off rather than failing startup: launchd would
- * restart the daemon in a loop, and Telegram and the duck with it.
- */
-function createCliqNotifier(url: string | null, monitor: FleetRuntime["monitor"]): CliqNotifier | null {
-  if (!url) {
-    return null;
-  }
-  try {
-    return new CliqNotifier({ webhook: new CliqWebhook(url), monitor });
-  } catch (error) {
-    logger.warn("cliq disabled", { error: error instanceof Error ? error.message : String(error) });
-    return null;
   }
 }

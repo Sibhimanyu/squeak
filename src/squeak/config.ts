@@ -63,6 +63,15 @@ const schema = z.object({
    * zapikey). Set: push cards go to Cliq too. One-way; see src/cliq/.
    */
   SQUEAK_CLIQ_WEBHOOK_URL: z.string().optional(),
+  /**
+   * Two-way Cliq (docs/cliq.md): a Zoho Self Client and its refresh token,
+   * written by `squeak cliq-auth`, and the one Zoho user allowed to act.
+   */
+  SQUEAK_CLIQ_CLIENT_ID: z.string().optional(),
+  SQUEAK_CLIQ_CLIENT_SECRET: z.string().optional(),
+  SQUEAK_CLIQ_REFRESH_TOKEN: z.string().optional(),
+  SQUEAK_CLIQ_OWNER_ID: z.string().optional(),
+  SQUEAK_CLIQ_OWNER_EMAIL: z.string().optional(),
   POLL_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(50).default(30),
   FLEET_HOOK_PORT: z.coerce.number().int().min(1024).max(65535).default(8477),
   FLEET_POLL_INTERVAL_MS: z.coerce.number().int().min(2000).default(20000),
@@ -88,6 +97,14 @@ export interface SqueakConfig {
   handsAppPath: string | null;
   remoteProjectId: string | null;
   cliqWebhookUrl: string | null;
+  /** Null unless every two-way setting is present. */
+  cliqTwoWay: {
+    clientId: string;
+    clientSecret: string;
+    refreshToken: string;
+    ownerId: string;
+    ownerEmail: string;
+  } | null;
   pollTimeoutSeconds: number;
   hookPort: number;
   pollIntervalMs: number;
@@ -148,6 +165,7 @@ export function loadSqueakConfig(): SqueakConfig {
     handsAppPath: parsed.SQUEAK_HANDS_APP === "off" ? null : resolve(parsed.SQUEAK_HANDS_APP),
     remoteProjectId: parsed.SQUEAK_REMOTE_PROJECT?.trim() || null,
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
+    cliqTwoWay: cliqTwoWay(parsed),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
     hookPort: parsed.FLEET_HOOK_PORT,
     pollIntervalMs: parsed.FLEET_POLL_INTERVAL_MS,
@@ -157,4 +175,18 @@ export function loadSqueakConfig(): SqueakConfig {
     codexQuotaWarnPercent: parsed.FLEET_CODEX_QUOTA_WARN_PERCENT,
     envFilePath,
   };
+}
+
+function cliqTwoWay(parsed: z.infer<typeof schema>): SqueakConfig["cliqTwoWay"] {
+  const values = {
+    clientId: parsed.SQUEAK_CLIQ_CLIENT_ID?.trim(),
+    clientSecret: parsed.SQUEAK_CLIQ_CLIENT_SECRET?.trim(),
+    refreshToken: parsed.SQUEAK_CLIQ_REFRESH_TOKEN?.trim(),
+    ownerId: parsed.SQUEAK_CLIQ_OWNER_ID?.trim(),
+    ownerEmail: parsed.SQUEAK_CLIQ_OWNER_EMAIL?.trim(),
+  };
+  const { clientId, clientSecret, refreshToken, ownerId, ownerEmail } = values;
+  return clientId && clientSecret && refreshToken && ownerId && ownerEmail
+    ? { clientId, clientSecret, refreshToken, ownerId, ownerEmail }
+    : null;
 }

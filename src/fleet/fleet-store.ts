@@ -93,6 +93,14 @@ export class FleetStore {
         PRIMARY KEY (chat_id, message_id)
       );
 
+      CREATE TABLE IF NOT EXISTS cliq_card (
+        message_id TEXT PRIMARY KEY,
+        target TEXT NOT NULL,
+        label TEXT NOT NULL,
+        turn TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
       CREATE TABLE IF NOT EXISTS fleet_mute (
         scope TEXT PRIMARY KEY,
         muted_until TEXT
@@ -228,6 +236,28 @@ export class FleetStore {
          FROM fleet_reply_target WHERE chat_id = ? AND message_id = ?`,
       )
       .get(chatId, messageId) as { target: string; label: string } | undefined;
+    return row ?? null;
+  }
+
+  /**
+   * A card posted to Cliq, by its message id: which session it answers and
+   * which turn it was about. Cliq ids are strings, hence a table of its own
+   * rather than `fleet_reply_target`.
+   */
+  setCliqCard(messageId: string, card: { target: string; label: string; turn: string }): void {
+    this.db
+      .prepare(
+        `INSERT INTO cliq_card (message_id, target, label, turn) VALUES (?, ?, ?, ?)
+         ON CONFLICT(message_id) DO UPDATE SET target = excluded.target, label = excluded.label, turn = excluded.turn`,
+      )
+      .run(messageId, card.target, card.label, card.turn);
+    this.db.prepare(`DELETE FROM cliq_card WHERE created_at < datetime('now', '-30 days')`).run();
+  }
+
+  getCliqCard(messageId: string): { target: string; label: string; turn: string } | null {
+    const row = this.db.prepare(`SELECT target, label, turn FROM cliq_card WHERE message_id = ?`).get(messageId) as
+      | { target: string; label: string; turn: string }
+      | undefined;
     return row ?? null;
   }
 

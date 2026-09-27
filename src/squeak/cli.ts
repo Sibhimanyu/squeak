@@ -32,7 +32,7 @@ FLEET_CODEX_QUOTA_WARN_PERCENT=85
 `;
 
 function printUsage(): void {
-  console.log(`Usage: squeak [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|help]
+  console.log(`Usage: squeak [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|cliq-auth|help]
 
 Commands:
   start            Start squeaking (default)
@@ -42,6 +42,7 @@ Commands:
   install-hooks    Report agent state live, for every session on this Mac
   uninstall-hooks  Remove the hooks this tool installed
   hooks-status     Show whether the hooks are installed
+  cliq-auth        Connect two-way Zoho Cliq: <client-id> <client-secret> <code>
   help             Show this message`);
 }
 
@@ -177,6 +178,14 @@ export async function main(argv: string[]): Promise<void> {
       const paths = hookPaths();
       console.log(fleetHooksInstalled(paths) ? "Hooks: installed" : "Hooks: not installed");
       console.log(`Ingress: 127.0.0.1:${hookPort()}`);
+      return;
+    }
+    case "cliq-auth": {
+      const { runCliqAuth } = await import("../cliq/setup.js");
+      const envPath = resolveSqueakEnvPath();
+      for (const line of await runCliqAuth(envPath, readValues(envPath), argv.slice(1))) {
+        console.log(line);
+      }
       return;
     }
     case "help":

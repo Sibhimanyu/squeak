@@ -623,30 +623,13 @@ export class FleetController {
     }
   }
 
-  /**
-   * A Conductor chat is answered only from a finish: a blocked one is holding
-   * its question open inside Conductor's own process, and a second writer
-   * would talk past it. A terminal agent is typed into, so one waiting for
-   * input can be answered too — but never one waiting on an approval, whose
-   * prompt a typed digit would answer. The send checks again either way.
-   */
   private canReplyFrom(item: AttentionItem): boolean {
-    if (!this.canAnswer(item.session)) {
-      return false;
-    }
-    if (item.session.conductorSessionId) {
-      return item.kind === "finished_unreviewed";
-    }
-    return item.kind === "finished_unreviewed" || item.kind === "blocked_question";
+    return canReplyFromCard(item, this.deps.replier);
   }
 
   /** Whether the replier can answer this session at all, whatever it is doing now. */
   private canAnswer(session: FleetSession): boolean {
-    const replier = this.deps.replier;
-    if (!replier) {
-      return false;
-    }
-    return session.conductorSessionId ? true : (replier.canReply?.(session) ?? false);
+    return canAnswerSession(session, this.deps.replier);
   }
 
   private readChoices(session: FleetSession): ParsedChoices | null {
@@ -707,11 +690,38 @@ export class FleetController {
 }
 
 /**
+ * A Conductor chat is answered only from a finish: a blocked one is holding
+ * its question open inside Conductor's own process, and a second writer
+ * would talk past it. A terminal agent is typed into, so one waiting for
+ * input can be answered too — but never one waiting on an approval, whose
+ * prompt a typed digit would answer. The send checks again either way.
+ *
+ * Shared by every surface that puts answer buttons on a card.
+ */
+export function canReplyFromCard(item: AttentionItem, replier: FleetReplier | null | undefined): boolean {
+  if (!canAnswerSession(item.session, replier)) {
+    return false;
+  }
+  if (item.session.conductorSessionId) {
+    return item.kind === "finished_unreviewed";
+  }
+  return item.kind === "finished_unreviewed" || item.kind === "blocked_question";
+}
+
+/** Whether the replier can answer this session at all, whatever it is doing now. */
+export function canAnswerSession(session: FleetSession, replier: FleetReplier | null | undefined): boolean {
+  if (!replier) {
+    return false;
+  }
+  return session.conductorSessionId ? true : (replier.canReply?.(session) ?? false);
+}
+
+/**
  * Whether it went through Conductor's window matters to the reader: only
  * then is it already visible there. A background reply is not, until
  * Conductor reloads the chat.
  */
-function deliveredText(sent: string, outcome: Extract<ReplyOutcome, { status: "started" }>): string {
+export function deliveredText(sent: string, outcome: Extract<ReplyOutcome, { status: "started" }>): string {
   if (outcome.via === "conductor") {
     return `${sent} in Conductor. I'll message you when it answers.`;
   }

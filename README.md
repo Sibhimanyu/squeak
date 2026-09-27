@@ -69,22 +69,13 @@ Set `SQUEAK_REMOTE_PROJECT` in Squeak's `.env` to your Firebase project id
 and scan the code with the iPhone app. Releases are built with
 `ios/scripts/release.sh` and installed through SideStore.
 
-### Zoho Cliq (optional, one-way)
+### Zoho Cliq (optional)
 
-Create a bot in Cliq (Integrations → Bots), subscribe to it, and generate a
-webhook token (Integrations → Webhook Tokens). Set `SQUEAK_CLIQ_WEBHOOK_URL`
-in Squeak's `.env` to the bot's **API Endpoint** plus the token —
-`https://cliq.zoho.in/api/v2/bots/<bot>/message?zapikey=…`, on your own data
-centre's host — and restart Squeak. Not the Incoming Webhook Endpoint
-(`…/incoming`): that runs the bot's incoming-webhook handler and, with none
-written, answers 200 and shows nothing. A channel's
-`…/channelsbyname/<channel>/message` URL works too.
-
-Every push card that goes to Telegram (blocked, finished, seems stuck, Codex
-quota) is posted there too, without buttons: Cliq sends taps and replies to
-Zoho's servers, which cannot reach the Mac. Answer from Squeak, Telegram or
-the iPhone. The `zapikey` is a credential; it stays in `.env` and is redacted
-from logs.
+Squeak can post every push card to a personal Cliq bot, and take commands,
+button taps (letters, Reply, Full message) and replies back from it. Cliq
+cannot call the Mac, so the bot's handlers write to a Cliq database that
+Squeak polls. Setup, the three Deluge handlers to paste, and the checks each
+action passes are in [docs/cliq.md](docs/cliq.md).
 
 ## Development
 
