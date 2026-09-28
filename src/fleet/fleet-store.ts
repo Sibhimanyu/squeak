@@ -107,6 +107,11 @@ export class FleetStore {
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
+      CREATE TABLE IF NOT EXISTS cliq_seen (
+        sig TEXT PRIMARY KEY,
+        seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
       CREATE TABLE IF NOT EXISTS fleet_mute (
         scope TEXT PRIMARY KEY,
         muted_until TEXT
@@ -284,6 +289,19 @@ export class FleetStore {
       | { text: string }
       | undefined;
     return row?.text ?? null;
+  }
+
+  hasSeenCliqSignature(sig: string): boolean {
+    return this.db.prepare(`SELECT 1 FROM cliq_seen WHERE sig = ?`).get(sig) !== undefined;
+  }
+
+  /**
+   * Kept a day: a relay record is refused after ten minutes anyway, so a copy
+   * older than that fails the age check even once its signature is forgotten.
+   */
+  markCliqSignatureSeen(sig: string): void {
+    this.db.prepare(`INSERT OR IGNORE INTO cliq_seen (sig) VALUES (?)`).run(sig);
+    this.db.prepare(`DELETE FROM cliq_seen WHERE seen_at < datetime('now', '-1 day')`).run();
   }
 
   getReview(sessionKey: string): FleetReviewRow | null {

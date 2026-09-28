@@ -10,7 +10,7 @@ import type { AssistantAnswer } from "../fleet/assistant.js";
 import type { AttentionItem, FleetSession } from "../fleet/types.js";
 import { logger } from "../utils/logger.js";
 import { logCliqFailure, type CliqButton, type CliqWebhook } from "./client.js";
-import type { CliqInbox, CliqInboxRecord } from "./inbox.js";
+import type { CliqInboxRecord, CliqRelayInbox } from "./inbox.js";
 
 /** The Cliq function every card button runs (docs/cliq.md). */
 export const CLIQ_BUTTON_FUNCTION = "squeakbutton";
@@ -61,7 +61,7 @@ export function turnStamp(text: string | null): string {
 
 /** What makes the channel two-way; without it, cards carry no buttons and nothing is read back. */
 export interface CliqInbound {
-  inbox: Pick<CliqInbox, "list" | "delete">;
+  inbox: Pick<CliqRelayInbox, "list" | "delete">;
   replier: FleetReplier;
   /** The Zoho user id allowed to act. A record written for anyone else is dropped. */
   ownerId: string;
@@ -94,7 +94,8 @@ type Card = { target: string; label: string; turn: string };
 /**
  * Squeak's Cliq bot. Cards go out through the bot's `/message` endpoint.
  * What you do in Cliq cannot reach the Mac directly, so the bot's Deluge
- * handlers write it to a Cliq database and this polls it (`inbox.ts`).
+ * handlers post it, signed, to a Firebase relay and this polls it
+ * (`inbox.ts`).
  *
  * It listens to the same `onPush` and `onQuotaAlert` as the Telegram
  * controller, so the monitor has already applied `shouldPush`, snoozes and

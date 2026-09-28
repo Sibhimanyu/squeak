@@ -1,9 +1,7 @@
-import type { ZohoOAuth } from "./oauth.js";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
-/** The Cliq database the bot's handlers write into. `squeak cliq-auth` creates it. */
-export const CLIQ_INBOX_DATABASE = "squeakinbox";
-
-const REQUEST_TIMEOUT_MS = 10_000;
+import type { ChannelDoc } from "../remote/firestore-rest.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * One thing done in Cliq, written by one of the bot's Deluge handlers
@@ -19,16 +17,6 @@ export interface CliqInboxRecord {
   userId: string;
   sentAt: number | null;
 }
-
-/** The fields `squeak cliq-auth` creates the database with; the handlers write exactly these. */
-export const CLIQ_INBOX_FIELDS = [
-  { field_name: "kind", type: "limited-text" },
-  { field_name: "arg", type: "limited-text" },
-  { field_name: "msgid", type: "limited-text" },
-  { field_name: "userid", type: "limited-text" },
-  { field_name: "sentat", type: "number" },
-  { field_name: "body", type: "large-text" },
-] as const;
 
 /**
  * Cliq spells one message id three ways: `1790492118179%2033850494115` from
@@ -49,101 +37,104 @@ export function canonicalMessageId(raw: string | null | undefined): string | nul
   return parts.length > 0 ? parts.join("_") : null;
 }
 
-export class CliqApiError extends Error {
-  readonly status: number | null;
+/** What the handlers sign: `zoho.encryption.hmacsha256(secret, box, "hex")`. */
+export function signCliqBox(secret: string, box: string): string {
+  return createHmac("sha256", secret).update(box, "utf8").digest("hex");
+}
 
-  constructor(message: string, status: number | null) {
-    super(message);
-    this.name = "CliqApiError";
-    this.status = status;
-  }
+/** The Firestore calls the relay needs; `FirestoreRest` in real use. */
+export interface RelayStore {
+  list(collection: string): Promise<Array<{ id: string; doc: ChannelDoc }>>;
+  delete(path: string): Promise<void>;
+}
+
+/** Signatures already acted on, so a copied record cannot run twice. */
+export interface SeenSignatures {
+  hasSeenCliqSignature(sig: string): boolean;
+  markCliqSignatureSeen(sig: string): void;
 }
 
 /**
- * The Mac's side of the database. Cliq cannot call the Mac, so the Mac
- * reads what the handlers wrote and deletes each record before acting on it:
- * a record is done at most once, even across a restart, and one that could
- * not be deleted waits for the next poll rather than running twice.
+ * The Mac's side of the Cliq relay. Zoho would not let the Mac read Cliq
+ * (`oauth_app_blocked` for a Self Client on a managed org), but Cliq's
+ * handlers can post out, so they write each record to
+ * `cliq/<relay>/inbox` in the Firebase project the phone channel already
+ * uses, and this reads it.
+ *
+ * Firestore is an untrusted pipe here, as it is for the phone. A record
+ * counts only if its box carries a valid HMAC from the secret that lives in
+ * the handlers and in Squeak's `.env`; anything else is deleted unread. The
+ * channel then checks who sent it, how old it is, and which card it names.
  */
-export class CliqInbox {
-  private readonly apiBase: string;
-  private readonly oauth: Pick<ZohoOAuth, "accessToken" | "invalidate">;
-  private readonly fetchImpl: typeof fetch;
+export class CliqRelayInbox {
+  private readonly store: RelayStore;
+  private readonly collection: string;
+  private readonly secret: string;
+  private readonly seen: SeenSignatures;
+  /** Signatures of the records the last `list` returned, by document id. */
+  private readonly pending = new Map<string, string>();
 
-  constructor(options: {
-    cliqHost: string;
-    oauth: Pick<ZohoOAuth, "accessToken" | "invalidate">;
-    fetch?: typeof fetch;
-  }) {
-    this.apiBase = `https://${options.cliqHost}/api/v2/storages/${CLIQ_INBOX_DATABASE}/records`;
-    this.oauth = options.oauth;
-    this.fetchImpl = options.fetch ?? fetch;
+  constructor(options: { store: RelayStore; relayId: string; secret: string; seen: SeenSignatures }) {
+    this.store = options.store;
+    this.collection = `cliq/${options.relayId}/inbox`;
+    this.secret = options.secret;
+    this.seen = options.seen;
   }
 
   async list(): Promise<CliqInboxRecord[]> {
-    const body = (await this.request("GET", `${this.apiBase}?limit=50`)) as { list?: unknown };
-    const rows = Array.isArray(body?.list) ? body.list : [];
-    return rows
-      .map((row) => parseRecord(row))
-      .filter((record): record is CliqInboxRecord => record !== null)
-      .sort((a, b) => (a.sentAt ?? 0) - (b.sentAt ?? 0));
+    const records: CliqInboxRecord[] = [];
+    for (const { id, doc } of await this.store.list(this.collection)) {
+      const record = this.verify(id, doc);
+      if (record) {
+        records.push(record);
+      } else {
+        await this.store.delete(`${this.collection}/${id}`).catch(() => undefined);
+      }
+    }
+    return records.sort((a, b) => (a.sentAt ?? 0) - (b.sentAt ?? 0));
   }
 
+  /** Claim a record: delete it, and remember its signature so a copy is refused. */
   async delete(id: string): Promise<void> {
-    await this.request("DELETE", `${this.apiBase}/${encodeURIComponent(id)}`);
+    await this.store.delete(`${this.collection}/${id}`);
+    const sig = this.pending.get(id);
+    this.pending.delete(id);
+    if (sig) {
+      this.seen.markCliqSignatureSeen(sig);
+    }
   }
 
-  private async request(method: string, url: string, retried = false): Promise<unknown> {
-    const token = await this.oauth.accessToken();
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, {
-        method,
-        headers: { authorization: `Zoho-oauthtoken ${token}` },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-    } catch (error) {
-      throw new CliqApiError(`Cliq unreachable: ${error instanceof Error ? error.name : "error"}`, null);
-    }
-    if (response.status === 401 && !retried) {
-      this.oauth.invalidate();
-      return this.request(method, url, true);
-    }
-    if (response.status === 204) {
+  private verify(id: string, doc: ChannelDoc): CliqInboxRecord | null {
+    const sig = doc.sig ?? "";
+    const expected = signCliqBox(this.secret, doc.box);
+    const valid = /^[0-9a-f]{64}$/.test(sig) && timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"));
+    if (!valid) {
+      logger.warn("cliq relay record with a bad signature dropped");
       return null;
     }
-    const text = await response.text().catch(() => "");
-    if (!response.ok) {
-      throw new CliqApiError(`Cliq returned ${response.status}: ${text.slice(0, 200)}`, response.status);
+    if (this.seen.hasSeenCliqSignature(sig)) {
+      logger.warn("cliq relay record replayed; dropped");
+      return null;
     }
+    let value: Record<string, unknown>;
     try {
-      return text ? JSON.parse(text) : null;
+      value = JSON.parse(doc.box) as Record<string, unknown>;
     } catch {
       return null;
     }
+    this.pending.set(id, sig);
+    const kind = asString(value.kind);
+    const sentAt = Number(value.sentat);
+    return {
+      id,
+      kind: kind === "message" || kind === "button" || kind === "reply" ? kind : "unknown",
+      arg: asString(value.arg),
+      msgid: canonicalMessageId(asString(value.msgid)),
+      body: asString(value.body),
+      userId: asString(value.userid),
+      sentAt: Number.isFinite(sentAt) && sentAt > 0 ? sentAt : null,
+    };
   }
-}
-
-function parseRecord(row: unknown): CliqInboxRecord | null {
-  if (!row || typeof row !== "object") {
-    return null;
-  }
-  const value = row as Record<string, unknown>;
-  const id = asString(value.id);
-  if (!id) {
-    return null;
-  }
-  const kind = asString(value.kind);
-  const sentAt = Number(value.sentat);
-  return {
-    id,
-    kind: kind === "message" || kind === "button" || kind === "reply" ? kind : "unknown",
-    arg: asString(value.arg),
-    msgid: canonicalMessageId(asString(value.msgid)),
-    body: asString(value.body),
-    userId: asString(value.userid),
-    sentAt: Number.isFinite(sentAt) && sentAt > 0 ? sentAt : null,
-  };
 }
 
 function asString(value: unknown): string {

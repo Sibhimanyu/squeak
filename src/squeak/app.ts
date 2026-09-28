@@ -4,9 +4,8 @@ import process from "node:process";
 import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import { CliqChannel } from "../cliq/channel.js";
-import { CliqWebhook, parseCliqWebhookUrl } from "../cliq/client.js";
-import { CliqInbox } from "../cliq/inbox.js";
-import { accountsHostFor, ZohoOAuth } from "../cliq/oauth.js";
+import { CliqWebhook } from "../cliq/client.js";
+import { CliqRelayInbox } from "../cliq/inbox.js";
 import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
@@ -334,16 +333,17 @@ export class SqueakApp {
     try {
       const webhook = new CliqWebhook(url);
       const twoWay = this.config.cliqTwoWay;
-      const cliqHost = parseCliqWebhookUrl(url).hostname;
       return new CliqChannel({
         webhook,
         monitor: this.runtime.monitor,
         store: this.runtime.store,
         inbound: twoWay
           ? {
-              inbox: new CliqInbox({
-                cliqHost,
-                oauth: new ZohoOAuth({ accountsHost: accountsHostFor(cliqHost), ...twoWay }),
+              inbox: new CliqRelayInbox({
+                store: new FirestoreRest(twoWay.projectId),
+                relayId: twoWay.relayId,
+                secret: twoWay.relaySecret,
+                seen: this.runtime.store,
               }),
               replier: this.router,
               ownerId: twoWay.ownerId,

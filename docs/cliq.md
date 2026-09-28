@@ -7,22 +7,33 @@ are in place — take commands, button taps and replies back from it.
 
 Cliq cannot call the Mac: button taps, messages and forms run *handlers*
 (Deluge scripts) on Zoho's servers, and the Mac sits behind NAT on loopback.
-So nothing on the Mac listens. Instead:
+The first design had the handlers write to a Cliq database the Mac read
+with Zoho OAuth, but a managed Zoho org refuses a personal Self Client
+(`oauth_app_blocked`, seen on zohocorp). Handlers can still post *out*, so
+they post to Squeak's own Firebase project instead:
 
 ```
 card ──► bot /message ──► you tap / reply / type
                                │
-                     bot handler (Deluge) writes a record
+             bot handler (Deluge) signs the record, posts it
                                ▼
-                   Cliq database "squeakinbox"
+      Firestore cliq/<relay>/inbox   (project SQUEAK_REMOTE_PROJECT)
                                │
-      Squeak polls it every 5s (OAuth), deletes each record, then acts
+      Squeak polls it every 5s, verifies, deletes each record, then acts
 ```
 
 - **Cards go out** through the bot's `/message` endpoint with the webhook
   token (`SQUEAK_CLIQ_WEBHOOK_URL`). Not `/incoming`: that runs the bot's
   incoming-webhook handler, and with none written it answers 200 with the
   subscriber list and shows nothing.
+- **Firestore is an untrusted pipe**, as for the phone. The rules
+  (`firebase/firestore.rules`) only allow creating `{box, sig, at}` records
+  under a relay id of 32+ random characters, never updating one. Each
+  record's `box` carries an HMAC-SHA256 from a secret that exists only in
+  Squeak's `.env` and in the three handlers; the Mac deletes anything
+  unsigned, altered or already seen (`cliq_seen`) without reading it.
+  Unlike the phone channel the text is not encrypted, so the words of a
+  command sit in the Firebase project until the next poll deletes them.
 - **Each card's message id is kept** (`cliq_card` in Squeak's state db,
   from `sync_message: true`) with the session it answers and a hash of the
   turn it was about. A tap or a reply names the card it came from, never a
@@ -36,8 +47,8 @@ card ──► bot /message ──► you tap / reply / type
   newer question. Then the same replier as Telegram and the Mac window runs,
   with the same busy rules: a working or blocked Conductor chat is refused,
   a terminal agent is only typed into at an empty prompt.
-- The database holds up to 1000 characters of text per record, so a longer
-  reply is refused in Cliq rather than cut short.
+- A handler forwards up to 4000 characters; a longer message is refused in
+  Cliq rather than cut short.
 
 What Cliq can do:
 
@@ -95,113 +106,50 @@ own data centre's hosts (`.com`, `.eu`, …) throughout.
 
 That alone gives you cards. The rest makes them answerable.
 
-### 2. A Zoho OAuth client for the Mac
+### 2. The relay
 
-1. Open <https://api-console.zoho.in> → **Add Client → Self Client → Create**.
-   Note the **Client ID** and **Client Secret**.
-2. **Generate Code** tab. Scope:
-   ```
-   ZohoCliq.StorageData.ALL,ZohoCliq.Storage.CREATE,ZohoCliq.Storage.READ
-   ```
-   Time duration 10 minutes, any description, **Create**. Copy the code.
-3. Within those minutes, on the Mac:
-   ```bash
-   node ~/conductor/repos/squeak/dist/squeak/cli.js cliq-auth <client-id> <client-secret> <code>
-   ```
-   It trades the code for a refresh token, creates the `squeakinbox`
-   database, and writes `SQUEAK_CLIQ_CLIENT_ID`, `…_SECRET` and
-   `…_REFRESH_TOKEN` to `.env`.
+On the Mac, with `SQUEAK_REMOTE_PROJECT` already set (the phone channel's
+Firebase project):
 
-   If it cannot create the database, make it by hand: **Integrations →
-   Databases → Create**, name `squeakinbox`, fields `kind`, `arg`, `msgid`,
-   `userid` (Limited text), `sentat` (Number), `body` (Large text).
-4. Add who may act, to `.env`:
-   ```
-   SQUEAK_CLIQ_OWNER_ID=<your Zoho user id>
-   SQUEAK_CLIQ_OWNER_EMAIL=<your Cliq login email>
-   ```
-   Your user id is the number the bot's `/message` call returns in
-   `user_ids`.
-
-### 3. A connection for the handlers
-
-**Integrations → Connections → Create Connection → Zoho Cliq**. Connection
-name and link name `squeakinbox`, scope `ZohoCliq.StorageData.CREATE`.
-Connect it. The handlers below write through it.
-
-### 4. The three handlers
-
-**Bot → Squeak → Message handler** (runs for anything you type to the bot):
-
-```deluge
-record = Map();
-record.put("kind","message");
-record.put("body",message);
-record.put("userid",user.get("id"));
-record.put("sentat",zoho.currenttime.toLong());
-if(message_details != null && message_details.get("message") != null)
-{
-	replied = message_details.get("message").get("replied_message");
-	if(replied != null)
-	{
-		record.put("msgid",replied.get("id"));
-	}
-}
-if(message.length() > 1000)
-{
-	return {"text":"That is over 1000 characters, more than Cliq's database holds. Send it from Squeak on the Mac instead."};
-}
-response = zoho.cliq.createRecord("squeakinbox",record,"squeakinbox");
-if(response.get("status") != "SUCCESS")
-{
-	return {"text":"Squeak could not queue that: " + response.get("message")};
-}
-return Map();
+```bash
+node ~/conductor/repos/squeak/dist/squeak/cli.js cliq-relay
 ```
 
-**Integrations → Functions → Create Function**, name `squeakbutton`, type
-**Button** (every card button runs this):
+It makes the relay id and signing secret, saves them to `.env`
+(`SQUEAK_CLIQ_RELAY_ID`, `SQUEAK_CLIQ_RELAY_SECRET`), and writes the three
+handlers with both filled in to `Application Support/squeak/cliq-handlers.txt`
+(0600). The secret is never printed. `--rotate` makes a new pair; paste the
+handlers again after it.
 
-```deluge
-key = arguments.get("key");
-if(key == "reply")
-{
-	inputs = list();
-	inputs.add({"type":"textarea","name":"text","label":"Reply","placeholder":"What should the agent do?","mandatory":true,"max_length":"1000"});
-	return {"type":"form","title":"Reply","name":"squeakreply","button_label":"Send","inputs":inputs,"action":{"type":"invoke.function","name":"squeakreply"}};
-}
-record = Map();
-record.put("kind","button");
-record.put("arg",key);
-record.put("msgid",message.get("id"));
-record.put("userid",user.get("id"));
-record.put("sentat",zoho.currenttime.toLong());
-response = zoho.cliq.createRecord("squeakinbox",record,"squeakinbox");
-if(response.get("status") != "SUCCESS")
-{
-	return {"type":"banner","text":"Squeak could not queue that tap.","status":"failure"};
-}
-return {"type":"banner","text":"Sent to your Mac","status":"success"};
+Add who may act, to `.env`:
+
+```
+SQUEAK_CLIQ_OWNER_ID=<your Zoho user id>
+SQUEAK_CLIQ_OWNER_EMAIL=<your Cliq login email>
 ```
 
-**Create Function**, name `squeakreply`, type **Form** (the Reply form's Send):
+Your user id is the number the bot's `/message` call returns in `user_ids`.
 
-```deluge
-record = Map();
-record.put("kind","reply");
-record.put("body",form.get("values").get("text"));
-record.put("msgid",message.get("id"));
-record.put("userid",user.get("id"));
-record.put("sentat",zoho.currenttime.toLong());
-response = zoho.cliq.createRecord("squeakinbox",record,"squeakinbox");
-if(response.get("status") != "SUCCESS")
-{
-	return {"type":"banner","text":"Squeak could not queue that reply.","status":"failure"};
-}
-return {"type":"banner","text":"Sent to your Mac","status":"success"};
-```
+The rules for the relay deploy with the rest of Firebase:
+`(cd firebase && firebase deploy --only firestore:rules --project <project>)`.
 
-### 5. Restart Squeak
+### 3. The three handlers
+
+Paste each block of `cliq-handlers.txt` where its heading says:
+
+- **Bots → Squeak → Edit Handlers → Message handler** — replace the sample
+  code Cliq starts every bot with (the "Messaging me for the first time?"
+  replies).
+- **Integrations → Functions → Create**, name `squeakbutton`, type
+  **Button** — every card button runs it; Reply opens a form.
+- **Integrations → Functions → Create**, name `squeakreply`, type **Form** —
+  the Reply form's Send.
+
+Each builds a record, signs it with `zoho.encryption.hmacsha256(secret,
+box, "hex")`, and posts it with `invokeurl`. No Cliq connection is needed:
+Firestore takes the post unauthenticated, and the signature is what counts.
+
+### 4. Restart Squeak
 
 `launchctl kickstart -k gui/$(id -u)/com.squeak.daemon`, or `ship.sh` when
 the code changed. Type `radar` to the bot: the answer comes back within five
@@ -209,8 +157,8 @@ seconds. `grep -i cliq ~/Library/Logs/squeak/squeak.log` shows any failure.
 
 ## Limits
 
-- Records API: 30 requests a minute per user. The poll uses 12, plus one
-  delete per thing you did.
+- Firestore's free tier is far above this: a poll every five seconds is
+  about 17,000 reads a day, against 50,000 free.
 - A poll every five seconds means up to five seconds before anything happens.
 - A card's buttons stay visible after use (a message posted through the API
   cannot be edited from here); the turn check is what stops a second tap.

@@ -64,12 +64,12 @@ const schema = z.object({
    */
   SQUEAK_CLIQ_WEBHOOK_URL: z.string().optional(),
   /**
-   * Two-way Cliq (docs/cliq.md): a Zoho Self Client and its refresh token,
-   * written by `squeak cliq-auth`, and the one Zoho user allowed to act.
+   * Two-way Cliq (docs/cliq.md): the Firebase relay the bot's handlers post
+   * to and the secret they sign with, written by `squeak cliq-relay`, and
+   * the one Zoho user allowed to act. Needs SQUEAK_REMOTE_PROJECT too.
    */
-  SQUEAK_CLIQ_CLIENT_ID: z.string().optional(),
-  SQUEAK_CLIQ_CLIENT_SECRET: z.string().optional(),
-  SQUEAK_CLIQ_REFRESH_TOKEN: z.string().optional(),
+  SQUEAK_CLIQ_RELAY_ID: z.string().optional(),
+  SQUEAK_CLIQ_RELAY_SECRET: z.string().optional(),
   SQUEAK_CLIQ_OWNER_ID: z.string().optional(),
   SQUEAK_CLIQ_OWNER_EMAIL: z.string().optional(),
   POLL_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(50).default(30),
@@ -99,9 +99,9 @@ export interface SqueakConfig {
   cliqWebhookUrl: string | null;
   /** Null unless every two-way setting is present. */
   cliqTwoWay: {
-    clientId: string;
-    clientSecret: string;
-    refreshToken: string;
+    projectId: string;
+    relayId: string;
+    relaySecret: string;
     ownerId: string;
     ownerEmail: string;
   } | null;
@@ -178,15 +178,12 @@ export function loadSqueakConfig(): SqueakConfig {
 }
 
 function cliqTwoWay(parsed: z.infer<typeof schema>): SqueakConfig["cliqTwoWay"] {
-  const values = {
-    clientId: parsed.SQUEAK_CLIQ_CLIENT_ID?.trim(),
-    clientSecret: parsed.SQUEAK_CLIQ_CLIENT_SECRET?.trim(),
-    refreshToken: parsed.SQUEAK_CLIQ_REFRESH_TOKEN?.trim(),
-    ownerId: parsed.SQUEAK_CLIQ_OWNER_ID?.trim(),
-    ownerEmail: parsed.SQUEAK_CLIQ_OWNER_EMAIL?.trim(),
-  };
-  const { clientId, clientSecret, refreshToken, ownerId, ownerEmail } = values;
-  return clientId && clientSecret && refreshToken && ownerId && ownerEmail
-    ? { clientId, clientSecret, refreshToken, ownerId, ownerEmail }
+  const projectId = parsed.SQUEAK_REMOTE_PROJECT?.trim();
+  const relayId = parsed.SQUEAK_CLIQ_RELAY_ID?.trim();
+  const relaySecret = parsed.SQUEAK_CLIQ_RELAY_SECRET?.trim();
+  const ownerId = parsed.SQUEAK_CLIQ_OWNER_ID?.trim();
+  const ownerEmail = parsed.SQUEAK_CLIQ_OWNER_EMAIL?.trim();
+  return projectId && relayId && relaySecret && ownerId && ownerEmail
+    ? { projectId, relayId, relaySecret, ownerId, ownerEmail }
     : null;
 }

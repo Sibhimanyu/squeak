@@ -17,6 +17,31 @@ service cloud.firestore {
       allow delete: if validChannel(channel) && validKind(kind);
     }
 
+    // The Cliq relay (docs/cliq.md). Cliq's own scripts cannot reach the Mac,
+    // so they post here and the Mac reads and deletes. Every record's box is
+    // HMAC-signed with a secret only the Mac and your Cliq functions hold, and
+    // the Mac drops anything unsigned, altered, stale or replayed; these rules
+    // only keep the pipe to one shape under an unguessable relay id. Create
+    // only, never update, so a record cannot be rewritten in place.
+    match /cliq/{relay}/inbox/{doc} {
+      allow get, list, delete: if validRelay(relay);
+      allow create: if validRelay(relay) && validCliqBody();
+    }
+
+    function validRelay(relay) {
+      return relay.matches('^[A-Za-z0-9_-]{32,64}$');
+    }
+
+    function validCliqBody() {
+      let body = request.resource.data;
+      return body.keys().hasOnly(['box', 'sig', 'at'])
+        && body.box is string
+        && body.box.size() < 12000
+        && body.sig is string
+        && body.sig.size() == 64
+        && body.at is int;
+    }
+
     function validChannel(channel) {
       return channel.matches('^[A-Za-z0-9_-]{22,64}$');
     }
