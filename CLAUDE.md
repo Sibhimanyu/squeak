@@ -466,6 +466,16 @@ transcripts, and ranks them by what is blocked on the human.
   `app.hide()` + `showInactive()` (the duck is gone for ~8ms). Not while the
   Squeak window is showing: activating an app raises all its windows, and
   the window would jump over your work.
+- **The panel's glass is a second window.** CSS `backdrop-filter` cannot
+  blur what is behind an Electron window (it only blurs the page), so the
+  old "20px blur" was a flat fill with other apps' text showing through.
+  macOS's material (`vibrancy: "popover"`) covers a whole window, and the
+  duck's window is mostly empty space, so `createGlass` keeps a focus-less,
+  click-through panel window sized to the panel's measured rect
+  (`duck:panel-rect`) one level below the duck (`floating` vs `floating`+1).
+  Anything that moves or resizes the duck window calls `syncGlass`.
+  `DUCK_CAPTURE` photographs the page only, so it runs without the glass;
+  `DUCK_CAPTURE_GLASS=1` keeps it for a `screencapture` of the real thing.
 - To see the duck without Screen Recording permission, use
   `DUCK_CAPTURE=<prefix>` — the window photographs itself. Note it photographs
   the *page*, not the composited window: it shows transparency correctly even

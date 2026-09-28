@@ -12,6 +12,7 @@
   --sq-surface: #18181b;
   --sq-surface-raised: #27272a;
   --sq-panel-translucent: rgba(24, 24, 27, 0.92);
+  --sq-panel-glass: rgba(24, 24, 27, 0.4);
   --sq-line: rgba(255, 255, 255, 0.08);
   --sq-ink: #f4f4f5;
   --sq-muted: #a1a1aa;
@@ -48,6 +49,7 @@
     --sq-surface: #ffffff;
     --sq-surface-raised: #ffffff;
     --sq-panel-translucent: rgba(255, 255, 255, 0.88);
+    --sq-panel-glass: rgba(255, 255, 255, 0.45);
     --sq-line: rgba(0, 0, 0, 0.08);
     --sq-ink: #18181b;
     --sq-muted: #52525b;

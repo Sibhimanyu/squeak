@@ -12,4 +12,6 @@ contextBridge.exposeInMainWorld("duck", {
   onExpanded: (handler) => ipcRenderer.on("duck:expanded", (_event, value) => handler(value)),
   onWillExpand: (handler) => ipcRenderer.on("duck:will-expand", (_event, value) => handler(value)),
   expandReady: () => ipcRenderer.send("duck:expand-ready"),
+  panelRect: (rect) => ipcRenderer.send("duck:panel-rect", rect),
+  onGlass: (handler) => ipcRenderer.on("duck:glass", (_event, value) => handler(value)),
 });

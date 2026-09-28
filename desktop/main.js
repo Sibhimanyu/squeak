@@ -61,6 +61,10 @@ const DEFAULT_SHORTCUT = "Control+Alt+D";
 const DEFAULT_VISIBILITY_SHORTCUT = "Control+Alt+H";
 
 let win = null;
+/** The native glass behind the open panel (createGlass); null where there is none. */
+let glass = null;
+/** Where the panel sits inside `win`, as the renderer last measured it. */
+let panelRect = null;
 let tray = null;
 let expanded = false;
 /** Which way the panel opens: "left" pins the duck to the window's right edge. */
@@ -168,6 +172,7 @@ function createWindow() {
   });
 
   hidden = readSettings().hidden === true;
+  createGlass();
 
   const port = process.env.FLEET_HOOK_PORT || "8477";
   win.loadFile(path.join(__dirname, "renderer", "index.html"), { query: { port } });
@@ -180,10 +185,79 @@ function createWindow() {
     // set immediately after construction, before the window has a backing
     // NSWindow; re-asserting once it is realized is a documented mitigation.
     applyFloatingBehavior(win);
+    if (glass) {
+      applyFloatingBehavior(glass, 0);
+      win.webContents.send("duck:glass", true);
+    }
     if (!hidden) {
       win.showInactive();
     }
   });
+}
+
+/**
+ * Real glass behind the panel. A web page cannot blur what is behind its
+ * window — CSS backdrop-filter only blurs the page's own content, so the
+ * panel's "20px blur" was a flat fill with other apps' text showing through
+ * — and macOS's material (NSVisualEffectView, Electron's `vibrancy`) covers
+ * a whole window, not part of one. The duck's window is mostly empty space
+ * around the duck, so the glass gets a window of its own, sized to the
+ * panel and kept just beneath the duck's. It never takes focus or clicks,
+ * so click-away-to-close and dragging are exactly as they were.
+ */
+function createGlass() {
+  // A capture photographs the page only, where the glass is not; it keeps
+  // the opaque panel so the shot is honest. DUCK_CAPTURE_GLASS=1 keeps the
+  // glass anyway, for a screen-level shot (screencapture) of the real thing.
+  if (process.platform !== "darwin" || (process.env.DUCK_CAPTURE && !process.env.DUCK_CAPTURE_GLASS)) {
+    return;
+  }
+  try {
+    glass = new BrowserWindow({
+      width: EXPANDED.width,
+      height: EXPANDED.height,
+      frame: false,
+      transparent: true,
+      show: false,
+      focusable: false,
+      resizable: false,
+      movable: false,
+      skipTaskbar: true,
+      fullscreenable: false,
+      hasShadow: true, // the panel's shadow is the native one now
+      roundedCorners: true,
+      type: "panel",
+      vibrancy: "popover", // follows light and dark, like a system popover
+      visualEffectState: "active", // stays glass when Squeak is not the active app
+    });
+    glass.setIgnoreMouseEvents(true);
+    applyFloatingBehavior(glass, 0);
+    void glass.loadURL("data:text/html,<body style='background:transparent'></body>");
+  } catch (error) {
+    console.warn("duck: no glass, keeping the opaque panel", error);
+    glass = null;
+  }
+}
+
+/** Put the glass exactly under the panel, or put it away. */
+function syncGlass() {
+  if (!glass || glass.isDestroyed()) {
+    return;
+  }
+  if (!win || !expanded || hidden || !panelRect) {
+    glass.hide();
+    return;
+  }
+  const bounds = win.getBounds();
+  glass.setBounds({
+    x: Math.round(bounds.x + panelRect.x),
+    y: Math.round(bounds.y + panelRect.y),
+    width: Math.round(panelRect.width),
+    height: Math.round(panelRect.height),
+  });
+  if (!glass.isVisible()) {
+    glass.showInactive();
+  }
 }
 
 /**
@@ -193,8 +267,10 @@ function createWindow() {
  * after switching to a panel. "floating" still sits above ordinary windows
  * (which is all the duck needs) without that special handling.
  */
-function applyFloatingBehavior(win) {
-  win.setAlwaysOnTop(true, "floating");
+function applyFloatingBehavior(win, relativeLevel = 1) {
+  // The duck sits one step above "floating" so the glass window, at
+  // "floating" itself, is always just behind it.
+  win.setAlwaysOnTop(true, "floating", relativeLevel);
   // skipTransformProcessType: without it Electron flips the process between
   // UIElementApplication and ForegroundApplication, which by its own
   // documentation "will hide the window and dock for a short time". The dock
@@ -233,6 +309,7 @@ function setExpanded(next) {
     const placed = clampToDisplay(x, y, COLLAPSED.width, COLLAPSED.height);
     win.setBounds({ ...placed, width: COLLAPSED.width, height: COLLAPSED.height });
     expanded = false;
+    syncGlass();
     win.webContents.send("duck:expanded", { expanded: false, side: expandSide });
     // placed.x is already the collapsed-equivalent position: both branches
     // above derive it by pinning the duck, just from opposite edges.
@@ -284,6 +361,7 @@ function finishExpand() {
   }
   win.setBounds({ x, y, width: EXPANDED.width, height: EXPANDED.height });
   expanded = true;
+  syncGlass(); // with the last measured rect; the renderer re-measures a frame later
   win.webContents.send("duck:expanded", { expanded: true, side: expandSide });
 
   // Behave like a popover: an open panel takes focus, which is what makes
@@ -325,6 +403,7 @@ function handBackActivation() {
   if (!hidden) {
     win.showInactive();
   }
+  // Collapsed by now, so the glass stays put away; app.hide() already hid it.
 }
 
 function cancelPendingExpand() {
@@ -343,6 +422,7 @@ function setHidden(next) {
   hidden = next;
   if (hidden) {
     setExpanded(false);
+    syncGlass();
     win.hide();
   } else {
     win.showInactive(); // never steal focus from what you are typing in
@@ -453,6 +533,7 @@ function openSqueak() {
   if (process.platform === "darwin" && app.dock && !app.dock.isVisible()) {
     void app.dock.show().then(() => {
       if (win) applyFloatingBehavior(win);
+      if (glass) applyFloatingBehavior(glass, 0);
       appWindow.focus();
     });
   }
@@ -461,6 +542,7 @@ function openSqueak() {
     appWindow.on("closed", () => {
       if (process.platform === "darwin" && app.dock) {
         app.dock.hide();
+        if (glass) applyFloatingBehavior(glass, 0);
         if (win) {
           applyFloatingBehavior(win);
           if (!hidden) win.showInactive();
@@ -513,6 +595,7 @@ function resetPosition() {
     cancelPendingExpand();
     win.setBounds({ ...position, ...COLLAPSED });
     expanded = false;
+    syncGlass();
     win.webContents.send("duck:expanded", false);
   }
 }
@@ -528,6 +611,18 @@ ipcMain.on("duck:state", (_event, state) => {
 });
 ipcMain.on("duck:collapse", () => setExpanded(false));
 
+ipcMain.on("duck:panel-rect", (_event, rect) => {
+  const valid =
+    rect &&
+    [rect.x, rect.y, rect.width, rect.height].every((n) => Number.isFinite(n)) &&
+    rect.width > 0 &&
+    rect.height > 0;
+  if (valid) {
+    panelRect = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    syncGlass();
+  }
+});
+
 ipcMain.on("duck:drag", (_event, delta) => {
   if (!win) {
     return;
@@ -541,6 +636,7 @@ ipcMain.on("duck:drag", (_event, delta) => {
   const bounds = win.getBounds();
   const placed = clampToDisplay(bounds.x + delta.dx, bounds.y + delta.dy, bounds.width, bounds.height);
   win.setBounds({ ...placed, width: bounds.width, height: bounds.height });
+  syncGlass();
 });
 
 ipcMain.on("duck:drag-end", () => {

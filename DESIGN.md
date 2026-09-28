@@ -101,7 +101,8 @@ for the apps.
 | `bg` | `#09090B` | `#F4F4F5` | Window / screen canvas |
 | `surface` | `#18181B` | `#FFFFFF` | Panels, cards, list backgrounds |
 | `surface-raised` | `#27272A` | `#FFFFFF` + border | Hovered row, popovers, sheets |
-| `panel-translucent` | `rgba(24,24,27,0.92)` + 20px blur | `rgba(255,255,255,0.88)` + 20px blur | The floating duck panel only |
+| `panel-glass` | `rgba(24,24,27,0.40)` over macOS glass | `rgba(255,255,255,0.45)` over macOS glass | The floating duck panel, over the system's own popover material |
+| `panel-translucent` | `rgba(24,24,27,0.92)` | `rgba(255,255,255,0.88)` | The duck panel where there is no system glass (captures, fallback) |
 | `line` | `rgba(255,255,255,0.08)` | `rgba(0,0,0,0.08)` | Dividers, borders |
 | `ink` | `#F4F4F5` | `#18181B` | Primary text |
 | `muted` | `#A1A1AA` | `#52525B` | Secondary text: meta lines, counts |
@@ -506,6 +507,7 @@ JSON.
   --sq-surface: #18181b;
   --sq-surface-raised: #27272a;
   --sq-panel-translucent: rgba(24, 24, 27, 0.92);
+  --sq-panel-glass: rgba(24, 24, 27, 0.4);
   --sq-line: rgba(255, 255, 255, 0.08);
   --sq-ink: #f4f4f5;
   --sq-muted: #a1a1aa;
@@ -542,6 +544,7 @@ JSON.
     --sq-surface: #ffffff;
     --sq-surface-raised: #ffffff;
     --sq-panel-translucent: rgba(255, 255, 255, 0.88);
+    --sq-panel-glass: rgba(255, 255, 255, 0.45);
     --sq-line: rgba(0, 0, 0, 0.08);
     --sq-ink: #18181b;
     --sq-muted: #52525b;

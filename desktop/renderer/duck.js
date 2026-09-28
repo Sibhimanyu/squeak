@@ -318,7 +318,21 @@ function applyExpanded(value) {
   els.body.classList.toggle("expand-right", open && state.side === "right");
 }
 
-window.duck.onExpanded(applyExpanded);
+window.duck.onExpanded((value) => {
+  applyExpanded(value);
+  // Where the panel sits in the window, so the glass behind it can match it
+  // exactly. Measured, not assumed, so it follows any change to duck.css.
+  if (els.body.classList.contains("expanded")) {
+    requestAnimationFrame(() => {
+      const rect = els.panel.getBoundingClientRect();
+      window.duck.panelRect({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+    });
+  }
+});
+
+// The main process has a native glass window to put behind the panel; only
+// then does the panel drop its own opaque fill.
+window.duck.onGlass((on) => els.body.classList.toggle("glass", Boolean(on)));
 
 // Opening is staged: the window grows synchronously but repaints later, so
 // the main process lets the new layout land first and only then resizes.
