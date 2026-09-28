@@ -259,12 +259,14 @@ describe("CliqChannel inbox", () => {
     t.records.push(record({ id: "a", body: "radar" }));
     t.records.push(record({ id: "b", body: "/snooze" }));
     t.records.push(record({ id: "c", body: "unmute" }));
+    t.records.push(record({ id: "u", body: "usage" }));
     t.records.push(record({ id: "d", body: "please keep it" }));
     await t.channel.pollOnce();
 
     expect(t.monitor.refresh).toHaveBeenCalled();
     expect(t.store.setMute).toHaveBeenCalledWith("*", new Date(now + 60 * 60_000).toISOString());
     expect(t.store.clearMute).toHaveBeenCalledWith("*");
+    expect(t.webhook.post.mock.calls.some(([text]) => text.startsWith("**Usage**"))).toBe(true);
     expect(t.replier.send).not.toHaveBeenCalled();
     expect(lastPost(t.webhook)).toContain("reply to its card or tap Reply");
   });

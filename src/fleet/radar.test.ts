@@ -13,6 +13,7 @@ import {
   renderAttentionCard,
   renderQuotaAlert,
   renderRadar,
+  renderUsage,
   sessionLabel,
   shortenPath,
   stateGlyph,
@@ -639,5 +640,57 @@ describe("stateGlyph", () => {
     expect(stateGlyph("error")).toBe("🟣");
     expect(stateGlyph("working")).toBe("🟢");
     expect(stateGlyph("finished")).toBe("✅");
+  });
+});
+
+describe("renderUsage", () => {
+  it("shows Codex's real quota and Claude's estimated cost, heaviest session first", () => {
+    const text = renderUsage(
+      {
+        codexUsage: {
+          planType: null,
+          primary: { usedPercent: 42.4, windowMinutes: 300, resetsAt: "2026-09-20T14:10:00.000Z" },
+          secondary: { usedPercent: 18, windowMinutes: 10080, resetsAt: "2026-09-23T16:00:00.000Z" },
+          hasCredits: false,
+          creditBalance: null,
+          observedAt: "2026-09-20T12:00:00.000Z",
+        },
+        active: [
+          session({ key: "a", branch: "cheap", costUsd: 0.5 }),
+          session({ key: "b", branch: "dear", costUsd: 3.25 }),
+          session({ key: "c", branch: "codex", agent: "codex", costUsd: null }),
+        ],
+      },
+      now,
+    );
+    expect(text).toContain("Codex · 5h: 42% used, resets in 2h 10m");
+    expect(text).toMatch(/Codex · .*: 18% used, resets in 3d 4h/);
+    expect(text).toContain("Claude · ~$3.75 est. across 2 active sessions");
+    expect(text.indexOf("dear")).toBeLessThan(text.indexOf("cheap"));
+    expect(text).toContain("not a limit");
+  });
+
+  it("does not pass off a reading from before the window reset as current", () => {
+    const text = renderUsage(
+      {
+        codexUsage: {
+          planType: null,
+          primary: { usedPercent: 61, windowMinutes: 300, resetsAt: "2026-09-20T11:00:00.000Z" },
+          secondary: null,
+          hasCredits: false,
+          creditBalance: null,
+          observedAt: "2026-09-20T06:00:00.000Z",
+        },
+        active: [],
+      },
+      now,
+    );
+    expect(text).toContain("Codex · 5h: reset since Codex last reported (was 61%)");
+  });
+
+  it("says so when there is nothing to report", () => {
+    const text = renderUsage({ codexUsage: null, active: [session()] }, now);
+    expect(text).toContain("Codex · no quota reported yet");
+    expect(text).toContain("Claude · no cost for the active sessions yet");
   });
 });

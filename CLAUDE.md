@@ -272,7 +272,12 @@ test for anything you fix is expected; the suite is fast.
   (1.25x / 2x for 5-min / 1-hour TTL writes, 0.1x for reads) come from the
   `claude-api` skill, not memory — pricing drifts and a stale number here
   would be worse than admitting the model is unpriced (`rateForModel`
-  returns `null` for anything not in the table, on purpose).
+  returns `null` for anything not in the table, on purpose). The 0.1x
+  cache-read rule does not hold for every model: Opus 5.5 reads at $0.20
+  (0.05x) and Fable 5.1 at $0.25, so those carry `cacheReadPerMTok`. A
+  missing model is silent in practice — every session on this machine ran
+  Opus 5.5 and the whole Claude cost line read "no cost yet" — so check
+  the table whenever a new model ships.
 - **This needed a whole-file read, which is a different cost class from
   everything else in `src/fleet/`.** State detection only needs the *last*
   entry, which the 256KB tail read easily contains; cost needs a *sum* across

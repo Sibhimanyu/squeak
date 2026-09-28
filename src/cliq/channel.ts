@@ -4,7 +4,7 @@ import { parseChoices, type ParsedChoices } from "../fleet/choices.js";
 import { canReplyFromCard, deliveredText, type FleetReplier } from "../fleet/fleet-controller.js";
 import type { FleetMonitor } from "../fleet/fleet-monitor.js";
 import type { FleetStore } from "../fleet/fleet-store.js";
-import { cardLabel, renderAttentionCard, renderQuotaAlert, renderRadar } from "../fleet/radar.js";
+import { cardLabel, renderAttentionCard, renderQuotaAlert, renderRadar, renderUsage } from "../fleet/radar.js";
 import { replyTargetFor } from "../fleet/reply-router.js";
 import type { AssistantAnswer } from "../fleet/assistant.js";
 import type { AttentionItem, FleetSession } from "../fleet/types.js";
@@ -39,7 +39,7 @@ const HELP = [
   '"tell squeak · main to go with B" — I show you the exact message and send it only when you tap Send.',
   "",
   "**Quick commands**",
-  "radar · snooze · unmute · hooks",
+  "radar · usage · snooze · unmute · hooks",
 ].join("\n");
 
 function quote(text: string): string {
@@ -306,6 +306,9 @@ export class CliqChannel {
       case "unmute":
         this.deps.store.clearMute("*");
         await this.post("Unmuted.");
+        return;
+      case "usage":
+        await this.post(renderUsage(await this.deps.monitor.refresh(), this.now()));
         return;
       case "hooks":
         await this.post(inbound.hookStatus());

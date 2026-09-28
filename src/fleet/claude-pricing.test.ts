@@ -72,3 +72,16 @@ describe("estimateMessageCostUsd", () => {
     expect(opus / haiku).toBeCloseTo(5, 5);
   });
 });
+
+describe("current models", () => {
+  it("prices Opus 5.5, which every Conductor session on this machine runs", () => {
+    expect(rateForModel("claude-opus-5-5")?.inputPerMTok).toBe(4);
+    expect(rateForModel("claude-opus-5-5[1m]")?.outputPerMTok).toBe(20);
+    // Its published cache read is $0.20 — 0.05x, not the 0.1x rule's $0.40.
+    expect(estimateMessageCostUsd("claude-opus-5-5", { cache_read_input_tokens: 1_000_000 })).toBeCloseTo(0.2);
+  });
+
+  it("uses Fable 5.1's own cache-read rate rather than 0.1x", () => {
+    expect(estimateMessageCostUsd("claude-fable-5-1", { cache_read_input_tokens: 1_000_000 })).toBeCloseTo(0.25);
+  });
+});

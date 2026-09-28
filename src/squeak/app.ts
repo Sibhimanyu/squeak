@@ -12,6 +12,7 @@ import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { readActivity } from "../fleet/activity.js";
 import { parseChoices } from "../fleet/choices.js";
+import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
 import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
@@ -32,6 +33,7 @@ const COMMANDS = [
   // of the two is enough in the menu.
   { command: "snooze", description: "Silence alerts for an hour" },
   { command: "unmute", description: "Resume alerts" },
+  { command: "usage", description: "Codex quota and Claude's estimated cost" },
   { command: "hooks", description: "Check whether live signal is wired up" },
   { command: "help", description: "What Squeak does" },
 ];
@@ -58,6 +60,7 @@ function helpText(): string {
     "",
     "/radar  what is running right now",
     "/snooze  silence for an hour · /unmute  resume",
+    "/usage  Codex quota and Claude's estimated cost",
     "/hooks  check live-signal wiring",
   ].join("\n");
 }
@@ -297,6 +300,9 @@ export class SqueakApp {
       case "/unmute":
         await this.controller.handleCallback(location, "fleet:unmute");
         await this.send(location, "Unmuted.");
+        return;
+      case "/usage":
+        await this.send(location, renderUsage(await this.runtime.monitor.refresh(), Date.now()));
         return;
       case "/hooks":
         await this.send(location, this.hookStatus());

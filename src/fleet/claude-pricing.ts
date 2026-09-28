@@ -22,9 +22,14 @@
 export interface ModelRate {
   inputPerMTok: number;
   outputPerMTok: number;
+  /** A published cache-read rate that is not 0.1x input (Opus 5.5: $0.20, not $0.40; Fable 5.1: $0.25, not $1). */
+  cacheReadPerMTok?: number;
 }
 
+// From the claude-api skill's model table (cached 2026-06-24), checked 2026-09-28.
 const RATES: Record<string, ModelRate> = {
+  // Its cache reads are $0.20: 0.05x input, not the usual 0.1x.
+  "claude-opus-5-5": { inputPerMTok: 4, outputPerMTok: 20, cacheReadPerMTok: 0.2 },
   "claude-opus-5": { inputPerMTok: 5, outputPerMTok: 25 },
   "claude-opus-4-8": { inputPerMTok: 5, outputPerMTok: 25 },
   "claude-opus-4-7": { inputPerMTok: 5, outputPerMTok: 25 },
@@ -32,7 +37,7 @@ const RATES: Record<string, ModelRate> = {
   "claude-sonnet-5": { inputPerMTok: 2, outputPerMTok: 10 },
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
-  "claude-fable-5-1": { inputPerMTok: 10, outputPerMTok: 50 },
+  "claude-fable-5-1": { inputPerMTok: 10, outputPerMTok: 50, cacheReadPerMTok: 0.25 },
   "claude-mythos-5-1": { inputPerMTok: 10, outputPerMTok: 50 },
   "claude-fable-5": { inputPerMTok: 10, outputPerMTok: 50 },
 };
@@ -92,7 +97,7 @@ export function estimateMessageCostUsd(model: string, usage: MessageUsage): numb
   const cost =
     (inputTokens * rate.inputPerMTok) / 1_000_000 +
     (outputTokens * rate.outputPerMTok) / 1_000_000 +
-    (cacheRead * rate.inputPerMTok * CACHE_READ_MULTIPLIER) / 1_000_000 +
+    (cacheRead * (rate.cacheReadPerMTok ?? rate.inputPerMTok * CACHE_READ_MULTIPLIER)) / 1_000_000 +
     (write5m * rate.inputPerMTok * CACHE_WRITE_5M_MULTIPLIER) / 1_000_000 +
     (write1h * rate.inputPerMTok * CACHE_WRITE_1H_MULTIPLIER) / 1_000_000;
 

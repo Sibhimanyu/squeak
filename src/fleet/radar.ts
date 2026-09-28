@@ -316,6 +316,52 @@ export function describeCodexUsage(usage: CodexUsage | null, nowMs: number): str
   return parts.length > 0 ? `_Codex quota: ${parts.join(" · ")}_` : null;
 }
 
+/** Sessions listed by name under the Claude total; the rest are only counted. */
+const USAGE_TOP_SESSIONS = 5;
+
+/**
+ * What you have used, for `usage` on every surface and for the assistant.
+ * Codex reports real account-wide quota; Claude writes no quota to disk (see
+ * CLAUDE.md), so it gets the estimated cost of the sessions on screen and is
+ * said to be an estimate — never a limit it does not have.
+ */
+export function renderUsage(snapshot: Pick<FleetSnapshot, "codexUsage" | "active">, nowMs: number): string {
+  const lines = ["**Usage**"];
+  const codex = snapshot.codexUsage;
+  for (const window of [codex?.primary, codex?.secondary]) {
+    if (!window) {
+      continue;
+    }
+    const span = describeWindowSpan(window.windowMinutes);
+    // Codex only reports when it runs, so the last reading can predate its
+    // own reset; then that percentage is history, not what is left.
+    lines.push(
+      Date.parse(window.resetsAt) <= nowMs
+        ? `Codex · ${span}: reset since Codex last reported (was ${Math.round(window.usedPercent)}%)`
+        : `Codex · ${span}: ${Math.round(window.usedPercent)}% used, resets in ${formatCountdown(window.resetsAt, nowMs)}`,
+    );
+  }
+  if (!codex?.primary && !codex?.secondary) {
+    lines.push("Codex · no quota reported yet");
+  }
+
+  const priced = snapshot.active
+    .filter((session) => typeof session.costUsd === "number" && session.costUsd > 0)
+    .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
+  if (priced.length === 0) {
+    lines.push("Claude · no cost for the active sessions yet");
+  } else {
+    const total = priced.reduce((sum, session) => sum + (session.costUsd ?? 0), 0);
+    const count = priced.length === 1 ? "1 active session" : `${priced.length} active sessions`;
+    lines.push(`Claude · ~$${total.toFixed(2)} est. across ${count}`);
+    for (const session of priced.slice(0, USAGE_TOP_SESSIONS)) {
+      lines.push(`  ${truncateStart(sessionLabel(session), 38)} · ~$${(session.costUsd ?? 0).toFixed(2)}`);
+    }
+  }
+  lines.push("_Claude keeps no quota on disk, so its figure is an estimated cost, not a limit._");
+  return lines.join("\n");
+}
+
 export function renderQuotaAlert(usage: CodexUsage, window: "primary" | "secondary", nowMs: number): string {
   const detail = window === "primary" ? usage.primary : usage.secondary;
   const span = detail ? describeWindowSpan(detail.windowMinutes) : window;
