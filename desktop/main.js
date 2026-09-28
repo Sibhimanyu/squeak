@@ -67,6 +67,12 @@ let expanded = false;
 let expandSide = "left";
 /** A resize waiting on the renderer to stage the matching layout. */
 let pendingExpand = null;
+/**
+ * Whether opening the panel made this the active app, and nothing has taken
+ * that back since. Then a collapse that was not a click elsewhere hands
+ * activation back, or your typing would land nowhere.
+ */
+let activatedForPanel = false;
 
 /** Give up waiting for the renderer and open anyway, rather than wedging. */
 const EXPAND_READY_TIMEOUT_MS = 250;
@@ -151,7 +157,12 @@ function createWindow() {
 
   // Clicking anywhere else dismisses the panel, the way a popover does.
   win.on("blur", () => {
-    if (expanded && !suppressBlurClose) {
+    if (suppressBlurClose) {
+      return; // Our own context menu; the panel stays, and so does activation.
+    }
+    // Whatever took focus — another app, or the Squeak window — now has it.
+    activatedForPanel = false;
+    if (expanded) {
       setExpanded(false);
     }
   });
@@ -226,6 +237,7 @@ function setExpanded(next) {
     // placed.x is already the collapsed-equivalent position: both branches
     // above derive it by pinning the duck, just from opposite edges.
     writeSettings({ position: { x: placed.x, y: placed.y } });
+    handBackActivation();
     return;
   }
 
@@ -277,7 +289,42 @@ function finishExpand() {
   // Behave like a popover: an open panel takes focus, which is what makes
   // clicking anywhere else dismiss it. Collapsed, the duck must never steal
   // focus from whatever you are typing in.
+  //
+  // Focus alone is not enough. The panel is non-activating, so the app you
+  // were in stays the active one, and clicking back into it — the usual way
+  // to dismiss a popover — never takes focus from the panel: no blur, and the
+  // panel stayed open (probed: Conductor frontmost, panel focused, Conductor
+  // activated again, still focused). Becoming the active app fixes that. But
+  // activating raises every window the app has, so not while the Squeak
+  // window is showing: it would jump in front of your work (probed too).
+  const othersShowing = BrowserWindow.getAllWindows().some(
+    (other) => other !== win && other.isVisible() && !other.isMinimized(),
+  );
+  if (!othersShowing) {
+    app.focus({ steal: true });
+    activatedForPanel = true;
+  }
   win.focus();
+}
+
+/**
+ * The panel closed some other way than a click elsewhere — the duck, the
+ * shortcut, Escape — while this was still the active app. Hiding the app
+ * returns activation to whichever app had it, and showing the duck again
+ * without activating keeps it on screen; it is gone for well under a frame.
+ */
+function handBackActivation() {
+  if (!activatedForPanel || !win) {
+    return;
+  }
+  activatedForPanel = false;
+  if (!win.isFocused()) {
+    return;
+  }
+  app.hide();
+  if (!hidden) {
+    win.showInactive();
+  }
 }
 
 function cancelPendingExpand() {

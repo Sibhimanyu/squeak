@@ -457,6 +457,15 @@ transcripts, and ranks them by what is blocked on the human.
 - A panel can still take focus, which click-away-to-close needs — checked with
   a standalone probe before *and after* changing the always-on-top level,
   since both are easy to break silently and not obvious from reading the code.
+- **Focus alone does not make click-away work.** The panel is
+  non-activating, so opening it leaves the app you were in active, and
+  clicking back into that app never takes focus from the panel — no `blur`,
+  and it stayed open (probed with Conductor frontmost). So an open panel
+  also makes Squeak the active app (`app.focus({ steal: true })`), and a
+  collapse that was not a click elsewhere hands activation back with
+  `app.hide()` + `showInactive()` (the duck is gone for ~8ms). Not while the
+  Squeak window is showing: activating an app raises all its windows, and
+  the window would jump over your work.
 - To see the duck without Screen Recording permission, use
   `DUCK_CAPTURE=<prefix>` — the window photographs itself. Note it photographs
   the *page*, not the composited window: it shows transparency correctly even
