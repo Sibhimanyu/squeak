@@ -6,7 +6,8 @@ import type { FleetMonitor } from "../fleet/fleet-monitor.js";
 import type { FleetStore } from "../fleet/fleet-store.js";
 import { cardLabel, renderAttentionCard, renderQuotaAlert, renderRadar } from "../fleet/radar.js";
 import { replyTargetFor } from "../fleet/reply-router.js";
-import type { AttentionItem } from "../fleet/types.js";
+import type { AssistantAnswer } from "../fleet/assistant.js";
+import type { AttentionItem, FleetSession } from "../fleet/types.js";
 import { logger } from "../utils/logger.js";
 import { logCliqFailure, type CliqButton, type CliqWebhook } from "./client.js";
 import type { CliqInbox, CliqInboxRecord } from "./inbox.js";
@@ -33,11 +34,20 @@ const HELP = [
   "· tap Reply, or reply to the card, and type",
   "· Full message shows everything it said",
   "",
-  "**Commands** (type them here)",
-  "radar · what is running right now",
-  "snooze · silence alerts for an hour · unmute · resume",
-  "hooks · check live-signal wiring",
+  "**Or just ask**",
+  '"anything need me?" · "what did the parser chat change?" · "mute for two hours"',
+  '"tell squeak · main to go with B" — I show you the exact message and send it only when you tap Send.',
+  "",
+  "**Quick commands**",
+  "radar · snooze · unmute · hooks",
 ].join("\n");
+
+function quote(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
 
 /**
  * Which turn a card was about, so a tap on an old card cannot answer a newer
@@ -58,13 +68,23 @@ export interface CliqInbound {
   /** Cliq wants the function owner's email on each button. */
   ownerEmail: string;
   hookStatus: () => string;
+  /**
+   * Plain-language questions and instructions (`fleet/assistant.ts`).
+   * Absent: anything that is not a command gets a pointer to the cards.
+   */
+  ask?: ((question: string) => Promise<AssistantAnswer>) | null;
+  /** Every tracked session, to turn an assistant's `send` into a card. */
+  sessions: () => FleetSession[];
   pollIntervalMs?: number;
 }
 
 export interface CliqChannelDependencies {
   webhook: Pick<CliqWebhook, "post">;
   monitor: Pick<FleetMonitor, "onPush" | "onQuotaAlert" | "refresh">;
-  store: Pick<FleetStore, "setCliqCard" | "getCliqCard" | "setMute" | "clearMute">;
+  store: Pick<
+    FleetStore,
+    "setCliqCard" | "getCliqCard" | "setCliqPending" | "takeCliqPending" | "setMute" | "clearMute"
+  >;
   inbound?: CliqInbound | null;
   now?: () => number;
 }
@@ -214,6 +234,17 @@ export class CliqChannel {
           await this.answer(card, pick[1]!, inbound, pick[1]!);
         } else if (record.arg === "full") {
           await this.fullMessage(card, inbound);
+        } else if (record.arg === "confirm") {
+          const text = this.deps.store.takeCliqPending(record.msgid!);
+          if (text === null) {
+            await this.post("That was already sent or cancelled.");
+          } else {
+            await this.answer(card, text, inbound);
+          }
+        } else if (record.arg === "cancel") {
+          await this.post(
+            this.deps.store.takeCliqPending(record.msgid!) === null ? "Nothing to cancel." : "Cancelled.",
+          );
         } else {
           logger.warn("cliq button with an unknown key ignored");
         }
@@ -283,10 +314,78 @@ export class CliqChannel {
         await this.post(HELP);
         return;
       default:
+        if (inbound.ask) {
+          await this.converse(text, inbound);
+          return;
+        }
         // Loose text has no addressee: several chats may be waiting, and
         // guessing which one it was for would put words in the wrong chat.
         await this.post("To answer a chat, reply to its card or tap Reply. Type *radar* to see what is running.");
     }
+  }
+
+  /**
+   * A question or an instruction in plain words. The assistant may mute,
+   * but it never types into an agent: a `send` becomes a card naming the
+   * session and the exact text, and only its Send tap — through the same
+   * checks as any other card — delivers it.
+   */
+  private async converse(text: string, inbound: CliqInbound): Promise<void> {
+    let answer: AssistantAnswer;
+    try {
+      answer = await inbound.ask!(text);
+    } catch (error) {
+      logCliqFailure("cliq assistant failed", error);
+      await this.post(
+        `I could not work that out (${error instanceof Error ? error.message : "error"}). Type *radar* for what is running.`,
+      );
+      return;
+    }
+
+    const action = answer.action;
+    switch (action.type) {
+      case "mute":
+        this.deps.store.setMute("*", new Date(this.now() + action.minutes * 60_000).toISOString());
+        break;
+      case "unmute":
+        this.deps.store.clearMute("*");
+        break;
+      case "send": {
+        const session = inbound.sessions().find((candidate) => candidate.key === action.sessionKey);
+        if (session) {
+          await this.proposeSend(session, action.text, answer.reply, inbound);
+          return;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    await this.post(answer.reply);
+  }
+
+  private async proposeSend(session: FleetSession, text: string, reply: string, inbound: CliqInbound): Promise<void> {
+    const target = replyTargetFor(session);
+    const label = cardLabel(session);
+    const fn = { name: CLIQ_BUTTON_FUNCTION, owner: inbound.ownerEmail };
+    const id = await this.post(
+      `${reply}
+
+Send to **${label}**:
+${quote(text)}`,
+      [
+        { label: "Send", key: "confirm", function: fn },
+        { label: "Cancel", key: "cancel", function: fn },
+      ],
+    );
+    if (!id) {
+      return;
+    }
+    // Bound to the turn it was proposed against, like any card: if the chat
+    // moves on before the tap, the send is refused rather than landing on a
+    // question it was not meant for.
+    this.deps.store.setCliqCard(id, { target, label, turn: turnStamp(inbound.replier.lastTurnText(target)) });
+    this.deps.store.setCliqPending(id, text);
   }
 
   private async pushAttention(items: AttentionItem[]): Promise<void> {

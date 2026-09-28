@@ -47,9 +47,32 @@ What Cliq can do:
 | tap **Reply**, type, **Send** | sends the text |
 | reply to a card | sends the text |
 | tap **Full message** | posts the agent's whole last message, with its own buttons |
+| ask anything, in plain words | an answer from what Squeak sees ("anything need me?", "what did greenroom change?", "mute for two hours") |
+| "tell *session* to …" | a card with the exact text and **Send** / **Cancel**; only Send types it |
 | type `radar` | what is running now |
 | type `snooze` / `unmute` | silence alerts for an hour / resume (Telegram too) |
 | type `hooks`, `help` | hook wiring, what this is |
+
+### Chatting
+
+Anything that is not a quick command goes to `fleet/assistant.ts`, which
+asks the Mac's own `claude` (Haiku, the user's login, no API key) with a
+summary of every active session: state, what it is doing now, its last
+message clipped to 1500 characters, what changed on disk. About six seconds
+an answer. The CLI runs with no tools, no MCP servers, no settings files (so
+no hooks fire — including Squeak's own), and no saved session, so it can
+only write an answer and never appears on the radar itself.
+
+It never types into an agent. When you ask it to tell one something, it
+proposes the session and the text; Squeak decides whether that session can
+take a message now (`canTakeMessageNow`: not working, not on an approval,
+not a Conductor chat holding its own question) and if so posts a card with
+**Send** / **Cancel**. The text waits in `cliq_pending` and is taken — read
+and deleted in one step — by the first Send, which then passes every check
+a card's button does, including the turn check against the moment it was
+proposed. Session content is fenced off as data in the prompt; the worst a
+message planted in an agent's output can do is get a wrong proposal shown to
+you, which you do not send.
 
 Cards for sessions that cannot be answered (a blocked Conductor chat, an
 agent waiting on an approval) carry no buttons, same as Telegram.

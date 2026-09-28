@@ -101,6 +101,12 @@ export class FleetStore {
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
+      CREATE TABLE IF NOT EXISTS cliq_pending (
+        message_id TEXT PRIMARY KEY,
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
       CREATE TABLE IF NOT EXISTS fleet_mute (
         scope TEXT PRIMARY KEY,
         muted_until TEXT
@@ -259,6 +265,25 @@ export class FleetStore {
       | { target: string; label: string; turn: string }
       | undefined;
     return row ?? null;
+  }
+
+  /** Text waiting on a Send tap, keyed by its confirmation card. */
+  setCliqPending(messageId: string, text: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO cliq_pending (message_id, text) VALUES (?, ?)
+         ON CONFLICT(message_id) DO UPDATE SET text = excluded.text`,
+      )
+      .run(messageId, text);
+    this.db.prepare(`DELETE FROM cliq_pending WHERE created_at < datetime('now', '-1 day')`).run();
+  }
+
+  /** Read and forget in one step, so a second Send tap finds nothing to send. */
+  takeCliqPending(messageId: string): string | null {
+    const row = this.db.prepare(`DELETE FROM cliq_pending WHERE message_id = ? RETURNING text`).get(messageId) as
+      | { text: string }
+      | undefined;
+    return row?.text ?? null;
   }
 
   getReview(sessionKey: string): FleetReviewRow | null {

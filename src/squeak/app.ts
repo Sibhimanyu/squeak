@@ -7,11 +7,12 @@ import { CliqChannel } from "../cliq/channel.js";
 import { CliqWebhook, parseCliqWebhookUrl } from "../cliq/client.js";
 import { CliqInbox } from "../cliq/inbox.js";
 import { accountsHostFor, ZohoOAuth } from "../cliq/oauth.js";
-import { FleetController } from "../fleet/fleet-controller.js";
+import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
+import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { readActivity } from "../fleet/activity.js";
 import { parseChoices } from "../fleet/choices.js";
-import { FleetReplyRouter } from "../fleet/reply-router.js";
+import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
 import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
@@ -78,6 +79,8 @@ export class SqueakApp {
   private readonly router: FleetReplyRouter;
   private readonly remote: RemoteBridge | null;
   private readonly cliq: CliqChannel | null;
+  /** Plain-language questions from Cliq, answered through the Mac's own `claude`. */
+  private readonly assistant: FleetAssistant;
   private lastUpdateId = 0;
   private stopped = false;
 
@@ -169,6 +172,7 @@ export class SqueakApp {
         }),
     });
 
+    this.assistant = new FleetAssistant(claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant")));
     this.cliq = this.createCliq();
 
     this.controller = new FleetController({
@@ -339,6 +343,22 @@ export class SqueakApp {
               ownerId: twoWay.ownerId,
               ownerEmail: twoWay.ownerEmail,
               hookStatus: () => this.hookStatus(),
+              ask: (question) =>
+                this.assistant.ask(question, {
+                  snapshot: this.runtime.monitor.snapshot,
+                  lastTurnText: (session) => {
+                    try {
+                      return this.router.lastTurnText(replyTargetFor(session));
+                    } catch {
+                      return null;
+                    }
+                  },
+                  activity: (session) =>
+                    session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null,
+                  canAnswer: (session) => canTakeMessageNow(session, this.router),
+                  nowMs: Date.now(),
+                }),
+              sessions: () => this.runtime.monitor.snapshot.sessions,
             }
           : null,
       });

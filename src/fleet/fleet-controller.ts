@@ -708,6 +708,22 @@ export function canReplyFromCard(item: AttentionItem, replier: FleetReplier | nu
   return item.kind === "finished_unreviewed" || item.kind === "blocked_question";
 }
 
+/**
+ * Whether a message could be typed into this session *now*: the card rules
+ * applied to its current state, for surfaces that offer a send without a
+ * card (the Cliq assistant). The send checks again either way.
+ */
+export function canTakeMessageNow(session: FleetSession, replier: FleetReplier | null | undefined): boolean {
+  if (!canAnswerSession(session, replier)) {
+    return false;
+  }
+  if (session.state === "working" || session.state === "awaiting_approval") {
+    return false;
+  }
+  // A blocked Conductor chat holds its question open inside Conductor's own process.
+  return !(session.conductorSessionId && session.state === "awaiting_input");
+}
+
 /** Whether the replier can answer this session at all, whatever it is doing now. */
 export function canAnswerSession(session: FleetSession, replier: FleetReplier | null | undefined): boolean {
   if (!replier) {

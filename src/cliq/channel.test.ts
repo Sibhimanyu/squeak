@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
+import type { AssistantAnswer } from "../fleet/assistant.js";
 import type { AttentionItem, FleetSession } from "../fleet/types.js";
 import { CliqChannel, turnStamp, type CliqInbound } from "./channel.js";
 import type { CliqButton } from "./client.js";
@@ -56,9 +57,12 @@ function record(overrides: Partial<CliqInboxRecord> = {}): CliqInboxRecord {
   };
 }
 
-function setup(options: { turn?: string | null; inbound?: boolean } = {}) {
+function setup(
+  options: { turn?: string | null; inbound?: boolean; ask?: (question: string) => Promise<AssistantAnswer> } = {},
+) {
   let push: ((items: AttentionItem[]) => void) | null = null;
   const cards = new Map<string, { target: string; label: string; turn: string }>();
+  const pending = new Map<string, string>();
   let postCount = 0;
   const webhook = {
     post: vi.fn<(text: string, options?: { buttons?: CliqButton[] }) => Promise<string | null>>(
@@ -84,6 +88,12 @@ function setup(options: { turn?: string | null; inbound?: boolean } = {}) {
   const store = {
     setCliqCard: vi.fn((id: string, card: { target: string; label: string; turn: string }) => cards.set(id, card)),
     getCliqCard: vi.fn((id: string) => cards.get(id) ?? null),
+    setCliqPending: vi.fn((id: string, text: string) => pending.set(id, text)),
+    takeCliqPending: vi.fn((id: string) => {
+      const text = pending.get(id) ?? null;
+      pending.delete(id);
+      return text;
+    }),
     setMute: vi.fn(),
     clearMute: vi.fn(),
   };
@@ -103,6 +113,8 @@ function setup(options: { turn?: string | null; inbound?: boolean } = {}) {
     ownerId: OWNER,
     ownerEmail: "owner@example.com",
     hookStatus: () => "**Hooks: installed**",
+    ask: options.ask ?? null,
+    sessions: () => [session()],
   };
   const channel = new CliqChannel({
     webhook,
@@ -274,5 +286,90 @@ describe("CliqChannel inbox", () => {
 
     expect(lastPost(t.webhook)).toContain("Recommendation: A");
     expect(t.cards.get("m2")?.turn).toBe(turnStamp(TURN));
+  });
+});
+
+describe("CliqChannel conversation", () => {
+  it("answers a question in plain words", async () => {
+    const ask = vi.fn(async () => ({ reply: "One chat is done: squeak · main.", action: { type: "none" as const } }));
+    const t = setup({ ask });
+    t.records.push(record({ body: "anything need me?" }));
+    await t.channel.pollOnce();
+
+    expect(ask).toHaveBeenCalledWith("anything need me?");
+    expect(lastPost(t.webhook)).toBe("One chat is done: squeak · main.");
+  });
+
+  it("mutes when asked to", async () => {
+    const t = setup({ ask: async () => ({ reply: "Muted for two hours.", action: { type: "mute", minutes: 120 } }) });
+    t.records.push(record({ body: "quiet for 2h please" }));
+    await t.channel.pollOnce();
+
+    expect(t.store.setMute).toHaveBeenCalledWith("*", new Date(now + 120 * 60_000).toISOString());
+  });
+
+  it("turns an instruction into a Send card, and types nothing until Send", async () => {
+    const t = setup({
+      ask: async () => ({
+        reply: "I'll tell it to go with B.",
+        action: { type: "send", sessionKey: "conductor:abc", text: "Go with B." },
+      }),
+    });
+    t.records.push(record({ id: "q", body: "tell the squeak chat to go with B" }));
+    await t.channel.pollOnce();
+
+    expect(t.replier.send).not.toHaveBeenCalled();
+    const [text, options] = t.webhook.post.mock.calls.at(-1)!;
+    expect(text).toContain("Send to **squeak · main**:\n> Go with B.");
+    expect(options!.buttons!.map((b) => b.key)).toEqual(["confirm", "cancel"]);
+
+    t.records.push(record({ id: "c", kind: "button", arg: "confirm", msgid: "m1" }));
+    await t.channel.pollOnce();
+    expect(t.replier.send).toHaveBeenCalledWith("abc", "Go with B.", expect.any(Function));
+
+    // A second tap on the same Send finds nothing left to send.
+    t.records.push(record({ id: "c2", kind: "button", arg: "confirm", msgid: "m1" }));
+    await t.channel.pollOnce();
+    expect(t.replier.send).toHaveBeenCalledOnce();
+    expect(lastPost(t.webhook)).toContain("already sent or cancelled");
+  });
+
+  it("sends nothing after Cancel", async () => {
+    const t = setup({
+      ask: async () => ({ reply: "Sending.", action: { type: "send", sessionKey: "conductor:abc", text: "Go." } }),
+    });
+    t.records.push(record({ id: "q", body: "tell it go" }));
+    await t.channel.pollOnce();
+    t.records.push(record({ id: "x", kind: "button", arg: "cancel", msgid: "m1" }));
+    t.records.push(record({ id: "c", kind: "button", arg: "confirm", msgid: "m1" }));
+    await t.channel.pollOnce();
+
+    expect(t.replier.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a Send once the chat has moved on", async () => {
+    const t = setup({
+      ask: async () => ({ reply: "Sending.", action: { type: "send", sessionKey: "conductor:abc", text: "Go." } }),
+    });
+    t.records.push(record({ id: "q", body: "tell it go" }));
+    await t.channel.pollOnce();
+    t.setTurn("Something newer.");
+    t.records.push(record({ id: "c", kind: "button", arg: "confirm", msgid: "m1" }));
+    await t.channel.pollOnce();
+
+    expect(t.replier.send).not.toHaveBeenCalled();
+    expect(lastPost(t.webhook)).toContain("has moved on");
+  });
+
+  it("says so when the assistant fails", async () => {
+    const t = setup({
+      ask: async () => {
+        throw new Error("the assistant took too long");
+      },
+    });
+    t.records.push(record({ body: "what's up" }));
+    await t.channel.pollOnce();
+
+    expect(lastPost(t.webhook)).toContain("the assistant took too long");
   });
 });
