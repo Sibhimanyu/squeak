@@ -5,6 +5,7 @@ import type { TelegramInlineKeyboard } from "../types.js";
 import { DEFAULT_CONTEXT_PRESSURE_PERCENT, isActionable } from "./attention.js";
 import { summarizeOutcome } from "./card-text.js";
 import type { ParsedChoices } from "./choices.js";
+import type { ClaudeLimits, ClaudeLimitWindow } from "./claude-limits.js";
 import { describeWindowSpan, type CodexUsage } from "./codex-usage.js";
 import { diffPageCount, diffPageSlice, type WorkspaceDiff } from "./diff-view.js";
 import { describeGitState } from "./git-state.js";
@@ -321,11 +322,16 @@ const USAGE_TOP_SESSIONS = 5;
 
 /**
  * What you have used, for `usage` on every surface and for the assistant.
- * Codex reports real account-wide quota; Claude writes no quota to disk (see
- * CLAUDE.md), so it gets the estimated cost of the sessions on screen and is
- * said to be an estimate — never a limit it does not have.
+ * Codex reports real account-wide quota. Claude's plan limit is only known
+ * from the last reading Squeak's own chat saw (`claude-limits.ts`), shown
+ * with its age; without one it says so — never that there is no limit. The
+ * dollar figure beside it is an estimate from token counts.
  */
-export function renderUsage(snapshot: Pick<FleetSnapshot, "codexUsage" | "active">, nowMs: number): string {
+export function renderUsage(
+  snapshot: Pick<FleetSnapshot, "codexUsage" | "active">,
+  nowMs: number,
+  claudeLimits: ClaudeLimits | null = null,
+): string {
   const lines = ["**Usage**"];
   const codex = snapshot.codexUsage;
   for (const window of [codex?.primary, codex?.secondary]) {
@@ -345,6 +351,27 @@ export function renderUsage(snapshot: Pick<FleetSnapshot, "codexUsage" | "active
     lines.push("Codex · no quota reported yet");
   }
 
+  const windows: Array<[string, ClaudeLimitWindow | null | undefined]> = [
+    ["5h", claudeLimits?.fiveHour],
+    ["7d", claudeLimits?.sevenDay],
+  ];
+  const age = claudeLimits ? formatAge(claudeLimits.observedAt, nowMs) : null;
+  const read = age === "just now" ? "read just now" : `read ${age} ago`;
+  for (const [span, window] of windows) {
+    if (!window) {
+      continue;
+    }
+    const percent = Math.round(window.utilization * 100);
+    lines.push(
+      Date.parse(window.resetsAt) <= nowMs
+        ? `Claude · ${span}: reset since the last reading (was ${percent}%)`
+        : `Claude · ${span}: ${percent}% used, resets in ${formatCountdown(window.resetsAt, nowMs)} · ${read}`,
+    );
+  }
+  if (!claudeLimits) {
+    lines.push("Claude · limit not seen yet");
+  }
+
   const priced = snapshot.active
     .filter((session) => typeof session.costUsd === "number" && session.costUsd > 0)
     .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
@@ -353,12 +380,16 @@ export function renderUsage(snapshot: Pick<FleetSnapshot, "codexUsage" | "active
   } else {
     const total = priced.reduce((sum, session) => sum + (session.costUsd ?? 0), 0);
     const count = priced.length === 1 ? "1 active session" : `${priced.length} active sessions`;
-    lines.push(`Claude · ~$${total.toFixed(2)} est. across ${count}`);
+    lines.push(`Claude · ~$${total.toFixed(2)} est. cost across ${count}`);
     for (const session of priced.slice(0, USAGE_TOP_SESSIONS)) {
       lines.push(`  ${truncateStart(sessionLabel(session), 38)} · ~$${(session.costUsd ?? 0).toFixed(2)}`);
     }
   }
-  lines.push("_Claude keeps no quota on disk, so its figure is an estimated cost, not a limit._");
+  lines.push(
+    claudeLimits
+      ? "_Claude's limit is from Squeak's last chat answer; its dollar figure is an estimate from token counts._"
+      : "_Claude does not save its limit anywhere Squeak can read; Squeak picks it up each time you ask it something in plain words._",
+  );
   return lines.join("\n");
 }
 

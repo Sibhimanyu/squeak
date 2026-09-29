@@ -665,9 +665,21 @@ describe("renderUsage", () => {
     );
     expect(text).toContain("Codex · 5h: 42% used, resets in 2h 10m");
     expect(text).toMatch(/Codex · .*: 18% used, resets in 3d 4h/);
-    expect(text).toContain("Claude · ~$3.75 est. across 2 active sessions");
+    expect(text).toContain("Claude · ~$3.75 est. cost across 2 active sessions");
     expect(text.indexOf("dear")).toBeLessThan(text.indexOf("cheap"));
-    expect(text).toContain("not a limit");
+    // Never "no limit": the limit exists, Squeak just has not read it.
+    expect(text).toContain("Claude · limit not seen yet");
+  });
+
+  it("shows Claude's real plan limit from the last reading, with its age", () => {
+    const text = renderUsage({ codexUsage: null, active: [] }, now, {
+      fiveHour: { utilization: 0.14, resetsAt: "2026-09-20T14:05:00.000Z" },
+      sevenDay: { utilization: 0.05, resetsAt: "2026-09-18T00:00:00.000Z" },
+      observedAt: "2026-09-20T11:48:00.000Z",
+    });
+    expect(text).toContain("Claude · 5h: 14% used, resets in 2h 5m · read 12m ago");
+    expect(text).toContain("Claude · 7d: reset since the last reading (was 5%)");
+    expect(text).not.toContain("not seen yet");
   });
 
   it("does not pass off a reading from before the window reset as current", () => {
@@ -686,6 +698,16 @@ describe("renderUsage", () => {
       now,
     );
     expect(text).toContain("Codex · 5h: reset since Codex last reported (was 61%)");
+  });
+
+  it("says 'read just now', not 'read just now ago'", () => {
+    const text = renderUsage({ codexUsage: null, active: [] }, now, {
+      fiveHour: { utilization: 0.5, resetsAt: "2026-09-20T13:00:00.000Z" },
+      sevenDay: null,
+      observedAt: new Date(now).toISOString(),
+    });
+    expect(text).toContain("· read just now");
+    expect(text).not.toContain("just now ago");
   });
 
   it("says so when there is nothing to report", () => {

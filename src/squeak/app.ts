@@ -7,6 +7,7 @@ import { CliqChannel } from "../cliq/channel.js";
 import { CliqWebhook } from "../cliq/client.js";
 import { CliqRelayInbox } from "../cliq/inbox.js";
 import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
+import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { readActivity } from "../fleet/activity.js";
@@ -83,6 +84,8 @@ export class SqueakApp {
   private readonly cliq: CliqChannel | null;
   /** Plain-language questions from Cliq, answered through the Mac's own `claude`. */
   private readonly assistant: FleetAssistant;
+  /** Claude's plan limits, as the assistant's own `claude` runs last reported them. */
+  private readonly claudeLimits: ClaudeLimitsStore;
   private lastUpdateId = 0;
   private stopped = false;
 
@@ -174,7 +177,12 @@ export class SqueakApp {
         }),
     });
 
-    this.assistant = new FleetAssistant(claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant")));
+    this.claudeLimits = new ClaudeLimitsStore(path.join(config.supportDir, "claude-limits.json"));
+    this.assistant = new FleetAssistant(
+      claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
+        this.claudeLimits.record(limits),
+      ),
+    );
     this.cliq = this.createCliq();
 
     this.controller = new FleetController({
@@ -301,7 +309,10 @@ export class SqueakApp {
         await this.send(location, "Unmuted.");
         return;
       case "/usage":
-        await this.send(location, renderUsage(await this.runtime.monitor.refresh(), Date.now()));
+        await this.send(
+          location,
+          renderUsage(await this.runtime.monitor.refresh(), Date.now(), this.claudeLimits.latest()),
+        );
         return;
       case "/hooks":
         await this.send(location, this.hookStatus());
@@ -337,6 +348,7 @@ export class SqueakApp {
         webhook,
         monitor: this.runtime.monitor,
         store: this.runtime.store,
+        claudeLimits: () => this.claudeLimits.latest(),
         inbound: twoWay
           ? {
               inbox: new CliqRelayInbox({
@@ -362,6 +374,7 @@ export class SqueakApp {
                   activity: (session) =>
                     session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null,
                   canAnswer: (session) => canTakeMessageNow(session, this.router),
+                  claudeLimits: this.claudeLimits.latest(),
                   nowMs: Date.now(),
                 }),
               sessions: () => this.runtime.monitor.snapshot.sessions,

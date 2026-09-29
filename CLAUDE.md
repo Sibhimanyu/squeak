@@ -298,10 +298,17 @@ test for anything you fix is expected; the suite is fast.
 - **Claude Code never persists its rate-limit event to disk.** `rate_limit_event`
   only ever appears in the live stdout of whatever process spawned the CLI —
   confirmed by dumping the raw hook payload too, which carries none of it
-  either. So Claude gets local per-session cost tracking (`cost-state`
-  entries, real and persisted) but not quota/reset tracking; do not try to
-  fake the latter from a spawned probe process, which would burn real quota
-  just to check quota.
+  either. Do not spawn a probe process to read it, which would burn real
+  quota just to check quota. But the Cliq assistant (`assistant.ts`) already
+  spawns `claude` for every plain-language question, so it runs with
+  `--output-format stream-json --verbose` and reads the event off that run:
+  `rate_limit_info.unifiedWindows.{five_hour,seven_day}` carry `utilization`
+  (0–1) and `resetsAt` (unix seconds). `ClaudeLimitsStore` keeps the latest
+  (`claude-limits.json`), and `usage` shows it with its age. A first answer
+  about limits can only say "not seen yet" — the reading arrives during the
+  call it would describe — and must never say the user has no limit: an
+  earlier prompt said "there is no Claude limit to report" and Haiku told
+  the user "you don't have a Claude limit".
 - The tray dropdown shows **usage, not the session list** — that already
   lives in the duck's own panel one click away. `tray.on("click", peek)` was
   removed: Electron already opens the context menu on a tray click by

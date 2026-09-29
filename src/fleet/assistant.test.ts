@@ -164,7 +164,9 @@ describe("claudeCliRunner", () => {
     fs.writeFileSync(
       bin,
       `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done > "${argsFile}"\ncat > "${stdinFile}"\n` +
-        `printf '%s' '{"is_error":false,"result":"","structured_output":{"reply":"hi","action":"none"}}'\n`,
+        `printf '%s\\n' '{"type":"system","subtype":"init"}'\n` +
+        `printf '%s\\n' '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.14,"resetsAt":1790689800}}}}'\n` +
+        `printf '%s\\n' '{"type":"result","is_error":false,"result":"","structured_output":{"reply":"hi","action":"none"}}'\n`,
       { mode: 0o755 },
     );
 
@@ -176,7 +178,8 @@ describe("claudeCliRunner", () => {
     expect(output).toEqual({ reply: "hi", action: "none" });
     const args = fs.readFileSync(argsFile, "utf8").split("\n");
     expect(args.slice(0, 5)).toEqual(["-p", "--model", "haiku", "--tools", ""]);
-    for (const flag of ["--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]) {
+    expect(args[args.indexOf("--output-format") + 1]).toBe("stream-json");
+    for (const flag of ["--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--verbose"]) {
       expect(args).toContain(flag);
     }
     expect(args[args.indexOf("--setting-sources") + 1]).toBe("");
@@ -188,9 +191,13 @@ describe("claudeCliRunner", () => {
   it("reports claude's own error", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-assistant-"));
     const bin = path.join(dir, "claude");
-    fs.writeFileSync(bin, `#!/bin/sh\ncat >/dev/null\nprintf '%s' '{"is_error":true,"result":"Not logged in"}'\n`, {
-      mode: 0o755,
-    });
+    fs.writeFileSync(
+      bin,
+      `#!/bin/sh\ncat >/dev/null\nprintf '%s' '{"type":"result","is_error":true,"result":"Not logged in"}'\n`,
+      {
+        mode: 0o755,
+      },
+    );
     await expect(claudeCliRunner(bin, dir)({ system: "", user: "", schema: {} })).rejects.toThrow("Not logged in");
   });
 });

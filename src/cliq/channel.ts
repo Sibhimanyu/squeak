@@ -7,6 +7,7 @@ import type { FleetStore } from "../fleet/fleet-store.js";
 import { cardLabel, renderAttentionCard, renderQuotaAlert, renderRadar, renderUsage } from "../fleet/radar.js";
 import { replyTargetFor } from "../fleet/reply-router.js";
 import type { AssistantAnswer } from "../fleet/assistant.js";
+import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { AttentionItem, FleetSession } from "../fleet/types.js";
 import { logger } from "../utils/logger.js";
 import { logCliqFailure, type CliqButton, type CliqWebhook } from "./client.js";
@@ -86,6 +87,8 @@ export interface CliqChannelDependencies {
     "setCliqCard" | "getCliqCard" | "setCliqPending" | "takeCliqPending" | "setMute" | "clearMute"
   >;
   inbound?: CliqInbound | null;
+  /** The last Claude plan reading, for `usage`. */
+  claudeLimits?: () => ClaudeLimits | null;
   now?: () => number;
 }
 
@@ -309,7 +312,7 @@ export class CliqChannel {
         await this.post("Unmuted.");
         return;
       case "usage":
-        await this.post(renderUsage(await this.deps.monitor.refresh(), this.now()));
+        await this.post(renderUsage(await this.deps.monitor.refresh(), this.now(), this.deps.claudeLimits?.() ?? null));
         return;
       case "hooks":
         await this.post(inbound.hookStatus());
