@@ -66,6 +66,20 @@ const receipts = new Map();
 const messageCache = new Map();
 /** What the open feed last drew, so a poll with nothing new leaves it alone. */
 let lastActivitySignature = "";
+/** Which "all sessions" source groups are collapsed; the hub starts tucked away. */
+const collapsed = new Set(
+  JSON.parse(window.localStorage.getItem("sq-collapsed") || "null") ?? ["Conductor", "Claude", "Codex", "Other"],
+);
+function saveCollapsed() {
+  window.localStorage.setItem("sq-collapsed", JSON.stringify([...collapsed]));
+}
+/** Order the hub lists its sources in. */
+const SOURCE_ORDER = ["Conductor", "Claude", "Codex", "Other"];
+/** Active plus the reopenable "others", so a selection can resolve to either. */
+function allSessions() {
+  if (offline || !state) return [];
+  return [...(state.active ?? []), ...(state.others ?? [])];
+}
 
 /* ---------- small DOM helpers ---------- */
 
@@ -267,10 +281,13 @@ function sessionRow(session) {
 
 function renderList() {
   const active = offline || !state ? [] : (state.active ?? []);
+  const others = offline || !state ? [] : (state.others ?? []);
   const signature = JSON.stringify([
     offline,
     selectedKey,
     active.map((s) => [s.key, s.state, s.lastActivityAt, s.git, s.contextPercent]),
+    others.map((s) => [s.key, s.state, s.source, s.lastActivityAt]),
+    [...collapsed],
     Math.floor(Date.now() / 60000), // ages tick by the minute
   ]);
   if (signature === lastListSignature) return;
@@ -289,17 +306,10 @@ function renderList() {
     els.list.replaceChildren(empty);
     return;
   }
-  if (active.length === 0) {
-    const empty = el("div", "empty");
-    const img = el("img");
-    img.src = MOOD_SPRITE.asleep;
-    img.alt = "";
-    empty.append(img, el("p", null, "Nothing's running. The duck is resting."));
-    els.list.replaceChildren(empty);
-    return;
-  }
 
   const children = [];
+
+  // Active: what's working or waiting on you, by attention order.
   for (const group of GROUPS) {
     const members = active.filter((session) => group.states.includes(session.state));
     if (members.length === 0) continue;
@@ -307,13 +317,57 @@ function renderList() {
     title.append(el("span", "count", String(members.length)));
     children.push(title, ...members.map(sessionRow));
   }
+
+  // The hub: every other tracked session, grouped by source, collapsed, so an
+  // old Conductor/Claude/Codex chat is one click from being reopened.
+  if (others.length > 0) {
+    const bySource = new Map();
+    for (const session of others) {
+      const list = bySource.get(session.source) ?? [];
+      list.push(session);
+      bySource.set(session.source, list);
+    }
+    if (children.length > 0) children.push(el("div", "list-divider"));
+    children.push(el("h2", "hub-title", "All sessions"));
+    const sources = [...bySource.keys()].sort(
+      (a, b) => (SOURCE_ORDER.indexOf(a) + 1 || 99) - (SOURCE_ORDER.indexOf(b) + 1 || 99),
+    );
+    for (const source of sources) {
+      const members = bySource.get(source);
+      const isCollapsed = collapsed.has(source);
+      const toggle = el("button", `group-toggle${isCollapsed ? " collapsed" : ""}`);
+      toggle.type = "button";
+      toggle.setAttribute("aria-expanded", String(!isCollapsed));
+      toggle.append(el("span", "chevron"), el("span", "group-name", source), el("span", "count", String(members.length)));
+      toggle.addEventListener("click", () => {
+        if (collapsed.has(source)) collapsed.delete(source);
+        else collapsed.add(source);
+        saveCollapsed();
+        lastListSignature = "";
+        renderList();
+      });
+      children.push(toggle);
+      if (!isCollapsed) children.push(...members.map(sessionRow));
+    }
+  }
+
+  if (children.length === 0) {
+    const empty = el("div", "empty");
+    const img = el("img");
+    img.src = MOOD_SPRITE.asleep;
+    img.alt = "";
+    empty.append(img, el("p", null, "All quiet. Your agents are resting."));
+    els.list.replaceChildren(empty);
+    return;
+  }
+
   els.list.replaceChildren(...children);
 }
 
 /* ---------- detail ---------- */
 
 function selectedSession() {
-  return (state?.active ?? []).find((session) => session.key === selectedKey) ?? null;
+  return allSessions().find((session) => session.key === selectedKey) ?? null;
 }
 
 function select(key) {
@@ -621,6 +675,14 @@ async function renderDetail() {
   if (session.cwd) actions.append(button("Reveal folder", "quiet", () => window.squeak.openPath(session.cwd)));
   head.append(titles, actions);
   nodes.push(head);
+
+  // Make a waiting agent impossible to miss.
+  if (session.state === "awaiting_approval" || session.state === "awaiting_input") {
+    const word = session.state === "awaiting_approval" ? "Needs your approval" : "Needs your answer";
+    const banner = el("div", "needs-banner");
+    banner.append(el("span", "needs-dot"), el("span", null, word));
+    nodes.push(banner);
+  }
 
   // Facts: folder, changes, cost.
   const facts = el("div", "facts");

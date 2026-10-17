@@ -10,3 +10,4 @@ dist.failed/
 !.env.example
 .envrc
 .DS_Store
+.impeccable/

@@ -504,11 +504,13 @@ JSON.
 
   /* neutrals — dark (default) */
   --sq-bg: #09090b;
+  --sq-sidebar: #0e0e11;
   --sq-surface: #18181b;
   --sq-surface-raised: #27272a;
   --sq-panel-translucent: rgba(24, 24, 27, 0.92);
   --sq-panel-glass: rgba(24, 24, 27, 0.4);
   --sq-line: rgba(255, 255, 255, 0.08);
+  --sq-line-strong: rgba(255, 255, 255, 0.14);
   --sq-ink: #f4f4f5;
   --sq-muted: #a1a1aa;
   --sq-subtle: #71717a;
@@ -531,6 +533,7 @@ JSON.
   --sq-radius-control: 8px;
   --sq-radius-chip: 6px;
   --sq-shadow-float: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --sq-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.22);
 
   /* motion */
   --sq-motion-quick: 120ms ease-out;
@@ -541,11 +544,13 @@ JSON.
 @media (prefers-color-scheme: light) {
   :root {
     --sq-bg: #f4f4f5;
+    --sq-sidebar: #ebebec;
     --sq-surface: #ffffff;
     --sq-surface-raised: #ffffff;
     --sq-panel-translucent: rgba(255, 255, 255, 0.88);
     --sq-panel-glass: rgba(255, 255, 255, 0.45);
     --sq-line: rgba(0, 0, 0, 0.08);
+    --sq-line-strong: rgba(0, 0, 0, 0.16);
     --sq-ink: #18181b;
     --sq-muted: #52525b;
     --sq-subtle: #71717a;

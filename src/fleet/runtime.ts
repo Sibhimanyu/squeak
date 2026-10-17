@@ -109,49 +109,80 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
  * The payload the desktop duck renders. Everything it needs is computed here,
  * so the renderer stays presentational and cannot disagree with Telegram.
  */
+/** Everything a surface needs to draw and address one session row. */
+function serializeSession(
+  session: FleetSession,
+  canReply: ((session: FleetSession) => boolean) | null,
+  distinctTitle: string | null,
+): unknown {
+  return {
+    key: session.key,
+    agent: session.agent,
+    origin: session.origin,
+    /** How the surfaces name the origin; null for Conductor, which is the default. */
+    originLabel: originLabel(session),
+    /** Which collapsible group a reopenable session belongs under. */
+    source: sourceOf(session),
+    state: session.state,
+    title: session.title,
+    repoName: session.repoName,
+    branch: session.branch,
+    cwd: session.cwd,
+    detail: session.detail,
+    lastActivityAt: session.lastActivityAt,
+    contextPercent: session.contextPercent,
+    alive: session.alive,
+    conductorSessionId: session.conductorSessionId,
+    conductorWorkspaceId: session.conductorWorkspaceId ?? null,
+    /**
+     * What the window addresses a reply or message read to: the Conductor
+     * chat (works even when idle, now that replies go through the local
+     * relay), or the fleet key of a terminal agent it can type into; null
+     * when neither applies.
+     */
+    replyTarget: session.conductorSessionId
+      ? session.conductorSessionId
+      : canReply?.(session)
+        ? replyTargetFor(session)
+        : null,
+    distinctTitle,
+    git: session.git,
+    costUsd: session.costUsd,
+  };
+}
+
+/** The hub groups reopenable sessions by where they live. */
+function sourceOf(session: FleetSession): string {
+  if (session.origin === "conductor") return "Conductor";
+  if (session.agent === "codex") return "Codex";
+  if (session.agent === "claude") return "Claude";
+  return "Other";
+}
+
+/** How many non-active sessions the hub offers to reopen, newest first. */
+const MAX_OTHER_SESSIONS = 80;
+
 export function serializeState(
   monitor: FleetMonitor,
   canReply: ((session: FleetSession) => boolean) | null = null,
 ): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
+  const activeKeys = new Set(snapshot.active.map((session) => session.key));
+  // Everything still tracked but not on the active screen — the user's older
+  // Conductor/Claude/Codex sessions, so the hub can reopen them. Dead
+  // worktrees (retired) are dropped; the rest come newest-first.
+  const others = snapshot.sessions
+    .filter((session) => !activeKeys.has(session.key) && !session.retired)
+    .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
+    .slice(0, MAX_OTHER_SESSIONS);
   return {
     generatedAt: snapshot.generatedAt,
     trackedCount: snapshot.sessions.length,
     duck: deriveDuckState(snapshot.active, snapshot.attention, Date.now()),
     codexUsage: snapshot.codexUsage,
-    active: snapshot.active.map((session) => ({
-      key: session.key,
-      agent: session.agent,
-      origin: session.origin,
-      /** How the surfaces name the origin; null for Conductor, which is the default. */
-      originLabel: originLabel(session),
-      state: session.state,
-      title: session.title,
-      repoName: session.repoName,
-      branch: session.branch,
-      cwd: session.cwd,
-      detail: session.detail,
-      lastActivityAt: session.lastActivityAt,
-      contextPercent: session.contextPercent,
-      alive: session.alive,
-      conductorSessionId: session.conductorSessionId,
-      conductorWorkspaceId: session.conductorWorkspaceId ?? null,
-      /**
-       * What the window addresses a reply or message read to: the Conductor
-       * chat, or the fleet key of a terminal agent it can type into; null
-       * when neither applies.
-       */
-      replyTarget: session.conductorSessionId
-        ? session.conductorSessionId
-        : canReply?.(session)
-          ? replyTargetFor(session)
-          : null,
-      /** Set only when another active row would read the same. */
-      distinctTitle: titles.get(session.key) ?? null,
-      git: session.git,
-      costUsd: session.costUsd,
-    })),
+    active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),
+    others: others.map((session) => serializeSession(session, canReply, null)),
     attention: snapshot.attention.map((item) => ({
       key: item.session.key,
       kind: item.kind,
