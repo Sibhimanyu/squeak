@@ -15,6 +15,7 @@ import { parseChoices } from "../fleet/choices.js";
 import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
+import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
 import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
@@ -78,6 +79,8 @@ export class SqueakApp {
   private readonly runtime: FleetRuntime;
   private readonly controller: FleetController;
   private readonly replier: ConductorReplier;
+  /** The loopback relay into Conductor's composer; inert until set up. */
+  private readonly conductorRelay: ConductorRelayService;
   /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
   private readonly router: FleetReplyRouter;
   private readonly remote: RemoteBridge | null;
@@ -107,10 +110,15 @@ export class SqueakApp {
       codexQuotaWarnPercent: config.codexQuotaWarnPercent,
     });
 
+    this.conductorRelay = new ConductorRelayService({
+      conductorDbPath: config.conductorDbPath,
+      statePath: path.join(config.supportDir, "conductor-relay.json"),
+    });
     this.replier = new ConductorReplier({
       registry: this.runtime.registry,
       claude: new ClaudeCodeAdapter(config.claudeBin),
       codex: new CodexAppServerAdapter(config.codexBin),
+      relay: this.conductorRelay,
       ui: config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null,
     });
     this.router = new FleetReplyRouter({
@@ -209,6 +217,7 @@ export class SqueakApp {
     // Before the controller, which starts the monitor: the first push must reach Cliq too.
     this.cliq?.start();
     await this.controller.start();
+    this.conductorRelay.start();
     this.remote?.start();
     await this.telegram.setMyCommands(COMMANDS).catch((error) => {
       logger.warn("could not publish squeak commands", { error: summarizeTelegramError(error) });
@@ -228,6 +237,7 @@ export class SqueakApp {
     this.stopped = true;
     this.remote?.stop();
     this.cliq?.stop();
+    await this.conductorRelay.stop().catch(() => undefined);
     await this.replier.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);
     logger.info("squeak stopped");

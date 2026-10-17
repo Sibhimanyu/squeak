@@ -53,10 +53,27 @@ interface ActiveReply {
   onFailed: ReplyFailureHandler;
 }
 
+/**
+ * The local desktop relay, when set up. Delivers a reply through Conductor's
+ * own composer over loopback, so it shows live and works with the screen
+ * locked — preferred over typing into the window (needs the screen) and the
+ * background CLI (needs Conductor idle). See `conductor-relay/service.ts`.
+ */
+export interface ConductorRelaySender {
+  isReady(): boolean;
+  send(args: {
+    workspaceId: string;
+    sessionId: string;
+    text: string;
+  }): Promise<{ ok: true } | { ok: false; reason: string }>;
+}
+
 export interface ConductorReplierDependencies {
   registry: ConductorRegistryAdapter;
   claude: ReplyAgentAdapter;
   codex: ReplyAgentAdapter;
+  /** The loopback relay into Conductor's composer; tried first when connected. */
+  relay?: ConductorRelaySender | null;
   /** Types into Conductor's own window. Without it every reply runs in the background. */
   ui?: ConductorUiSender | null;
   /** How long to look for a message the window may or may not have sent. */
@@ -155,6 +172,17 @@ export class ConductorReplier {
     // either route: typing into the composer would not answer it either.
     if (session.status === "needs_user_input" || session.status === "needs_plan_response") {
       return { status: "refused", reason: busyReason(session.status)! };
+    }
+
+    // The loopback relay delivers through Conductor's composer without the
+    // screen, so it is preferred. On any failure we fall through to the window
+    // and then the background CLI, exactly as before.
+    if (this.deps.relay?.isReady() && !this.isReplying(sessionId)) {
+      const result = await this.deps.relay.send({ workspaceId: session.workspaceId, sessionId, text: input });
+      if (result.ok) {
+        return { status: "started", via: "conductor" };
+      }
+      logger.info("conductor relay reply failed; falling back", { sessionId, reason: result.reason });
     }
 
     let fallbackReason: string | null = null;
