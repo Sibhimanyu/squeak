@@ -12,9 +12,11 @@ enum Theme {
     static let duck = Color(UIColor(hex: 0xFCD02C))
     static let duckWing = Color(UIColor(hex: 0xFCC010))
     static let bg = adaptive(0x09090B, 0xF4F4F5)
+    static let sidebar = adaptive(0x0E0E11, 0xEBEBEC)
     static let surface = adaptive(0x18181B, 0xFFFFFF)
     static let surfaceRaised = adaptive(0x27272A, 0xFFFFFF)
     static let line = Color(UIColor { $0.userInterfaceStyle == .light ? UIColor(white: 0, alpha: 0.08) : UIColor(white: 1, alpha: 0.08) })
+    static let lineStrong = Color(UIColor { $0.userInterfaceStyle == .light ? UIColor(white: 0, alpha: 0.16) : UIColor(white: 1, alpha: 0.14) })
     static let ink = adaptive(0xF4F4F5, 0x18181B)
     static let muted = adaptive(0xA1A1AA, 0x52525B)
     static let subtle = adaptive(0x71717A, 0x71717A)
@@ -52,10 +54,13 @@ struct StateDot: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dim = false
 
+    private var glows: Bool { state == "working" || state.hasPrefix("awaiting") }
+
     var body: some View {
         Circle()
             .fill(Theme.stateColor(state))
             .frame(width: 9, height: 9)
+            .shadow(color: glows ? Theme.stateColor(state).opacity(0.5) : .clear, radius: glows ? 4 : 0)
             .opacity(dim ? 0.35 : 1)
             .onAppear {
                 guard !reduceMotion else { return }

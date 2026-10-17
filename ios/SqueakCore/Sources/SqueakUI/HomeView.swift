@@ -30,7 +30,12 @@ struct HomeView: View {
                                         .listRowBackground(Theme.surface)
                                 }
                             } header: {
-                                Text("\(group.title) \(members.count)").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
+                                HStack(spacing: 6) {
+                                    Text(group.title).textCase(.uppercase).tracking(0.6)
+                                    Text("\(members.count)").foregroundStyle(Theme.subtle)
+                                }
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(Theme.subtle)
                             }
                         }
                     }
@@ -120,17 +125,25 @@ struct SessionRow: View {
     let session: PhoneSnapshot.Session
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            StateDot(state: session.state).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
+        HStack(spacing: 11) {
+            // A state-coloured spine down the leading edge, as on the Mac.
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Theme.stateColor(session.state))
+                .frame(width: 3)
+                .frame(maxHeight: .infinity)
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.label).font(.body.weight(.medium)).lineLimit(1)
+                HStack(spacing: 7) {
+                    StateDot(state: session.state)
+                    Text(session.label).font(.body.weight(.semibold)).lineLimit(1)
+                }
                 Text(meta).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1).monospacedDigit()
                 if let git = session.git {
-                    Text(git).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1).monospacedDigit()
+                    Text(git).font(.footnote).foregroundStyle(Theme.subtle).lineLimit(1).monospacedDigit()
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .combine)
     }
 

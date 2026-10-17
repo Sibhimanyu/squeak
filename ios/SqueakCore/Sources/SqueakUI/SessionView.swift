@@ -41,6 +41,8 @@ struct SessionView: View {
                     if let git = session.git { Text(git).font(.footnote).foregroundStyle(Theme.muted).monospacedDigit() }
                 }
 
+                if session.needsYou { NeedsBanner(state: session.state) }
+
                 Divider().overlay(Theme.line)
 
                 if session.state == "working", let activity = session.activity, !activity.steps.isEmpty {
@@ -80,8 +82,11 @@ struct SessionView: View {
                         .lineLimit(1...5)
                         .focused($composing)
                         .padding(10)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(composing ? Theme.duck : Theme.lineStrong, lineWidth: composing ? 2 : 1)
+                        )
                     Button {
                         let text = draft
                         Task {
@@ -137,6 +142,32 @@ struct ActivityFeed: View {
     }
 }
 
+/// A waiting agent, made unmistakable — matches the Mac window's banner.
+struct NeedsBanner: View {
+    let state: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+    private var word: String { state == "awaiting_approval" ? "Needs your approval" : "Needs your answer" }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle().fill(Theme.needsYou).frame(width: 9, height: 9)
+                .shadow(color: Theme.needsYou.opacity(0.5), radius: 4)
+                .opacity(dim ? 0.4 : 1)
+            Text(word).font(.callout.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Theme.needsYou.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.needsYou.opacity(0.45)))
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { dim = true }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct DecisionCard: View {
     let choices: PhoneSnapshot.Choices
     let disabled: Bool
@@ -148,17 +179,19 @@ struct DecisionCard: View {
             ForEach(choices.options) { option in
                 Button { onPick(option.letter) } label: {
                     HStack(spacing: 12) {
-                        Text(option.letter).font(.body.bold()).frame(width: 28, height: 28)
-                            .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6))
+                        Text(option.letter).font(.body.bold()).frame(width: 30, height: 30)
+                            .foregroundStyle(Theme.primaryText)
+                            .background(Theme.primaryFill, in: RoundedRectangle(cornerRadius: 6))
                         Text(option.title).multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
                         if option.letter == choices.recommended {
-                            Text("recommended").font(.caption).foregroundStyle(Theme.muted)
+                            Text("recommended").font(.caption2.weight(.semibold)).textCase(.uppercase)
+                                .foregroundStyle(Theme.muted)
                         }
                     }
                     .padding(10)
-                    .frame(minHeight: 44)
+                    .frame(minHeight: 48)
                     .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.lineStrong))
                 }
                 .buttonStyle(.plain)
                 .disabled(disabled)
@@ -167,7 +200,8 @@ struct DecisionCard: View {
         }
         .padding(12)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.lineStrong))
+        .shadow(color: .black.opacity(0.22), radius: 8, y: 2)
     }
 }
 
