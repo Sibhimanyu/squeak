@@ -568,7 +568,6 @@ main {
   margin-top: 16px;
   padding: 12px 14px;
   border: 1px solid color-mix(in srgb, var(--sq-needs-you) 45%, transparent);
-  border-left-width: 3px;
   border-radius: var(--sq-radius-card);
   background: color-mix(in srgb, var(--sq-needs-you) 14%, var(--sq-bg));
   color: var(--sq-ink);
@@ -756,7 +755,6 @@ main {
   margin-top: 4px;
   padding: 16px;
   border: 1px solid var(--sq-line-strong);
-  border-top: 2px solid var(--sq-duck);
   border-radius: var(--sq-radius-card);
   background: var(--sq-surface);
   box-shadow: var(--sq-shadow-card);
