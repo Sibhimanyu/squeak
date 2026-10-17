@@ -5,6 +5,7 @@ import { ConductorMirrorWriter, type MirrorFingerprints } from "../adapters/cond
 import type { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import type { CodexNotification, SupportedAgentType } from "../types.js";
 import { extractAssistantEnvelopeText } from "../utils/conductor-envelope.js";
+import { buildTranscript, TRANSCRIPT_SCAN_ROWS, type TranscriptResult } from "./transcript.js";
 import { describeUiFailure, mayHaveSent, type ConductorUiSender } from "./conductor-ui.js";
 import { logger } from "../utils/logger.js";
 
@@ -143,6 +144,14 @@ export class ConductorReplier {
     // The last text block is the one written to the reader; earlier ones in
     // the same turn are running commentary between tool calls.
     return parts[0] ?? null;
+  }
+
+  /** The chat's readable history, oldest first: user text and assistant prose only. */
+  transcript(sessionId: string, limit: number): TranscriptResult {
+    return buildTranscript(this.deps.registry.listSessionMessages(sessionId, TRANSCRIPT_SCAN_ROWS), {
+      limit,
+      scanRows: TRANSCRIPT_SCAN_ROWS,
+    });
   }
 
   /**

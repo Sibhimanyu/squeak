@@ -175,6 +175,7 @@ export class SqueakApp {
         const text = this.router.lastTurnText(target);
         return { text, choices: parseChoices(text) };
       },
+      transcript: (target, limit) => this.router.transcript(target, limit),
       activity: (key) => {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
         return session?.transcriptPath ? readActivity(session.agent, session.transcriptPath) : { steps: [], total: 0 };

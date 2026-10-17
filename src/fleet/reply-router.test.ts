@@ -18,6 +18,7 @@ function harness(sessions: FleetSession[], terminalAnswers = true) {
   const calls: string[] = [];
   const conductor = {
     lastTurnText: (id: string) => `conductor text for ${id}`,
+    transcript: () => ({ messages: [], complete: true }),
     send: async (id: string, text: string): Promise<ReplyOutcome> => {
       calls.push(`conductor ${id} ${text}`);
       return { status: "started", via: "conductor" };

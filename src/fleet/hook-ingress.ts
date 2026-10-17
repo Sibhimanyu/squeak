@@ -33,6 +33,8 @@ export interface HookIngressOptions {
  */
 export interface IngressControl {
   sessionMessage(replyTarget: string): unknown;
+  /** A chat's readable history (user and assistant text only), oldest first. */
+  transcript?(replyTarget: string, limit: number): unknown;
   reply(replyTarget: string, text: string): Promise<unknown>;
   /**
    * The current turn of a session, step by step, by its fleet key. Token-gated
@@ -41,6 +43,18 @@ export interface IngressControl {
   activity?(sessionKey: string): unknown;
   /** The phone channel: status, pair, approve, reject, revoke, reset. */
   remote?(action: string, deviceId: string | null): Promise<unknown>;
+}
+
+export const TRANSCRIPT_DEFAULT_LIMIT = 40;
+export const TRANSCRIPT_MAX_LIMIT = 200;
+
+/** Default 40, at most 200; anything that is not a positive integer is the default. */
+export function parseTranscriptLimit(raw: string | null): number {
+  if (!raw || !/^\d{1,9}$/.test(raw)) {
+    return TRANSCRIPT_DEFAULT_LIMIT;
+  }
+  const value = Number(raw);
+  return value < 1 ? TRANSCRIPT_DEFAULT_LIMIT : Math.min(value, TRANSCRIPT_MAX_LIMIT);
 }
 
 /**
@@ -193,6 +207,7 @@ export class HookIngressServer {
    * `GET  /control/session/<replyTarget>/message`
    * `POST /control/session/<replyTarget>/reply` with `{ "text": "..." }`
    * `GET  /control/session/<sessionKey>/activity`
+   * `GET  /control/session/<replyTarget>/transcript?limit=N`
    *
    * `replyTarget` is a Conductor chat id or a terminal agent's fleet key, as
    * `/state` hands it out.
@@ -232,7 +247,7 @@ export class HookIngressServer {
     }
 
     // A Conductor chat id, or the fleet key of a terminal agent (`claude-transcript:<uuid>`).
-    const match = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity)$/.exec(
+    const match = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity|transcript)$/.exec(
       (request.url ?? "").split("?")[0] ?? "",
     );
     if (!match) {
@@ -240,7 +255,7 @@ export class HookIngressServer {
       request.resume();
       return;
     }
-    const [, sessionId, action] = match as unknown as [string, string, "message" | "reply" | "activity"];
+    const [, sessionId, action] = match as unknown as [string, string, "message" | "reply" | "activity" | "transcript"];
 
     if (action === "message" && request.method === "GET") {
       request.resume();
@@ -248,6 +263,24 @@ export class HookIngressServer {
         respondJson(response, 200, control.sessionMessage(sessionId));
       } catch (error) {
         logger.warn("control message read failed", { error: error instanceof Error ? error.message : String(error) });
+        respond(response, 500, "unavailable");
+      }
+      return;
+    }
+
+    if (action === "transcript" && request.method === "GET") {
+      request.resume();
+      if (!control.transcript) {
+        respond(response, 503, "transcript unavailable");
+        return;
+      }
+      const rawLimit = new URL(request.url ?? "", "http://localhost").searchParams.get("limit");
+      try {
+        respondJson(response, 200, control.transcript(sessionId, parseTranscriptLimit(rawLimit)));
+      } catch (error) {
+        logger.warn("control transcript read failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
         respond(response, 500, "unavailable");
       }
       return;

@@ -1,3 +1,4 @@
+import type { TranscriptResult } from "./transcript.js";
 import type { FleetReplier } from "./fleet-controller.js";
 import type { ReplyFailureHandler, ReplyOutcome } from "./session-reply.js";
 import type { TerminalReplier } from "./terminal-reply.js";
@@ -20,6 +21,7 @@ function isFleetKey(target: string): boolean {
 
 interface ConductorSide {
   lastTurnText(conductorSessionId: string): string | null;
+  transcript(conductorSessionId: string, limit: number): TranscriptResult;
   send(conductorSessionId: string, text: string, onFailed: ReplyFailureHandler): Promise<ReplyOutcome>;
 }
 
@@ -52,6 +54,18 @@ export class FleetReplyRouter implements FleetReplier {
     }
     const session = this.resolve(target);
     return session && this.deps.terminal?.canReply(session) ? this.deps.terminal.lastTurnText(session) : null;
+  }
+
+  /** Readable history. Terminal agents have no cheap reader yet, so they get none. */
+  transcript(target: string, limit: number): TranscriptResult {
+    if (!isFleetKey(target)) {
+      return this.deps.conductor.transcript(target, limit);
+    }
+    const session = this.resolve(target);
+    if (session?.conductorSessionId) {
+      return this.deps.conductor.transcript(session.conductorSessionId, limit);
+    }
+    return { messages: [], complete: false };
   }
 
   async send(target: string, text: string, onFailed: ReplyFailureHandler): Promise<ReplyOutcome> {

@@ -1190,6 +1190,7 @@ export class ConductorRegistryAdapter {
       .prepare(
         `
           SELECT
+            id,
             role,
             content,
             sent_at as sentAt,

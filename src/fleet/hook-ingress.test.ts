@@ -262,6 +262,10 @@ describe("HookIngressServer control routes", () => {
     const replies: Array<{ id: string; text: string }> = [];
     server.setControl({
       sessionMessage: (id) => ({ id, text: "A) yes\nB) no" }),
+      transcript: (id, limit) => ({
+        messages: [{ id: "m1", role: "user", text: id, at: null, turnId: String(limit) }],
+        complete: true,
+      }),
       activity: (key) => ({ key, steps: [{ kind: "tool", text: "Run tests", at: null }], total: 1 }),
       reply: async (id, text) => {
         replies.push({ id, text });
@@ -301,6 +305,30 @@ describe("HookIngressServer control routes", () => {
       total: 1,
     });
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("serves a transcript only with the token, clamps the limit, and sends no CORS header", async () => {
+    const { base, auth } = await withControl();
+    expect((await fetch(`${base}/transcript`)).status).toBe(403);
+    const limitOf = async (query: string): Promise<string | null> => {
+      const response = await fetch(`${base}/transcript${query}`, { headers: auth });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("access-control-allow-origin")).toBeNull();
+      const body = (await response.json()) as { messages: Array<{ turnId: string | null }>; complete: boolean };
+      return body.messages[0]?.turnId ?? null;
+    };
+    const first = await fetch(`${base}/transcript`, { headers: auth });
+    expect(await first.json()).toEqual({
+      messages: [{ id: "m1", role: "user", text: "abc-123", at: null, turnId: "40" }],
+      complete: true,
+    });
+    expect(await limitOf("?limit=5")).toBe("5");
+    expect(await limitOf("?limit=9999")).toBe("200");
+    expect(await limitOf("?limit=0")).toBe("40");
+    expect(await limitOf("?limit=-3")).toBe("40");
+    expect(await limitOf("?limit=abc")).toBe("40");
+    expect((await fetch(`${base}/transcripts`, { headers: auth })).status).toBe(404);
+    expect((await fetch(`${base}/transcript`, { method: "POST", headers: auth })).status).toBe(405);
   });
 
   it("refuses control requests without the token", async () => {

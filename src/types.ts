@@ -53,6 +53,8 @@ export interface ConductorSessionRef {
 }
 
 export interface SessionMessageRecord {
+  /** Conductor's row id; absent on records built by hand. */
+  id?: string;
   role: "user" | "assistant";
   content: string;
   sentAt: string | null;
