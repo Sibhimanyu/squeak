@@ -841,6 +841,10 @@ els.serviceRestart.addEventListener("click", () => void restartService());
 els.showDuck.addEventListener("click", () => window.squeak.showDuck());
 els.openPhone.addEventListener("click", () => select(PHONE));
 
+// Heresay's Report button: a one-time note that it is there, once its
+// script (after this one) has loaded. Offline, it never loads; that is fine.
+window.addEventListener("load", () => window.Heresay?.introduce());
+
 void poll();
 void refreshService();
 setInterval(() => void poll(), STATE_POLL_MS);
