@@ -359,51 +359,11 @@ struct DeliveryText {
     }
 }
 
-/// Agent text is untrusted: plain Text only, never Markdown or links. Fenced code
-/// blocks are split out and set monospaced.
+/// Message text is untrusted: safe Markdown only (`MarkdownView`), no HTML, no live links.
 struct MessageBody: View {
     let text: String
 
-    private enum Piece: Hashable { case prose(String), code(String) }
-
-    private var pieces: [Piece] {
-        let parts = text.components(separatedBy: "```")
-        var out: [Piece] = []
-        for (i, part) in parts.enumerated() {
-            if i % 2 == 1 {
-                var code = part
-                if let nl = code.firstIndex(of: "\n"), !code[..<nl].contains(" ") { code = String(code[code.index(after: nl)...]) }
-                out.append(.code(code.trimmingCharacters(in: .newlines)))
-            } else {
-                let p = part.trimmingCharacters(in: .newlines)
-                if !p.isEmpty { out.append(.prose(p)) }
-            }
-        }
-        return out
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(pieces.enumerated()), id: \.offset) { _, piece in
-                switch piece {
-                case .prose(let p):
-                    Text(verbatim: p)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Theme.ink)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                case .code(let c):
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        Text(verbatim: c)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(Theme.ink)
-                            .textSelection(.enabled)
-                            .padding(8)
-                    }
-                    .background(Theme.surfaceRaised.opacity(0.7), in: RoundedRectangle(cornerRadius: 8))
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        MarkdownView(text: text)
     }
 }

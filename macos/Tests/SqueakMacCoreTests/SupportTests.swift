@@ -210,3 +210,73 @@ struct DaemonSenderTests {
         #expect(await broker.sessions().contains { $0.key.provider == "conductor" })
     }
 }
+
+@Suite("Message markup")
+struct MessageMarkupTests {
+    typealias M = MessageMarkup
+
+    @Test func paragraphWithBoldItalicCode() {
+        let b = M.parse("Hello **bold** and *it* and `x`")
+        #expect(b == [.paragraph([.text("Hello "), .bold([.text("bold")]), .text(" and "), .italic([.text("it")]), .text(" and "), .code("x")])])
+    }
+
+    @Test func nesting() {
+        #expect(M.parseInlines("**a *b* c**") == [.bold([.text("a "), .italic([.text("b")]), .text(" c")])])
+        #expect(M.parseInlines("*a **b** c*") == [.italic([.text("a "), .bold([.text("b")]), .text(" c")])])
+        // Markers inside code stay literal.
+        #expect(M.parseInlines("`**x**`") == [.code("**x**")])
+    }
+
+    @Test func unclosedMarkersStayLiteral() {
+        #expect(M.parseInlines("a **b") == [.text("a **b")])
+        #expect(M.parseInlines("a `b") == [.text("a `b")])
+        #expect(M.parseInlines("a *b") == [.text("a *b")])
+        #expect(M.parseInlines("2 * 3 * 4") == [.text("2 * 3 * 4")])
+        #expect(M.parseInlines("snake_case_name") == [.text("snake_case_name")])
+        #expect(M.parseInlines("[no](link") == [.text("[no](link")])
+    }
+
+    @Test func escapesAndHtmlAreLiteral() {
+        #expect(M.parseInlines("\\*not\\*") == [.text("*not*")])
+        #expect(M.parseInlines("<b>x</b> <a href=\"u\">y</a>") == [.text("<b>x</b> <a href=\"u\">y</a>")])
+    }
+
+    @Test func links() {
+        #expect(M.parseInlines("see [the **doc**](https://e.com/a) now") ==
+            [.text("see "), .link(label: [.text("the "), .bold([.text("doc")])], destination: "https://e.com/a"), .text(" now")])
+        // A destination with a space is not a link.
+        #expect(M.parseInlines("[a](b c)") == [.text("[a](b c)")])
+        // Bare URLs are plain text.
+        #expect(M.parseInlines("https://e.com") == [.text("https://e.com")])
+    }
+
+    @Test func headingsListsQuotes() {
+        let b = M.parse("## Title ##\n- one\n  - nested\n2. two\n> quoted\n> more\n\npara")
+        #expect(b == [
+            .heading(level: 2, [.text("Title")]),
+            .listItem(marker: .bullet, depth: 0, [.text("one")]),
+            .listItem(marker: .bullet, depth: 1, [.text("nested")]),
+            .listItem(marker: .number(2), depth: 0, [.text("two")]),
+            .quote([.text("quoted\nmore")]),
+            .paragraph([.text("para")]),
+        ])
+        #expect(M.parse("#nospace") == [.paragraph([.text("#nospace")])])
+    }
+
+    @Test func codeFenceWithLanguage() {
+        let b = M.parse("before\n```swift\nlet a = **1**\n\n  indented\n```\nafter")
+        #expect(b == [.paragraph([.text("before")]), .codeBlock(language: "swift", code: "let a = **1**\n\n  indented"), .paragraph([.text("after")])])
+        #expect(M.parse("```\nx") == [.codeBlock(language: nil, code: "x")])
+    }
+
+    @Test func largeInputIsFast() {
+        let chunk = "Some **bold** text with `code`, a [link](https://e.com), and *unclosed ** markers `\n- item\n"
+        let big = String(repeating: chunk, count: 200_000 / chunk.utf8.count)
+        let pathological = String(repeating: "** _ * ` [ ", count: 8_000)
+        let clock = ContinuousClock()
+        let t1 = clock.measure { _ = M.parse(big) }
+        let t2 = clock.measure { _ = M.parse(pathological) }
+        #expect(t1 < .milliseconds(100), "\(t1)")
+        #expect(t2 < .milliseconds(100), "\(t2)")
+    }
+}

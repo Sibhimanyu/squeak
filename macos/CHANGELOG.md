@@ -15,6 +15,9 @@ What exists:
 - Sending a message to a Conductor chat goes through the Squeak service
   (already installed with Squeak 1.x), which types it into Conductor's window.
   If the service is down, sending is disabled and Settings says why.
+- Messages render safe Markdown (headings, lists, quotes, code blocks, bold,
+  italic, inline code). Links show their address as text and are never
+  clickable; no HTML is interpreted.
 - Quick message window with an optional global shortcut, drafts that are never
   sent automatically, and notifications that never contain message text.
 - Settings › Connections shows each source honestly; Settings › About has

@@ -32,6 +32,13 @@ enum CaptureRunner {
         pop.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(700))
         write(pop.contentView, to: "\(prefix)-popover.png")
+
+        // A fixed sample, so every markdown block shows up regardless of the live chats.
+        let sample = NSWindow(contentRect: NSRect(x: 300, y: 300, width: 620, height: 640), styleMask: [.borderless], backing: .buffered, defer: false)
+        sample.contentView = NSHostingView(rootView: MarkdownSample().frame(width: 620, height: 640))
+        sample.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(700))
+        write(sample.contentView, to: "\(prefix)-markdown.png")
         NSApp.terminate(nil)
     }
 
@@ -46,5 +53,37 @@ enum CaptureRunner {
         guard let data = rep.representation(using: .png, properties: [:]) else { return }
         try? FileManager.default.createDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: URL(fileURLWithPath: path))
+    }
+}
+
+private struct MarkdownSample: View {
+    static let text = """
+    ## What changed
+
+    I fixed **three things** and left *one* alone. Run `swift test` to check; see [the notes](https://example.com/notes?a=1) for why.
+
+    - Parser in `Core`
+      - nested **bold** item
+    - Renderer with an unclosed **marker
+    1. First step
+    2. Second step
+
+    > A quoted line that explains the choice,
+    > continued here.
+
+    ```swift
+    let long = "a very long line that should scroll horizontally instead of wrapping, as code never wraps"
+    print(long)
+    ```
+
+    <b>HTML</b> stays literal, and snake_case_names too.
+    """
+
+    var body: some View {
+        MarkdownView(text: Self.text)
+            .padding(16)
+            .background(Theme.surface)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Theme.bg)
     }
 }
