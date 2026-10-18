@@ -10,6 +10,8 @@ enum CaptureRunner {
     static func run(prefix: String, model: AppModel) async {
         let env = ProcessInfo.processInfo.environment
         if let a = env["SQUEAK_MAC_APPEARANCE"] { NSApp.appearance = NSAppearance(named: a == "light" ? .aqua : .darkAqua) }
+        if model.demoMode { await runWindowDemo(prefix: prefix, model: model) }
+        if model.demoMode { await runDemo(prefix: prefix, model: model); return }
         await model.broker.setMode(.foreground)
         await wait(seconds: 8) { model.hasLoaded }
         if let s = model.ordered.flattened.first(where: { $0.replyTarget != nil }) ?? model.ordered.flattened.first {
@@ -53,6 +55,59 @@ enum CaptureRunner {
         gw.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(900))
         write(gallery, to: "\(prefix)-components.png")
+        NSApp.terminate(nil)
+    }
+
+    /// SQUEAK_MAC_DEMO=1: popover, quick composer and Settings › Connections from DemoData, no network.
+    /// Writes <prefix>-popover.png, <prefix>-composer.png, <prefix>-settings-connections.png.
+    private static func runDemo(prefix: String, model: AppModel) async {
+        try? await Task.sleep(for: .milliseconds(600))
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+
+        let pop = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 360, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        let popHost = NSHostingView(rootView: PopoverView().environment(model))
+        pop.contentView = popHost
+        pop.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(700))
+        var h = popHost.fittingSize.height
+        pop.setContentSize(NSSize(width: 360, height: h))
+        try? await Task.sleep(for: .milliseconds(500))
+        h = popHost.fittingSize.height
+        pop.setContentSize(NSSize(width: 360, height: h))
+        try? await Task.sleep(for: .milliseconds(500))
+        write(pop.contentView, to: "\(prefix)-popover.png")
+        pop.orderOut(nil)
+
+        // The quick composer over a stand-in backdrop (a glass panel cannot blur a window that is not there).
+        let qs = QuickComposerController.shared.state
+        qs.prepare(model: model)
+        let backdrop = LinearGradient(
+            colors: dark ? [Color(red: 0.13, green: 0.16, blue: 0.24), Color(red: 0.04, green: 0.04, blue: 0.06)] : [Color(red: 0.74, green: 0.80, blue: 0.90), Color(red: 0.92, green: 0.92, blue: 0.94)],
+            startPoint: .top, endPoint: .bottom)
+        let cw = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 800, height: 330), styleMask: [.borderless], backing: .buffered, defer: false)
+        cw.contentView = NSHostingView(rootView: ZStack { backdrop; QuickComposerView(close: {}).environment(model).environment(qs) }.frame(width: 800, height: 330))
+        cw.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(900))
+        write(cw.contentView, to: "\(prefix)-composer.png")
+        cw.orderOut(nil)
+
+        // The real Settings window, so the native tab toolbar is in the picture.
+        setenv("SQUEAK_MAC_SETTINGS_TAB", "connections", 1)
+        model.openSettings()
+        try? await Task.sleep(for: .seconds(1.5))
+        if let w = NSApp.windows.first(where: { $0.isVisible && ($0.title == "Settings" || $0.title == "General" || $0.title == "Connections") }),
+           let frame = w.contentView?.superview {
+            w.setFrameOrigin(NSPoint(x: 120, y: 120))
+            try? await Task.sleep(for: .milliseconds(500))
+            write(frame, to: "\(prefix)-settings-connections.png")
+        } else {
+            AppLog.info("capture: no Settings window, using the bare view")
+            let sw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 520, height: 440), styleMask: [.titled], backing: .buffered, defer: false)
+            sw.contentView = NSHostingView(rootView: SettingsView().environment(model))
+            sw.makeKeyAndOrderFront(nil)
+            try? await Task.sleep(for: .seconds(1))
+            write(sw.contentView, to: "\(prefix)-settings-connections.png")
+        }
         NSApp.terminate(nil)
     }
 

@@ -1,136 +1,213 @@
 import SqueakMacCore
 import SwiftUI
 
+/// The menu-bar popover (brief: 360 wide, content-height up to 560). List first: whitespace and type
+/// do the work. Choice taps and inline replies go through `AppModel.send`, a deliberate user tap.
 struct PopoverView: View {
     @Environment(AppModel.self) private var model
+    @State private var showEarlier = false
+    @State private var notices: [SessionKey: String] = [:]
+    @State private var contentHeight: CGFloat = 0
+
+    static let width: CGFloat = 360
+    static let maxHeight: CGFloat = 560
 
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
             header
-            VStack(spacing: 8) {
-                ConnectionBanner(compact: true)
-                LaunchOfferBanner()
-                UpdateBanner()
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, model.connectionHelp != nil || model.launchOfferPending || model.availableUpdate != nil ? 8 : 0)
-            searchBar(query: $model.query)
-            Divider().overlay(Theme.line)
+            SearchField(text: $model.query)
+                .padding(.horizontal, 20)
+                .padding(.bottom, Space.m)
+            banners
+            Hairline()
             content
-            Divider().overlay(Theme.line)
+            Hairline()
             footer
         }
-        .frame(width: 360, height: 520)
+        .frame(width: Self.width)
         .background(Theme.bg)
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack(spacing: 8) {
-            Circle().fill(Theme.duck).frame(width: 18, height: 18)
-                .overlay(Text("S").font(.system(size: 10, weight: .heavy)).foregroundStyle(Color(nsColor: NSColor(hex: 0x3C1804))))
-                .accessibilityHidden(true)
+        HStack(spacing: Space.s) {
+            DuckGlyph(size: 18)
             Text("Squeak").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
-            ConnectionPill()
             Spacer()
-            Button { model.openSettings() } label: { Image(systemName: "gearshape") }
-                .buttonStyle(.borderless)
-                .foregroundStyle(Theme.muted)
-                .accessibilityLabel("Settings")
-                .help("Settings")
+            if model.health != nil, !model.isConnected {
+                HStack(spacing: 5) {
+                    Circle().fill(Theme.subtle).frame(width: 6, height: 6)
+                    Text(model.connectionTitle).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Connection: \(model.connectionTitle)")
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 20)
+        .padding(.top, Space.l)
+        .padding(.bottom, Space.m)
     }
 
-    private func searchBar(query: Binding<String>) -> some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Theme.subtle).font(.system(size: 11))
-                TextField("Search sessions and messages", text: query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .accessibilityLabel("Search")
+    @ViewBuilder private var banners: some View {
+        let showHelp = model.health != nil && model.connectionHelp != nil
+        if showHelp || model.launchOfferPending || model.availableUpdate != nil {
+            VStack(alignment: .leading, spacing: Space.s) {
+                if showHelp, let help = model.connectionHelp {
+                    HStack(alignment: .top, spacing: Space.s) {
+                        Text(help).font(.system(size: 11.5)).foregroundStyle(Theme.muted).lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Check again") { model.recheck() }.buttonStyle(.plain)
+                            .font(.system(size: 11.5, weight: .medium)).foregroundStyle(Theme.ink)
+                    }
+                }
+                LaunchOfferBanner()
+                UpdateBanner()
             }
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-            filterMenu
+            .padding(.horizontal, 20)
+            .padding(.bottom, Space.m)
         }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
     }
 
-    private var filterMenu: some View {
-        Menu {
-            Button("All sessions") { model.filter = .all }
-            if model.providers.count > 1 {
-                Divider()
-                ForEach(model.providers, id: \.self) { p in Button(providerName(p)) { model.filter = .provider(p) } }
-            }
-            if !model.repos.isEmpty {
-                Divider()
-                ForEach(model.repos, id: \.self) { r in Button(r) { model.filter = .repo(r) } }
-            }
-        } label: {
-            Image(systemName: model.filter == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .foregroundStyle(model.filter == .all ? Theme.muted : Theme.duck)
-        .accessibilityLabel("Filter by provider or project")
-        .help("Filter by provider or project")
-    }
+    // MARK: Content
 
-    @ViewBuilder
-    private var content: some View {
+    @ViewBuilder private var content: some View {
         if model.sessions.isEmpty {
-            Spacer(minLength: 0)
-            if model.health == nil {
-                EmptyStateView(symbol: "ellipsis.circle", title: "Connecting…", message: "Looking for the Squeak service on this Mac.")
-            } else if !model.isConnected {
-                EmptyStateView(symbol: "bolt.slash", title: "No sessions to show", message: "Squeak can't reach its service yet, so there is nothing to list. The fix is above.")
-            } else {
-                EmptyStateView(symbol: "tray", title: "No sessions yet", message: "Start a chat in Conductor and it shows up here, with its replies.")
+            VStack {
+                if model.health == nil {
+                    EmptyStateView(symbol: "ellipsis.circle", title: "Connecting…", message: "Looking for the Squeak service on this Mac.")
+                } else if !model.isConnected {
+                    EmptyStateView(symbol: "bolt.slash", title: "No sessions to show", message: "Squeak can't reach its service yet, so there is nothing to list.")
+                } else {
+                    EmptyStateView(symbol: "tray", title: "No sessions yet", message: "Start a chat in Conductor and it shows up here, with its replies.")
+                }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity)
+            .frame(height: 220)
         } else {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    SessionSections { model.open($0) }
+                list
+                    .padding(.horizontal, Space.s)
+                    .padding(.vertical, Space.s)
+                    .background(
+                        GeometryReader { Color.clear.preference(key: PopoverHeightKey.self, value: $0.size.height) }
+                    )
+            }
+            .onPreferenceChange(PopoverHeightKey.self) { contentHeight = $0 }
+            .frame(height: min(max(contentHeight, 120), Self.maxHeight - 132))
+            .scrollIndicators(.automatic)
+        }
+    }
+
+    @ViewBuilder private var list: some View {
+        if model.isSearching {
+            let hits = model.searchHits
+            if hits.isEmpty {
+                EmptyStateView(symbol: "magnifyingglass", title: "No matches", message: "Search looks at titles and messages Squeak has already opened on this Mac.")
+                    .frame(maxWidth: .infinity)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(hits, id: \.key) { hit in
+                        if let s = model.session(hit.key) { row(s, snippet: hit.titleMatch ? nil : hit.snippet) }
+                    }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+            }
+        } else {
+            let sections = model.grouped
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(sections.enumerated()), id: \.element.id) { i, section in
+                    if i > 0 { Hairline().padding(.vertical, Space.s).padding(.horizontal, Space.m) }
+                    sectionView(section)
+                }
             }
         }
     }
 
-    private var footer: some View {
-        HStack(spacing: 8) {
-            Button {
-                QuickComposerController.shared.show()
-            } label: {
-                Label("Quick message", systemImage: "square.and.pencil")
+    @ViewBuilder private func sectionView(_ section: SessionSection) -> some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            SectionLabel(section.kind.title).padding(.horizontal, Space.m).padding(.bottom, 2)
+            switch section.kind {
+            case .needsYou:
+                ForEach(Array(section.sessions.enumerated()), id: \.element.id) { i, s in
+                    if i < 2 { card(s) } else { row(s) }
+                }
+            case .earlier:
+                ShowEarlierRow(count: section.sessions.count, expanded: showEarlier) { showEarlier.toggle() }
+                if showEarlier { ForEach(section.sessions) { row($0) } }
+            default:
+                ForEach(section.sessions) { row($0) }
             }
-            .buttonStyle(PrimaryButtonStyle())
-            Button("Open Squeak") { model.showConversationWindow() }
-                .buttonStyle(QuietButtonStyle())
-            Spacer()
-            Button("Quit") { NSApp.terminate(nil) }
-                .buttonStyle(QuietButtonStyle())
-                .keyboardShortcut("q")
-                .help("Quit Squeak")
         }
-        .padding(12)
+    }
+
+    private func row(_ s: HostSession, snippet: String? = nil) -> some View {
+        Button { model.open(s.key) } label: {
+            SessionRowView(session: s, isPinned: model.pinned.contains(s.key), subtitleOverride: snippet, showsAgent: snippet == nil)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(model.pinned.contains(s.key) ? "Unpin" : "Pin to top") { model.togglePin(s.key) }
+        }
+    }
+
+    private func card(_ s: HostSession) -> some View {
+        NeedsYouCard(
+            session: s, question: model.question(for: s.key), choices: model.choices(for: s.key),
+            canReply: model.canSend(s) && model.isConnected,
+            onOpen: { model.open(s.key) },
+            onChoose: { send($0.letter, to: s.key) },
+            onReply: { send($0, to: s.key) },
+            notice: notices[s.key]
+        )
+    }
+
+    /// A deliberate tap: the same send path as the window's Send. The card says what happened.
+    private func send(_ text: String, to key: SessionKey) {
+        notices[key] = "Sending…"
+        Task {
+            let result = await model.send(text, to: key)
+            notices[key] = result.flatMap(SendFeedback.init)?.failureText
+        }
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack(spacing: Space.m) {
+            Button { QuickComposerController.shared.show() } label: {
+                HStack(spacing: 6) {
+                    Text("Quick message").foregroundStyle(Theme.muted)
+                    Text("⌘K").foregroundStyle(Theme.subtle)
+                }
+                .font(.system(size: 12))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("k")
+            Spacer()
+            Button("Open Squeak") { model.showConversationWindow() }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.ink)
+            Menu {
+                Button("Settings…") { model.openSettings() }.keyboardShortcut(",")
+                Divider()
+                Button("Quit Squeak") { NSApp.terminate(nil) }.keyboardShortcut("q")
+            } label: {
+                Image(systemName: "gearshape").font(.system(size: 13)).foregroundStyle(Theme.muted)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("Settings and quit")
+            .help("Settings")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, Space.m)
     }
 }
 
-func providerName(_ p: String) -> String {
-    switch p {
-    case "conductor": "Conductor"
-    case "claude-terminal": "Claude (Terminal)"
-    case "codex-terminal": "Codex (Terminal)"
-    default: p.capitalized
-    }
+private struct PopoverHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }

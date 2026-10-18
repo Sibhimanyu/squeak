@@ -304,6 +304,8 @@ struct NeedsYouCard: View {
     var onOpen: () -> Void = {}
     var onChoose: (Choice) -> Void = { _ in }
     var onReply: (String) -> Void = { _ in }
+    /// A quiet line under the card: a send is in flight, or why it did not go.
+    var notice: String?
 
     @State private var replying = false
     @State private var text = ""
@@ -340,11 +342,23 @@ struct NeedsYouCard: View {
             .buttonStyle(.plain)
 
             if canReply {
-                if !choices.isEmpty { ChoiceChips(choices: choices, onChoose: onChoose) }
-                if replying { replyField } else { replyButton }
+                if replying {
+                    if !choices.isEmpty { ChoiceChips(choices: choices, onChoose: onChoose) }
+                    replyField
+                } else {
+                    // Chips and the quiet Reply share one line when they fit.
+                    FlowLayout(spacing: Space.s) {
+                        ForEach(choices, id: \.letter) { c in ChoiceChip(choice: c, isEnabled: true) { onChoose(c) } }
+                        replyButton
+                    }
+                }
+            }
+            if let notice {
+                Text(verbatim: notice).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(14)
+        .padding(12)
         .background(Theme.surfaceRaised.opacity(hovering ? 0.65 : 0.55), in: RoundedRectangle(cornerRadius: Radius.card))
         .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
@@ -358,7 +372,9 @@ struct NeedsYouCard: View {
             Text("Reply")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.muted)
-                .padding(.horizontal, 2)
+                .padding(.horizontal, Space.s)
+                .frame(height: 30)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

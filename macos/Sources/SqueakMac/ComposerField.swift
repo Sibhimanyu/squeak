@@ -13,6 +13,8 @@ struct ComposerField: NSViewRepresentable {
     var focusToken = 0
     var onSend: () -> Void
     var onEscape: (() -> Void)?
+    /// Reports the height the text wants (inset included), so a container can grow with it.
+    var onContentHeight: ((CGFloat) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -51,6 +53,7 @@ struct ComposerField: NSViewRepresentable {
         tv.isEditable = isEnabled
         tv.alphaValue = isEnabled ? 1 : 0.5
         tv.needsDisplay = true
+        context.coordinator.reportHeight(tv)
         if context.coordinator.lastFocusToken != focusToken {
             context.coordinator.lastFocusToken = focusToken
             DispatchQueue.main.async { tv.window?.makeFirstResponder(tv) }
@@ -70,6 +73,17 @@ struct ComposerField: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
+            reportHeight(tv)
+        }
+
+        private var lastHeight: CGFloat = 0
+        func reportHeight(_ tv: NSTextView) {
+            guard let report = parent.onContentHeight, let lm = tv.layoutManager, let tc = tv.textContainer else { return }
+            lm.ensureLayout(for: tc)
+            let h = ceil(lm.usedRect(for: tc).height + tv.textContainerInset.height * 2)
+            guard abs(h - lastHeight) > 0.5 else { return }
+            lastHeight = h
+            DispatchQueue.main.async { report(h) }
         }
 
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {

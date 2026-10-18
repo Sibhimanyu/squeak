@@ -20,6 +20,8 @@ final class AppModel {
     let broker: Broker
     let cache: EncryptedCache?
     let captureMode: Bool
+    /// SQUEAK_MAC_DEMO=1: made-up sessions, no network, no sends (see DemoData.swift).
+    let demoMode: Bool
     @ObservationIgnored var openConversationWindow: (() -> Void)?
     @ObservationIgnored var openSettingsWindow: (() -> Void)?
     @ObservationIgnored private var started = false
@@ -78,9 +80,10 @@ final class AppModel {
     init() {
         let env = ProcessInfo.processInfo.environment
         captureMode = env["SQUEAK_MAC_CAPTURE"] != nil
+        demoMode = env["SQUEAK_MAC_DEMO"] == "1"
         client = DaemonClient.live()
         // The capture run never touches the real Keychain or the real cache file.
-        if captureMode {
+        if captureMode || demoMode {
             cache = nil
         } else {
             cache = EncryptedCache(keyStore: KeychainKeyStore())
@@ -111,6 +114,7 @@ final class AppModel {
         }
         observeWindowVisibility()
         AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")
+        if demoMode { installDemo(); return }
         startUpdateChecks()
         Task { [weak self] in
             guard let self else { return }
@@ -163,6 +167,21 @@ final class AppModel {
             if windowVisible, n.key == selected { return }
             Notifier.shared.post(n, showName: notificationsShowNames)
         }
+    }
+
+    /// Fills the model from DemoData and stops there: no broker, no polling, no network.
+    func installDemo() {
+        let d = DemoData.make()
+        sessions = d.sessions
+        needsYouText = d.needsYouText
+        health = AdapterHealth(adapterId: "demo", status: .connected, lastSyncedAt: Date())
+        adapterHealths = [
+            "conductor-local": AdapterHealth(adapterId: "conductor-local", status: .connected, lastSyncedAt: Date()),
+            "conductor-daemon": AdapterHealth(adapterId: "conductor-daemon", status: .connected, lastSyncedAt: Date()),
+        ]
+        tokenPresent = true
+        hasLoaded = true
+        firstConnectionSeen = true
     }
 
     // MARK: Window visibility drives the poll mode
@@ -271,6 +290,10 @@ final class AppModel {
         openURL = nil
         draft = ""
         messages = key.map { knownMessages[$0] ?? [] } ?? []
+        if demoMode {
+            if let key { messages = DemoData.transcript(for: key); activity = DemoData.activity(for: key) }
+            return
+        }
         Task { [weak self] in
             guard let self else { return }
             guard let key else { await broker.setFocused(nil); return }
@@ -289,7 +312,7 @@ final class AppModel {
     }
 
     func refreshActivity() async {
-        guard let key = selected else { return }
+        guard let key = selected, !demoMode else { return }
         let steps = (try? await broker.activity(for: key)) ?? []
         if key == selected, steps != activity { activity = steps }
     }
@@ -318,6 +341,7 @@ final class AppModel {
     func send(_ text: String, to key: SessionKey) async -> SendResult? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        if demoMode { return .notSent(reason: "Demo data: nothing is sent.") }
         lastUsed = key
         defaults.set(key.stringValue, forKey: "lastUsed")
         if key == selected { draftTask?.cancel(); draft = "" }

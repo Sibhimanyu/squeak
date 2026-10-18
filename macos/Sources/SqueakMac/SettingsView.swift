@@ -3,14 +3,25 @@ import SqueakMacCore
 import SwiftUI
 
 struct SettingsView: View {
-    var body: some View {
-        TabView {
-            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
-            ConnectionsSettings().tabItem { Label("Connections", systemImage: "bolt.horizontal") }
-            PrivacySettings().tabItem { Label("Privacy", systemImage: "lock.shield") }
-            AboutSettings().tabItem { Label("About", systemImage: "info.circle") }
+    enum Tab: Hashable { case general, connections, privacy, about }
+    /// SQUEAK_MAC_SETTINGS_TAB lets a capture land on a tab; otherwise General.
+    @State private var tab: Tab = {
+        switch ProcessInfo.processInfo.environment["SQUEAK_MAC_SETTINGS_TAB"] {
+        case "connections": .connections
+        case "privacy": .privacy
+        case "about": .about
+        default: .general
         }
-        .frame(width: 480, height: 400)
+    }()
+
+    var body: some View {
+        TabView(selection: $tab) {
+            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }.tag(Tab.general)
+            ConnectionsSettings().tabItem { Label("Connections", systemImage: "link") }.tag(Tab.connections)
+            PrivacySettings().tabItem { Label("Privacy", systemImage: "hand.raised") }.tag(Tab.privacy)
+            AboutSettings().tabItem { Label("About", systemImage: "info.circle") }.tag(Tab.about)
+        }
+        .frame(width: 520, height: 440)
     }
 }
 
@@ -52,7 +63,6 @@ private struct GeneralSettings: View {
                 .disabled(!Bundled.isApp)
         }
         .formStyle(.grouped)
-        .padding()
     }
 }
 
@@ -62,38 +72,51 @@ private struct ConnectionsSettings: View {
     var body: some View {
         let r = model.connectionsReport
         Form {
-            row(r.database)
-            row(r.daemon)
-            row(r.sending)
-            LabeledContent("Address") { Text(verbatim: model.client.baseURL.absoluteString).textSelection(.enabled) }
-            if let synced = model.lastSyncedText { LabeledContent("Sync") { Text(synced) } }
-            if let help = model.connectionHelp {
-                Text(help).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            Section {
+                row(r.database, name: "Conductor", okWord: "reading chats", okColor: Theme.working)
+                row(r.daemon, name: "Squeak service", okWord: "connected", okColor: Theme.working)
+                row(r.sending, name: "Sending", okWord: "available", okColor: Theme.done)
+            } footer: {
+                Text("Squeak reads agent chats locally and sends replies only when you choose.")
             }
-            Button("Check again") { model.recheck() }
+            Section {
+                LabeledContent("Address") { Text(verbatim: model.client.baseURL.absoluteString).textSelection(.enabled) }
+                if let synced = model.lastSyncedText { LabeledContent("Sync") { Text(synced) } }
+                if let help = model.connectionHelp {
+                    Text(help).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                Button("Check again") { model.recheck() }
+            }
         }
         .formStyle(.grouped)
-        .padding()
     }
 
-    private func row(_ r: ConnectionsReport.Row) -> some View {
-        LabeledContent(r.title) {
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(r.value).foregroundStyle(color(r.level))
-                if let d = r.detail {
-                    Text(d).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
-                        .fixedSize(horizontal: false, vertical: true)
+    private func row(_ r: ConnectionsReport.Row, name: String, okWord: String, okColor: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Circle().fill(color(r.level, ok: okColor)).frame(width: 9, height: 9)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                (Text(name).font(.system(size: 13, weight: .medium))
+                    + Text("  —  ").foregroundStyle(.secondary)
+                    + Text(r.level == .ok ? okWord : r.value.lowercased()).foregroundStyle(.secondary))
+                if let d = r.detail, r.level != .ok {
+                    Text(d).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
+            Spacer(minLength: 0)
         }
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(name), \(r.level == .ok ? okWord : r.value)")
     }
 
-    private func color(_ l: ConnectionsReport.Level) -> Color {
+    private func color(_ l: ConnectionsReport.Level, ok: Color) -> Color {
         switch l {
-        case .ok: .primary
-        case .warning: .orange
-        case .problem: .red
-        case .neutral: .secondary
+        case .ok: ok
+        case .warning: Theme.error
+        case .problem: Theme.needsYou
+        case .neutral: Theme.subtle
         }
     }
 }
@@ -115,7 +138,6 @@ private struct PrivacySettings: View {
             if let n = model.cacheNotice { Text(n).font(.caption).foregroundStyle(.secondary) }
         }
         .formStyle(.grouped)
-        .padding()
         .confirmationDialog("Delete the message cache and its encryption key?", isPresented: $confirm) {
             Button("Delete cache", role: .destructive) { Task { await model.purgeCache() } }
         } message: {
@@ -131,7 +153,7 @@ private struct AboutSettings: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 8) {
-            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
+            DuckGlyph(size: 56)
             Text("Squeak").font(.title2.bold())
             Text("Version \(AppModel.appVersion)").foregroundStyle(.secondary)
             Text("A pager for your coding agents. Reads your sessions and lets you answer them.")

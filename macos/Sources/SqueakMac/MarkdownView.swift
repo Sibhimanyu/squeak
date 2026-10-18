@@ -5,7 +5,9 @@ import SwiftUI
 /// links are shown as text plus their address in a muted style and are never clickable.
 struct MarkdownView: View {
     let text: String
-    var size: CGFloat = 13
+    var size: CGFloat = 14
+    /// Extra leading: 14pt text at 1.45 line height.
+    var lineSpacing: CGFloat { size * 0.26 }
 
     var body: some View {
         let blocks = MessageMarkup.parse(text)
@@ -21,8 +23,10 @@ struct MarkdownView: View {
 
     /// Items of one list sit close together; everything else gets paragraph spacing.
     private func gap(_ a: MessageMarkup.Block, _ b: MessageMarkup.Block) -> CGFloat {
-        if case .listItem = a, case .listItem = b { return 3 }
-        return 8
+        if case .listItem = a, case .listItem = b { return 5 }
+        if case .heading = a { return 6 }
+        if case .heading = b { return 16 }
+        return 10
     }
 
     @ViewBuilder private func row(_ block: MessageMarkup.Block) -> some View {
@@ -30,20 +34,19 @@ struct MarkdownView: View {
         case .paragraph(let inlines):
             run(inlines, size: size)
         case .heading(let level, let inlines):
-            run(inlines, size: size + CGFloat(max(0, 4 - level)) * 1.5, weight: .semibold)
-                .padding(.top, 2)
+            run(inlines, size: level <= 2 ? 16 : 15, weight: .semibold)
         case .listItem(let marker, let depth, let inlines):
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(verbatim: marker.label)
                     .font(.system(size: size, design: .default).monospacedDigit())
                     .foregroundStyle(Theme.muted)
-                    .frame(minWidth: 14, alignment: .trailing)
+                    .frame(minWidth: 16, alignment: .trailing)
                 run(inlines, size: size)
             }
-            .padding(.leading, CGFloat(depth) * 16)
+            .padding(.leading, 4 + CGFloat(depth) * 18)
         case .quote(let inlines):
             HStack(alignment: .top, spacing: 8) {
-                RoundedRectangle(cornerRadius: 1.5).fill(Theme.line).frame(width: 3)
+                RoundedRectangle(cornerRadius: 1.5).fill(Theme.subtle.opacity(0.5)).frame(width: 3)
                 run(inlines, size: size, color: Theme.muted)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -53,18 +56,19 @@ struct MarkdownView: View {
                     Text(verbatim: language)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Theme.subtle)
-                        .padding(.horizontal, 10).padding(.top, 6)
+                        .padding(.horizontal, 14).padding(.top, 8)
                 }
                 ScrollView(.horizontal, showsIndicators: true) {
                     Text(verbatim: code)
                         .font(.system(size: size - 1, design: .monospaced))
                         .foregroundStyle(Theme.ink)
                         .fixedSize(horizontal: true, vertical: true)
-                        .padding(10)
+                        .lineSpacing(2)
+                        .padding(.horizontal, 14).padding(.top, language == nil ? 12 : 6).padding(.bottom, 12)
                 }
             }
-            .background(Theme.surfaceRaised.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surfaceRaised.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 
@@ -72,6 +76,7 @@ struct MarkdownView: View {
         var style = Style(size: size, weight: weight, italic: false, color: color)
         style.bold = weight != .regular
         return Text(MarkdownView.attributed(inlines, style))
+            .lineSpacing(size >= 15 ? 2 : lineSpacing)
             .fixedSize(horizontal: false, vertical: true)
     }
 
