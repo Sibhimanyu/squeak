@@ -11,7 +11,9 @@ let package = Package(
     targets: [
         .target(name: "SqueakMacCore"),
         .executableTarget(name: "SqueakMac", dependencies: ["SqueakMacCore"]),
-        .testTarget(name: "SqueakMacCoreTests", dependencies: ["SqueakMacCore"]),
+        .testTarget(
+            name: "SqueakMacCoreTests", dependencies: ["SqueakMacCore"],
+            resources: [.copy("Fixtures/relay-vectors.json")]),
     ],
     swiftLanguageModes: [.v6]
 )
