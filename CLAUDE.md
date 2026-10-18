@@ -45,6 +45,9 @@ deployment section before changing anything under `src/` or `desktop/`.
 | `desktop/squeak-service.js` | the window's only way out: /state, token-gated control routes, launchctl, Squeak Hands |
 | `helpers/squeak-hands/` | the signed Swift helper that alone holds the Accessibility grant |
 | `ios/` | Squeak for iPhone (SwiftUI, xcodegen) and `SqueakCore` (`swift test`) |
+| `src/fleet/conductor-relay/` | the local relay: Conductor's Remote Control host connects to Squeak on loopback, and a reply goes into the chat through Conductor's own composer — the first route `ConductorReplier.send` tries. Spec and evidence: `docs/conductor-local-feasibility.md` |
+| `macos/` | Squeak 2.0, the native SwiftUI menu-bar app (SwiftPM; `swift test`, `scripts/build-app.sh`). Talks to the daemon's control routes today; its Swift relay port (`Relay/`) is tested but not wired in, since the daemon owns port 8788. Read `macos/README.md` |
+| `docs/current-state-audit.md` | the pre-2.0 map of every process, route, file and secret |
 | `firebase/` | project `squeak-5c9gvo`: Firestore rules, and Hosting for the SideStore source |
 | `scripts/ship.sh` | put a worktree's branch live and restart Squeak |
 | `scripts/build-squeak-app.sh` | packages `~/Applications/Squeak.app` (icon, bundle id, signing) |
