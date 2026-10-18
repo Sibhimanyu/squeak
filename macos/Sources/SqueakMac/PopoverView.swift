@@ -115,13 +115,26 @@ struct PopoverView: View {
             }
         } else {
             let sections = model.grouped
+            let quiet = !sections.contains { $0.kind == .needsYou || $0.kind == .working }
             VStack(alignment: .leading, spacing: 0) {
+                if quiet { allQuiet }
                 ForEach(Array(sections.enumerated()), id: \.element.id) { i, section in
                     if i > 0 { Hairline().padding(.vertical, Space.s).padding(.horizontal, Space.m) }
                     sectionView(section)
                 }
             }
         }
+    }
+
+    private var allQuiet: some View {
+        VStack(spacing: Space.xs) {
+            DuckGlyph(size: 24).accessibilityHidden(true)
+            Text("All quiet").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink).padding(.top, Space.xs)
+            Text("Nothing needs you right now.").font(.system(size: 12)).foregroundStyle(Theme.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.l)
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private func sectionView(_ section: SessionSection) -> some View {

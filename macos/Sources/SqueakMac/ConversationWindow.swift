@@ -283,8 +283,8 @@ struct SessionDetail: View {
             .disabled(model.openURL == nil && !model.demoMode)
             .help(model.openURL == nil ? "This chat can't be opened in Conductor" : "Open this chat in Conductor")
         }
+        .frame(maxWidth: 720)
         .padding(.horizontal, 32)
-        .frame(maxWidth: 784)
         .padding(.top, 36)
         .padding(.bottom, Space.l)
         .frame(maxWidth: .infinity)
@@ -371,8 +371,8 @@ struct SessionDetail: View {
             if session.state == .working { ActivityPill(open: $activityOpen, key: session.key) }
             composer
         }
-        .frame(maxWidth: 784)
-        .padding(.horizontal, Space.l)
+        .frame(maxWidth: 720)
+        .padding(.horizontal, 32)
         .padding(.top, Space.l)
         .padding(.bottom, Space.l)
         .frame(maxWidth: .infinity)

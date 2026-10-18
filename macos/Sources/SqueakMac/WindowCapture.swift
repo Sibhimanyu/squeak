@@ -25,6 +25,10 @@ extension CaptureRunner {
         model.select(SessionKey(provider: "conductor", hostSessionId: "demo-2"))
         try? await Task.sleep(for: .milliseconds(1200))
         snapshot(win.contentView, to: "\(prefix)-window-working.png")
+        win.setContentSize(NSSize(width: 1400, height: 900))
+        model.select(SessionKey(provider: "conductor", hostSessionId: "demo-1"))
+        try? await Task.sleep(for: .milliseconds(1200))
+        snapshot(win.contentView, to: "\(prefix)-window-1400.png")
         win.orderOut(nil)
     }
 

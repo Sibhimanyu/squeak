@@ -25,6 +25,19 @@ struct SettingsView: View {
     }
 }
 
+/// Native-style section footer: leading-aligned, secondary, wraps.
+private struct SectionFootnote: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text)
+            .font(.callout).foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 private struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @State private var loginOn = LoginItem.isEnabled
@@ -33,34 +46,40 @@ private struct GeneralSettings: View {
     var body: some View {
         @Bindable var model = model
         Form {
-            Toggle("Open Squeak when I log in", isOn: Binding(
-                get: { loginOn },
-                set: { on in
-                    do {
-                        try LoginItem.set(on)
-                        loginOn = LoginItem.isEnabled
-                        loginError = nil
-                    } catch {
-                        loginOn = LoginItem.isEnabled
-                        loginError = error.localizedDescription
+            Section {
+                Toggle("Open Squeak when I log in", isOn: Binding(
+                    get: { loginOn },
+                    set: { on in
+                        do {
+                            try LoginItem.set(on)
+                            loginOn = LoginItem.isEnabled
+                            loginError = nil
+                        } catch {
+                            loginOn = LoginItem.isEnabled
+                            loginError = error.localizedDescription
+                        }
                     }
-                }
-            ))
-            .disabled(!Bundled.isApp)
-            if !Bundled.isApp {
-                Text("Available when running the Squeak app (not from a build folder).").font(.caption).foregroundStyle(.secondary)
-            }
-            if let loginError { Text(loginError).font(.caption).foregroundStyle(.red) }
-
-            Picker("Quick message shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
-                Text("None").tag("")
-                ForEach(HotKeyPreset.all) { Text($0.title).tag($0.id) }
-            }
-            Text("Works from any app and needs no special permission. It is off until you choose one.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            Toggle("Notify me when a session needs me or finishes", isOn: $model.notificationsEnabled)
+                ))
                 .disabled(!Bundled.isApp)
+            } footer: {
+                if let loginError {
+                    SectionFootnote(loginError)
+                } else if !Bundled.isApp {
+                    SectionFootnote("Available when running the Squeak app, not from a build folder.")
+                }
+            }
+            Section {
+                Picker("Quick message shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
+                    Text("None").tag("")
+                    ForEach(HotKeyPreset.all) { Text($0.title).tag($0.id) }
+                }
+            } footer: {
+                SectionFootnote("Works from any app and needs no special permission. It is off until you choose one.")
+            }
+            Section {
+                Toggle("Notify me when a session needs me or finishes", isOn: $model.notificationsEnabled)
+                    .disabled(!Bundled.isApp)
+            }
         }
         .formStyle(.grouped)
     }
@@ -77,15 +96,14 @@ private struct ConnectionsSettings: View {
                 row(r.daemon, name: "Squeak service", okWord: "connected", okColor: Theme.working)
                 row(r.sending, name: "Sending", okWord: "available", okColor: Theme.done)
             } footer: {
-                Text("Squeak reads agent chats locally and sends replies only when you choose.")
+                SectionFootnote("Squeak reads agent chats locally and sends replies only when you choose.")
             }
             Section {
                 LabeledContent("Address") { Text(verbatim: model.client.baseURL.absoluteString).textSelection(.enabled) }
                 if let synced = model.lastSyncedText { LabeledContent("Sync") { Text(synced) } }
-                if let help = model.connectionHelp {
-                    Text(help).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                }
                 Button("Check again") { model.recheck() }
+            } footer: {
+                if let help = model.connectionHelp { SectionFootnote(help) }
             }
         }
         .formStyle(.grouped)
@@ -128,14 +146,18 @@ private struct PrivacySettings: View {
     var body: some View {
         @Bindable var model = model
         Form {
-            Toggle("Show session names in notifications", isOn: $model.notificationsShowNames)
-            Text("Off by default. Notifications never contain message text; with this off they don't name the session either.")
-                .font(.caption).foregroundStyle(.secondary)
-            LabeledContent("Cache") {
-                Text("Messages are encrypted on this Mac, kept 14 days, up to 50 MB.").font(.caption).foregroundStyle(.secondary)
+            Section {
+                Toggle("Show session names in notifications", isOn: $model.notificationsShowNames)
+            } footer: {
+                SectionFootnote("Off by default. Notifications never contain message text; with this off they don't name the session either.")
             }
-            Button("Purge cache…", role: .destructive) { confirm = true }
-            if let n = model.cacheNotice { Text(n).font(.caption).foregroundStyle(.secondary) }
+            Section {
+                Button("Purge cache…", role: .destructive) { confirm = true }
+            } header: {
+                Text("Message cache")
+            } footer: {
+                SectionFootnote(model.cacheNotice ?? "Messages are encrypted on this Mac, kept 14 days, up to 50 MB.")
+            }
         }
         .formStyle(.grouped)
         .confirmationDialog("Delete the message cache and its encryption key?", isPresented: $confirm) {
@@ -152,26 +174,33 @@ private struct AboutSettings: View {
 
     var body: some View {
         @Bindable var model = model
-        VStack(spacing: 8) {
-            DuckGlyph(size: 56)
-            Text("Squeak").font(.title2.bold())
-            Text("Version \(AppModel.appVersion)").foregroundStyle(.secondary)
-            Text("A pager for your coding agents. Reads your sessions and lets you answer them.")
-                .multilineTextAlignment(.center).font(.callout).frame(maxWidth: 320)
-            Toggle("Check for new versions", isOn: $model.updateChecksEnabled)
-                .toggleStyle(.checkbox)
-                .help("Asks GitHub once a day whether a newer release exists. Never downloads or installs anything.")
-            Button(copied ? "Copied" : "Copy diagnostics") {
-                model.copyDiagnostics()
-                copied = true
-                Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+        VStack(spacing: 0) {
+            VStack(spacing: 6) {
+                DuckGlyph(size: 56)
+                Text("Squeak").font(.title2.bold())
+                Text("Version \(AppModel.appVersion)").foregroundStyle(.secondary)
+                Text("A pager for your coding agents. Reads your sessions and lets you answer them.")
+                    .multilineTextAlignment(.center).font(.callout).foregroundStyle(.secondary).frame(maxWidth: 320)
             }
-            Text("Versions, source status, session counts and recent log lines. No message text, titles, paths or ids.")
-                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 340)
-            Text(Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String ?? "")
-                .font(.caption).foregroundStyle(.secondary)
+            .padding(.top, 24)
+            Form {
+                Section {
+                    Toggle("Check for new versions", isOn: $model.updateChecksEnabled)
+                        .help("Asks GitHub once a day whether a newer release exists. Never downloads or installs anything.")
+                } footer: {
+                    SectionFootnote("Asks GitHub once a day. Never downloads or installs anything.")
+                }
+                Section {
+                    Button(copied ? "Copied" : "Copy diagnostics") {
+                        model.copyDiagnostics()
+                        copied = true
+                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+                    }
+                } footer: {
+                    SectionFootnote("Versions, source status, session counts and recent log lines. No message text, titles, paths or ids.")
+                }
+            }
+            .formStyle(.grouped)
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

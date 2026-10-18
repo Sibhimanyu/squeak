@@ -38,7 +38,12 @@ final class OnboardingController {
 struct OnboardingView: View {
     var finish: () -> Void
     @Environment(AppModel.self) private var model
-    @State private var step = 0
+    @State private var step: Int
+
+    init(step: Int = 0, finish: @escaping () -> Void) {
+        _step = State(initialValue: step)
+        self.finish = finish
+    }
 
     private let conductorInstalled = FileManager.default.fileExists(atPath: "/Applications/Conductor.app")
 

@@ -108,6 +108,28 @@ enum CaptureRunner {
             try? await Task.sleep(for: .seconds(1))
             write(sw.contentView, to: "\(prefix)-settings-connections.png")
         }
+
+        // Other tabs: click the real toolbar items so the native tab strip is in the picture.
+        if let w = NSApp.windows.first(where: { $0.isVisible && $0.toolbar != nil && ($0.title == "Settings" || ["General", "Connections", "Privacy", "About"].contains($0.title)) }),
+           let frame = w.contentView?.superview {
+            for tab in ["General", "Privacy", "About"] {
+                if let item = w.toolbar?.items.first(where: { $0.label == tab }), let target = item.target, let action = item.action {
+                    _ = target.perform(action, with: item)
+                }
+                try? await Task.sleep(for: .seconds(1))
+                write(frame, to: "\(prefix)-settings-\(tab.lowercased()).png")
+            }
+        } else {
+            AppLog.info("capture: no Settings toolbar for the other tabs")
+        }
+        for n in 0..<4 {
+            let ow = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 480, height: 420), styleMask: [.titled], backing: .buffered, defer: false)
+            ow.contentView = NSHostingView(rootView: OnboardingView(step: n, finish: {}).environment(model))
+            ow.makeKeyAndOrderFront(nil)
+            try? await Task.sleep(for: .milliseconds(700))
+            write(ow.contentView, to: "\(prefix)-onboarding-\(n + 1).png")
+            ow.orderOut(nil)
+        }
         NSApp.terminate(nil)
     }
 
