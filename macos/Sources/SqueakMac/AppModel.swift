@@ -31,6 +31,20 @@ final class AppModel {
     private(set) var hasLoaded = false
     private(set) var tokenPresent = true
     private(set) var firstConnectionSeen = false
+    private(set) var adapterHealths: [String: AdapterHealth] = [:]
+    /// False when conductor.db is missing and the daemon serves Conductor chats too.
+    let usesLocalConductor: Bool
+
+    // MARK: Updates (a notice only; nothing is downloaded or installed)
+    private(set) var availableUpdate: AvailableUpdate?
+    private(set) var lastUpdateCheck: Date?
+    var updateChecksEnabled: Bool {
+        didSet {
+            defaults.set(updateChecksEnabled, forKey: "updateChecks")
+            if updateChecksEnabled { startUpdateChecks() } else { updateTask?.cancel(); updateTask = nil; availableUpdate = nil }
+        }
+    }
+    @ObservationIgnored private var updateTask: Task<Void, Never>?
 
     // MARK: Selection and conversation
     private(set) var selected: SessionKey?
@@ -69,7 +83,9 @@ final class AppModel {
             cache = EncryptedCache(keyStore: KeychainKeyStore())
         }
         let draftStore = cache.map { DraftStore(cache: $0) }
-        broker = Broker(adapters: [ConductorDaemonAdapter(client: client)], cache: cache, draftStore: draftStore)
+        usesLocalConductor = ConductorDatabase().exists
+        broker = Broker(adapters: ConductorSources.adapters(client: client), cache: cache, draftStore: draftStore)
+        updateChecksEnabled = UserDefaults.standard.object(forKey: "updateChecks") as? Bool ?? true
         let d = UserDefaults.standard
         pinned = Set((d.stringArray(forKey: "pinned") ?? []).compactMap(SessionKey.init(stringValue:)))
         hotKeyID = d.string(forKey: "hotKey")
@@ -91,6 +107,8 @@ final class AppModel {
             self?.showConversationWindow()
         }
         observeWindowVisibility()
+        AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")
+        startUpdateChecks()
         Task { [weak self] in
             guard let self else { return }
             await broker.restoreFromCache()
@@ -121,8 +139,13 @@ final class AppModel {
             knownMessages[key] = all
             if key == selected { messages = all }
         case .connection(let h):
-            health = h
-            if h.status == .connected {
+            let summary = await broker.connectionSummary() ?? h
+            if health?.status != summary.status {
+                AppLog.info("connection \(DiagnosticsInput.describe(summary.status)) (\(h.adapterId))")
+            }
+            health = summary
+            adapterHealths = Dictionary(uniqueKeysWithValues: await broker.healths().map { ($0.adapterId, $0) })
+            if adapterHealths.values.contains(where: { $0.status == .connected }) {
                 hasLoaded = true
                 sessions = await broker.sessions()
                 if !firstConnectionSeen {
@@ -267,7 +290,14 @@ final class AppModel {
         lastUsed = key
         defaults.set(key.stringValue, forKey: "lastUsed")
         if key == selected { draftTask?.cancel(); draft = "" }
-        return await broker.send(trimmed, to: key)
+        let result = await broker.send(trimmed, to: key)
+        switch result {
+        case .accepted(let via): AppLog.info("send accepted via \(via)")
+        case .refused: AppLog.info("send refused")
+        case .uncertain: AppLog.info("send uncertain")
+        case .notSent: AppLog.info("send not sent")
+        }
+        return result
     }
 
     /// Puts a refused or unsent message back in the composer. Never sends.
@@ -323,12 +353,91 @@ final class AppModel {
         }
     }
 
+    // MARK: Updates
+
+    static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0-dev"
+    }
+
+    /// On launch and every 24 hours. Never in a capture run.
+    private func startUpdateChecks() {
+        guard updateChecksEnabled, !captureMode, updateTask == nil else { return }
+        updateTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.checkForUpdate()
+                try? await Task.sleep(for: .seconds(24 * 3600))
+            }
+        }
+    }
+
+    private func checkForUpdate() async {
+        let result = await UpdateChecker().check(currentVersion: Self.appVersion)
+        lastUpdateCheck = Date()
+        switch result {
+        case .available(let u):
+            AppLog.info("update check: \(u.version) available")
+            availableUpdate = u.tag == defaults.string(forKey: "dismissedUpdate") ? nil : u
+        case .upToDate:
+            AppLog.info("update check: up to date")
+            availableUpdate = nil
+        case .failed(let why):
+            AppLog.info("update check failed: \(why)")
+        }
+    }
+
+    func viewRelease() {
+        if let url = availableUpdate?.releaseURL { NSWorkspace.shared.open(url) }
+    }
+
+    func dismissUpdate() {
+        if let u = availableUpdate { defaults.set(u.tag, forKey: "dismissedUpdate") }
+        availableUpdate = nil
+    }
+
+    // MARK: Connections and diagnostics
+
+    var connectionsReport: ConnectionsReport {
+        ConnectionsReport.make(
+            databaseExists: ConductorDatabase().exists,
+            localHealth: adapterHealths["conductor-local"],
+            daemonHealth: adapterHealths["conductor-daemon"],
+            tokenPresent: tokenPresent)
+    }
+
+    func diagnosticsText() -> String {
+        let names = ["conductor-local": "Conductor database", "conductor-daemon": "Squeak service"]
+        let adapters = adapterHealths.keys.sorted().map { id in
+            let h = adapterHealths[id]!
+            return DiagnosticsInput.Adapter(name: names[id] ?? "adapter", status: DiagnosticsInput.describe(h.status), lastSyncedAt: h.lastSyncedAt)
+        }
+        return DiagnosticsReport.render(DiagnosticsInput(
+            appVersion: Self.appVersion,
+            osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+            adapters: adapters,
+            stateCounts: DiagnosticsInput.counts(of: sessions),
+            lastUpdateCheck: lastUpdateCheck,
+            logLines: AppLog.buffer.last(50)))
+    }
+
+    func copyDiagnostics() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(diagnosticsText(), forType: .string)
+        AppLog.info("diagnostics copied")
+    }
+
     // MARK: Connection wording
+
+    /// Conductor chats are read straight from its database, so a stopped daemon
+    /// costs sending and terminal sessions, not the chat list.
+    private var readingDirectly: Bool {
+        usesLocalConductor && adapterHealths["conductor-local"]?.status == .connected && effectiveStatusIsDaemonDown
+    }
+    private var effectiveStatusIsDaemonDown: Bool { adapterHealths["conductor-daemon"]?.status == .daemonDown }
 
     var connectionTitle: String {
         switch effectiveStatus {
         case .connected: "Connected"
-        case .daemonDown: "Squeak service is off"
+        case .daemonDown: readingDirectly ? "Reading only" : "Squeak service is off"
         case .tokenMissing: "Access token missing"
         case .degraded(let r): hasLoaded || health != nil ? "Trouble connecting" : r
         }
@@ -337,6 +446,8 @@ final class AppModel {
     var connectionHelp: String? {
         switch effectiveStatus {
         case .connected: nil
+        case .daemonDown where readingDirectly:
+            "Conductor chats are read directly, so they stay up to date. Replying and terminal sessions need Squeak's background service, which isn't running. Start it with “launchctl kickstart -k gui/$(id -u)/com.squeak.daemon” in Terminal."
         case .daemonDown:
             "Squeak's background service isn't running, so sessions can't update or be answered. Start it with “launchctl kickstart -k gui/$(id -u)/com.squeak.daemon” in Terminal. This app reconnects by itself."
         case .tokenMissing:

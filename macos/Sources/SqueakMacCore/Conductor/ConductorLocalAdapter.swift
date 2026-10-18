@@ -4,7 +4,17 @@ import Foundation
 public protocol ConductorSender: Sendable {
     /// Whether sending can work right now (relay paired and reachable).
     var isReady: Bool { get }
+    /// Why sending is unavailable right now (shown instead of a send button).
+    var unavailableReason: String { get }
+    /// Re-checks readiness. Called by the adapter on every poll, before it maps
+    /// sessions, so `isReady` is never older than one poll.
+    func refresh() async
     func send(workspaceId: String, sessionId: String, text: String) async -> SendResult
+}
+
+public extension ConductorSender {
+    var unavailableReason: String { "Squeak's relay is not set up yet" }
+    func refresh() async {}
 }
 
 /// The default sender before the relay is set up: never sends.
@@ -79,7 +89,7 @@ public struct ConductorLocalAdapter: HostAdapter {
         } else if sender.isReady {
             sendCapability = .supported
         } else {
-            sendCapability = .unsupported("Squeak's relay is not set up yet")
+            sendCapability = .unsupported(sender.unavailableReason)
         }
         let session = HostSession(
             key: SessionKey(provider: "conductor", workspaceId: row.workspaceId, hostSessionId: row.id),
@@ -105,6 +115,7 @@ public struct ConductorLocalAdapter: HostAdapter {
     // MARK: HostAdapter
 
     public func discover() async throws -> [HostSession] {
+        await sender.refresh()
         let current = now()
         let rows = try registry.listFleetSessions(limit: Self.sessionLimit)
         var sessions: [HostSession] = []
@@ -133,7 +144,7 @@ public struct ConductorLocalAdapter: HostAdapter {
     public func send(_ text: String, to session: HostSession, clientId: UUID) async -> SendResult {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .notSent(reason: "Nothing to send") }
         guard let workspace = session.conductorWorkspaceId else { return .notSent(reason: "This chat has no Conductor workspace") }
-        guard sender.isReady else { return .notSent(reason: "relay not set up") }
+        guard sender.isReady else { return .notSent(reason: sender.unavailableReason) }
         return await sender.send(workspaceId: workspace, sessionId: sessionId(of: session), text: text)
     }
 

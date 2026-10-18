@@ -6,9 +6,14 @@ public struct ConductorDaemonAdapter: HostAdapter {
     public let id = "conductor-daemon"
     private let client: DaemonClient
     private let now: @Sendable () -> Date
+    private let includeConductor: Bool
 
-    public init(client: DaemonClient, now: @escaping @Sendable () -> Date = { Date() }) {
+    /// - Parameter includeConductor: false when `ConductorLocalAdapter` owns Conductor's
+    ///   chats; the daemon's Conductor rows are then dropped so no chat appears twice
+    ///   and no Conductor key comes from here.
+    public init(client: DaemonClient, includeConductor: Bool = true, now: @escaping @Sendable () -> Date = { Date() }) {
         self.client = client
+        self.includeConductor = includeConductor
         self.now = now
     }
 
@@ -65,7 +70,8 @@ public struct ConductorDaemonAdapter: HostAdapter {
     // MARK: HostAdapter
 
     public func discover() async throws -> [HostSession] {
-        try await client.state().sessions.map(Self.map)
+        let all = try await client.state().sessions.map(Self.map)
+        return includeConductor ? all : all.filter { $0.key.provider != "conductor" }
     }
 
     public func transcript(for session: HostSession, limit: Int) async throws -> [ChatMessage] {

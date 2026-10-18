@@ -196,3 +196,25 @@ struct SessionSections: View {
             }
     }
 }
+
+/// A quiet notice that a newer release exists. Opens the release page; nothing is downloaded.
+struct UpdateBanner: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let u = model.availableUpdate {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down.circle").foregroundStyle(Theme.muted).accessibilityHidden(true)
+                Text("Squeak \(u.version.description) is available")
+                    .font(.system(size: 12)).foregroundStyle(Theme.ink)
+                Spacer()
+                Button("View release") { model.viewRelease() }.buttonStyle(QuietButtonStyle())
+                Button { model.dismissUpdate() } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless).foregroundStyle(Theme.subtle)
+                    .accessibilityLabel("Dismiss")
+            }
+            .padding(10)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+}

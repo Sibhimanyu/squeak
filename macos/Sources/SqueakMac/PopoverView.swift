@@ -11,9 +11,10 @@ struct PopoverView: View {
             VStack(spacing: 8) {
                 ConnectionBanner(compact: true)
                 LaunchOfferBanner()
+                UpdateBanner()
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, model.connectionHelp != nil || model.launchOfferPending ? 8 : 0)
+            .padding(.bottom, model.connectionHelp != nil || model.launchOfferPending || model.availableUpdate != nil ? 8 : 0)
             searchBar(query: $model.query)
             Divider().overlay(Theme.line)
             content

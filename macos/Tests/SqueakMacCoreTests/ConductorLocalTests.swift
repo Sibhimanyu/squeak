@@ -455,7 +455,7 @@ struct ConductorLocalAdapterTests {
     @Test func nullSenderNeverSends() async throws {
         let f = try fixture()
         let s = try await adapter(f).discover().first!
-        #expect(await adapter(f).send("hi", to: s, clientId: UUID()) == .notSent(reason: "relay not set up"))
+        #expect(await adapter(f).send("hi", to: s, clientId: UUID()) == .notSent(reason: "Squeak's relay is not set up yet"))
         #expect(await NullSender().send(workspaceId: "w", sessionId: "s", text: "t") == .notSent(reason: "relay not set up"))
     }
 

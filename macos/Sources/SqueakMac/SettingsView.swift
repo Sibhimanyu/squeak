@@ -10,7 +10,7 @@ struct SettingsView: View {
             PrivacySettings().tabItem { Label("Privacy", systemImage: "lock.shield") }
             AboutSettings().tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 480, height: 340)
+        .frame(width: 480, height: 400)
     }
 }
 
@@ -60,18 +60,13 @@ private struct ConnectionsSettings: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let r = model.connectionsReport
         Form {
-            LabeledContent("Squeak service") {
-                HStack(spacing: 6) {
-                    ConnectionPill()
-                }
-            }
+            row(r.database)
+            row(r.daemon)
+            row(r.sending)
             LabeledContent("Address") { Text(verbatim: model.client.baseURL.absoluteString).textSelection(.enabled) }
-            LabeledContent("Access token") {
-                Text(model.tokenPresent ? "Found" : "Missing").foregroundStyle(model.tokenPresent ? Color.primary : Color.red)
-            }
             if let synced = model.lastSyncedText { LabeledContent("Sync") { Text(synced) } }
-            LabeledContent("Direct Conductor relay") { Text("Not enabled yet").foregroundStyle(.secondary) }
             if let help = model.connectionHelp {
                 Text(help).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
@@ -79,6 +74,27 @@ private struct ConnectionsSettings: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    private func row(_ r: ConnectionsReport.Row) -> some View {
+        LabeledContent(r.title) {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(r.value).foregroundStyle(color(r.level))
+                if let d = r.detail {
+                    Text(d).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func color(_ l: ConnectionsReport.Level) -> Color {
+        switch l {
+        case .ok: .primary
+        case .warning: .orange
+        case .problem: .red
+        case .neutral: .secondary
+        }
     }
 }
 
@@ -109,14 +125,27 @@ private struct PrivacySettings: View {
 }
 
 private struct AboutSettings: View {
+    @Environment(AppModel.self) private var model
+    @State private var copied = false
+
     var body: some View {
+        @Bindable var model = model
         VStack(spacing: 8) {
-            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 64, height: 64)
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
             Text("Squeak").font(.title2.bold())
-            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0 (dev)")")
-                .foregroundStyle(.secondary)
+            Text("Version \(AppModel.appVersion)").foregroundStyle(.secondary)
             Text("A pager for your coding agents. Reads your sessions and lets you answer them.")
                 .multilineTextAlignment(.center).font(.callout).frame(maxWidth: 320)
+            Toggle("Check for new versions", isOn: $model.updateChecksEnabled)
+                .toggleStyle(.checkbox)
+                .help("Asks GitHub once a day whether a newer release exists. Never downloads or installs anything.")
+            Button(copied ? "Copied" : "Copy diagnostics") {
+                model.copyDiagnostics()
+                copied = true
+                Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+            }
+            Text("Versions, source status, session counts and recent log lines. No message text, titles, paths or ids.")
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 340)
             Text(Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String ?? "")
                 .font(.caption).foregroundStyle(.secondary)
         }
