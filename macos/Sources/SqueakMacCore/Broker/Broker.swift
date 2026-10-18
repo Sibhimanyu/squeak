@@ -186,6 +186,14 @@ public actor Broker {
         }
     }
 
+    /// The agent's latest message in a session, for cards that show the question.
+    /// Reads a short transcript tail; never touches the focused conversation's cache.
+    public func lastAgentText(for key: SessionKey) async -> String? {
+        guard let session = session(for: key), let adapter = adapter(for: key) else { return nil }
+        guard let tail = try? await adapter.transcript(for: session, limit: 8) else { return nil }
+        return tail.last { $0.role == .assistant && !$0.text.isEmpty }?.text
+    }
+
     public func activity(for key: SessionKey) async throws -> [ActivityStep] {
         guard let session = session(for: key), let adapter = adapter(for: key) else { return [] }
         return try await adapter.activity(for: session)

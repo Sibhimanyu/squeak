@@ -33,10 +33,7 @@ struct MenuBarLabel: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: model.attentionCount > 0 ? "bird.fill" : "bird")
-            if model.attentionCount > 0 { Text("\(model.attentionCount)") }
-        }
+        Image(nsImage: MenuBarIcon.image(for: MenuBarIcon.State(model: model)))
         .accessibilityLabel(model.attentionCount > 0 ? "Squeak, \(model.attentionCount) need you" : "Squeak")
         .task {
             // The label is alive from launch, so it is where the window actions are captured.
@@ -71,6 +68,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // No Dock icon, even from a bare `swift run` (the bundle also sets LSUIElement).
         NSApp.setActivationPolicy(.accessory)
+        if let sheet = ProcessInfo.processInfo.environment["SQUEAK_MAC_ICON_SHEET"] {
+            MenuBarIconSheet.write(to: sheet, master: ProcessInfo.processInfo.environment["SQUEAK_MAC_ICON_MASTER"])
+            exit(0)
+        }
         let model = AppModel.shared
         model.start()
         if let prefix = ProcessInfo.processInfo.environment["SQUEAK_MAC_CAPTURE"] {

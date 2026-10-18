@@ -1,0 +1,111 @@
+import Foundation
+import Testing
+@testable import SqueakMacCore
+
+private let decision = [
+    "```", "DEBUG REPORT", "A) this line is inside a code block and must be ignored", "```", "",
+    "**D1 — Arm device control on the farm?** (reply with a letter)", "",
+    "The dashboard can't operate anything until `allow_control` is flipped to true on the add-on.", "",
+    "Recommendation: A, because you have asked twice for working light control.", "",
+    "**A) Arm it now (recommended).** Completeness: 10/10. I set `allow_control: true`, restart the add-on.", "",
+    "**B) Arm it, but only after you are physically near the hardware.** Completeness: 8/10. Same change, later.", "",
+    "**C) Leave it off.** Completeness: 3/10. The dashboard now says plainly that control is switched off.", "",
+    "Net: the code is ready and the failure mode is now honest.",
+].joined(separator: "\n")
+
+@Suite("Choices")
+struct ChoicesTests {
+    @Test func realDecisionMessage() {
+        let p = Choices.parseFull(decision)
+        #expect(p?.question == "D1 — Arm device control on the farm?")
+        #expect(p?.options == [
+            Choice(letter: "A", label: "Arm it now"),
+            Choice(letter: "B", label: "Arm it, but only after you are physically near the hardware"),
+            Choice(letter: "C", label: "Leave it off"),
+        ])
+        #expect(p?.recommended == "A")
+    }
+
+    @Test func firstSentenceWhenNotBold() {
+        let p = Choices.parseFull("Which one?\n\nA) Ship it. It is ready.\nB. Wait a day — CI is flaky.\n")
+        #expect(p?.options == [Choice(letter: "A", label: "Ship it"), Choice(letter: "B", label: "Wait a day")])
+        #expect(p?.question == "Which one?")
+        #expect(p?.recommended == nil)
+    }
+
+    @Test func listMarkersAndParens() {
+        #expect(Choices.parse("- (A) Keep\n- (B) Drop\n").map(\.letter) == ["A", "B"])
+    }
+
+    @Test func ordinaryFinishMessages() {
+        #expect(Choices.parse("Done. All tests pass and the branch is pushed.").isEmpty)
+        #expect(Choices.parse("1. Ran the tests\n2. Fixed the import\n").isEmpty)
+        #expect(Choices.parse("").isEmpty)
+        #expect(Choices.parseFull(nil) == nil)
+    }
+
+    @Test func needsTwoStartingAtA() {
+        #expect(Choices.parse("A) The only option").isEmpty)
+        #expect(Choices.parse("B) Second\nC) Third").isEmpty)
+    }
+
+    @Test func sentenceStartingWithA() {
+        #expect(Choices.parse("A small fix landed.\nB is next.").isEmpty)
+    }
+
+    @Test func twoBlocksAreAmbiguous() {
+        #expect(Choices.parse("D1?\nA) one\nB) two\n\nD2?\nA) three\nB) four").isEmpty)
+    }
+
+    @Test func recommendationMustBeOffered() {
+        #expect(Choices.parseFull("Recommendation: D\nA) one\nB) two")?.recommended == nil)
+    }
+}
+
+@Suite("ShortRelativeTime")
+struct ShortRelativeTimeTests {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    @Test func buckets() {
+        func f(_ s: TimeInterval) -> String { ShortRelativeTime.format(now.addingTimeInterval(-s), now: now) }
+        #expect(f(0) == "now")
+        #expect(f(59) == "now")
+        #expect(f(60) == "1m")
+        #expect(f(120) == "2m")
+        #expect(f(3599) == "59m")
+        #expect(f(3600) == "1h")
+        #expect(f(86399) == "23h")
+        #expect(f(86400 * 3) == "3d")
+        #expect(f(86400 * 14) == "2w")
+        #expect(ShortRelativeTime.format(now.addingTimeInterval(30), now: now) == "now")
+        #expect(f(86400 * 120).contains(" "))
+    }
+}
+
+@Suite("SessionGrouping")
+struct SessionGroupingTests {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    func s(_ id: String, _ st: SessionState, ago: TimeInterval?, alive: Bool? = nil) -> HostSession {
+        HostSession(key: SessionKey(provider: "t", hostSessionId: id), title: id, state: st,
+                    lastActivityAt: ago.map { now.addingTimeInterval(-$0) }, alive: alive)
+    }
+
+    @Test func sectionsAndOrder() {
+        let all = [
+            s("old", .finished, ago: 86400 * 3), s("rec", .finished, ago: 7200), s("idle", .idle, ago: 600),
+            s("w1", .working, ago: 60), s("w2", .working, ago: 10), s("b", .blocked, ago: 5),
+            s("dead", .working, ago: 100, alive: false), s("none", .idle, ago: nil),
+        ]
+        let pinned = Set([all[3].key])  // w1
+        let g = SessionGrouping.group(all, pinned: pinned, now: now)
+        #expect(g.map(\.kind) == [.needsYou, .working, .recent, .earlier])
+        #expect(g[0].sessions.map(\.title) == ["b"])
+        #expect(g[1].sessions.map(\.title) == ["w1", "w2"])  // pinned first
+        #expect(g[2].sessions.map(\.title) == ["dead", "idle", "rec"])
+        #expect(g[3].sessions.map(\.title) == ["old", "none"])
+    }
+
+    @Test func emptySectionsHidden() {
+        let g = SessionGrouping.group([s("w", .working, ago: 1)], now: now)
+        #expect(g.map(\.kind) == [.working])
+    }
+}

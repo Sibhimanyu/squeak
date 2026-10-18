@@ -52,6 +52,9 @@ final class AppModel {
     private(set) var activity: [ActivityStep] = []
     private(set) var openURL: URL?
     private(set) var draft = ""
+    /// The agent's last message for sessions that need you, so cards can show the question and options.
+    private(set) var needsYouText: [SessionKey: String] = [:]
+    @ObservationIgnored private var needsYouFetchedAt: [SessionKey: Date?] = [:]
     @ObservationIgnored private var knownMessages: [SessionKey: [ChatMessage]] = [:]
     @ObservationIgnored private var draftTask: Task<Void, Never>?
 
@@ -134,6 +137,7 @@ final class AppModel {
             sessions = await broker.sessions()
             hasLoaded = true
             if let selected, openURL == nil { openURL = await broker.openInHostURL(for: selected) }
+            await refreshNeedsYouText()
         case .messagesChanged(let key):
             let all = await broker.messages(for: key)
             knownMessages[key] = all
@@ -203,6 +207,33 @@ final class AppModel {
             case .repo(let r): s.repoName == r
             }
         }
+    }
+
+    /// The brief's sections (Needs you / Working / Recent / Earlier), pinned first inside each.
+    var grouped: [SessionSection] { SessionGrouping.group(visibleSessions, pinned: pinned) }
+
+    /// The agent's latest message for a session: the open transcript, else the cached card text.
+    func lastAgentText(_ key: SessionKey) -> String? {
+        knownMessages[key]?.last(where: { $0.role == .assistant })?.text ?? needsYouText[key]
+    }
+
+    func choices(for key: SessionKey) -> [Choice] { lastAgentText(key).map(Choices.parse) ?? [] }
+
+    /// The question line for a card: the parsed question when options exist, else the text's tail.
+    func question(for key: SessionKey) -> String? {
+        guard let t = lastAgentText(key), !t.isEmpty else { return nil }
+        if let q = Choices.parseFull(t)?.question { return q }
+        return Choices.stripMarkdown(t)
+    }
+
+    private func refreshNeedsYouText() async {
+        let blocked = sessions.filter { $0.state == .blocked && $0.alive != false }
+        needsYouFetchedAt = needsYouFetchedAt.filter { k, _ in blocked.contains { $0.key == k } }
+        for s in blocked where needsYouFetchedAt[s.key] != .some(s.lastActivityAt) {
+            needsYouFetchedAt[s.key] = .some(s.lastActivityAt)
+            if let t = await broker.lastAgentText(for: s.key) { needsYouText[s.key] = t }
+        }
+        needsYouText = needsYouText.filter { k, _ in blocked.contains { $0.key == k } }
     }
 
     var ordered: OrderedSessions { SessionOrdering.order(visibleSessions, pinned: pinned) }

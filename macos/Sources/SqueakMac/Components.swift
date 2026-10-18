@@ -8,12 +8,6 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: agentSymbol(session))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.muted)
-                .frame(width: 26, height: 26)
-                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
-                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     if pinned {

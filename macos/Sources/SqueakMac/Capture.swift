@@ -39,6 +39,20 @@ enum CaptureRunner {
         sample.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(700))
         write(sample.contentView, to: "\(prefix)-markdown.png")
+
+        // Component gallery: dark and light side by side, demo data only.
+        let gallery = NSView(frame: NSRect(x: 0, y: 0, width: 1200, height: 900))
+        for (i, name) in [NSAppearance.Name.darkAqua, .aqua].enumerated() {
+            let host = NSHostingView(rootView: ComponentGallery().frame(width: 600, height: 900))
+            host.frame = NSRect(x: CGFloat(i) * 600, y: 0, width: 600, height: 900)
+            host.appearance = NSAppearance(named: name)
+            gallery.addSubview(host)
+        }
+        let gw = NSWindow(contentRect: gallery.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        gw.contentView = gallery
+        gw.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(900))
+        write(gallery, to: "\(prefix)-components.png")
         NSApp.terminate(nil)
     }
 
@@ -85,5 +99,57 @@ private struct MarkdownSample: View {
             .background(Theme.surface)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Theme.bg)
+    }
+}
+
+/// Every shared component with made-up data, for review without touching live chats.
+private struct ComponentGallery: View {
+    static let now = Date()
+    static func demo(_ id: String, _ title: String, _ state: SessionState, ago: TimeInterval, repo: String, branch: String, agent: String) -> HostSession {
+        HostSession(
+            key: SessionKey(provider: "demo", hostSessionId: id), title: title, repoName: repo, branch: branch,
+            agent: agent, state: state, lastActivityAt: now.addingTimeInterval(-ago)
+        )
+    }
+    let checkout = demo("1", "Checkout retries", .blocked, ago: 5, repo: "orchard", branch: "fix/retry-logic", agent: "claude")
+    let limiter = demo("2", "Rate limiter", .working, ago: 120, repo: "lighthouse", branch: "main", agent: "codex")
+    let docs = demo("3", "Docs refresh", .finished, ago: 3600, repo: "orchard", branch: "docs/api", agent: "claude")
+    let flaky = demo("4", "Fix flaky login test", .idle, ago: 86400 * 3, repo: "squeak", branch: "test/login-flake", agent: "codex")
+    @State private var query = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.l) {
+            HStack(spacing: Space.s) {
+                DuckGlyph(size: 18)
+                Text("Squeak").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+                Spacer()
+                DuckGlyph(size: 48)
+            }
+            SearchField(text: $query, hint: "⌘F")
+            SectionLabel("Needs you", count: 1)
+            NeedsYouCard(
+                session: checkout, question: "Should I preserve the existing retry count of 2, or move it to 3 for gateway timeouts?",
+                choices: [Choice(letter: "A", label: "Keep 2"), Choice(letter: "B", label: "Use 3"), Choice(letter: "C", label: "Let me review")]
+            )
+            SectionLabel("Working")
+            SessionRowView(session: limiter, showsAgent: true)
+            Hairline()
+            SectionLabel("Recent")
+            SessionRowView(session: docs, isSelected: true, isPinned: true)
+            SessionRowView(session: flaky)
+            ShowEarlierRow(count: 12) {}
+            Hairline()
+            HStack(spacing: Space.s) {
+                StateChip(state: .blocked); StateChip(state: .working); StateChip(state: .finished)
+                StateChip(state: .idle); StateChip(state: .error)
+            }
+            HStack(spacing: Space.l) {
+                ForEach([0.0, 120, 7200, 86400 * 3, 86400 * 14], id: \.self) { RelativeTimeText(Self.now.addingTimeInterval(-$0)) }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Space.l)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.bg)
     }
 }
