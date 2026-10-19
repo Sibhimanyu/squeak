@@ -5,7 +5,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
-VERSION="2.0.0"
+VERSION="2.0.1"
 OUT="$HERE/build"
 APP="$OUT/Squeak.app"
 
