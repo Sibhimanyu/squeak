@@ -1,5 +1,6 @@
 import AppKit
 import SqueakMacCore
+import SqueakMarkup
 import SwiftUI
 
 /// DESIGN.md §3 and §11 as SwiftUI colours (mirrors the iPhone app's Theme).
@@ -161,4 +162,15 @@ enum Typo {
     static let label = Font.system(size: 13, weight: .semibold)  // 550 is not a system weight
     static let meta = Font.system(size: 11)
     static let code = Font.system(size: 12, design: .monospaced)
+}
+
+extension MessageStyle {
+    /// Messages in Squeak for Mac: DESIGN.md §4.2 sizes, §3.2 colours.
+    static var squeak: MessageStyle {
+        var s = MessageStyle.mac
+        s.ink = Theme.ink; s.muted = Theme.muted; s.subtle = Theme.subtle; s.line = Theme.lineStrong
+        s.codeSurface = Theme.surfaceRaised.opacity(0.45)
+        s.tableHeader = Theme.surfaceRaised.opacity(0.55)
+        return s
+    }
 }

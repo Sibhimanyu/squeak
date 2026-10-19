@@ -1,5 +1,6 @@
 #if os(iOS)
 import SqueakCore
+import SqueakMarkup
 import SwiftUI
 import UIKit
 
@@ -121,6 +122,16 @@ struct PrimaryButtonStyle: ButtonStyle {
                 isEnabled ? Theme.primaryFill.opacity(configuration.isPressed ? 0.8 : 1) : Theme.surfaceRaised,
                 in: RoundedRectangle(cornerRadius: 8)
             )
+    }
+}
+
+extension MessageStyle {
+    /// Messages on the phone: DESIGN.md §4.2 (16/22 body), §3.2 colours, Dynamic Type.
+    static var squeak: MessageStyle {
+        var s = MessageStyle.phone
+        s.ink = Theme.ink; s.muted = Theme.muted; s.subtle = Theme.subtle; s.line = Theme.lineStrong
+        s.codeSurface = Theme.surface; s.tableHeader = Theme.line
+        return s
     }
 }
 #endif

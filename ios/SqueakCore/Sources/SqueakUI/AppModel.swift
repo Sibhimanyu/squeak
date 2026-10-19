@@ -16,29 +16,19 @@ final class AppModel: ObservableObject {
         case paired
     }
 
-    struct Receipt: Equatable {
-        enum Kind: Equatable { case sending, sent(String), refused(String) }
-        let kind: Kind
-        let turnId: String?
-    }
-
     @Published private(set) var phase: Phase = .unpaired
-    @Published private(set) var snapshot: PhoneSnapshot?
+    @Published private(set) var snapshot: PhoneSnapshot? { didSet { remember(snapshot) } }
     @Published private(set) var lastFetch: Date?
     @Published private(set) var problem: String?
-    @Published var receipts: [String: Receipt] = [:]
     /// What this phone sent since the app opened, per session. Local only:
     /// the channel carries no conversation history back, so the phone shows
     /// its own replies and the Mac's latest message, nothing it cannot know.
     @Published private(set) var outbox: [String: [SentMessage]] = [:]
 
-    struct SentMessage: Identifiable, Equatable {
-        let id = UUID()
-        let text: String
-        let date: Date
-        /// The turn it answered; places it before or after the agent's current message.
-        let answersTurn: String?
-    }
+    typealias SentMessage = ChatSend
+
+    /// The last agent message seen per session, so a working turn keeps the previous answer on screen.
+    private(set) var remembered: [String: RememberedMessage] = [:]
 
     private var channel: Channel?
     private var loop: Task<Void, Never>?
@@ -52,6 +42,7 @@ final class AppModel: ObservableObject {
         if demo {
             snapshot = DemoData.snapshot
             outbox = DemoData.outbox
+            for (k, v) in DemoData.remembered { remembered[k] = v }
             lastFetch = Date()
             phase = .paired
             return
@@ -150,18 +141,21 @@ final class AppModel: ObservableObject {
 
     /* ---------- replying ---------- */
 
-    func send(_ text: String, to session: PhoneSnapshot.Session) async {
+    /// Sends a reply. The message is on screen at once as "Sending…" and settles to one of the delivery
+    /// lines (`ChatSend.Status.line`). Returns false when nothing was sent (empty, or Face ID declined),
+    /// so the composer can give the text back.
+    @discardableResult
+    func send(_ text: String, to session: PhoneSnapshot.Session) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard await confirmWithBiometrics(reason: "Send to \(session.label)") else { return }
-        receipts[session.key] = Receipt(kind: .sending, turnId: session.turnId)
+        guard !trimmed.isEmpty else { return false }
+        guard await confirmWithBiometrics(reason: "Send to \(session.label)") else { return false }
+        let sentId = begin(trimmed, for: session)
         if demo {
             try? await Task.sleep(for: .seconds(1))
-            receipts[session.key] = Receipt(kind: .sent(Self.sentText(trimmed, session.label, via: "conductor")), turnId: session.turnId)
-            record(trimmed, for: session)
-            return
+            finish(sentId, .sent, for: session)
+            return true
         }
-        guard let channel else { return }
+        guard let channel else { finish(sentId, .refused("not connected to your Mac."), for: session); return true }
         do {
             let (id, document) = try channel.replyDocument(to: session, text: trimmed, signer: signer)
             try await channel.send(document, id: id)
@@ -169,30 +163,37 @@ final class AppModel: ObservableObject {
             for _ in 0..<40 {
                 try await Task.sleep(for: .milliseconds(750))
                 if let result = try await channel.result(for: id) {
-                    let kind: Receipt.Kind = result.sent
-                        ? .sent(Self.sentText(trimmed, session.label, via: result.via))
-                        : .refused(result.reason ?? "Your Mac refused that reply.")
-                    receipts[session.key] = Receipt(kind: kind, turnId: session.turnId)
-                    if result.sent { record(trimmed, for: session) }
-                    return
+                    finish(sentId, result.sent ? .sent : .refused(result.reason ?? "your Mac refused that reply."), for: session)
+                    return true
                 }
             }
-            receipts[session.key] = Receipt(kind: .refused("Your Mac didn't answer. It may be asleep; the reply expires in five minutes."), turnId: session.turnId)
+            // Written, but the Mac never said: it may still arrive within its five minutes.
+            finish(sentId, .notConfirmed, for: session)
         } catch {
-            receipts[session.key] = Receipt(kind: .refused("Couldn't send: \(error.localizedDescription)"), turnId: session.turnId)
+            finish(sentId, .refused(error.localizedDescription), for: session)
         }
+        return true
     }
 
-    private func record(_ text: String, for session: PhoneSnapshot.Session) {
-        outbox[session.key, default: []].append(SentMessage(text: text, date: Date(), answersTurn: session.turnId))
+    /// Any send of this session still waiting on the Mac.
+    func isSending(_ key: String) -> Bool { outbox[key]?.contains { $0.status == .sending } ?? false }
+
+    private func begin(_ text: String, for session: PhoneSnapshot.Session) -> UUID {
+        let send = ChatSend(text: text, date: Date(), answersTurn: session.turnId ?? remembered[session.key]?.turnId, status: .sending)
+        outbox[session.key, default: []].append(send)
+        return send.id
     }
 
-    /// DESIGN.md §9: "Sent B to orchard · irrigation in Conductor."
-    static func sentText(_ text: String, _ label: String, via: String?) -> String {
-        let what = text.count <= 3 ? text : "your reply"
-        return via == "background"
-            ? "Sent \(what) to \(label) in the background. Conductor shows it next time it loads the chat."
-            : "Sent \(what) to \(label) in Conductor."
+    private func finish(_ id: UUID, _ status: ChatSend.Status, for session: PhoneSnapshot.Session) {
+        guard let i = outbox[session.key]?.firstIndex(where: { $0.id == id }) else { return }
+        outbox[session.key]?[i].status = status
+    }
+
+    private func remember(_ snapshot: PhoneSnapshot?) {
+        for s in snapshot?.sessions ?? [] where s.state != "working" {
+            guard let text = [s.message, s.detail].compactMap({ $0 }).first(where: { !$0.isEmpty }) else { continue }
+            remembered[s.key] = RememberedMessage(text: text, atISO: s.lastActivityAt, turnId: s.turnId)
+        }
     }
 
     private func confirmWithBiometrics(reason: String) async -> Bool {

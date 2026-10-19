@@ -64,6 +64,21 @@ extension DemoData {
                 m("2", .assistant, question, at(10, 44)),
             ]
         }
+        if key.hostSessionId == "demo-3" {
+            // A reply was just sent: the previous answer stays (muted), then "You", then the working row.
+            return [
+                m("1", .user, "Why does bold text show up as literal asterisks in Telegram?", at(10, 2), state: .confirmed),
+                m("2", .assistant, "The splitter cuts messages inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. I can fix the splitter and keep the fallback.", at(10, 9)),
+                m("3", .user, "Fix the splitter, and make sure tables still render.", at(10, 12), state: .accepted(via: "conductor")),
+                m("4", .user, "Also keep the plain-text fallback for anything it still can't parse.", at(10, 14), state: .accepted(via: "conductor")),
+            ]
+        }
+        if key.hostSessionId == "demo-6" {
+            return [
+                m("1", .user, "Make sure two chats can never share a worktree. How did it go?", at(8, 52), state: .confirmed),
+                m("2", .assistant, richMessage, at(9, 20)),
+            ]
+        }
         return [
             m("1", .user, "Where did we land on this?", at(9, 12), state: .confirmed),
             m("2", .assistant, "Done. The change is on the branch and the tests pass.", at(9, 20)),
@@ -99,4 +114,48 @@ extension DemoData {
     static func summary(for key: SessionKey) -> String? {
         key.hostSessionId == "demo-1" ? "3 files changed · 12 tests passed" : nil
     }
+}
+
+extension DemoData {
+    /// One answer with every kind of block, for the typesetting captures.
+    static let richMessage = """
+    ## Session isolation
+
+    Each chat now runs in **its own worktree**, and the check fails loudly if two chats ever share one. I touched `src/fleet/isolation.ts` and the launcher in ~/conductor/repos/squeak.
+
+    The change is small, but it affects every place that creates a workspace. Two things are worth knowing:
+
+    - The check runs *before* a chat starts
+      - it compares the worktree path with every live chat
+      - a clash stops the start and says which chat holds it
+    - Archived workspaces are ignored, since their worktree is gone
+    - [x] Unit tests for the clash case
+    - [ ] A test for a path that is a symlink
+
+    ### How it behaves
+
+    | Case | Before | Now |
+    | :--- | :---: | ---: |
+    | Two chats, one worktree | silent clash | **refused** |
+    | Archived workspace | counted | ignored |
+    | Missing directory | crash | `error` card |
+
+    The core of the check:
+
+    ```ts
+    export function assertIsolated(path: string, live: Chat[]): void {
+      const clash = live.find((c) => c.worktree === path);
+      if (clash) throw new Error(`worktree held by ${clash.title}`);
+    }
+    ```
+
+    > Heads up: existing chats keep their worktree. The check only guards new starts, so a clash that already exists will not be repaired.
+
+    1. Run `npm test` to see the new cases.
+    2. Read the notes at [the design doc](https://example.com/docs/isolation) before changing the launcher.
+
+    ---
+
+    Say the word and I will cover the symlink case too.
+    """
 }

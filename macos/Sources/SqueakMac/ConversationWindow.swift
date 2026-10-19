@@ -1,5 +1,6 @@
 import AppKit
 import SqueakIcons
+import SqueakMarkup
 import SqueakMacCore
 import SwiftUI
 
@@ -328,6 +329,10 @@ struct SessionDetail: View {
     @State private var contentHeight: CGFloat = 0
 
     private var agent: String { SessionRowView.agentName(session.agent) ?? "Agent" }
+    private var rows: [ChatTimeline.Row] {
+        ChatTimeline.rows(messages: model.messages, state: session.state, activity: model.activity)
+    }
+    private var isWorking: Bool { ChatTimeline.isWorking(messages: model.messages, state: session.state) }
     private var spring: Animation? { reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86) }
 
     var body: some View {
@@ -344,8 +349,8 @@ struct SessionDetail: View {
         }
         .animation(spring, value: tab)
         .onAppear { focusToken += 1 }
-        .task(id: "\(session.key.stringValue)-\(session.state == .working)-\(tab.rawValue)") {
-            guard session.state == .working || tab == .activity else { return }
+        .task(id: "\(session.key.stringValue)-\(isWorking)-\(tab.rawValue)") {
+            guard isWorking || tab == .activity else { return }
             while !Task.isCancelled {
                 await model.refreshActivity()
                 try? await Task.sleep(for: .seconds(2))
@@ -400,20 +405,29 @@ struct SessionDetail: View {
     private var transcript: some View {
         if case .unsupported(let why) = session.capabilities.readTranscript {
             note(.eyeOff, "Can't show this conversation", why)
-        } else if model.messages.isEmpty {
-            note(.messageSquareText, "No messages yet", "Messages appear here as the agent and you exchange them.")
+        } else if rows.count == 1, rows[0] == .empty {
+            note(.messageSquareText, "No messages yet", "Send one below to start. Messages appear here as the agent and you exchange them.")
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 26) {
-                        ForEach(model.messages) { m in
-                            MessageView(
-                                message: m, agentName: agent, canOpenHost: model.openURL != nil,
-                                layout: m.id == needsYouMessageID ? ChoiceLayout.make(m.text) : nil,
-                                canAnswer: sendBlock == nil && model.isConnected, onChoose: choose
-                            )
-                            .id(m.id)
+                        ForEach(rows) { row in
+                            switch row {
+                            case .message(let m, let muted):
+                                MessageView(
+                                    message: m, agentName: agent, canOpenHost: model.openURL != nil,
+                                    layout: !muted && m.id == needsYouMessageID ? ChoiceLayout.make(m.text) : nil,
+                                    canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted
+                                )
+                                .id(m.id)
+                            case .working(let label):
+                                WorkingRow(agentName: agent, label: label)
+                                    .id("working")
+                                    .transition(.opacity)
+                            case .empty:
+                                EmptyView()
+                            }
                         }
                         Color.clear.frame(height: 1).id("bottom")
                             .onAppear { atBottom = true }
@@ -426,7 +440,8 @@ struct SessionDetail: View {
                     .frame(maxWidth: .infinity)
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
-                .onChange(of: model.messages.last?.id) { _, _ in
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows.map(\.id))
+                .onChange(of: rows.last?.id) { _, _ in
                     if atBottom || model.messages.last?.role == .user { scrollDown(proxy) }
                 }
                 .onChange(of: model.messages.last?.state) { _, _ in
@@ -472,7 +487,6 @@ struct SessionDetail: View {
 
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
-            summary
             composer
             Text(verbatim: destinationNote).font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, 4)
         }
@@ -482,19 +496,6 @@ struct SessionDetail: View {
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity)
         .background(.bar)
-    }
-
-    /// Real data only: the live step of a working session, or what the source reports (nothing today
-    /// for live sessions, since the adapters expose no diff or test results).
-    @ViewBuilder private var summary: some View {
-        if session.state == .working {
-            HStack(spacing: 8) {
-                StateDot(state: .working).scaleEffect(0.85)
-                Text(verbatim: model.activity.last?.text ?? "Working…").font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
-            }
-            .padding(.leading, 4)
-            .accessibilityLabel("What it's doing: \(model.activity.last?.text ?? "working")")
-        }
     }
 
     // MARK: Composer
@@ -560,6 +561,8 @@ struct SessionDetail: View {
         let t = model.draft
         guard canSend, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let key = session.key
+        // The field clears as it sends and keeps focus, so the next message can be typed at once.
+        focusToken += 1
         Task { _ = await model.send(t, to: key) }
     }
 }
@@ -629,10 +632,12 @@ struct MessageView: View {
     var layout: ChoiceLayout?
     var canAnswer = true
     var onChoose: (ChoiceCard) -> Void = { _ in }
+    /// The previous turn's agent message while a new one is being worked on.
+    var muted = false
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if message.role == .user { userBody } else { agentBody }
+        if message.role == .user { userBody } else { agentBody.opacity(muted ? 0.62 : 1) }
     }
 
     private func meta(_ name: String) -> some View {
@@ -665,9 +670,9 @@ struct MessageView: View {
             VStack(alignment: .leading, spacing: 10) {
                 meta(agentName)
                 if let layout {
-                    if !layout.before.isEmpty { MarkdownView(text: layout.before) }
+                    if !layout.before.isEmpty { MessageText(markdown: layout.before, style: .squeak) }
                     if let q = layout.question {
-                        Text(verbatim: q).font(Typo.heading).padding(.top, 8).accessibilityAddTraits(.isHeader)
+                        MessageInlineText(markdown: q, style: .squeak, size: 15, weight: .semibold).padding(.top, 8).accessibilityAddTraits(.isHeader)
                     }
                     SqueakGlassGroup(spacing: 10) {
                         VStack(spacing: 10) {
@@ -676,9 +681,9 @@ struct MessageView: View {
                             }
                         }
                     }
-                    if !layout.after.isEmpty { MarkdownView(text: layout.after).padding(.top, 6) }
+                    if !layout.after.isEmpty { MessageText(markdown: layout.after, style: .squeak).padding(.top, 6) }
                 } else {
-                    MarkdownView(text: message.text)
+                    MessageText(markdown: message.text, style: .squeak)
                 }
             }
         }
@@ -689,8 +694,7 @@ struct MessageView: View {
 
     private func delivery(_ status: DeliveryText) -> some View {
         HStack(spacing: 6) {
-            Lucide(status.symbol, size: 16, color: status.color)
-            Text(status.text).font(Typo.meta).foregroundStyle(status.color)
+            Text(status.text).font(Typo.meta).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             if status.offersOpen, canOpenHost {
                 Button("Open in Conductor") { model.openInHost() }.buttonStyle(.plain)
@@ -760,40 +764,20 @@ private struct CardPressStyle: ButtonStyle {
     }
 }
 
+/// The one muted line under a sent message ("Sending…", "Sent", "Not confirmed", "Not sent: reason"),
+/// with the one action that fits a failure.
 struct DeliveryText {
     var text: String
-    var symbol: LucideName
-    var color: Color
     var offersOpen = false
     var offersReuse = false
 
     init?(state: MessageState?) {
+        guard let state, let line = state.deliveryLine else { return nil }
+        text = line
         switch state {
-        case nil, .draft: return nil
-        case .pending: self = .init(text: "Sending…", symbol: .ellipsis, color: Theme.subtle)
-        case .accepted(let via): self = .init(text: Self.delivered(via), symbol: .check, color: Theme.subtle)
-        case .confirmed: self = .init(text: "Sent", symbol: .check, color: Theme.subtle)
-        case .uncertain:
-            self = .init(text: "Typed it in, but couldn't confirm it was sent. Check Conductor before resending.", symbol: .circleAlert, color: Theme.muted, offersOpen: true)
-        case .refused(let r): self = .init(text: "Refused: \(r)", symbol: .circleX, color: Theme.error, offersReuse: true)
-        case .notSent(let r): self = .init(text: "Not sent: \(r)", symbol: .circleAlert, color: Theme.error, offersReuse: true)
-        }
-    }
-
-    private init(text: String, symbol: LucideName, color: Color, offersOpen: Bool = false, offersReuse: Bool = false) {
-        self.text = text
-        self.symbol = symbol
-        self.color = color
-        self.offersOpen = offersOpen
-        self.offersReuse = offersReuse
-    }
-
-    static func delivered(_ via: String) -> String {
-        switch via {
-        case "conductor": "Sent in Conductor"
-        case "terminal": "Sent in Terminal"
-        case "background": "Sent in the background. Conductor shows it after it reloads the chat."
-        default: "Sent in \(via)"
+        case .uncertain: offersOpen = true
+        case .refused, .notSent: offersReuse = true
+        default: break
         }
     }
 }
@@ -803,5 +787,26 @@ private struct SendLabel: View {
     @Environment(\.isEnabled) private var isEnabled
     var body: some View {
         Text("Send").font(Typo.label).foregroundStyle(isEnabled ? Theme.primaryText : Theme.muted)
+    }
+}
+
+
+/// The agent at work, directly under what you sent: its name, a pulsing dot (still under Reduce
+/// Motion) and the live step ("Running tests…", "Starting…" before the first).
+struct WorkingRow: View {
+    let agentName: String
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            StateDot(state: .working)
+            Text(agentName).font(Typo.label).foregroundStyle(Theme.ink)
+            Text("·").foregroundStyle(Theme.subtle)
+            Text(verbatim: label).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
+                .contentTransition(.opacity)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(agentName) is working: \(label)")
     }
 }

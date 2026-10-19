@@ -31,6 +31,10 @@ extension CaptureRunner {
         model.select(SessionKey(provider: "conductor", hostSessionId: "demo-3"))
         try? await Task.sleep(for: .milliseconds(1200))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-working.png")
+        // A long, well-formatted answer: the document typesetting (headings, lists, a table, code, a quote).
+        model.select(SessionKey(provider: "conductor", hostSessionId: "demo-6"))
+        try? await Task.sleep(for: .milliseconds(1200))
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-message.png")
         win.orderOut(nil)
     }
 

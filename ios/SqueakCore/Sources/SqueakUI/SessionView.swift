@@ -1,6 +1,7 @@
 #if os(iOS)
 import SqueakCore
 import SqueakIcons
+import SqueakMarkup
 import SwiftUI
 
 /// One session: the agent's latest message, its options as cards, what this
@@ -53,9 +54,6 @@ struct SessionView: View {
 
     @ViewBuilder
     private func content(_ session: PhoneSnapshot.Session) -> some View {
-        let receipt = model.receipts[session.key].flatMap { $0.turnId == session.turnId ? $0 : nil }
-        let delivered: Bool = { if case .sent = receipt?.kind { return true } else { return false } }()
-
         VStack(spacing: 0) {
             header(session)
             Picker("View", selection: $tab) {
@@ -67,7 +65,7 @@ struct SessionView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if tab == .chat {
-                        chat(session, receipt: receipt, sending: receipt?.kind == .sending)
+                        chat(session, sending: model.isSending(session.key))
                     } else {
                         ActivityView(session: session)
                     }
@@ -81,7 +79,7 @@ struct SessionView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            Composer(session: session, receipt: receipt, delivered: delivered, draft: $draft, composing: $composing)
+            Composer(session: session, draft: $draft, composing: $composing)
         }
     }
 
@@ -106,36 +104,65 @@ struct SessionView: View {
     /* ---------- chat ---------- */
 
     @ViewBuilder
-    private func chat(_ session: PhoneSnapshot.Session, receipt: AppModel.Receipt?, sending: Bool) -> some View {
-        let sent = model.outbox[session.key] ?? []
-        let earlier = sent.filter { $0.answersTurn != session.turnId || session.turnId == nil }
-        let later = sent.filter { $0.answersTurn == session.turnId && session.turnId != nil }
-        let text = session.message ?? session.detail
+    private func chat(_ session: PhoneSnapshot.Session, sending: Bool) -> some View {
+        let rows = ChatTimeline.rows(session: session, remembered: model.remembered[session.key], sends: model.outbox[session.key] ?? [])
         let choices = session.state == "working" ? nil : session.choices
-        let reading = Presentation.read(message: text ?? "", choices: choices)
 
-        ForEach(earlier) { SentBubble(message: $0) }
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(rows) { row in
+                switch row {
+                case .sent(let message):
+                    SentBubble(message: message)
+                case .agent(let text, let atISO, let muted):
+                    agentMessage(session, text: text, atISO: atISO, muted: muted, choices: choices, sending: sending)
+                case .working(let label):
+                    WorkingRow(agentName: Presentation.agentName(session.agent), label: label)
+                        .transition(.opacity)
+                case .empty(let text):
+                    Text(text).foregroundStyle(Theme.muted)
+                }
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: rows.map(\.id))
+    }
 
-        VStack(alignment: .leading, spacing: 10) {
+    private func agentMessage(_ session: PhoneSnapshot.Session, text: String, atISO: String, muted: Bool, choices: PhoneSnapshot.Choices?, sending: Bool) -> some View {
+        let reading = Presentation.read(message: text, choices: muted ? nil : choices)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Text(Presentation.agentName(session.agent)).font(.subheadline.weight(.semibold))
-                Text(Age.clock(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+                Text(Age.clock(atISO)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
             }
             .accessibilityElement(children: .combine)
-            if text == nil && choices == nil {
-                Text("Nothing to show yet.").foregroundStyle(Theme.muted)
-            }
-            if !reading.before.isEmpty { MessageText(paragraphs: reading.before) }
-            if let choices {
+            if !reading.before.isEmpty { MessageText(markdown: reading.before.joined(separator: "\n\n"), style: .squeak) }
+            if let choices, !muted {
                 OptionsView(choices: choices, details: reading.details, disabled: Presentation.replyBlock(session) != nil || sending) { letter in
                     Task { await model.send(letter, to: session) }
                 }
             }
-            if !reading.after.isEmpty { MessageText(paragraphs: reading.after) }
+            if !reading.after.isEmpty { MessageText(markdown: reading.after.joined(separator: "\n\n"), style: .squeak) }
         }
+        .opacity(muted ? 0.62 : 1)
+        .accessibilityLabel(muted ? "Previous message" : "")
+    }
+}
 
-        ForEach(later) { SentBubble(message: $0) }
-        if let receipt { ReceiptView(receipt: receipt) }
+/// The agent at work, under what you sent: its name, a pulsing dot (still under Reduce Motion) and the
+/// live step ("Running tests…", "Starting…" before the first). The colour is the working state's (§3.3).
+struct WorkingRow: View {
+    let agentName: String
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            StatusDot(color: Theme.working, pulses: true, period: 1.6)
+            Text(agentName).font(.subheadline.weight(.semibold))
+            Text("·").foregroundStyle(Theme.subtle)
+            Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(agentName) is working: \(label)")
     }
 }
 
@@ -154,10 +181,20 @@ struct SentBubble: View {
                 .padding(.horizontal, 14).padding(.vertical, 10)
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+            status
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("You, \(message.date.formatted(date: .omitted, time: .shortened)): \(message.text)")
+        .accessibilityLabel("You, \(message.date.formatted(date: .omitted, time: .shortened)): \(message.text). \(statusWord)")
+    }
+}
+
+extension SentBubble {
+    fileprivate var statusWord: String { message.status.line }
+
+    /// Exactly one muted line per message.
+    fileprivate var status: some View {
+        Text(message.status.line).font(.footnote).foregroundStyle(Theme.muted).multilineTextAlignment(.trailing)
     }
 }
 
@@ -220,50 +257,46 @@ struct OptionsView: View {
 struct Composer: View {
     @EnvironmentObject var model: AppModel
     let session: PhoneSnapshot.Session
-    let receipt: AppModel.Receipt?
-    let delivered: Bool
     @Binding var draft: String
     var composing: FocusState<Bool>.Binding
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var block: String? { Presentation.replyBlock(session) }
-    private var sending: Bool { receipt?.kind == .sending }
     private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
+    /// Always there: after a send the field clears and keeps focus, so the next message can be typed at once.
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if delivered {
-                if let receipt { ReceiptView(receipt: receipt) }
-            } else {
-                HStack(alignment: .bottom, spacing: 10) {
-                    TextField("Reply to \(Presentation.agentName(session.agent))…", text: $draft, axis: .vertical)
-                        .lineLimit(1...5)
-                        .focused(composing)
-                        .disabled(block != nil)
-                        .padding(.horizontal, 14).padding(.vertical, 12)
-                        .frame(minHeight: 44)
-                        .glassSurface(in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.ink, lineWidth: 1.5).opacity(composing.wrappedValue ? 1 : 0))
-                        .accessibilityLabel("Message for \(session.label)")
-                    sendButton
-                }
-                caption
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Reply to \(Presentation.agentName(session.agent))…", text: $draft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .focused(composing)
+                    .disabled(block != nil)
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    .frame(minHeight: 44)
+                    .glassSurface(in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.ink, lineWidth: 1.5).opacity(composing.wrappedValue ? 1 : 0))
+                    .accessibilityLabel("Message for \(session.label)")
+                sendButton
             }
+            caption
         }
         .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-
     }
 
     private func send() {
         let text = draft
+        // Clear at once and keep the keyboard up; hand the text back if nothing was sent (Face ID declined).
+        draft = ""
+        composing.wrappedValue = true
         Task {
-            await model.send(text, to: session)
-            if case .sent = model.receipts[session.key]?.kind { draft = "" }
+            let started = await model.send(text, to: session)
+            if !started, draft.isEmpty { draft = text }
         }
     }
 
-    private var sendDisabled: Bool { block != nil || empty || sending }
+    private var sendDisabled: Bool { block != nil || empty }
 
     /// Send is the one primary control: the prominent glass button filled
     /// with duck on iOS 26 (§8.9, owner's decision), a flat duck fill before.
@@ -292,10 +325,6 @@ struct Composer: View {
     private var caption: some View {
         if let block {
             Text(block).font(.footnote).foregroundStyle(Theme.muted)
-        } else if let receipt, case let .refused(reason) = receipt.kind {
-            Text(reason).font(.footnote).foregroundStyle(Theme.ink)
-        } else if sending {
-            Text("Sending…").font(.footnote).foregroundStyle(Theme.muted)
         } else {
             Text("Sent to your Mac securely.").font(.footnote).foregroundStyle(Theme.muted)
         }
@@ -361,60 +390,4 @@ struct ActivityView: View {
     }
 }
 
-struct ReceiptView: View {
-    let receipt: AppModel.Receipt
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            switch receipt.kind {
-            case .sending:
-                ProgressView(); Text("Sending…")
-            case let .sent(text):
-                Lucide(.check, size: 16, color: Theme.done); Text(text)
-            case let .refused(reason):
-                Lucide(.triangleAlert, size: 16, color: Theme.error); Text(reason)
-            }
-        }
-        .font(.subheadline)
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// The agent's markdown, inline formatting only, paragraphs kept. Links and
-/// images become their words — a phone should not open agent-written URLs.
-struct MessageText: View {
-    let paragraphs: [String]
-    init(text: String) { paragraphs = text.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }
-    init(paragraphs: [String]) { self.paragraphs = paragraphs }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                if paragraph.hasPrefix("```") {
-                    Text(paragraph.trimmingCharacters(in: CharacterSet(charactersIn: "`\n")))
-                        .font(.system(.footnote, design: .monospaced))
-                        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-                } else {
-                    Text(attributed(paragraph)).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .textSelection(.enabled)
-    }
-
-    private func attributed(_ paragraph: String) -> AttributedString {
-        let plain = paragraph
-            .replacingOccurrences(of: #"!\[([^\]]*)\]\([^)]*\)"#, with: "[image: $1]", options: .regularExpression)
-            .replacingOccurrences(of: #"\[([^\]]+)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
-        var result = (try? AttributedString(markdown: plain, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(plain)
-        for run in result.runs where run.link != nil { result[run.range].link = nil }
-        return result
-    }
-}
 #endif

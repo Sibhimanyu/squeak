@@ -7,6 +7,46 @@ import SqueakCore
 /// options and composer are live (a chat waiting inside Conductor cannot be
 /// answered from a phone, and the demo keeps to that rule).
 enum DemoData {
+    /// One answer with every kind of block, for the typesetting captures.
+    static let richMessage = """
+    ## Session isolation
+
+    Each chat now runs in **its own worktree**, and the check fails loudly if two chats ever share one. I touched `src/fleet/isolation.ts` and the launcher in ~/conductor/repos/squeak.
+
+    Two things are worth knowing:
+
+    - The check runs *before* a chat starts
+      - it compares the worktree path with every live chat
+      - a clash stops the start and names the chat
+    - Archived workspaces are ignored
+    - [x] Unit tests for the clash case
+    - [ ] A test for a symlinked path
+
+    ### How it behaves
+
+    | Case | Before | Now |
+    | :--- | :---: | ---: |
+    | Two chats, one worktree | silent clash | **refused** |
+    | Archived workspace | counted | ignored |
+    | Missing directory | crash | `error` card |
+
+    ```ts
+    export function assertIsolated(path: string, live: Chat[]): void {
+      const clash = live.find((c) => c.worktree === path);
+      if (clash) throw new Error(`worktree held by ${clash.title}`);
+    }
+    ```
+
+    > Existing chats keep their worktree. The check only guards new starts, so a clash that already exists will not be repaired.
+
+    1. Run `npm test` to see the new cases.
+    2. Read [the design doc](https://example.com/docs/isolation) before changing the launcher.
+
+    ---
+
+    Say the word and I will cover the symlink case too.
+    """
+
     private static var replyable: Bool { ProcessInfo.processInfo.arguments.contains("-squeak-demo-replyable") }
 
     private static func id(_ n: Int) -> String { String(format: "d0000000-0000-4000-8000-%012d", n) }
@@ -67,7 +107,7 @@ enum DemoData {
                       activity: .init(total: 3, steps: [.init(kind: "tool", text: "Read src/api/cache.ts")])),
                 .init(key: "iso", conductorSessionId: id(6), label: "squeak · session-isolation", agent: "claude", state: "finished",
                       lastActivityAt: now(-3600), detail: "Each session now runs in its own worktree.", git: "+42/−3 · 2 files", contextPercent: nil,
-                      turnId: "t5", message: "Each session now runs in its own worktree, and the checks fail loudly if two share one.", choices: nil),
+                      turnId: "t5", message: ProcessInfo.processInfo.arguments.contains("-squeak-demo-tail") ? String(richMessage[richMessage.range(of: "```ts")!.lowerBound...]) : richMessage, choices: nil),
                 .init(key: "copy", conductorSessionId: id(7), label: "storefront · checkout-copy", agent: "codex", state: "finished",
                       lastActivityAt: now(-7200), detail: "Reviewed the checkout copy.", git: nil, contextPercent: nil,
                       turnId: "t6", message: "Reviewed the checkout copy. Three strings were tightened.", choices: nil),
@@ -79,7 +119,17 @@ enum DemoData {
 
     /// A reply already sent from this phone, so the demo shows a "You" bubble.
     static var outbox: [String: [AppModel.SentMessage]] {
-        ["pay": [.init(text: "Add retry handling for failed payments.\nPrevent duplicate charges.", date: Date().addingTimeInterval(-300), answersTurn: "t0")]]
+        ["pay": [.init(text: "Add retry handling for failed payments.\nPrevent duplicate charges.", date: Date().addingTimeInterval(-300), answersTurn: "t0")],
+         // A reply just sent to the working chat: its bubble, then the working row.
+         "tg": [.init(text: "Fix the splitter, and make sure tables still render.", date: Date().addingTimeInterval(-150), answersTurn: "t1"),
+                .init(text: "Also keep the plain-text fallback for anything it still can't parse.", date: Date().addingTimeInterval(-60), answersTurn: "t1")]]
+    }
+
+    /// The agent's previous answer in the working chat, kept above its working row.
+    static var remembered: [String: RememberedMessage] {
+        ["tg": RememberedMessage(
+            text: "The splitter cuts messages inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. I can fix the splitter and keep the fallback.",
+            atISO: now(-900), turnId: "t1")]
     }
 
     private static func now(_ offset: Double) -> String {

@@ -1,5 +1,6 @@
 import AppKit
 import SqueakMacCore
+import SqueakMarkup
 import SwiftUI
 
 /// SQUEAK_MAC_CAPTURE=<prefix>: opens the conversation window, waits for the first
@@ -186,7 +187,7 @@ private struct MarkdownSample: View {
     """
 
     var body: some View {
-        MarkdownView(text: Self.text)
+        MessageText(markdown: Self.text, style: .squeak)
             .padding(16)
             .background(Theme.surface)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

@@ -14,10 +14,11 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../icons"),
+        .package(path: "../../markup"),
     ],
     targets: [
         .target(name: "SqueakCore"),
-        .target(name: "SqueakUI", dependencies: ["SqueakCore", .product(name: "SqueakIcons", package: "icons")], resources: [.process("Resources")]),
+        .target(name: "SqueakUI", dependencies: ["SqueakCore", .product(name: "SqueakIcons", package: "icons"), .product(name: "SqueakMarkup", package: "markup")], resources: [.process("Resources")]),
         // Writes the fixtures the Mac's tests verify against (src/remote/fixtures).
         .executableTarget(name: "squeak-fixtures", dependencies: ["SqueakCore"]),
         // A phone in a terminal: pairs and replies over real Firestore (scripts/e2e-remote.sh).

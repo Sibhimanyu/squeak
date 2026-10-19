@@ -1,6 +1,7 @@
 import AppKit
 import SqueakIcons
 import SqueakMacCore
+import SqueakMarkup
 import SwiftUI
 
 // Shared components for the v3 redesign (.context/v3/DESIGN-BRIEF.md). Every screen builds from
@@ -361,9 +362,7 @@ struct NeedsYouCard: View {
                         SessionRowLines(session: session)
                     }
                     if let question, !question.isEmpty {
-                        Text(verbatim: question)
-                            .font(Typo.body)
-                            .foregroundStyle(Theme.ink)
+                        MessageInlineText(markdown: question, style: .squeak)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)

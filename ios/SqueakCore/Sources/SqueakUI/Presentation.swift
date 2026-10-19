@@ -171,8 +171,7 @@ enum Presentation {
     /// question) are drawn as cards, so their paragraphs are taken out of
     /// the prose and everything else is kept in order.
     static func read(message: String, choices: PhoneSnapshot.Choices?) -> Reading {
-        let paragraphs = message.components(separatedBy: "\n\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let paragraphs = splitParagraphs(message)
         guard let choices else { return Reading(before: paragraphs, after: [], details: [:]) }
         let letters = Set(choices.options.map(\.letter))
         var details: [String: String] = [:]
@@ -191,6 +190,32 @@ enum Presentation {
         let cut = firstDropped ?? paragraphs.count
         return Reading(before: kept.filter { $0.index < cut }.map(\.text),
                        after: kept.filter { $0.index > cut }.map(\.text), details: details)
+    }
+
+    /// Blank-line separated paragraphs, except that a fenced code block stays whole
+    /// (its own blank lines are code, not a break).
+    static func splitParagraphs(_ message: String) -> [String] {
+        var out: [String] = []
+        var cur: [Substring] = []
+        var fence: Character?
+        func flush() {
+            let s = cur.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !s.isEmpty { out.append(s) }
+            cur = []
+        }
+        for line in message.split(separator: "\n", omittingEmptySubsequences: false) {
+            let t = line.drop(while: { $0 == " " })
+            if t.hasPrefix("```") || t.hasPrefix("~~~") {
+                if fence == nil { fence = t.first } else if fence == t.first { fence = nil }
+            }
+            if fence == nil, line.allSatisfy({ $0 == " " || $0 == "\t" || $0 == "\r" }), !t.hasPrefix("```") {
+                flush()
+            } else {
+                cur.append(line)
+            }
+        }
+        flush()
+        return out
     }
 
     private static let optionPattern = try! NSRegularExpression(pattern: #"^\W{0,4}([A-Z])\s?[\)\.:]\s"#)
