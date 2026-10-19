@@ -17,16 +17,13 @@ struct SessionView: View {
         return ""
     }()
     @FocusState private var composing: Bool
-    @State private var tab: Tab = {
+    /// The working row's steps, open or closed. Open from the start when the turn is streamed live
+    /// (verbose), since that is what it is for; `-squeak-tab activity` opens it for screenshots.
+    @State private var stepsOpen: Bool? = {
         let args = ProcessInfo.processInfo.arguments
-        if let i = args.firstIndex(of: "-squeak-tab"), i + 1 < args.count, args[i + 1] == "activity" { return .activity }
-        return .chat
+        if let i = args.firstIndex(of: "-squeak-tab"), i + 1 < args.count, args[i + 1] == "activity" { return true }
+        return nil
     }()
-
-    enum Tab: String, CaseIterable, Identifiable {
-        case chat = "Chat", activity = "Activity"
-        var id: String { rawValue }
-    }
 
     private var session: PhoneSnapshot.Session? { model.snapshot?.session(key) }
 
@@ -53,30 +50,15 @@ struct SessionView: View {
 
     @ViewBuilder
     private func content(_ session: PhoneSnapshot.Session) -> some View {
-        VStack(spacing: 0) {
-            Picker("View", selection: $tab) {
-                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .frame(maxWidth: 220)
-            .padding(.top, 2).padding(.bottom, 6)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if tab == .chat {
-                        chat(session, sending: model.isSending(session.key))
-                    } else {
-                        ActivityView(session: session, live: model.verbose ? model.liveTurns[session.key] : nil)
-                    }
-                }
+        // One view: the conversation, with the working turn's steps folded into its working row.
+        ScrollView {
+            chat(session, sending: model.isSending(session.key))
                 .padding(.horizontal, 20).padding(.vertical, 16)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .transition(.opacity)
-            }
-            .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: tab)
-            .scrollDismissesKeyboard(.interactively)
         }
+        // New steps and replies arrive at the bottom; keep it in view as they do.
+        .modifier(StickToBottom())
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.bg.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Composer(session: session, draft: $draft, composing: $composing)
@@ -125,8 +107,13 @@ struct SessionView: View {
                 case .agent(let text, let atISO, let muted):
                     agentMessage(session, text: text, atISO: atISO, muted: muted, choices: choices, sending: sending)
                 case .working(let label):
-                    WorkingRow(agentName: Presentation.agentName(session.agent), label: label)
-                        .transition(.opacity)
+                    let live = model.verbose ? model.liveTurns[session.key] : nil
+                    WorkingRow(
+                        agentName: Presentation.agentName(session.agent), label: label,
+                        steps: StepList.steps(session: session, live: live), total: live?.total ?? session.activity?.total ?? 0,
+                        live: live != nil, open: Binding(get: { stepsOpen ?? (live != nil) }, set: { stepsOpen = $0 })
+                    )
+                    .transition(.opacity)
                 case .empty(let text):
                     Text(text).foregroundStyle(Theme.muted)
                 }
@@ -158,20 +145,51 @@ struct SessionView: View {
 
 /// The agent at work, under what you sent: its name, a pulsing dot (still under Reduce Motion) and the
 /// live step ("Running tests…", "Starting…" before the first). The colour is the working state's (§3.3).
+///
+/// It carries the turn's steps too (what used to be the Activity tab): a tap opens them in place,
+/// the newest six the snapshot carries, or the whole turn when it is streamed live (verbose).
 struct WorkingRow: View {
     let agentName: String
     let label: String
+    var steps: [StepList.Step] = []
+    var total = 0
+    var live = false
+    @Binding var open: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(agentName: String, label: String, steps: [StepList.Step] = [], total: Int = 0, live: Bool = false, open: Binding<Bool> = .constant(false)) {
+        self.agentName = agentName; self.label = label; self.steps = steps; self.total = total; self.live = live; _open = open
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            StatusDot(color: Theme.working, pulses: true, period: 1.6)
-            Text(agentName).font(.subheadline.weight(.semibold))
-            Text("·").foregroundStyle(Theme.subtle)
-            Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
+        VStack(alignment: .leading, spacing: 14) {
+            Button {
+                withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    StatusDot(color: Theme.working, pulses: true, period: 1.6)
+                    Text(agentName).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    Text("·").foregroundStyle(Theme.subtle)
+                    Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
+                    if !steps.isEmpty {
+                        Spacer(minLength: 4)
+                        Lucide(open ? .chevronUp : .chevronDown, size: 14, color: Theme.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(steps.isEmpty)
+            .accessibilityLabel("\(agentName) is working: \(label)")
+            .accessibilityHint(steps.isEmpty ? "" : open ? "Hides the steps" : "Shows the steps of this turn")
+            if open, !steps.isEmpty {
+                StepList(steps: steps, total: total, live: live)
+                    .padding(.leading, 4)
+                    .transition(.opacity)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(agentName) is working: \(label)")
     }
 }
 
@@ -301,6 +319,8 @@ struct Composer: View {
         }
         .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Opaque, so the conversation scrolling underneath never shows through the field or the caption.
+        .background(Theme.bg.ignoresSafeArea(edges: .bottom))
     }
 
     private func send(_ mode: ReplyMode = .queue) {
@@ -394,54 +414,50 @@ private struct SendFace: ViewModifier {
     }
 }
 
-/// The steps the phone receives for a working turn (§ phone gets the newest
-/// six, clipped), with an honest empty state.
-struct ActivityView: View {
-    let session: PhoneSnapshot.Session
-    /// The whole turn, in verbose mode ("Show thinking live"); else the snapshot's newest six steps.
-    var live: LiveTurn? = nil
+/// Keeps the newest content in view as it grows (iOS 18); earlier, the view just grows downward.
+private struct StickToBottom: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content.defaultScrollAnchor(.bottom, for: .initialOffset).defaultScrollAnchor(.bottom, for: .sizeChanges)
+        } else {
+            content
+        }
+    }
+}
 
-    private var steps: [(kind: String, text: String)] {
-        if let live, !live.steps.isEmpty { return live.steps.map { ($0.kind, $0.text) } }
-        return (session.activity?.steps ?? []).map { ($0.kind, $0.text) }
+/// A working turn's steps: the newest six the snapshot carries, clipped, or the whole turn when it
+/// is streamed live (verbose, "Show thinking live").
+struct StepList: View {
+    struct Step: Equatable { let kind: String; let text: String }
+    let steps: [Step]
+    let total: Int
+    let live: Bool
+
+    static func steps(session: PhoneSnapshot.Session, live: LiveTurn?) -> [Step] {
+        if let live, !live.steps.isEmpty { return live.steps.map { Step(kind: $0.kind, text: $0.text) } }
+        return (session.activity?.steps ?? []).map { Step(kind: $0.kind, text: $0.text) }
     }
 
-    private var total: Int { live.map(\.total) ?? session.activity?.total ?? 0 }
-
     var body: some View {
-        if session.state == "working" || live?.working == true, !steps.isEmpty {
-            VStack(alignment: .leading, spacing: 14) {
-                if live != nil {
-                    Text(total > steps.count ? "Live · the latest \(steps.count) of \(total) steps." : "Live · every step of this turn.")
-                        .font(.footnote).foregroundStyle(Theme.muted)
-                } else if total > steps.count {
-                    Text("The latest \(steps.count) of \(total) steps this turn.")
-                        .font(.footnote).foregroundStyle(Theme.muted)
-                }
-                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Lucide(icon(step.kind), size: 16, color: Theme.muted).frame(width: 22)
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(label(step.kind)).font(.caption).foregroundStyle(Theme.muted)
-                            Text(step.text).font(.body).italic(step.kind == "thinking")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .accessibilityElement(children: .combine)
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            if live {
+                Text(total > steps.count ? "Live · the latest \(steps.count) of \(total) steps." : "Live · every step of this turn.")
+                    .font(.footnote).foregroundStyle(Theme.muted)
+            } else if total > steps.count {
+                Text("The latest \(steps.count) of \(total) steps this turn.")
+                    .font(.footnote).foregroundStyle(Theme.muted)
             }
-        } else {
-            ContentUnavailableView {
-                Label {
-                    Text(session.state == "working" ? "No steps from your Mac" : "Nothing in progress")
-                } icon: {
-                    Lucide(.list, size: 28, color: Theme.muted)
+            ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Lucide(icon(step.kind), size: 16, color: Theme.muted).frame(width: 22)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(label(step.kind)).font(.caption).foregroundStyle(Theme.muted)
+                        Text(step.text).font(.body).italic(step.kind == "thinking")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-            } description: {
-                Text(session.state == "working"
-                    ? "This session is working, but your Mac didn't send its steps."
-                    : "Steps appear here while the session is working.")
+                .accessibilityElement(children: .combine)
             }
         }
     }

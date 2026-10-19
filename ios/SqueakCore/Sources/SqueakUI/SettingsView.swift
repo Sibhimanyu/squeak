@@ -38,8 +38,8 @@ struct SettingsView: View {
                         .frame(minHeight: 44)
                 } header: { Text("Activity") } footer: {
                     Text(model.liveAvailable
-                        ? "A session's Activity shows its whole turn as it happens, thinking included. Your Mac sends it only while that session is open here, and deletes it when you leave."
-                        : "Needs your Mac on Squeak's faster channel. Until then, Activity shows the latest six steps.")
+                        ? "A working chat's steps show its whole turn as it happens, thinking included. Your Mac sends it only while that chat is open here, and deletes it when you leave."
+                        : "Needs your Mac on Squeak's faster channel. Until then, a working chat shows its latest six steps.")
                 }
                 Section {
                     Text("Replies are signed on this iPhone and checked by your Mac. Face ID is asked before the first one, and again after Squeak has been away for five minutes.")
