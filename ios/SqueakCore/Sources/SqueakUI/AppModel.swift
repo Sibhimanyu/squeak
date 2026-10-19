@@ -7,8 +7,13 @@ import UIKit
 
 /// The whole app's state. It decides nothing about agents — the Mac does
 /// (DESIGN.md §1, "every surface agrees") — it only fetches, shows and sends.
+///
+/// Observable per property: a view redraws only when something it read changes. As one
+/// ObservableObject, every streamed step redrew the list under the chat, the whole chat and
+/// the field being typed in, which is what made the phone lag while an agent worked.
 @MainActor
-final class AppModel: ObservableObject {
+@Observable
+final class AppModel {
     enum Phase: Equatable {
         case unpaired
         /// Waiting for the Mac to approve; both screens show `code`.
@@ -16,19 +21,19 @@ final class AppModel: ObservableObject {
         case paired
     }
 
-    @Published private(set) var phase: Phase = .unpaired
-    @Published private(set) var snapshot: PhoneSnapshot? { didSet { remember(snapshot); settleStarting(snapshot) } }
+    private(set) var phase: Phase = .unpaired
+    private(set) var snapshot: PhoneSnapshot? { didSet { remember(snapshot); settleStarting(snapshot) } }
     /// A chat the Mac accepted, until it shows up in the snapshot (the row's "Starting…").
-    @Published private(set) var startingChat: StartingChat?
+    private(set) var startingChat: StartingChat?
 
     struct StartingChat: Equatable { let sessionId: String; let label: String }
     enum StartResult: Equatable { case started, cancelled, refused(String) }
-    @Published private(set) var lastFetch: Date?
-    @Published private(set) var problem: String?
+    private(set) var lastFetch: Date?
+    private(set) var problem: String?
     /// What this phone sent since the app opened, per session. Local only:
     /// the channel carries no conversation history back, so the phone shows
     /// its own replies and the Mac's latest message, nothing it cannot know.
-    @Published private(set) var outbox: [String: [SentMessage]] = [:]
+    private(set) var outbox: [String: [SentMessage]] = [:]
 
     typealias SentMessage = ChatSend
 
@@ -38,25 +43,26 @@ final class AppModel: ObservableObject {
     /// "Show thinking live" (Settings): the open session's whole turn, as it
     /// happens, instead of its newest six steps. Off by default; the Mac
     /// sends it only while this phone has that session open.
-    @Published var verbose: Bool = UserDefaults.standard.bool(forKey: "squeak.verbose") {
+    /// On unless switched off in Settings: the open chat's turn, live, is what a working chat shows.
+    var verbose: Bool = UserDefaults.standard.object(forKey: "squeak.verbose") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(verbose, forKey: "squeak.verbose")
             restartLive()
         }
     }
     /// The verbose view per session key, while it is being watched.
-    @Published private(set) var liveTurns: [String: LiveTurn] = [:]
+    private(set) var liveTurns: [String: LiveTurn] = [:]
     /// False once it is known the Mac's channel cannot stream (Firestore), so verbose cannot work.
-    @Published private(set) var liveAvailable = true
+    private(set) var liveAvailable = true
 
-    private var channel: Channel?
-    private var loop: Task<Void, Never>?
-    private var unlock = SendUnlock()
+    @ObservationIgnored private var channel: Channel?
+    @ObservationIgnored private var loop: Task<Void, Never>?
+    @ObservationIgnored private var unlock = SendUnlock()
     /// The session open on screen.
-    private var watching: String?
-    private var liveTask: Task<Void, Never>?
+    @ObservationIgnored private var watching: String?
+    @ObservationIgnored private var liveTask: Task<Void, Never>?
     /// How many recent chats Home has asked for; "Show more" adds 20, up to the Mac's 50.
-    @Published private(set) var recentWanted = 10
+    private(set) var recentWanted = 10
     /// Sent only once more is asked for, so a phone at the default writes the same presence as before.
     private var recentAsk: Int? { recentWanted > 10 ? recentWanted : nil }
 
@@ -71,8 +77,8 @@ final class AppModel: ObservableObject {
 
     /// What presence tells the Mac to stream: only in verbose mode.
     private var presenceWatching: String? { verbose ? watching : nil }
-    private var lastPresence = Date.distantPast
-    private let signer: CommandSigner
+    @ObservationIgnored private var lastPresence = Date.distantPast
+    @ObservationIgnored private let signer: CommandSigner
     let demo: Bool
 
     init() {
@@ -81,6 +87,8 @@ final class AppModel: ObservableObject {
         if demo {
             snapshot = DemoData.snapshot
             outbox = DemoData.outbox
+            liveTurns = DemoData.liveTurns
+            if ProcessInfo.processInfo.arguments.contains("-squeak-stream") { streamDemo() }
             for (k, v) in DemoData.remembered { remembered[k] = v }
             lastFetch = Date()
             phase = .paired
@@ -92,6 +100,26 @@ final class AppModel: ObservableObject {
             channel = Channel(pairing: pairing, deviceId: deviceId)
             phase = KeyStore.load(account: "approved") != nil ? .paired : .awaitingApproval(
                 code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: pairing.n)
+        }
+    }
+
+    /// Demo only: a step every 700 ms and a snapshot every 1.5 s, like a busy turn on the real channel.
+    private func streamDemo() {
+        Task { [weak self] in
+            var n = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(700))
+                guard let self, let turn = self.liveTurns["tg"] else { return }
+                let step = DemoData.streamSteps[n % DemoData.streamSteps.count]
+                self.liveTurns["tg"] = LiveTurn(key: turn.key, working: true, total: turn.total + 1,
+                                                steps: Array((turn.steps + [step]).suffix(50)), queue: turn.queue)
+                if n % 2 == 1, let current = self.snapshot {
+                    self.snapshot = PhoneSnapshot(
+                        v: current.v, mac: current.mac, generatedAt: ISO8601DateFormatter().string(from: Date()), duck: current.duck,
+                        sessions: current.sessions, usage: current.usage, workspaces: current.workspaces, recent: current.recent)
+                }
+                n += 1
+            }
         }
     }
 
@@ -209,7 +237,7 @@ final class AppModel: ObservableObject {
             self?.liveAvailable = true
             for await turn in turns {
                 if Task.isCancelled { break }
-                if self?.liveTurns[key] != turn { self?.liveTurns[key] = turn }
+                if self?.liveTurns[key] != turn { self?.liveTurns[key] = turn; self?.noteQueue(turn, for: key) }
             }
         }
     }
@@ -218,9 +246,9 @@ final class AppModel: ObservableObject {
         await tick()
     }
 
-    private var ticking = false
+    @ObservationIgnored private var ticking = false
     /// A change arrived while a fetch was running; fetch once more after it.
-    private var tickAgain = false
+    @ObservationIgnored private var tickAgain = false
 
     private func tickIfAwaitingApproval() async {
         if case .awaitingApproval = phase { await tick() }
@@ -310,7 +338,7 @@ final class AppModel: ObservableObject {
         // On screen first, like any chat app: the bubble ("Sending…") and the agent's "Starting…"
         // row appear on the tap, and Face ID, signing and the network all happen behind them.
         UIImpactFeedbackGenerator(style: mode == .steer ? .medium : .light).impactOccurred()
-        let sentId = begin(trimmed, for: session)
+        let sentId = begin(trimmed, for: session, mode: mode)
         guard await confirmWithBiometrics(reason: "Send to \(session.label)") else {
             withdraw(sentId, for: session)
             return false
@@ -325,8 +353,9 @@ final class AppModel: ObservableObject {
         guard let channel else { finish(sentId, .refused("not connected to your Mac."), for: session); return true }
         do {
             let signer = signer
+            let messageId = outbox[session.key]?.first(where: { $0.id == sentId })?.messageId
             let (id, document) = try await Task.detached(priority: .userInitiated) {
-                try channel.replyDocument(to: session, text: trimmed, mode: mode, signer: signer)
+                try channel.replyDocument(to: session, text: trimmed, mode: mode, messageId: messageId, signer: signer)
             }.value
             try await channel.send(document, id: id)
             // The Mac answers within a few seconds while this app is open.
@@ -447,10 +476,102 @@ final class AppModel: ObservableObject {
     /// Any send of this session still waiting on the Mac.
     func isSending(_ key: String) -> Bool { outbox[key]?.contains { $0.status == .sending } ?? false }
 
-    private func begin(_ text: String, for session: PhoneSnapshot.Session) -> UUID {
-        let send = ChatSend(text: text, date: Date(), answersTurn: session.turnId ?? remembered[session.key]?.turnId, status: .sending)
+    private func begin(_ text: String, for session: PhoneSnapshot.Session, mode: ReplyMode) -> UUID {
+        let send = ChatSend(
+            text: text, date: Date(), answersTurn: session.turnId ?? remembered[session.key]?.turnId, status: .sending,
+            mode: mode, queuedBehindTurn: mode == .queue && session.state == "working")
         outbox[session.key, default: []].append(send)
         return send.id
+    }
+
+    /* ---------- the queue ---------- */
+
+    /// Cards taken off the queue on a tap, before the Mac's queue says so; given back if it refuses.
+    private(set) var hiddenQueued: Set<String> = []
+
+    /// What a queue card's tap did, for the card's one line when it did not work.
+    private(set) var queueProblem: [String: String] = [:]
+
+    /// Marks this phone's queued sends the Mac's queue has shown, so their leaving it reads as sent.
+    private func noteQueue(_ turn: LiveTurn?, for key: String) {
+        guard let ids = turn?.queue.map({ Set($0.map(\.id)) }), var sends = outbox[key] else { return }
+        var changed = false
+        for i in sends.indices where !sends[i].seenInQueue && ids.contains(sends[i].messageId) {
+            sends[i].seenInQueue = true; changed = true
+        }
+        // Once the Mac stops listing it, it went to the agent: its bubble says sent.
+        for i in sends.indices where sends[i].seenInQueue && !ids.contains(sends[i].messageId) {
+            if case .queued = sends[i].status { sends[i].status = .sent; changed = true }
+        }
+        if changed { outbox[key] = sends }
+        hiddenQueued.formIntersection(ids)
+    }
+
+    /// Steer a queued message into the turn now. It leaves the stack at once and shows in the turn
+    /// as steered; if the Mac refuses, it comes back with the reason.
+    func steerQueued(_ card: ChatQueue.Card, in session: PhoneSnapshot.Session) async {
+        let local = outbox[session.key]?.firstIndex { $0.messageId == card.id }
+        hiddenQueued.insert(card.id)
+        queueProblem[card.id] = nil
+        // Shown in the turn straight away, where a steer goes.
+        let steerId: UUID
+        if let local, var send = outbox[session.key]?[local] {
+            outbox[session.key]?.remove(at: local)
+            send = ChatSend(id: send.id, text: send.text, date: Date(), answersTurn: send.answersTurn, status: .sending,
+                            messageId: send.messageId, mode: .steer)
+            outbox[session.key, default: []].append(send)
+            steerId = send.id
+        } else {
+            let send = ChatSend(text: card.text, date: Date(), answersTurn: session.turnId, status: .sending, messageId: card.id, mode: .steer)
+            outbox[session.key, default: []].append(send)
+            steerId = send.id
+        }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        let refusal = await queueCommand(.promote, card: card, session: session)
+        if let refusal {
+            outbox[session.key]?.removeAll { $0.id == steerId }
+            hiddenQueued.remove(card.id)
+            queueProblem[card.id] = refusal
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        } else {
+            finish(steerId, .steered, for: session)
+        }
+    }
+
+    /// Take a queued message out of the queue. Returns its text when it was removed, for Edit.
+    @discardableResult
+    func removeQueued(_ card: ChatQueue.Card, in session: PhoneSnapshot.Session) async -> String? {
+        hiddenQueued.insert(card.id)
+        queueProblem[card.id] = nil
+        let refusal = await queueCommand(.cancel, card: card, session: session)
+        if let refusal {
+            hiddenQueued.remove(card.id)
+            queueProblem[card.id] = refusal
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            return nil
+        }
+        outbox[session.key]?.removeAll { $0.messageId == card.id }
+        return card.text
+    }
+
+    /// nil when the Mac did it; otherwise why not.
+    private func queueCommand(_ action: QueueCommand.Action, card: ChatQueue.Card, session: PhoneSnapshot.Session) async -> String? {
+        if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
+        guard await confirmWithBiometrics(reason: action == .promote ? "Steer into \(session.label)" : "Remove from the queue") else {
+            return "Face ID was cancelled."
+        }
+        guard let channel, let sessionId = session.conductorSessionId else { return "Not connected to your Mac." }
+        do {
+            let signer = signer, messageId = card.id
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.queueDocument(sessionId: sessionId, messageId: messageId, action: action, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return "Your Mac didn't answer. Is Squeak running?" }
+            return result.sent ? nil : (result.reason ?? "Your Mac refused that.")
+        } catch {
+            return "Couldn't reach your Mac."
+        }
     }
 
     /// A send that never left the phone (Face ID declined): gone from the chat, its text back in the field.

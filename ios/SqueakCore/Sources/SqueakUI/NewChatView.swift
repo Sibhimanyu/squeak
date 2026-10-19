@@ -7,7 +7,7 @@ import SwiftUI
 /// The phone only offers what the Mac listed; the Mac checks the list again and
 /// the command is signed on this phone behind Face ID, like a reply.
 struct NewChatView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
     let workspaces: [PhoneSnapshot.Workspace]

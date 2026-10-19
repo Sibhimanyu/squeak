@@ -352,10 +352,11 @@ test for anything you fix is expected; the suite is fast.
 - **The phone gets less of a working turn than the Mac window**: the newest
   six steps, each clipped to 200 characters, no timestamps, and only while
   the session works — what leaves the Mac is only what the phone renders.
-  The one exception is verbose ("Show thinking live" on the phone, off by
-  default): the whole turn of the one session open on screen, deleted from
-  the database when the phone leaves it (`live-turn.ts`). Keep it that
-  narrow; `SQUEAK_REMOTE_VERBOSE=off` refuses it on the Mac.
+  The one exception is verbose ("Show thinking live" on the phone, on by
+  default): the whole turn of the one session open on screen, plus that
+  chat's Conductor queue, deleted from the database when the phone leaves it
+  (`live-turn.ts`). Keep it that narrow; `SQUEAK_REMOTE_VERBOSE=off` refuses
+  it on the Mac.
 - **The iPhone app is standalone.** `SqueakRootView` (module `SqueakUI`) is
   the whole UI in one view and `ios/Squeak` is a window around it. The app
   owns the `squeak://` scheme; Telegram's "Open in Squeak" goes through

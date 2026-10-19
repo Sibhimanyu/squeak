@@ -3,7 +3,8 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 import { logger } from "../../utils/logger.js";
 import { ConductorRelayServer } from "./relay-server.js";
-import type { DeviceCredentials, PhoneClient } from "./phone.js";
+import type { QueueItem } from "../session-reply.js";
+import type { DeviceCredentials, PendingMessagesState, PhoneClient } from "./phone.js";
 
 /**
  * The daemon-owned desktop relay. When the user has pointed Conductor's relay
@@ -34,6 +35,11 @@ export interface ConductorRelayServiceOptions {
 }
 
 const LISTEN_RETRY_MS = 5000;
+/** A caller's message id must be what Conductor's zod UUID accepts, in the one spelling the phone sends. */
+export const MESSAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+type QueueResult = { ok: true; items: QueueItem[] } | { ok: false; reason: string };
+type QueueActionResult = { ok: true } | { ok: false; reason: string };
 
 export class ConductorRelayService {
   private server: ConductorRelayServer | undefined;
@@ -59,20 +65,106 @@ export class ConductorRelayService {
     sessionId: string;
     text: string;
     mode?: "queue" | "steer";
+    /** The caller's id for it (lowercase UUID), else a fresh one. */
+    messageId?: string;
   }): Promise<{ ok: true } | { ok: false; reason: string }> {
     const client = this.client;
     if (!client) return { ok: false, reason: "relay not connected" };
+    if (args.messageId !== undefined && !MESSAGE_ID.test(args.messageId)) {
+      return { ok: false, reason: "invalid message id" };
+    }
     try {
       const res = await client.sendChatMessage({
         workspaceLocalId: args.workspaceId,
         sessionId: args.sessionId,
         text: args.text,
         mode: args.mode ?? "queue",
+        ...(args.messageId ? { messageId: args.messageId } : {}),
       });
       if (res.status >= 200 && res.status < 300) return { ok: true };
       return { ok: false, reason: `relay HTTP ${res.status}` };
     } catch (e) {
       // A dead connection surfaces here; drop it so isReady() goes false.
+      this.client = undefined;
+      return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /**
+   * The messages waiting in a chat's queue that the agent has not taken yet
+   * (`deliveryStatus: "pending"`; a `claimed` one is already on its way),
+   * in queue order.
+   */
+  async queue(workspaceId: string, sessionId: string): Promise<QueueResult> {
+    const read = await this.readQueue(workspaceId, sessionId);
+    if (!read.ok) return read;
+    const items = read.state.messages
+      .filter((message) => message.deliveryStatus === "pending")
+      .map((message) => ({
+        id: message.messageId,
+        text: queuedText(message.deliveryPayload),
+        mode: message.mode === "steer" ? ("steer" as const) : ("queue" as const),
+        position: typeof message.position === "number" ? message.position : 0,
+      }))
+      .sort((a, b) => a.position - b.position);
+    return { ok: true, items };
+  }
+
+  /** Steer a queued message into the running turn now. */
+  promote(workspaceId: string, sessionId: string, messageId: string): Promise<QueueActionResult> {
+    return this.queueAction("promote", workspaceId, sessionId, messageId);
+  }
+
+  /** Delete a queued message before the agent reads it. */
+  cancel(workspaceId: string, sessionId: string, messageId: string): Promise<QueueActionResult> {
+    return this.queueAction("cancel", workspaceId, sessionId, messageId);
+  }
+
+  /**
+   * The queue is read again here for the message's revision and the queue's
+   * generation: the caller (and the phone behind it) never supplies either,
+   * so a stale view cannot aim a write at a message that has changed.
+   */
+  private async queueAction(
+    action: "promote" | "cancel",
+    workspaceId: string,
+    sessionId: string,
+    messageId: string,
+  ): Promise<QueueActionResult> {
+    const read = await this.readQueue(workspaceId, sessionId);
+    if (!read.ok) return read;
+    const message = read.state.messages.find((candidate) => candidate.messageId === messageId);
+    if (!message || message.deliveryStatus !== "pending") return { ok: false, reason: "not in the queue" };
+    const client = this.client;
+    if (!client) return { ok: false, reason: "relay not connected" };
+    const args = {
+      workspaceLocalId: workspaceId,
+      sessionId,
+      messageId,
+      expectedRevision: typeof message.revision === "number" ? message.revision : 0,
+      expectedGeneration: read.state.generation,
+    };
+    try {
+      const res = action === "promote" ? await client.promoteMessage(args) : await client.cancelMessage(args);
+      if (res.status >= 200 && res.status < 300) return { ok: true };
+      return { ok: false, reason: `relay HTTP ${res.status}` };
+    } catch (e) {
+      this.client = undefined;
+      return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  private async readQueue(
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<{ ok: true; state: PendingMessagesState } | { ok: false; reason: string }> {
+    const client = this.client;
+    if (!client) return { ok: false, reason: "relay not connected" };
+    try {
+      const res = await client.pendingMessages({ workspaceLocalId: workspaceId, sessionId });
+      if (!res.state) return { ok: false, reason: `relay HTTP ${res.status}` };
+      return { ok: true, state: res.state };
+    } catch (e) {
       this.client = undefined;
       return { ok: false, reason: e instanceof Error ? e.message : String(e) };
     }
@@ -217,4 +309,10 @@ export class ConductorRelayService {
       /* best effort */
     }
   }
+}
+
+/** What a queued message says, as Conductor's composer shows it. */
+function queuedText(payload: { message?: unknown; displayMessage?: unknown } | undefined): string {
+  if (typeof payload?.displayMessage === "string") return payload.displayMessage;
+  return typeof payload?.message === "string" ? payload.message : "";
 }

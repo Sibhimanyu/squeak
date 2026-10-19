@@ -172,10 +172,42 @@ enum DemoData {
     /// A reply already sent from this phone, so the demo shows a "You" bubble.
     static var outbox: [String: [AppModel.SentMessage]] {
         ["pay": [.init(text: "Add retry handling for failed payments.\nPrevent duplicate charges.", date: Date().addingTimeInterval(-300), answersTurn: "t0")],
-         // A reply just sent to the working chat: its bubble, then the working row.
-         "tg": [.init(text: "Fix the splitter, and make sure tables still render.", date: Date().addingTimeInterval(-150), answersTurn: "t1", status: .steered),
-                .init(text: "Also keep the plain-text fallback for anything it still can't parse.", date: Date().addingTimeInterval(-60), answersTurn: "t1", status: .queued(agent: "Claude", steerUnavailable: false))]]
+         // The working chat: what started the turn, a steer that landed inside it, and one queued behind it.
+         "tg": [.init(text: "Fix the splitter, and make sure tables still render.", date: Date().addingTimeInterval(-700), answersTurn: "t1", status: .sent),
+                .init(text: "Keep the plain-text fallback for anything it still can't parse.", date: Date().addingTimeInterval(-240), answersTurn: "t1",
+                      status: .steered, mode: .steer),
+                .init(text: "Then update the README's formatting section.", date: Date().addingTimeInterval(-60), answersTurn: "t1",
+                      status: .queued(agent: "Claude", steerUnavailable: false), messageId: demoQueued, mode: .queue, queuedBehindTurn: true)]]
     }
+
+    private static let demoQueued = "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31"
+
+    /// The working chat's turn as the Mac streams it: whole steps, the steer where it landed, and
+    /// Conductor's queue (one from this phone, one typed on the Mac).
+    static var liveTurns: [String: LiveTurn] {
+        ["tg": LiveTurn(key: "tg", working: true, total: 7, steps: [
+            .init(kind: "note", text: "Checking why bold text arrives as literal asterisks."),
+            .init(kind: "tool", text: "Read src/utils/tg-format.ts"),
+            .init(kind: "thinking", text: "The splitter cuts inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. Splitting on block boundaries first, then on tags, keeps every chunk balanced."),
+            .init(kind: "you", text: "Keep the plain-text fallback for anything it still can't parse."),
+            .init(kind: "thinking", text: "Keeping the fallback: it only runs when Telegram rejects a chunk."),
+            .init(kind: "tool", text: "Edit src/utils/tg-format.ts"),
+            .init(kind: "tool", text: "Run npm test -- tg-format"),
+        ], queue: [
+            .init(id: demoQueued, text: "Then update the README's formatting section.", mode: "queue", position: 0),
+            .init(id: "6b1d0c7e-8a43-4f0e-b2d9-1c5e7a9f3d20", text: "Run the whole suite before you finish.", mode: "queue", position: 1),
+        ])]
+    }
+
+    /// `-squeak-stream`: the working chat keeps adding steps, for profiling a streamed turn.
+    static let streamSteps: [LiveTurn.Step] = [
+        .init(kind: "thinking", text: "Two tests fail on nested lists; the tag stack needs to survive a chunk boundary."),
+        .init(kind: "tool", text: "Edit src/utils/tg-format.ts"),
+        .init(kind: "tool", text: "Run npm test -- tg-format"),
+        .init(kind: "note", text: "Nested lists pass now. Checking tables."),
+        .init(kind: "tool", text: "Read src/utils/tg-format.test.ts"),
+        .init(kind: "tool", text: "Edit src/utils/tg-format.test.ts"),
+    ]
 
     /// The agent's previous answer in the working chat, kept above its working row.
     static var remembered: [String: RememberedMessage] {

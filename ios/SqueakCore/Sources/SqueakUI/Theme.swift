@@ -56,24 +56,72 @@ extension UIColor {
 }
 
 /// The state dot (§8.1); pulses only when asked and never under Reduce Motion.
+///
+/// The pulse is a Core Animation animation on the dot's own layer, so it runs in the render
+/// server. As a SwiftUI `repeatForever` it ran on the main thread every frame, and inside the
+/// chat's scroll view each frame also re-laid the scroll view out: ~15% CPU with nothing
+/// happening, in every chat where an agent was working, and typing waited on it.
 struct StatusDot: View {
     let color: Color
     var pulses = false
     var period = 1.0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var dim = false
 
     var body: some View {
-        Circle()
-            .fill(color)
+        PulsingDot(color: UIColor(color), period: pulses && !reduceMotion ? period : nil)
             .frame(width: 9, height: 9)
-            .opacity(dim ? 0.35 : 1)
-            .onAppear {
-                guard pulses, !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: period / 2).repeatForever(autoreverses: true)) { dim = true }
-            }
             .accessibilityHidden(true)
     }
+}
+
+private struct PulsingDot: UIViewRepresentable {
+    let color: UIColor
+    /// nil: a still dot.
+    let period: Double?
+
+    final class DotView: UIView {
+        var period: Double? { didSet { if period != oldValue { restart() } } }
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+        }
+        required init?(coder: NSCoder) { nil }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            layer.cornerRadius = bounds.width / 2
+        }
+        // A layer animation is removed when the view leaves the window; put it back when it returns.
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window != nil { restart() }
+        }
+        func restart() {
+            layer.removeAnimation(forKey: "pulse")
+            guard let period, window != nil else { return }
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 1
+            pulse.toValue = 0.35
+            pulse.duration = period / 2
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            layer.add(pulse, forKey: "pulse")
+        }
+    }
+
+    func makeUIView(context: Context) -> DotView {
+        let view = DotView()
+        view.backgroundColor = color
+        view.period = period
+        return view
+    }
+
+    func updateUIView(_ view: DotView, context: Context) {
+        view.backgroundColor = color
+        view.period = period
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: DotView, context: Context) -> CGSize? { CGSize(width: 9, height: 9) }
 }
 
 /// Liquid Glass on iOS 26 for the composer and option rows (DESIGN.md §5,

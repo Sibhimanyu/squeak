@@ -26,6 +26,12 @@ function block(id: string, content: Record<string, unknown>, at = "2026-09-26T03
   return { type: "assistant", timestamp: at, message: { id, role: "assistant", content: [content] } };
 }
 
+/** The last block of a message that ended the turn, the way Claude Code stamps it. */
+function ended(id: string, content: Record<string, unknown>, at = "2026-09-26T03:00:00.000Z") {
+  const entry = block(id, content, at);
+  return { ...entry, message: { ...entry.message, stop_reason: "end_turn" } };
+}
+
 const user = (content: unknown, at = "2026-09-26T02:59:00.000Z") => ({
   type: "user",
   timestamp: at,
@@ -36,7 +42,7 @@ describe("readActivity for Claude", () => {
   it("lists the current turn's thinking, notes and tool calls in order, each block once", () => {
     const file = transcript([
       user("an earlier question"),
-      block("m0", { type: "text", text: "An earlier answer." }),
+      ended("m0", { type: "text", text: "An earlier answer." }),
       user("fix the flaky test"),
       block("m1", { type: "thinking", thinking: "The retry loop races the timer." }),
       block("m1", { type: "text", text: "Found it; patching the timer." }),
@@ -125,6 +131,64 @@ describe("readActivity for Claude", () => {
     expect(whole.steps[2]!.text.length).toBeLessThanOrEqual(120);
   });
 
+  it("keeps a message sent into a running turn as a step of that turn, not a new one", () => {
+    const file = transcript([
+      user("fix the flaky test"),
+      block("m1", { type: "tool_use", id: "t1", name: "Read", input: { file_path: "/w/timer.ts" } }),
+      user([{ type: "tool_result", tool_use_id: "t1", content: "…" }]),
+      user("use the fake clock instead", "2026-09-26T03:00:30.000Z"),
+      // Claude Code may write it again; it is one step.
+      user("use the fake clock instead", "2026-09-26T03:00:30.000Z"),
+      block("m2", { type: "text", text: "Switching to the fake clock." }),
+    ]);
+
+    expect(readActivity("claude", file).steps.map((step) => [step.kind, step.text])).toEqual([
+      ["tool", "Read timer.ts"],
+      ["you", "use the fake clock instead"],
+      ["note", "Switching to the fake clock."],
+    ]);
+  });
+
+  it("starts a new turn for a message sent after the last one ended", () => {
+    const file = transcript([
+      user("fix the flaky test"),
+      ended("m1", { type: "text", text: "Fixed." }),
+      user([{ type: "text", text: "now update the docs" }]),
+      block("m2", { type: "tool_use", id: "t2", name: "Edit", input: { file_path: "/w/README.md" } }),
+    ]);
+
+    expect(readActivity("claude", file).steps.map((step) => [step.kind, step.text])).toEqual([
+      ["tool", "Edit README.md"],
+    ]);
+  });
+
+  it("ignores isMeta entries (a skill loading mid-turn does not wipe the feed)", () => {
+    const file = transcript([
+      user("ship it"),
+      block("m1", { type: "tool_use", id: "t1", name: "Skill", input: { skill: "ship" } }),
+      user([{ type: "tool_result", tool_use_id: "t1", content: "Launching skill: ship" }]),
+      { ...user([{ type: "text", text: "Base directory for this skill: /x\n\n# Ship" }]), isMeta: true },
+      block("m2", { type: "text", text: "Running the checks." }),
+    ]);
+
+    expect(readActivity("claude", file).steps.map((step) => [step.kind, step.text])).toEqual([
+      ["tool", "Use the ship skill"],
+      ["note", "Running the checks."],
+    ]);
+  });
+
+  it("treats a message after an interruption as a new turn", () => {
+    const file = transcript([
+      user("fix it"),
+      block("m1", { type: "tool_use", id: "t1", name: "Read", input: { file_path: "/w/a.ts" } }),
+      user([{ type: "text", text: "[Request interrupted by user for tool use]" }]),
+      user("do something else"),
+      block("m2", { type: "text", text: "Sure." }),
+    ]);
+
+    expect(readActivity("claude", file).steps.map((step) => [step.kind, step.text])).toEqual([["note", "Sure."]]);
+  });
+
   it("is empty for a transcript that is not there", () => {
     expect(readActivity("claude", "/nonexistent/t.jsonl")).toEqual({ steps: [], total: 0 });
   });
@@ -151,6 +215,47 @@ describe("readActivity for Codex", () => {
       ["thinking", "Looking for the v3 folder."],
       ["tool", "Run ls v3"],
       ["note", "All three are there."],
+    ]);
+  });
+});
+
+describe("readActivity for Codex steers", () => {
+  const at = "2026-09-26T03:00:00.000Z";
+  const item = (payload: Record<string, unknown>) => ({ timestamp: at, type: "response_item", payload });
+  const event = (type: string) => ({ timestamp: at, type: "event_msg", payload: { type } });
+  const said = (text: string) => item({ type: "message", role: "user", content: [{ type: "input_text", text }] });
+
+  it("keeps a message sent mid-task as a step; the injected context and first prompt still start the turn", () => {
+    const file = transcript([
+      event("task_started"),
+      said("# AGENTS.md instructions for /w"),
+      said("<system_instruction>…</system_instruction>"),
+      said("check the speaker images"),
+      item({ type: "function_call", name: "shell", arguments: JSON.stringify({ cmd: ["ls", "v3"] }) }),
+      said("only the v3 folder"),
+      item({ type: "message", role: "assistant", content: [{ type: "output_text", text: "Just v3, then." }] }),
+    ]);
+
+    expect(readActivity("codex", file).steps.map((step) => [step.kind, step.text])).toEqual([
+      ["tool", "Run ls v3"],
+      ["you", "only the v3 folder"],
+      ["note", "Just v3, then."],
+    ]);
+  });
+
+  it("starts a new turn for a message after task_complete", () => {
+    const file = transcript([
+      event("task_started"),
+      said("check the speaker images"),
+      item({ type: "message", role: "assistant", content: [{ type: "output_text", text: "All there." }] }),
+      event("task_complete"),
+      event("task_started"),
+      said("now resize them"),
+      item({ type: "function_call", name: "shell", arguments: JSON.stringify({ cmd: ["sips", "-Z", "800"] }) }),
+    ]);
+
+    expect(readActivity("codex", file).steps.map((step) => [step.kind, step.text])).toEqual([
+      ["tool", "Run sips -Z 800"],
     ]);
   });
 });

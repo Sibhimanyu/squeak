@@ -5,6 +5,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
+import type { QueueAction, ReplyOptions } from "../fleet/session-reply.js";
+import type { FleetSession } from "../fleet/types.js";
 import { RemoteBridge, type RemoteConfig } from "./remote-bridge.js";
 
 /**
@@ -24,7 +26,13 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   steerCommand: { box: string; sig: string; device: string };
   startCommandId: string;
   startCommand: { box: string; sig: string; device: string };
+  queuedCommandId: string;
+  queuedCommand: { box: string; sig: string; device: string };
+  promoteCommandId: string;
+  promoteCommand: { box: string; sig: string; device: string };
 };
+
+const QUEUED_ID = "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31";
 
 function bridge(turn: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "phone-interop-"));
@@ -37,6 +45,8 @@ function bridge(turn: string) {
   };
   fs.writeFileSync(configPath, JSON.stringify(config));
   const sends: Array<[string, string, string | undefined]> = [];
+  const sent: Array<ReplyOptions | undefined> = [];
+  const queueActions: Array<[string, string, QueueAction]> = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
   const remote = new RemoteBridge({
     configPath,
@@ -47,10 +57,21 @@ function bridge(turn: string) {
       lastTurnId: () => turn,
       send: async (sessionId, text, _onFailed, options) => {
         sends.push([sessionId, text, options?.mode]);
+        sent.push(options);
         return { status: "started", via: "conductor", delivery: options?.mode === "steer" ? "steered" : "sent" };
       },
+      queue: async () => [{ id: QUEUED_ID, text: "Then add tests", mode: "queue", position: 0 }],
+      queueAction: async (sessionId, messageId, action) => {
+        queueActions.push([sessionId, messageId, action]);
+        return { ok: true };
+      },
     },
-    snapshot: () => ({}) as FleetSnapshot,
+    // The chat the phone's commands name, as the Mac's own snapshot shows it.
+    snapshot: () =>
+      ({
+        sessions: [],
+        active: [{ key: "claude-transcript:s1", conductorSessionId: "s1" } as FleetSession],
+      }) as unknown as FleetSnapshot,
     newChat: {
       workspaces: () => [
         { id: "w1", repoName: "farm", branch: "arm", lastActivityAt: "", defaultAgent: "claude" as const },
@@ -63,7 +84,7 @@ function bridge(turn: string) {
     // As of when the phone made it, so the fixture never expires.
     now: () => fixture.madeAt + 1_000,
   });
-  return { remote, config, sends, starts };
+  return { remote, config, sends, sent, starts, queueActions };
 }
 
 describe("a reply made on the iPhone", () => {
@@ -86,6 +107,22 @@ describe("a reply made on the iPhone", () => {
     const verdict = await remote.handleCommand(config, fixture.startCommandId, fixture.startCommand);
     expect(verdict.result).toEqual({ id: fixture.startCommandId, status: "sent", sessionId: "new-1" });
     expect(starts).toEqual([{ workspaceId: "w1", agent: "codex", text: "Add a timer" }]);
+    expect(sends).toEqual([]);
+  });
+
+  it("carries the phone's own message id for a queued reply", async () => {
+    const { remote, config, sends, sent } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.queuedCommandId, fixture.queuedCommand);
+    expect(verdict.result).toMatchObject({ status: "sent" });
+    expect(sends).toEqual([["s1", "Then add tests", "queue"]]);
+    expect(sent).toEqual([{ mode: "queue", messageId: QUEUED_ID }]);
+  });
+
+  it("steers a queued message in when the phone signs a queue command", async () => {
+    const { remote, config, sends, queueActions } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.promoteCommandId, fixture.promoteCommand);
+    expect(verdict.result).toEqual({ id: fixture.promoteCommandId, status: "sent" });
+    expect(queueActions).toEqual([["s1", QUEUED_ID, "promote"]]);
     expect(sends).toEqual([]);
   });
 

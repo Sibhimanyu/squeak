@@ -4,7 +4,7 @@ import SwiftUI
 import VisionKit
 
 struct PairView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @State private var scanning = false
     @State private var pasted = ""
     @State private var working = false
@@ -75,7 +75,7 @@ struct PairView: View {
 }
 
 struct AwaitingApprovalView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     let code: String
     let mac: String
 

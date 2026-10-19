@@ -221,6 +221,23 @@ public struct ReplyCommand: Codable, Equatable, Sendable {
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
+    /// Chosen by the phone and used by Conductor as the queued message's id, so a queued
+    /// reply's card can be matched to the Mac's queue (LiveTurn.queue). Absent from older phones.
+    public var messageId: String? = nil
+}
+
+/// Steer a queued message into the turn now, or take it out of the queue. The
+/// queued message's id is the anchor, so there is no turn to match.
+public struct QueueCommand: Codable, Equatable, Sendable {
+    public enum Action: String, Codable, Equatable, Sendable { case promote, cancel }
+    public let v: Int
+    public let kind: String
+    public let sessionId: String
+    public let messageId: String
+    public let action: Action
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
 }
 
 /// Which agent a new chat starts with.

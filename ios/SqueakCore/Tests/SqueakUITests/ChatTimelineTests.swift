@@ -44,7 +44,8 @@ final class ChatTimelineTests: XCTestCase {
     func testLiveStepAndWorkingFromConductorItself() {
         let steps = [tool("Read src/a.ts"), tool("Run npm test -- a")]
         let rows = ChatTimeline.rows(session: session("working", turn: "t2", steps: steps), remembered: previous, sends: [], now: now)
-        XCTAssertEqual(rows, [.agent(text: "Earlier answer", atISO: previous.atISO, muted: true), .working(label: "Running tests…")])
+        XCTAssertEqual(rows, [.agent(text: "Earlier answer", atISO: previous.atISO, muted: true),
+                              .working(label: "Running tests…", steps: steps.map { TurnStep(kind: $0.kind, text: $0.text) })])
         XCTAssertEqual(ChatTimeline.workingLabel([tool("Read src/a.ts")]), "Reading code…")
         XCTAssertEqual(ChatTimeline.workingLabel([.init(kind: "thinking", text: "hm")]), "Thinking…")
         XCTAssertEqual(ChatTimeline.workingLabel([tool("Frobnicate")]), "Working…")
@@ -135,5 +136,101 @@ final class ChatTimelineTests: XCTestCase {
                        .queued(agent: "Claude", steerUnavailable: true))
         XCTAssertEqual(ChatSend.Status.delivered(try result(#"{"status":"sent","delivery":"steered"}"#), agent: "Claude"), .steered)
         XCTAssertEqual(ChatSend.Status.delivered(try result(#"{"status":"sent"}"#), agent: "Claude"), .sent)
+    }
+    /* ---------- queue and steer ---------- */
+
+    func queuedSend(_ status: ChatSend.Status = .queued(agent: "Claude", steerUnavailable: false), id: String = "m1", ago: TimeInterval = 5, seen: Bool = false) -> ChatSend {
+        var s = ChatSend(text: "Then add tests", date: now.addingTimeInterval(-ago), answersTurn: "t1", status: status,
+                         messageId: id, mode: .queue, queuedBehindTurn: true)
+        s.seenInQueue = seen
+        return s
+    }
+    func liveTurn(working: Bool = true, steps: [LiveTurn.Step] = [], queue: [LiveTurn.QueuedMessage]? = nil) -> LiveTurn {
+        LiveTurn(key: "k", working: working, total: steps.count, steps: steps, queue: queue)
+    }
+
+    func testAQueuedMessageIsACardNotAChatRow() {
+        let q = queuedSend()
+        let working = session("working", turn: "t1")
+        let live = liveTurn(queue: [.init(id: "m1", text: "Then add tests")])
+        let rows = ChatTimeline.rows(session: working, remembered: previous, sends: [q], live: live, now: now)
+        XCTAssertFalse(rows.contains { if case .sent = $0 { true } else { false } })
+        let cards = ChatQueue.cards(session: working, live: live, sends: [q], now: now)
+        XCTAssertEqual(cards, [.init(id: "m1", text: "Then add tests", pending: false, actionable: true)])
+    }
+
+    func testQueueCardsIncludeConductorsOwnAndPendingOnes() {
+        let q = queuedSend(.sending, id: "m2")
+        let live = liveTurn(queue: [.init(id: "mac", text: "Typed on the Mac")])
+        let cards = ChatQueue.cards(session: session("working", turn: "t1"), live: live, sends: [q], now: now)
+        XCTAssertEqual(cards.map(\.id), ["mac", "m2"])
+        XCTAssertEqual(cards.last?.pending, true)
+        XCTAssertEqual(cards.last?.actionable, false)
+        // Hidden on a tap until the Mac's queue catches up.
+        XCTAssertEqual(ChatQueue.cards(session: session("working", turn: "t1"), live: live, sends: [q], hidden: ["mac"], now: now).map(\.id), ["m2"])
+    }
+
+    func testLeavingConductorsQueueMovesItIntoTheChat() {
+        let q = queuedSend(seen: true)
+        let live = liveTurn(queue: [])
+        let rows = ChatTimeline.rows(session: session("working", turn: "t2"), remembered: previous, sends: [q], live: live, now: now)
+        XCTAssertTrue(rows.contains { if case .sent(let s) = $0 { s.id == q.id } else { false } })
+        XCTAssertTrue(ChatQueue.cards(session: session("working", turn: "t2"), live: live, sends: [q], now: now).isEmpty)
+    }
+
+    func testNotYetListedStaysACardForTheGraceThenTrustsTheMac() {
+        let live = liveTurn(queue: [])
+        XCTAssertTrue(ChatQueue.isQueued(queuedSend(ago: 5), session: session("working"), live: live, now: now))
+        XCTAssertFalse(ChatQueue.isQueued(queuedSend(ago: 60), session: session("working"), live: live, now: now))
+    }
+
+    func testWithoutTheMacsQueueItWaitsForTheTurnToEnd() {
+        let q = queuedSend()
+        XCTAssertTrue(ChatQueue.isQueued(q, session: session("working", turn: "t1"), live: nil, now: now))
+        XCTAssertFalse(ChatQueue.isQueued(q, session: session("finished", turn: "t2", message: "Done"), live: nil, now: now))
+        let card = ChatQueue.cards(session: session("working", turn: "t1"), live: nil, sends: [q], now: now).first
+        XCTAssertEqual(card?.actionable, false)
+    }
+
+    func testASteerLandsInsideTheTurnAndFoldsWhatCameBefore() {
+        let steer = ChatSend(text: "Keep the fallback", date: now.addingTimeInterval(-30), answersTurn: "t1", status: .steered, mode: .steer)
+        let live = liveTurn(steps: [.init(kind: "tool", text: "Read a.ts"), .init(kind: "you", text: "Keep the fallback"),
+                                    .init(kind: "tool", text: "Edit a.ts")])
+        let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: previous, sends: [steer], live: live, now: now)
+        XCTAssertEqual(rows, [
+            .agent(text: "Earlier answer", atISO: previous.atISO, muted: true),
+            .folded(id: "part-0", steps: [TurnStep(kind: "tool", text: "Read a.ts")]),
+            .steer(id: steer.id.uuidString, text: "Keep the fallback", line: "Steered into the current turn"),
+            .working(label: "Editing a file…", steps: [TurnStep(kind: "tool", text: "Edit a.ts")]),
+        ])
+    }
+
+    func testASteerTheMacHasNotReportedYetGoesLastAndTheAgentIsReadingIt() {
+        let steer = ChatSend(text: "Stop and use the timer", date: now.addingTimeInterval(-2), answersTurn: "t1", status: .sending, mode: .steer)
+        let live = liveTurn(steps: [.init(kind: "tool", text: "Read a.ts")])
+        let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [steer], live: live, now: now)
+        XCTAssertEqual(rows, [
+            .folded(id: "part-0", steps: [TurnStep(kind: "tool", text: "Read a.ts")]),
+            .steer(id: steer.id.uuidString, text: "Stop and use the timer", line: "Sending…"),
+            .working(label: "Reading your message…", steps: []),
+        ])
+    }
+
+    func testASteerTypedOnTheMacStillShowsWhereItLanded() {
+        let live = liveTurn(steps: [.init(kind: "you", text: "From the Mac"), .init(kind: "tool", text: "Edit a.ts")])
+        let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [], live: live, now: now)
+        XCTAssertEqual(rows.first, .steer(id: "you-0", text: "From the Mac", line: "Steered into the current turn"))
+    }
+
+    func testClippedReportsStillMatchTheSteer() {
+        XCTAssertTrue(ChatTimeline.same("Keep the plain-text fallback for…", "Keep the plain-text fallback for anything it can't parse"))
+        XCTAssertTrue(ChatTimeline.same("Two words", "Two\n words"))
+        XCTAssertFalse(ChatTimeline.same("Something else", "Keep it"))
+    }
+
+    func testAFinishedTurnFoldsItsStepsAboveTheReply() {
+        let live = liveTurn(working: false, steps: [.init(kind: "tool", text: "Run tests"), .init(kind: "you", text: "x")])
+        let rows = ChatTimeline.rows(session: session("finished", turn: "t2", message: "Done", ago: 1), remembered: previous, sends: [], live: live, now: now)
+        XCTAssertEqual(rows, [.folded(id: "worked", steps: [TurnStep(kind: "tool", text: "Run tests")]), .agent(text: "Done", atISO: iso(1), muted: false)])
     }
 }

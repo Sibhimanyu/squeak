@@ -15,7 +15,7 @@ import {
   type StartChatOutcome,
 } from "../fleet/new-chat.js";
 import { chatTitle, distinctTitles, sessionLabel } from "../fleet/radar.js";
-import type { ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/session-reply.js";
+import type { QueueAction, QueueItem, ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/session-reply.js";
 import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
@@ -72,6 +72,29 @@ export interface RemoteCommand {
    * reply: it only changes where Conductor puts it when the agent is mid-turn.
    */
   mode?: ReplyMode;
+  /**
+   * Optional, signed with the rest: the phone's id for the message (a
+   * lowercase UUID), passed to Conductor so the phone can find it in the
+   * chat's queue (the live doc's `queue`) and steer or delete it later.
+   */
+  messageId?: string;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/**
+ * A signed change to a message waiting in a Conductor chat's queue: steer it
+ * into the running turn now (`promote`) or delete it (`cancel`). Same envelope
+ * as a reply. There is no turn to match: the queued message's id is the
+ * anchor, and it must still be in the queue when the Mac reads it.
+ */
+export interface QueueCommand {
+  v: 1;
+  kind: "queue";
+  sessionId: string;
+  messageId: string;
+  action: QueueAction;
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
@@ -143,6 +166,13 @@ export interface RemoteReplier {
     onFailed: (message: string) => void,
     options?: ReplyOptions,
   ): Promise<ReplyOutcome>;
+  /** The chat's Conductor queue; null when it can't be read (relay down, not a Conductor chat). */
+  queue?(sessionId: string): Promise<QueueItem[] | null>;
+  queueAction?(
+    sessionId: string,
+    messageId: string,
+    action: QueueAction,
+  ): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 /** Starting chats from a phone. Absent means this Mac does not offer it. */
@@ -250,6 +280,8 @@ export const START_MIN_GAP_MS = 15_000;
 const PHONE_ACTIVITY_STEPS = 6;
 const PHONE_ACTIVITY_STEP_CHARS = 200;
 const ACTIVITY_LIMIT = 50;
+/** A phone-chosen message id: what Conductor accepts, in the one spelling the phone sends. */
+const MESSAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export class RemoteBridge {
   private readonly deps: RemoteBridgeDependencies;
@@ -298,6 +330,13 @@ export class RemoteBridge {
               ? { activity: liveActivity(session, LIVE_STEPS, LIVE_STEP_CHARS), working: session.state === "working" }
               : null;
           },
+          queue: deps.replier.queue
+            ? async (key) => {
+                const session = this.deps.snapshot().active.find((candidate) => candidate.key === key);
+                const conductorSessionId = session?.conductorSessionId;
+                return conductorSessionId ? ((await this.deps.replier.queue?.(conductorSessionId)) ?? null) : null;
+              }
+            : null,
           write: async (handle, turn) => {
             const config = this.config;
             if (config) {
@@ -730,13 +769,17 @@ export class RemoteBridge {
     }
     this.seenNonces.set(command.nonce, command.expiresAt);
 
-    // 3. The actions there are: a reply to an existing chat, or a new chat.
+    // 3. The actions there are: a reply to an existing chat, a new chat, a usage
+    // refresh, or a change to a queued message.
     const kind = (command as { kind?: unknown }).kind;
     if (kind === "start") {
       return this.handleStart(device, id, command as unknown as StartCommand, now);
     }
     if (kind === "usage") {
       return this.handleUsage(device, id, command as unknown as UsageCommand);
+    }
+    if (kind === "queue") {
+      return this.handleQueue(device, id, command as unknown as QueueCommand);
     }
     if (kind !== undefined && kind !== "reply") {
       return refuse("Not a request this Mac understands.");
@@ -745,6 +788,12 @@ export class RemoteBridge {
       return refuse("Not a reply this Mac understands.");
     }
     if (command.mode !== undefined && command.mode !== "queue" && command.mode !== "steer") {
+      return refuse("Not a reply this Mac understands.");
+    }
+    if (
+      command.messageId !== undefined &&
+      (typeof command.messageId !== "string" || !MESSAGE_ID.test(command.messageId))
+    ) {
       return refuse("Not a reply this Mac understands.");
     }
     const text = command.text.trim();
@@ -765,7 +814,7 @@ export class RemoteBridge {
       (message) => {
         this.log(device.name, "refused", `the reply failed: ${message}`);
       },
-      { mode: command.mode ?? "queue" },
+      { mode: command.mode ?? "queue", ...(command.messageId ? { messageId: command.messageId } : {}) },
     );
     if (outcome.status === "refused") {
       this.log(device.name, "refused", outcome.reason);
@@ -847,6 +896,77 @@ export class RemoteBridge {
     }
     this.log(device.name, "sent", `new ${command.agent} chat in ${workspace.repoName} · ${workspace.branch}`);
     return { write: true, result: { id, status: "sent", sessionId: outcome.sessionId } };
+  }
+
+  /**
+   * Steer or delete a queued message. Signature, freshness and nonce have
+   * already held. The chat must be one the phone is shown (looked up in the
+   * Mac's own snapshot, never the phone's copy), and the message must still
+   * be in Conductor's queue as the Mac reads it now.
+   */
+  private async handleQueue(
+    device: PairedDevice,
+    id: string,
+    command: QueueCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `queued message: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (
+      command.v !== 1 ||
+      typeof command.sessionId !== "string" ||
+      typeof command.messageId !== "string" ||
+      !MESSAGE_ID.test(command.messageId) ||
+      (command.action !== "promote" && command.action !== "cancel")
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (!this.phoneShows(command.sessionId)) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    const replier = this.deps.replier;
+    if (!replier.queue || !replier.queueAction) {
+      return refuse("This Mac can't change queued messages.");
+    }
+    let queue: QueueItem[] | null;
+    try {
+      queue = await replier.queue(command.sessionId);
+    } catch {
+      queue = null;
+    }
+    if (!queue) {
+      return refuse("This Mac can't read that chat's queue right now.");
+    }
+    if (!queue.some((item) => item.id === command.messageId)) {
+      return refuse("That message already went to the agent.");
+    }
+    let outcome: { ok: true } | { ok: false; reason: string };
+    try {
+      outcome = await replier.queueAction(command.sessionId, command.messageId, command.action);
+    } catch (error) {
+      outcome = { ok: false, reason: error instanceof Error ? error.message : "The change could not be made." };
+    }
+    if (!outcome.ok) {
+      this.log(device.name, "refused", `queued message: ${outcome.reason}`);
+      return { write: true, result: { id, status: "refused", reason: outcome.reason } };
+    }
+    this.log(
+      device.name,
+      "sent",
+      `${command.action === "promote" ? "steered in" : "deleted"} a queued message in ${command.sessionId.slice(0, 8)}`,
+    );
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /** Whether a Conductor chat is in what the phone is shown: active, or in its Recent list. */
+  private phoneShows(conductorSessionId: string): boolean {
+    const snapshot = this.deps.snapshot();
+    if (snapshot.active.some((session) => session.conductorSessionId === conductorSessionId)) {
+      return true;
+    }
+    const { recent } = this.recentSessions(snapshot, this.phoneOpen() ? this.recentWanted : PHONE_RECENT_LIMIT);
+    return recent.some((session) => session.conductorSessionId === conductorSessionId);
   }
 
   /** A usage refresh. Signature, freshness and nonce have already held. */

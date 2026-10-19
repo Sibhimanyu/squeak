@@ -29,6 +29,25 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
+/** One message waiting in a chat's queue, as Conductor reports it (spec §5.4). */
+export interface PendingMessage {
+  messageId: string;
+  deliveryPayload?: { message?: unknown; displayMessage?: unknown };
+  mode?: string;
+  position?: number;
+  revision?: number;
+  deliveryStatus?: string;
+}
+
+/** `GET …/pending-messages`: the chat's queue and the generation every write must name. */
+export interface PendingMessagesState {
+  sessionId?: string;
+  generation: number;
+  paused?: boolean;
+  messages: PendingMessage[];
+  ingestedMessageIds?: string[];
+}
+
 export interface DeviceCredentials {
   deviceId: string;
   deviceToken: string;
@@ -223,15 +242,19 @@ export class PhoneClient {
     text: string;
     mode?: "queue" | "steer";
     model?: string;
+    /** The caller's id for the message (a lowercase UUID), so it can find it in the queue later. */
+    messageId?: string;
   }): Promise<TunnelResponse> {
-    const base = `/workspaces/${encodeURIComponent(args.workspaceLocalId)}/sessions/${encodeURIComponent(args.sessionId)}/pending-messages`;
+    const base = pendingBase(args.workspaceLocalId, args.sessionId);
+    // Stable across the retry: Conductor dedupes on it.
+    const messageId = args.messageId ?? crypto.randomUUID();
     const post = async (generation: number) =>
       this.request({
         method: "POST",
         target: `${base}/send`,
         headers: { "content-type": "application/json" },
         body: {
-          messageId: crypto.randomUUID(),
+          messageId,
           deliveryPayload: { message: args.text },
           config: args.model ? { model: args.model } : {},
           mode: args.mode ?? "queue",
@@ -244,6 +267,56 @@ export class PhoneClient {
     if (res.status === 409) {
       const state = JSON.parse(res.body) as { state?: { generation?: number } };
       res = await post(state.state?.generation ?? 0);
+    }
+    return res;
+  }
+
+  /** A chat's queue (spec §5.4). `state` is null unless Conductor answered 2xx with a queue. */
+  async pendingMessages(args: {
+    workspaceLocalId: string;
+    sessionId: string;
+  }): Promise<{ status: number; state: PendingMessagesState | null }> {
+    const res = await this.request({ method: "GET", target: pendingBase(args.workspaceLocalId, args.sessionId) });
+    if (res.status < 200 || res.status >= 300) return { status: res.status, state: null };
+    return { status: res.status, state: parseQueueState(res.body) };
+  }
+
+  /** Steer a queued message into the running turn now. */
+  promoteMessage(args: QueueWriteArgs): Promise<TunnelResponse> {
+    return this.queueWrite("promote", args);
+  }
+
+  /** Take a queued message out of the queue before the agent reads it. */
+  cancelMessage(args: QueueWriteArgs): Promise<TunnelResponse> {
+    return this.queueWrite("cancel", args);
+  }
+
+  /**
+   * Both name the message's revision and the queue's generation, as read just
+   * before. On a 409 the body carries the queue as it is now: retry once with
+   * its numbers, unless the message has left it (delivered or gone).
+   */
+  private async queueWrite(action: "promote" | "cancel", args: QueueWriteArgs): Promise<TunnelResponse> {
+    const target = `${pendingBase(args.workspaceLocalId, args.sessionId)}/${encodeURIComponent(args.messageId)}/${action}`;
+    const post = (expectedRevision: number, expectedGeneration: number) =>
+      this.request({
+        method: "POST",
+        target,
+        headers: { "content-type": "application/json" },
+        body: { expectedRevision, expectedGeneration },
+      });
+    let res = await post(args.expectedRevision, args.expectedGeneration);
+    if (res.status === 409) {
+      let state: PendingMessagesState | null;
+      try {
+        state = parseQueueState(JSON.stringify((JSON.parse(res.body) as { state?: unknown }).state ?? null));
+      } catch {
+        state = null;
+      }
+      const message = state?.messages.find((candidate) => candidate.messageId === args.messageId);
+      if (state && message) {
+        res = await post(message.revision ?? 0, state.generation);
+      }
     }
     return res;
   }
@@ -320,4 +393,44 @@ export class PhoneClient {
     }
     return res;
   }
+}
+
+interface QueueWriteArgs {
+  workspaceLocalId: string;
+  sessionId: string;
+  messageId: string;
+  expectedRevision: number;
+  expectedGeneration: number;
+}
+
+function pendingBase(workspaceLocalId: string, sessionId: string): string {
+  return `/workspaces/${encodeURIComponent(workspaceLocalId)}/sessions/${encodeURIComponent(sessionId)}/pending-messages`;
+}
+
+/** A queue state from Conductor's JSON, or null when it is not one. Untrusted shape: checked, not cast. */
+function parseQueueState(body: string): PendingMessagesState | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Record<string, unknown>;
+  if (typeof record.generation !== "number" || !Array.isArray(record.messages)) return null;
+  const messages = record.messages.filter(
+    (message): message is PendingMessage =>
+      Boolean(message) &&
+      typeof message === "object" &&
+      typeof (message as { messageId?: unknown }).messageId === "string",
+  );
+  return {
+    ...(typeof record.sessionId === "string" ? { sessionId: record.sessionId } : {}),
+    generation: record.generation,
+    ...(typeof record.paused === "boolean" ? { paused: record.paused } : {}),
+    messages,
+    ...(Array.isArray(record.ingestedMessageIds)
+      ? { ingestedMessageIds: record.ingestedMessageIds.filter((id): id is string => typeof id === "string") }
+      : {}),
+  };
 }

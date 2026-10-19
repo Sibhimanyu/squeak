@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The gear: which Mac this phone is paired with, how it is doing, and unpairing.
 struct SettingsView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.squeakScreen) private var screen
     @State private var confirmingUnpair = false
@@ -33,7 +33,7 @@ struct SettingsView: View {
                     }
                 }
                 Section {
-                    Toggle("Show thinking live", isOn: $model.verbose)
+                    Toggle("Show thinking live", isOn: Bindable(model).verbose)
                         .tint(Theme.primaryFill)
                         .frame(minHeight: 44)
                 } header: { Text("Activity") } footer: {

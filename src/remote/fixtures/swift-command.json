@@ -1,25 +1,37 @@
 {
   "channelId": "AAAAAAAAAAAAAAAAAAAAAA",
   "command": {
-    "box": "t3JlZiD3lHKQSMINxJOE52RO6+H7fygfHCq6CdxIO7\/1c0YNeUGSJszbc7wt5Jgcncj2vqHlpPpHmznuhzrxuL7XF2GVv\/v5OpZpDXK3qQApON047p4kG3XpyQKq3dDS\/N0P8iHPbzoMFGtDfL4NhPMv2+p7yA3rhlYrmr3NU0Vxw9kb0xRJeUDnke+a4R4\/X3CNXmu86T8IZZo=",
+    "box": "Pc+hVTvqz\/6elAC3MZThEkcoJcf6YVsTVhBscWGrjg7Y1QQi8UGoChU0TpA\/MQZeaXaMVkKzt2lLOjb2l4oBREQ1X70y\/PH4PqoojrLHaPxVGkLl+nnqHZ7UeQtFGGbMfk\/sPP+4HKht5qzbjFjwUQF83yBWWVdJDS6Jas4LfkuWZ1g1AmCzO1h6Tw2EbakK3fqj13cE2LMVhNk=",
     "device": "iphone-fixture",
-    "sig": "5gAJBGIeJJLA8Po\/NV5Id3ExYVW0H\/RMM8AnX6TlgFomgYbHSnmV3C4nE97zO2CTt6xveuIEkX739Ur0Ih4nkg=="
+    "sig": "V9C9Z9rpKOpeDpGi0NHerB6D5uv1GPUpgM9zsBzm9iHWdw2GrUeEarkFr7J4yb\/+udWojGbiDuwAorH\/F2DMOg=="
   },
-  "commandId": "7a77d8eb-643e-4d4e-a927-005742e53286",
+  "commandId": "61c2ff07-57a4-4783-a772-dd0cbc99359b",
   "deviceId": "iphone-fixture",
-  "key": "59bUdahV8c3Yh1D\/PWOGfjITuTuLM\/40Bogvvp2odFw=",
-  "madeAt": 1792393733435,
-  "publicKey": "BDmo+mklqBN99ei9Au72QpmIAMjs45mk21YQLF8MMm2nDDIOxKb64N6oAJWJ39j00jTRkfjpZmjS4LgFV43vfEM=",
+  "key": "3pG3LDIOztBYiGP45PJgYOzEm+e2Y8FO5zQOVf0Xvqo=",
+  "madeAt": 1792400785861,
+  "promoteCommand": {
+    "box": "VgIhf4DBM8a\/Yxxe2lH3PEIuNVG+KP\/IUUczbAZx0pns\/8s9tkvtudHPNKCjXFhaNshNsfEbOW\/xHDWPVQsOmzeDOQKOtEs2rwzLtCyuHZFNoKvlN7TABUmhD4cyeyHmBp8B2TRIQ2jUMqB+lUWX6rhhuYSPVsn1lSzIjn+wlMgO5LVs9sYi4FY46baLuQWxvd\/0+xEpeqEzJx71JRB+jVS57C4TLh85w+KwKy\/TP1EQ5xN7t2XQRkH5G93+UB7ntU+LDm\/ck\/zH08n451c=",
+    "device": "iphone-fixture",
+    "sig": "02QQaXzv5vic31bKZU9rpbxyABsBfR2b\/6wi4E9XJqv0euxmXwD5QEHOchxSF8GNSI9SavMNgELwFGvzLptAEw=="
+  },
+  "promoteCommandId": "3c8eeddc-c636-42f2-8508-96b4181a8835",
+  "publicKey": "BBljqlfTLkwkHYv\/v14\/6\/TDsTcPjJGv0OCRnpKMXkoaBJ8w3APBguFKmGPc1HP6kr11ijvMWd4KY9o+jwYyKoA=",
+  "queuedCommand": {
+    "box": "e7OcX9\/Q8csW3nAfDDL3IxrvLxr02KZkdy5Z2Kp\/NAYNneFQqdYxLIwaf0d53+Oi1i3BZPfXTCJZSRKV6LwQ6wSViLQ4XOM9R1z11seqhIIpQ\/i5sxShO+EfAk2+nzCLcdC4z1MyvJAHsKsMwMWhG3SagZFFwKe2mTLi6I\/S6je\/l0428SLs26s6xtBDCcfExAcL+oJ7Lhvu2WFMPQKZ64YxWh1ya0My5oBH+3ZZuFwj\/TF\/ZGTMbxcnt0elQgyWwXDofPUkB1H1AapKuFsD9+uaTXplr0YE0iXH",
+    "device": "iphone-fixture",
+    "sig": "eFuFW2gNqumGSZNLHBp7fFkkv5ReUUEiQ1PPZst3eHmTqa1nog13srXlzMeterH7SkmZNmBNUg1XllPRAV2pmw=="
+  },
+  "queuedCommandId": "2101f969-0dc6-4c42-b5be-42ba080d2ac6",
   "startCommand": {
-    "box": "1W2AxhnQrhjXNxdAhuL\/FUQr5AbNEngnUwaz2bCVfNDYIN7QIe0Dkjfib9N4+6IvVUdx2zb693VcBPNMSEjBzEaINJTso1vbR4zOccP\/feHI9Yks\/ufutMvn4gdeFSsyOOGnGhqnEDwwY7XLUo50n\/PqwnlNOuu3MmXUdNNQEEmuoH6aSleJ\/sY59Bmg2Y3PbcdIdc1ZDCS6GJF4pvAmoE1NO7+xIxvIMsMuQV0xBw==",
+    "box": "H4siHSXZOwgXztSr8EGu1rGrbenhVgeNjYBzXrdB3GU2Y\/W6aOO+va6SqytnnaqP+Vp0dsiB7qjic1OIorySw8GojkQNqTTxbsp3vby2X54dHxCocSs2cuIhBmKRlTStfQV7jDuBDdgsboCzLPPvD1wHJjYr2yEefJg4HVMNkQ+jrYnPDq4ynOtvn7d4h4nWhM2SOeT0\/AWyiP+wANLeswjl+L9L5JsOx8B36ynIOw==",
     "device": "iphone-fixture",
-    "sig": "7KRr+QKGfyuz9XpdcrihjxTR29KFjN32uzZ5M32P3y9NkNuQi2YumXHh68+Xfpw2zDBSA6dljRJbt9kb6RQKeg=="
+    "sig": "3L7E432kspy9c2vNwqxmdhsHIQob1mmwRfGyX70Hi8n5\/2eKRiwp2rv2E\/Ve2E5A5fsDs0V8odQjLQXPDbbiUg=="
   },
-  "startCommandId": "153bdb48-41df-405d-b2fe-7411943a9103",
+  "startCommandId": "0c54a2b5-1de7-419c-b187-6eea14dd9f20",
   "steerCommand": {
-    "box": "\/DtgV4Sl5M7U\/QKFi2d+4xE7BRzBq+FAFwSdA+QSTOEeBUNTTIWvrOq3IdmiwtDYofzFh7MrxyLjbGDXx6Arm0ROv7w61FInZKNeBDtJUMIJ6S+U0D\/gWo9R56KBih8G7enoOWyBBpY1xJ3ZUaq5MLfuzLRvOXj6b4OiWMOkNoqqta6vVx8Fkt6dhwZmGTEEne99vvvEdcQFgHFVS4SInrLH+J0hprIedZ7ybLCPxL2L7Xx8WZQ8ZQhE\/URcOg==",
+    "box": "yJbwlWlwWn+xA9+wQ4MFzxKsXsM5pE2u0KD\/qCOqqSFhu9K9FNNjYmYf9BgaQgdqXQmhFqw5rgLYIAPAYcvYMviovVStk1qAItLXZsZ8fdr484YHB8sFob+RQoHQLKDCjLofILYJjxZvKmduJiw\/O+8Sl0PjTYI2tgrlw5JmKDwpPZE+B8oeFt6PqrfPs2xCqgs6kFFXkJtBxcFedIEVKXR42CVlQcC6ds09HBMrh9NlU+KCVBkYbwU9ZyqdXg==",
     "device": "iphone-fixture",
-    "sig": "EFMEIOQMADsxk++NGYx7xIACAwBfYz89v4Rbk6Ts2ykHilHM8P4+CULeW5fnQX7uJL\/UPMCnWUcq6roA+At90A=="
+    "sig": "842WFn3pcKVkIVUg1wAw8lucz4UuJcWkLjtI7Z4Tr\/JjKw4LNpLXL91Zxfkf1U2xj2wSPTzpJzRq4hcQr8FTRA=="
   },
-  "steerCommandId": "49dbf36c-85da-42dc-be9d-65654539143e"
+  "steerCommandId": "5fb9562a-be9e-4372-a00d-0c2576e31d73"
 }

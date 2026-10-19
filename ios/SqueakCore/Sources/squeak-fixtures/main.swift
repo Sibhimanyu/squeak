@@ -16,6 +16,10 @@ let session = PhoneSnapshot.Session(
 let madeAt = Date()
 let (id, document) = try channel.replyDocument(to: session, text: "B", signer: signer, now: madeAt)
 let (steerId, steerDocument) = try channel.replyDocument(to: session, text: "Use the timer instead", mode: .steer, signer: signer, now: madeAt)
+let (queuedId, queuedDocument) = try channel.replyDocument(
+    to: session, text: "Then add tests", messageId: "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31", signer: signer, now: madeAt)
+let (promoteId, promoteDocument) = try channel.queueDocument(
+    sessionId: "s1", messageId: "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31", action: .promote, signer: signer, now: madeAt)
 let (startId, startDocument) = try channel.startDocument(workspaceId: "w1", agent: .codex, text: "Add a timer", signer: signer, now: madeAt)
 let fixture: [String: Any] = [
     "madeAt": Int64(madeAt.timeIntervalSince1970 * 1000),
@@ -28,6 +32,12 @@ let fixture: [String: Any] = [
     // The same reply with `mode: "steer"` signed in.
     "steerCommandId": steerId,
     "steerCommand": ["box": steerDocument.box, "sig": steerDocument.sig!, "device": steerDocument.device!],
+    // A reply carrying the phone's own message id (Conductor's queue id): "Then add tests".
+    "queuedCommandId": queuedId,
+    "queuedCommand": ["box": queuedDocument.box, "sig": queuedDocument.sig!, "device": queuedDocument.device!],
+    // Steer that queued message now.
+    "promoteCommandId": promoteId,
+    "promoteCommand": ["box": promoteDocument.box, "sig": promoteDocument.sig!, "device": promoteDocument.device!],
     // A new chat in workspace w1 with codex: "Add a timer".
     "startCommandId": startId,
     "startCommand": ["box": startDocument.box, "sig": startDocument.sig!, "device": startDocument.device!],

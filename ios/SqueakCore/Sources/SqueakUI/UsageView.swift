@@ -7,7 +7,7 @@ import SwiftUI
 /// (DESIGN.md §3.3: a state colour is never a fill). Refresh asks the Mac for a new Claude reading,
 /// signed like a reply; it makes one small real call, at most once a minute.
 struct UsageView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var refreshing = false
     @State private var refreshNote: String?

@@ -538,9 +538,28 @@ a tap queues, and holding it (on the Mac, its chevron or ⇧⌘↩) offers
 act, so it is never sticky and every message starts queued. The explanation
 is one line, shown until the first message sent mid-turn.
 
-A working chat has no Activity tab: the "Claude · Running tests…" row
-opens in place to the turn's steps (the whole turn, open from the start,
-when "Show thinking live" streams it).
+**Queued messages are not in the chat** (owner's decision, 2026-10-19,
+after Cursor's and Codex's queues). They stack as cards above the composer,
+oldest first, under one muted line ("Queued · Claude reads them after this
+turn"): the text in two lines, **Steer now** (secondary), and a ⋯ menu with
+Edit and Delete. Edit takes the text back into the field. A card moves into
+the chat as your message only when the agent picks it up. The cards are
+Conductor's own queue, so one typed on the Mac shows too; a card the Mac has
+not listed yet says "Queuing…" and has no actions.
+
+**A steer lands inside the turn.** The steps before it fold to one quiet line
+("Worked · 6 steps", a tap opens them), your message sits under it with
+"Steered into the current turn", and the turn carries on below it ("Reading
+your message…" until the agent's next step). A finished turn's steps fold the
+same way above its answer.
+
+A working chat has no Activity tab: the "Claude · Running tests…" row is
+folded by default, with a small live box under it (`surface-raised`,
+`radius-card`, `line` border) showing the newest three steps one line each,
+the newest in `ink`; it follows the turn without moving the chat. A tap
+opens every step, one line each, a tap on a step opens its whole text.
+"Show thinking live" (on by default) streams the whole turn of the chat
+on screen.
 
 The session header is two lines (in the iPhone's navigation bar): the title,
 then state, age and as much of repo, agent and diff as fits. The transcript

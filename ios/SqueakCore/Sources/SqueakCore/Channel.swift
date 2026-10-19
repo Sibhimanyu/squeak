@@ -145,6 +145,7 @@ public struct Channel: Sendable {
         to session: PhoneSnapshot.Session,
         text: String,
         mode: ReplyMode = .queue,
+        messageId: String? = nil,
         signer: CommandSigner,
         now: Date = Date()
     ) throws -> (id: String, document: ChannelDocument) {
@@ -158,6 +159,31 @@ public struct Channel: Sendable {
             text: text,
             // A queued reply carries no mode at all, byte-identical to before.
             mode: mode == .steer ? .steer : nil,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000),
+            messageId: messageId
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// The signed document that steers a queued message now (`promote`) or takes it out of the queue (`cancel`).
+    public func queueDocument(
+        sessionId: String,
+        messageId: String,
+        action: QueueCommand.Action,
+        signer: CommandSigner,
+        now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = QueueCommand(
+            v: 1,
+            kind: "queue",
+            sessionId: sessionId,
+            messageId: messageId,
+            action: action,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

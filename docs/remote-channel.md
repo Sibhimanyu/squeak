@@ -89,8 +89,9 @@ The phone talks straight to Squeak's loopback server over a private network.
   choices. Encrypted with a key shared only between the Mac and paired phones.
 - `events` — "needs you" / "done" pushes, carrying only a session handle and
   the three-line card text (so the lock screen can show it), encrypted.
-- `commands` — from the phone: `{ sessionId, answersTurn, text, mode?, nonce,
-expiresAt }`, signed with the device key, encrypted to the Mac.
+- `commands` — from the phone: `{ sessionId, answersTurn, text, mode?,
+messageId?, nonce, expiresAt }`, signed with the device key, encrypted to the
+Mac (and the `kind: "start"`, `"usage"` and `"queue"` commands below).
 - Retention: snapshot overwritten in place; events and commands deleted by the
   Mac as soon as they are processed, and expired server-side after 24 hours.
 
@@ -245,7 +246,8 @@ already made; and every start, accepted or refused, in the Mac app's device
 activity. It cannot create a workspace, and it cannot start a chat anywhere
 else on the machine. Each of those is a separate, later decision.
 - **Verbose: thinking live (2026-10-19).** iPhone Settings › "Show thinking
-  live" (off by default). With it on, the phone's sealed presence names the
+  live" (on by default on the phone since the queue below; the Mac's
+  `SQUEAK_REMOTE_VERBOSE=off` still refuses it). With it on, the phone's sealed presence names the
   session open on screen (`watching`), and the Mac publishes that session's
   whole current turn (`src/remote/live-turn.ts`: up to 50 steps of up to
   4,000 characters, thinking included) to `live/<handle>`, sealed, at most
@@ -258,6 +260,32 @@ else on the machine. Each of those is a separate, later decision.
   for). `SQUEAK_REMOTE_VERBOSE=off` on the Mac refuses it outright. An older
   phone's plain `{ at }` presence keeps working. Measured on the live
   project: the turn arrived 786 ms after the phone opened the session.
+- **Steers in the turn, and Conductor's queue (2026-10-19).** The activity
+  feed gains a step kind `you`: a message the user sent into a turn that was
+  still running (a steer), shown in place inside the turn rather than starting
+  a new one. Claude: a user message after a `tool_use` (or a `tool_result`) and
+  before an `end_turn`; `isMeta` entries (skill bodies, image notes) are
+  ignored and no longer reset the feed. Codex: a user message between
+  `task_started` and `task_complete` once the agent has begun answering. It
+  flows through the snapshot's six steps and the live doc unchanged.
+  The live doc gains `queue`: `[{ id, text, mode: "queue" | "steer", position }]`,
+  Conductor's pending messages for the watched chat (`deliveryStatus:
+  "pending"` only, in queue order, text up to 2,000 characters), read over
+  the loopback relay each tick. Absent means the Mac can't read it (relay
+  down, not a Conductor chat), and the phone keeps its own list; `[]` is an
+  empty queue. A reply may carry `messageId`, a lowercase UUID the phone
+  chooses, sealed and signed with the rest and handed to Conductor as the
+  message's id so the phone can find its message in that queue; anything
+  else there is refused. A fourth signed command,
+  `{ v: 1, kind: "queue", sessionId, messageId, action: "promote" | "cancel", nonce, expiresAt }`,
+  steers a queued message in now or deletes it. After the shared signature,
+  freshness and nonce checks: the chat must be a Conductor chat in what the
+  Mac shows the phone (its own snapshot, never the phone's copy), and the
+  message must still be in the queue as the Mac reads it then. There is no
+  `answersTurn`: the queued message's id is the anchor, and the Mac reads the
+  revision and generation Conductor's write needs itself, so the phone never
+  supplies them. It can only move or drop a message the owner already sent;
+  it adds no text.
 - **Usage refresh from the phone (2026-10-19).** A third signed command,
   `{ v: 1, kind: "usage", nonce, expiresAt }`, with no text and no target. It
   passes the same signature, freshness and nonce checks, then runs the Mac's

@@ -65,7 +65,23 @@ export const STEER_UNAVAILABLE_NOTE = "Steer needs Conductor's relay, so this wa
 
 export interface ReplyOptions {
   mode?: ReplyMode;
+  /**
+   * The caller's id for the message (a lowercase UUID), used only by the
+   * relay route, so the sender can recognise it in Conductor's queue. The
+   * window and the background CLI have no such id and ignore it.
+   */
+  messageId?: string;
 }
+
+/** A message waiting in a Conductor chat's queue, oldest first by `position`. */
+export interface QueueItem {
+  id: string;
+  text: string;
+  mode: ReplyMode;
+  position: number;
+}
+
+export type QueueAction = "promote" | "cancel";
 
 /** Conductor statuses in which an agent is mid-turn, so a message waits or steers. */
 export function isInFlight(status: string): boolean {
@@ -97,7 +113,23 @@ export interface ConductorRelaySender {
     sessionId: string;
     text: string;
     mode?: ReplyMode;
+    messageId?: string;
   }): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** Conductor's queue for a chat, read over the relay. Absent on senders that cannot. */
+  queue?(
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<{ ok: true; items: QueueItem[] } | { ok: false; reason: string }>;
+  promote?(
+    workspaceId: string,
+    sessionId: string,
+    messageId: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string }>;
+  cancel?(
+    workspaceId: string,
+    sessionId: string,
+    messageId: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 export interface ConductorReplierDependencies {
@@ -233,6 +265,7 @@ export class ConductorReplier {
         sessionId,
         text: input,
         mode: steer ? "steer" : "queue",
+        ...(options.messageId ? { messageId: options.messageId } : {}),
       });
       if (result.ok) {
         return { status: "started", via: "conductor", delivery: steer ? "steered" : inFlight ? "queued" : "sent" };
@@ -335,6 +368,49 @@ export class ConductorReplier {
     this.mirror.updateSessionStatus(sessionId, "working");
     this.mirror.appendUserMessage({ sessionId, turnId: reply.turnId, text: input, sentAt });
     return { status: "started", via: "background", fallbackReason, delivery: "sent" };
+  }
+
+  /**
+   * The messages waiting in Conductor's queue for this chat, or null when
+   * they cannot be read: the relay is down, or the chat is not Conductor's.
+   */
+  async queue(sessionId: string): Promise<QueueItem[] | null> {
+    const relay = this.deps.relay;
+    if (!relay?.isReady() || !relay.queue) {
+      return null;
+    }
+    const session = this.deps.registry.getSessionById(sessionId);
+    if (!session) {
+      return null;
+    }
+    const result = await relay.queue(session.workspaceId, sessionId);
+    return result.ok ? result.items : null;
+  }
+
+  /** Steer a queued message in now (`promote`), or delete it (`cancel`). Relay only. */
+  async queueAction(
+    sessionId: string,
+    messageId: string,
+    action: QueueAction,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const relay = this.deps.relay;
+    const run = action === "promote" ? relay?.promote : relay?.cancel;
+    if (!relay?.isReady() || !run) {
+      return { ok: false, reason: "Conductor's relay isn't connected, so queued messages can't be changed from here." };
+    }
+    const session = this.deps.registry.getSessionById(sessionId);
+    if (!session) {
+      return { ok: false, reason: "That chat no longer exists in Conductor." };
+    }
+    const result = await run.call(relay, session.workspaceId, sessionId, messageId);
+    if (result.ok) {
+      return result;
+    }
+    if (result.reason === "not in the queue") {
+      return { ok: false, reason: "That message already went to the agent." };
+    }
+    logger.info("conductor relay queue change failed", { sessionId, action, reason: result.reason });
+    return { ok: false, reason: `Conductor didn't take that change (${result.reason}).` };
   }
 
   /** Whether Conductor recorded `text` as a user message in this chat since `sinceIso`. */

@@ -6,7 +6,7 @@ import SwiftUI
 /// DESIGN.md §8.2: every active session, in attention order,
 /// under a native large title with search and a segmented filter.
 struct HomeView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @ObservedObject private var router = SqueakRouter.shared
     @State private var filter = Presentation.Filter.all
     @State private var query = ""
@@ -284,7 +284,7 @@ struct SectionHeader: View {
 }
 
 struct SessionRow: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     let session: PhoneSnapshot.Session
     /// A chat from Recent: its second line is what the agent last said, not a state word.
     var recent = false
@@ -344,7 +344,7 @@ struct SessionRow: View {
 /// "Mac connected", and honest when it is not: the phone only knows its
 /// last successful read of the Mac's snapshot, so that is all it claims.
 struct ConnectionBar: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2)) { _ in

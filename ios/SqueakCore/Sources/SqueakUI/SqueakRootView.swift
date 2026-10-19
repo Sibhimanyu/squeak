@@ -9,7 +9,7 @@ import SwiftUI
 /// — the app being in the foreground *and* this view being visible — which is
 /// also what tells the Mac to publish and poll faster.
 public struct SqueakRootView: View {
-    @StateObject private var model = AppModel()
+    @State private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false
     private let onMainScreen: (() -> Void)?
@@ -34,7 +34,7 @@ public struct SqueakRootView: View {
 
     public var body: some View {
         RootView(onMainScreen: onMainScreen)
-            .environmentObject(model)
+            .environment(model)
             .environment(\.squeakScreen, ScreenReporter(report: onScreen, openReport: onReport))
             .tint(Theme.done)
             .onAppear { visible = true; update() }
@@ -48,7 +48,7 @@ public struct SqueakRootView: View {
 }
 
 struct RootView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(AppModel.self) private var model
     @Environment(\.squeakScreen) private var screen
     var onMainScreen: (() -> Void)?
 

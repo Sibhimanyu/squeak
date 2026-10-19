@@ -329,3 +329,83 @@ describe("ConductorReplier.send queue and steer", () => {
     expect(outcome.status === "started" && outcome.note).toMatch(/queued instead/);
   });
 });
+
+describe("ConductorReplier queued messages", () => {
+  const item = {
+    id: "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31",
+    text: "Then add tests",
+    mode: "queue" as const,
+    position: 0,
+  };
+
+  function queueFixture(overrides: Partial<ConductorRelaySender> = {}) {
+    const calls: unknown[][] = [];
+    const relay: ConductorRelaySender = {
+      isReady: () => true,
+      send: async (args) => {
+        calls.push(["send", args]);
+        return { ok: true };
+      },
+      queue: async (workspaceId, sessionId) => {
+        calls.push(["queue", workspaceId, sessionId]);
+        return { ok: true, items: [item] };
+      },
+      promote: async (workspaceId, sessionId, messageId) => {
+        calls.push(["promote", workspaceId, sessionId, messageId]);
+        return { ok: true };
+      },
+      cancel: async (workspaceId, sessionId, messageId) => {
+        calls.push(["cancel", workspaceId, sessionId, messageId]);
+        return { ok: true };
+      },
+      ...overrides,
+    };
+    return { ...fixture(session({ status: "working" }), [], null, relay), calls };
+  }
+
+  it("passes the caller's message id to the relay, and only there", async () => {
+    const { replier, calls } = queueFixture();
+    await replier.send("s1", "next", () => undefined, { messageId: item.id });
+    expect(calls).toEqual([
+      ["send", { workspaceId: "w1", sessionId: "s1", text: "next", mode: "queue", messageId: item.id }],
+    ]);
+  });
+
+  it("reads the queue through the relay, in the chat's workspace", async () => {
+    const { replier, calls } = queueFixture();
+    expect(await replier.queue("s1")).toEqual([item]);
+    expect(calls).toEqual([["queue", "w1", "s1"]]);
+  });
+
+  it("cannot read the queue without a connected relay", async () => {
+    const { replier } = queueFixture({ isReady: () => false });
+    expect(await replier.queue("s1")).toBeNull();
+    const { replier: failing } = queueFixture({ queue: async () => ({ ok: false, reason: "relay HTTP 500" }) });
+    expect(await failing.queue("s1")).toBeNull();
+  });
+
+  it("promotes and cancels through the relay", async () => {
+    const { replier, calls } = queueFixture();
+    expect(await replier.queueAction("s1", item.id, "promote")).toEqual({ ok: true });
+    expect(await replier.queueAction("s1", item.id, "cancel")).toEqual({ ok: true });
+    expect(calls).toEqual([
+      ["promote", "w1", "s1", item.id],
+      ["cancel", "w1", "s1", item.id],
+    ]);
+  });
+
+  it("says a message already went when the relay no longer finds it, and why otherwise", async () => {
+    const gone = queueFixture({ promote: async () => ({ ok: false, reason: "not in the queue" }) });
+    expect(await gone.replier.queueAction("s1", item.id, "promote")).toEqual({
+      ok: false,
+      reason: "That message already went to the agent.",
+    });
+    const refused = queueFixture({ cancel: async () => ({ ok: false, reason: "relay HTTP 409" }) });
+    expect(await refused.replier.queueAction("s1", item.id, "cancel")).toEqual({
+      ok: false,
+      reason: "Conductor didn't take that change (relay HTTP 409).",
+    });
+    const down = queueFixture({ isReady: () => false });
+    expect(await down.replier.queueAction("s1", item.id, "cancel")).toMatchObject({ ok: false });
+  });
+});

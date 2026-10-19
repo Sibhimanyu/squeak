@@ -9,6 +9,8 @@ public struct LiveTurn: Codable, Equatable, Sendable {
         public let kind: String
         public let text: String
         public let at: String?
+
+        public init(kind: String, text: String, at: String? = nil) { self.kind = kind; self.text = text; self.at = at }
     }
 
     public let v: Int
@@ -17,6 +19,24 @@ public struct LiveTurn: Codable, Equatable, Sendable {
     /// How many steps the turn has had; `steps` holds the newest of them.
     public let total: Int
     public let steps: [Step]
+    /// Conductor's queue for this chat, oldest first. Absent when the Mac cannot read it
+    /// (Conductor's relay is not connected); empty when nothing is queued.
+    public var queue: [QueuedMessage]? = nil
+
+    public struct QueuedMessage: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        public let text: String
+        public let mode: String?
+        public let position: Int?
+
+        public init(id: String, text: String, mode: String? = nil, position: Int? = nil) {
+            self.id = id; self.text = text; self.mode = mode; self.position = position
+        }
+    }
+
+    public init(v: Int = 1, key: String, working: Bool, total: Int, steps: [Step], queue: [QueuedMessage]? = nil) {
+        self.v = v; self.key = key; self.working = working; self.total = total; self.steps = steps; self.queue = queue
+    }
 
     /// The document id for a session: the same as the Mac's `liveHandle`.
     public static func handle(for sessionKey: String) -> String {

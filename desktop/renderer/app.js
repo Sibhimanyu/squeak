@@ -746,7 +746,7 @@ async function renderDetail() {
 }
 
 /** How each kind of step reads in the feed; the words are the agent's own. */
-const STEP_LABEL = { thinking: "Thinking", note: null, tool: null, background: "Worker done" };
+const STEP_LABEL = { thinking: "Thinking", note: null, tool: null, background: "Worker done", you: "You" };
 
 /**
  * Redraw the open feed from the daemon's reading of the transcript. Only the

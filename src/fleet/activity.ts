@@ -13,9 +13,13 @@ import type { AgentKind } from "./types.js";
  * as summaries when the host asks for them (Conductor does); Codex's reasoning
  * is encrypted and its summary usually empty, so a Codex feed is its notes
  * and commands. Everything here is the agent's own output and stays untrusted.
+ *
+ * One kind is not the agent's: `you` is a message the user sent into a turn
+ * that was still running (a steer). It belongs to the turn, in place, rather
+ * than starting a new one.
  */
 
-export type ActivityKind = "thinking" | "note" | "tool" | "background";
+export type ActivityKind = "thinking" | "note" | "tool" | "background" | "you";
 
 export interface ActivityStep {
   kind: ActivityKind;
@@ -51,11 +55,17 @@ export function readActivity(
   return { steps: steps.slice(-limit), total: steps.length };
 }
 
+/** An assistant entry with one of these ends the turn; anything else (`tool_use`, null) leaves it open. */
+const CLAUDE_TURN_ENDS = new Set(["end_turn", "stop_sequence", "refusal"]);
+
 function claudeSteps(entries: Record<string, unknown>[], max: number): ActivityStep[] {
   // Claude Code writes each block of a message as its own entry, all under
   // one message id, and may write a block again as it streams; a block is
   // keyed by what it is, so repeats collapse and distinct blocks stay.
   let steps = new Map<string, ActivityStep>();
+  // Whether a turn is still running, so a message typed now is a steer
+  // inside it rather than the start of the next one.
+  let open = false;
   for (const entry of entries) {
     if (entry.isSidechain === true) {
       continue;
@@ -64,23 +74,50 @@ function claudeSteps(entries: Record<string, unknown>[], max: number): ActivityS
     const at = asString(entry.timestamp);
     const message = asRecord(entry.message);
     if (type === "user" && message) {
-      if (typeof message.content === "string") {
-        // A worker reporting in is part of the work; anything else the user
-        // typed starts a new turn.
-        const finished = /<task-notification>[\s\S]*?<summary>([^<]*)<\/summary>/.exec(message.content);
-        if (finished) {
-          steps.set(`bg:${steps.size}`, { kind: "background", text: clip(finished[1]!.trim(), max), at });
-        } else if (!message.content.startsWith("<")) {
+      // Skill bodies and "[Image: …]" notes are written as user entries
+      // marked isMeta; they are not anything the user said.
+      if (entry.isMeta === true) {
+        continue;
+      }
+      const blocks = asArray(message.content).map(asRecord);
+      if (blocks.some((block) => asString(block?.type) === "tool_result")) {
+        open = true;
+        continue;
+      }
+      const text =
+        typeof message.content === "string"
+          ? message.content
+          : blocks
+              .filter((block) => asString(block?.type) === "text")
+              .map((block) => asString(block?.text) ?? "")
+              .join("\n");
+      const hasText = typeof message.content === "string" || blocks.some((block) => asString(block?.type) === "text");
+      if (!hasText) {
+        continue;
+      }
+      // A worker reporting in is part of the work; other tags are Claude
+      // Code's own notes.
+      const finished = /<task-notification>[\s\S]*?<summary>([^<]*)<\/summary>/.exec(text);
+      if (finished) {
+        steps.set(`bg:${steps.size}`, { kind: "background", text: clip(finished[1]!.trim(), max), at });
+      } else if (text.startsWith("[Request interrupted")) {
+        open = false;
+      } else if (!text.startsWith("<")) {
+        if (open) {
+          const said = text.trim();
+          if (said) {
+            steps.set(`you:${said}`, { kind: "you", text: clip(said, max), at });
+          }
+        } else {
           steps = new Map();
         }
-      } else if (asArray(message.content).some((block) => asString(asRecord(block)?.type) === "text")) {
-        steps = new Map();
       }
       continue;
     }
     if (type !== "assistant" || !message) {
       continue;
     }
+    open = !CLAUDE_TURN_ENDS.has(asString(message.stop_reason) ?? "");
     const id = asString(message.id) ?? `${at}`;
     for (const raw of asArray(message.content)) {
       const block = asRecord(raw);
@@ -159,10 +196,25 @@ export function describeClaudeTool(name: string, input: Record<string, unknown>)
 
 function codexSteps(entries: Record<string, unknown>[], max: number): ActivityStep[] {
   let steps: ActivityStep[] = [];
+  // Between task_started and task_complete a turn is running. Its first real
+  // user message starts it; one sent after the agent has begun answering is a
+  // steer into it. Codex writes AGENTS.md and the host's prompt as user
+  // messages before the agent says anything, so those still start the turn.
+  let inTask = false;
+  let agentBegan = false;
   for (const entry of entries) {
     const at = asString(entry.timestamp);
     const payload = asRecord(entry.payload);
     const kind = asString(payload?.type);
+    if (asString(entry.type) === "event_msg") {
+      if (kind === "task_started") {
+        inTask = true;
+        agentBegan = false;
+      } else if (kind === "task_complete" || kind === "turn_aborted") {
+        inTask = false;
+      }
+      continue;
+    }
     if (asString(entry.type) !== "response_item" || !payload) {
       continue;
     }
@@ -174,12 +226,23 @@ function codexSteps(entries: Record<string, unknown>[], max: number): ActivitySt
       if (asString(payload.role) === "user") {
         // Codex injects its own context as user messages wrapped in tags.
         if (text && !text.startsWith("<")) {
-          steps = [];
+          if (inTask && agentBegan) {
+            steps.push({ kind: "you", text: clip(text, max), at });
+          } else {
+            steps = [];
+            agentBegan = false;
+          }
         }
-      } else if (asString(payload.role) === "assistant" && text) {
-        steps.push({ kind: "note", text: clip(text, max), at });
+        continue;
+      }
+      if (asString(payload.role) === "assistant") {
+        agentBegan = true;
+        if (text) {
+          steps.push({ kind: "note", text: clip(text, max), at });
+        }
       }
     } else if (kind === "reasoning") {
+      agentBegan = true;
       const text = asArray(payload.summary)
         .map((part) => asString(asRecord(part)?.text) ?? "")
         .join("\n")
@@ -188,6 +251,7 @@ function codexSteps(entries: Record<string, unknown>[], max: number): ActivitySt
         steps.push({ kind: "thinking", text: clip(text, max), at });
       }
     } else if (kind === "function_call" || kind === "custom_tool_call" || kind === "local_shell_call") {
+      agentBegan = true;
       steps.push({ kind: "tool", text: describeCodexTool(payload), at });
     }
   }

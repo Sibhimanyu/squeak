@@ -44,9 +44,76 @@ struct ChatSend: Identifiable, Equatable {
     /// The agent turn it answered; places it before or after that turn's message.
     let answersTurn: String?
     var status: Status
+    /// Conductor's id for it once queued (the phone chooses it), so its card matches the Mac's queue.
+    let messageId: String
+    let mode: ReplyMode
+    /// Sent to queue behind a turn in progress: it waits above the composer, not in the chat.
+    let queuedBehindTurn: Bool
+    /// Seen in the Mac's copy of Conductor's queue; once it leaves it, it went to the agent.
+    var seenInQueue = false
 
-    init(id: UUID = UUID(), text: String, date: Date, answersTurn: String?, status: Status = .sent) {
+    init(id: UUID = UUID(), text: String, date: Date, answersTurn: String?, status: Status = .sent,
+         messageId: String = UUID().uuidString.lowercased(), mode: ReplyMode = .queue, queuedBehindTurn: Bool = false) {
         self.id = id; self.text = text; self.date = date; self.answersTurn = answersTurn; self.status = status
+        self.messageId = messageId; self.mode = mode; self.queuedBehindTurn = queuedBehindTurn
+    }
+
+    var isSteer: Bool { mode == .steer }
+}
+
+/// One step of a turn as the chat shows it: the snapshot's or the live turn's, the same shape.
+/// `you` is a message put into the turn while it ran (a steer).
+struct TurnStep: Equatable, Hashable {
+    let kind: String
+    let text: String
+}
+
+/// The messages waiting behind a working turn, shown as cards above the composer and never in the
+/// chat (DESIGN.md §8.5). Conductor's queue, as the Mac publishes it in the live turn, is the truth;
+/// this phone's own queued sends fill the gap until it shows them.
+enum ChatQueue {
+    struct Card: Identifiable, Equatable {
+        let id: String
+        let text: String
+        /// Not in Conductor's queue yet as far as this phone knows ("Queuing…").
+        let pending: Bool
+        /// Steer now, Edit and Delete work: the Mac can read and change this chat's queue.
+        let actionable: Bool
+    }
+
+    /// Long enough for the Mac to publish a message it has just queued.
+    static let publishGrace: TimeInterval = 20
+
+    /// Whether a send waits above the composer rather than showing in the chat.
+    static func isQueued(_ send: ChatSend, session: PhoneSnapshot.Session, live: LiveTurn?, now: Date = Date()) -> Bool {
+        guard send.queuedBehindTurn, send.mode == .queue else { return false }
+        switch send.status {
+        case .refused, .sent, .steered: return false
+        case .sending, .queued, .notConfirmed: break
+        }
+        if let queue = live?.queue {
+            if queue.contains(where: { $0.id == send.messageId }) { return true }
+            if send.seenInQueue { return false }
+            if send.status == .sending { return true }
+            return now.timeIntervalSince(send.date) < publishGrace
+        }
+        // The Mac can't read this chat's queue: it waits until the turn it queued behind is over.
+        if send.status == .sending { return true }
+        return session.turnId == send.answersTurn && now.timeIntervalSince(send.date) < 30 * 60
+    }
+
+    static func cards(session: PhoneSnapshot.Session, live: LiveTurn?, sends: [ChatSend], hidden: Set<String> = [], now: Date = Date()) -> [Card] {
+        let live = live?.key == session.key ? live : nil
+        let mine = sends.filter { isQueued($0, session: session, live: live, now: now) }
+        var cards: [Card] = []
+        if let queue = live?.queue {
+            cards = queue.map { Card(id: $0.id, text: $0.text, pending: false, actionable: true) }
+        }
+        let known = Set(cards.map(\.id))
+        cards += mine.filter { !known.contains($0.messageId) }.map {
+            Card(id: $0.messageId, text: $0.text, pending: live?.queue != nil || $0.status == .sending, actionable: false)
+        }
+        return cards.filter { !hidden.contains($0.id) }
     }
 }
 
@@ -70,13 +137,20 @@ enum ChatTimeline {
     enum Row: Equatable, Identifiable {
         case agent(text: String, atISO: String, muted: Bool)
         case sent(ChatSend)
-        case working(label: String)
+        /// A message put into the running turn, where it landed among the steps.
+        case steer(id: String, text: String, line: String)
+        /// The part of a turn before a steer (or a finished turn's steps), folded to one line.
+        case folded(id: String, steps: [TurnStep])
+        /// The live part of the turn: its newest steps under "Claude · Running tests…".
+        case working(label: String, steps: [TurnStep] = [])
         case empty(String)
 
         var id: String {
             switch self {
             case .agent: "agent"
             case .sent(let s): s.id.uuidString
+            case .steer(let id, _, _): id
+            case .folded(let id, _): id
             case .working: "working"
             case .empty: "empty"
             }
@@ -99,10 +173,14 @@ enum ChatTimeline {
     }
 
     static func rows(
-        session: PhoneSnapshot.Session, remembered: RememberedMessage?, sends: [ChatSend], now: Date = Date()
+        session: PhoneSnapshot.Session, remembered: RememberedMessage?, sends allSends: [ChatSend],
+        live: LiveTurn? = nil, now: Date = Date()
     ) -> [Row] {
         let working = session.state == "working"
+        let live = live?.key == session.key ? live : nil
         let current: String? = working ? nil : [session.message, session.detail].compactMap { $0 }.first { !$0.isEmpty }
+        // Queued messages wait above the composer, not here.
+        let sends = allSends.filter { !ChatQueue.isQueued($0, session: session, live: live, now: now) }
 
         func replied(_ s: ChatSend) -> Bool {
             if now.timeIntervalSince(s.date) > giveUp, !working { return true }
@@ -131,15 +209,79 @@ enum ChatTimeline {
             copy.status = .sent
             return copy
         }
-        var rows: [Row] = sends.filter { !after($0) }.map { .sent(settled($0)) }
+        // While the turn runs, a steer belongs inside it, among the steps.
+        let steers = isWorking ? sends.filter { s in s.isSteer && awaiting.contains(where: { $0.id == s.id }) } : []
+        let plain = sends.filter { s in !steers.contains(where: { $0.id == s.id }) }
+
+        var rows: [Row] = plain.filter { !after($0) }.map { .sent(settled($0)) }
         if isWorking {
             if let r = remembered { rows.append(.agent(text: r.text, atISO: r.atISO, muted: true)) }
         } else if let current {
+            // A finished turn's steps, folded above its answer, while the live turn still has them.
+            if let live, !live.working, !live.steps.isEmpty {
+                rows.append(.folded(id: "worked", steps: live.steps.filter { $0.kind != "you" }.map { TurnStep(kind: $0.kind, text: $0.text) }))
+            }
             rows.append(.agent(text: current, atISO: session.lastActivityAt, muted: false))
         }
-        rows += sends.filter(after).map { .sent(settled($0)) }
-        if isWorking { rows.append(.working(label: workingLabel(session.activity?.steps ?? []))) }
+        rows += plain.filter(after).map { .sent(settled($0)) }
+        if isWorking { rows += turn(steps: turnSteps(session: session, live: live), steers: steers, truncated: (live?.total ?? session.activity?.total ?? 0) > turnSteps(session: session, live: live).count) }
         return rows.isEmpty ? [.empty(emptyText(canReply: Presentation.replyBlock(session) == nil))] : rows
+    }
+
+    /// The working turn's steps: the live turn's whole steps when the Mac streams them for this turn,
+    /// else the snapshot's newest six.
+    static func turnSteps(session: PhoneSnapshot.Session, live: LiveTurn?) -> [TurnStep] {
+        if let live, live.working, !live.steps.isEmpty { return live.steps.map { TurnStep(kind: $0.kind, text: $0.text) } }
+        return (session.activity?.steps ?? []).map { TurnStep(kind: $0.kind, text: $0.text) }
+    }
+
+    /// The turn in parts: each steer where it landed, the steps before it folded, the live part last.
+    /// A steer the Mac has not reported yet goes at the end, the agent still to read it.
+    static func turn(steps: [TurnStep], steers: [ChatSend], truncated: Bool) -> [Row] {
+        var segments: [[TurnStep]] = [[]]
+        var yous: [String] = []
+        for step in steps {
+            if step.kind == "you" { yous.append(step.text); segments.append([]) } else { segments[segments.count - 1].append(step) }
+        }
+        var unmatched = steers
+        var rows: [Row] = []
+        // A steer that scrolled out of a clipped feed landed before everything shown.
+        if truncated {
+            let early = unmatched.filter { s in s.status == .steered && !yous.contains { same($0, s.text) } }
+            rows += early.map { .steer(id: $0.id.uuidString, text: $0.text, line: $0.status.line) }
+            unmatched.removeAll { s in early.contains { $0.id == s.id } }
+        }
+        for (i, you) in yous.enumerated() {
+            if !segments[i].isEmpty { rows.append(.folded(id: "part-\(i)", steps: segments[i])) }
+            if let mine = unmatched.firstIndex(where: { same(you, $0.text) }) {
+                let s = unmatched.remove(at: mine)
+                rows.append(.steer(id: s.id.uuidString, text: s.text, line: s.status.line))
+            } else {
+                rows.append(.steer(id: "you-\(i)", text: you, line: ChatSend.Status.steered.line))
+            }
+        }
+        var live = segments[segments.count - 1]
+        if !unmatched.isEmpty {
+            if !live.isEmpty { rows.append(.folded(id: "part-\(yous.count)", steps: live)) }
+            rows += unmatched.map { .steer(id: $0.id.uuidString, text: $0.text, line: $0.status.line) }
+            live = []
+        }
+        let steered = !yous.isEmpty || !unmatched.isEmpty
+        rows.append(.working(label: live.isEmpty && steered ? "Reading your message…" : workingLabel(turn: live), steps: live))
+        return rows
+    }
+
+    /// The Mac's copy of a message is whitespace-flattened and may be clipped with "…".
+    static func same(_ reported: String, _ sent: String) -> Bool {
+        func flat(_ t: String) -> String { t.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+        let a = flat(reported), b = flat(sent)
+        if a == b { return true }
+        guard a.hasSuffix("…") else { return false }
+        return b.hasPrefix(String(a.dropLast()).trimmingCharacters(in: .whitespaces))
+    }
+
+    static func workingLabel(turn steps: [TurnStep]) -> String {
+        workingLabel(steps.map { PhoneSnapshot.Step(kind: $0.kind, text: $0.text) })
     }
 
     /// "Running tests…", or "Starting…" before the first step; DESIGN.md §8.7 for the empty copy.

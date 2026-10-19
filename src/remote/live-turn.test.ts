@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Activity } from "../fleet/activity.js";
-import { LIVE_STEP_CHARS, LIVE_STEPS, liveHandle, LiveTurnPublisher, type LiveTurn } from "./live-turn.js";
+import type { QueueItem } from "../fleet/session-reply.js";
+import {
+  LIVE_QUEUE_TEXT_CHARS,
+  LIVE_STEP_CHARS,
+  LIVE_STEPS,
+  liveHandle,
+  LiveTurnPublisher,
+  type LiveTurn,
+} from "./live-turn.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -126,5 +134,61 @@ describe("LiveTurnPublisher", () => {
     release();
     await vi.advanceTimersByTimeAsync(0);
     expect(t.docs.size).toBe(0);
+  });
+
+  describe("the chat's queue", () => {
+    function withQueue(read: (key: string) => Promise<QueueItem[] | null>) {
+      const docs = new Map<string, LiveTurn>();
+      const write = vi.fn(async (handle: string, turn: LiveTurn) => {
+        docs.set(handle, turn);
+      });
+      const activity: Activity = { total: 1, steps: [{ kind: "you", text: "use the fake clock", at: "t1" }] };
+      const publisher = new LiveTurnPublisher({
+        read: () => ({ activity, working: true }),
+        write,
+        clear: async () => undefined,
+        queue: read,
+      });
+      return { publisher, docs, write };
+    }
+
+    it("is published with the turn, each text capped, and a change in it alone writes", async () => {
+      vi.useFakeTimers();
+      let queue: QueueItem[] = [{ id: "q1", text: "z".repeat(3_000), mode: "queue", position: 0 }];
+      const t = withQueue(async () => queue);
+      t.publisher.watch("s1");
+      await vi.advanceTimersByTimeAsync(0);
+      const turn = t.docs.get(liveHandle("s1"))!;
+      expect(turn.steps).toEqual([{ kind: "you", text: "use the fake clock", at: "t1" }]);
+      expect(turn.queue).toHaveLength(1);
+      expect(turn.queue![0]!.text.length).toBe(LIVE_QUEUE_TEXT_CHARS);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(t.write).toHaveBeenCalledTimes(1);
+      queue = [];
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(t.write).toHaveBeenCalledTimes(2);
+      expect(t.docs.get(liveHandle("s1"))!.queue).toEqual([]);
+      t.publisher.stop();
+    });
+
+    it("is left out when it can't be read: an error, null, or a read that hangs", async () => {
+      vi.useFakeTimers();
+      for (const read of [
+        async () => {
+          throw new Error("relay down");
+        },
+        async () => null,
+        () => new Promise<null>(() => undefined),
+      ]) {
+        const t = withQueue(read);
+        t.publisher.watch("s1");
+        await vi.advanceTimersByTimeAsync(2_100);
+        const turn = t.docs.get(liveHandle("s1"));
+        expect(turn).toBeDefined();
+        expect(turn).not.toHaveProperty("queue");
+        t.publisher.stop();
+      }
+    });
   });
 });

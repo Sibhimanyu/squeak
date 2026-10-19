@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PhoneClient } from "./phone.js";
 import { ConductorRelayService } from "./service.js";
 
 /**
@@ -64,5 +65,107 @@ describe("ConductorRelayService fail-safe", () => {
     const svc = new ConductorRelayService({ conductorDbPath: path.join(dir, "nope.db"), statePath });
     expect(() => svc.start()).not.toThrow();
     expect(svc.isReady()).toBe(false);
+  });
+});
+
+describe("ConductorRelayService queue", () => {
+  const ID = "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31";
+  const OTHER = "1a2b3c4d-0000-4000-8000-000000000000";
+  const state = {
+    generation: 7,
+    messages: [
+      {
+        messageId: OTHER,
+        deliveryPayload: { message: "second" },
+        mode: "queue",
+        position: 2,
+        revision: 0,
+        deliveryStatus: "pending",
+      },
+      {
+        messageId: ID,
+        deliveryPayload: { message: "first" },
+        mode: "steer",
+        position: 1,
+        revision: 3,
+        deliveryStatus: "pending",
+      },
+      {
+        messageId: "c",
+        deliveryPayload: { message: "on its way" },
+        mode: "queue",
+        position: 0,
+        revision: 0,
+        deliveryStatus: "claimed",
+      },
+    ],
+  };
+
+  /** A service with a connected client stand-in, without a relay or a database. */
+  function connected(client: Partial<PhoneClient>) {
+    const svc = new ConductorRelayService({ conductorDbPath: "/nonexistent", statePath: "/nonexistent" });
+    (svc as unknown as { client: Partial<PhoneClient> }).client = client;
+    return svc;
+  }
+
+  it("lists only messages still waiting, in queue order", async () => {
+    const svc = connected({ pendingMessages: async () => ({ status: 200, state }) });
+    expect(await svc.queue("ws", "s1")).toEqual({
+      ok: true,
+      items: [
+        { id: ID, text: "first", mode: "steer", position: 1 },
+        { id: OTHER, text: "second", mode: "queue", position: 2 },
+      ],
+    });
+  });
+
+  it("promotes and cancels with the revision and generation it reads itself", async () => {
+    const promote = vi.fn(async () => ({ status: 200, headers: {}, body: "{}" }));
+    const cancel = vi.fn(async () => ({ status: 200, headers: {}, body: "{}" }));
+    const svc = connected({
+      pendingMessages: async () => ({ status: 200, state }),
+      promoteMessage: promote,
+      cancelMessage: cancel,
+    });
+    expect(await svc.promote("ws", "s1", ID)).toEqual({ ok: true });
+    expect(await svc.cancel("ws", "s1", OTHER)).toEqual({ ok: true });
+    expect(promote).toHaveBeenCalledWith({
+      workspaceLocalId: "ws",
+      sessionId: "s1",
+      messageId: ID,
+      expectedRevision: 3,
+      expectedGeneration: 7,
+    });
+    expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ messageId: OTHER, expectedRevision: 0 }));
+  });
+
+  it("refuses a message that is not waiting any more, without writing", async () => {
+    const promote = vi.fn();
+    const svc = connected({ pendingMessages: async () => ({ status: 200, state }), promoteMessage: promote });
+    expect(await svc.promote("ws", "s1", "c")).toEqual({ ok: false, reason: "not in the queue" });
+    expect(await svc.promote("ws", "s1", "gone")).toEqual({ ok: false, reason: "not in the queue" });
+    expect(promote).not.toHaveBeenCalled();
+  });
+
+  it("is a soft failure before it is connected, and when Conductor refuses", async () => {
+    const svc = new ConductorRelayService({ conductorDbPath: "/nonexistent", statePath: "/nonexistent" });
+    expect(await svc.queue("ws", "s1")).toEqual({ ok: false, reason: "relay not connected" });
+    const refusing = connected({
+      pendingMessages: async () => ({ status: 200, state }),
+      cancelMessage: async () => ({ status: 409, headers: {}, body: "{}" }),
+    });
+    expect(await refusing.cancel("ws", "s1", ID)).toEqual({ ok: false, reason: "relay HTTP 409" });
+  });
+
+  it("refuses a caller's message id that is not a lowercase UUID, and passes a good one", async () => {
+    const sendChatMessage = vi.fn(async () => ({ status: 200, headers: {}, body: "{}" }));
+    const svc = connected({ sendChatMessage });
+    expect(await svc.send({ workspaceId: "ws", sessionId: "s1", text: "hi", messageId: ID.toUpperCase() })).toEqual({
+      ok: false,
+      reason: "invalid message id",
+    });
+    expect(await svc.send({ workspaceId: "ws", sessionId: "s1", text: "hi", messageId: ID })).toEqual({ ok: true });
+    expect(sendChatMessage).toHaveBeenCalledTimes(1);
+    expect(sendChatMessage).toHaveBeenCalledWith(expect.objectContaining({ messageId: ID }));
   });
 });

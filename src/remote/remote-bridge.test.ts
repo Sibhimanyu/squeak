@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
-import type { ReplyOutcome } from "../fleet/session-reply.js";
+import type { QueueAction, QueueItem, ReplyOutcome } from "../fleet/session-reply.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { ChannelDoc } from "./firestore-rest.js";
 import type { NewChatWorkspace, StartChatOutcome } from "../fleet/new-chat.js";
@@ -16,6 +16,7 @@ import {
   START_MIN_GAP_MS,
   type ChannelStore,
   type RemoteChatStarter,
+  type QueueCommand,
   type RemoteCommand,
   type StartCommand,
 } from "./remote-bridge.js";
@@ -89,7 +90,18 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function fixture(options: { outcome?: ReplyOutcome; turn?: string; newChat?: RemoteChatStarter } = {}) {
+const QUEUED_ID = "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31";
+
+function fixture(
+  options: {
+    outcome?: ReplyOutcome;
+    turn?: string;
+    newChat?: RemoteChatStarter;
+    /** The chat's queue as the replier reads it; `"none"` = a replier without queue support. */
+    queue?: QueueItem[] | null | "none";
+    queueOutcome?: { ok: true } | { ok: false; reason: string };
+  } = {},
+) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
   dirs.push(dir);
   const store = new MemoryStore();
@@ -102,6 +114,22 @@ function fixture(options: { outcome?: ReplyOutcome; turn?: string; newChat?: Rem
       sends.push({ sessionId, text });
       return options.outcome ?? ({ status: "started", via: "conductor" } as ReplyOutcome);
     }),
+    ...(options.queue === "none"
+      ? {}
+      : {
+          queue: vi.fn<(sessionId: string) => Promise<QueueItem[] | null>>(async () =>
+            options.queue === undefined || options.queue === "none"
+              ? [{ id: QUEUED_ID, text: "Then add tests", mode: "queue" as const, position: 0 }]
+              : options.queue,
+          ),
+          queueAction: vi.fn<
+            (
+              sessionId: string,
+              messageId: string,
+              action: QueueAction,
+            ) => Promise<{ ok: true } | { ok: false; reason: string }>
+          >(async () => options.queueOutcome ?? { ok: true }),
+        }),
   };
   let snapshot = {
     sessions: [session()],
@@ -171,6 +199,21 @@ function fixture(options: { outcome?: ReplyOutcome; turn?: string; newChat?: Rem
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const queueCommand = (overrides: Partial<QueueCommand> = {}, signer = phone) => {
+    const body: QueueCommand = {
+      v: 1,
+      kind: "queue",
+      sessionId: "s1",
+      messageId: QUEUED_ID,
+      action: "promote",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const result = (id: string) => {
     const doc = store.docs.get(`${channel}/results/${id}`);
     return doc ? open<Record<string, unknown>>(payload.k, doc.box) : null;
@@ -187,6 +230,7 @@ function fixture(options: { outcome?: ReplyOutcome; turn?: string; newChat?: Rem
     pair,
     command,
     startCommand,
+    queueCommand,
     result,
     configPath,
     emit,
@@ -254,6 +298,31 @@ describe("RemoteBridge commands", () => {
       { mode: "queue" },
     ]);
     expect(f.result("c1")).toMatchObject({ status: "sent", delivery: "steered" });
+  });
+
+  it("passes the phone's own message id through, so it can find the message in Conductor's queue", async () => {
+    const f = fixture();
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.command({ messageId: QUEUED_ID }));
+    await f.bridge.tick();
+    expect(f.replier.send.mock.calls.map((call) => (call as unknown[])[3])).toEqual([
+      { mode: "queue", messageId: QUEUED_ID },
+    ]);
+    expect(f.result("c1")).toMatchObject({ status: "sent" });
+  });
+
+  it("refuses a message id that is not a lowercase UUID", async () => {
+    const f = fixture();
+    await f.pair();
+    const bad = [QUEUED_ID.toUpperCase(), "not-a-uuid", 42 as never, "", `${QUEUED_ID}x`];
+    for (const [index, messageId] of bad.entries()) {
+      await f.store.set(`${f.channel}/commands/c${index}`, f.command({ messageId }));
+    }
+    await f.bridge.tick();
+    expect(f.sends).toEqual([]);
+    for (const index of bad.keys()) {
+      expect(f.result(`c${index}`)).toMatchObject({ status: "refused", reason: "Not a reply this Mac understands." });
+    }
   });
 
   it("refuses a mode that is neither queue nor steer", async () => {
@@ -330,6 +399,119 @@ describe("RemoteBridge commands", () => {
     await f.store.set(`${f.channel}/commands/c1`, f.command());
     await f.bridge.tick();
     expect(f.result("c1")).toEqual({ id: "c1", status: "refused", reason: "That chat is still working in Conductor." });
+  });
+});
+
+describe("RemoteBridge queued messages", () => {
+  it("steers a queued message in, and deletes one, when the phone signs it", async () => {
+    const f = fixture();
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.queueCommand());
+    await f.bridge.tick();
+    await f.store.set(`${f.channel}/commands/c2`, f.queueCommand({ action: "cancel" }));
+    await f.bridge.tick();
+    expect(f.replier.queueAction!.mock.calls).toEqual([
+      ["s1", QUEUED_ID, "promote"],
+      ["s1", QUEUED_ID, "cancel"],
+    ]);
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent" });
+    expect(f.result("c2")).toEqual({ id: "c2", status: "sent" });
+    expect(f.sends).toEqual([]);
+  });
+
+  it("names no turn: the queued message is the anchor, so a chat that moved on still takes it", async () => {
+    const f = fixture({ turn: "turn-9" });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.queueCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent" });
+  });
+
+  it("refuses a message that has already left the queue", async () => {
+    const f = fixture({ queue: [] });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.queueCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That message already went to the agent." });
+    expect(f.replier.queueAction).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the queue cannot be read, without claiming the message went", async () => {
+    const f = fixture({ queue: null });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.queueCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({
+      status: "refused",
+      reason: "This Mac can't read that chat's queue right now.",
+    });
+    expect(f.replier.queueAction).not.toHaveBeenCalled();
+  });
+
+  it("is refused by a Mac whose replier cannot change queued messages", async () => {
+    const f = fixture({ queue: "none" });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.queueCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't change queued messages." });
+  });
+
+  it("refuses a chat the phone is not shown, judged against the Mac's snapshot", async () => {
+    const f = fixture();
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.queueCommand({ sessionId: "s-elsewhere" }));
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That chat isn't on your phone any more." });
+    expect(f.replier.queue).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed request: bad id, unknown action, missing session", async () => {
+    const f = fixture();
+    await f.pair();
+    const bad: Array<Partial<QueueCommand>> = [
+      { messageId: "nope" },
+      { messageId: QUEUED_ID.toUpperCase() },
+      { action: "reorder" as never },
+      { sessionId: 7 as never },
+      { v: 2 as never },
+    ];
+    for (const [index, overrides] of bad.entries()) {
+      await f.store.set(`${f.channel}/commands/c${index}`, f.queueCommand(overrides));
+    }
+    await f.bridge.tick();
+    for (const index of bad.keys()) {
+      expect(f.result(`c${index}`)).toMatchObject({ status: "refused", reason: "Not a request this Mac understands." });
+    }
+    expect(f.replier.queueAction).not.toHaveBeenCalled();
+  });
+
+  it("passes Conductor's own refusal back", async () => {
+    const f = fixture({ queueOutcome: { ok: false, reason: "Conductor didn't take that change (relay HTTP 409)." } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.queueCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({
+      status: "refused",
+      reason: "Conductor didn't take that change (relay HTTP 409).",
+    });
+  });
+
+  it("keeps every shared check: signature, expiry, replay", async () => {
+    const f = fixture();
+    await f.pair();
+    const stranger = device();
+    await f.store.set(`${f.channel}/commands/c1`, f.queueCommand({}, stranger));
+    await f.store.set(`${f.channel}/commands/c2`, f.queueCommand({ expiresAt: NOW - 1 }));
+    const once = f.queueCommand();
+    await f.store.set(`${f.channel}/commands/c3`, once);
+    await f.bridge.tick();
+    await f.store.set(`${f.channel}/commands/c4`, once);
+    await f.bridge.tick();
+    expect(f.result("c1")).toBeNull();
+    expect(f.result("c2")).toMatchObject({ status: "refused" });
+    expect(f.result("c3")).toMatchObject({ status: "sent" });
+    expect(f.result("c4")).toMatchObject({ status: "refused", reason: "That reply was already received." });
+    expect(f.replier.queueAction).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -828,7 +1010,13 @@ describe("RemoteBridge on a streaming store (Realtime Database)", () => {
 });
 
 describe("RemoteBridge verbose view (live turn)", () => {
-  function verbose(options: { verbose?: boolean; firestore?: boolean } = {}) {
+  function verbose(
+    options: {
+      verbose?: boolean;
+      firestore?: boolean;
+      queue?: (sessionId: string) => Promise<QueueItem[] | null>;
+    } = {},
+  ) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-live-"));
     dirs.push(dir);
     const store = options.firestore ? new MemoryStore() : new WatchingStore();
@@ -843,7 +1031,12 @@ describe("RemoteBridge verbose view (live turn)", () => {
       configPath: path.join(dir, "remote.json"),
       projectId: "squeak-test",
       store,
-      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      replier: {
+        lastTurnText: () => null,
+        lastTurnId: () => null,
+        send: vi.fn(),
+        ...(options.queue ? { queue: options.queue } : {}),
+      },
       snapshot: () => ({ sessions: active, active, attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
       liveActivity,
       ...(options.verbose === undefined ? {} : { verbose: options.verbose }),
@@ -891,6 +1084,32 @@ describe("RemoteBridge verbose view (live turn)", () => {
     expect(turn.key).toBe("claude-transcript:s1");
     expect(turn.steps[0]!.text).toHaveLength(900); // not clipped to the snapshot's 200
     t.bridge.stop();
+  });
+
+  it("carries the chat's Conductor queue, read for its Conductor id; absent when it can't be read", async () => {
+    const queue = vi.fn(
+      async (sessionId: string): Promise<QueueItem[] | null> =>
+        sessionId === "s1" ? [{ id: "q1", text: "y".repeat(3_000), mode: "queue", position: 2 }] : null,
+    );
+    const t = verbose({ queue });
+    await t.pair();
+    await t.presence("claude-transcript:s1");
+    await t.bridge.tick();
+    await settle();
+    const [doc] = t.liveDocs();
+    const turn = open<{ queue?: QueueItem[] }>(t.payload.k, t.store.docs.get(doc!)!.box);
+    expect(queue).toHaveBeenCalledWith("s1");
+    expect(turn.queue).toEqual([{ id: "q1", text: `${"y".repeat(1_999)}…`, mode: "queue", position: 2 }]);
+    t.bridge.stop();
+
+    const bare = verbose();
+    await bare.pair();
+    await bare.presence("claude-transcript:s1");
+    await bare.bridge.tick();
+    await settle();
+    const [plain] = bare.liveDocs();
+    expect(open<Record<string, unknown>>(bare.payload.k, bare.store.docs.get(plain!)!.box)).not.toHaveProperty("queue");
+    bare.bridge.stop();
   });
 
   it("deletes it when the phone stops watching", async () => {
