@@ -1,4 +1,5 @@
 import AppKit
+import Heresay
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
@@ -226,6 +227,13 @@ private struct AboutSettings: View {
                     }
                 } footer: {
                     SectionFootnote("Versions, source status, session counts and recent log lines. No message text, titles, paths or ids.")
+                }
+                if SqueakMacApp.reportsEnabled {
+                    Section {
+                        Button("Report a problem…") { Heresay.present() }
+                    } footer: {
+                        SectionFootnote("Tell us what's broken, confusing or could be better. A person reads every report. Also in Help › Report a problem (⌥⌘R).")
+                    }
                 }
             }
             .formStyle(.grouped)

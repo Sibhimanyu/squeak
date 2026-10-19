@@ -7,21 +7,26 @@ import SwiftUI
 @main
 struct SqueakApp: App {
     init() {
-        // The corner button would sit on the reply box's Send button, so it stays off the
-        // session screen; Report is one tap away on the session list.
-        Heresay.configure(
-            key: "pk_ywg4d-und-rWBiNMlKdaVU0t",
-            url: URL(string: "https://heresay-sibhi-42b1.web.app")!,
-            style: HeresayStyle(hiddenOnScreens: ["Session"])
-        )
+        // No corner button: reports open from Settings › Report a problem (owner's choice).
+        Heresay.configure(key: "pk_ywg4d-und-rWBiNMlKdaVU0t", url: URL(string: "https://heresay-sibhi-42b1.web.app")!)
     }
 
     var body: some Scene {
         WindowGroup {
-            // Tell people once where Report is, when they reach the session list (never over pairing).
-            SqueakRootView(onMainScreen: { Heresay.introduce() }, onScreen: { Heresay.setScreen($0) })
-                .onOpenURL { SqueakRouter.shared.handle($0) }
-                .heresayReportButton()
+            // Tell people once where reports live, when they reach the session list (never over
+            // pairing). The default wording points at a corner button this app doesn't have.
+            SqueakRootView(
+                onMainScreen: {
+                    Heresay.introduce(
+                        title: "Help make Squeak better",
+                        message: "Open Settings and choose Report a problem any time to say what's broken, confusing or could be better. A person reads every report."
+                    )
+                },
+                onScreen: { Heresay.setScreen($0) },
+                onReport: { Heresay.present() }
+            )
+            .onOpenURL { SqueakRouter.shared.handle($0) }
+            .heresay()
         }
     }
 }

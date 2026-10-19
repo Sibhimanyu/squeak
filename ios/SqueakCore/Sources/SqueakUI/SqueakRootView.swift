@@ -14,13 +14,17 @@ public struct SqueakRootView: View {
     @State private var visible = false
     private let onMainScreen: (() -> Void)?
     private let onScreen: ((String) -> Void)?
+    private let onReport: (() -> Void)?
 
     /// `onMainScreen` runs when the session list appears (paired, past onboarding).
     /// `onScreen` names the screen in front ("Pairing", "Sessions", "Session"), for the host's
-    /// feedback tool.
-    public init(onMainScreen: (() -> Void)? = nil, onScreen: ((String) -> Void)? = nil) {
+    /// feedback tool. `onReport` opens that tool; Settings shows "Report a problem" when it is set.
+    public init(
+        onMainScreen: (() -> Void)? = nil, onScreen: ((String) -> Void)? = nil, onReport: (() -> Void)? = nil
+    ) {
         self.onMainScreen = onMainScreen
         self.onScreen = onScreen
+        self.onReport = onReport
     }
 
     /// Squeak's duck as a tab-bar glyph (a template image, so the tab bar
@@ -31,7 +35,7 @@ public struct SqueakRootView: View {
     public var body: some View {
         RootView(onMainScreen: onMainScreen)
             .environmentObject(model)
-            .environment(\.squeakScreen, ScreenReporter(report: onScreen))
+            .environment(\.squeakScreen, ScreenReporter(report: onScreen, openReport: onReport))
             .tint(Theme.done)
             .onAppear { visible = true; update() }
             .onDisappear { visible = false; update() }
@@ -59,6 +63,7 @@ struct RootView: View {
 /// Tells the host which screen is in front.
 struct ScreenReporter: @unchecked Sendable {
     var report: ((String) -> Void)?
+    var openReport: (() -> Void)?
 }
 
 extension EnvironmentValues {
