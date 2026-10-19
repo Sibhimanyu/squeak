@@ -39,9 +39,6 @@ struct HomeView: View {
         NavigationStack(path: $path) {
             List {
                 if model.snapshot != nil {
-                    Text(subtitle).font(.body).foregroundStyle(Theme.muted)
-                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                     controls
                     if let starting = model.startingChat { StartingRow(label: starting.label) }
                     let visible = groups
@@ -66,8 +63,9 @@ struct HomeView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
+            // Inline, two lines in the bar (like a chat's header): the list is what this screen is for.
             .navigationTitle("Sessions")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: "Search sessions…")
             .navigationDestination(for: String.self) { key in SessionView(key: key) }
             .refreshable { await model.refresh() }
@@ -91,6 +89,16 @@ struct HomeView: View {
             ToolbarItem(placement: .topBarLeading) { duck }.sharedBackgroundVisibility(.hidden)
         } else {
             ToolbarItem(placement: .topBarLeading) { duck }
+        }
+        ToolbarItem(placement: .principal) {
+            VStack(spacing: 1) {
+                Text("Sessions").font(.headline)
+                if model.snapshot != nil {
+                    Text(subtitle).font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
         }
         // Only a Mac new enough to list workspaces can start a chat; Settings says so otherwise.
         if model.snapshot?.workspaces != nil {
@@ -123,7 +131,7 @@ struct HomeView: View {
 
     private var subtitle: String {
         let count = sessions.count
-        return count == 0 ? "Nothing active on your Mac" : "\(count) active across your Mac"
+        return count == 0 ? "Nothing active" : "\(count) active"
     }
 
     private func openPending() {
@@ -154,9 +162,10 @@ struct HomeView: View {
                 Text("Working").tag(Presentation.Filter.working)
             }
             .pickerStyle(.segmented)
+            .controlSize(.small)
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
+            .listRowInsets(EdgeInsets(top: 2, leading: 20, bottom: 4, trailing: 20))
         }
     }
 
