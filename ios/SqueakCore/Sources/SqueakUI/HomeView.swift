@@ -261,9 +261,16 @@ struct SectionHeader: View {
 }
 
 struct SessionRow: View {
+    @EnvironmentObject var model: AppModel
     let session: PhoneSnapshot.Session
 
-    private var status: Presentation.Status { Presentation.status(session) }
+    /// The Mac's state, except while this phone's own message is about to start a turn: then
+    /// "starting", the same rule the chat uses (ChatTimeline.isStarting), so the two agree.
+    private var status: Presentation.Status {
+        ChatTimeline.isStarting(session: session, sends: model.outbox[session.key] ?? [])
+            ? .init(text: "starting", tone: .working)
+            : Presentation.status(session)
+    }
 
     var body: some View {
         // §8.2: dot, then title and age, `repo · agent`, and the state word or the live step.

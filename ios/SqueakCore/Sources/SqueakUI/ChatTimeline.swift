@@ -83,8 +83,20 @@ enum ChatTimeline {
         }
     }
 
-    /// A send with no reply this long after it stops counting as "starting", whatever the snapshot says.
-    static let giveUp: TimeInterval = 600
+    /// A send that has not made the Mac report the agent working this long after it stops counting
+    /// as "starting": the Mac's word wins. Streamed, a turn that starts shows as working within a
+    /// second or two, so a send still not answered after this has not started anything. (It was ten
+    /// minutes, and a chat whose turn had ended said "Starting…" inside while the list said done.)
+    static let giveUp: TimeInterval = 90
+
+    /// Whether this phone's own send makes the chat look like it is starting while the Mac does not
+    /// yet say working. The list row uses it too, so the two never disagree.
+    static func isStarting(session: PhoneSnapshot.Session, sends: [ChatSend], now: Date = Date()) -> Bool {
+        guard session.state != "working" else { return false }
+        return rows(session: session, remembered: nil, sends: sends, now: now).contains {
+            if case .working = $0 { true } else { false }
+        }
+    }
 
     static func rows(
         session: PhoneSnapshot.Session, remembered: RememberedMessage?, sends: [ChatSend], now: Date = Date()

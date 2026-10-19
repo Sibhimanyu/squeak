@@ -69,10 +69,22 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertEqual(rows, [.agent(text: "Earlier answer", atISO: iso(600), muted: false), .sent(s)])
     }
 
-    func testAnUnansweredSendGivesUpAfterTenMinutes() {
-        let s = send(.sent, ago: 700)
+    func testAnUnansweredSendDefersToTheMacAfterNinetySeconds() {
+        // Still starting a minute in: Conductor may be picking it up from its queue.
+        let early = ChatTimeline.rows(session: session("finished", message: "Earlier answer"), remembered: previous, sends: [send(.sent, ago: 60)], now: now)
+        XCTAssertTrue(early.contains { if case .working = $0 { true } else { false } })
+        let s = send(.sent, ago: 100)
         let rows = ChatTimeline.rows(session: session("finished", message: "Earlier answer"), remembered: previous, sends: [s], now: now)
         XCTAssertFalse(rows.contains { if case .working = $0 { true } else { false } })
+    }
+
+    func testTheListAndTheChatAgreeOnStarting() {
+        let finished = session("finished", message: "Earlier answer")
+        XCTAssertTrue(ChatTimeline.isStarting(session: finished, sends: [send()], now: now))
+        XCTAssertFalse(ChatTimeline.isStarting(session: finished, sends: [], now: now))
+        XCTAssertFalse(ChatTimeline.isStarting(session: finished, sends: [send(.sent, ago: 100)], now: now))
+        // Working is the Mac's own word; "starting" is only for the gap before it.
+        XCTAssertFalse(ChatTimeline.isStarting(session: session("working"), sends: [send()], now: now))
     }
 
     func testNeedsYouIsNeverWorking() {
