@@ -15,6 +15,13 @@ final class LiveTurnTests: XCTestCase {
         XCTAssertNil(turn.steps[0].at)
     }
 
+    func testPresenceAsksForMoreRecentOnlyWhenTold() throws {
+        let asked = String(data: try JSONEncoder().encode(Presence(at: 5, recent: 30)), encoding: .utf8)!
+        XCTAssertTrue(asked.contains(#""recent":30"#))
+        let plain = String(data: try JSONEncoder().encode(Presence(at: 5)), encoding: .utf8)!
+        XCTAssertFalse(plain.contains("recent"))
+    }
+
     func testPresenceLeavesWatchingOutWhenNotVerbose() throws {
         let plain = String(data: try JSONEncoder().encode(Presence(at: 5)), encoding: .utf8)
         XCTAssertEqual(plain, #"{"at":5}"#)

@@ -55,6 +55,20 @@ final class AppModel: ObservableObject {
     /// The session open on screen.
     private var watching: String?
     private var liveTask: Task<Void, Never>?
+    /// How many recent chats Home has asked for; "Show more" adds 20, up to the Mac's 50.
+    @Published private(set) var recentWanted = 10
+    /// Sent only once more is asked for, so a phone at the default writes the same presence as before.
+    private var recentAsk: Int? { recentWanted > 10 ? recentWanted : nil }
+
+    /// Ask the Mac for 20 more recent chats; they arrive with the next view.
+    func showMoreRecent() {
+        guard recentWanted < 50 else { return }
+        recentWanted = min(50, recentWanted + 20)
+        guard !demo, let channel else { return }
+        let watching = presenceWatching, recent = recentAsk
+        Task { try? await channel.touchPresence(watching: watching, recent: recent) }
+    }
+
     /// What presence tells the Mac to stream: only in verbose mode.
     private var presenceWatching: String? { verbose ? watching : nil }
     private var lastPresence = Date.distantPast
@@ -168,7 +182,7 @@ final class AppModel: ObservableObject {
         liveTask?.cancel()
         liveTask = nil
         // Ask the Mac to stop (and delete) the live turn now rather than when presence lapses.
-        if wasStreaming, let channel { Task { try? await channel.touchPresence(watching: nil) } }
+        if wasStreaming, let channel { Task { try? await channel.touchPresence(watching: nil, recent: recentAsk) } }
     }
 
     /// The session on screen, or nil when none is. In verbose mode the Mac streams its turn.
@@ -185,7 +199,7 @@ final class AppModel: ObservableObject {
         guard !demo, loop != nil, let channel else { return }
         let key = presenceWatching
         liveTask = Task { [weak self] in
-            try? await channel.touchPresence(watching: key)
+            try? await channel.touchPresence(watching: key, recent: recentAsk)
             self?.lastPresence = Date()
             guard let key else { return }
             guard let turns = await channel.liveTurns(for: key) else {
@@ -228,7 +242,7 @@ final class AppModel: ObservableObject {
         guard let channel else { return }
         guard phase == .paired else { await tick(); return }
         do {
-            try await channel.touchPresence(watching: presenceWatching)
+            try await channel.touchPresence(watching: presenceWatching, recent: recentAsk)
             lastPresence = Date()
             lastFetch = Date()
             problem = nil
@@ -265,7 +279,7 @@ final class AppModel: ObservableObject {
             }
             // Tell the Mac someone is looking, so it publishes and polls faster.
             if Date().timeIntervalSince(lastPresence) > 20 {
-                try await channel.touchPresence(watching: presenceWatching)
+                try await channel.touchPresence(watching: presenceWatching, recent: recentAsk)
                 lastPresence = Date()
             }
             if let next = try await channel.snapshot() {

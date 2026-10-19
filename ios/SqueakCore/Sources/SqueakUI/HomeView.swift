@@ -69,6 +69,21 @@ struct HomeView: View {
                                     .listRowBackground(Color.clear)
                                     .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                             }
+                            if query.isEmpty, model.snapshot?.recentMore == true {
+                                let waiting = model.recentWanted > older.count
+                                Button { model.showMoreRecent() } label: {
+                                    HStack(spacing: 8) {
+                                        if waiting && model.recentWanted > 10 { ProgressView() }
+                                        Text(waiting && model.recentWanted > 10 ? "Loading older chats…" : "Show more")
+                                            .font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                }
+                                .disabled(waiting && model.recentWanted > 10)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .accessibilityHint("Loads older chats from your Mac")
+                            }
                         } header: {
                             SectionHeader(title: "Recent", count: older.count)
                         }

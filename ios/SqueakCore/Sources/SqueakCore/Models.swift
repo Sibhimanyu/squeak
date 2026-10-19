@@ -172,11 +172,14 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// Conductor chats that are no longer active, newest first, to pick up
     /// again. Optional: a Mac older than this does not send it.
     public let recent: [Session]?
+    /// Whether the Mac has more recent chats than it sent ("Show more"). Optional: older Macs omit it.
+    public let recentMore: Bool?
 
     public init(
         v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session], usage: Usage? = nil,
-        workspaces: [Workspace]? = nil, recent: [Session]? = nil
+        workspaces: [Workspace]? = nil, recent: [Session]? = nil, recentMore: Bool? = nil
     ) {
+        self.recentMore = recentMore
         self.v = v; self.mac = mac; self.generatedAt = generatedAt; self.duck = duck; self.sessions = sessions
         self.usage = usage; self.workspaces = workspaces; self.recent = recent
     }

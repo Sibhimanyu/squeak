@@ -1087,3 +1087,60 @@ describe("RemoteBridge recent chats", () => {
     expect(view.recent[0]!.message!.length).toBeLessThanOrEqual(2_001);
   });
 });
+
+describe("RemoteBridge recent chats, Show more", () => {
+  const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
+  const chat = (id: string, minutesAgo: number) =>
+    session({ key: `k:${id}`, conductorSessionId: id, state: "idle", lastActivityAt: at(minutesAgo) });
+
+  async function more(sessions: FleetSession[], wanted?: number) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-more-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => "x".repeat(3_000), lastTurnId: () => "t", send: vi.fn() },
+      snapshot: () => ({ sessions, active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    await store.set(`channels/${payload.c}/state/presence`, {
+      box: seal(payload.k, { at: NOW, ...(wanted === undefined ? {} : { recent: wanted }) }),
+    });
+    await bridge.tick();
+    const view = bridge.phoneView();
+    bridge.stop();
+    return view;
+  }
+
+  const day = 24 * 60;
+  const many = Array.from({ length: 60 }, (_, i) => chat(`c${i}`, (i + 1) * 60 * 10)); // every 10h, back 25 days
+
+  it("sends a week's ten by default and says there are more", async () => {
+    const view = await more(many);
+    expect(view.recent).toHaveLength(10);
+    expect(view.recentMore).toBe(true);
+  });
+
+  it("sends what the phone asks for, back a month, with short previews past the first ten", async () => {
+    const view = await more(many, 30);
+    expect(view.recent).toHaveLength(30);
+    expect(view.recent[9]!.message!.length).toBeGreaterThan(1_000);
+    expect(view.recent[10]!.message!.length).toBeLessThanOrEqual(301);
+    expect(view.recentMore).toBe(true);
+  });
+
+  it("never more than fifty, and Show more stops when nothing is left", async () => {
+    expect((await more(many, 500)).recent).toHaveLength(50);
+    const few = await more([chat("a", 60), chat("b", 10 * day)], 30);
+    expect(few.recent.map((s) => s.key)).toEqual(["k:a", "k:b"]);
+    expect(few.recentMore).toBe(false);
+  });
+
+  it("an older phone's plain presence keeps the default", async () => {
+    expect((await more(many, undefined)).recent).toHaveLength(10);
+  });
+});

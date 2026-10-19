@@ -110,8 +110,8 @@ public struct Channel: Sendable {
     /// Tells the Mac a phone is looking, so it polls and publishes faster.
     /// `watching` names the session open on screen, only in verbose mode;
     /// the Mac then publishes its whole turn (`liveTurn`) until it is nil.
-    public func touchPresence(watching: String? = nil, now: Date = Date()) async throws {
-        let presence = Presence(at: Int64(now.timeIntervalSince1970 * 1000), watching: watching)
+    public func touchPresence(watching: String? = nil, recent: Int? = nil, now: Date = Date()) async throws {
+        let presence = Presence(at: Int64(now.timeIntervalSince1970 * 1000), watching: watching, recent: recent)
         let box = try ChannelCrypto.seal(presence, key: pairing.k)
         try await store.set(path("state", "presence"), ChannelDocument(box: box))
     }

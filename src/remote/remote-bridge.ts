@@ -231,8 +231,13 @@ const MESSAGE_MAX_CHARS = 8_000;
  * rarely, but every published view carries them.
  */
 export const PHONE_RECENT_LIMIT = 10;
+/** "Show more" on the phone asks for up to this many, and reaches back further. */
+export const PHONE_RECENT_MAX = 50;
 const PHONE_RECENT_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
+const PHONE_RECENT_MORE_AGE_MS = 30 * 24 * 60 * 60_000;
 const RECENT_MESSAGE_MAX_CHARS = 2_000;
+/** Past the first PHONE_RECENT_LIMIT, a preview: enough to recognise the chat, small enough to send 50. */
+const RECENT_MORE_MESSAGE_MAX_CHARS = 300;
 /** How many workspaces the snapshot offers a phone for a new chat. */
 export const PHONE_WORKSPACE_LIMIT = 20;
 /** One start per device in this window: a stolen phone cannot fan out agents. */
@@ -272,6 +277,8 @@ export class RemoteBridge {
   private announcedFor = "";
   /** The session the phone's last presence said it is watching in verbose mode. */
   private presenceWatching: string | null = null;
+  /** How many recent chats the phone asked for ("Show more"); a view preference, not a command. */
+  private recentWanted = PHONE_RECENT_LIMIT;
   private readonly live: LiveTurnPublisher | null;
   private lastSignature: string | null = null;
   private changeTimer: NodeJS.Timeout | null = null;
@@ -615,11 +622,19 @@ export class RemoteBridge {
       return;
     }
     try {
-      const presence = open<{ at: number; watching?: unknown }>(config.key, doc.box);
+      const presence = open<{ at: number; watching?: unknown; recent?: unknown }>(config.key, doc.box);
       // A phone's clock is not ours; only trust it not to be in the future.
       this.phoneSeenAt = Math.max(this.phoneSeenAt, Math.min(presence.at, this.now()));
       this.presenceWatching =
         typeof presence.watching === "string" && presence.watching.length <= 300 ? presence.watching : null;
+      const wanted =
+        typeof presence.recent === "number" && Number.isFinite(presence.recent)
+          ? Math.min(PHONE_RECENT_MAX, Math.max(PHONE_RECENT_LIMIT, Math.trunc(presence.recent)))
+          : PHONE_RECENT_LIMIT;
+      if (wanted !== this.recentWanted) {
+        this.recentWanted = wanted;
+        this.nudgePublish(0);
+      }
     } catch {
       // Not ours — ignore it.
     }
@@ -911,7 +926,7 @@ export class RemoteBridge {
 
   phoneView() {
     const snapshot = this.deps.snapshot();
-    const recent = this.recentSessions(snapshot);
+    const { recent, more } = this.recentSessions(snapshot, this.phoneOpen() ? this.recentWanted : PHONE_RECENT_LIMIT);
     const titles = distinctTitles([...snapshot.active, ...recent]);
     const blocked = snapshot.active.filter((session) => session.state.startsWith("awaiting")).length;
     const working = snapshot.active.filter((session) => session.state === "working").length;
@@ -926,7 +941,15 @@ export class RemoteBridge {
       ...(this.deps.newChat ? { workspaces: this.phoneWorkspaces() } : {}),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
       // Older phones ignore it; newer ones list it under Recent and can reply to any of them.
-      recent: recent.map((session) => this.phoneSession(session, titles, RECENT_MESSAGE_MAX_CHARS)),
+      recent: recent.map((session, index) =>
+        this.phoneSession(
+          session,
+          titles,
+          index < PHONE_RECENT_LIMIT ? RECENT_MESSAGE_MAX_CHARS : RECENT_MORE_MESSAGE_MAX_CHARS,
+        ),
+      ),
+      // Whether "Show more" would find anything; older phones ignore it.
+      recentMore: more,
     };
   }
 
@@ -935,19 +958,23 @@ export class RemoteBridge {
    * not in an archived workspace (`retired`), touched in the last week. Only
    * Conductor chats, because those are what a phone can reply to.
    */
-  private recentSessions(snapshot: FleetSnapshot): FleetSession[] {
+  private recentSessions(snapshot: FleetSnapshot, limit: number): { recent: FleetSession[]; more: boolean } {
     const active = new Set(snapshot.active.map((session) => session.key));
-    const since = this.now() - PHONE_RECENT_MAX_AGE_MS;
-    return snapshot.sessions
+    // The first page is the last week; asking for more reaches back a month.
+    const since = this.now() - (limit > PHONE_RECENT_LIMIT ? PHONE_RECENT_MORE_AGE_MS : PHONE_RECENT_MAX_AGE_MS);
+    const monthAgo = this.now() - PHONE_RECENT_MORE_AGE_MS;
+    const candidates = snapshot.sessions
       .filter(
         (session) =>
           !active.has(session.key) &&
           !session.retired &&
           Boolean(session.conductorSessionId) &&
-          Date.parse(session.lastActivityAt) >= since,
+          Date.parse(session.lastActivityAt) >= monthAgo,
       )
-      .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
-      .slice(0, PHONE_RECENT_LIMIT);
+      .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
+    const inWindow = candidates.filter((session) => Date.parse(session.lastActivityAt) >= since);
+    const recent = inWindow.slice(0, limit);
+    return { recent, more: limit < PHONE_RECENT_MAX && candidates.length > recent.length };
   }
 
   private phoneSession(session: FleetSession, titles: Map<string, string | null>, maxChars: number) {

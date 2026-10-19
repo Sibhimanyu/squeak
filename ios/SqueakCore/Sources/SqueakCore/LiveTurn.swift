@@ -35,8 +35,10 @@ public struct Presence: Codable, Equatable, Sendable {
     public let at: Int64
     /// The session open on screen, only when verbose mode is on.
     public let watching: String?
+    /// How many recent chats to send, after "Show more"; absent means the Mac's default (10).
+    public let recent: Int?
 
-    public init(at: Int64, watching: String? = nil) {
-        self.at = at; self.watching = watching
+    public init(at: Int64, watching: String? = nil, recent: Int? = nil) {
+        self.at = at; self.watching = watching; self.recent = recent
     }
 }
