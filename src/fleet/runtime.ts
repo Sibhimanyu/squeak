@@ -52,6 +52,8 @@ export interface FleetRuntime {
   setCanReply(canReply: ((session: FleetSession) => boolean) | null): void;
   /** Where /state reads Claude's last plan-limit reading from. */
   setClaudeLimits(read: (() => ClaudeLimits | null) | null): void;
+  /** Where /state reads the "Keep Mac awake" switch from. */
+  setKeepAwake(read: (() => boolean) | null): void;
 }
 
 /**
@@ -95,11 +97,12 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     port: options.hookPort,
     tokenPath: defaultHookInstallPaths(options.supportDir).tokenPath,
     onEvent: (event) => monitor.ingestHookEvent(event),
-    readState: () => serializeState(monitor, canReply, claudeLimits?.() ?? null),
+    readState: () => serializeState(monitor, canReply, claudeLimits?.() ?? null, keepAwake?.() ?? false),
   });
 
   let canReply: ((session: FleetSession) => boolean) | null = null;
   let claudeLimits: (() => ClaudeLimits | null) | null = null;
+  let keepAwake: (() => boolean) | null = null;
   return {
     registry,
     store,
@@ -112,6 +115,9 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     },
     setClaudeLimits: (next) => {
       claudeLimits = next;
+    },
+    setKeepAwake: (next) => {
+      keepAwake = next;
     },
   };
 }
@@ -177,6 +183,7 @@ export function serializeState(
   monitor: FleetMonitor,
   canReply: ((session: FleetSession) => boolean) | null = null,
   claudeLimits: ClaudeLimits | null = null,
+  keepAwake = false,
 ): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
@@ -196,6 +203,8 @@ export function serializeState(
     // Claude Code's last plan-limit reading (utilization 0-1), with when it was
     // seen; null until one has been. Refreshed only by the owner's request.
     claudeLimits,
+    // The "Keep Mac awake" switch, for the menu bar's checkbox.
+    keepAwake,
     active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),
     others: others.map((session) => serializeSession(session, canReply, null)),
     attention: snapshot.attention.map((item) => ({

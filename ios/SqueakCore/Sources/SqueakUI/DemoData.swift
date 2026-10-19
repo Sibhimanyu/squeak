@@ -81,7 +81,7 @@ enum DemoData {
 
     static var snapshot: PhoneSnapshot {
         let raw = rawSnapshot
-        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: ProcessInfo.processInfo.arguments.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent)
+        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: ProcessInfo.processInfo.arguments.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent, keepAwake: raw.keepAwake ?? false)
     }
 
     /// Chats from earlier, to pick up again. `-squeak-demo-empty-active` shows them with nothing active.

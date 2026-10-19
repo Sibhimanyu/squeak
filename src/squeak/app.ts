@@ -100,13 +100,14 @@ export class SqueakApp {
   private readonly claudeLimits: ClaudeLimitsStore;
   private readonly claudeRefresher: ClaudeLimitsRefresher;
   /** Keeps the Mac awake while an agent works, and while plugged in (SQUEAK_CAFFEINATE). */
-  private readonly caffeinator = new Caffeinator();
+  private readonly caffeinator: Caffeinator;
   private unwatchCaffeinate: (() => void) | null = null;
   private lastUpdateId = 0;
   private stopped = false;
 
   constructor(config: SqueakConfig) {
     this.config = config;
+    this.caffeinator = new Caffeinator(undefined, undefined, path.join(config.supportDir, "keep-awake.json"));
     this.telegram = config.botToken ? new TelegramClient(config.botToken) : null;
     const telegram = this.telegram;
     this.telegramStatus = new TelegramStatus({
@@ -193,6 +194,10 @@ export class SqueakApp {
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
           // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
           refreshUsage: () => this.claudeRefresher.refresh(),
+          keepAwake: {
+            get: () => this.caffeinator.keepAwake,
+            set: (on) => this.caffeinator.setKeepAwake(on),
+          },
           // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
           answerer: answers,
           newChat: {
@@ -241,6 +246,10 @@ export class SqueakApp {
         return { text, choices: parseChoices(text) };
       },
       refreshClaudeUsage: () => this.claudeRefresher.refresh(),
+      setKeepAwake: (on) => {
+        this.caffeinator.setKeepAwake(on);
+        return { keepAwake: this.caffeinator.keepAwake };
+      },
       transcript: (target, limit) => this.router.transcript(target, limit),
       activity: (key) => {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
@@ -259,6 +268,7 @@ export class SqueakApp {
 
     this.claudeLimits = new ClaudeLimitsStore(path.join(config.supportDir, "claude-limits.json"));
     this.runtime.setClaudeLimits(() => this.claudeLimits.latest());
+    this.runtime.setKeepAwake(() => this.caffeinator.keepAwake);
     const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
       this.claudeLimits.record(limits),
     );
@@ -295,6 +305,8 @@ export class SqueakApp {
     if (this.config.caffeinate) {
       this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
     }
+    // The user's own switch is honoured even with SQUEAK_CAFFEINATE=off: they asked.
+    this.caffeinator.restoreSwitch();
     if (this.config.caffeinateOnPower) {
       this.caffeinator.holdOnPower();
     }

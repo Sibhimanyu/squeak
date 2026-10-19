@@ -404,6 +404,30 @@ describe("HookIngressServer control routes", () => {
     expect(calls).toBe(1);
   });
 
+  it("flips the keep-awake switch only for a caller with the token, with a boolean", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const flips: boolean[] = [];
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      setKeepAwake: (on) => {
+        flips.push(on);
+        return { keepAwake: on };
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/keep-awake`;
+    const auth = { "x-squeak-token": harness.token };
+    expect((await fetch(url, { method: "POST", body: JSON.stringify({ on: true }) })).status).toBe(403);
+    expect((await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ on: "yes" }) })).status).toBe(400);
+    expect(flips).toEqual([]);
+    const ok = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ on: true }) });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ keepAwake: true });
+    expect(flips).toEqual([true]);
+  });
+
   it("rejects an empty reply and an unknown route", async () => {
     const { base, auth, replies } = await withControl();
     const empty = await fetch(`${base}/reply`, { method: "POST", headers: auth, body: JSON.stringify({ text: "  " }) });

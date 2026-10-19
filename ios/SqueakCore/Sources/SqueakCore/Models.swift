@@ -177,12 +177,15 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public let recent: [Session]?
     /// Whether the Mac has more recent chats than it sent ("Show more"). Optional: older Macs omit it.
     public let recentMore: Bool?
+    /// The Mac's "Keep Mac awake" switch. Optional: a Mac without it omits it, and the phone hides the toggle.
+    public let keepAwake: Bool?
 
     public init(
         v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session], usage: Usage? = nil,
-        workspaces: [Workspace]? = nil, recent: [Session]? = nil, recentMore: Bool? = nil
+        workspaces: [Workspace]? = nil, recent: [Session]? = nil, recentMore: Bool? = nil, keepAwake: Bool? = nil
     ) {
         self.recentMore = recentMore
+        self.keepAwake = keepAwake
         self.v = v; self.mac = mac; self.generatedAt = generatedAt; self.duck = duck; self.sessions = sessions
         self.usage = usage; self.workspaces = workspaces; self.recent = recent
     }
@@ -266,6 +269,16 @@ public struct StartCommand: Codable, Equatable, Sendable {
 public struct UsageCommand: Codable, Equatable, Sendable {
     public let v: Int
     public let kind: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// A signed flip of the Mac's "Keep Mac awake" switch. Reaches no agent.
+public struct AwakeCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let on: Bool
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

@@ -552,6 +552,21 @@ function openSqueak() {
   }
 }
 
+/** Flips the switch at once in the menu; the next /state poll settles it either way. */
+async function toggleKeepAwake() {
+  if (!lastState) {
+    return;
+  }
+  const on = !lastState.keepAwake;
+  lastState = { ...lastState, keepAwake: on };
+  refreshTray();
+  const result = await service.setKeepAwake(on);
+  if (result === null && lastState) {
+    lastState = { ...lastState, keepAwake: !on };
+    refreshTray();
+  }
+}
+
 async function restartServiceFromMenu() {
   await service.restartService();
 }
@@ -570,6 +585,15 @@ function refreshTray() {
       { label: "Open Squeak…", click: openSqueak },
       { type: "separator" },
       ...usageMenuItems(state),
+      { type: "separator" },
+      // Holds the Mac awake on battery too, so the phone can reach it; the lid still sleeps it.
+      {
+        label: "Keep Mac awake",
+        type: "checkbox",
+        checked: Boolean(state?.keepAwake),
+        enabled: Boolean(state && "keepAwake" in state),
+        click: () => void toggleKeepAwake(),
+      },
       { type: "separator" },
       // Toggle, so pass the negation. Passing `hidden` made this a no-op:
       // setHidden returns early when the requested state already matches.

@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.squeakScreen) private var screen
     @State private var confirmingUnpair = false
+    @State private var awakeProblem: String?
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
@@ -30,6 +31,18 @@ struct SettingsView: View {
                                 .font(.subheadline).foregroundStyle(Theme.muted)
                         }
                         LabeledContent("Last change", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")
+                    }
+                }
+                if let keepAwake = model.keepAwake {
+                    Section {
+                        Toggle("Keep Mac awake", isOn: Binding(
+                            get: { keepAwake },
+                            set: { on in Task { awakeProblem = await model.setKeepAwake(on) } }
+                        ))
+                        .tint(Theme.primaryFill)
+                        .frame(minHeight: 44)
+                    } footer: {
+                        Text(awakeProblem ?? "Stops your Mac sleeping, on battery too, so this iPhone can reach it. Closing the lid still sleeps it. When plugged in, your Mac stays awake anyway.")
                     }
                 }
                 Section {

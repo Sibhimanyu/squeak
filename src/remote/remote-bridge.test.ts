@@ -1235,6 +1235,76 @@ describe("RemoteBridge verbose view (live turn)", () => {
   });
 });
 
+describe("RemoteBridge keep-awake switch from the phone", () => {
+  async function awake(options: { offered?: boolean } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-awake-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    let on = false;
+    const set = vi.fn((next: boolean) => {
+      on = next;
+    });
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      ...(options.offered === false ? {} : { keepAwake: { get: () => on, set } }),
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const channel = `channels/${payload.c}`;
+    const phone = device();
+    await store.set(`${channel}/pairing/iphone-1`, { box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }) });
+    await bridge.tick();
+    await bridge.approve("iphone-1");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    const command = (value: unknown, signer = phone) => {
+      const box = seal(payload.k, {
+        v: 1,
+        kind: "awake",
+        on: value,
+        nonce: crypto.randomBytes(16).toString("hex"),
+        expiresAt: NOW + 60_000,
+      });
+      return { box, sig: signer.sign(box), device: "iphone-1" };
+    };
+    return { bridge, config, command, set };
+  }
+
+  it("a signed flip turns the switch on and off, and the phone view says so", async () => {
+    const t = await awake();
+    expect(t.bridge.phoneView().keepAwake).toBe(false);
+    const verdict = await t.bridge.handleCommand(t.config, "a1", t.command(true));
+    expect(verdict.result).toMatchObject({ status: "sent" });
+    expect(t.set).toHaveBeenLastCalledWith(true);
+    expect(t.bridge.phoneView().keepAwake).toBe(true);
+    await t.bridge.handleCommand(t.config, "a2", t.command(false));
+    expect(t.set).toHaveBeenLastCalledWith(false);
+    t.bridge.stop();
+  });
+
+  it("an unsigned flip, or one that is not a boolean, changes nothing", async () => {
+    const t = await awake();
+    const forged = await t.bridge.handleCommand(t.config, "a1", t.command(true, device()));
+    expect(forged.write).toBe(false);
+    const odd = await t.bridge.handleCommand(t.config, "a2", t.command("yes"));
+    expect(odd.result).toMatchObject({ status: "refused" });
+    expect(t.set).not.toHaveBeenCalled();
+    t.bridge.stop();
+  });
+
+  it("a Mac without the switch refuses it and leaves it out of the view", async () => {
+    const t = await awake({ offered: false });
+    expect(t.bridge.phoneView()).not.toHaveProperty("keepAwake");
+    const verdict = await t.bridge.handleCommand(t.config, "a1", t.command(true));
+    expect(verdict.result).toMatchObject({ status: "refused" });
+    t.bridge.stop();
+  });
+});
+
 describe("RemoteBridge usage refresh from the phone", () => {
   async function usage(options: { refresh?: boolean } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-usage-"));

@@ -220,6 +220,16 @@ async function pairingQr() {
   }
 }
 
+/** The "Keep Mac awake" switch. Answers the daemon's new state, or null if it could not be set. */
+async function setKeepAwake(on) {
+  try {
+    const { keepAwake } = await control("keep-awake", { method: "POST", body: JSON.stringify({ on: on === true }) });
+    return keepAwake === true;
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
   openInConductor,
   pairingQr,
@@ -230,4 +240,5 @@ module.exports = {
   serviceStatus,
   sessionActivity,
   sessionMessage,
+  setKeepAwake,
 };

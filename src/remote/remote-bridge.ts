@@ -134,6 +134,19 @@ export interface UsageCommand {
   expiresAt: number;
 }
 
+/**
+ * A signed flip of the Mac's "Keep Mac awake" switch (fleet/caffeinate.ts).
+ * Only an on/off: it reaches no agent and carries no text.
+ */
+export interface AwakeCommand {
+  v: 1;
+  kind: "awake";
+  on: boolean;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
 export interface RemoteActivity {
   at: string;
   device: string;
@@ -205,6 +218,8 @@ export interface RemoteBridgeDependencies {
    * throttled to once a minute). Absent: a phone's Refresh is refused.
    */
   refreshUsage?: (() => Promise<{ refreshed: boolean; throttled: boolean; error?: string }>) | null;
+  /** The "Keep Mac awake" switch. Absent: phones hide it, and a flip is refused. */
+  keepAwake?: { get(): boolean; set(on: boolean): void } | null;
   /** Claude's last plan-limit reading, for the read-only usage view on the phone. */
   claudeLimits?: (() => ClaudeLimits | null) | null;
   /**
@@ -780,6 +795,9 @@ export class RemoteBridge {
     if (kind === "start") {
       return this.handleStart(device, id, command as unknown as StartCommand, now);
     }
+    if (kind === "awake") {
+      return this.handleAwake(device, id, command as unknown as AwakeCommand);
+    }
     if (kind === "usage") {
       return this.handleUsage(device, id, command as unknown as UsageCommand);
     }
@@ -984,6 +1002,23 @@ export class RemoteBridge {
     return recent.some((session) => session.conductorSessionId === conductorSessionId);
   }
 
+  /** A keep-awake flip. Signature, freshness and nonce have already held. */
+  private handleAwake(
+    device: PairedDevice,
+    id: string,
+    command: AwakeCommand,
+  ): { write: boolean; result: Record<string, unknown> } {
+    const keepAwake = this.deps.keepAwake;
+    if (!keepAwake || command.v !== 1 || typeof command.on !== "boolean") {
+      this.log(device.name, "rejected", "keep awake: not available");
+      return { write: true, result: { id, status: "refused", reason: "This Mac can't be kept awake from a phone." } };
+    }
+    keepAwake.set(command.on);
+    this.nudgePublish(0);
+    this.log(device.name, "sent", command.on ? "keep the Mac awake" : "let the Mac sleep");
+    return { write: true, result: { id, status: "sent" } };
+  }
+
   /** A usage refresh. Signature, freshness and nonce have already held. */
   private async handleUsage(
     device: PairedDevice,
@@ -1047,6 +1082,7 @@ export class RemoteBridge {
       JSON.stringify(view.recent) +
       JSON.stringify(view.duck) +
       JSON.stringify(view.workspaces) +
+      JSON.stringify(view.keepAwake) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     if (serialized === this.lastPublished) {
       return;
@@ -1072,6 +1108,8 @@ export class RemoteBridge {
       duck: { blockedCount: blocked, workingCount: working },
       // Read-only. Refreshing Claude's reading is a Mac action; commands are plain replies only.
       usage: phoneUsage(snapshot.codexUsage, this.deps.claudeLimits?.() ?? null),
+      // The "Keep Mac awake" switch; absent when this Mac does not offer it (phones then hide it).
+      ...(this.deps.keepAwake ? { keepAwake: this.deps.keepAwake.get() } : {}),
       // Where a phone may start a chat; absent when this Mac can't (phones then hide the button).
       ...(this.deps.newChat ? { workspaces: this.phoneWorkspaces() } : {}),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),

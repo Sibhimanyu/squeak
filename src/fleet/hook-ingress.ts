@@ -48,6 +48,8 @@ export interface IngressControl {
    * it is only ever reached by the owner pressing Refresh.
    */
   refreshClaudeUsage?(): Promise<unknown>;
+  /** The "Keep Mac awake" switch (fleet/caffeinate.ts); answers its new state. */
+  setKeepAwake?(on: boolean): { keepAwake: boolean };
   /** Which channels are set up and healthy. Never carries a secret. */
   channels?(): unknown;
   /** Chats that messaged the Telegram bot without being allowed. */
@@ -326,6 +328,49 @@ export class HookIngressServer {
             logger.warn("control new chat failed", { error: error instanceof Error ? error.message : String(error) });
             respond(response, 500, "new chat failed");
           });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/keep-awake") {
+      if (request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!control.setKeepAwake) {
+        request.resume();
+        respond(response, 503, "keep awake unavailable");
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let on: unknown;
+        try {
+          on = (JSON.parse(body || "{}") as { on?: unknown }).on;
+        } catch {
+          on = undefined;
+        }
+        if (typeof on !== "boolean") {
+          respond(response, 400, "expected { on: boolean }");
+          return;
+        }
+        respondJson(response, 200, control.setKeepAwake!(on));
       });
       request.on("error", () => {
         aborted = true;
