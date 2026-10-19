@@ -15,6 +15,7 @@ import { applyAwakeAction, AwakeSession, readAwakeAction } from "../fleet/awake-
 import { LidSleepGuard, SUDOERS_PATH, sudoersRule } from "../fleet/lid-sleep.js";
 import { ensureBackstop } from "../fleet/awake-backstop.js";
 import { readPower } from "../fleet/power-monitor.js";
+import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { readPendingAsk, readPendingQuestion } from "../fleet/question.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
@@ -108,6 +109,8 @@ export class SqueakApp {
   private readonly caffeinator: Caffeinator;
   /** The user's awake session (menu bar, window, phone); held through the caffeinator. */
   private readonly awake: AwakeSession;
+  /** What a closed lid does during a lid session: display off, mute, Low Power Mode, pause chat apps. */
+  private readonly lidActions: LidActions;
   private lidRuleTimer: NodeJS.Timeout | null = null;
   private safetyTimer: NodeJS.Timeout | null = null;
   private unwatchCaffeinate: (() => void) | null = null;
@@ -122,6 +125,12 @@ export class SqueakApp {
       hold: (on) => this.caffeinator.setKeepAwake(on),
       lid: new LidSleepGuard({ journalPath: path.join(config.supportDir, "lid-journal.json") }),
       onChange: () => this.remote?.changed(),
+    });
+    this.lidActions = new LidActions({
+      settingsPath: path.join(config.supportDir, "awake-settings.json"),
+      journalPath: path.join(config.supportDir, "lid-actions.json"),
+      setLowPowerWanted: (wanted) => void this.awake.setLidLowPower(wanted),
+      lidSessionOn: () => this.awake.state?.lidStatus === "on",
     });
     this.telegram = config.botToken ? new TelegramClient(config.botToken) : null;
     const telegram = this.telegram;
@@ -291,6 +300,8 @@ export class SqueakApp {
       state: this.awake.state,
       lidReady: this.awake.lidReady,
       lastEnd: this.awake.lastEnd,
+      lidActions: this.lidActions.settings,
+      lidClosedNow: this.lidActions.active,
     }));
     const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
       this.claudeLimits.record(limits),
@@ -329,8 +340,10 @@ export class SqueakApp {
       this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
     }
     // The user's own switch is honoured even with SQUEAK_CAFFEINATE=off: they asked.
-    // Undoes a sleep disable a previous run left behind before anything else.
+    // Undoes what a previous run left behind (sleep disabled, muted, apps paused) before anything else.
+    await this.lidActions.recover();
     await this.awake.restore();
+    this.lidActions.start();
     void this.refreshLidRule();
     this.lidRuleTimer = setInterval(() => void this.refreshLidRule(), 10 * 60_000);
     this.lidRuleTimer.unref?.();
@@ -391,6 +404,7 @@ export class SqueakApp {
     this.unwatchCaffeinate?.();
     if (this.lidRuleTimer) clearInterval(this.lidRuleTimer);
     if (this.safetyTimer) clearInterval(this.safetyTimer);
+    await this.lidActions.stop().catch(() => undefined);
     await this.awake.stop().catch(() => undefined);
     this.caffeinator.stop();
     this.remote?.stop();
@@ -402,6 +416,15 @@ export class SqueakApp {
   }
 
   private async applyAwake(request: unknown) {
+    // What a closed lid does: { action: "lid-actions", settings: { mute: false, ... } }.
+    if ((request as { action?: unknown } | null)?.action === "lid-actions") {
+      const settings = (request as { settings?: unknown }).settings;
+      if (typeof settings !== "object" || settings === null) {
+        return { ok: false as const, reason: "Expected settings." };
+      }
+      this.lidActions.updateSettings(readLidActionSettings({ ...this.lidActions.settings, ...settings }));
+      return { ok: true as const, state: this.awake.state };
+    }
     // The Mac app asks after installing or removing the lid rule.
     if ((request as { action?: unknown } | null)?.action === "recheck-lid") {
       await this.refreshLidRule();
@@ -431,6 +454,7 @@ export class SqueakApp {
     await ensureBackstop({
       supportDir: this.config.supportDir,
       journalPath: path.join(this.config.supportDir, "lid-journal.json"),
+      actionsPath: path.join(this.config.supportDir, "lid-actions.json"),
     }).catch((error: unknown) => {
       logger.warn("awake backstop failed", { error: error instanceof Error ? error.message : String(error) });
     });

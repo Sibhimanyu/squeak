@@ -100,6 +100,10 @@ export class AwakeSession {
   /** A safety rule wants Low Power Mode, and why. */
   private safetyWhy: string | null = null;
   private wantLowPower = false;
+  /** The lid is closed during a lid session and its actions ask for Low Power Mode (lid-actions.ts). */
+  private lidLowPower = false;
+  /** Low Power Mode was already on (the user's) when asked: leave it alone until the want goes. */
+  private lowPowerDeclined = false;
   /** Whether Squeak turned Low Power Mode on and has not turned it off. */
   private lowPowerActual = false;
   private ended: AwakeEnd | null = null;
@@ -121,6 +125,15 @@ export class AwakeSession {
       lowPower: this.lowPowerActual,
       ...(this.safetyWhy ? { safety: this.safetyWhy } : {}),
     };
+  }
+
+  /** The lid closed (or opened) during a lid session, and its actions want Low Power Mode. */
+  setLidLowPower(wanted: boolean): Promise<void> {
+    if (this.lidLowPower === wanted) {
+      return this.lidChain;
+    }
+    this.lidLowPower = wanted;
+    return this.syncLid();
   }
 
   /** How the last session ended; null until one has. */
@@ -145,7 +158,7 @@ export class AwakeSession {
     }
     const before = [this.safetyWhy, this.wantLowPower];
     this.safetyWhy = decision.why;
-    this.wantLowPower = decision.lowPower && this.lidRule;
+    this.wantLowPower = decision.lowPower;
     if (before[0] !== this.safetyWhy || before[1] !== this.wantLowPower) {
       this.options.onChange?.();
     }
@@ -248,6 +261,7 @@ export class AwakeSession {
     this.saved = null;
     this.safetyWhy = null;
     this.wantLowPower = false;
+    this.lidLowPower = false;
     this.ended = { reason, at: new Date(this.now()).toISOString(), ...(why ? { why } : {}) };
     this.options.hold(false);
     this.write(null);
@@ -273,14 +287,15 @@ export class AwakeSession {
 
   private async reconcileLowPower(): Promise<void> {
     const lid = this.options.lid;
-    const want = this.wantLowPower && this.saved !== null && !this.stopping;
-    if (!lid || want === this.lowPowerActual) {
+    const want = (this.wantLowPower || this.lidLowPower) && this.lidRule && this.saved !== null && !this.stopping;
+    if (!want) this.lowPowerDeclined = false;
+    if (!lid || want === this.lowPowerActual || (want && this.lowPowerDeclined)) {
       return;
     }
     if (want) {
       this.lowPowerActual = await lid.lowPowerOn(this.saved?.until ?? null).catch(() => false);
-      // Already on (the user's) or refused: do not ask again every check.
-      if (!this.lowPowerActual) this.wantLowPower = false;
+      // Already on (the user's) or refused: do not ask again until the want goes.
+      this.lowPowerDeclined = !this.lowPowerActual;
     } else {
       await lid.lowPowerOff().catch(() => undefined);
       this.lowPowerActual = false;

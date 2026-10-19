@@ -23,20 +23,41 @@ import { logger } from "../utils/logger.js";
 export const BACKSTOP_LABEL = "com.squeak.awake-backstop";
 const DAEMON_LABEL = "com.squeak.daemon";
 
-/** The script, with its paths baked in. `sudo` and `launchctl` are overridable for tests. */
-export function backstopScript(journalPath: string): string {
+/**
+ * The script, with its paths baked in. `sudo`, `launchctl` and `osascript`
+ * are overridable for tests. `actionsPath` is lid-actions.ts's journal (apps
+ * paused, sound muted while the lid was shut): undone only when the daemon is
+ * not running, since a running one undoes it when the lid opens.
+ */
+export function backstopScript(journalPath: string, actionsPath: string): string {
   return `#!/bin/bash
-# Squeak's awake backstop (src/fleet/awake-backstop.ts). Undoes a sleep disable
-# or Low Power Mode Squeak journalled but did not undo: when the daemon is not
-# running, or the session's end passed two minutes ago. No journal: nothing.
+# Squeak's awake backstop (src/fleet/awake-backstop.ts). Undoes what Squeak
+# journalled but did not undo: a sleep disable or Low Power Mode when the
+# daemon is not running or the session's end passed two minutes ago; paused
+# apps and muted sound when the daemon is not running. No journal: nothing.
 JOURNAL=${shellQuote(journalPath)}
+ACTIONS=${shellQuote(actionsPath)}
 SUDO="\${SQUEAK_BACKSTOP_SUDO:-/usr/bin/sudo}"
 LAUNCHCTL="\${SQUEAK_BACKSTOP_LAUNCHCTL:-/bin/launchctl}"
+OSASCRIPT="\${SQUEAK_BACKSTOP_OSASCRIPT:-/usr/bin/osascript}"
+[ -f "$JOURNAL" ] || [ -f "$ACTIONS" ] || exit 0
+running=0
+"$LAUNCHCTL" print "gui/$(/usr/bin/id -u)/${DAEMON_LABEL}" 2>/dev/null | /usr/bin/grep -q "state = running" && running=1
+if [ "$running" = 0 ] && [ -f "$ACTIONS" ]; then
+  for pid in $(/usr/bin/plutil -extract frozen json -o - "$ACTIONS" 2>/dev/null | /usr/bin/tr -c '0-9' ' '); do
+    kill -CONT "$pid" 2>/dev/null
+  done
+  if [ "$(/usr/bin/plutil -extract muted raw -o - "$ACTIONS" 2>/dev/null)" = "true" ]; then
+    "$OSASCRIPT" -e "set volume without output muted"
+  fi
+  echo "$(/bin/date -u +%FT%TZ) squeak backstop undid $(/bin/cat "$ACTIONS")" >&2
+  /bin/rm -f "$ACTIONS"
+fi
 [ -f "$JOURNAL" ] || exit 0
 field() { /usr/bin/plutil -extract "$1" raw -o - "$JOURNAL" 2>/dev/null; }
 until_ms="$(field until)"
 now_ms="$(( $(/bin/date +%s) * 1000 ))"
-if "$LAUNCHCTL" print "gui/$(/usr/bin/id -u)/${DAEMON_LABEL}" 2>/dev/null | /usr/bin/grep -q "state = running"; then
+if [ "$running" = 1 ]; then
   case "$until_ms" in
     ''|*[!0-9]*) exit 0 ;;
   esac
@@ -90,6 +111,7 @@ export function backstopPlist(scriptPath: string, logPath: string): string {
 export async function ensureBackstop(options: {
   supportDir: string;
   journalPath: string;
+  actionsPath: string;
   launchAgentsDir?: string;
   launchctl?: (args: string[]) => Promise<boolean>;
 }): Promise<void> {
@@ -99,7 +121,7 @@ export async function ensureBackstop(options: {
     `${BACKSTOP_LABEL}.plist`,
   );
   const logPath = path.join(options.supportDir, "awake-backstop.log");
-  const script = backstopScript(options.journalPath);
+  const script = backstopScript(options.journalPath, options.actionsPath);
   const plist = backstopPlist(scriptPath, logPath);
   const launchctl =
     options.launchctl ??

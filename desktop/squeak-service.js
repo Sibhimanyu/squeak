@@ -225,7 +225,8 @@ async function pairingQr() {
   }
 }
 
-const AWAKE_ACTIONS = new Set(["start", "extend", "end", "recheck-lid"]);
+const AWAKE_ACTIONS = new Set(["start", "extend", "end", "recheck-lid", "lid-actions"]);
+const LID_ACTION_KEYS = ["displayOff", "mute", "lowPower", "freezeApps"];
 const MAX_AWAKE_MINUTES = 7 * 24 * 60;
 
 /**
@@ -244,6 +245,21 @@ async function awake(request) {
     (action === "start" && minutes !== null && !validMinutes)
   ) {
     return { ok: false, message: "That is not a length of time Squeak can stay awake for." };
+  }
+  if (action === "lid-actions") {
+    // Only the known switches, only as booleans.
+    const settings = Object.fromEntries(
+      LID_ACTION_KEYS.filter((key) => typeof request?.settings?.[key] === "boolean").map((key) => [
+        key,
+        request.settings[key],
+      ]),
+    );
+    try {
+      await control("keep-awake", { method: "POST", body: JSON.stringify({ action, settings }) });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
   }
   if (lid && (action !== "start" || minutes === null)) {
     return { ok: false, message: "A lid-closed session needs an end time." };

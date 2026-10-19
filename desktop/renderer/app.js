@@ -567,7 +567,7 @@ function safetyEnd() {
 
 function lidLine(session) {
   if (!session?.lid) return "";
-  if (session.lidStatus === "on") return " · lid closed too";
+  if (session.lidStatus === "on") return state?.awakeLidClosedNow ? " · lid closed now" : " · lid closed too";
   if (session.lidStatus === "starting") return " · turning on lid-closed…";
   return " · lid-closed didn't turn on";
 }
@@ -606,6 +606,29 @@ function lidCard() {
   });
   label.append(box, el("span", null, "Also with the lid closed, for the sessions you start here"));
   card.append(label);
+  card.append(el("p", "muted-note", "When the lid closes during one:"));
+  const settings = state?.awakeLidActions ?? {};
+  for (const [key, text] of [
+    ["displayOff", "Turn the display off"],
+    ["mute", "Mute the sound (unmuted again when it opens)"],
+    ["lowPower", "Turn on Low Power Mode"],
+    ["freezeApps", "Pause Slack, WhatsApp, Discord and Telegram until it opens"],
+  ]) {
+    const row = el("label", "lid-choice");
+    const toggle = el("input");
+    toggle.type = "checkbox";
+    toggle.checked = Boolean(settings[key]);
+    toggle.addEventListener("change", async () => {
+      const result = await window.squeak.awake({ action: "lid-actions", settings: { [key]: toggle.checked } });
+      awakeProblem = result.ok ? null : result.message;
+      const next = await window.squeak.state();
+      if (next) state = next;
+      lastDetailSignature = "";
+      renderAwake();
+    });
+    row.append(toggle, el("span", null, text));
+    card.append(row);
+  }
   card.append(
     el(
       "p",
@@ -636,6 +659,8 @@ function renderAwake() {
     lidRuleBusy,
     state?.awakeLidReady,
     state?.awakeLastEnd,
+    state?.awakeLidActions,
+    state?.awakeLidClosedNow,
     Math.floor(Date.now() / 60000),
   ]);
   if (signature === lastDetailSignature) return;
