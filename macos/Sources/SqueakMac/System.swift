@@ -53,8 +53,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     static func genericBody(_ kind: NotificationKind) -> String {
         switch kind {
-        case .blocked: "A session needs your approval"
-        case .finished: "A session finished"
+        case .blocked: "A session needs you"
+        case .finished: "A session is done"
         case .error: "A session hit an error"
         }
     }

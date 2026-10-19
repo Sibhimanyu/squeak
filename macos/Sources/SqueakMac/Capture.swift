@@ -199,10 +199,8 @@ private struct ComponentGallery: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
             HStack(spacing: Space.s) {
-                DuckGlyph(size: 18)
-                Text("Squeak").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+                LogoLockup(height: 22)
                 Spacer()
-                DuckGlyph(size: 48)
             }
             SearchField(text: $query, hint: "⌘F")
             SectionLabel("Needs you", count: 1)
@@ -211,7 +209,7 @@ private struct ComponentGallery: View {
                 choices: [Choice(letter: "A", label: "Keep 2"), Choice(letter: "B", label: "Use 3"), Choice(letter: "C", label: "Let me review")]
             )
             SectionLabel("Working")
-            SessionRowView(session: limiter, showsAgent: true)
+            SessionRowView(session: limiter)
             Hairline()
             SectionLabel("Recent")
             SessionRowView(session: docs, isSelected: true, isPinned: true)

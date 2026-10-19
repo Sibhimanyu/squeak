@@ -17,17 +17,18 @@ enum Space {
     static let xxl: CGFloat = 32
 }
 
-/// Corner radii: rows 8, cards 12, capsule composer 22.
+/// Corner radii (§5): panel 16, card 12, control 8, chip 6.
 enum Radius {
-    static let row: CGFloat = 8
+    static let panel: CGFloat = 16
     static let card: CGFloat = 12
-    static let capsule: CGFloat = 22
-    static let bubble: CGFloat = 10
+    static let control: CGFloat = 8
+    static let chip: CGFloat = 6
+    static let row: CGFloat = 8
 }
 
 // MARK: Section label
 
-/// 11pt semibold uppercase, tracking 0.6, `subtle`.
+/// Section header (§4.2 `heading`, sentence case: the product has no all-caps labels).
 struct SectionLabel: View {
     let title: String
     var count: Int?
@@ -39,14 +40,11 @@ struct SectionLabel: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(0.6)
+            Text(title).font(Typo.heading).foregroundStyle(Theme.ink)
             if let count {
-                Text("\(count)").font(.system(size: 11, weight: .medium)).monospacedDigit()
+                Text("\(count)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
             }
         }
-        .foregroundStyle(Theme.subtle)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityAddTraits(.isHeader)
     }
@@ -81,22 +79,6 @@ struct RelativeTimeText: View {
     }
 }
 
-// MARK: Duck
-
-/// The brand duck. The app icon when running bundled; otherwise a placeholder tinted `Theme.duck`.
-struct DuckGlyph: View {
-    var size: CGFloat = 18
-
-    /// The brand duck: the traced menu-bar silhouette, filled duck-yellow, eye cut out.
-    var body: some View {
-        DuckShape(showsWing: size >= 24)
-            .fill(Theme.duck, style: FillStyle(eoFill: true))
-            .aspectRatio(DuckGlyphPath.aspect, contentMode: .fit)
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
-    }
-}
-
 // MARK: State
 
 /// Dot plus word on the state colour at 14% alpha, 11.5pt medium, capsule.
@@ -121,27 +103,73 @@ struct StateChip: View {
 
 // MARK: Row
 
-/// dot · title/subtitle · time. Hover fills `surfaceRaised` 35%, selected 70%. No border, no icon.
+/// What a session is called and said about, in DESIGN.md §8.2's words: `repo · branch` (the daemon's
+/// disambiguated title when two rows would read the same), then `agent · state · age`.
+enum SessionText {
+    static func name(_ s: HostSession) -> String {
+        if let d = s.distinctTitle, !d.isEmpty { return d }
+        let parts = [s.repoName, s.branch].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? s.label : parts.joined(separator: " · ")
+    }
+
+    /// §3.3: the word for the state. Both blocked states share one colour; the word says which.
+    static func stateWord(_ s: HostSession) -> String {
+        switch s.state {
+        case .blocked: s.awaitingApproval == true ? "needs approval" : "needs an answer"
+        case .working: "working"
+        case .finished: "done"
+        case .idle: "idle"
+        case .error: "error"
+        case .unknown: "unknown"
+        }
+    }
+
+    static func agent(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        return raw.lowercased()
+    }
+}
+
+/// `agent · state · age`, muted, with the state word in its colour only when the session needs you.
+struct MetaLine: View {
+    let session: HostSession
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { ctx in
+            text(now: ctx.date).font(Typo.meta).monospacedDigit().lineLimit(1)
+        }
+    }
+
+    private func text(now: Date) -> Text {
+        let sep = Text(verbatim: " · ").foregroundStyle(Theme.subtle)
+        var t = Text(verbatim: "")
+        if let a = SessionText.agent(session.agent) { t = t + Text(verbatim: a).foregroundStyle(Theme.muted) + sep }
+        let word = Text(verbatim: SessionText.stateWord(session))
+        t = t + (session.state == .blocked ? word.foregroundStyle(Theme.needsYou) : word.foregroundStyle(Theme.muted))
+        if let at = session.lastActivityAt { t = t + sep + Text(verbatim: ShortRelativeTime.format(at, now: now)).foregroundStyle(Theme.muted) }
+        return t
+    }
+}
+
+/// dot · name / meta. Hover fills `surfaceRaised` (§8.2), selected a little more. No icon.
 /// The pin shows only on hover or selection. Taps are the caller's (wrap in Button or onTapGesture).
 struct SessionRowView: View {
     let session: HostSession
     var isSelected = false
     var isPinned = false
-    /// Replaces "repo · branch" (search snippets).
+    /// Replaces the meta line (search snippets).
     var subtitleOverride: String?
-    /// Appends the agent name ("repo · branch · Claude"); the popover wants it, the sidebar does not.
-    var showsAgent = false
 
     @State private var hovering = false
 
     var body: some View {
         HStack(alignment: .top, spacing: Space.m) {
             StateDot(state: session.state)
-                .frame(height: 17)  // centres on the 13pt title line
+                .frame(height: 19)  // aligned to the first text line
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text(verbatim: session.label)
-                        .font(.system(size: 13, weight: .medium))
+                    Text(verbatim: SessionText.name(session))
+                        .font(Typo.label)
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
                     if isPinned && (hovering || isSelected) {
@@ -149,29 +177,23 @@ struct SessionRowView: View {
                             .accessibilityLabel("Pinned")
                     }
                 }
-                Text(verbatim: subtitleOverride ?? SessionRowView.subtitle(session, showsAgent: showsAgent))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.muted)
-                    .lineLimit(1)
+                if let o = subtitleOverride {
+                    Text(verbatim: o).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+                } else {
+                    MetaLine(session: session)
+                }
             }
             Spacer(minLength: Space.s)
-            RelativeTimeText(session.lastActivityAt).frame(height: 17)
         }
         .padding(.horizontal, Space.m)
         .padding(.vertical, 7)
         .background(
-            RoundedRectangle(cornerRadius: Radius.row).fill(Theme.surfaceRaised.opacity(isSelected ? 0.7 : hovering ? 0.35 : 0))
+            RoundedRectangle(cornerRadius: Radius.row).fill(Theme.surfaceRaised.opacity(isSelected ? 1 : hovering ? 0.7 : 0))
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(session.label), \(Theme.label(for: session.state))")
-    }
-
-    static func subtitle(_ s: HostSession, showsAgent: Bool = false) -> String {
-        var parts = [s.repoName, s.branch].compactMap { $0 }.filter { !$0.isEmpty }
-        if showsAgent, let a = agentName(s.agent) { parts.append(a) }
-        return parts.joined(separator: " · ")
+        .accessibilityLabel("\(SessionText.name(session)), \(SessionText.agent(session.agent) ?? "agent"), \(SessionText.stateWord(session))")
     }
 
     static func agentName(_ raw: String?) -> String? {
@@ -267,19 +289,20 @@ private struct ChoiceChip: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Text(choice.letter)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Typo.meta.weight(.semibold))
                     .foregroundStyle(Theme.muted)
                     .frame(width: 18, height: 18)
-                    .background(Theme.bg.opacity(0.55), in: RoundedRectangle(cornerRadius: 5))
+                    .background(Theme.bg, in: RoundedRectangle(cornerRadius: Radius.chip))
                 Text(verbatim: choice.label)
-                    .font(.system(size: 12.5))
+                    .font(Typo.label)
                     .foregroundStyle(Theme.ink)
                     .lineLimit(1)
             }
             .padding(.leading, 6)
             .padding(.trailing, 12)
             .frame(height: 30)
-            .background(Theme.surfaceRaised.opacity(hovering && isEnabled ? 1 : 0.8), in: RoundedRectangle(cornerRadius: Radius.row))
+            .background(Theme.surfaceRaised.opacity(hovering && isEnabled ? 1 : 0.8), in: RoundedRectangle(cornerRadius: Radius.control))
+            .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -317,24 +340,22 @@ struct NeedsYouCard: View {
             Button(action: onOpen) {
                 VStack(alignment: .leading, spacing: Space.s) {
                     HStack(alignment: .top, spacing: Space.m) {
-                        StateDot(state: .blocked).frame(height: 17)
+                        StateDot(state: .blocked).frame(height: 19)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(verbatim: session.label)
-                                .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                            Text(verbatim: SessionRowView.subtitle(session, showsAgent: true))
-                                .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
+                            Text(verbatim: SessionText.name(session))
+                                .font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
+                            MetaLine(session: session)
                         }
                         Spacer(minLength: Space.s)
-                        RelativeTimeText(session.lastActivityAt).frame(height: 17)
                     }
                     if let question, !question.isEmpty {
                         Text(verbatim: question)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.ink.opacity(0.85))
+                            .font(Typo.body)
+                            .foregroundStyle(Theme.ink)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, 20)  // under the title, past the dot
+                            .padding(.leading, 21)  // under the title, past the dot
                     }
                 }
                 .contentShape(Rectangle())
@@ -354,12 +375,13 @@ struct NeedsYouCard: View {
                 }
             }
             if let notice {
-                Text(verbatim: notice).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+                Text(verbatim: notice).font(Typo.meta).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(12)
-        .background(Theme.surfaceRaised.opacity(hovering ? 0.65 : 0.55), in: RoundedRectangle(cornerRadius: Radius.card))
+        .background(hovering ? Theme.surfaceRaised : Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
     }
@@ -370,7 +392,7 @@ struct NeedsYouCard: View {
             fieldFocused = true
         } label: {
             Text("Reply")
-                .font(.system(size: 12, weight: .medium))
+                .font(Typo.label)
                 .foregroundStyle(Theme.muted)
                 .padding(.horizontal, Space.s)
                 .frame(height: 30)
@@ -381,9 +403,9 @@ struct NeedsYouCard: View {
 
     private var replyField: some View {
         HStack(spacing: Space.s) {
-            TextField("Reply to \(SessionRowView.agentName(session.agent) ?? "agent")…", text: $text)
+            TextField("Message for \(SessionText.name(session))", text: $text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(Typo.body)
                 .focused($fieldFocused)
                 .onSubmit(submit)
                 .onExitCommand { replying = false; text = "" }
@@ -392,16 +414,17 @@ struct NeedsYouCard: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(trimmed.isEmpty ? Theme.muted : Theme.primaryText)
                     .frame(width: 24, height: 24)
-                    .background(trimmed.isEmpty ? Theme.surfaceRaised : Theme.duck, in: Circle())
+                    .background(trimmed.isEmpty ? Theme.surfaceRaised : Theme.primaryFill, in: RoundedRectangle(cornerRadius: Radius.control))
             }
             .buttonStyle(.plain)
             .disabled(trimmed.isEmpty)
             .accessibilityLabel("Send reply")
         }
-        .padding(.leading, 14)
+        .padding(.leading, 12)
         .padding(.trailing, 4)
         .frame(height: 32)
-        .background(Theme.bg.opacity(0.5), in: Capsule())
+        .background(Theme.bg, in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
     }
 
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -416,10 +439,10 @@ struct NeedsYouCard: View {
 
 // MARK: Search
 
-/// Rounded 8, raised 50%, magnifier, placeholder, optional hint chip ("⌘F").
+/// Rounded 8, raised, magnifier, placeholder, optional hint chip ("⌘F").
 struct SearchField: View {
     @Binding var text: String
-    var placeholder = "Search chats"
+    var placeholder = "Search sessions"
     var hint: String?
     var focus: FocusState<Bool>.Binding?
 
@@ -439,7 +462,8 @@ struct SearchField: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 30)
-        .background(Theme.surfaceRaised.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.row))
+        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
     }
 
     @ViewBuilder private var field: some View {

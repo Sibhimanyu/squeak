@@ -31,7 +31,7 @@ func render(scale: CGFloat, to path: String) {
     arrow.move(to: NSPoint(x: 356, y: y + 12))
     arrow.line(to: NSPoint(x: 372, y: y))
     arrow.line(to: NSPoint(x: 356, y: y - 12))
-    color(0xFCD02C).setStroke()                      // duck
+    color(0xFFDA1A).setStroke()                      // duck
     arrow.stroke()
 
     let title = NSAttributedString(string: "Drag Squeak to Applications", attributes: [

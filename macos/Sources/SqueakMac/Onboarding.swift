@@ -81,7 +81,7 @@ struct OnboardingView: View {
             }
             .accessibilityHidden(true)
             Spacer()
-            Button(step == 3 ? "Done" : "Continue") { if step == 3 { finish() } else { step += 1 } }
+            Button(step == 3 ? "Finish" : "Continue") { if step == 3 { finish() } else { step += 1 } }
                 .buttonStyle(PrimaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
         }
@@ -94,7 +94,7 @@ struct OnboardingView: View {
 
     private var welcome: some View {
         VStack(spacing: Space.m) {
-            DuckGlyph(size: 72).padding(.top, Space.l).padding(.bottom, Space.s)
+            DuckMark(width: 72).padding(.top, Space.l).padding(.bottom, Space.s)
             heading("Squeak lives in your menu bar")
             Text("It shows your coding-agent sessions, tells you when one needs you, and lets you answer without switching apps.")
                 .font(.system(size: 14)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
@@ -150,8 +150,8 @@ struct OnboardingView: View {
 
     private var done: some View {
         VStack(spacing: Space.m) {
-            DuckGlyph(size: 56).padding(.top, Space.xl).padding(.bottom, Space.s)
-            heading("You're set")
+            DuckMark(width: 56).padding(.top, Space.xl).padding(.bottom, Space.s)
+            heading("You're set up")
             Text("Click the duck in the menu bar any time. Pick a quick-message shortcut and a login option in Settings.")
                 .font(.system(size: 14)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)

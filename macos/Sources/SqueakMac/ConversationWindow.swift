@@ -82,25 +82,39 @@ struct SidebarView: View {
     }
 
     private func row(_ f: NavFilter, _ title: String, _ symbol: String) -> some View {
-        Label(title, systemImage: symbol)
-            .badge(model.count(f))
-            .tag(f)
-            .accessibilityLabel("\(title), \(model.count(f))")
+        HStack {
+            Label(title, systemImage: symbol)
+            Spacer(minLength: 4)
+            count(model.count(f), needsYou: f == .needsYou)
+        }
+        .tag(f)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(model.count(f))")
+    }
+
+    /// 8.3: a red pill with a white count for things that need you; every other count is plain muted text.
+    @ViewBuilder private func count(_ n: Int, needsYou: Bool) -> some View {
+        if needsYou && n > 0 {
+            Text("\(n)").font(.system(size: 11, weight: .bold)).monospacedDigit().foregroundStyle(.white)
+                .padding(.horizontal, 7).frame(minWidth: 20, minHeight: 20)
+                .background(Theme.needsYou, in: Capsule())
+        } else if n > 0 {
+            Text("\(n)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+        }
     }
 
     private func source(_ s: SessionSource, _ symbol: String) -> some View {
         Label(s.title, systemImage: symbol).tag(NavFilter.source(s))
     }
 
+    /// No duck here: the sidebar sits on the system's glass, and glass never sits behind the duck (DESIGN.md 5).
     private var brand: some View {
         HStack(spacing: 8) {
-            DuckGlyph(size: 26)
-            Text("Squeak").font(.title2.weight(.semibold))
             Spacer(minLength: 0)
             Button { QuickComposerController.shared.show() } label: {
                 Image(systemName: "square.and.pencil").frame(width: 26, height: 26).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
+            .buttonStyle(.plain).foregroundStyle(Theme.muted)
             .accessibilityLabel("Quick message").help("Quick message")
         }
         .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 8)
@@ -110,14 +124,14 @@ struct SidebarView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 7) {
-                Circle().fill(connectionColor).frame(width: 7, height: 7)
-                Text(connectionText).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                Circle().fill(connectionColor).frame(width: 9, height: 9)
+                Text(connectionText).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
             }
             .accessibilityElement(children: .combine)
             Button { model.openSettings() } label: {
-                Label("Settings", systemImage: "gearshape").font(.callout)
+                Label("Settings", systemImage: "gearshape").font(Typo.body)
             }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
+            .buttonStyle(.plain).foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16).padding(.vertical, 12)
@@ -128,12 +142,12 @@ struct SidebarView: View {
     /// Honest: "Service connected" only when it is; the daemon's own words otherwise.
     private var connectionText: String {
         guard loaded else { return "Connecting…" }
-        return model.isConnected ? "Service connected" : model.connectionTitle
+        return model.isConnected ? "Connected" : model.connectionTitle
     }
 
     private var connectionColor: Color {
-        guard loaded else { return Color.secondary.opacity(0.6) }
-        return model.isConnected ? Theme.working : Theme.attentionDot
+        guard loaded else { return Theme.idle }
+        return model.isConnected ? Theme.working : Theme.offline
     }
 }
 
@@ -171,8 +185,8 @@ struct SessionListView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Sessions").font(.largeTitle.weight(.bold)).accessibilityAddTraits(.isHeader)
-            Text("\(model.activeCount) active across your Mac").font(.callout).foregroundStyle(.secondary)
+            Text("Sessions").font(Typo.title).accessibilityAddTraits(.isHeader)
+            Text("\(model.activeCount) active across your Mac").font(Typo.body).foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 12)
@@ -195,7 +209,7 @@ struct SessionListView: View {
     }
 
     private func row(_ s: HostSession, snippet: String? = nil) -> some View {
-        SessionListRow(session: s, live: model.liveStep(s.key), isPinned: model.pinned.contains(s.key), subtitleOverride: snippet)
+        SessionListRow(session: s, isPinned: model.pinned.contains(s.key), subtitleOverride: snippet)
             .tag(s.key)
             .listRowSeparator(.visible)
             .contextMenu {
@@ -207,7 +221,7 @@ struct SessionListView: View {
         let hits = model.searchHits
         if hits.isEmpty {
             Text("No matches. Search covers titles and messages Squeak has already opened on this Mac.")
-                .font(.callout).foregroundStyle(.secondary).padding(.vertical, 12)
+                .font(Typo.body).foregroundStyle(Theme.muted).padding(.vertical, 12)
         } else {
             ForEach(hits, id: \.key) { hit in
                 if let s = model.session(hit.key) { row(s, snippet: hit.titleMatch ? nil : hit.snippet) }
@@ -217,60 +231,36 @@ struct SessionListView: View {
 
     @ViewBuilder private var emptyNote: some View {
         Text(model.isConnected ? "No chats yet. Start one in Conductor and it shows up here." : "No chats to show yet.")
-            .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(24)
+            .font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center).padding(24)
     }
 }
 
-/// title + time, "repo · Agent", then one status line with a small dot.
+/// 8.2: dot, `repo · branch`, then `agent · state · age`. No icon.
 struct SessionListRow: View {
     let session: HostSession
-    var live: String?
     var isPinned = false
     var subtitleOverride: String?
 
     var body: some View {
-        let status = StatusLine.make(session, live: live)
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(verbatim: session.label).font(.body.weight(.semibold)).lineLimit(1)
-                if isPinned {
-                    Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(.tertiary).accessibilityLabel("Pinned")
+        HStack(alignment: .top, spacing: Space.m) {
+            StateDot(state: session.state).frame(height: 19)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(verbatim: SessionText.name(session)).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
+                    if isPinned {
+                        Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(Theme.subtle).accessibilityLabel("Pinned")
+                    }
                 }
-                Spacer(minLength: 6)
-                RelativeTimeText(session.lastActivityAt, size: 12)
-            }
-            Text(verbatim: subtitleOverride ?? [session.repoName, SessionRowView.agentName(session.agent)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                .font(.callout).foregroundStyle(.secondary).lineLimit(1)
-            HStack(spacing: 6) {
-                Circle().fill(status.color).frame(width: 7, height: 7)
-                Text(status.text).font(.callout).foregroundStyle(status.textColor).lineLimit(1)
+                if let o = subtitleOverride {
+                    Text(verbatim: o).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+                } else {
+                    MetaLine(session: session)
+                }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(session.label), \(status.text)")
-    }
-}
-
-/// The row's last line, derived from the session's own state; never invented.
-struct StatusLine {
-    var text: String
-    var color: Color
-    var textColor: Color
-
-    static func make(_ s: HostSession, live: String?) -> StatusLine {
-        switch s.state {
-        case .blocked:
-            return StatusLine(text: s.awaitingApproval == true ? "Approval needed" : "Waiting for your answer", color: Theme.attentionDot, textColor: Theme.attention)
-        case .working:
-            let phrase = live ?? "Working"
-            let execs = phrase.hasPrefix("Running") || phrase.hasPrefix("Building") || phrase.hasPrefix("Linting")
-            return StatusLine(text: phrase, color: execs ? Theme.working : Color.blue, textColor: .secondary)
-        case .finished: return StatusLine(text: "Completed", color: Color.secondary.opacity(0.7), textColor: .secondary)
-        case .idle: return StatusLine(text: "Idle", color: Color.secondary.opacity(0.7), textColor: .secondary)
-        case .error: return StatusLine(text: "Stopped with an error", color: Theme.error, textColor: .secondary)
-        case .unknown: return StatusLine(text: "Unknown", color: Color.secondary.opacity(0.5), textColor: .secondary)
-        }
+        .accessibilityLabel("\(SessionText.name(session)), \(SessionText.agent(session.agent) ?? "agent"), \(SessionText.stateWord(session))")
     }
 }
 
@@ -289,7 +279,7 @@ struct DetailView: View {
                 VStack(spacing: Space.m) {
                     ConnectionNotice().frame(maxWidth: 460)
                     Text("Drafts are saved on this Mac and never sent on their own after reconnecting.")
-                        .font(.caption).foregroundStyle(.tertiary)
+                        .font(Typo.meta).foregroundStyle(Theme.subtle)
                 }
                 .padding(Space.xl)
             } else if model.sessions.isEmpty {
@@ -303,10 +293,10 @@ struct DetailView: View {
 
     private func pick(_ note: String?) -> some View {
         VStack(spacing: Space.m) {
-            DuckGlyph(size: 48).opacity(0.9)
-            Text("Pick a chat").font(.title3).foregroundStyle(.secondary)
+            DuckMark(width: 48)
+            Text("Pick a chat").font(Typo.heading).foregroundStyle(Theme.muted)
             if let note {
-                Text(note).font(.callout).foregroundStyle(.tertiary).multilineTextAlignment(.center).frame(maxWidth: 320)
+                Text(note).font(Typo.body).foregroundStyle(Theme.subtle).multilineTextAlignment(.center).frame(maxWidth: 320)
             }
         }
         .accessibilityElement(children: .combine)
@@ -322,16 +312,17 @@ struct ConnectionNotice: View {
         if let help = model.connectionHelp, model.health != nil {
             VStack(alignment: .leading, spacing: Space.xs) {
                 HStack(spacing: 6) {
-                    Circle().fill(Theme.attentionDot).frame(width: 7, height: 7)
-                    Text(model.connectionTitle).font(.callout.weight(.semibold))
+                    Circle().fill(Theme.offline).frame(width: 9, height: 9)
+                    Text(model.connectionTitle).font(Typo.label)
                     Spacer()
                     Button("Check again") { model.recheck() }.controlSize(.small)
                 }
-                Text(help).font(.callout).foregroundStyle(.secondary)
+                Text(help).font(Typo.body).foregroundStyle(Theme.muted)
                     .lineLimit(compact ? 2 : nil).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             }
             .padding(Space.m)
-            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.card))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         }
     }
 }
@@ -382,22 +373,21 @@ struct SessionDetail: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
                 Text(verbatim: session.label)
-                    .font(.largeTitle.weight(.bold)).lineLimit(2).accessibilityAddTraits(.isHeader)
+                    .font(Typo.title).lineLimit(2).accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 12)
                 if session.capabilities.openInHost.isSupported {
                     Button { model.openInHost() } label: {
                         Label("Open in Conductor", systemImage: "arrow.up.forward.square")
                     }
                     .modifier(GlassBorderedButton())
-                    .controlSize(.large)
                     .help("Open this chat in Conductor")
                     .disabled(model.openURL == nil && !model.demoMode)
                 }
             }
             if let line = repoBranch {
-                Text(verbatim: line).font(.title3).foregroundStyle(.secondary).lineLimit(1)
+                Text(verbatim: line).font(Typo.heading).foregroundStyle(Theme.muted).lineLimit(1)
             }
-            Text(verbatim: "\(agent) · \(session.source.title)").font(.callout).foregroundStyle(.secondary)
+            Text(verbatim: "\(SessionText.agent(session.agent) ?? "agent") · \(SessionText.stateWord(session)) · \(session.source.title)").font(Typo.meta).foregroundStyle(Theme.muted)
             Picker("View", selection: $tab) {
                 ForEach(DetailTab.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -411,7 +401,7 @@ struct SessionDetail: View {
 
     private var repoBranch: String? {
         let parts = [session.repoName, session.branch].compactMap { $0 }.filter { !$0.isEmpty }
-        return parts.isEmpty ? nil : parts.joined(separator: " / ")
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: Transcript
@@ -429,7 +419,7 @@ struct SessionDetail: View {
                     LazyVStack(alignment: .leading, spacing: 26) {
                         ForEach(model.messages) { m in
                             MessageView(
-                                message: m, agentName: agent, glyph: AgentGlyph(agent: session.agent), canOpenHost: model.openURL != nil,
+                                message: m, agentName: agent, canOpenHost: model.openURL != nil,
                                 layout: m.id == needsYouMessageID ? ChoiceLayout.make(m.text) : nil,
                                 canAnswer: sendBlock == nil && model.isConnected, onChoose: choose
                             )
@@ -462,9 +452,9 @@ struct SessionDetail: View {
 
     private func note(_ symbol: String, _ title: String, _ message: String) -> some View {
         VStack(spacing: Space.s) {
-            Image(systemName: symbol).font(.system(size: 26)).foregroundStyle(.tertiary)
-            Text(title).font(.headline)
-            Text(message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Image(systemName: symbol).font(.system(size: 26)).foregroundStyle(Theme.subtle)
+            Text(title).font(Typo.heading)
+            Text(message).font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
         }
         .frame(maxWidth: 340)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -494,7 +484,7 @@ struct SessionDetail: View {
         VStack(alignment: .leading, spacing: 8) {
             summary
             composer
-            Text(verbatim: destinationNote).font(.caption).foregroundStyle(.secondary).padding(.leading, 4)
+            Text(verbatim: destinationNote).font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, 4)
         }
         .frame(maxWidth: 820)
         .padding(.horizontal, 28)
@@ -510,14 +500,14 @@ struct SessionDetail: View {
         if session.state == .working {
             HStack(spacing: 8) {
                 StateDot(state: .working).scaleEffect(0.85)
-                Text(verbatim: model.activity.last?.text ?? "Working…").font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                Text(verbatim: model.activity.last?.text ?? "Working…").font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
             }
             .padding(.leading, 4)
             .accessibilityLabel("What it's doing: \(model.activity.last?.text ?? "working")")
         } else if let line = model.summaryLine(for: session) {
             HStack(spacing: 8) {
-                Image(systemName: "doc.text").foregroundStyle(.secondary)
-                Text(verbatim: line).font(.callout).foregroundStyle(.secondary)
+                Image(systemName: "doc.text").foregroundStyle(Theme.muted)
+                Text(verbatim: line).font(Typo.body).foregroundStyle(Theme.muted)
             }
             .padding(.leading, 4)
         }
@@ -561,13 +551,13 @@ struct SessionDetail: View {
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 if editable {
-                    Text("⌘ ↩").font(.caption).foregroundStyle(.secondary)
+                    Text("⌘ ↩").font(Typo.meta).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 7).frame(height: 22)
-                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
                         .accessibilityHidden(true)
                 }
                 Button(action: send) {
-                    Text("Send").font(.body.weight(.semibold)).foregroundStyle(Color(nsColor: NSColor(hex: 0x18181B)))
+                    SendLabel()
                         .padding(.horizontal, 6)
                 }
                 .modifier(SendButtonStyle())
@@ -578,7 +568,7 @@ struct SessionDetail: View {
             }
         }
         .padding(.leading, 14).padding(.trailing, 10).padding(.top, 8).padding(.bottom, 10)
-        .squeakGlass(radius: 20)
+        .squeakGlass(radius: Radius.card)
         .accessibilityElement(children: .contain)
     }
 
@@ -599,10 +589,10 @@ struct ActivityList: View {
     var body: some View {
         if model.activity.isEmpty {
             VStack(spacing: Space.s) {
-                Image(systemName: "list.bullet.clipboard").font(.system(size: 26)).foregroundStyle(.tertiary)
-                Text("No activity to show").font(.headline)
+                Image(systemName: "list.bullet.clipboard").font(.system(size: 26)).foregroundStyle(Theme.subtle)
+                Text("No activity to show").font(Typo.heading)
                 Text(session.state == .working ? "Steps appear here as the agent works." : "Steps appear here while the agent works on a turn.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(Typo.body).foregroundStyle(Theme.muted)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -611,14 +601,14 @@ struct ActivityList: View {
                     ForEach(Array(model.activity.enumerated()), id: \.offset) { i, step in
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: Self.icon(step))
-                                .font(.system(size: 12)).foregroundStyle(.secondary)
+                                .font(.system(size: 12)).foregroundStyle(Theme.muted)
                                 .frame(width: 28, height: 28)
-                                .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
                             Text(verbatim: step.text).font(.body).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.top, 5)
                             if let at = step.at {
-                                Text(at.formatted(date: .omitted, time: .standard)).font(.callout).monospacedDigit()
-                                    .foregroundStyle(.tertiary).padding(.top, 5)
+                                Text(at.formatted(date: .omitted, time: .standard)).font(Typo.body).monospacedDigit()
+                                    .foregroundStyle(Theme.subtle).padding(.top, 5)
                             }
                         }
                         .padding(.vertical, 9)
@@ -649,24 +639,9 @@ struct ActivityList: View {
 
 // MARK: - Messages
 
-/// A round avatar glyph per agent: SF Symbols, not logos.
-struct AgentGlyph {
-    var symbol: String
-    var color: Color
-
-    init(agent: String?) {
-        switch agent?.lowercased() {
-        case "claude": symbol = "asterisk"; color = Color(nsColor: NSColor(hex: 0xE5532D))
-        case "codex": symbol = "chevron.left.forwardslash.chevron.right"; color = Color.indigo
-        default: symbol = "bubble.left"; color = Color.secondary
-        }
-    }
-}
-
 struct MessageView: View {
     let message: ChatMessage
     var agentName: String
-    var glyph: AgentGlyph
     var canOpenHost: Bool
     var layout: ChoiceLayout?
     var canAnswer = true
@@ -679,10 +654,10 @@ struct MessageView: View {
 
     private func meta(_ name: String) -> some View {
         HStack(spacing: 6) {
-            Text(name).font(.callout.weight(.semibold)).foregroundStyle(.primary.opacity(0.8))
+            Text(name).font(Typo.label).foregroundStyle(Theme.ink)
             if let at = message.at {
-                Text("·").foregroundStyle(.tertiary)
-                Text(at.formatted(date: .omitted, time: .shortened)).font(.callout).foregroundStyle(.secondary)
+                Text("·").foregroundStyle(Theme.subtle)
+                Text(at.formatted(date: .omitted, time: .shortened)).font(Typo.body).foregroundStyle(Theme.muted)
             }
         }
     }
@@ -695,7 +670,8 @@ struct MessageView: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 14).padding(.vertical, 11)
-                .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
             if let status = DeliveryText(state: message.state) { delivery(status) }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -703,17 +679,12 @@ struct MessageView: View {
 
     private var agentBody: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: glyph.symbol)
-                .font(.system(size: 15, weight: .semibold)).foregroundStyle(glyph.color)
-                .frame(width: 34, height: 34)
-                .background(glyph.color.opacity(0.12), in: Circle())
-                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 10) {
                 meta(agentName)
                 if let layout {
                     if !layout.before.isEmpty { MarkdownView(text: layout.before) }
                     if let q = layout.question {
-                        Text(verbatim: q).font(.system(size: 15, weight: .semibold)).padding(.top, 8).accessibilityAddTraits(.isHeader)
+                        Text(verbatim: q).font(Typo.heading).padding(.top, 8).accessibilityAddTraits(.isHeader)
                     }
                     SqueakGlassGroup(spacing: 10) {
                         VStack(spacing: 10) {
@@ -736,23 +707,24 @@ struct MessageView: View {
     private func delivery(_ status: DeliveryText) -> some View {
         HStack(spacing: 6) {
             Image(systemName: status.symbol).font(.system(size: 10, weight: .medium)).foregroundStyle(status.color)
-            Text(status.text).font(.caption).foregroundStyle(status.color)
+            Text(status.text).font(Typo.meta).foregroundStyle(status.color)
                 .fixedSize(horizontal: false, vertical: true)
             if status.offersOpen, canOpenHost {
                 Button("Open in Conductor") { model.openInHost() }.buttonStyle(.plain)
-                    .font(.caption.weight(.medium))
+                    .font(Typo.meta.weight(.medium))
             }
             if status.offersReuse {
                 Button("Edit as new message") { model.reuse(message) }.buttonStyle(.plain)
-                    .font(.caption.weight(.medium))
+                    .font(Typo.meta.weight(.medium))
             }
         }
         .accessibilityElement(children: .combine)
     }
 }
 
-/// A big, deliberate answer: letter, title, description, and a Recommended badge. Tapping sends just
-/// the letter. A spring press (interruptible) and a hover tint; glass on macOS 26.
+/// 8.4 option row: letter in a `radius-chip` square, title in `label`, the detail beneath, and the
+/// word "recommended" in `muted` when the agent marked one (never coloured, never pre-selected).
+/// Tapping sends just the letter. The row sits on Liquid Glass (Glass.swift); no state colour on it.
 struct AnswerCard: View {
     let card: ChoiceCard
     var isEnabled = true
@@ -761,27 +733,27 @@ struct AnswerCard: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
                 Text(card.letter)
-                    .font(.system(size: 15, weight: .medium))
-                    .frame(width: 36, height: 36)
-                    .overlay(Circle().strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1.2))
+                    .font(Typo.label)
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: 26, height: 26)
+                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.chip))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.line))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(verbatim: card.title).font(.system(size: 15, weight: .medium)).foregroundStyle(.primary)
+                    Text(verbatim: card.title).font(Typo.label).foregroundStyle(Theme.ink)
                     if let d = card.detail {
-                        Text(verbatim: d).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text(verbatim: d).font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 12)
                 if card.isRecommended {
-                    Text("Recommended").font(.caption.weight(.medium)).foregroundStyle(Color(nsColor: NSColor(hex: 0x3F3200)))
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Theme.duck.opacity(0.55), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    Text("recommended").font(Typo.meta).foregroundStyle(Theme.muted)
                 }
             }
-            .padding(.horizontal, 18).padding(.vertical, 14)
-            .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
         }
         .buttonStyle(CardPressStyle(hovering: hovering))
         .disabled(!isEnabled)
@@ -798,11 +770,10 @@ private struct CardPressStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .squeakGlass(radius: 16, tint: hovering ? Color.accentColor.opacity(0.14) : nil, interactive: true)
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color(nsColor: .separatorColor).opacity(0.7)))
+            .squeakGlass(radius: Radius.card, interactive: true)
+            .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(hovering ? Theme.lineStrong : Theme.line))
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
             .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
-            .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.9), value: hovering)
     }
 }
 
@@ -818,9 +789,9 @@ struct DeliveryText {
         case nil, .draft: return nil
         case .pending: self = .init(text: "Sending…", symbol: "ellipsis", color: Theme.subtle)
         case .accepted(let via): self = .init(text: Self.delivered(via), symbol: "checkmark", color: Theme.subtle)
-        case .confirmed: self = .init(text: "Delivered", symbol: "checkmark", color: Theme.subtle)
+        case .confirmed: self = .init(text: "Sent", symbol: "checkmark", color: Theme.subtle)
         case .uncertain:
-            self = .init(text: "Not confirmed — check Conductor before resending", symbol: "exclamationmark.circle", color: Theme.muted, offersOpen: true)
+            self = .init(text: "Typed it in, but couldn't confirm it was sent. Check Conductor before resending.", symbol: "exclamationmark.circle", color: Theme.muted, offersOpen: true)
         case .refused(let r): self = .init(text: "Refused: \(r)", symbol: "xmark.circle", color: Theme.error, offersReuse: true)
         case .notSent(let r): self = .init(text: "Not sent: \(r)", symbol: "exclamationmark.circle", color: Theme.error, offersReuse: true)
         }
@@ -836,10 +807,18 @@ struct DeliveryText {
 
     static func delivered(_ via: String) -> String {
         switch via {
-        case "conductor": "Delivered via Conductor"
-        case "terminal": "Delivered via Terminal"
-        case "background": "Sent in the background — Conductor shows it after it reloads the chat"
-        default: "Delivered via \(via)"
+        case "conductor": "Sent in Conductor"
+        case "terminal": "Sent in Terminal"
+        case "background": "Sent in the background. Conductor shows it after it reloads the chat."
+        default: "Sent in \(via)"
         }
+    }
+}
+
+/// "Send" in the primary text colour while it can be pressed, muted while it cannot.
+private struct SendLabel: View {
+    @Environment(\.isEnabled) private var isEnabled
+    var body: some View {
+        Text("Send").font(Typo.label).foregroundStyle(isEnabled ? Theme.primaryText : Theme.muted)
     }
 }

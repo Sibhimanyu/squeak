@@ -15,7 +15,8 @@ struct LaunchOfferBanner: View {
                 Button("Turn on") { model.answerLaunchOffer(enable: true) }.buttonStyle(PrimaryButtonStyle())
             }
             .padding(10)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         }
     }
 }
@@ -50,9 +51,9 @@ struct SendFeedback {
         switch result {
         case .accepted(let via):
             let word = via == "terminal" ? "Terminal" : via == "conductor" ? "Conductor" : via
-            self = .init(text: "Delivered via \(word)", symbol: "checkmark", color: Theme.subtle, succeeded: true)
+            self = .init(text: "Sent in \(word)", symbol: "checkmark", color: Theme.subtle, succeeded: true)
         case .uncertain:
-            self = .init(text: "Not confirmed. Check Conductor before resending.", symbol: "exclamationmark.circle", color: Theme.muted, succeeded: false)
+            self = .init(text: "Couldn't confirm it was sent. Check Conductor before resending.", symbol: "exclamationmark.circle", color: Theme.muted, succeeded: false)
         case .refused(let r):
             self = .init(text: "Refused: \(r)", symbol: "xmark.circle", color: Theme.error, succeeded: false)
         case .notSent(let r):

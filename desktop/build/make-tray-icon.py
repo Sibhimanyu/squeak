@@ -4,6 +4,9 @@ Make the menu-bar icon from the duck's own artwork, so the two always match.
 
     python3 desktop/build/make-tray-icon.py      # writes desktop/assets/duckTemplate{,@2x}.png
 
+The source is the approved logo (brand/logo, full colour, facing right), so
+the mark follows the brand duck rather than the older mood sprite.
+
 A menu-bar icon must be a template image: black plus transparency, which
 macOS tints for light and dark menu bars. So this takes the duck's
 silhouette (renderer/duck.png) and cuts its inner lines — eye, wing, beak
@@ -14,7 +17,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageFilter
 
 here = Path(__file__).resolve().parent.parent
-src = Image.open(here / "renderer" / "duck.png").convert("RGBA")
+src = Image.open(here.parent / "brand" / "logo" / "png" / "squeak-duck-full-color-1024.png").convert("RGBA")
 src = src.crop(src.getbbox())
 width, height = src.size
 r, g, b, a = src.split()

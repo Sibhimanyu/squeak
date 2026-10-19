@@ -176,7 +176,7 @@ private struct AboutSettings: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             VStack(spacing: 6) {
-                DuckGlyph(size: 56)
+                DuckMark(width: 56)
                 Text("Squeak").font(.title2.bold())
                 Text("Version \(AppModel.appVersion)").foregroundStyle(.secondary)
                 Text("A pager for your coding agents. Reads your sessions and lets you answer them.")
@@ -187,7 +187,7 @@ private struct AboutSettings: View {
                 Section {
                     Toggle("Automatically check for updates", isOn: Binding(get: { model.updater.automaticallyChecks }, set: { model.updater.automaticallyChecks = $0 }))
                         .disabled(!model.updater.isActive)
-                    Button("Check for Updates…") { model.updater.checkForUpdates() }
+                    Button("Check for updates…") { model.updater.checkForUpdates() }
                         .disabled(!model.updater.canCheck)
                 } footer: {
                     SectionFootnote("Squeak checks once a day, and installs a new version for you when you quit or relaunch it. Nothing about your chats is sent.")

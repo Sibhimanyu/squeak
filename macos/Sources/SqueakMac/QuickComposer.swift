@@ -96,8 +96,7 @@ struct QuickComposerView: View {
         @Bindable var state = state
         VStack(alignment: .leading, spacing: Space.m) {
             HStack(spacing: Space.m) {
-                DuckGlyph(size: 24)
-                Text("To:").font(.system(size: 14)).foregroundStyle(Theme.muted)
+                Text("To").font(.system(size: 14)).foregroundStyle(Theme.muted)
                 destinationMenu
                 Spacer()
             }
@@ -117,9 +116,9 @@ struct QuickComposerView: View {
                 .background(Theme.surfaceRaised.opacity(0.4), in: RoundedRectangle(cornerRadius: Radius.card))
             }
             HStack(spacing: Space.s) {
-                Text("⌘↩ Send").foregroundStyle(Theme.muted)
+                Text("⌘↩ sends").foregroundStyle(Theme.muted)
                 Text("·").foregroundStyle(Theme.subtle)
-                Text("Esc Close").foregroundStyle(Theme.muted)
+                Text("Esc closes").foregroundStyle(Theme.muted)
                 Spacer()
                 status
             }

@@ -18,16 +18,16 @@ struct SqueakGlass: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         if Self.flat || reduceTransparency {
+            // Reduce Transparency (and flat captures): the opaque tokens, no glass (DESIGN.md §5).
             content
-                .background(Color(nsColor: .controlBackgroundColor), in: shape)
-                .overlay(shape.strokeBorder(Color(nsColor: .separatorColor)))
+                .background(Theme.surfaceRaised, in: shape)
+                .overlay(shape.strokeBorder(Theme.line))
         } else if #available(macOS 26, *) {
             content.glassEffect(Self.style(tint, interactive), in: shape)
         } else {
             content
                 .background(.regularMaterial, in: shape)
-                .overlay(shape.strokeBorder(Color(nsColor: .separatorColor)))
-                .shadow(color: .black.opacity(0.10), radius: 8, y: 2)
+                .overlay(shape.strokeBorder(Theme.line))
         }
     }
 
@@ -61,31 +61,22 @@ struct SqueakGlassGroup<Content: View>: View {
     }
 }
 
-/// The duck-yellow Send button: `.glassProminent` on macOS 26, a flat yellow rounded button before.
+/// Send (§8.9, §5): the prominent glass button on macOS 26, filled with the primary fill (`duck` on
+/// dark, ink on light, since yellow fails on white); the flat primary button before 26 and under
+/// Reduce Transparency.
 struct SendButtonStyle: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     func body(content: Content) -> some View {
-        if #available(macOS 26, *), !SqueakGlass.flat {
-            content.buttonStyle(.glassProminent).tint(Theme.duck)
+        if #available(macOS 26, *), !SqueakGlass.flat, !reduceTransparency {
+            content.buttonStyle(.glassProminent).tint(Theme.primaryFill)
         } else {
-            content.buttonStyle(YellowButtonStyle())
+            content.buttonStyle(PrimaryButtonStyle())
         }
     }
 }
 
-struct YellowButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 16).frame(minHeight: 30)
-            .background(Theme.duck.opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.35), in: Capsule())
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
-    }
-}
-
-/// A bordered secondary button: `.glass` on macOS 26 (real captures), `.bordered` before and in flat captures.
+/// A secondary button (§8.9): surface-raised fill, ink text, line border.
 struct GlassBorderedButton: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 26, *), !SqueakGlass.flat { content.buttonStyle(.glass) } else { content.buttonStyle(.bordered) }
-    }
+    func body(content: Content) -> some View { content.buttonStyle(SecondaryButtonStyle()) }
 }

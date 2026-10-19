@@ -34,6 +34,13 @@ if ! otool -l "$APP/Contents/MacOS/SqueakMac" | grep -q "@executable_path/../Fra
   install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/SqueakMac"
 fi
 
+# The brand's own duck files (DESIGN.md 6.1) and the menu-bar template; the app never redraws them.
+BRAND="$APP/Contents/Resources/brand"
+mkdir -p "$BRAND"
+cp "$REPO"/brand/logo/png/squeak-duck-full-color-*.png "$REPO"/brand/logo/png/squeak-duck-compact-*.png \
+   "$REPO"/brand/logo/png/squeak-lockup-horizontal-*.png "$BRAND/"
+cp "$REPO/desktop/assets/duckTemplate.png" "$REPO/desktop/assets/duckTemplate@2x.png" "$BRAND/"
+
 ICON=""
 for c in "$REPO/desktop/build/squeak.icns"; do [ -f "$c" ] && ICON="$c"; done
 ICON_KEY=""

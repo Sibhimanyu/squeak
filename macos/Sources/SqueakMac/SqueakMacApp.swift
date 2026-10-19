@@ -1,4 +1,5 @@
 import AppKit
+import Heresay
 import SqueakMacCore
 import SwiftUI
 
@@ -6,6 +7,18 @@ import SwiftUI
 struct SqueakMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel.shared
+
+    /// In-app reports (Help › Report a Problem…). Not in capture or demo runs, which must stay offline.
+    static let reportsEnabled: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        return Bundle.main.bundleIdentifier != nil && env["SQUEAK_MAC_CAPTURE"] == nil && env["SQUEAK_MAC_DEMO"] == nil
+    }()
+
+    init() {
+        if Self.reportsEnabled {
+            Heresay.configure(key: "pk_SBtaP3xDs3fa2b9BRe62tEnq", url: URL(string: "https://heresay-sibhi-42b1.web.app")!)
+        }
+    }
 
     var body: some Scene {
         MenuBarExtra {
@@ -17,9 +30,15 @@ struct SqueakMacApp: App {
 
         Window("Squeak", id: "conversation") {
             ConversationView().environment(model)
+                .heresay()
+                // Once per install, say where reports live; only on the main window, never over Welcome.
+                .onAppear { if Self.reportsEnabled { Heresay.introduce() } }
         }
         .defaultSize(width: 1000, height: 680)
-        .commands { SqueakCommands(model: model) }
+        .commands {
+            SqueakCommands(model: model)
+            HeresayCommands()
+        }
 
         Settings {
             SettingsView().environment(model)
@@ -48,7 +67,7 @@ struct SqueakCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
-            Button("Check for Updates…") { model.updater.checkForUpdates() }
+            Button("Check for updates…") { model.updater.checkForUpdates() }
                 .disabled(!model.updater.canCheck)
         }
         CommandMenu("Sessions") {
@@ -59,7 +78,7 @@ struct SqueakCommands: Commands {
                     .disabled(!list.indices.contains(i))
             }
             Divider()
-            Button("Quick Message") { QuickComposerController.shared.show() }
+            Button("Quick message") { QuickComposerController.shared.show() }
             Button("Open in Conductor") { model.openInHost() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(model.openURL == nil)
@@ -72,10 +91,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // No Dock icon, even from a bare `swift run` (the bundle also sets LSUIElement).
         NSApp.setActivationPolicy(.accessory)
-        if let sheet = ProcessInfo.processInfo.environment["SQUEAK_MAC_ICON_SHEET"] {
-            MenuBarIconSheet.write(to: sheet, master: ProcessInfo.processInfo.environment["SQUEAK_MAC_ICON_MASTER"])
-            exit(0)
-        }
         ActivationPolicyController.shared.start()
         let model = AppModel.shared
         model.start()

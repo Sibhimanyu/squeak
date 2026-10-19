@@ -33,12 +33,11 @@ struct PopoverView: View {
 
     private var header: some View {
         HStack(spacing: Space.s) {
-            DuckGlyph(size: 18)
-            Text("Squeak").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+            LogoLockup(height: 22)
             Spacer()
             if model.health != nil, !model.isConnected {
                 HStack(spacing: 5) {
-                    Circle().fill(Theme.subtle).frame(width: 6, height: 6)
+                    Circle().fill(Theme.offline).frame(width: 9, height: 9)
                     Text(model.connectionTitle).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
                 }
                 .accessibilityElement(children: .combine)
@@ -127,9 +126,8 @@ struct PopoverView: View {
 
     private var allQuiet: some View {
         VStack(spacing: Space.xs) {
-            DuckGlyph(size: 24).accessibilityHidden(true)
-            Text("All quiet").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink).padding(.top, Space.xs)
-            Text("Nothing needs you right now.").font(.system(size: 12)).foregroundStyle(Theme.muted)
+            Text("All quiet").font(Typo.label).foregroundStyle(Theme.ink)
+            Text("Nothing needs you right now.").font(Typo.body).foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Space.l)
@@ -155,7 +153,7 @@ struct PopoverView: View {
 
     private func row(_ s: HostSession, snippet: String? = nil) -> some View {
         Button { model.open(s.key) } label: {
-            SessionRowView(session: s, isPinned: model.pinned.contains(s.key), subtitleOverride: snippet, showsAgent: snippet == nil)
+            SessionRowView(session: s, isPinned: model.pinned.contains(s.key), subtitleOverride: snippet)
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -203,7 +201,7 @@ struct PopoverView: View {
                 .foregroundStyle(Theme.ink)
             Menu {
                 Button("Settings…") { model.openSettings() }.keyboardShortcut(",")
-                Button("Check for Updates…") { model.updater.checkForUpdates() }.disabled(!model.updater.canCheck)
+                Button("Check for updates…") { model.updater.checkForUpdates() }.disabled(!model.updater.canCheck)
                 Divider()
                 Button("Quit Squeak") { NSApp.terminate(nil) }.keyboardShortcut("q")
             } label: {
