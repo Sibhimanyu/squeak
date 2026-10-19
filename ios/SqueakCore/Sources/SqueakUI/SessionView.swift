@@ -17,12 +17,13 @@ struct SessionView: View {
         return ""
     }()
     @FocusState private var composing: Bool
-    /// The working row's steps, open or closed. Open from the start when the turn is streamed live
-    /// (verbose), since that is what it is for; `-squeak-tab activity` opens it for screenshots.
-    @State private var stepsOpen: Bool? = {
+    /// The working row's steps, open or closed. Closed by default, like a chat app's "Thinking…"
+    /// line, verbose or not, and closed again on every send; `-squeak-tab activity` opens it for
+    /// screenshots.
+    @State private var stepsOpen: Bool = {
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "-squeak-tab"), i + 1 < args.count, args[i + 1] == "activity" { return true }
-        return nil
+        return false
     }()
 
     private var session: PhoneSnapshot.Session? { model.snapshot?.session(key) }
@@ -75,8 +76,9 @@ struct SessionView: View {
                     withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
                 }
             }
-            // Sending is always a reason to look at the end.
+            // Sending is always a reason to look at the end, and starts a fresh, folded working row.
             .onChange(of: model.outbox[session.key]?.count ?? 0) { _, _ in
+                stepsOpen = false
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
             }
         }
@@ -144,7 +146,7 @@ struct SessionView: View {
                     WorkingRow(
                         agentName: Presentation.agentName(session.agent), label: label,
                         steps: StepList.steps(session: session, live: live), total: live?.total ?? session.activity?.total ?? 0,
-                        live: live != nil, open: Binding(get: { stepsOpen ?? (live != nil) }, set: { stepsOpen = $0 })
+                        live: live != nil, open: $stepsOpen
                     )
                     .transition(.opacity)
                 case .empty(let text):
@@ -521,28 +523,65 @@ struct StepList: View {
         return (session.activity?.steps ?? []).map { Step(kind: $0.kind, text: $0.text) }
     }
 
+    /// Steps opened to their full text, by position in the whole turn (stable as new steps arrive).
+    @State private var expanded: Set<Int> = []
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 4) {
             if live {
-                Text(total > steps.count ? "Live · the latest \(steps.count) of \(total) steps." : "Live · every step of this turn.")
-                    .font(.footnote).foregroundStyle(Theme.muted)
+                Text(total > steps.count ? "Live · the latest \(steps.count) of \(total) steps" : "Live · every step of this turn")
+                    .font(.footnote).foregroundStyle(Theme.muted).padding(.bottom, 4)
             } else if total > steps.count {
-                Text("The latest \(steps.count) of \(total) steps this turn.")
-                    .font(.footnote).foregroundStyle(Theme.muted)
+                Text("The latest \(steps.count) of \(total) steps this turn")
+                    .font(.footnote).foregroundStyle(Theme.muted).padding(.bottom, 4)
             }
-            ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Lucide(icon(step.kind), size: 16, color: Theme.muted).frame(width: 22)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(label(step.kind)).font(.caption).foregroundStyle(Theme.muted)
-                        Text(step.text).font(.body).italic(step.kind == "thinking")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .accessibilityElement(children: .combine)
+            ForEach(Array(steps.enumerated()), id: \.offset) { offset, step in
+                row(step, index: total - steps.count + offset)
             }
         }
+    }
+
+    /// One line per step, like a chat app's collapsed reasoning: icon, kind, first line. A step with
+    /// more to say opens on a tap to its whole text.
+    private func row(_ step: Step, index: Int) -> some View {
+        let open = expanded.contains(index)
+        let more = step.text.count > 60 || step.text.contains("\n")
+        return Button {
+            guard more else { return }
+            withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.88)) {
+                if open { expanded.remove(index) } else { expanded.insert(index) }
+            }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Lucide(icon(step.kind), size: 14, color: Theme.muted).frame(width: 18)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(label(step.kind)).font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
+                        if !open {
+                            Text(step.text.replacingOccurrences(of: "\n", with: " "))
+                                .font(.subheadline).foregroundStyle(Theme.muted).italic(step.kind == "thinking")
+                                .lineLimit(1).truncationMode(.tail)
+                        }
+                        Spacer(minLength: 0)
+                        if more { Lucide(open ? .chevronUp : .chevronDown, size: 12, color: Theme.subtle) }
+                    }
+                    if open {
+                        Text(step.text).font(.subheadline).foregroundStyle(Theme.ink).italic(step.kind == "thinking")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label(step.kind)): \(step.text)")
+        .accessibilityHint(more ? (open ? "Folds this step" : "Shows the whole step") : "")
     }
 
     private func icon(_ kind: String) -> LucideName {
