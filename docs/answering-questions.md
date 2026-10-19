@@ -7,12 +7,12 @@ pick, a field to type an answer — and deliver the answer to that chat.
 
 ## What can be waiting on you
 
-| Kind | Where it comes from | What the human gives |
-| --- | --- | --- |
-| **Question** | `AskUserQuestion` / `mcp__conductor__AskUserQuestion` tool call, pending (no `tool_result` yet). Input: `questions[]` of `{header?, question, multiSelect?, options[]: string \| {label, description?}}` | One or more options per question (one, or any with `multiSelect`), or their own words ("Other") |
-| **Plan** | `ExitPlanMode` pending | Approve, or keep planning with a note |
-| **Lettered options in prose** | The agent's last message ends with `A. … / B. …` (already parsed: `Choices`) | A letter or free text — this is a normal reply and already works |
-| **Permission** | `PermissionRequest` hook (approve a tool call) | Allow / deny — out of scope here; Conductor alone can answer it (see "Not in scope") |
+| Kind                          | Where it comes from                                                                                                                                                                                      | What the human gives                                                                            |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Question**                  | `AskUserQuestion` / `mcp__conductor__AskUserQuestion` tool call, pending (no `tool_result` yet). Input: `questions[]` of `{header?, question, multiSelect?, options[]: string \| {label, description?}}` | One or more options per question (one, or any with `multiSelect`), or their own words ("Other") |
+| **Plan**                      | `ExitPlanMode` pending                                                                                                                                                                                   | Approve, or keep planning with a note                                                           |
+| **Lettered options in prose** | The agent's last message ends with `A. … / B. …` (already parsed: `Choices`)                                                                                                                             | A letter or free text — this is a normal reply and already works                                |
+| **Permission**                | `PermissionRequest` hook (approve a tool call)                                                                                                                                                           | Allow / deny — out of scope here; Conductor alone can answer it (see "Not in scope")            |
 
 Detection is already in place (`src/fleet/pending-question.ts`, Swift
 `PendingQuestion`): a chat with a pending question is "needs you" even while
