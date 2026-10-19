@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.5
+
+- Follows Squeak's design guide throughout: the approved duck (facing right),
+  the brand yellow, red for "needs you", and plain sentence-case wording.
+- Session rows lead with the chat's title, then repo and agent, then what the
+  agent is doing right now. Groups: needs you, done, working, error, idle.
+- Lucide icons everywhere, the same set as Conductor.
+- The menu-bar duck is regenerated from the approved logo.
+- Send is ink on light and duck yellow on dark; glass on the reply box, the
+  answer rows and Send on macOS 26.
+- Help › Report a problem… (⌥⌘R) sends feedback straight to the team.
+
 ## 2.0.4
 
 - A new main window: a native three-column layout with a translucent sidebar
