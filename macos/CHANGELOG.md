@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.9
+
+- Start a new Conductor chat from Squeak: ⌘N, the menu-bar panel or Quick
+  message. Pick the workspace and agent, write the first message.
+- Finishes and changes show up within a couple of seconds: Squeak watches
+  Conductor's database instead of checking on a timer.
+- Session headers in two lines; Send holds Steer while an agent works.
+
 ## 2.0.8
 
 - Settings › About has Report a problem… to tell us what's broken, confusing
