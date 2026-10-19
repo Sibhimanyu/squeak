@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.6
+
+- Settings › Channels: set up Telegram (paste a bot token, link your chat by
+  messaging the bot, send a test message) and Zoho Cliq, without the
+  terminal. Saved tokens are never shown again.
+- Settings › iPhone: pair Squeak for iPhone with a QR code and approve it on
+  the Mac; see and remove paired phones.
+- Updates download from sibhimanyu.github.io, which works on networks that
+  stall GitHub's release downloads.
+
 ## 2.0.5
 
 - Follows Squeak's design guide throughout: the approved duck (facing right),
