@@ -97,6 +97,12 @@ export function distinctTitles(sessions: FleetSession[]): Map<string, string | n
   );
 }
 
+/** The chat's own title, or null for none and Conductor's "Untitled" placeholder. */
+export function chatTitle(session: Pick<FleetSession, "title">): string | null {
+  const title = session.title?.trim();
+  return !title || title === "Untitled" ? null : title;
+}
+
 function disambiguatingTitle(session: FleetSession): string | null {
   const title = session.title?.trim();
   if (!title || title === "Untitled") {

@@ -8,7 +8,7 @@ import type { ParsedChoices } from "../fleet/choices.js";
 import { parseChoices } from "../fleet/choices.js";
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import { describeGitState } from "../fleet/git-state.js";
-import { distinctTitles, sessionLabel } from "../fleet/radar.js";
+import { chatTitle, distinctTitles, sessionLabel } from "../fleet/radar.js";
 import type { ReplyOutcome } from "../fleet/session-reply.js";
 import type { Activity } from "../fleet/activity.js";
 import type { FleetSession } from "../fleet/types.js";
@@ -472,6 +472,8 @@ export class RemoteBridge {
           key: session.key,
           conductorSessionId,
           label: title ? `${sessionLabel(session)} (${title})` : sessionLabel(session),
+          // The phone's row headline (DESIGN.md §8.2); older phones ignore it.
+          title: chatTitle(session),
           agent: session.agent,
           state: session.state,
           lastActivityAt: session.lastActivityAt,

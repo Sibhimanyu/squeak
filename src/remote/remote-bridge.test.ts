@@ -349,4 +349,16 @@ describe("RemoteBridge phone view activity", () => {
   it("sends no activity for a session that is not working", () => {
     expect(viewWith([session({ state: "finished" })], 3).sessions[0]!.activity).toBeNull();
   });
+
+  it("sends the chat's own title for the row headline, never Conductor's placeholder", () => {
+    const view = viewWith(
+      [
+        session({ key: "a", title: "Payment retry logic" }),
+        session({ key: "b", title: "Untitled" }),
+        session({ key: "c", title: null }),
+      ],
+      0,
+    );
+    expect(view.sessions.map((s) => s.title)).toEqual(["Payment retry logic", null, null]);
+  });
 });
