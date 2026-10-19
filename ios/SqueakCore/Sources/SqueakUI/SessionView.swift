@@ -58,6 +58,11 @@ struct SessionView: View {
             }
         }
         .onAppear { screen.report?("Session"); model.watch(key) }
+        // The agent you are watching finishes: one light tap, so you can look up from the keyboard.
+        .onChange(of: session?.state) { old, new in
+            guard old == "working", let new, new != "working" else { return }
+            UINotificationFeedbackGenerator().notificationOccurred(new == "error" ? .error : .success)
+        }
         .onDisappear { screen.report?("Sessions"); model.watch(nil) }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -526,6 +531,10 @@ private struct QueueCard: View {
                     Text(problem).font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
                 } else if card.pending {
                     Text("Queuing…").font(.caption).foregroundStyle(Theme.muted)
+                } else if !card.actionable {
+                    // Say why there is no Steer now / Edit / Delete, where they would be.
+                    Text("Queued in Conductor · it can be changed from your Mac, not from here right now")
+                        .font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

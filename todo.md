@@ -60,9 +60,9 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
       (needs APNs from the Mac — its own project).
 - [ ] **9. Live Activity / Dynamic Island** — blocked on the same push decision (without push it goes stale the moment the app is suspended). while an agent works (needs push too).
 - [x] **10. Plan approvals on the phone** (also under "Not built yet").
-- [ ] **11. Say why a control is missing**: a queue card without actions, a
+- [x] **11. Say why a control is missing**: a queue card without actions, a
       blocked composer — one line of reason where the tap would be.
-- [ ] **12. Haptics and motion pass**: a light tap when an open chat's agent
+- [x] **12. Haptics and motion pass**: a light tap when an open chat's agent
       finishes; every animation checked under Reduce Motion.
 
 ## Stay awake plan (Insomnia-style, chat ushuaia keep-awake, 2026-10-19), worked top to bottom

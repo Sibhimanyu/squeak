@@ -19,6 +19,7 @@ public struct MessageText: View {
 
     @ScaledMetric(relativeTo: .body) private var dynamicScale: CGFloat = 1
     @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(markdown: String, style: MessageStyle = .mac) {
         self.markdown = markdown
@@ -55,7 +56,7 @@ public struct MessageText: View {
                     }
                 }
             if isLong {
-                Button { withAnimation(.snappy(duration: 0.2)) { expanded.toggle() } } label: {
+                Button { withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { expanded.toggle() } } label: {
                     HStack(spacing: 4) {
                         Text(expanded ? "Show less" : "Show more")
                         Lucide(expanded ? .chevronUp : .chevronDown, size: 14, color: style.muted)
