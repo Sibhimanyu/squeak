@@ -168,7 +168,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// DESIGN.md §9: "Sent B to snof · irrigation in Conductor."
+    /// DESIGN.md §9: "Sent B to orchard · irrigation in Conductor."
     static func sentText(_ text: String, _ label: String, via: String?) -> String {
         let what = text.count <= 3 ? text : "your reply"
         return via == "background"

@@ -18,15 +18,15 @@
 <body>
 <main>
   <h1>Opening Squeak</h1>
-  <p>If nothing happens, tap the button. It opens the Squeak tab in SNOF on this session.</p>
-  <a class="btn" id="go" href="snof://squeak">Open in SNOF</a>
+  <p>If nothing happens, tap the button. It opens Squeak on this session.</p>
+  <a class="btn" id="go" href="squeak://open">Open in Squeak</a>
 </main>
 <script>
   // Telegram buttons can only open https links; this page hands the session
   // on to the app. The session id rides in the fragment (after #), which
   // browsers never send to a server.
   var match = /(?:^|&)s=([0-9A-Fa-f-]{8,64})(?:&|$)/.exec(location.hash.slice(1));
-  var target = match ? "snof://squeak?s=" + match[1] : "snof://squeak";
+  var target = match ? "squeak://open?s=" + match[1] : "squeak://open";
   document.getElementById("go").href = target;
   location.replace(target);
 </script>

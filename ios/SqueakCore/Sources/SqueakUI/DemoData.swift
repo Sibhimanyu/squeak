@@ -30,7 +30,7 @@ enum DemoData {
                       .init(kind: "tool", text: "Edit merge.ts"),
                       .init(kind: "tool", text: "Run npm run ci"),
                   ])),
-            .init(key: "d", conductorSessionId: "d0000000-0000-4000-8000-000000000003", label: "snof · irrigation-pull-to-refresh", agent: "claude", state: "working",
+            .init(key: "d", conductorSessionId: "d0000000-0000-4000-8000-000000000003", label: "orchard · irrigation-pull-to-refresh", agent: "claude", state: "working",
                   lastActivityAt: now(-40), detail: "Editing HomeView.swift", git: nil, contextPercent: 74,
                   turnId: "t3", message: nil, choices: nil),
         ])

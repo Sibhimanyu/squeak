@@ -3,14 +3,13 @@ import PackageDescription
 
 // Everything in the iPhone app that is not UI: the pairing payload, the
 // channel crypto, the Firestore client and the command format. Kept apart so
-// `swift test` runs it on the Mac, like snof's SNOFCore.
+// `swift test` runs it on the Mac.
 let package = Package(
     name: "SqueakCore",
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [
         .library(name: "SqueakCore", targets: ["SqueakCore"]),
-        // The iPhone screens, embeddable in any app: the Squeak app itself,
-        // or a tab inside another one (see SqueakRootView).
+        // The iPhone screens: the whole UI of the Squeak app (see SqueakRootView).
         .library(name: "SqueakUI", targets: ["SqueakUI"]),
     ],
     targets: [

@@ -343,13 +343,12 @@ test for anything you fix is expected; the suite is fast.
 - **The phone gets less of a working turn than the Mac window**: the newest
   six steps, each clipped to 200 characters, no timestamps, and only while
   the session works — what leaves the Mac is only what the phone renders.
-- **The iPhone UI also ships inside SNOF**, as an owner-only tab: a free
-  Apple ID allows three sideloaded apps. `SqueakRootView` (module `SqueakUI`)
-  is the whole UI in one view; `ios/scripts/vendor-into.sh <snof>/ios/SqueakKit`
-  copies it and `SqueakCore` into SNOF, which shows it only to the owner's
-  account (`SqueakAccess.swift` there). After changing anything under
-  `ios/SqueakCore/Sources`, re-vendor into SNOF, or its tab keeps the old code.
-  Launch flags are `-squeak-*` so they never collide with a host app's own.
+- **The iPhone app is standalone.** `SqueakRootView` (module `SqueakUI`) is
+  the whole UI in one view and `ios/Squeak` is a window around it. The app
+  owns the `squeak://` scheme; Telegram's "Open in Squeak" goes through
+  `https://<project>.web.app/open/#s=<id>`, which redirects to
+  `squeak://open?s=<id>` (`SqueakLink` parses it, `SqueakRouter` opens it).
+  Launch flags are `-squeak-*` (demo screenshots only).
 - The iPhone app is released with `ios/scripts/release.sh "notes"`; bump
   `MARKETING_VERSION` in `ios/project.yml` or SideStore never offers it. The
   file is served as `.zip` because Spark refuses `.ipa` on new projects.

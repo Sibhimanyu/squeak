@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a Release .ipa and publish it as a SideStore source on Firebase
 # Hosting (https://squeak-5c9gvo.web.app). Phones with the source added get
-# updates in SideStore. Same pipeline as snof's ios/scripts/release.sh.
+# updates in SideStore.
 #
 #   ./scripts/release.sh "What changed, one line"          # build + deploy
 #   ./scripts/release.sh "..." --no-deploy                  # build only

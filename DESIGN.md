@@ -376,7 +376,7 @@ interaction on the phone and in Telegram.
 ### 8.5 Reply composer
 
 A single text field with the target named in its placeholder: *"Message for
-snof · irrigation"*. Send is the only primary button. After sending, the
+orchard · irrigation"*. Send is the only primary button. After sending, the
 composer is replaced by the receipt described above. It never sends to a
 session the user did not explicitly pick.
 
@@ -443,7 +443,7 @@ Use these words, consistently, everywhere:
 
 ### Rules
 
-- **Lead with the fact.** "snof · irrigation needs approval" — not "Heads up!
+- **Lead with the fact.** "orchard · irrigation needs approval" — not "Heads up!
   An agent is waiting for you."
 - **Say it once, short.** Three lines on a card. One sentence in an empty
   state. Buttons are verbs: *Reply*, *View diff*, *Start Squeak*.
@@ -462,9 +462,9 @@ Use these words, consistently, everywhere:
 
 | Situation | Yes | No |
 | --- | --- | --- |
-| Blocked | `🔴 snof · irrigation — needs approval` | `⚠️ ACTION REQUIRED: Agent awaiting permission!` |
+| Blocked | `🔴 orchard · irrigation — needs approval` | `⚠️ ACTION REQUIRED: Agent awaiting permission!` |
 | Finished | `✅ squeak · session-hub — done` / `Fixed the stale finish detection.` / `_3 files changed_` | `🎉 Great news! Your agent completed its task successfully!` |
-| Reply sent | `Sent B to snof · irrigation in Conductor.` | `Your response has been submitted.` |
+| Reply sent | `Sent B to orchard · irrigation in Conductor.` | `Your response has been submitted.` |
 | Failure | `The reply did not go through: claude exited (1).` | `Oops, something went wrong. Please try again.` |
 
 ---
@@ -478,7 +478,7 @@ Use these words, consistently, everywhere:
   pulse speed (1.0s vs 1.6s), and needs you also raises the badge.
 - **Targets:** 44×44pt minimum on mobile; 24×24px minimum on desktop.
 - **Reduced motion** is fully supported (§7).
-- **Screen readers:** every row reads as "snof, irrigation-pull-to-refresh,
+- **Screen readers:** every row reads as "orchard, irrigation-pull-to-refresh,
   Claude, working, 2 minutes ago". The duck is decorative (`aria-hidden`); its
   mood is announced as text ("3 agents working, 1 needs you").
 - **Dynamic type** on mobile up to 200% without truncating the state word.

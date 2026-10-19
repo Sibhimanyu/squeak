@@ -3,7 +3,7 @@ import Combine
 import SqueakCore
 import SwiftUI
 
-/// Where a link asks Squeak to go. The host app hands links to it; the
+/// Where a link asks Squeak to go. The app hands links to it; the
 /// session list opens the session once it is in the snapshot — which, right
 /// after a cold launch, can take a few seconds to arrive.
 @MainActor

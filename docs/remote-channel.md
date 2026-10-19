@@ -108,7 +108,7 @@ A command is executed only if **all** hold:
 5. The same busy rules as Telegram and the Mac window (`ConductorReplier`).
 
 Every accepted and rejected command is logged locally and shown in the Mac
-app's device list ("iPhone answered B in snof · irrigation, 14:02").
+app's device list ("iPhone answered B in orchard · irrigation, 14:02").
 
 ### The phone
 

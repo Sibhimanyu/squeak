@@ -34,16 +34,17 @@ final class ChannelCryptoTests: XCTestCase {
 }
 
 final class SqueakLinkTests: XCTestCase {
-    func testReadsTheSessionFromAnyHostAppsScheme() {
+    func testReadsTheSessionFromSqueakLinks() {
         let id = "289014c4-b06d-4bae-92c6-7ed94912e6bd"
-        XCTAssertEqual(SqueakLink.sessionId(from: URL(string: "snof://squeak?s=\(id)")!), id)
-        XCTAssertEqual(SqueakLink.sessionId(from: URL(string: "other://squeak?s=\(id)")!), id)
+        XCTAssertEqual(SqueakLink.sessionId(from: URL(string: "squeak://open?s=\(id)")!), id)
+        XCTAssertEqual(SqueakLink.sessionId(from: URL(string: "squeak://squeak?s=\(id)")!), id)
     }
 
     func testIgnoresEverythingElse() {
-        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "snof://farm?s=289014c4")!))
-        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "snof://squeak")!))
-        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "snof://squeak?s=../../etc")!))
-        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "snof://squeak?s=abc")!))
+        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "squeak://farm?s=289014c4")!))
+        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "other://open?s=289014c4-b06d")!))
+        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "squeak://open")!))
+        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "squeak://open?s=../../etc")!))
+        XCTAssertNil(SqueakLink.sessionId(from: URL(string: "squeak://open?s=abc")!))
     }
 }
