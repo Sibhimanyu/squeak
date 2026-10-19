@@ -5,10 +5,18 @@
 #   (cd firebase && firebase emulators:exec --only database --project demo-squeak ../scripts/check-database-rules.sh)
 #
 # Needs Java (the emulator is a jar). Touches nothing in the cloud.
+#
+# Or against a deployed database, cleaning up after itself:
+#   SQUEAK_RULES_DATABASE_URL=https://<db>.firebasedatabase.app scripts/check-database-rules.sh
 set -uo pipefail
 
-DB="http://127.0.0.1:${FIREBASE_DATABASE_EMULATOR_PORT:-9000}"
-NS="ns=demo-squeak-default-rtdb"
+if [[ -n ${SQUEAK_RULES_DATABASE_URL:-} ]]; then
+  DB=${SQUEAK_RULES_DATABASE_URL%/}
+  NS="x=1"
+else
+  DB="http://127.0.0.1:${FIREBASE_DATABASE_EMULATOR_PORT:-9000}"
+  NS="ns=demo-squeak-default-rtdb"
+fi
 CH="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 RELAY="BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 SIG64=$(printf 'a%.0s' {1..64})
@@ -57,6 +65,11 @@ expect refused "Cliq record with a short signature" PUT "cliq/$RELAY/inbox/r-2" 
 expect refused "Cliq record without a time" PUT "cliq/$RELAY/inbox/r-3" "{\"box\":\"x\",\"sig\":\"$SIG64\"}"
 expect refused "short relay id" PUT "cliq/short/inbox/r-4" "{\"box\":\"x\",\"sig\":\"$SIG64\",\"at\":1}"
 expect refused "read every relay" GET "cliq"
+
+# Leave nothing behind (the rules allow deleting each document).
+for doc in state/snapshot live/s12 commands/c-1; do
+  curl -s -o /dev/null -X DELETE "$DB/channels/$CH/$doc.json?$NS"
+done
 
 if ((failures > 0)); then
   echo "$failures rule check(s) failed"
