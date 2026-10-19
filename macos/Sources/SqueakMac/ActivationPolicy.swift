@@ -64,7 +64,18 @@ final class ActivationPolicyController {
         }
     }
 
+    /// The conversation window, Settings and Welcome are ordinary app windows: they live on a
+    /// desktop Space and never float over another app's full-screen Space (only the popover and
+    /// the quick-message panel do that). They can go full screen themselves.
+    static func makeOrdinary(_ w: NSWindow) {
+        var b = w.collectionBehavior
+        b.remove([.fullScreenAuxiliary, .canJoinAllSpaces, .moveToActiveSpace, .transient])
+        b.insert([.managed, .fullScreenPrimary])
+        if b != w.collectionBehavior { w.collectionBehavior = b }
+    }
+
     func update(closing: NSWindow?) {
+        for w in NSApp.windows where Self.isAppWindow(w) { Self.makeOrdinary(w) }
         let wanted: NSApplication.ActivationPolicy =
             NSApp.windows.contains { $0 !== closing && Self.isAppWindow($0) } ? .regular : .accessory
         apply(wanted)

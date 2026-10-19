@@ -413,8 +413,10 @@ final class AppModel {
 
     func showConversationWindow() {
         ActivationPolicyController.shared.willShowWindow()
-        openConversationWindow?()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.recomputeVisibility() }
+        // Create the window only once Squeak is a regular app: a window made while it is still a
+        // menu-bar accessory is treated like a panel and can land on top of a full-screen app.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.openConversationWindow?() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.recomputeVisibility() }
     }
 
     func open(_ key: SessionKey) {
@@ -428,7 +430,7 @@ final class AppModel {
 
     func openSettings() {
         ActivationPolicyController.shared.willShowWindow()
-        openSettingsWindow?()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.openSettingsWindow?() }
     }
 
     // MARK: Launch at login
