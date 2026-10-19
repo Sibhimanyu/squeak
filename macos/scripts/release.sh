@@ -60,7 +60,7 @@ FEED="https://sibhimanyu.github.io/squeak/appcast.xml"
 PREV="$(mktemp)"; trap 'rm -f "$PREV"' EXIT
 curl -fsSL --max-time 20 "$FEED" -o "$PREV" 2>/dev/null || { echo "(no published appcast yet; starting a new one)"; : > "$PREV"; }
 python3 -I scripts/update-appcast.py "$PREV" build/appcast.xml "$VERSION" "$BUILD" \
-  "https://github.com/Sibhimanyu/squeak/releases/download/v$VERSION/$DMG" \
+  "https://sibhimanyu.github.io/squeak/download/$DMG" \
   "https://github.com/Sibhimanyu/squeak/releases/tag/v$VERSION" "$LEN" "$SIG"
 
 {
@@ -88,5 +88,9 @@ echo "       --repo Sibhimanyu/squeak --title \"Squeak $VERSION\" \\"
 echo "       --notes-file \"$HERE/build/RELEASE_NOTES.md\""
 echo
 echo "  2. git clone git@github.com:Sibhimanyu/sibhimanyu.github.io.git /tmp/pages \\"
-echo "       && mkdir -p /tmp/pages/squeak && cp \"$HERE/build/appcast.xml\" /tmp/pages/squeak/appcast.xml \\"
-echo "       && cd /tmp/pages && git add squeak/appcast.xml && git commit -m \"Squeak $VERSION appcast\" && git push"
+echo "       && mkdir -p /tmp/pages/squeak/download && cp \"$HERE/build/appcast.xml\" /tmp/pages/squeak/appcast.xml \\"
+echo "       && cp \"$HERE/build/$DMG\" /tmp/pages/squeak/download/ \\"
+echo "       && cd /tmp/pages && git add squeak && git commit -m \"Squeak $VERSION\" && git push"
+echo
+echo "  The DMG is served from Pages, not the GitHub release: release-assets.githubusercontent.com"
+echo "  stalls on some networks (it did on the owner's), and Sparkle would hang on \"Downloading update\"."
