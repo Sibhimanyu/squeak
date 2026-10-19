@@ -28,6 +28,8 @@ final class AppModel {
     let captureMode: Bool
     /// SQUEAK_MAC_DEMO=1: made-up sessions, no network, no sends (see DemoData.swift).
     let demoMode: Bool
+    /// Settings › Channels and › iPhone. Demo and capture runs never touch the real `.env` or daemon.
+    @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
     @ObservationIgnored var openConversationWindow: (() -> Void)?
     @ObservationIgnored var openSettingsWindow: (() -> Void)?
     @ObservationIgnored private var started = false

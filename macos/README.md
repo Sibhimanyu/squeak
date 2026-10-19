@@ -50,7 +50,14 @@ Untested:
   owner, along with the other owner steps in section 7 (relaunch, restart,
   sleep/wake, disconnect).
 
-The relay is set up only through the terminal CLI; the app has no relay
+Settings has Channels and iPhone tabs: Telegram bot token and allowed chats, Zoho Cliq
+webhook and owner, and iPhone pairing (QR, approve, disconnect). They write the daemon's
+`.env` (0600, `EnvFile`), restart the service with `launchctl kickstart`, and need the
+daemon's `/control/channels` and `/control/telegram/*` routes (older daemons read as "update
+the Squeak service"). Only smoke-run with demo data; no real token was entered, no test
+message sent, no phone paired.
+
+The Conductor relay is set up only through the terminal CLI; the app has no relay
 setup UI. The Swift relay is written but not wired in. Sparkle updates have
 not yet been exercised end to end against a published appcast (see Updates).
 

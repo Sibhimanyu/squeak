@@ -107,6 +107,64 @@ public struct DaemonClient: Sendable {
         }
     }
 
+    // MARK: Channels (nil means the daemon predates the route: 404)
+
+    public func channels() async throws -> ChannelsStatus? {
+        let r = try await get("/control/channels", token: true)
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try decode(ChannelsStatus.self, r.body)
+    }
+
+    public func telegramCandidates() async throws -> [TelegramCandidate]? {
+        let r = try await get("/control/telegram/candidates", token: true)
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try decode(TelegramCandidatesBody.self, r.body).chats
+    }
+
+    /// Sends one real message to the linked chats. Only ever call this from the user's own tap.
+    public func telegramTest() async throws -> TelegramTestResult? {
+        let r = try await post("/control/telegram/test", timeout: 20)
+        if r.status == 404 { return nil }
+        // The daemon may answer a refusal with a body and a 4xx; read it when it is ours.
+        if let result = try? JSONDecoder().decode(TelegramTestResult.self, from: r.body), r.status != 401, r.status != 403 { return result }
+        try Self.check(r.status)
+        return try decode(TelegramTestResult.self, r.body)
+    }
+
+    // MARK: iPhone pairing (RemoteBridge through /control/remote/*)
+
+    /// nil when the daemon has no such route (404) or no phone channel behind it (503).
+    public func remoteStatus() async throws -> RemoteStatus? {
+        let r = try await get("/control/remote/status", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(RemoteStatus.self, r.body)
+    }
+
+    /// Opens the pairing window; the URL is the QR payload and a secret.
+    public func remotePair() async throws -> RemotePairing? {
+        let r = try await post("/control/remote/pair")
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        guard let p = try? JSONDecoder().decode(RemotePairing.self, from: r.body), !p.url.isEmpty else { return nil }
+        return p
+    }
+
+    public func remoteApprove(deviceId: String) async throws -> Bool { try await remoteAction("approve", deviceId) }
+    public func remoteReject(deviceId: String) async throws -> Bool { try await remoteAction("reject", deviceId) }
+    public func remoteRevoke(deviceId: String) async throws -> Bool { try await remoteAction("revoke", deviceId) }
+    public func remoteReset() async throws -> Bool { try await remoteAction("reset", nil) }
+
+    private func remoteAction(_ action: String, _ deviceId: String?) async throws -> Bool {
+        let path = "/control/remote/\(action)" + (deviceId.map { "/" + Self.encode($0) } ?? "")
+        let r = try await post(path)
+        try Self.check(r.status)
+        struct Ok: Decodable { var ok: Bool? }
+        return (try? JSONDecoder().decode(Ok.self, from: r.body))?.ok ?? false
+    }
+
     // MARK: Plumbing
 
     private static let pathAllowed: CharacterSet = {
@@ -131,6 +189,21 @@ public struct DaemonClient: Sendable {
         }
         do {
             return try await transport.send(HTTPRequest(url: url(path), headers: headers, timeout: 5))
+        } catch let e as TransportError {
+            switch e {
+            case .connectionRefused: throw AdapterError.daemonDown
+            case .timedOut: throw AdapterError.timedOut
+            case .connectionLost, .other: throw AdapterError.daemonDown
+            }
+        }
+    }
+
+    private func post(_ path: String, timeout: TimeInterval = 8) async throws -> HTTPResponse {
+        guard let t = tokenProvider() else { throw AdapterError.tokenMissing }
+        do {
+            return try await transport.send(HTTPRequest(
+                method: "POST", url: url(path), headers: ["x-squeak-token": t, "content-type": "application/json"],
+                body: Data("{}".utf8), timeout: timeout))
         } catch let e as TransportError {
             switch e {
             case .connectionRefused: throw AdapterError.daemonDown

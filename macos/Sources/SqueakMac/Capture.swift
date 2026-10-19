@@ -112,9 +112,9 @@ enum CaptureRunner {
         }
 
         // Other tabs: click the real toolbar items so the native tab strip is in the picture.
-        if let w = NSApp.windows.first(where: { $0.isVisible && $0.toolbar != nil && ($0.title == "Settings" || ["General", "Connections", "Privacy", "About"].contains($0.title)) }),
+        if let w = NSApp.windows.first(where: { $0.isVisible && $0.toolbar != nil && ($0.title == "Settings" || ["General", "Connections", "Channels", "iPhone", "Privacy", "About"].contains($0.title)) }),
            let frame = w.contentView?.superview {
-            for tab in ["General", "Privacy", "About"] {
+            for tab in ["General", "Channels", "iPhone", "Privacy", "About"] {
                 if let item = w.toolbar?.items.first(where: { $0.label == tab }), let target = item.target, let action = item.action {
                     _ = target.perform(action, with: item)
                 }
@@ -123,6 +123,19 @@ enum CaptureRunner {
             }
         } else {
             AppLog.info("capture: no Settings toolbar for the other tabs")
+        }
+        // Channels: the full-height tabs and both sheets, from demo data (the model is in demo mode).
+        for (name, view) in [("channels-full", AnyView(ChannelsSettings())), ("iphone-full", AnyView(IPhoneSettings())),
+                             ("link-sheet", AnyView(LinkChatSheet())), ("pair-sheet", AnyView(PairSheet()))] {
+            let full = name.hasSuffix("full")
+            let host = NSHostingView(rootView: view.environment(model).frame(width: full ? 560 : nil, height: full ? 1000 : nil).background(Theme.bg))
+            let fw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: full ? 560 : 500, height: full ? 1000 : 420), styleMask: [.titled], backing: .buffered, defer: false)
+            fw.contentView = host
+            fw.makeKeyAndOrderFront(nil)
+            try? await Task.sleep(for: .seconds(1.2))
+            if !full { fw.setContentSize(host.fittingSize); try? await Task.sleep(for: .milliseconds(400)) }
+            write(fw.contentView, to: "\(prefix)-\(name).png")
+            fw.orderOut(nil)
         }
         for n in 0..<4 {
             let ow = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 480, height: 420), styleMask: [.titled], backing: .buffered, defer: false)

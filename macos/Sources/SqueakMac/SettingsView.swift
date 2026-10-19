@@ -4,11 +4,13 @@ import SqueakMacCore
 import SwiftUI
 
 struct SettingsView: View {
-    enum Tab: Hashable { case general, connections, privacy, about }
+    enum Tab: Hashable { case general, connections, channels, iphone, privacy, about }
     /// SQUEAK_MAC_SETTINGS_TAB lets a capture land on a tab; otherwise General.
     @State private var tab: Tab = {
         switch ProcessInfo.processInfo.environment["SQUEAK_MAC_SETTINGS_TAB"] {
         case "connections": .connections
+        case "channels": .channels
+        case "iphone": .iphone
         case "privacy": .privacy
         case "about": .about
         default: .general
@@ -19,10 +21,12 @@ struct SettingsView: View {
         TabView(selection: $tab) {
             GeneralSettings().tabItem { Label { Text("General") } icon: { LucideImage.template(.settings) } }.tag(Tab.general)
             ConnectionsSettings().tabItem { Label { Text("Connections") } icon: { LucideImage.template(.link) } }.tag(Tab.connections)
+            ChannelsSettings().tabItem { Label { Text("Channels") } icon: { LucideImage.template(.messageSquare) } }.tag(Tab.channels)
+            IPhoneSettings().tabItem { Label { Text("iPhone") } icon: { LucideImage.template(.smartphone) } }.tag(Tab.iphone)
             PrivacySettings().tabItem { Label { Text("Privacy") } icon: { LucideImage.template(.hand) } }.tag(Tab.privacy)
             AboutSettings().tabItem { Label { Text("About") } icon: { LucideImage.template(.info) } }.tag(Tab.about)
         }
-        .frame(width: 520, height: 440)
+        .frame(width: 560, height: 520)
     }
 }
 
@@ -100,6 +104,11 @@ private struct ConnectionsSettings: View {
                 SectionFootnote("Squeak reads agent chats locally and sends replies only when you choose.")
             }
             Section {
+                ForEach(model.channels.summary) { channelRow($0) }
+            } header: { Text("Channels") } footer: {
+                SectionFootnote("Set these up in the Channels and iPhone tabs.")
+            }
+            Section {
                 LabeledContent("Address") { Text(verbatim: model.client.baseURL.absoluteString).textSelection(.enabled) }
                 if let synced = model.lastSyncedText { LabeledContent("Sync") { Text(synced) } }
                 Button("Check again") { model.recheck() }
@@ -108,6 +117,22 @@ private struct ConnectionsSettings: View {
             }
         }
         .formStyle(.grouped)
+        .task { await model.channels.refresh() }
+    }
+
+    private func channelRow(_ r: ChannelsModel.SummaryRow) -> some View {
+        HStack(spacing: 12) {
+            // Only a real state gets a dot (§3.3); "not set up" and "one-way" are plain text.
+            switch r.dot {
+            case .working: Circle().fill(Theme.working).frame(width: 9, height: 9).accessibilityHidden(true)
+            case .error: Circle().fill(Theme.error).frame(width: 9, height: 9).accessibilityHidden(true)
+            case .none: EmptyView()
+            }
+            (Text(r.name).font(.system(size: 13, weight: .medium)) + Text("  —  ").foregroundStyle(.secondary) + Text(r.value).foregroundStyle(.secondary))
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
     }
 
     private func row(_ r: ConnectionsReport.Row, name: String, okWord: String, okColor: Color) -> some View {

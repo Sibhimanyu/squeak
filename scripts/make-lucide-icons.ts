@@ -70,6 +70,7 @@ export const CURATED = [
   "circle",
   "square-terminal",
   "inbox",
+  "smartphone",
 ];
 
 const num = (s: string | undefined, d = 0) => (s === undefined ? d : Number(s));
