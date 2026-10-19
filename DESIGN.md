@@ -1,6 +1,6 @@
 # Squeak — Design & Brand Guidelines
 
-> Version 1 · 2026-09-25 · Step 1 of the Squeak app roadmap (see §13).
+> Version 2 · 2026-10-19 · brand Edition 01 adopted (see §12).
 >
 > This is the single reference for how every Squeak surface looks, moves and
 > speaks: the menu-bar duck that ships today, the desktop app, the mobile app,
@@ -8,6 +8,13 @@
 > artwork, the panel in `desktop/renderer/duck.css`, the card rules in
 > `CLAUDE.md` — so it codifies rather than reinvents. Where it changes
 > something that ships today, §12 lists the change.
+>
+> It has two layers. The **brand** — logo, brand colours, brand type, voice,
+> mascot — comes from the brand kit in [`brand/`](brand/README.md), whose
+> guidelines are `brand/guidelines/squeak-brand-guidelines.pdf`. The
+> **product** — state colours, surfaces, components, motion — is defined
+> here alone. Where the two meet (the duck yellow, the app icon), the brand
+> value wins.
 
 ---
 
@@ -21,6 +28,21 @@ debugging companion, the thing you explain your problem to. Here the duck
 explains the agents' problems to *you*.
 
 One line: **Squeak is a pager for your coding agents, with a duck.**
+
+The tagline is **Your agents. In view.** — two sentences, both full stops.
+
+- **Audience:** people who run coding agents on their own machines and want
+  to step away without losing the thread.
+- **Job:** show which agent needs you, give enough context to decide, and
+  carry the reply back to the right session.
+- **The name:** a rubber duck sits beside the work and says nothing until it
+  matters. Then it squeaks: one short, friendly sound that tells you
+  something needs you.
+
+The brand's three principles are **Calm** (quiet by default; interrupt only
+when a person is needed, and never twice for the same thing), **Precise** (say
+exactly what happened, what is waiting and where a reply will go) and
+**Warm** (the mascot carries the charm, the words carry the clarity).
 
 ### Personality
 
@@ -75,16 +97,33 @@ and Telegram are remote hands. They share one visual language so that
 
 ### 3.1 Brand colours — the duck
 
-Sampled from the duck artwork (`desktop/renderer/duck-*.png`), so the UI and
-the sprite are the same yellow.
+From the brand kit (`brand/tokens/`), taken from the approved logo, so the
+logo, the app icon and the UI are the same yellow. RGB first; the kit's CMYK
+values are an uncalibrated conversion, not print-certified.
 
-| Token | Hex | Use |
+| Token | Brand name | Hex | Use |
+| --- | --- | --- | --- |
+| `duck` | Duck Yellow | `#FFDA1A` | The duck. Primary action fill on dark. Highlights in brand material. A fill, never text on a light ground. |
+| `duck-wing` | — | `#FFC812` | The wing shade in the artwork. Pressed/hover state of a duck-filled control. |
+| `beak` | Bill Orange | `#FF972E` | The bill, and rare warm accents in brand material. Never a UI colour (it would read as a warning), never text. |
+| `duck-outline` | Ink | `#18191B` | The duck's contour lines; text/icons placed *on* duck yellow. |
+| `duck-text` | — | `#8A5A00` | Yellow-family text or links on light backgrounds, where `duck` is unreadable. |
+
+**Brand neutrals** are for brand material only — the guidelines, the site,
+slides, social cards, documents. The product keeps the zinc neutrals of §3.2.
+
+| Brand name | Hex | Use |
 | --- | --- | --- |
-| `duck` | `#FCD02C` | The duck. App icon ground. Primary action fill on dark. |
-| `duck-wing` | `#FCC010` | Pressed/hover state of a duck-filled control. Illustration shading. |
-| `beak` | `#FC8830` | Illustration only. Never a UI colour (it would read as a warning). |
-| `duck-outline` | `#3C1804` | Illustration outline; text/icons placed *on* duck yellow. |
-| `duck-text` | `#8A5A00` | Yellow-family text or links on light backgrounds, where `duck` is unreadable. |
+| Ink | `#18191B` | Text, dark grounds, the logo's dark ground |
+| Paper | `#F8F7F3` | The default warm ground for pages and documents |
+| White | `#FFFFFF` | Cards on Paper |
+| Slate | `#62656D` | Secondary text on light (5.44:1 on Paper) |
+| Line | `#DCDDD8` | Dividers on light, decorative only |
+| Dark Surface | `#242629` | Raised ground on dark |
+| Dark Muted | `#ACAFB5` | Secondary text on dark (6.90:1 on Dark Surface) |
+
+Balance in a brand composition: Paper and White 45%, Ink 30%, Duck Yellow
+12%, Slate and Line 10%, Bill Orange 3%.
 
 **Yellow and orange belong to the duck.** No state, warning or error may use
 them: next to a yellow duck, a yellow "error" reads as brand decoration, not
@@ -160,10 +199,10 @@ All values are WCAG 2 contrast ratios, computed, not estimated. Text needs
 | `ink` on `surface` (light) | 17.72 | AAA |
 | `muted` on `surface` (light) | 7.73 | AAA |
 | `muted` on `bg` (light) | 7.03 | AAA |
-| `ink` (zinc-900) on `duck` | 11.98 | AAA — text on a duck-yellow button |
-| `duck-outline` on `duck` | 10.72 | AAA |
-| `duck` on `surface` (dark) | 11.98 | AAA |
-| `duck` on white | **1.48** | **fails — never do this** |
+| `ink` (zinc-900) on `duck` | 12.90 | AAA — text on a duck-yellow button |
+| `duck-outline` on `duck` | 12.81 | AAA |
+| `duck` on `surface` (dark) | 12.90 | AAA |
+| `duck` on white | **1.37** | **fails — never do this** |
 | `duck-text` on white | 5.93 | AA |
 | State dots, dark (needs / working / done / error / idle) | 6.40 / 7.78 / 8.27 / 6.51 / 3.67 | all ≥ 3:1 |
 | State dots, light (needs / working / done / error / idle) | 4.83 / 5.02 / 5.93 / 5.70 / 4.83 | all ≥ 4.5:1, usable as text |
@@ -172,15 +211,53 @@ All values are WCAG 2 contrast ratios, computed, not estimated. Text needs
 
 ## 4. Typography
 
-System fonts everywhere. Squeak sits beside the user's editor, terminal and
-Conductor; a custom typeface would make it the odd one out.
+Two sets, one per layer. **Brand material** uses the brand typefaces, bundled
+with their licences in `brand/fonts/`. **The product** uses system fonts:
+Squeak sits beside the user's editor, terminal and Conductor, and a custom
+typeface there would make it the odd one out.
+
+### 4.1 Brand type
+
+| Family | Role | Weights | Fallback |
+| --- | --- | --- | --- |
+| **Figtree** | Wordmark, headings, editorial display | 400–700 | Avenir Next, `system-ui` |
+| **Inter** | Body copy | 400–700 | SF Pro Text, Helvetica Neue |
+| **JetBrains Mono** | Labels, names and figures | 400, 500 | SF Mono, Menlo |
+
+Roles are fixed: Figtree speaks, Inter explains, JetBrains Mono labels. All
+three are SIL OFL 1.1.
+
+| Style | Spec (size / line, tracking) | Sample |
+| --- | --- | --- |
+| Display | Figtree 700 · 96 / 100 · −2% | Your agents. |
+| Headline | Figtree 700 · 56 / 60 · −1% | Calm, clear, useful |
+| Title | Figtree 600 · 32 / 40 · 0% | Which agent needs you |
+| Body | Inter 400 · 22 / 32 · 0% | Squeak gathers every question from your agents into one calm inbox. |
+| Label | JetBrains Mono 500 · 16 / 20 · +8%, caps | EDITION 01 · OCTOBER 2026 |
+
+Setting type:
+
+- **Sentence case** for headlines and titles. Capitals only in the mono label
+  style.
+- **Tight display, open labels.** Track display sizes in, never out; mono
+  labels open up to +8%.
+- **Comfortable measure.** Body copy runs 45 to 75 characters a line, left
+  aligned, never justified.
+- **One weight step.** Contrast comes from size first; pair 700 headings with
+  400 body, nothing between.
+- **Mono means data** — labels, names and figures, never sentences.
+- **The wordmark is not a text style.** "Squeak" in the logo is a fixed asset
+  (Figtree Bold, −1% tracking). Do not restyle it or set headings in it; in
+  running copy, write Squeak in sentence case.
+
+### 4.2 Product type
 
 | Role | Apple | Android / web fallback |
 | --- | --- | --- |
 | Interface | SF Pro (`-apple-system`) | Roboto, `system-ui` |
 | Code, paths, branches, diffs | SF Mono (`ui-monospace`) | JetBrains Mono, `monospace` |
 
-### Scale
+Scale:
 
 | Token | Size / line | Weight | Use |
 | --- | --- | --- | --- |
@@ -202,7 +279,8 @@ Rules:
 - Truncate from the **start** for paths (`…/renderer/duck.css`), from the
   **end** for prose. Never truncate a message that is the point of the screen;
   split it (Telegram's 4096-character cap included).
-- Sentence case everywhere. No all-caps labels.
+- Sentence case everywhere. No all-caps labels in the product (the mono
+  label style of §4.1 is for brand material).
 - Mobile respects Dynamic Type / font scale; layouts must survive 200%.
 
 ---
@@ -236,15 +314,82 @@ other apps:
 
 Nothing inside a window gets a shadow.
 
+**Glass in the native apps** (owner's decision, 2026-10-19). On macOS 26 and
+iOS 26 the reply composer, the decision card's option rows and the Send
+button sit on Liquid Glass (`.glassEffect`, regular variant; Send is the
+prominent glass button filled with `duck`, per §8.9). Sidebars, toolbars,
+navigation bars and popovers use the system's own glass. On earlier systems
+they fall back to the system's regular material; with Reduce Transparency on,
+to the opaque `surface` / `surface-raised` tokens. Glass never carries state
+colour and never sits behind the duck.
+
 ---
 
 ## 6. The duck and iconography
 
-### 6.1 The duck
+### 6.1 The logo
 
-The duck is a cartoon rubber duck: a round body, a dark-brown outline
-(`duck-outline`), flat yellow with a single wing shade, an orange beak, facing
-right. It is the only illustrated element in Squeak.
+The logo is the **sleepy-eyed duck**: facing right, a Duck Yellow body with
+an Ink contour, a single wing shade, a Bill Orange bill, a half-lidded eye
+and a tiny eyebrow. The approved artwork is
+`brand/logo/source/squeak-duck-approved-source.png`, kept unmodified; the
+vectors in `brand/logo/svg/` are traced from it. It has one expression and is
+never redrawn — crop the master instead.
+
+| Variant | Size | What changes | File |
+| --- | --- | --- | --- |
+| Full | 48 px and up | Everything: eye, eyebrow, smile, wing contour | `squeak-duck-full-color` |
+| Compact | 24 to 47 px | Wing simplified, catchlight removed | `squeak-duck-compact` |
+| Silhouette | 16 to 23 px | Head and bill only — a mark, not the full logo | `squeak-duck-silhouette` |
+| Mono | any | One flat colour: Ink on light, Paper on dark | `squeak-duck-mono-{ink,paper}` |
+
+Minimum print sizes, as a starting point to proof: full 12 mm, compact 8 mm,
+silhouette 5 mm. The symbol's width : height is 1.16056.
+
+**Lockups.** Horizontal (headers, documents, toolbars): gap 0.18 × symbol
+height, wordmark size 0.60 × symbol height, baseline 0.74 × symbol height
+below the symbol's top. Stacked (square or narrow spaces): gap 0.14 × symbol
+height, wordmark size 0.62 × symbol width, centred. Symbol only for avatars,
+app icons and favicons where the name is nearby. Files:
+`squeak-lockup-{horizontal,stacked}-{ink,paper}`; `ink` files go on light
+grounds, `paper` files on dark.
+
+**Clear space** is x = ¼ of the mark's total height on all four sides,
+measured from the outermost contour. Keep text, edges and other graphics out.
+
+**Grounds.** On Paper or White by default; on Ink for dark; mono Ink on Duck
+Yellow. A monochrome mark needs at least 3:1 against its ground, and every
+ground is flat — never a photo or pattern.
+
+**Never:** stretch, rotate, recolour, lower the contrast (yellow on yellow),
+crowd the clear space, or add effects (shadow, glow, outline). Never place a
+PNG on a baked-in square.
+
+**Applications.**
+
+- *App icon:* the full duck, about 65% of the canvas width, centred on Ink,
+  on a square 1024 px canvas with no baked mask. Platform masks (rounded
+  square, Mac tile, circle) come from each platform's own template.
+- *Avatar:* circle crop on Ink; compact variant below 48 px.
+- *Social card* (1200 × 630) and *title slide* (16:9): the tagline in
+  Figtree, the duck large on one side, the wordmark once.
+
+### 6.2 Mascot and imagery
+
+- One mascot moment per page, screen or layout. Flat brand colours on Paper,
+  White, Ink or Dark Surface.
+- No new emotions, props or costumes on the logo; no off-model redesigns or
+  alternate poses. The in-app moods below are the one sanctioned set.
+- Never use the duck as a pattern, bullet or decoration.
+- Imagery is flat colour, the duck and plenty of space. Honest work over
+  staged scenes; no stock photos of people at laptops.
+
+### 6.3 The duck in the app
+
+In the product the duck is a character with moods: the same rubber duck, a
+round body, an outline (`duck-outline`), flat yellow with a single wing
+shade, an orange beak, facing right. It is the only illustrated element in
+Squeak.
 
 | Mood | When (computed in `src/fleet/duck-mood.ts`) | Artwork | Motion |
 | --- | --- | --- | --- |
@@ -264,20 +409,22 @@ Rules:
 - New moods need new artwork in the same style (outline weight, flat fills,
   single shade). Never recolour the duck to show state — state has its own
   colours (§3.3); the duck shows *mood*.
-- The app icon is the working duck on a `#18181B` rounded-square ground,
-  facing right, occupying ~70% of the tile. No text, no gradients.
+- The app icon is the logo (§6.1) on Ink. No text, no gradients.
 - The menu-bar mark is the monochrome outline in
   `desktop/assets/duckTemplate.png` (a template image, so macOS tints it),
   generated from the duck artwork by `desktop/build/make-tray-icon.py` — its
   silhouette with the eye, wing and beak lines cut out — so it is always the
   same duck. Never hand-draw it.
 
-### 6.2 Icons
+### 6.4 Icons
 
 [Lucide](https://lucide.dev), 1.5px stroke, 16px in lists and 20px in
 toolbars, `muted` colour by default — the same set Conductor uses, so the two
 apps feel related. Icons accompany words; an icon alone is only acceptable for
 universal actions (close, back, more) and must carry an accessible label.
+The native Mac and iPhone apps use Lucide too, not SF Symbols (owner's
+decision, 2026-10-19): the same SVGs, drawn as vector shapes at the same
+1.5px stroke from the shared `icons/` package.
 
 ---
 
@@ -319,16 +466,21 @@ the meta line, so it is never the only carrier of meaning.
 The atom of every list: the duck panel, the app's main list, the phone's home.
 
 ```
-●  repo · branch                       ← label, one line, ellipsis
-   claude · working · 2m · ctx 62%     ← meta: agent · state · age · extras
-   +2017/−1824 · 39 files              ← git line, only when there is change
+●  Payment retry logic                 2m   ← the chat's title, one line, ellipsis; age
+   storefront · claude                      ← repo · agent
+   running tests                            ← what it is doing now (working), or the state word
 ```
 
-- Three lines maximum. The third line exists only when something changed on
-  disk.
-- When two rows would read identically (same repo, branch and agent), append
-  the chat's own title to the label — only then (`labelCounts` in `radar.ts`).
-- Rows are ordered by attention: needs you, then done, then working, then idle.
+- The headline is the chat's own title (owner's decision, 2026-10-19). A chat
+  with no title (Conductor's "Untitled", a terminal session) falls back to
+  `repo · branch`.
+- The third line is the session's state in words (§9). While it works, it is
+  instead the agent's newest step, shortened ("running tests", "editing 2
+  files"), from the same activity feed as the detail; never invented.
+- Three lines maximum. The git line (`+2017/−1824 · 39 files`) moves to the
+  detail header.
+- Rows are grouped and ordered by attention: needs you, then done, then
+  working, then error, then idle.
 - A row is a button: it opens the session's detail (app) or offers its actions
   (phone). Hover: `surface-raised`.
 
@@ -376,9 +528,9 @@ interaction on the phone and in Telegram.
 ### 8.5 Reply composer
 
 A single text field with the target named in its placeholder: *"Message for
-orchard · irrigation"*. Send is the only primary button. After sending, the
-composer is replaced by the receipt described above. It never sends to a
-session the user did not explicitly pick.
+orchard · irrigation"*. Send is the only primary button. The composer stays;
+each sent message carries one delivery line (sent / queued / steered / not
+sent). It never sends to a session the user did not explicitly pick.
 
 ### 8.6 Push card (Telegram and mobile notifications)
 
@@ -467,6 +619,21 @@ Use these words, consistently, everywhere:
 | Reply sent | `Sent B to orchard · irrigation in Conductor.` | `Your response has been submitted.` |
 | Failure | `The reply did not go through: claude exited (1).` | `Oops, something went wrong. Please try again.` |
 
+### Brand copy
+
+Outside the product — the site, the App Store, announcements, bios — the same
+voice holds: calm, clear, lightly witty, useful. Charm lives in the mascot;
+the words stay plain. Say what Squeak does for the reader, in their words.
+One duck joke at most, and never in a headline. Platforms keep their own
+capitalisation: Mac, iPhone, Telegram, Cliq.
+
+| Kind | Yes | No |
+| --- | --- | --- |
+| Tagline | Your agents. In view. | The ultimate AI agent command center! |
+| Description | An attention inbox for the coding agents you already use. | Revolutionary AI-powered productivity for developers. |
+| Announcement | Squeak tells you which coding agent needs you, and carries your answer back. On Mac, iPhone and Telegram. | Squeak is here to supercharge your workflow!! |
+| Bio | Squeak. A pager for your coding agents. | Quack quack! The quackiest way to herd your AI agents. |
+
 ---
 
 ## 10. Accessibility
@@ -491,15 +658,16 @@ Use these words, consistently, everywhere:
 
 Canonical values, for every surface to import instead of copying. The
 desktop app and the Electron duck consume the CSS; the mobile app consumes the
-JSON.
+JSON. Brand-material tokens (Paper, Slate, the brand type scale, logo
+geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
 
 ```css
 :root {
   /* brand */
-  --sq-duck: #fcd02c;
-  --sq-duck-wing: #fcc010;
-  --sq-beak: #fc8830;
-  --sq-duck-outline: #3c1804;
+  --sq-duck: #ffda1a;
+  --sq-duck-wing: #ffc812;
+  --sq-beak: #ff972e;
+  --sq-duck-outline: #18191b;
   --sq-duck-text: #8a5a00;
 
   /* neutrals — dark (default) */
@@ -565,7 +733,7 @@ JSON.
 
 ```json
 {
-  "brand": { "duck": "#FCD02C", "duckWing": "#FCC010", "beak": "#FC8830", "duckOutline": "#3C1804", "duckText": "#8A5A00" },
+  "brand": { "duck": "#FFDA1A", "duckWing": "#FFC812", "beak": "#FF972E", "duckOutline": "#18191B", "duckText": "#8A5A00" },
   "dark": {
     "bg": "#09090B", "surface": "#18181B", "surfaceRaised": "#27272A", "line": "rgba(255,255,255,0.08)",
     "ink": "#F4F4F5", "muted": "#A1A1AA", "subtle": "#71717A",
@@ -603,6 +771,18 @@ Telegram glyphs follow §3.3.
 | Telegram "needs an answer" | 🟡 | 🔴 | Both blocked states are "needs you"; yellow is the duck's |
 | Telegram error | ❗ | 🟣 | Matches the violet error colour |
 | Panel text colours | hard-coded in `duck.css` | `--sq-*` tokens | One source for every surface |
+
+**Brand Edition 01 (version 2).** Adopting the brand kit changes these. They
+are written into §3.1 and §11 but **not yet applied in code**:
+
+| Where | Today | Now | Why |
+| --- | --- | --- | --- |
+| `--sq-duck` (`desktop/renderer/tokens.css`, `Theme.swift` in `ios/` and `macos/`, `macos/scripts/dmg-background.swift`) | `#FCD02C` | `#FFDA1A` | The approved logo's yellow |
+| `--sq-duck-wing` | `#FCC010` | `#FFC812` | The logo's wing shade |
+| `--sq-beak` | `#FC8830` | `#FF972E` | Bill Orange |
+| `--sq-duck-outline` | `#3C1804` brown | `#18191B` Ink | The logo's contour is Ink |
+| Mood sprites (`desktop/renderer/duck-*.png`, the iPhone's `Media.xcassets`) | The older round-eyed duck, brown outline | Redraw from the approved duck, in Ink | One duck everywhere; the sleepy eye is the logo's own expression |
+| Menu-bar mark | Generated from the old sprite | Regenerate from the new artwork | `make-tray-icon.py` follows the sprite |
 
 ---
 

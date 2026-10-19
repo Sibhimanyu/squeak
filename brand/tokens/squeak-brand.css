@@ -1,0 +1,34 @@
+/*
+ * Squeak brand tokens, Edition 01 (October 2026).
+ * Brand materials only: logo grounds, documents, site, slides, social.
+ * Product UI tokens (state colours, surfaces, radii, motion) live in
+ * desktop/renderer/tokens.css; see DESIGN.md §11.
+ */
+:root {
+  /* colour, RGB first */
+  --sqb-duck-yellow: #ffda1a;
+  --sqb-bill-orange: #ff972e;
+  --sqb-ink: #18191b;
+  --sqb-paper: #f8f7f3;
+  --sqb-white: #ffffff;
+  --sqb-slate: #62656d;
+  --sqb-line: #dcddd8;
+  --sqb-dark-surface: #242629;
+  --sqb-dark-muted: #acafb5;
+  --sqb-dark-line: #3a3d42; /* dividers on dark only, never text */
+
+  /* type families */
+  --sqb-font-display: "Figtree", "Avenir Next", system-ui, sans-serif;
+  --sqb-font-body: "Inter", "SF Pro Text", "Helvetica Neue", sans-serif;
+  --sqb-font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+  /* wordmark: Figtree 700, tracking -1%; a logo asset, never a text style */
+  --sqb-wordmark-tracking: -0.01em;
+}
+
+/* type scale (size / line height, tracking) */
+.sqb-display { font: 700 96px/100px var(--sqb-font-display); letter-spacing: -0.02em; }
+.sqb-headline { font: 700 56px/60px var(--sqb-font-display); letter-spacing: -0.01em; }
+.sqb-title { font: 600 32px/40px var(--sqb-font-display); letter-spacing: 0; }
+.sqb-body { font: 400 22px/32px var(--sqb-font-body); letter-spacing: 0; }
+.sqb-label { font: 500 16px/20px var(--sqb-font-mono); letter-spacing: 0.08em; text-transform: uppercase; }

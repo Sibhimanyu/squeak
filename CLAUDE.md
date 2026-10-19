@@ -54,6 +54,7 @@ deployment section before changing anything under `src/` or `desktop/`.
 | `scripts/install-squeak-agents.sh` | the launch agents for the daemon and the app |
 | `scripts/move-checkout.sh`, `scripts/rename-in-conductor.py` | move the checkout; rename the repo in Conductor's records (Conductor quit) keeping every chat |
 | `DESIGN.md` | the brand and design system every surface follows; tokens in §11 |
+| `brand/` | the brand kit: logo SVG/PNG and the approved source, the guidelines (PDF and Illustrator master), Figtree/Inter/JetBrains Mono with licences, brand tokens. Rules are in `DESIGN.md` |
 | `docs/remote-channel.md` | the phone channel's threat model and design — read before touching it |
 
 ## Deployment
