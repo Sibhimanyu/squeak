@@ -27,7 +27,7 @@ deployment section before changing anything under `src/` or `desktop/`.
 | `src/fleet/terminal-process.ts`, `terminal-screen.ts` | proves which process and tty a session is; reads its screen for an empty prompt |
 | `src/fleet/activity.ts` | a working session's current turn, step by step, for the window's "What it's doing" |
 | `src/fleet/choices.ts` | reads lettered options out of an agent's last message, for one-tap answers |
-| `src/fleet/caffeinate.ts` | keeps the Mac awake (`caffeinate -i -w <pid>`) while an agent works, 2 min grace, and (`-s`) always while plugged in so the phone can reach it; `SQUEAK_CAFFEINATE=working` / `off`. "Keep Mac awake" (tray checkbox, iPhone Settings, `POST /control/keep-awake`, phone command kind `awake`) holds `-i` on battery too, saved in `keep-awake.json` |
+| `src/fleet/caffeinate.ts` | keeps the Mac awake (`caffeinate -i -w <pid>`) while an agent works, 2 min grace, and (`-s`) always while plugged in so the phone can reach it; `SQUEAK_CAFFEINATE=working` / `off`. an awake session (`awake-session.ts`: tray submenu, the window's "Stay awake" pane, iPhone Settings; `POST /control/keep-awake`, phone command kind `awake`) holds `-i` on battery too, for a while or until ended, saved in `keep-awake.json` |
 | `src/fleet/git-state.ts` | cached working-tree reads, so "finished" says what changed |
 | `src/fleet/diff-view.ts` | reads and paginates a workspace diff for review in Telegram |
 | `src/fleet/duck-mood.ts` | what the duck is doing, derived where CI can test it |

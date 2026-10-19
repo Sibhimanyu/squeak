@@ -562,19 +562,55 @@ function openSqueak() {
   }
 }
 
-/** Flips the switch at once in the menu; the next /state poll settles it either way. */
-async function toggleKeepAwake() {
-  if (!lastState) {
-    return;
-  }
-  const on = !lastState.keepAwake;
-  lastState = { ...lastState, keepAwake: on };
-  refreshTray();
-  const result = await service.setKeepAwake(on);
-  if (result === null && lastState) {
-    lastState = { ...lastState, keepAwake: !on };
+/** "1h 23m" / "45m" / "under a minute" until an ISO time. Display only. */
+function awakeLeft(untilIso) {
+  const minutes = Math.ceil((Date.parse(untilIso) - Date.now()) / 60_000);
+  if (!(minutes > 1)) return "under a minute";
+  const hours = Math.floor(minutes / 60);
+  if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+}
+
+/** Changes the awake session; the menu shows the daemon's answer at once, and /state settles it after. */
+async function changeAwake(request) {
+  const result = await service.awake(request);
+  if (result.ok && lastState) {
+    lastState = { ...lastState, keepAwake: result.awake !== null, awake: result.awake };
     refreshTray();
   }
+}
+
+const AWAKE_CHOICES = [
+  { label: "For 1 hour", minutes: 60 },
+  { label: "For 2 hours", minutes: 120 },
+  { label: "For 4 hours", minutes: 240 },
+  { label: "For 8 hours", minutes: 480 },
+  { label: "Until I turn it off", minutes: null },
+];
+
+/** The awake session's menu items: a way to start one, or how long the running one has left. */
+function awakeMenuItems(state) {
+  if (!state || !("keepAwake" in state)) {
+    return [];
+  }
+  const session = state.awake;
+  if (!session && !state.keepAwake) {
+    return [
+      {
+        label: "Keep Mac awake",
+        submenu: AWAKE_CHOICES.map((choice) => ({
+          label: choice.label,
+          click: () => void changeAwake({ action: "start", minutes: choice.minutes }),
+        })),
+      },
+    ];
+  }
+  const until = session?.until ?? null;
+  return [
+    { label: until ? `Awake · ${awakeLeft(until)} left` : "Awake until you end it", enabled: false },
+    ...(until ? [{ label: "Add 1 hour", click: () => void changeAwake({ action: "extend", minutes: 60 }) }] : []),
+    { label: "End awake session", click: () => void changeAwake({ action: "end" }) },
+  ];
 }
 
 async function restartServiceFromMenu() {
@@ -597,14 +633,8 @@ function refreshTray() {
       ...usageMenuItems(state),
       { type: "separator" },
       // Holds the Mac awake on battery too, so the phone can reach it; the lid still sleeps it.
-      {
-        label: "Keep Mac awake",
-        type: "checkbox",
-        checked: Boolean(state?.keepAwake),
-        enabled: Boolean(state && "keepAwake" in state),
-        click: () => void toggleKeepAwake(),
-      },
-      { type: "separator" },
+      ...awakeMenuItems(state),
+      ...(state && "keepAwake" in state ? [{ type: "separator" }] : []),
       // Toggle, so pass the negation. Passing `hidden` made this a no-op:
       // setHidden returns early when the requested state already matches.
       {

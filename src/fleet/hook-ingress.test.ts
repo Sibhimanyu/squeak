@@ -404,28 +404,34 @@ describe("HookIngressServer control routes", () => {
     expect(calls).toBe(1);
   });
 
-  it("flips the keep-awake switch only for a caller with the token, with a boolean", async () => {
+  it("changes the awake session only for a caller with the token, and says why not", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;
-    const flips: boolean[] = [];
+    const requests: unknown[] = [];
+    const state = { startedAt: "2026-10-19T10:00:00.000Z", until: "2026-10-19T11:00:00.000Z" };
     server.setControl({
       sessionMessage: () => null,
       reply: async () => null,
-      setKeepAwake: (on) => {
-        flips.push(on);
-        return { keepAwake: on };
+      awake: (request) => {
+        requests.push(request);
+        return (request as { action?: string }).action === "start"
+          ? { ok: true, state }
+          : { ok: false, reason: "No awake session is running to add time to." };
       },
     });
     const url = `http://127.0.0.1:${harness.port}/control/keep-awake`;
     const auth = { "x-squeak-token": harness.token };
-    expect((await fetch(url, { method: "POST", body: JSON.stringify({ on: true }) })).status).toBe(403);
-    expect((await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ on: "yes" }) })).status).toBe(400);
-    expect(flips).toEqual([]);
-    const ok = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ on: true }) });
+    const start = JSON.stringify({ action: "start", minutes: 60 });
+    expect((await fetch(url, { method: "POST", body: start })).status).toBe(403);
+    expect((await fetch(url, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
+    expect(requests).toEqual([]);
+    const ok = await fetch(url, { method: "POST", headers: auth, body: start });
     expect(ok.status).toBe(200);
     expect(ok.headers.get("access-control-allow-origin")).toBeNull();
-    expect(await ok.json()).toEqual({ keepAwake: true });
-    expect(flips).toEqual([true]);
+    expect(await ok.json()).toEqual({ keepAwake: true, awake: state });
+    const refused = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ action: "extend" }) });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "No awake session is running to add time to." });
   });
 
   it("rejects an empty reply and an unknown route", async () => {

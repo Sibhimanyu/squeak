@@ -10,6 +10,7 @@ import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { CLAUDE_PROBE_SCHEMA, CLAUDE_PROBE_SYSTEM, ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
 import { Caffeinator } from "../fleet/caffeinate.js";
+import { applyAwakeAction, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
 import { readPendingAsk, readPendingQuestion } from "../fleet/question.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
@@ -101,13 +102,20 @@ export class SqueakApp {
   private readonly claudeRefresher: ClaudeLimitsRefresher;
   /** Keeps the Mac awake while an agent works, and while plugged in (SQUEAK_CAFFEINATE). */
   private readonly caffeinator: Caffeinator;
+  /** The user's awake session (menu bar, window, phone); held through the caffeinator. */
+  private readonly awake: AwakeSession;
   private unwatchCaffeinate: (() => void) | null = null;
   private lastUpdateId = 0;
   private stopped = false;
 
   constructor(config: SqueakConfig) {
     this.config = config;
-    this.caffeinator = new Caffeinator(undefined, undefined, path.join(config.supportDir, "keep-awake.json"));
+    this.caffeinator = new Caffeinator();
+    this.awake = new AwakeSession({
+      path: path.join(config.supportDir, "keep-awake.json"),
+      hold: (on) => this.caffeinator.setKeepAwake(on),
+      onChange: () => this.remote?.changed(),
+    });
     this.telegram = config.botToken ? new TelegramClient(config.botToken) : null;
     const telegram = this.telegram;
     this.telegramStatus = new TelegramStatus({
@@ -194,9 +202,9 @@ export class SqueakApp {
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
           // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
           refreshUsage: () => this.claudeRefresher.refresh(),
-          keepAwake: {
-            get: () => this.caffeinator.keepAwake,
-            set: (on) => this.caffeinator.setKeepAwake(on),
+          awake: {
+            state: () => this.awake.state,
+            apply: (request) => this.applyAwake(request),
           },
           // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
           answerer: answers,
@@ -246,10 +254,7 @@ export class SqueakApp {
         return { text, choices: parseChoices(text) };
       },
       refreshClaudeUsage: () => this.claudeRefresher.refresh(),
-      setKeepAwake: (on) => {
-        this.caffeinator.setKeepAwake(on);
-        return { keepAwake: this.caffeinator.keepAwake };
-      },
+      awake: (request) => this.applyAwake(request),
       transcript: (target, limit) => this.router.transcript(target, limit),
       activity: (key) => {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
@@ -268,7 +273,7 @@ export class SqueakApp {
 
     this.claudeLimits = new ClaudeLimitsStore(path.join(config.supportDir, "claude-limits.json"));
     this.runtime.setClaudeLimits(() => this.claudeLimits.latest());
-    this.runtime.setKeepAwake(() => this.caffeinator.keepAwake);
+    this.runtime.setAwake(() => this.awake.state);
     const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
       this.claudeLimits.record(limits),
     );
@@ -306,7 +311,7 @@ export class SqueakApp {
       this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
     }
     // The user's own switch is honoured even with SQUEAK_CAFFEINATE=off: they asked.
-    this.caffeinator.restoreSwitch();
+    this.awake.restore();
     if (this.config.caffeinateOnPower) {
       this.caffeinator.holdOnPower();
     }
@@ -359,6 +364,7 @@ export class SqueakApp {
     }
     this.stopped = true;
     this.unwatchCaffeinate?.();
+    this.awake.stop();
     this.caffeinator.stop();
     this.remote?.stop();
     this.cliq?.stop();
@@ -366,6 +372,14 @@ export class SqueakApp {
     await this.replier.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);
     logger.info("squeak stopped");
+  }
+
+  private applyAwake(request: unknown) {
+    const action = readAwakeAction(request);
+    if (!action) {
+      return { ok: false as const, reason: "Not a request to change the awake session." };
+    }
+    return applyAwakeAction(this.awake, action);
   }
 
   private async pollLoop(telegram: TelegramClient): Promise<void> {

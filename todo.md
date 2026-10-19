@@ -71,7 +71,7 @@ Modelled on Insomnia (github.com/krishhgg/Insomnia, MIT). Done already: the Mac
 stays awake while agents work and always while plugged in; a "Keep Mac awake"
 switch in the menu bar and iPhone Settings (`keep-awake.json`, command `awake`).
 
-- [ ] **1. Timed sessions.** "Stay awake for 1h / 2h / 4h / until a time / until I
+- [x] **1. Timed sessions.** "Stay awake for 1h / 2h / 4h / until a time / until I
       turn it off", started from the menu bar, the Squeak window or the iPhone; a
       countdown on every surface; add time to a running session; ending it takes a
       deliberate gesture. Replaces the on/off switch (an old phone's `awake` on/off

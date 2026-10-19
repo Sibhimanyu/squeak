@@ -1,3 +1,4 @@
+import type { AwakeState } from "../fleet/awake-session.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -135,13 +136,17 @@ export interface UsageCommand {
 }
 
 /**
- * A signed flip of the Mac's "Keep Mac awake" switch (fleet/caffeinate.ts).
- * Only an on/off: it reaches no agent and carries no text.
+ * A signed change to the Mac's awake session (fleet/awake-session.ts): `on`
+ * false ends it; true starts one for `minutes` (absent: until ended), or with
+ * `extend` adds that many minutes to the running one. It reaches no agent and
+ * carries no text. The first phones sent only `on`.
  */
 export interface AwakeCommand {
   v: 1;
   kind: "awake";
   on: boolean;
+  minutes?: number;
+  extend?: number;
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
@@ -218,8 +223,11 @@ export interface RemoteBridgeDependencies {
    * throttled to once a minute). Absent: a phone's Refresh is refused.
    */
   refreshUsage?: (() => Promise<{ refreshed: boolean; throttled: boolean; error?: string }>) | null;
-  /** The "Keep Mac awake" switch. Absent: phones hide it, and a flip is refused. */
-  keepAwake?: { get(): boolean; set(on: boolean): void } | null;
+  /** The awake session. Absent: phones hide it, and a change is refused. */
+  awake?: {
+    state(): AwakeState | null;
+    apply(request: unknown): { ok: true; state: AwakeState | null } | { ok: false; reason: string };
+  } | null;
   /** Claude's last plan-limit reading, for the read-only usage view on the phone. */
   claudeLimits?: (() => ClaudeLimits | null) | null;
   /**
@@ -393,6 +401,11 @@ export class RemoteBridge {
   }
 
   /** Publish soon because what the phone shows just changed. */
+  /** Something the phone shows changed outside the fleet (the awake session): publish it soon. */
+  changed(): void {
+    this.nudgePublish(0);
+  }
+
   private nudgePublish(delayMs: number): void {
     if (this.stopped || this.changeTimer || !this.config?.devices.some((device) => !device.revokedAt)) {
       return;
@@ -1008,14 +1021,19 @@ export class RemoteBridge {
     id: string,
     command: AwakeCommand,
   ): { write: boolean; result: Record<string, unknown> } {
-    const keepAwake = this.deps.keepAwake;
-    if (!keepAwake || command.v !== 1 || typeof command.on !== "boolean") {
+    const awake = this.deps.awake;
+    if (!awake || command.v !== 1) {
       this.log(device.name, "rejected", "keep awake: not available");
       return { write: true, result: { id, status: "refused", reason: "This Mac can't be kept awake from a phone." } };
     }
-    keepAwake.set(command.on);
+    // Only the fields an awake command has: the phone cannot reach the action shape's names.
+    const outcome = awake.apply({ on: command.on, minutes: command.minutes, extend: command.extend });
+    if (!outcome.ok) {
+      this.log(device.name, "rejected", `keep awake: ${outcome.reason}`);
+      return { write: true, result: { id, status: "refused", reason: outcome.reason } };
+    }
     this.nudgePublish(0);
-    this.log(device.name, "sent", command.on ? "keep the Mac awake" : "let the Mac sleep");
+    this.log(device.name, "sent", outcome.state ? "keep the Mac awake" : "let the Mac sleep");
     return { write: true, result: { id, status: "sent" } };
   }
 
@@ -1083,6 +1101,7 @@ export class RemoteBridge {
       JSON.stringify(view.duck) +
       JSON.stringify(view.workspaces) +
       JSON.stringify(view.keepAwake) +
+      JSON.stringify(view.awakeUntil) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     if (serialized === this.lastPublished) {
       return;
@@ -1109,7 +1128,7 @@ export class RemoteBridge {
       // Read-only. Refreshing Claude's reading is a Mac action; commands are plain replies only.
       usage: phoneUsage(snapshot.codexUsage, this.deps.claudeLimits?.() ?? null),
       // The "Keep Mac awake" switch; absent when this Mac does not offer it (phones then hide it).
-      ...(this.deps.keepAwake ? { keepAwake: this.deps.keepAwake.get() } : {}),
+      ...this.phoneAwake(),
       // Where a phone may start a chat; absent when this Mac can't (phones then hide the button).
       ...(this.deps.newChat ? { workspaces: this.phoneWorkspaces() } : {}),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
@@ -1124,6 +1143,15 @@ export class RemoteBridge {
       // Whether "Show more" would find anything; older phones ignore it.
       recentMore: more,
     };
+  }
+
+  /** The awake session for the phone: on/off, and its end when it has one. Absent when this Mac can't. */
+  private phoneAwake(): { keepAwake?: boolean; awakeUntil?: string } {
+    const state = this.deps.awake?.state();
+    if (state === undefined) {
+      return {};
+    }
+    return { keepAwake: state !== null, ...(state?.until ? { awakeUntil: state.until } : {}) };
   }
 
   /**

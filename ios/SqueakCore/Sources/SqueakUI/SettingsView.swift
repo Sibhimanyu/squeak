@@ -33,17 +33,8 @@ struct SettingsView: View {
                         LabeledContent("Last change", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")
                     }
                 }
-                if let keepAwake = model.keepAwake {
-                    Section {
-                        Toggle("Keep Mac awake", isOn: Binding(
-                            get: { keepAwake },
-                            set: { on in Task { awakeProblem = await model.setKeepAwake(on) } }
-                        ))
-                        .tint(Theme.primaryFill)
-                        .frame(minHeight: 44)
-                    } footer: {
-                        Text(awakeProblem ?? "Stops your Mac sleeping, on battery too, so this iPhone can reach it. Closing the lid still sleeps it. When plugged in, your Mac stays awake anyway.")
-                    }
+                if model.awakeOffered {
+                    AwakeSection(problem: $awakeProblem)
                 }
                 Section {
                     Toggle("Show thinking live", isOn: Bindable(model).verbose)
@@ -89,6 +80,79 @@ struct SettingsView: View {
             }
         }
         .foregroundStyle(Theme.ink)
+    }
+}
+/// The Mac's awake session: start one for a while or until ended, add time, or end it.
+private struct AwakeSection: View {
+    @Environment(AppModel.self) private var model
+    @Binding var problem: String?
+    @State private var confirmingEnd = false
+    @State private var untilTime = Date().addingTimeInterval(3 * 3600)
+
+    private static let durations: [(String, Int)] = [("1h", 60), ("2h", 120), ("4h", 240), ("8h", 480)]
+
+    var body: some View {
+        Section {
+            if let awake = model.awake {
+                TimelineView(.periodic(from: .now, by: 30)) { _ in
+                    LabeledContent("Awake") {
+                        Text(awake.until.map { "until \($0.formatted(date: .omitted, time: .shortened)) · \(Self.left($0)) left" }
+                             ?? "until you end it")
+                    }
+                }
+                .frame(minHeight: 44)
+                if awake.until != nil {
+                    Button("Add 1 hour") { change(.extend(minutes: 60)) }
+                        .frame(minHeight: 44)
+                }
+                Button("End awake session", role: .destructive) { confirmingEnd = true }
+                    .frame(minHeight: 44)
+                    .confirmationDialog("Let your Mac sleep again?", isPresented: $confirmingEnd, titleVisibility: .visible) {
+                        Button("End awake session", role: .destructive) { change(.end) }
+                    }
+            } else {
+                HStack(spacing: 8) {
+                    ForEach(Self.durations, id: \.0) { choice in
+                        Button(choice.0) { change(.start(minutes: choice.1)) }
+                            .buttonStyle(.bordered)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .tint(Theme.primaryFill)
+                .frame(minHeight: 44)
+                HStack(spacing: 12) {
+                    DatePicker("Until", selection: $untilTime, displayedComponents: .hourAndMinute)
+                    Button("Start") { change(.start(minutes: Self.minutes(until: untilTime))) }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.primaryFill)
+                }
+                .frame(minHeight: 44)
+                Button("Until I end it") { change(.start(minutes: nil)) }
+                    .tint(Theme.primaryFill)
+                    .frame(minHeight: 44)
+            }
+        } header: { Text("Keep Mac awake") } footer: {
+            Text(problem ?? "Stops your Mac sleeping, on battery too, so this iPhone can reach it. Closing the lid still sleeps it. Plugged in, your Mac stays awake anyway.")
+        }
+    }
+
+    private func change(_ change: AppModel.AwakeChange) {
+        Task { problem = await model.changeAwake(change) }
+    }
+
+    /// Minutes until the next time the clock shows `date`'s hour and minute (tomorrow if passed today).
+    static func minutes(until date: Date, now: Date = Date()) -> Int {
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let next = Calendar.current.nextDate(after: now, matching: parts, matchingPolicy: .nextTime) ?? now.addingTimeInterval(3600)
+        return max(1, Int((next.timeIntervalSince(now) / 60).rounded()))
+    }
+
+    static func left(_ until: Date) -> String {
+        let minutes = Int((until.timeIntervalSinceNow / 60).rounded(.up))
+        if minutes <= 1 { return "under a minute" }
+        let hours = minutes / 60
+        if hours >= 24 { return "\(hours / 24)d \(hours % 24)h" }
+        return hours > 0 ? "\(hours)h \(minutes % 60)m" : "\(minutes)m"
     }
 }
 #endif

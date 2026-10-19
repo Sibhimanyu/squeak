@@ -46,10 +46,15 @@ const els = {
   serviceRestart: document.getElementById("service-restart"),
   showDuck: document.getElementById("show-duck"),
   openPhone: document.getElementById("open-phone"),
+  openAwake: document.getElementById("open-awake"),
 };
 
 /** The detail pane shows the phone view instead of a session. */
 const PHONE = "__phone__";
+/** …or the awake session. */
+const AWAKE = "__awake__";
+/** The last thing the awake pane could not do, shown until the next change. */
+let awakeProblem = null;
 /** The pairing QR, as an image the main process drew. Cleared once paired. */
 let pairingImage = null;
 
@@ -260,6 +265,12 @@ function renderTitle() {
   els.body.dataset.mood = duck.mood;
   els.duck.src = MOOD_SPRITE[duck.mood] ?? MOOD_SPRITE.idle;
   els.summary.textContent = summarize(duck, (state.active ?? []).length);
+  els.openAwake.hidden = !("keepAwake" in state);
+  els.openAwake.textContent = state.awake
+    ? state.awake.until
+      ? `Awake · ${awakeLeft(state.awake.until)}`
+      : "Awake"
+    : "Stay awake";
 }
 
 /* ---------- list ---------- */
@@ -461,6 +472,141 @@ function composer(session, locked) {
   return wrap;
 }
 
+/* ---------- awake session (src/fleet/awake-session.ts) ---------- */
+
+/** "1h 23m" / "45m" / "under a minute" until an ISO time. Display only; the daemon ends it. */
+function awakeLeft(untilIso) {
+  const minutes = Math.ceil((Date.parse(untilIso) - Date.now()) / 60_000);
+  if (!(minutes > 1)) return "under a minute";
+  const hours = Math.floor(minutes / 60);
+  if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+}
+
+function clockTime(iso) {
+  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+async function changeAwake(request) {
+  const result = await window.squeak.awake(request);
+  awakeProblem = result.ok ? null : result.message;
+  if (result.ok && state) state = { ...state, keepAwake: result.awake !== null, awake: result.awake };
+  lastDetailSignature = "";
+  renderTitle();
+  await renderDetail();
+}
+
+/** Minutes from now until the next `HH:MM` on the clock (tomorrow if it has passed today). */
+function minutesUntilClock(value) {
+  const [hours, minutes] = value.split(":").map(Number);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
+  const target = new Date();
+  target.setHours(hours, minutes, 0, 0);
+  if (target.getTime() <= Date.now()) target.setDate(target.getDate() + 1);
+  return Math.max(1, Math.round((target.getTime() - Date.now()) / 60_000));
+}
+
+/** Ending a session takes holding the button, so a stray click cannot end one. */
+function holdToEnd() {
+  const node = button("Hold to end", "secondary hold-end", () => undefined);
+  let timer = null;
+  const cancel = () => {
+    window.clearTimeout(timer);
+    timer = null;
+    node.classList.remove("holding");
+    node.textContent = "Hold to end";
+  };
+  node.addEventListener("pointerdown", () => {
+    node.classList.add("holding");
+    node.textContent = "Keep holding…";
+    timer = window.setTimeout(() => {
+      cancel();
+      void changeAwake({ action: "end" });
+    }, 600);
+  });
+  for (const event of ["pointerup", "pointerleave", "pointercancel"]) node.addEventListener(event, cancel);
+  return node;
+}
+
+function renderAwake() {
+  const session = state?.awake ?? null;
+  // Whole minutes are all the countdown shows, so redraw once a minute at most.
+  const signature = JSON.stringify([AWAKE, session, awakeProblem, Math.floor(Date.now() / 60000)]);
+  if (signature === lastDetailSignature) return;
+  lastDetailSignature = signature;
+
+  const nodes = [];
+  const head = el("div", "detail-head");
+  const titles = el("div");
+  titles.append(el("h2", null, "Stay awake"));
+  titles.append(
+    el(
+      "div",
+      "state-line",
+      session
+        ? session.until
+          ? `Awake until ${clockTime(session.until)} · ${awakeLeft(session.until)} left`
+          : "Awake until you end it"
+        : "Your Mac sleeps as usual: awake while agents work, and while plugged in.",
+    ),
+  );
+  head.append(titles);
+  nodes.push(head);
+
+  const card = el("div", "decision");
+  if (session) {
+    card.append(el("h3", null, session.until ? "Need longer?" : "Keeping your Mac awake"));
+    const actions = el("div", "actions");
+    if (session.until) {
+      actions.append(button("Add 1 hour", "primary", () => void changeAwake({ action: "extend", minutes: 60 })));
+    }
+    actions.append(holdToEnd());
+    card.append(actions);
+  } else {
+    card.append(el("h3", null, "Keep your Mac awake, on battery too"));
+    const actions = el("div", "actions");
+    for (const [text, minutes] of [
+      ["1 hour", 60],
+      ["2 hours", 120],
+      ["4 hours", 240],
+      ["8 hours", 480],
+      ["Until I end it", null],
+    ]) {
+      actions.append(button(text, "secondary", () => void changeAwake({ action: "start", minutes })));
+    }
+    card.append(actions);
+    const until = el("div", "actions awake-until");
+    const time = el("input");
+    time.type = "time";
+    time.setAttribute("aria-label", "Stay awake until");
+    until.append(
+      el("span", "muted-note", "Or until"),
+      time,
+      button("Start", "secondary", () => {
+        const minutes = minutesUntilClock(time.value);
+        if (minutes === null) {
+          awakeProblem = "Pick a time first.";
+          lastDetailSignature = "";
+          renderAwake();
+          return;
+        }
+        void changeAwake({ action: "start", minutes });
+      }),
+    );
+    card.append(until);
+  }
+  if (awakeProblem) card.append(el("p", "muted-note", awakeProblem));
+  nodes.push(card);
+  nodes.push(
+    el(
+      "p",
+      "muted-note",
+      "Closing the lid still puts your Mac to sleep. Your iPhone can start, extend or end this too.",
+    ),
+  );
+  els.detail.replaceChildren(wrapScroll(nodes));
+}
+
 /* ---------- iPhone (docs/remote-channel.md) ---------- */
 
 function formatWhen(iso) {
@@ -625,6 +771,10 @@ function wrapScroll(nodes) {
 async function renderDetail() {
   if (selectedKey === PHONE) {
     await renderPhone();
+    return;
+  }
+  if (selectedKey === AWAKE) {
+    renderAwake();
     return;
   }
   const session = selectedSession();
@@ -827,7 +977,7 @@ async function poll() {
     if (!receipt.pending && (!session || session.lastActivityAt !== receipt.atActivity)) receipts.delete(key);
   }
 
-  if (selectedKey !== PHONE && (!selectedKey || !selectedSession())) {
+  if (selectedKey !== PHONE && selectedKey !== AWAKE && (!selectedKey || !selectedSession())) {
     const first = GROUPS.flatMap((group) => (state?.active ?? []).filter((s) => group.states.includes(s.state)))[0];
     selectedKey = first?.key ?? null;
   }
@@ -840,6 +990,7 @@ async function poll() {
 els.serviceRestart.addEventListener("click", () => void restartService());
 els.showDuck.addEventListener("click", () => window.squeak.showDuck());
 els.openPhone.addEventListener("click", () => select(PHONE));
+els.openAwake.addEventListener("click", () => select(AWAKE));
 
 // Heresay's Report button: a one-time note that it is there, once its
 // script (after this one) has loaded. Offline, it never loads; that is fine.

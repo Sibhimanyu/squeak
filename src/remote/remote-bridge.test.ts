@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { applyAwakeAction, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
@@ -1235,14 +1236,15 @@ describe("RemoteBridge verbose view (live turn)", () => {
   });
 });
 
-describe("RemoteBridge keep-awake switch from the phone", () => {
+describe("RemoteBridge awake session from the phone", () => {
   async function awake(options: { offered?: boolean } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-awake-"));
     dirs.push(dir);
     const store = new MemoryStore();
-    let on = false;
-    const set = vi.fn((next: boolean) => {
-      on = next;
+    const session = new AwakeSession({ path: null, hold: () => undefined, now: () => NOW });
+    const apply = vi.fn((request: unknown) => {
+      const action = readAwakeAction(request);
+      return action ? applyAwakeAction(session, action) : { ok: false as const, reason: "Not a request." };
     });
     const bridge = new RemoteBridge({
       configPath: path.join(dir, "remote.json"),
@@ -1250,7 +1252,7 @@ describe("RemoteBridge keep-awake switch from the phone", () => {
       store,
       replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
       snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
-      ...(options.offered === false ? {} : { keepAwake: { get: () => on, set } }),
+      ...(options.offered === false ? {} : { awake: { state: () => session.state, apply } }),
       now: () => NOW,
     });
     const pairing = bridge.startPairing();
@@ -1261,45 +1263,71 @@ describe("RemoteBridge keep-awake switch from the phone", () => {
     await bridge.tick();
     await bridge.approve("iphone-1");
     const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
-    const command = (value: unknown, signer = phone) => {
+    const command = (fields: Record<string, unknown>, signer = phone) => {
       const box = seal(payload.k, {
         v: 1,
         kind: "awake",
-        on: value,
+        ...fields,
         nonce: crypto.randomBytes(16).toString("hex"),
         expiresAt: NOW + 60_000,
       });
       return { box, sig: signer.sign(box), device: "iphone-1" };
     };
-    return { bridge, config, command, set };
+    return { bridge, config, command, apply, session };
   }
 
-  it("a signed flip turns the switch on and off, and the phone view says so", async () => {
+  it("starts a timed session, adds time, ends it, and the phone view follows", async () => {
     const t = await awake();
-    expect(t.bridge.phoneView().keepAwake).toBe(false);
-    const verdict = await t.bridge.handleCommand(t.config, "a1", t.command(true));
-    expect(verdict.result).toMatchObject({ status: "sent" });
-    expect(t.set).toHaveBeenLastCalledWith(true);
-    expect(t.bridge.phoneView().keepAwake).toBe(true);
-    await t.bridge.handleCommand(t.config, "a2", t.command(false));
-    expect(t.set).toHaveBeenLastCalledWith(false);
+    expect(t.bridge.phoneView()).toMatchObject({ keepAwake: false });
+    expect(t.bridge.phoneView()).not.toHaveProperty("awakeUntil");
+    const started = await t.bridge.handleCommand(t.config, "a1", t.command({ on: true, minutes: 60 }));
+    expect(started.result).toMatchObject({ status: "sent" });
+    expect(t.bridge.phoneView()).toMatchObject({
+      keepAwake: true,
+      awakeUntil: new Date(NOW + 60 * 60_000).toISOString(),
+    });
+    await t.bridge.handleCommand(t.config, "a2", t.command({ on: true, extend: 30 }));
+    expect(t.bridge.phoneView().awakeUntil).toBe(new Date(NOW + 90 * 60_000).toISOString());
+    await t.bridge.handleCommand(t.config, "a3", t.command({ on: false }));
+    expect(t.bridge.phoneView()).toMatchObject({ keepAwake: false });
+    t.session.stop();
     t.bridge.stop();
   });
 
-  it("an unsigned flip, or one that is not a boolean, changes nothing", async () => {
+  it("an old phone's bare on starts an untimed session", async () => {
     const t = await awake();
-    const forged = await t.bridge.handleCommand(t.config, "a1", t.command(true, device()));
-    expect(forged.write).toBe(false);
-    const odd = await t.bridge.handleCommand(t.config, "a2", t.command("yes"));
+    await t.bridge.handleCommand(t.config, "a1", t.command({ on: true }));
+    expect(t.bridge.phoneView()).toMatchObject({ keepAwake: true });
+    expect(t.bridge.phoneView()).not.toHaveProperty("awakeUntil");
+    t.session.stop();
+    t.bridge.stop();
+  });
+
+  it("passes on only the awake fields, and refuses what the session refuses", async () => {
+    const t = await awake();
+    await t.bridge.handleCommand(t.config, "a1", t.command({ on: true, action: "end", minutes: 5 }));
+    expect(t.apply).toHaveBeenLastCalledWith({ on: true, minutes: 5, extend: undefined });
+    t.session.end();
+    const extend = await t.bridge.handleCommand(t.config, "a2", t.command({ on: true, extend: 30 }));
+    expect(extend.result).toMatchObject({ status: "refused", reason: expect.stringMatching(/No awake session/) });
+    const odd = await t.bridge.handleCommand(t.config, "a3", t.command({ on: "yes" }));
     expect(odd.result).toMatchObject({ status: "refused" });
-    expect(t.set).not.toHaveBeenCalled();
+    expect(t.session.active).toBe(false);
     t.bridge.stop();
   });
 
-  it("a Mac without the switch refuses it and leaves it out of the view", async () => {
+  it("an unsigned change does nothing", async () => {
+    const t = await awake();
+    const forged = await t.bridge.handleCommand(t.config, "a1", t.command({ on: true }, device()));
+    expect(forged.write).toBe(false);
+    expect(t.apply).not.toHaveBeenCalled();
+    t.bridge.stop();
+  });
+
+  it("a Mac without sessions refuses it and leaves it out of the view", async () => {
     const t = await awake({ offered: false });
     expect(t.bridge.phoneView()).not.toHaveProperty("keepAwake");
-    const verdict = await t.bridge.handleCommand(t.config, "a1", t.command(true));
+    const verdict = await t.bridge.handleCommand(t.config, "a1", t.command({ on: true }));
     expect(verdict.result).toMatchObject({ status: "refused" });
     t.bridge.stop();
   });

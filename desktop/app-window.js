@@ -82,6 +82,10 @@ async function captureTo(target, prefix) {
   await target.webContents.executeJavaScript("document.getElementById('open-phone').click()");
   await wait(1500);
   await shot("phone");
+  // The stay-awake pane; only opened, never a button pressed.
+  await target.webContents.executeJavaScript("document.getElementById('open-awake').click()");
+  await wait(1200);
+  await shot("awake");
   // Tapping an option SENDS A REPLY. Only against a test endpoint, only when
   // asked: a capture of the live app must never be able to answer an agent.
   const port = process.env.FLEET_HOOK_PORT || "8477";
@@ -112,6 +116,7 @@ function registerAppIpc({ showDuck }) {
   ipcMain.handle("squeak:open-in-conductor", (_event, target) => service.openInConductor(target));
   ipcMain.handle("squeak:remote", (_event, action, deviceId) => service.remote(action, deviceId ?? null));
   ipcMain.handle("squeak:pairing-qr", () => service.pairingQr());
+  ipcMain.handle("squeak:awake", (_event, request) => service.awake(request));
   ipcMain.on("squeak:show-duck", () => showDuck());
 }
 

@@ -256,14 +256,19 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
-    /// The signed document turning the Mac's "Keep Mac awake" switch on or off.
-    public func awakeDocument(on: Bool, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+    /// The signed document changing the Mac's awake session: `on` false ends it; true starts one for
+    /// `minutes` (nil: until ended), or with `extend` adds that many minutes to the running one.
+    public func awakeDocument(
+        on: Bool, minutes: Int? = nil, extend: Int? = nil, signer: CommandSigner, now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = AwakeCommand(
             v: 1,
             kind: "awake",
             on: on,
+            minutes: minutes,
+            extend: extend,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

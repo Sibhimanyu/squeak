@@ -968,3 +968,32 @@ main {
 .reset {
   margin-top: 24px;
 }
+
+/* ---------- stay awake ---------- */
+
+.decision .actions {
+  flex-wrap: wrap;
+}
+
+.awake-until {
+  align-items: center;
+  margin-top: 12px;
+}
+
+.awake-until input[type="time"] {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-control);
+  background: var(--sq-surface-raised);
+  color: var(--sq-ink);
+  font: inherit;
+}
+
+.hold-end.holding {
+  border-color: var(--sq-needs-you);
+}
+
+.decision + .muted-note {
+  margin-top: 12px;
+}

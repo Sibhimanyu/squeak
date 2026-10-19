@@ -220,13 +220,31 @@ async function pairingQr() {
   }
 }
 
-/** The "Keep Mac awake" switch. Answers the daemon's new state, or null if it could not be set. */
-async function setKeepAwake(on) {
+const AWAKE_ACTIONS = new Set(["start", "extend", "end"]);
+const MAX_AWAKE_MINUTES = 7 * 24 * 60;
+
+/**
+ * Starts, extends or ends the awake session (src/fleet/awake-session.ts).
+ * `minutes` is whole minutes, or null to start one that lasts until ended.
+ * Answers `{ ok, awake }` with the session after, or `{ ok: false, message }`.
+ */
+async function awake(request) {
+  const action = request?.action;
+  const minutes = request?.minutes ?? null;
+  const validMinutes = Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_AWAKE_MINUTES;
+  if (
+    !AWAKE_ACTIONS.has(action) ||
+    (action === "extend" && !validMinutes) ||
+    (action === "start" && minutes !== null && !validMinutes)
+  ) {
+    return { ok: false, message: "That is not a length of time Squeak can stay awake for." };
+  }
+  const body = action === "end" ? { action } : { action, minutes };
   try {
-    const { keepAwake } = await control("keep-awake", { method: "POST", body: JSON.stringify({ on: on === true }) });
-    return keepAwake === true;
-  } catch {
-    return null;
+    const result = await control("keep-awake", { method: "POST", body: JSON.stringify(body) });
+    return { ok: true, awake: result.awake ?? null };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -240,5 +258,5 @@ module.exports = {
   serviceStatus,
   sessionActivity,
   sessionMessage,
-  setKeepAwake,
+  awake,
 };

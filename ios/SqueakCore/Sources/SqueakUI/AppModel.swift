@@ -117,7 +117,7 @@ final class AppModel {
                     self.snapshot = PhoneSnapshot(
                         v: current.v, mac: current.mac, generatedAt: ISO8601DateFormatter().string(from: Date()), duck: current.duck,
                         sessions: current.sessions, usage: current.usage, workspaces: current.workspaces, recent: current.recent,
-                        keepAwake: current.keepAwake)
+                        keepAwake: current.keepAwake, awakeUntil: current.awakeUntil)
                 }
                 n += 1
             }
@@ -419,7 +419,7 @@ final class AppModel {
                 snapshot = PhoneSnapshot(
                     v: current.v, mac: current.mac, generatedAt: current.generatedAt, duck: current.duck,
                     sessions: [session] + current.sessions, usage: current.usage, workspaces: current.workspaces,
-                    recent: current.recent, keepAwake: current.keepAwake)
+                    recent: current.recent, keepAwake: current.keepAwake, awakeUntil: current.awakeUntil)
             }
             return .started
         }
@@ -509,32 +509,65 @@ final class AppModel {
 
     /* ---------- keep the Mac awake ---------- */
 
-    /// The switch as last tapped, shown until the Mac's snapshot has had time to agree.
-    private var keepAwakeTapped: (on: Bool, at: Date)?
-
-    /// The Mac's "Keep Mac awake" switch; nil when the Mac does not offer it.
-    var keepAwake: Bool? {
-        guard let reported = snapshot?.keepAwake else { return nil }
-        if let tapped = keepAwakeTapped, Date().timeIntervalSince(tapped.at) < 30 { return tapped.on }
-        return reported
+    /// The Mac's awake session as this phone shows it.
+    struct AwakeStatus: Equatable {
+        /// Nil: until it is ended.
+        var until: Date?
     }
 
-    /// Flips the Mac's switch. No Face ID: it reaches no agent. Returns a line for the screen on failure.
-    func setKeepAwake(_ on: Bool) async -> String? {
-        keepAwakeTapped = (on, Date())
+    enum AwakeChange {
+        case start(minutes: Int?)
+        case extend(minutes: Int)
+        case end
+    }
+
+    /// The session as last changed here, shown until the Mac's snapshot has had time to agree.
+    private var awakeTapped: (status: AwakeStatus?, at: Date)?
+
+    /// Whether this Mac offers awake sessions at all.
+    var awakeOffered: Bool { snapshot?.keepAwake != nil }
+
+    /// The running awake session, or nil when there is none.
+    var awake: AwakeStatus? {
+        if let tapped = awakeTapped, Date().timeIntervalSince(tapped.at) < 30 { return tapped.status }
+        guard snapshot?.keepAwake == true else { return nil }
+        return AwakeStatus(until: snapshot?.awakeUntil.flatMap(Self.parseISO))
+    }
+
+    private static func parseISO(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    }
+
+    /// Starts, extends or ends the Mac's awake session. No Face ID: it reaches no agent.
+    /// Returns a line for the screen on failure.
+    func changeAwake(_ change: AwakeChange) async -> String? {
+        let expected: AwakeStatus?
+        switch change {
+        case .start(let minutes): expected = AwakeStatus(until: minutes.map { Date().addingTimeInterval(Double($0) * 60) })
+        case .extend(let minutes): expected = AwakeStatus(until: awake?.until.map { max($0, Date()).addingTimeInterval(Double(minutes) * 60) })
+        case .end: expected = nil
+        }
+        awakeTapped = (expected, Date())
         if demo { return nil }
-        guard let channel else { keepAwakeTapped = nil; return "Not connected to your Mac." }
+        guard let channel else { awakeTapped = nil; return "Not connected to your Mac." }
         do {
-            let (id, document) = try channel.awakeDocument(on: on, signer: signer)
+            let (id, document): (String, ChannelDocument)
+            switch change {
+            case .start(let minutes): (id, document) = try channel.awakeDocument(on: true, minutes: minutes, signer: signer)
+            case .extend(let minutes): (id, document) = try channel.awakeDocument(on: true, extend: minutes, signer: signer)
+            case .end: (id, document) = try channel.awakeDocument(on: false, signer: signer)
+            }
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else {
-                keepAwakeTapped = nil
+                awakeTapped = nil
                 return "Your Mac didn't answer. Is Squeak running?"
             }
-            guard result.sent else { keepAwakeTapped = nil; return result.reason ?? "Your Mac couldn't change that." }
+            guard result.sent else { awakeTapped = nil; return result.reason ?? "Your Mac couldn't change that." }
             return nil
         } catch {
-            keepAwakeTapped = nil
+            awakeTapped = nil
             return "Couldn't reach your Mac."
         }
     }

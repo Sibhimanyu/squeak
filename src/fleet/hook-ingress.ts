@@ -48,8 +48,11 @@ export interface IngressControl {
    * it is only ever reached by the owner pressing Refresh.
    */
   refreshClaudeUsage?(): Promise<unknown>;
-  /** The "Keep Mac awake" switch (fleet/caffeinate.ts); answers its new state. */
-  setKeepAwake?(on: boolean): { keepAwake: boolean };
+  /**
+   * Starts, extends or ends an awake session (fleet/awake-session.ts,
+   * `readAwakeAction` shapes). Answers the session after, or why not.
+   */
+  awake?(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
   /** Which channels are set up and healthy. Never carries a secret. */
   channels?(): unknown;
   /** Chats that messaged the Telegram bot without being allowed. */
@@ -341,7 +344,7 @@ export class HookIngressServer {
         respond(response, 405, "method not allowed");
         return;
       }
-      if (!control.setKeepAwake) {
+      if (!control.awake) {
         request.resume();
         respond(response, 503, "keep awake unavailable");
         return;
@@ -360,17 +363,19 @@ export class HookIngressServer {
         if (aborted) {
           return;
         }
-        let on: unknown;
+        let parsed: unknown;
         try {
-          on = (JSON.parse(body || "{}") as { on?: unknown }).on;
+          parsed = JSON.parse(body || "{}");
         } catch {
-          on = undefined;
-        }
-        if (typeof on !== "boolean") {
-          respond(response, 400, "expected { on: boolean }");
+          respond(response, 400, "bad json");
           return;
         }
-        respondJson(response, 200, control.setKeepAwake!(on));
+        const outcome = control.awake!(parsed);
+        if (!outcome.ok) {
+          respondJson(response, 400, { error: outcome.reason });
+          return;
+        }
+        respondJson(response, 200, { keepAwake: outcome.state !== null, awake: outcome.state });
       });
       request.on("error", () => {
         aborted = true;
