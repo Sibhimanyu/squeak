@@ -493,11 +493,11 @@ function usageMenuItems(state) {
   const items = [];
   const usage = state?.codexUsage;
 
-  // A window that has reset since the reading is empty again; its old number is the last window's.
+  // What is left, like the bars in the apps; a window that has reset since the reading is full again.
   const line = (name, reading) =>
     Date.parse(reading.resetsAt) <= Date.now()
       ? `Codex ${name}: reset, not read since`
-      : `Codex ${name}: ${Math.round(reading.usedPercent)}% · resets ${formatCountdown(reading.resetsAt)}`;
+      : `Codex ${name}: ${Math.round(100 - Math.min(Math.max(reading.usedPercent, 0), 100))}% left · resets ${formatCountdown(reading.resetsAt)}`;
   if (usage?.primary) {
     items.push({ label: line("5h", usage.primary), enabled: false });
   }

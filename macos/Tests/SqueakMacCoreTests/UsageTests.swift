@@ -17,11 +17,11 @@ struct UsageTests {
         #expect(UsageFormat.resets(now.addingTimeInterval(-60), now: now) == "has reset since")
     }
 
-    @Test func aResetWindowReadsResetWithAnEmptyBar() {
-        #expect(UsageFormat.used(76, resetsAt: now.addingTimeInterval(-60), now: now) == "Reset")
-        #expect(UsageFormat.fraction(76, resetsAt: now.addingTimeInterval(-60), now: now) == 0)
-        #expect(UsageFormat.used(76, resetsAt: now.addingTimeInterval(3600), now: now) == "76% used")
-        #expect(abs(UsageFormat.fraction(76, resetsAt: now.addingTimeInterval(3600), now: now) - 0.76) < 0.0001)
+    @Test func theBarShowsWhatIsLeftAndIsFullOnceTheWindowResets() {
+        #expect(UsageFormat.left(76, resetsAt: now.addingTimeInterval(-60), now: now) == "Reset")
+        #expect(UsageFormat.remaining(76, resetsAt: now.addingTimeInterval(-60), now: now) == 1)
+        #expect(UsageFormat.left(76, resetsAt: now.addingTimeInterval(3600), now: now) == "24% left")
+        #expect(abs(UsageFormat.remaining(76, resetsAt: now.addingTimeInterval(3600), now: now) - 0.24) < 0.0001)
     }
 
     @Test func ageAppearsOnlyOnceAReadingIsStale() {

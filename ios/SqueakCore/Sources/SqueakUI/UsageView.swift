@@ -96,11 +96,11 @@ struct UsageView: View {
                 Text(name).font(.subheadline)
                 Spacer()
                 if let window {
-                    Text(UsageFormat.used(window.usedPercent, resetsAt: window.resetsAt)).font(.subheadline.weight(.semibold)).monospacedDigit()
+                    Text(UsageFormat.left(window.usedPercent, resetsAt: window.resetsAt)).font(.subheadline.weight(.semibold)).monospacedDigit()
                 }
             }
             if let window {
-                UsageBar(fraction: UsageFormat.fraction(window.usedPercent, resetsAt: window.resetsAt))
+                UsageBar(fraction: UsageFormat.remaining(window.usedPercent, resetsAt: window.resetsAt))
                 Text(UsageFormat.resets(window.resetsAt)).font(.footnote).foregroundStyle(Theme.muted)
             } else {
                 Text("Not reported").font(.footnote).foregroundStyle(Theme.muted)
