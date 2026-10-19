@@ -187,16 +187,20 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public let awakeLidProblem: String?
     /// Whether this Mac can start a lid-closed session (its sudoers rule is installed).
     public let awakeLidReady: Bool?
+    /// A safety rule acting on the session now ("Low Power Mode on · Battery at 38%").
+    public let awakeSafety: String?
 
     public init(
         v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session], usage: Usage? = nil,
         workspaces: [Workspace]? = nil, recent: [Session]? = nil, recentMore: Bool? = nil, keepAwake: Bool? = nil,
-        awakeUntil: String? = nil, awakeLid: String? = nil, awakeLidProblem: String? = nil, awakeLidReady: Bool? = nil
+        awakeUntil: String? = nil, awakeLid: String? = nil, awakeLidProblem: String? = nil, awakeLidReady: Bool? = nil,
+        awakeSafety: String? = nil
     ) {
         self.recentMore = recentMore
         self.keepAwake = keepAwake
         self.awakeUntil = awakeUntil
         self.awakeLid = awakeLid; self.awakeLidProblem = awakeLidProblem; self.awakeLidReady = awakeLidReady
+        self.awakeSafety = awakeSafety
         self.v = v; self.mac = mac; self.generatedAt = generatedAt; self.duck = duck; self.sessions = sessions
         self.usage = usage; self.workspaces = workspaces; self.recent = recent
     }

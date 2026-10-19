@@ -99,6 +99,9 @@ const schema = z.object({
   FLEET_ACTIVE_WINDOW_MINUTES: z.coerce.number().int().min(5).default(360),
   FLEET_IDLE_AFTER_MINUTES: z.coerce.number().int().min(1).default(10),
   FLEET_CONTEXT_PRESSURE_PERCENT: z.coerce.number().int().min(10).max(100).default(80),
+  /** An awake session on battery: Low Power Mode at this percent, and it ends at the second (power-monitor.ts). */
+  SQUEAK_AWAKE_LOW_POWER_PERCENT: z.coerce.number().int().min(5).max(100).default(40),
+  SQUEAK_AWAKE_END_PERCENT: z.coerce.number().int().min(1).max(50).default(10),
   /** Codex quota used-percent past which a one-time warning is pushed. */
   FLEET_CODEX_QUOTA_WARN_PERCENT: z.coerce.number().int().min(10).max(100).default(85),
 });
@@ -141,6 +144,8 @@ export interface SqueakConfig {
   activeWindowMs: number;
   idleAfterMs: number;
   contextPressurePercent: number;
+  /** Battery thresholds for awake sessions' safety rules. */
+  awakeSafety: { lowPowerPercent: number; endPercent: number };
   codexQuotaWarnPercent: number;
   envFilePath: string;
 }
@@ -206,6 +211,10 @@ export function loadSqueakConfig(): SqueakConfig {
     activeWindowMs: parsed.FLEET_ACTIVE_WINDOW_MINUTES * 60_000,
     idleAfterMs: parsed.FLEET_IDLE_AFTER_MINUTES * 60_000,
     contextPressurePercent: parsed.FLEET_CONTEXT_PRESSURE_PERCENT,
+    awakeSafety: {
+      lowPowerPercent: parsed.SQUEAK_AWAKE_LOW_POWER_PERCENT,
+      endPercent: parsed.SQUEAK_AWAKE_END_PERCENT,
+    },
     codexQuotaWarnPercent: parsed.FLEET_CODEX_QUOTA_WARN_PERCENT,
     envFilePath,
   };

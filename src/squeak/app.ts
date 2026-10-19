@@ -13,6 +13,8 @@ import { CLAUDE_PROBE_SCHEMA, CLAUDE_PROBE_SYSTEM, ClaudeLimitsRefresher } from 
 import { Caffeinator } from "../fleet/caffeinate.js";
 import { applyAwakeAction, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
 import { LidSleepGuard, SUDOERS_PATH, sudoersRule } from "../fleet/lid-sleep.js";
+import { ensureBackstop } from "../fleet/awake-backstop.js";
+import { readPower } from "../fleet/power-monitor.js";
 import { readPendingAsk, readPendingQuestion } from "../fleet/question.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
@@ -107,6 +109,7 @@ export class SqueakApp {
   /** The user's awake session (menu bar, window, phone); held through the caffeinator. */
   private readonly awake: AwakeSession;
   private lidRuleTimer: NodeJS.Timeout | null = null;
+  private safetyTimer: NodeJS.Timeout | null = null;
   private unwatchCaffeinate: (() => void) | null = null;
   private lastUpdateId = 0;
   private stopped = false;
@@ -282,7 +285,11 @@ export class SqueakApp {
 
     this.claudeLimits = new ClaudeLimitsStore(path.join(config.supportDir, "claude-limits.json"));
     this.runtime.setClaudeLimits(() => this.claudeLimits.latest());
-    this.runtime.setAwake(() => ({ state: this.awake.state, lidReady: this.awake.lidReady }));
+    this.runtime.setAwake(() => ({
+      state: this.awake.state,
+      lidReady: this.awake.lidReady,
+      lastEnd: this.awake.lastEnd,
+    }));
     const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
       this.claudeLimits.record(limits),
     );
@@ -322,9 +329,12 @@ export class SqueakApp {
     // The user's own switch is honoured even with SQUEAK_CAFFEINATE=off: they asked.
     // Undoes a sleep disable a previous run left behind before anything else.
     await this.awake.restore();
-    void this.awake.refreshLidRule();
-    this.lidRuleTimer = setInterval(() => void this.awake.refreshLidRule(), 10 * 60_000);
+    void this.refreshLidRule();
+    this.lidRuleTimer = setInterval(() => void this.refreshLidRule(), 10 * 60_000);
     this.lidRuleTimer.unref?.();
+    // The safety rules read the battery and heat once a minute while a session runs.
+    this.safetyTimer = setInterval(() => void this.checkAwakeSafety(), 60_000);
+    this.safetyTimer.unref?.();
     if (this.config.caffeinateOnPower) {
       this.caffeinator.holdOnPower();
     }
@@ -378,6 +388,7 @@ export class SqueakApp {
     this.stopped = true;
     this.unwatchCaffeinate?.();
     if (this.lidRuleTimer) clearInterval(this.lidRuleTimer);
+    if (this.safetyTimer) clearInterval(this.safetyTimer);
     await this.awake.stop().catch(() => undefined);
     this.caffeinator.stop();
     this.remote?.stop();
@@ -391,7 +402,7 @@ export class SqueakApp {
   private async applyAwake(request: unknown) {
     // The Mac app asks after installing or removing the lid rule.
     if ((request as { action?: unknown } | null)?.action === "recheck-lid") {
-      await this.awake.refreshLidRule();
+      await this.refreshLidRule();
       return { ok: true as const, state: this.awake.state };
     }
     const action = readAwakeAction(request);
@@ -399,9 +410,35 @@ export class SqueakApp {
       return { ok: false as const, reason: "Not a request to change the awake session." };
     }
     if (action.kind === "start" && action.lid) {
-      await this.awake.refreshLidRule();
+      await this.refreshLidRule();
     }
-    return applyAwakeAction(this.awake, action);
+    const outcome = applyAwakeAction(this.awake, action);
+    // A session started on 8% battery should end now, not in a minute.
+    if (outcome.ok && action.kind === "start") {
+      await this.checkAwakeSafety();
+      return { ok: true as const, state: this.awake.state };
+    }
+    return outcome;
+  }
+
+  /** Re-checks the sudoers rule; with it in, makes sure the backstop agent is there too. */
+  private async refreshLidRule(): Promise<void> {
+    if (!(await this.awake.refreshLidRule())) {
+      return;
+    }
+    await ensureBackstop({
+      supportDir: this.config.supportDir,
+      journalPath: path.join(this.config.supportDir, "lid-journal.json"),
+    }).catch((error: unknown) => {
+      logger.warn("awake backstop failed", { error: error instanceof Error ? error.message : String(error) });
+    });
+  }
+
+  private async checkAwakeSafety(): Promise<void> {
+    if (!this.awake.active) {
+      return;
+    }
+    await this.awake.checkSafety(await readPower(), this.config.awakeSafety);
   }
 
   private async pollLoop(telegram: TelegramClient): Promise<void> {

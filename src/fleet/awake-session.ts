@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 import { logger } from "../utils/logger.js";
+import { decideSafety, type PowerReading, type SafetyThresholds } from "./power-monitor.js";
 
 /**
  * An awake session: the user asked for the Mac to stay awake, for a while or
@@ -34,17 +35,32 @@ export interface AwakeState {
   lidStatus: "off" | "starting" | "on" | "failed";
   /** Why it could not be, when it failed. */
   lidProblem?: string;
+  /** Squeak turned Low Power Mode on for this session (a safety rule). */
+  lowPower: boolean;
+  /** Why a safety rule is acting now ("Battery at 38%"); absent when none is. */
+  safety?: string;
+}
+
+/** How the last session ended, so surfaces can say a safety rule ended it. */
+export interface AwakeEnd {
+  reason: AwakeEndReason;
+  at: string;
+  why?: string;
 }
 
 /** What lid-sleep.ts's LidSleepGuard does for a session. */
 export interface LidControl {
   ruleInstalled(): Promise<boolean>;
-  disableSleep(): Promise<void>;
+  disableSleep(until: number | null): Promise<void>;
   restoreSleep(): Promise<boolean>;
+  /** False when it was already on (the user's) or could not be turned on. */
+  lowPowerOn(until: number | null): Promise<boolean>;
+  lowPowerOff(): Promise<void>;
+  updateUntil(until: number | null): void;
   recover(sessionOwnsIt: boolean): Promise<void>;
 }
 
-export type AwakeEndReason = "ended" | "expired" | "replaced";
+export type AwakeEndReason = "ended" | "expired" | "replaced" | "battery" | "heat";
 
 interface Saved {
   startedAt: number;
@@ -81,6 +97,12 @@ export class AwakeSession {
   private lidChain: Promise<void> = Promise.resolve();
   /** Whether the sudoers rule is installed, as last checked. */
   private lidRule = false;
+  /** A safety rule wants Low Power Mode, and why. */
+  private safetyWhy: string | null = null;
+  private wantLowPower = false;
+  /** Whether Squeak turned Low Power Mode on and has not turned it off. */
+  private lowPowerActual = false;
+  private ended: AwakeEnd | null = null;
 
   constructor(private readonly options: AwakeSessionOptions) {
     this.now = options.now ?? Date.now;
@@ -96,7 +118,38 @@ export class AwakeSession {
       lid: Boolean(this.saved.lid),
       lidStatus: this.lidStatus,
       ...(this.lidProblem ? { lidProblem: this.lidProblem } : {}),
+      lowPower: this.lowPowerActual,
+      ...(this.safetyWhy ? { safety: this.safetyWhy } : {}),
     };
+  }
+
+  /** How the last session ended; null until one has. */
+  get lastEnd(): AwakeEnd | null {
+    return this.ended;
+  }
+
+  /**
+   * Applies the safety rules (power-monitor.ts) to one reading: end the
+   * session on a flat battery or a critically hot Mac, and Low Power Mode
+   * on a low battery or a hot one — only with the sudoers rule, and never
+   * over the user's own setting.
+   */
+  checkSafety(reading: PowerReading, thresholds?: SafetyThresholds): Promise<void> {
+    if (!this.saved) {
+      return this.lidChain;
+    }
+    const decision = decideSafety(reading, thresholds);
+    if (decision.end) {
+      this.end(decision.end, decision.why ?? undefined);
+      return this.lidChain;
+    }
+    const before = [this.safetyWhy, this.wantLowPower];
+    this.safetyWhy = decision.why;
+    this.wantLowPower = decision.lowPower && this.lidRule;
+    if (before[0] !== this.safetyWhy || before[1] !== this.wantLowPower) {
+      this.options.onChange?.();
+    }
+    return this.syncLid();
   }
 
   /** Whether a lid-closed session can start here: the sudoers rule is installed. */
@@ -179,11 +232,12 @@ export class AwakeSession {
         this.now() + MAX_AWAKE_MINUTES * 60_000,
       );
       this.begin({ ...this.saved, until: capped });
+      this.options.lid?.updateUntil(capped);
     }
     return this.state;
   }
 
-  end(reason: AwakeEndReason = "ended"): void {
+  end(reason: AwakeEndReason = "ended", why?: string): void {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -192,10 +246,13 @@ export class AwakeSession {
       return;
     }
     this.saved = null;
+    this.safetyWhy = null;
+    this.wantLowPower = false;
+    this.ended = { reason, at: new Date(this.now()).toISOString(), ...(why ? { why } : {}) };
     this.options.hold(false);
     this.write(null);
     void this.syncLid();
-    logger.info("awake session over", { reason });
+    logger.info("awake session over", { reason, why });
     this.options.onChange?.();
   }
 
@@ -214,13 +271,31 @@ export class AwakeSession {
 
   private stopping = false;
 
+  private async reconcileLowPower(): Promise<void> {
+    const lid = this.options.lid;
+    const want = this.wantLowPower && this.saved !== null && !this.stopping;
+    if (!lid || want === this.lowPowerActual) {
+      return;
+    }
+    if (want) {
+      this.lowPowerActual = await lid.lowPowerOn(this.saved?.until ?? null).catch(() => false);
+      // Already on (the user's) or refused: do not ask again every check.
+      if (!this.lowPowerActual) this.wantLowPower = false;
+    } else {
+      await lid.lowPowerOff().catch(() => undefined);
+      this.lowPowerActual = false;
+    }
+    this.options.onChange?.();
+  }
+
   private syncLid(): Promise<void> {
     this.lidChain = this.lidChain.then(() => this.reconcileLid());
     return this.lidChain;
   }
 
-  /** Brings sleep in line with what the session wants now. */
+  /** Brings sleep and Low Power Mode in line with what the session wants now. */
   private async reconcileLid(): Promise<void> {
+    await this.reconcileLowPower();
     const lid = this.options.lid;
     const want = Boolean(this.saved?.lid) && !this.stopping;
     if (!lid || want === this.lidActual) {
@@ -231,7 +306,7 @@ export class AwakeSession {
       this.lidProblem = undefined;
       this.options.onChange?.();
       try {
-        await lid.disableSleep();
+        await lid.disableSleep(this.saved?.until ?? null);
         this.lidActual = true;
         this.lidStatus = "on";
       } catch (error) {

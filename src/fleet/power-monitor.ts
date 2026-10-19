@@ -1,0 +1,95 @@
+import { execFile } from "node:child_process";
+
+/**
+ * Battery and heat, for an awake session's safety rules (todo.md, stay-awake
+ * plan item 3). Read without root:
+ *
+ * - `pmset -g batt`: the power source, and the internal battery's percent
+ *   and whether it charges. A desktop has no battery line: no battery rules.
+ * - `notifyutil -g com.apple.system.thermalpressurelevel`: the kernel's
+ *   thermal pressure, 0 nominal, 1 moderate, 2 heavy, 3 trapping, 4 sleeping
+ *   (OSThermalNotification.h). ProcessInfo calls 2 "serious" and 3+ "critical".
+ * - `notifyutil -g com.apple.system.lowpowermode`: Low Power Mode, 0 or 1.
+ */
+
+export interface PowerReading {
+  /** Running on battery; null when it could not be read. */
+  onBattery: boolean | null;
+  /** The internal battery's charge; null on a desktop or when unread. */
+  percent: number | null;
+  /** 0–4, see above; null when unread. */
+  thermal: number | null;
+  /** Whether Low Power Mode is on; null when unread. */
+  lowPower: boolean | null;
+}
+
+export const THERMAL_SERIOUS = 2;
+export const THERMAL_CRITICAL = 3;
+
+export function readBattery(output: string): { onBattery: boolean | null; percent: number | null } {
+  const source = /Now drawing from '([^']+)'/.exec(output)?.[1];
+  const onBattery = source === undefined ? null : source === "Battery Power";
+  const percent = /InternalBattery[^\n]*?\t(\d{1,3})%/.exec(output)?.[1];
+  return { onBattery, percent: percent === undefined ? null : Math.min(100, Number(percent)) };
+}
+
+/** The number after a `notifyutil -g <name>` line's name; null when absent. */
+export function readNotifyValue(output: string, name: string): number | null {
+  const match = new RegExp(`^${name.replace(/\./g, "\\.")}\\s+(-?\\d+)\\s*$`, "m").exec(output);
+  return match ? Number(match[1]) : null;
+}
+
+type Run = (command: string, args: string[]) => Promise<string | null>;
+
+const defaultRun: Run = (command, args) =>
+  new Promise((resolve) => {
+    execFile(command, args, { timeout: 10_000 }, (error, stdout) => resolve(error ? null : String(stdout)));
+  });
+
+export async function readPower(run: Run = defaultRun): Promise<PowerReading> {
+  const [batt, thermal, lowPower] = await Promise.all([
+    run("/usr/bin/pmset", ["-g", "batt"]),
+    run("/usr/bin/notifyutil", ["-g", "com.apple.system.thermalpressurelevel"]),
+    run("/usr/bin/notifyutil", ["-g", "com.apple.system.lowpowermode"]),
+  ]);
+  const battery = batt === null ? { onBattery: null, percent: null } : readBattery(batt);
+  const thermalLevel = thermal === null ? null : readNotifyValue(thermal, "com.apple.system.thermalpressurelevel");
+  const lowPowerLevel = lowPower === null ? null : readNotifyValue(lowPower, "com.apple.system.lowpowermode");
+  return {
+    ...battery,
+    thermal: thermalLevel,
+    lowPower: lowPowerLevel === null ? null : lowPowerLevel === 1,
+  };
+}
+
+export interface SafetyThresholds {
+  /** On battery at or below this percent: Low Power Mode. */
+  lowPowerPercent: number;
+  /** On battery at or below this percent: the session ends. */
+  endPercent: number;
+}
+
+export const DEFAULT_THRESHOLDS: SafetyThresholds = { lowPowerPercent: 40, endPercent: 10 };
+
+export type SafetyEnd = "battery" | "heat";
+
+/** What the rules want for a running awake session, given one reading. */
+export function decideSafety(
+  reading: PowerReading,
+  thresholds: SafetyThresholds = DEFAULT_THRESHOLDS,
+): { end: SafetyEnd | null; lowPower: boolean; why: string | null } {
+  const draining = reading.onBattery === true && reading.percent !== null;
+  if (draining && reading.percent! <= thresholds.endPercent) {
+    return { end: "battery", lowPower: false, why: `Battery at ${reading.percent}%` };
+  }
+  if (reading.thermal !== null && reading.thermal >= THERMAL_CRITICAL) {
+    return { end: "heat", lowPower: false, why: "Your Mac is critically hot" };
+  }
+  if (draining && reading.percent! <= thresholds.lowPowerPercent) {
+    return { end: null, lowPower: true, why: `Battery at ${reading.percent}%` };
+  }
+  if (reading.thermal !== null && reading.thermal >= THERMAL_SERIOUS) {
+    return { end: null, lowPower: true, why: "Your Mac is running hot" };
+  }
+  return { end: null, lowPower: false, why: null };
+}

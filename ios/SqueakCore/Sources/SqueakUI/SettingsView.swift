@@ -108,6 +108,10 @@ private struct AwakeSection: View {
                     }
                     .frame(minHeight: 44)
                 }
+                if let safety = awake.safety {
+                    LabeledContent("Safety") { Text(safety) }
+                        .frame(minHeight: 44)
+                }
                 if awake.until != nil {
                     Button("Add 1 hour") { change(.extend(minutes: 60)) }
                         .frame(minHeight: 44)

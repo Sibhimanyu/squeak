@@ -118,7 +118,8 @@ final class AppModel {
                         v: current.v, mac: current.mac, generatedAt: ISO8601DateFormatter().string(from: Date()), duck: current.duck,
                         sessions: current.sessions, usage: current.usage, workspaces: current.workspaces, recent: current.recent,
                         keepAwake: current.keepAwake, awakeUntil: current.awakeUntil,
-                        awakeLid: current.awakeLid, awakeLidProblem: current.awakeLidProblem, awakeLidReady: current.awakeLidReady)
+                        awakeLid: current.awakeLid, awakeLidProblem: current.awakeLidProblem, awakeLidReady: current.awakeLidReady,
+                        awakeSafety: current.awakeSafety)
                 }
                 n += 1
             }
@@ -421,7 +422,8 @@ final class AppModel {
                     v: current.v, mac: current.mac, generatedAt: current.generatedAt, duck: current.duck,
                     sessions: [session] + current.sessions, usage: current.usage, workspaces: current.workspaces,
                     recent: current.recent, keepAwake: current.keepAwake, awakeUntil: current.awakeUntil,
-                        awakeLid: current.awakeLid, awakeLidProblem: current.awakeLidProblem, awakeLidReady: current.awakeLidReady)
+                        awakeLid: current.awakeLid, awakeLidProblem: current.awakeLidProblem, awakeLidReady: current.awakeLidReady,
+                        awakeSafety: current.awakeSafety)
             }
             return .started
         }
@@ -518,6 +520,8 @@ final class AppModel {
         /// "on", "starting" or "failed" for a lid-closed session; nil without the lid.
         var lid: String? = nil
         var lidProblem: String? = nil
+        /// A safety rule acting now.
+        var safety: String? = nil
     }
 
     enum AwakeChange {
@@ -540,7 +544,8 @@ final class AppModel {
         if let tapped = awakeTapped, Date().timeIntervalSince(tapped.at) < 30 { return tapped.status }
         guard snapshot?.keepAwake == true else { return nil }
         return AwakeStatus(
-            until: snapshot?.awakeUntil.flatMap(Self.parseISO), lid: snapshot?.awakeLid, lidProblem: snapshot?.awakeLidProblem)
+            until: snapshot?.awakeUntil.flatMap(Self.parseISO), lid: snapshot?.awakeLid, lidProblem: snapshot?.awakeLidProblem,
+            safety: snapshot?.awakeSafety)
     }
 
     private static func parseISO(_ value: String) -> Date? {

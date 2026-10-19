@@ -551,6 +551,20 @@ async function changeLidRule(action) {
   renderAwake();
 }
 
+/** "Low Power Mode on · Battery at 38%", when a safety rule is acting. */
+function safetyLine(session) {
+  if (!session?.safety) return "";
+  return session.lowPower ? ` · Low Power Mode on (${session.safety})` : ` · ${session.safety}`;
+}
+
+/** Why the last session ended, when a safety rule ended it in the last hour. */
+function safetyEnd() {
+  const end = state?.awakeLastEnd;
+  if (!end || (end.reason !== "battery" && end.reason !== "heat")) return null;
+  if (Date.now() - Date.parse(end.at) > 60 * 60_000) return null;
+  return `Your last session ended at ${clockTime(end.at)}: ${end.why ?? (end.reason === "heat" ? "your Mac was too hot" : "the battery was low")}.`;
+}
+
 function lidLine(session) {
   if (!session?.lid) return "";
   if (session.lidStatus === "on") return " · lid closed too";
@@ -621,6 +635,7 @@ function renderAwake() {
     awakeWithLid,
     lidRuleBusy,
     state?.awakeLidReady,
+    state?.awakeLastEnd,
     Math.floor(Date.now() / 60000),
   ]);
   if (signature === lastDetailSignature) return;
@@ -636,9 +651,9 @@ function renderAwake() {
       "state-line",
       session
         ? session.until
-          ? `Awake until ${clockTime(session.until)} · ${awakeLeft(session.until)} left${lidLine(session)}`
-          : "Awake until you end it"
-        : "Your Mac sleeps as usual: awake while agents work, and while plugged in.",
+          ? `Awake until ${clockTime(session.until)} · ${awakeLeft(session.until)} left${lidLine(session)}${safetyLine(session)}`
+          : `Awake until you end it${safetyLine(session)}`
+        : (safetyEnd() ?? "Your Mac sleeps as usual: awake while agents work, and while plugged in."),
     ),
   );
   head.append(titles);
@@ -699,7 +714,13 @@ function renderAwake() {
   if (awakeProblem) card.append(el("p", "muted-note", awakeProblem));
   nodes.push(card);
   nodes.push(lidCard());
-  nodes.push(el("p", "muted-note", "Your iPhone can start, extend or end this too."));
+  nodes.push(
+    el(
+      "p",
+      "muted-note",
+      "Your iPhone can start, extend or end this too. A session ends by itself at 10% battery or if your Mac gets critically hot, and turns on Low Power Mode at 40% or when it runs hot (once lid-closed is set up).",
+    ),
+  );
   els.detail.replaceChildren(wrapScroll(nodes));
 }
 

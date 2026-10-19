@@ -1194,6 +1194,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeUntil) +
       JSON.stringify(view.awakeLid) +
       JSON.stringify(view.awakeLidReady) +
+      JSON.stringify(view.awakeSafety) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     if (serialized === this.lastPublished) {
       return;
@@ -1244,6 +1245,7 @@ export class RemoteBridge {
     awakeLid?: string;
     awakeLidProblem?: string;
     awakeLidReady?: boolean;
+    awakeSafety?: string;
   } {
     const awake = this.deps.awake;
     if (!awake) {
@@ -1257,6 +1259,8 @@ export class RemoteBridge {
       ...(state?.lid ? { awakeLid: state.lidStatus } : {}),
       ...(state?.lidProblem ? { awakeLidProblem: state.lidProblem } : {}),
       ...(awake.lidReady?.() ? { awakeLidReady: true } : {}),
+      // A safety rule acting now: "Low Power Mode on · Battery at 38%".
+      ...(state?.safety ? { awakeSafety: state.lowPower ? `Low Power Mode on · ${state.safety}` : state.safety } : {}),
     };
   }
 

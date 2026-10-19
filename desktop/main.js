@@ -622,7 +622,7 @@ function awakeMenuItems(state) {
     {
       label: `${until ? `Awake · ${awakeLeft(until)} left` : "Awake until you end it"}${
         session?.lid ? (session.lidStatus === "failed" ? " · lid-closed failed" : " · lid closed too") : ""
-      }`,
+      }${session?.lowPower ? " · Low Power Mode" : ""}`,
       enabled: false,
     },
     ...(until ? [{ label: "Add 1 hour", click: () => void changeAwake({ action: "extend", minutes: 60 }) }] : []),

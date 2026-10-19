@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { PowerReading } from "./power-monitor.js";
 import { applyAwakeAction, AwakeSession, MAX_AWAKE_MINUTES, readAwakeAction, validMinutes } from "./awake-session.js";
 
 const dirs: string[] = [];
@@ -142,7 +143,7 @@ describe("readAwakeAction", () => {
 });
 
 describe("AwakeSession with the lid closed", () => {
-  function lidSetup(options: { failDisable?: string; rule?: boolean } = {}) {
+  function lidSetup(options: { failDisable?: string; rule?: boolean; userLowPower?: boolean } = {}) {
     const t = setup();
     const calls: string[] = [];
     const lid = {
@@ -157,6 +158,16 @@ describe("AwakeSession with the lid closed", () => {
       }),
       recover: vi.fn(async (owns: boolean) => {
         calls.push(`recover:${owns}`);
+      }),
+      lowPowerOn: vi.fn(async () => {
+        calls.push("lowPowerOn");
+        return !options.userLowPower;
+      }),
+      lowPowerOff: vi.fn(async () => {
+        calls.push("lowPowerOff");
+      }),
+      updateUntil: vi.fn((until: number | null) => {
+        calls.push(`until:${until}`);
       }),
     };
     const make = () => new AwakeSession({ path: t.sessionPath, hold: () => undefined, lid, onChange: t.changes });
@@ -230,7 +241,7 @@ describe("AwakeSession with the lid closed", () => {
     t.session.extend(30);
     await t.session.lidSettled();
     expect(t.session.state?.lid).toBe(true);
-    expect(t.calls).toEqual(["disable"]);
+    expect(t.calls).toEqual([`until:${Date.now() + 90 * 60_000}`, "disable"]);
   });
 
   it("stopping Squeak restores sleep but keeps the session, and the next start disables it again", async () => {
@@ -269,5 +280,106 @@ describe("AwakeSession with the lid closed", () => {
     });
     expect(readAwakeAction({ on: true, minutes: 60, lid: true })).toEqual({ kind: "start", minutes: 60, lid: true });
     expect(readAwakeAction({ action: "start", minutes: 60, lid: "yes" })).toBeNull();
+  });
+});
+
+describe("AwakeSession safety rules", () => {
+  const reading = (fields: Partial<PowerReading>): PowerReading => ({
+    onBattery: true,
+    percent: 80,
+    thermal: 0,
+    lowPower: false,
+    ...fields,
+  });
+
+  function safetySetup(options: { userLowPower?: boolean; rule?: boolean } = {}) {
+    const t = setup();
+    const calls: string[] = [];
+    const lid = {
+      ruleInstalled: vi.fn(async () => options.rule ?? true),
+      disableSleep: vi.fn(async () => undefined),
+      restoreSleep: vi.fn(async () => true),
+      recover: vi.fn(async () => undefined),
+      lowPowerOn: vi.fn(async () => {
+        calls.push("lowPowerOn");
+        return !options.userLowPower;
+      }),
+      lowPowerOff: vi.fn(async () => {
+        calls.push("lowPowerOff");
+      }),
+      updateUntil: vi.fn(),
+    };
+    const session = new AwakeSession({ path: t.sessionPath, hold: () => undefined, lid, onChange: t.changes });
+    return { session, calls };
+  }
+
+  it("a low battery turns Low Power Mode on, and it goes off again when the session ends", async () => {
+    const t = safetySetup();
+    await t.session.refreshLidRule();
+    t.session.start(120);
+    await t.session.checkSafety(reading({ percent: 38 }));
+    expect(t.session.state).toMatchObject({ lowPower: true, safety: "Battery at 38%" });
+    t.session.end();
+    await t.session.lidSettled();
+    expect(t.calls).toEqual(["lowPowerOn", "lowPowerOff"]);
+  });
+
+  it("a flat battery ends the session and says why", async () => {
+    const t = safetySetup();
+    await t.session.refreshLidRule();
+    t.session.start(120, { lid: true });
+    await t.session.checkSafety(reading({ percent: 9 }));
+    expect(t.session.active).toBe(false);
+    expect(t.session.lastEnd).toMatchObject({ reason: "battery", why: "Battery at 9%" });
+  });
+
+  it("a critically hot Mac ends it; a hot one gets Low Power Mode", async () => {
+    const t = safetySetup();
+    await t.session.refreshLidRule();
+    t.session.start(120);
+    await t.session.checkSafety(reading({ onBattery: false, percent: 100, thermal: 2 }));
+    expect(t.session.state).toMatchObject({ lowPower: true, safety: "Your Mac is running hot" });
+    await t.session.checkSafety(reading({ onBattery: false, percent: 100, thermal: 3 }));
+    expect(t.session.lastEnd).toMatchObject({ reason: "heat" });
+  });
+
+  it("cooling down turns Low Power Mode off again mid-session", async () => {
+    const t = safetySetup();
+    await t.session.refreshLidRule();
+    t.session.start(120);
+    await t.session.checkSafety(reading({ onBattery: false, thermal: 2 }));
+    await t.session.checkSafety(reading({ onBattery: false, thermal: 0 }));
+    expect(t.session.state).toMatchObject({ lowPower: false });
+    expect(t.session.state).not.toHaveProperty("safety");
+    expect(t.calls).toEqual(["lowPowerOn", "lowPowerOff"]);
+  });
+
+  it("never turns off Low Power Mode the user had on", async () => {
+    const t = safetySetup({ userLowPower: true });
+    await t.session.refreshLidRule();
+    t.session.start(120);
+    await t.session.checkSafety(reading({ percent: 30 }));
+    t.session.end();
+    await t.session.lidSettled();
+    expect(t.calls).toEqual(["lowPowerOn"]);
+  });
+
+  it("without the sudoers rule, still ends on a flat battery but leaves Low Power Mode alone", async () => {
+    const t = safetySetup({ rule: false });
+    await t.session.refreshLidRule();
+    t.session.start(120);
+    await t.session.checkSafety(reading({ percent: 30 }));
+    expect(t.calls).toEqual([]);
+    await t.session.checkSafety(reading({ percent: 5 }));
+    expect(t.session.lastEnd?.reason).toBe("battery");
+  });
+
+  it("plugged in, a low battery is not a reason", async () => {
+    const t = safetySetup();
+    await t.session.refreshLidRule();
+    t.session.start(120);
+    await t.session.checkSafety(reading({ onBattery: false, percent: 5 }));
+    expect(t.session.active).toBe(true);
+    expect(t.calls).toEqual([]);
   });
 });

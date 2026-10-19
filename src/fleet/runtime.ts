@@ -1,4 +1,4 @@
-import type { AwakeState } from "./awake-session.js";
+import type { AwakeEnd, AwakeState } from "./awake-session.js";
 import os from "node:os";
 import path from "node:path";
 import { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
@@ -54,7 +54,7 @@ export interface FleetRuntime {
   /** Where /state reads Claude's last plan-limit reading from. */
   setClaudeLimits(read: (() => ClaudeLimits | null) | null): void;
   /** Where /state reads the awake session from (fleet/awake-session.ts). */
-  setAwake(read: (() => { state: AwakeState | null; lidReady: boolean }) | null): void;
+  setAwake(read: (() => { state: AwakeState | null; lidReady: boolean; lastEnd: AwakeEnd | null }) | null): void;
 }
 
 /**
@@ -103,7 +103,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
 
   let canReply: ((session: FleetSession) => boolean) | null = null;
   let claudeLimits: (() => ClaudeLimits | null) | null = null;
-  let awake: (() => { state: AwakeState | null; lidReady: boolean }) | null = null;
+  let awake: (() => { state: AwakeState | null; lidReady: boolean; lastEnd: AwakeEnd | null }) | null = null;
   return {
     registry,
     store,
@@ -184,7 +184,7 @@ export function serializeState(
   monitor: FleetMonitor,
   canReply: ((session: FleetSession) => boolean) | null = null,
   claudeLimits: ClaudeLimits | null = null,
-  awake: { state: AwakeState | null; lidReady: boolean } | null = null,
+  awake: { state: AwakeState | null; lidReady: boolean; lastEnd: AwakeEnd | null } | null = null,
 ): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
@@ -206,7 +206,15 @@ export function serializeState(
     claudeLimits,
     // The awake session (start, end time), for the menu bar; keepAwake is its on/off.
     // Present only when the daemon runs awake sessions; older surfaces read keepAwake.
-    ...(awake ? { keepAwake: awake.state !== null, awake: awake.state, awakeLidReady: awake.lidReady } : {}),
+    ...(awake
+      ? {
+          keepAwake: awake.state !== null,
+          awake: awake.state,
+          awakeLidReady: awake.lidReady,
+          // How the last session ended, so a surface can say "ended: battery at 9%".
+          awakeLastEnd: awake.lastEnd,
+        }
+      : {}),
     active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),
     others: others.map((session) => serializeSession(session, canReply, null)),
     attention: snapshot.attention.map((item) => ({

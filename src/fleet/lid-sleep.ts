@@ -113,12 +113,13 @@ export class LidSleepGuard {
    * Disables sleep, journalled first, and reads it back after SETTLE_MS: a
    * bit that another process put back would let a closed lid sleep the Mac
    * mid-session, which is worse than saying so. Throws with a reason.
+   * `until` (epoch ms) goes in the journal for the backstop.
    */
-  async disableSleep(): Promise<void> {
-    this.writeJournal();
+  async disableSleep(until: number | null = null): Promise<void> {
+    this.updateJournal({ sleepDisabled: true, until });
     const result = await this.run(SUDO, ["-n", PMSET, "-a", "disablesleep", "1"]);
     if (!result.ok) {
-      this.clearJournal();
+      this.updateJournal({ sleepDisabled: false });
       throw new Error(
         /password/i.test(result.stderr)
           ? "Lid-closed needs setting up on the Mac first (one admin password)."
@@ -127,47 +128,121 @@ export class LidSleepGuard {
     }
     await this.wait(SETTLE_MS);
     if ((await this.sleepDisabled()) !== true) {
-      // Leave the journal: recover() will make sure it ends at 0.
+      // Leave the journal: restoring makes sure it ends at 0.
       throw new Error("Something on this Mac turned sleep back on, so a closed lid would still sleep it.");
     }
     logger.info("sleep disabled for a lid-closed awake session");
   }
 
-  /** Restores sleep. The journal is cleared only once pmset says it worked, so a failure is retried at start. */
+  /** Restores sleep. The journal entry is cleared only once pmset says it worked, so a failure is retried. */
   async restoreSleep(): Promise<boolean> {
     const result = await this.run(SUDO, ["-n", PMSET, "-a", "disablesleep", "0"]);
     if (!result.ok) {
       logger.warn("could not restore sleep; will retry when Squeak starts", { stderr: result.stderr.trim() });
       return false;
     }
-    this.clearJournal();
+    this.updateJournal({ sleepDisabled: false });
     logger.info("sleep restored");
     return true;
   }
 
-  /** Squeak disabled sleep and has not restored it yet. */
+  /**
+   * Turns battery Low Power Mode on for a safety rule, journalled first.
+   * Answers false without touching it when it is already on: that is the
+   * user's own setting, and Squeak must not turn it off later.
+   */
+  async lowPowerOn(until: number | null = null): Promise<boolean> {
+    const current = await this.lowPowerMode();
+    if (current !== false) {
+      return false;
+    }
+    this.updateJournal({ lowPower: true, until });
+    const result = await this.run(SUDO, ["-n", PMSET, "-b", "lowpowermode", "1"]);
+    if (!result.ok) {
+      this.updateJournal({ lowPower: false });
+      logger.warn("could not turn on Low Power Mode", { stderr: result.stderr.trim() });
+      return false;
+    }
+    logger.info("Low Power Mode on for an awake session");
+    return true;
+  }
+
+  /** Turns Low Power Mode back off, only if Squeak turned it on. */
+  async lowPowerOff(): Promise<void> {
+    if (!this.readJournal().lowPower) {
+      return;
+    }
+    const result = await this.run(SUDO, ["-n", PMSET, "-b", "lowpowermode", "0"]);
+    if (!result.ok) {
+      logger.warn("could not turn Low Power Mode off; will retry when Squeak starts", { stderr: result.stderr.trim() });
+      return;
+    }
+    this.updateJournal({ lowPower: false });
+    logger.info("Low Power Mode off again");
+  }
+
+  /** Low Power Mode as the system reports it; null when unread. */
+  async lowPowerMode(): Promise<boolean | null> {
+    const result = await this.run("/usr/bin/notifyutil", ["-g", "com.apple.system.lowpowermode"]);
+    const value = result.ok ? /lowpowermode\s+(\d)/.exec(result.stdout)?.[1] : undefined;
+    return value === undefined ? null : value === "1";
+  }
+
+  /** A session's new end, so the backstop does not undo an extended session. */
+  updateUntil(until: number | null): void {
+    if (this.journalled) {
+      this.updateJournal({ until });
+    }
+  }
+
+  /** Squeak changed something (sleep, Low Power Mode) and has not undone it yet. */
   get journalled(): boolean {
     return fs.existsSync(this.options.journalPath);
   }
 
-  /** At start: undo a disable no running session owns. */
+  /** At start: undo whatever a previous run left that no running session owns. */
   async recover(sessionOwnsIt: boolean): Promise<void> {
     if (!this.journalled || sessionOwnsIt) {
       return;
     }
-    logger.warn("restoring sleep that a previous run left disabled");
-    await this.restoreSleep();
+    const journal = this.readJournal();
+    logger.warn("undoing what a previous run left", { ...journal });
+    if (journal.lowPower) await this.lowPowerOff();
+    if (journal.sleepDisabled) await this.restoreSleep();
   }
 
-  private writeJournal(): void {
-    fs.writeFileSync(this.options.journalPath, JSON.stringify({ disabledSleepAt: this.now() }) + "\n");
-  }
-
-  private clearJournal(): void {
+  private readJournal(): Journal {
     try {
-      fs.unlinkSync(this.options.journalPath);
+      const raw = JSON.parse(fs.readFileSync(this.options.journalPath, "utf8")) as Record<string, unknown>;
+      return {
+        // The first journal held only { disabledSleepAt }.
+        sleepDisabled: raw.sleepDisabled === true || typeof raw.disabledSleepAt === "number",
+        lowPower: raw.lowPower === true,
+        until: typeof raw.until === "number" ? raw.until : null,
+      };
     } catch {
-      // Already gone.
+      return { sleepDisabled: false, lowPower: false, until: null };
     }
   }
+
+  /** Merges `change` in; removes the file once nothing is left to undo. */
+  private updateJournal(change: Partial<Journal>): void {
+    const next = { ...this.readJournal(), ...change };
+    if (!next.sleepDisabled && !next.lowPower) {
+      try {
+        fs.unlinkSync(this.options.journalPath);
+      } catch {
+        // Already gone.
+      }
+      return;
+    }
+    fs.writeFileSync(this.options.journalPath, JSON.stringify({ ...next, at: this.now() }) + "\n");
+  }
+}
+
+interface Journal {
+  sleepDisabled: boolean;
+  lowPower: boolean;
+  /** When the owning session ends (epoch ms); null: until it is ended. */
+  until: number | null;
 }

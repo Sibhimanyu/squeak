@@ -80,7 +80,7 @@ switch in the menu bar and iPhone Settings (`keep-awake.json`, command `awake`).
       `pmset -a disablesleep 0|1` and `pmset -b lowpowermode 0|1`, explained in plain
       words first (any process running as you can then use those four commands). A
       lid-closed session needs an end time. Uninstall removes the rule.
-- [ ] **3. Safety rules.** Battery ≤40% → Low Power Mode; ≤10% → end the session;
+- [x] **3. Safety rules.** Battery ≤40% → Low Power Mode; ≤10% → end the session;
       thermal "serious" → Low Power Mode; "critical" → end. Thresholds in settings.
       Every system change is journalled before it is made and undone at session end,
       at daemon start (launchd restarts it), and by a small launchd backstop if Squeak
