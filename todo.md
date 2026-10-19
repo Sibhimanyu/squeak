@@ -65,6 +65,34 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
 - [ ] **12. Haptics and motion pass**: a light tap when an open chat's agent
       finishes; every animation checked under Reduce Motion.
 
+## Stay awake plan (Insomnia-style, chat ushuaia keep-awake, 2026-10-19), worked top to bottom
+
+Modelled on Insomnia (github.com/krishhgg/Insomnia, MIT). Done already: the Mac
+stays awake while agents work and always while plugged in; a "Keep Mac awake"
+switch in the menu bar and iPhone Settings (`keep-awake.json`, command `awake`).
+
+- [ ] **1. Timed sessions.** "Stay awake for 1h / 2h / 4h / until a time / until I
+      turn it off", started from the menu bar, the Squeak window or the iPhone; a
+      countdown on every surface; add time to a running session; ending it takes a
+      deliberate gesture. Replaces the on/off switch (an old phone's `awake` on/off
+      still works).
+- [ ] **2. Lid closed.** One admin prompt installs `/etc/sudoers.d/squeak` for exactly
+      `pmset -a disablesleep 0|1` and `pmset -b lowpowermode 0|1`, explained in plain
+      words first (any process running as you can then use those four commands). A
+      lid-closed session needs an end time. Uninstall removes the rule.
+- [ ] **3. Safety rules.** Battery ≤40% → Low Power Mode; ≤10% → end the session;
+      thermal "serious" → Low Power Mode; "critical" → end. Thresholds in settings.
+      Every system change is journalled before it is made and undone at session end,
+      at daemon start (launchd restarts it), and by a small launchd backstop if Squeak
+      is gone for good — a Mac left with `disablesleep 1` never sleeps, even in a bag.
+- [ ] **4. Lid-closed actions.** When the lid shuts during a session: display off,
+      mute, Low Power Mode, optionally SIGSTOP chat apps (Slack, WhatsApp, Discord);
+      all reversed when it opens. Each one a setting.
+- [ ] **5. Status on the phone.** Lid state, battery %, power draw and the countdown on
+      the iPhone; a push when a safety rule ends a session.
+- [ ] Not planned unless asked: hotspot failover (stores Wi-Fi passwords), tmux
+      "continue" nudge (overlaps terminal replies), browser relaunch.
+
 ## From chat ushuaia-f7 (Mac app, service, releases)
 
 Not built yet:
