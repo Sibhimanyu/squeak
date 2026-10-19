@@ -42,6 +42,29 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
       "Show more": check why the other few are left out (retired flag, transcript
       time vs Conductor time) rather than assume they don't qualify.
 
+## iPhone UX plan (chat ushuaia-c6, 2026-10-19), worked top to bottom
+
+- [ ] **1. "Read by Claude" receipts.** A bubble's line moves from Sent to "Read by
+      Claude" when the agent actually picks the message up (the transcript's user
+      entry, or it leaving Conductor's queue), not when the Mac received it.
+- [ ] **2. Stop while working.** A Stop control beside Send on a working chat,
+      through the relay's `…/sessions/:sid/stop`, signed like every command.
+- [ ] **3. Keep my place.** Drafts survive leaving a chat; reopening returns to
+      where you were reading; a "↓ New" pill when something arrives above the fold.
+- [ ] **4. The last 3–4 exchanges in a chat** (also under "iPhone UI ideas" above).
+- [ ] **5. What changed on a finished turn.** "3 files · +84/−12" under the reply,
+      tapping through to the diff (the Mac's diff-view already pages it).
+- [ ] **6. Copy / share** any message or step on a long press.
+- [ ] **7. Swipe actions on Home rows**: A/B/C or Reply without opening the chat.
+- [ ] **8. Answer from the notification**: actionable push with A/B/C and reply
+      (needs APNs from the Mac — its own project).
+- [ ] **9. Live Activity / Dynamic Island** while an agent works (needs push too).
+- [ ] **10. Plan approvals on the phone** (also under "Not built yet").
+- [ ] **11. Say why a control is missing**: a queue card without actions, a
+      blocked composer — one line of reason where the tap would be.
+- [ ] **12. Haptics and motion pass**: a light tap when an open chat's agent
+      finishes; every animation checked under Reduce Motion.
+
 ## From chat ushuaia-f7 (Mac app, service, releases)
 
 Not built yet:
