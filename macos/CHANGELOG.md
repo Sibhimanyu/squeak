@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.7
+
+- Messages read like documents: headings, lists, tables, code with Copy,
+  quotes, and links you can copy but never open by accident.
+- Sending shows your message at once with one status line, then what the
+  agent is doing ("Running tests…") until its reply arrives. The reply box
+  stays put.
+- While an agent works, Send becomes Queue (it reads your message after this
+  turn), with Steer now to send it into the turn in progress. Each message
+  says whether it was sent, queued or steered.
+- A chat waiting on a question or a plan now shows as needs you, with the
+  question.
+- Usage: Claude and Codex limits in the menu-bar panel and the window, with
+  Refresh for Claude.
+- The menu-bar panel is glass, like the rest of macOS.
+
 ## 2.0.6
 
 - Settings › Channels: set up Telegram (paste a bot token, link your chat by
