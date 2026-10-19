@@ -63,7 +63,8 @@ public struct ConductorDaemonAdapter: HostAdapter {
             conductorWorkspaceId: workspace,
             conductorSessionId: conductorSession,
             capabilities: caps,
-            origin: .hostOwned
+            origin: .hostOwned,
+            awaitingApproval: d.state == "awaiting_approval" ? true : nil
         )
     }
 

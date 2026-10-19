@@ -23,6 +23,9 @@ enum Theme {
     static let muted = adaptive(0xA1A1AA, 0x52525B)
     static let subtle = adaptive(0x71717A, 0x71717A)
     static let needsYou = adaptive(0xF87171, 0xDC2626)
+    /// Amber for "needs you" in the Squeak window: the one thing asking for attention.
+    static let attention = adaptive(0xFBBF24, 0xB45309)
+    static let attentionDot = adaptive(0xFBBF24, 0xE8A400)
     static let working = adaptive(0x22C55E, 0x15803D)
     static let done = adaptive(0x38BDF8, 0x0369A1)
     static let error = adaptive(0xA78BFA, 0x7C3AED)

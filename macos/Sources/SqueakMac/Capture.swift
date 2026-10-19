@@ -21,13 +21,15 @@ enum CaptureRunner {
         try? await Task.sleep(for: .milliseconds(800))
 
         let win = NSWindow(
-            contentRect: NSRect(x: 80, y: 80, width: 1040, height: 700),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false
+            contentRect: NSRect(x: 60, y: 60, width: 1200, height: 800),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false
         )
+        win.titlebarAppearsTransparent = true
+        win.titleVisibility = .hidden
         win.contentView = NSHostingView(rootView: ConversationView().environment(model))
         win.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .seconds(1))
-        write(win.contentView, to: "\(prefix)-window.png")
+        write(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window.png")
 
         let pop = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 360, height: 520), styleMask: [.borderless], backing: .buffered, defer: false)
         pop.contentView = NSHostingView(rootView: PopoverView().environment(model))

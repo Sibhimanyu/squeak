@@ -9,6 +9,12 @@ enum SessionFilter: Hashable {
     case repo(String)
 }
 
+/// The sidebar's filters: sections of the list, or where a session runs.
+enum NavFilter: Hashable {
+    case all, needsYou, working, recent
+    case source(SessionSource)
+}
+
 /// The UI's single source of truth. The Broker (an actor) owns the data; this
 /// mirrors what the screens draw and forwards what the user does.
 @MainActor @Observable
@@ -55,6 +61,9 @@ final class AppModel {
     // MARK: Browsing
     var query = ""
     var filter: SessionFilter = .all
+    var navFilter: NavFilter? = .all
+    /// A short live phrase per working session ("Running tests"), for the list rows.
+    private(set) var liveSteps: [SessionKey: String] = [:]
     private(set) var pinned: Set<SessionKey>
 
     // MARK: Settings (persisted in UserDefaults; nothing sensitive)
@@ -173,6 +182,7 @@ final class AppModel {
         tokenPresent = true
         hasLoaded = true
         firstConnectionSeen = true
+        Task { await refreshLiveSteps() }
     }
 
     // MARK: Window visibility drives the poll mode
@@ -210,14 +220,56 @@ final class AppModel {
     var isConnected: Bool { effectiveStatus == .connected }
 
     var visibleSessions: [HostSession] {
-        sessions.filter { s in
+        let now = Date()
+        return sessions.filter { s in
             switch filter {
-            case .all: true
-            case .provider(let p): s.key.provider == p
-            case .repo(let r): s.repoName == r
+            case .all: break
+            case .provider(let p): if s.key.provider != p { return false }
+            case .repo(let r): if s.repoName != r { return false }
+            }
+            switch navFilter ?? .all {
+            case .all: return true
+            case .needsYou: return SessionGrouping.kind(of: s, now: now) == .needsYou
+            case .working: return SessionGrouping.kind(of: s, now: now) == .working
+            case .recent: return SessionGrouping.kind(of: s, now: now) == .recent
+            case .source(let src): return s.source == src
             }
         }
     }
+
+    /// Sessions in a sidebar filter, whatever filter is selected now (for the counts).
+    func count(_ f: NavFilter) -> Int {
+        let now = Date()
+        switch f {
+        case .all: return sessions.filter { SessionGrouping.kind(of: $0, now: now) != .earlier }.count
+        case .needsYou: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .needsYou }.count
+        case .working: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .working }.count
+        case .recent: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .recent }.count
+        case .source(let src): return sessions.filter { $0.source == src }.count
+        }
+    }
+
+    /// "8 active across your Mac": everything that is not Earlier.
+    var activeCount: Int { count(.all) }
+    var hasCodexApp: Bool { sessions.contains { $0.source == .codexApp } }
+
+    func liveStep(_ key: SessionKey) -> String? { liveSteps[key] }
+
+    /// Reads the newest step of each working session (at most 8) into one short phrase each.
+    func refreshLiveSteps() async {
+        let working = sessions.filter { SessionGrouping.kind(of: $0, now: Date()) == .working }.prefix(8)
+        var out: [SessionKey: String] = [:]
+        for s in working {
+            if demoMode { out[s.key] = ActivityPhrase.short(DemoData.activity(for: s.key)) } else {
+                let steps = (try? await broker.activity(for: s.key)) ?? []
+                out[s.key] = ActivityPhrase.short(steps)
+            }
+        }
+        if out != liveSteps { liveSteps = out }
+    }
+
+    /// Real data only. Squeak's adapters expose no diff or test results, so live sessions have none.
+    func summaryLine(for s: HostSession) -> String? { demoMode ? DemoData.summary(for: s.key) : nil }
 
     /// The brief's sections (Needs you / Working / Recent / Earlier), pinned first inside each.
     var grouped: [SessionSection] { SessionGrouping.group(visibleSessions, pinned: pinned) }
@@ -251,7 +303,7 @@ final class AppModel {
     var repos: [String] { Array(Set(sessions.compactMap(\.repoName))).sorted() }
 
     var searchHits: [SearchHit] {
-        SearchIndex(sessions: visibleSessions, messages: knownMessages).search(query)
+        SearchIndex(sessions: sessions, messages: knownMessages).search(query)
     }
 
     var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }

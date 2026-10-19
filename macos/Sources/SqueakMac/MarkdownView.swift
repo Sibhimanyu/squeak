@@ -5,7 +5,7 @@ import SwiftUI
 /// links are shown as text plus their address in a muted style and are never clickable.
 struct MarkdownView: View {
     let text: String
-    var size: CGFloat = 14
+    var size: CGFloat = 13
     /// Extra leading: 14pt text at 1.45 line height.
     var lineSpacing: CGFloat { size * 0.26 }
 

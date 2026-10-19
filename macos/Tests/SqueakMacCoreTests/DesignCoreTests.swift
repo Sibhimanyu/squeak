@@ -109,3 +109,36 @@ struct SessionGroupingTests {
         #expect(g.map(\.kind) == [.working])
     }
 }
+
+@Suite("Answer cards and live phrases")
+struct AnswerCardTests {
+    @Test func splitsTitleDescriptionAndRecommendation() {
+        let text = "Found it.\n\nHow should failures be retried?\n\nA. Retry automatically — Up to 3 attempts. (Recommended)\nB. **Let the customer retry** — Show an error.\n\nBoth are safe."
+        let l = ChoiceLayout.make(text)
+        #expect(l?.question == "How should failures be retried?")
+        #expect(l?.before == "Found it.")
+        #expect(l?.after == "Both are safe.")
+        #expect(l?.cards.map(\.title) == ["Retry automatically", "Let the customer retry"])
+        #expect(l?.cards.map(\.detail) == ["Up to 3 attempts.", "Show an error."])
+        #expect(l?.cards.map(\.isRecommended) == [true, false])
+    }
+
+    @Test func noOptionsNoLayout() {
+        #expect(ChoiceLayout.make("Just prose, no options.") == nil)
+    }
+
+    @Test func phrasesFromSteps() {
+        #expect(ActivityPhrase.short([]) == "Working")
+        #expect(ActivityPhrase.short([ActivityStep(kind: "tool", text: "Run npm test -- x")]) == "Running tests")
+        #expect(ActivityPhrase.short([ActivityStep(kind: "tool", text: "Read a.ts")]) == "Reading code")
+        let edits = [ActivityStep(kind: "tool", text: "Edit a.ts"), ActivityStep(kind: "tool", text: "Edit b.ts")]
+        #expect(ActivityPhrase.short(edits) == "Editing 2 files")
+    }
+
+    @Test func sources() {
+        #expect(SessionSource(provider: "conductor") == .conductor)
+        #expect(SessionSource(provider: "codex-terminal") == .terminal)
+        #expect(SessionSource(provider: "claude-desktop") == .claudeDesktop)
+        #expect(SessionSource(provider: "codex-desktop") == .codexApp)
+    }
+}
