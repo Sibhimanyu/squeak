@@ -130,6 +130,8 @@ export interface ConductorRelaySender {
     sessionId: string,
     messageId: string,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** Conductor's Stop for the chat's running turn. */
+  stopTurn?(workspaceId: string, sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 export interface ConductorReplierDependencies {
@@ -411,6 +413,32 @@ export class ConductorReplier {
     }
     logger.info("conductor relay queue change failed", { sessionId, action, reason: result.reason });
     return { ok: false, reason: `Conductor didn't take that change (${result.reason}).` };
+  }
+
+  /**
+   * Stop the agent mid-turn, through Conductor's own Stop so its window and
+   * queue agree (it pauses the queue, as its button does). Only a chat
+   * Conductor says is working can be stopped; anything else is refused, so a
+   * stale phone cannot stop the turn after the one it was looking at.
+   */
+  async stopTurn(sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const relay = this.deps.relay;
+    if (!relay?.isReady() || !relay.stopTurn) {
+      return { ok: false, reason: "Conductor's relay isn't connected, so this Mac can't stop the agent from here." };
+    }
+    const session = this.deps.registry.getSessionById(sessionId);
+    if (!session) {
+      return { ok: false, reason: "That chat no longer exists in Conductor." };
+    }
+    if (!isInFlight(session.status)) {
+      return { ok: false, reason: "The agent isn't working any more." };
+    }
+    const result = await relay.stopTurn(session.workspaceId, sessionId);
+    if (result.ok) {
+      return result;
+    }
+    logger.info("conductor relay stop failed", { sessionId, reason: result.reason });
+    return { ok: false, reason: `Conductor didn't stop it (${result.reason}).` };
   }
 
   /** Whether Conductor recorded `text` as a user message in this chat since `sinceIso`. */

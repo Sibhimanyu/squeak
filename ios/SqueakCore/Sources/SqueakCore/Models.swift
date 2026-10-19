@@ -236,6 +236,18 @@ public struct ReplyCommand: Codable, Equatable, Sendable {
     public var messageId: String? = nil
 }
 
+/// Stop a working chat, as Conductor's own Stop button does. It names the turn the phone saw,
+/// so a Stop sent while one turn ran cannot stop the next.
+public struct StopCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let sessionId: String
+    public let answersTurn: String?
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
 /// Steer a queued message into the turn now, or take it out of the queue. The
 /// queued message's id is the anchor, so there is no turn to match.
 public struct QueueCommand: Codable, Equatable, Sendable {

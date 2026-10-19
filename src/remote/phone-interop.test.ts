@@ -32,6 +32,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   queuedCommand: { box: string; sig: string; device: string };
   promoteCommandId: string;
   promoteCommand: { box: string; sig: string; device: string };
+  stopCommandId: string;
+  stopCommand: { box: string; sig: string; device: string };
 };
 
 const QUEUED_ID = "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31";
@@ -49,6 +51,7 @@ function bridge(turn: string) {
   const sends: Array<[string, string, string | undefined]> = [];
   const sent: Array<ReplyOptions | undefined> = [];
   const queueActions: Array<[string, string, QueueAction]> = [];
+  const stops: string[] = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
   const answers: Array<[string, unknown]> = [];
   const remote = new RemoteBridge({
@@ -66,6 +69,10 @@ function bridge(turn: string) {
       queue: async () => [{ id: QUEUED_ID, text: "Then add tests", mode: "queue", position: 0 }],
       queueAction: async (sessionId, messageId, action) => {
         queueActions.push([sessionId, messageId, action]);
+        return { ok: true };
+      },
+      stopTurn: async (sessionId) => {
+        stops.push(sessionId);
         return { ok: true };
       },
     },
@@ -94,7 +101,7 @@ function bridge(turn: string) {
     // As of when the phone made it, so the fixture never expires.
     now: () => fixture.madeAt + 1_000,
   });
-  return { remote, config, sends, sent, starts, queueActions, answers };
+  return { remote, config, sends, sent, starts, queueActions, answers, stops };
 }
 
 describe("a reply made on the iPhone", () => {
@@ -144,6 +151,14 @@ describe("a reply made on the iPhone", () => {
     const verdict = await remote.handleCommand(config, fixture.promoteCommandId, fixture.promoteCommand);
     expect(verdict.result).toEqual({ id: fixture.promoteCommandId, status: "sent" });
     expect(queueActions).toEqual([["s1", QUEUED_ID, "promote"]]);
+    expect(sends).toEqual([]);
+  });
+
+  it("stops a working chat when the phone signs a stop for the turn it saw", async () => {
+    const { remote, config, sends, stops } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.stopCommandId, fixture.stopCommand);
+    expect(verdict.result).toEqual({ id: fixture.stopCommandId, status: "sent" });
+    expect(stops).toEqual(["s1"]);
     expect(sends).toEqual([]);
   });
 

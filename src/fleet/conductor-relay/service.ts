@@ -131,6 +131,28 @@ export class ConductorRelayService {
   }
 
   /**
+   * Stop the chat's running turn: Conductor's own Stop (`…/sessions/:sid/stop`),
+   * which also pauses the chat's queue, exactly as pressing Stop in its window.
+   */
+  async stopTurn(workspaceId: string, sessionId: string): Promise<QueueActionResult> {
+    const client = this.client;
+    if (!client) return { ok: false, reason: "relay not connected" };
+    try {
+      const res = await client.request({
+        method: "POST",
+        target: `/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/stop`,
+        headers: { "content-type": "application/json" },
+        body: {},
+      });
+      if (res.status >= 200 && res.status < 300) return { ok: true };
+      return { ok: false, reason: `relay HTTP ${res.status}` };
+    } catch (e) {
+      this.client = undefined;
+      return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /**
    * The queue is read again here for the message's revision and the queue's
    * generation: the caller (and the phone behind it) never supplies either,
    * so a stale view cannot aim a write at a message that has changed.

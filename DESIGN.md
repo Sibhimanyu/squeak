@@ -534,6 +534,10 @@ sent), which becomes **Read by Claude** once the agent has it: its turn
 started from it, the turn shows the steer, or it left Conductor's queue.
 "Sent" only ever means the Mac has it. It never sends to a session the user did not explicitly pick.
 
+While the agent works and nothing is typed, the button is **Stop** (a
+needs-you-red square on `surface-raised`, Conductor's own Stop; the working
+row says "Stopping…" until it has). Once you type, it is Send again.
+
 While the agent works, Send becomes **Queue** and is still the only control:
 a tap queues, and holding it (on the Mac, its chevron or ⇧⌘↩) offers
 **Steer now**. No picker or second button: steering is the rarer, deliberate

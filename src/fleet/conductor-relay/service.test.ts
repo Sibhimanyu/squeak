@@ -119,6 +119,22 @@ describe("ConductorRelayService queue", () => {
     });
   });
 
+  it("stops a turn through Conductor's own stop route", async () => {
+    const request = vi.fn(async () => ({ status: 200, headers: {}, body: "{}" }));
+    const svc = connected({ request } as unknown as Partial<PhoneClient>);
+    expect(await svc.stopTurn("ws 1", "s1")).toEqual({ ok: true });
+    expect(request).toHaveBeenCalledWith({
+      method: "POST",
+      target: "/workspaces/ws%201/sessions/s1/stop",
+      headers: { "content-type": "application/json" },
+      body: {},
+    });
+    const refused = connected({
+      request: async () => ({ status: 500, headers: {}, body: "" }),
+    } as unknown as Partial<PhoneClient>);
+    expect(await refused.stopTurn("ws", "s1")).toEqual({ ok: false, reason: "relay HTTP 500" });
+  });
+
   it("promotes and cancels with the revision and generation it reads itself", async () => {
     const promote = vi.fn(async () => ({ status: 200, headers: {}, body: "{}" }));
     const cancel = vi.fn(async () => ({ status: 200, headers: {}, body: "{}" }));

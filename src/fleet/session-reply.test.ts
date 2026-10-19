@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
-import type { ConductorSessionRef, SessionMessageRecord } from "../types.js";
+import type { ConductorSessionRef, SessionMessageRecord, SessionStatus } from "../types.js";
 import type { ConductorUiSender, UiSendResult } from "./conductor-ui.js";
 import { busyReason, ConductorReplier, type ConductorRelaySender, type ReplyAgentAdapter } from "./session-reply.js";
 
@@ -358,6 +358,10 @@ describe("ConductorReplier queued messages", () => {
         calls.push(["cancel", workspaceId, sessionId, messageId]);
         return { ok: true };
       },
+      stopTurn: async (workspaceId, sessionId) => {
+        calls.push(["stop", workspaceId, sessionId]);
+        return { ok: true };
+      },
       ...overrides,
     };
     return { ...fixture(session({ status: "working" }), [], null, relay), calls };
@@ -407,5 +411,43 @@ describe("ConductorReplier queued messages", () => {
     });
     const down = queueFixture({ isReady: () => false });
     expect(await down.replier.queueAction("s1", item.id, "cancel")).toMatchObject({ ok: false });
+  });
+});
+
+describe("ConductorReplier stop", () => {
+  function stopFixture(status: SessionStatus, overrides: Partial<ConductorRelaySender> = {}) {
+    const calls: unknown[][] = [];
+    const relay: ConductorRelaySender = {
+      isReady: () => true,
+      send: async () => ({ ok: true }),
+      stopTurn: async (workspaceId, sessionId) => {
+        calls.push(["stop", workspaceId, sessionId]);
+        return { ok: true };
+      },
+      ...overrides,
+    };
+    return { ...fixture(session({ status }), [], null, relay), calls };
+  }
+
+  it("stops a working chat through Conductor's own Stop, in its workspace", async () => {
+    const { replier, calls } = stopFixture("working");
+    expect(await replier.stopTurn("s1")).toEqual({ ok: true });
+    expect(calls).toEqual([["stop", "w1", "s1"]]);
+  });
+
+  it("refuses a chat that is not working, and touches nothing", async () => {
+    const { replier, calls } = stopFixture("idle");
+    expect(await replier.stopTurn("s1")).toEqual({ ok: false, reason: "The agent isn't working any more." });
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses without the relay, and says why Conductor refused", async () => {
+    const down = stopFixture("working", { isReady: () => false });
+    expect(await down.replier.stopTurn("s1")).toMatchObject({ ok: false, reason: /relay isn't connected/ });
+    const refused = stopFixture("working", { stopTurn: async () => ({ ok: false, reason: "relay HTTP 500" }) });
+    expect(await refused.replier.stopTurn("s1")).toEqual({
+      ok: false,
+      reason: "Conductor didn't stop it (relay HTTP 500).",
+    });
   });
 });

@@ -102,6 +102,8 @@ function fixture(
     /** The chat's queue as the replier reads it; `"none"` = a replier without queue support. */
     queue?: QueueItem[] | null | "none";
     queueOutcome?: { ok: true } | { ok: false; reason: string };
+    /** What the replier's Stop answers; `"none"` = a replier that cannot stop. */
+    stopOutcome?: { ok: true } | { ok: false; reason: string } | "none";
     answerer?: Answerer | null;
   } = {},
 ) {
@@ -117,6 +119,13 @@ function fixture(
       sends.push({ sessionId, text });
       return options.outcome ?? ({ status: "started", via: "conductor" } as ReplyOutcome);
     }),
+    ...(options.stopOutcome === "none"
+      ? {}
+      : {
+          stopTurn: vi.fn<(sessionId: string) => Promise<{ ok: true } | { ok: false; reason: string }>>(async () =>
+            options.stopOutcome === "none" ? { ok: true } : (options.stopOutcome ?? { ok: true }),
+          ),
+        }),
     ...(options.queue === "none"
       ? {}
       : {
@@ -233,6 +242,20 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const stopCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "stop",
+      sessionId: "s1",
+      answersTurn: "turn-1",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const result = (id: string) => {
     const doc = store.docs.get(`${channel}/results/${id}`);
     return doc ? open<Record<string, unknown>>(payload.k, doc.box) : null;
@@ -251,6 +274,7 @@ function fixture(
     startCommand,
     answerCommand,
     queueCommand,
+    stopCommand,
     result,
     configPath,
     emit,
@@ -419,6 +443,58 @@ describe("RemoteBridge commands", () => {
     await f.store.set(`${f.channel}/commands/c1`, f.command());
     await f.bridge.tick();
     expect(f.result("c1")).toEqual({ id: "c1", status: "refused", reason: "That chat is still working in Conductor." });
+  });
+});
+
+describe("RemoteBridge stop", () => {
+  it("stops a working chat when the phone signs it for the turn it saw", async () => {
+    const f = fixture();
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.stopCommand());
+    await f.bridge.tick();
+    expect(f.replier.stopTurn!.mock.calls).toEqual([["s1"]]);
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent" });
+    expect(f.sends).toEqual([]);
+  });
+
+  it("takes a Stop with no turn named for a chat that has none", async () => {
+    const f = fixture();
+    f.replier.lastTurnId.mockReturnValue(null as unknown as string);
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.stopCommand({ answersTurn: undefined }));
+    await f.bridge.tick();
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent" });
+  });
+
+  it("refuses a Stop for a turn that already ended", async () => {
+    const f = fixture({ turn: "turn-2" });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.stopCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That turn already ended." });
+    expect(f.replier.stopTurn).not.toHaveBeenCalled();
+  });
+
+  it("passes the replier's refusal back, and refuses a chat the phone is not shown", async () => {
+    const f = fixture({ stopOutcome: { ok: false, reason: "The agent isn't working any more." } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.stopCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "The agent isn't working any more." });
+    await f.store.set(`${f.channel}/commands/c2`, f.stopCommand({ sessionId: "s-elsewhere" }));
+    await f.bridge.tick();
+    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That chat isn't on your phone any more." });
+  });
+
+  it("is refused by a Mac that cannot stop, and refuses a malformed Stop", async () => {
+    const f = fixture({ stopOutcome: "none" });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.stopCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't stop an agent from a phone." });
+    await f.store.set(`${f.channel}/commands/c2`, f.stopCommand({ sessionId: 7 }));
+    await f.bridge.tick();
+    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "Not a request this Mac understands." });
   });
 });
 

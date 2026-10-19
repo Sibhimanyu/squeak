@@ -67,7 +67,7 @@ struct SessionView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 ChatRows(
-                    rows: rows, session: session, sending: model.isSending(session.key),
+                    rows: rows, session: session, sending: model.isSending(session.key), stopping: model.isStopping(session.key),
                     total: live?.working == true ? live?.total ?? 0 : session.activity?.total ?? 0, live: live?.working == true,
                     stepsOpen: $stepsOpen, openParts: $openParts
                 )
@@ -122,7 +122,8 @@ struct SessionView: View {
                 Composer(
                     session: session, agentName: Presentation.agentName(session.agent),
                     working: session.state == "working" && Presentation.replyBlock(session) == nil,
-                    block: Presentation.replyBlock(session), draft: $draft, composing: $composing
+                    block: Presentation.replyBlock(session), stopping: model.isStopping(session.key),
+                    draft: $draft, composing: $composing
                 )
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: cards.map(\.id))
@@ -179,6 +180,7 @@ private struct ChatRows: View {
     let rows: [ChatTimeline.Row]
     let session: PhoneSnapshot.Session
     let sending: Bool
+    let stopping: Bool
     let total: Int
     let live: Bool
     @Binding var stepsOpen: Bool
@@ -211,7 +213,7 @@ private struct ChatRows: View {
                         set: { if $0 { openParts.insert(id) } else { openParts.remove(id) } }))
                 case .working(let label, let steps):
                     // After a steer the live part is its own count; "the latest 3 of 7" would count the folded parts too.
-                    WorkingRow(agentName: agentName, label: label, steps: steps, total: parted ? steps.count : total, live: live, open: $stepsOpen)
+                    WorkingRow(agentName: agentName, label: stopping ? "Stopping…" : label, steps: steps, total: parted ? steps.count : total, live: live, open: $stepsOpen)
                         .transition(.opacity)
                 case .empty(let text):
                     Text(text).foregroundStyle(Theme.muted)
@@ -731,13 +733,15 @@ struct Composer: View {
     let agentName: String
     let working: Bool
     let block: String?
+    /// A Stop was sent and the agent has not stopped yet.
+    let stopping: Bool
     @Binding var draft: String
     var composing: FocusState<Bool>.Binding
 
-    init(session: PhoneSnapshot.Session, agentName: String, working: Bool, block: String?,
+    init(session: PhoneSnapshot.Session, agentName: String, working: Bool, block: String?, stopping: Bool = false,
          draft: Binding<String>, composing: FocusState<Bool>.Binding) {
         key = session.key; label = session.label; self.agentName = agentName; self.working = working; self.block = block
-        _draft = draft; self.composing = composing
+        self.stopping = stopping; _draft = draft; self.composing = composing
     }
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -794,7 +798,25 @@ struct Composer: View {
     /// Mid-turn it is a menu whose tap is Queue and whose hold is the choice.
     @ViewBuilder
     private var sendButton: some View {
-        if working {
+        if working, empty {
+            // Like any chat app: while the agent works and nothing is typed, the button stops it.
+            Button {
+                Task {
+                    guard let session = model.snapshot?.session(key) else { return }
+                    await model.stop(session)
+                }
+            } label: {
+                RoundedRectangle(cornerRadius: 3).fill(stopping ? Theme.muted : Theme.needsYou)
+                    .frame(width: 12, height: 12)
+                    .frame(width: 44, height: 44)
+                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+            }
+            .buttonStyle(.plain)
+            .disabled(stopping)
+            .accessibilityLabel(stopping ? "Stopping" : "Stop \(agentName)")
+            .accessibilityHint("Stops the turn in progress, as Stop does in Conductor")
+        } else if working {
             Menu {
                 Button { send(.steer) } label: {
                     Text("Steer now")
@@ -838,8 +860,10 @@ struct Composer: View {
     private var caption: some View {
         if let block {
             Text(block).font(.footnote).foregroundStyle(Theme.muted)
+        } else if let problem = model.problemFor[key] {
+            Text(problem).font(.footnote).foregroundStyle(Theme.muted)
         } else if working, !explained {
-            Text("Send queues it after this turn. Hold to steer now.")
+            Text("Send queues it · hold to steer · empty, it stops \(agentName)")
                 .font(.footnote).foregroundStyle(Theme.muted)
         }
     }

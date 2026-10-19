@@ -20,6 +20,7 @@ let (queuedId, queuedDocument) = try channel.replyDocument(
     to: session, text: "Then add tests", messageId: "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31", signer: signer, now: madeAt)
 let (promoteId, promoteDocument) = try channel.queueDocument(
     sessionId: "s1", messageId: "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31", action: .promote, signer: signer, now: madeAt)
+let (stopId, stopDocument) = try channel.stopDocument(to: session, signer: signer, now: madeAt)
 let (startId, startDocument) = try channel.startDocument(workspaceId: "w1", agent: .codex, text: "Add a timer", signer: signer, now: madeAt)
 // ANSWER-CARD: an answer to question 0 of the pending call toolu_fixture in chat s1: "Red", plus its own words.
 let (answerId, answerDocument) = try channel.answerDocument(
@@ -40,6 +41,9 @@ let fixture: [String: Any] = [
     "queuedCommandId": queuedId,
     "queuedCommand": ["box": queuedDocument.box, "sig": queuedDocument.sig!, "device": queuedDocument.device!],
     // Steer that queued message now.
+    // Stop the chat's turn (turn-1).
+    "stopCommandId": stopId,
+    "stopCommand": ["box": stopDocument.box, "sig": stopDocument.sig!, "device": stopDocument.device!],
     "promoteCommandId": promoteId,
     "promoteCommand": ["box": promoteDocument.box, "sig": promoteDocument.sig!, "device": promoteDocument.device!],
     // A new chat in workspace w1 with codex: "Add a timer".

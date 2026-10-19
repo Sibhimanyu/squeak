@@ -583,6 +583,53 @@ final class AppModel {
         return send.id
     }
 
+    /* ---------- stop ---------- */
+
+    /// Chats a Stop was sent to, until the Mac stops calling them working (or 30 s pass).
+    private(set) var stopping: [String: Date] = [:]
+
+    func isStopping(_ key: String) -> Bool {
+        guard let at = stopping[key] else { return false }
+        return Date().timeIntervalSince(at) < 30 && snapshot?.session(key)?.state == "working"
+    }
+
+    /// Stop the agent's turn, as Conductor's Stop button does. The working row says
+    /// "Stopping…" at once; nil when the Mac did it, else why not.
+    @discardableResult
+    func stop(_ session: PhoneSnapshot.Session) async -> String? {
+        stopping[session.key] = Date()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        let refusal = await stopCommand(session)
+        if let refusal {
+            stopping[session.key] = nil
+            problemFor[session.key] = refusal
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        } else {
+            problemFor[session.key] = nil
+        }
+        return refusal
+    }
+
+    /// The last thing that went wrong with a chat's control (a Stop), shown under its composer.
+    private(set) var problemFor: [String: String] = [:]
+
+    private func stopCommand(_ session: PhoneSnapshot.Session) async -> String? {
+        if demo { try? await Task.sleep(for: .milliseconds(500)); return nil }
+        guard await confirmWithBiometrics(reason: "Stop \(session.label)") else { return "Face ID was cancelled." }
+        guard let channel else { return "Not connected to your Mac." }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.stopDocument(to: session, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return "Your Mac didn't answer. Is Squeak running?" }
+            return result.sent ? nil : (result.reason ?? "Your Mac refused that.")
+        } catch {
+            return "Couldn't reach your Mac."
+        }
+    }
+
     /* ---------- the queue ---------- */
 
     /// Cards taken off the queue on a tap, before the Mac's queue says so; given back if it refuses.

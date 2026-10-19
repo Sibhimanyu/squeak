@@ -92,6 +92,22 @@ export interface RemoteCommand {
  * as a reply. There is no turn to match: the queued message's id is the
  * anchor, and it must still be in the queue when the Mac reads it.
  */
+/**
+ * A signed Stop for a working Conductor chat: the same as Conductor's own Stop
+ * button. Same envelope as a reply; it names the turn the phone saw working,
+ * so a Stop sent while one turn ran cannot stop the next.
+ */
+export interface StopCommand {
+  v: 1;
+  kind: "stop";
+  sessionId: string;
+  /** The chat's last finished turn as the phone saw it; absent when it had none. */
+  answersTurn?: string | null;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
 export interface QueueCommand {
   v: 1;
   kind: "queue";
@@ -193,6 +209,8 @@ export interface RemoteReplier {
     messageId: string,
     action: QueueAction,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** Conductor's Stop for a working chat. Absent: a phone's Stop is refused. */
+  stopTurn?(sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 /** Starting chats from a phone. Absent means this Mac does not offer it. */
@@ -817,6 +835,9 @@ export class RemoteBridge {
     if (kind === "queue") {
       return this.handleQueue(device, id, command as unknown as QueueCommand);
     }
+    if (kind === "stop") {
+      return this.handleStop(device, id, command as unknown as StopCommand);
+    }
     if (kind === "answer") {
       const result = await runAnswerCommand(command as unknown as AnswerCommand, {
         answerer: this.deps.answerer ?? null,
@@ -1002,6 +1023,50 @@ export class RemoteBridge {
       "sent",
       `${command.action === "promote" ? "steered in" : "deleted"} a queued message in ${command.sessionId.slice(0, 8)}`,
     );
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
+   * Stop a working chat. Signature, freshness and nonce have already held. The
+   * chat must be one the phone is shown, and still on the turn the phone saw
+   * working (the same turn rule as a reply); the replier refuses anything not
+   * working by Conductor's own word.
+   */
+  private async handleStop(
+    device: PairedDevice,
+    id: string,
+    command: StopCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `stop: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    // The phone leaves out a turn it does not know, rather than sending null.
+    const turn = command.answersTurn ?? null;
+    if (command.v !== 1 || typeof command.sessionId !== "string" || (turn !== null && typeof turn !== "string")) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (!this.phoneShows(command.sessionId)) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    const replier = this.deps.replier;
+    if (!replier.stopTurn) {
+      return refuse("This Mac can't stop an agent from a phone.");
+    }
+    if (turn !== replier.lastTurnId(command.sessionId)) {
+      return refuse("That turn already ended.");
+    }
+    let outcome: { ok: true } | { ok: false; reason: string };
+    try {
+      outcome = await replier.stopTurn(command.sessionId);
+    } catch (error) {
+      outcome = { ok: false, reason: error instanceof Error ? error.message : "The agent could not be stopped." };
+    }
+    if (!outcome.ok) {
+      this.log(device.name, "refused", `stop: ${outcome.reason}`);
+      return { write: true, result: { id, status: "refused", reason: outcome.reason } };
+    }
+    this.log(device.name, "sent", `stopped ${command.sessionId.slice(0, 8)}`);
     return { write: true, result: { id, status: "sent" } };
   }
 
