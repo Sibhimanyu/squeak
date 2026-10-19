@@ -35,7 +35,7 @@ struct UsageWindowRow: View {
                 Text(name).font(bigger ? Typo.body : Typo.meta).foregroundStyle(bigger ? Theme.ink : Theme.muted)
                 Spacer(minLength: 6)
                 if let window {
-                    Text(UsageFormat.used(window.usedPercent)).font(bigger ? Typo.label : Typo.meta.weight(.semibold))
+                    Text(UsageFormat.used(window.usedPercent, resetsAt: window.resetsAt)).font(bigger ? Typo.label : Typo.meta.weight(.semibold))
                         .monospacedDigit().foregroundStyle(Theme.ink)
                     Text("·").foregroundStyle(Theme.subtle)
                     Text(UsageFormat.resets(window.resetsAt)).font(bigger ? Typo.body : Typo.meta).foregroundStyle(Theme.muted)
@@ -43,10 +43,10 @@ struct UsageWindowRow: View {
                     Text("not reported").font(bigger ? Typo.body : Typo.meta).foregroundStyle(Theme.muted)
                 }
             }
-            UsageBar(fraction: UsageFormat.fraction(window?.usedPercent ?? 0), height: bigger ? 6 : 5)
+            UsageBar(fraction: window.map { UsageFormat.fraction($0.usedPercent, resetsAt: $0.resetsAt) } ?? 0, height: bigger ? 6 : 5)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(window.map { "\(name), \(UsageFormat.used($0.usedPercent)), \(UsageFormat.resets($0.resetsAt))" } ?? "\(name), not reported")
+        .accessibilityLabel(window.map { "\(name), \(UsageFormat.used($0.usedPercent, resetsAt: $0.resetsAt)), \(UsageFormat.resets($0.resetsAt))" } ?? "\(name), not reported")
     }
 }
 

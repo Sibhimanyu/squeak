@@ -28,4 +28,13 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.fraction(140), 1)
         XCTAssertEqual(UsageFormat.fraction(-3), 0)
     }
+    func testAWindowThatHasResetReadsResetWithAnEmptyBar() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let past = ISO8601DateFormatter().string(from: now.addingTimeInterval(-60))
+        let future = ISO8601DateFormatter().string(from: now.addingTimeInterval(3600))
+        XCTAssertEqual(UsageFormat.used(76, resetsAt: past, now: now), "Reset")
+        XCTAssertEqual(UsageFormat.fraction(76, resetsAt: past, now: now), 0)
+        XCTAssertEqual(UsageFormat.used(76, resetsAt: future, now: now), "76% used")
+        XCTAssertEqual(UsageFormat.fraction(76, resetsAt: future, now: now), 0.76, accuracy: 0.0001)
+    }
 }

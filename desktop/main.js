@@ -471,7 +471,12 @@ function trayTooltip(state) {
 
 /** e.g. "Control+Alt+H" -> "⌃⌥H", for a menu item's keyboard hint. */
 function describeAccelerator(shortcut) {
-  return shortcut.replace("Control", "⌃").replace("Alt", "⌥").replace("Shift", "⇧").replace("Command", "⌘").replace(/\+/g, "");
+  return shortcut
+    .replace("Control", "⌃")
+    .replace("Alt", "⌥")
+    .replace("Shift", "⇧")
+    .replace("Command", "⌘")
+    .replace(/\+/g, "");
 }
 
 /**
@@ -486,13 +491,16 @@ function usageMenuItems(state) {
   const items = [];
   const usage = state?.codexUsage;
 
+  // A window that has reset since the reading is empty again; its old number is the last window's.
+  const line = (name, reading) =>
+    Date.parse(reading.resetsAt) <= Date.now()
+      ? `Codex ${name}: reset, not read since`
+      : `Codex ${name}: ${Math.round(reading.usedPercent)}% · resets ${formatCountdown(reading.resetsAt)}`;
   if (usage?.primary) {
-    const resets = formatCountdown(usage.primary.resetsAt);
-    items.push({ label: `Codex 5h: ${Math.round(usage.primary.usedPercent)}% · resets ${resets}`, enabled: false });
+    items.push({ label: line("5h", usage.primary), enabled: false });
   }
   if (usage?.secondary) {
-    const resets = formatCountdown(usage.secondary.resetsAt);
-    items.push({ label: `Codex 7d: ${Math.round(usage.secondary.usedPercent)}% · resets ${resets}`, enabled: false });
+    items.push({ label: line("7d", usage.secondary), enabled: false });
   }
 
   const claudeCost = (state?.active ?? [])

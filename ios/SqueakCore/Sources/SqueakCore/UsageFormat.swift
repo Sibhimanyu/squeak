@@ -46,4 +46,21 @@ public enum UsageFormat {
 
     /// 0...1 for drawing a bar; anything outside is clamped.
     public static func fraction(_ percent: Double) -> Double { min(max(percent / 100, 0), 1) }
+
+    /// Whether the window has reset since this reading was taken.
+    public static func hasReset(_ iso: String, now: Date = Date()) -> Bool {
+        guard let at = date(iso) else { return false }
+        return at <= now
+    }
+
+    /// "42% used", or "Reset" once the window has started over: the old number is the last
+    /// window's, and a full bar for a window that is empty again read as the opposite of the truth.
+    public static func used(_ percent: Double, resetsAt: String, now: Date = Date()) -> String {
+        hasReset(resetsAt, now: now) ? "Reset" : used(percent)
+    }
+
+    /// The bar for a reading: empty once its window has reset.
+    public static func fraction(_ percent: Double, resetsAt: String, now: Date = Date()) -> Double {
+        hasReset(resetsAt, now: now) ? 0 : fraction(percent)
+    }
 }
