@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.1
+
+A calmer redesign of every screen.
+
+- New menu-bar icon: a crisp template duck, traced from the brand artwork, that
+  follows light and dark menu bars; it shows a count when chats need you and
+  dims when Squeak is offline.
+- Popover: list-first, grouped as Needs you, Working, Recent and Earlier. A chat
+  that needs you shows its question with one-tap answer chips and an inline
+  reply. "All quiet" when nothing does.
+- Window: a centred reading column; agent replies are plain prose, your
+  messages sit on a soft fill; the question that needs you is marked in red with
+  answer chips under it; a floating composer.
+- Quick message is a Spotlight-style panel; Settings uses native tabs and
+  grouped forms; onboarding is shorter and quieter.
+
 ## 2.0.0
 
 First release of the native Squeak app for macOS (menu bar, macOS 14+).
