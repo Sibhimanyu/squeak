@@ -12,12 +12,12 @@ struct PairView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Image("duck", bundle: .module)
-                    .resizable().scaledToFit().frame(width: 96, height: 96)
+                Image("squeak-duck-full", bundle: .module)
+                    .resizable().scaledToFit().frame(width: 128, height: 128)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 40)
                     .accessibilityHidden(true)
-                Text("Squeak").font(.largeTitle.bold())
+                Text("Squeak").font(.system(size: 28, weight: .bold))
                 Text("See what your agents are doing on your Mac, and answer them from here.")
                     .foregroundStyle(Theme.muted)
                 VStack(alignment: .leading, spacing: 8) {
@@ -36,12 +36,13 @@ struct PairView: View {
                         .font(.system(.footnote, design: .monospaced))
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(10).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-                    Button("Pair") { Task { await pair(pasted) } }.disabled(pasted.isEmpty || working)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.lineStrong))
+                    Button("Pair") { Task { await pair(pasted) } }.disabled(pasted.isEmpty || working).frame(minHeight: 44)
                 }
                 .foregroundStyle(Theme.muted)
 
                 if let problem = model.problem {
-                    Text(problem).foregroundStyle(Theme.needsYou).font(.footnote)
+                    Text(problem).foregroundStyle(Theme.ink).font(.footnote)
                 }
             }
             .padding(24)
@@ -66,7 +67,8 @@ struct PairView: View {
     private func step(_ n: Int, _ text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text("\(n)").font(.footnote.bold()).frame(width: 22, height: 22)
-                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.lineStrong))
             Text(text)
         }
     }
@@ -89,10 +91,10 @@ struct AwaitingApprovalView: View {
                 .accessibilityLabel(code.map(String.init).joined(separator: " "))
             ProgressView().padding(.top, 8)
             if let problem = model.problem {
-                Text(problem).foregroundStyle(Theme.needsYou).font(.footnote)
+                Text(problem).foregroundStyle(Theme.ink).font(.footnote)
             }
             Spacer()
-            Button("Cancel") { model.unpair() }.foregroundStyle(Theme.muted)
+            Button("Cancel") { model.unpair() }.foregroundStyle(Theme.muted).frame(minHeight: 44)
         }
         .padding(24)
         .frame(maxWidth: .infinity)

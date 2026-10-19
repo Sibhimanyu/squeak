@@ -27,6 +27,18 @@ final class AppModel: ObservableObject {
     @Published private(set) var lastFetch: Date?
     @Published private(set) var problem: String?
     @Published var receipts: [String: Receipt] = [:]
+    /// What this phone sent since the app opened, per session. Local only:
+    /// the channel carries no conversation history back, so the phone shows
+    /// its own replies and the Mac's latest message, nothing it cannot know.
+    @Published private(set) var outbox: [String: [SentMessage]] = [:]
+
+    struct SentMessage: Identifiable, Equatable {
+        let id = UUID()
+        let text: String
+        let date: Date
+        /// The turn it answered; places it before or after the agent's current message.
+        let answersTurn: String?
+    }
 
     private var channel: Channel?
     private var loop: Task<Void, Never>?
@@ -39,6 +51,7 @@ final class AppModel: ObservableObject {
         signer = demo ? SoftwareSigner() : KeyStore.signer()
         if demo {
             snapshot = DemoData.snapshot
+            outbox = DemoData.outbox
             lastFetch = Date()
             phase = .paired
             return
@@ -145,6 +158,7 @@ final class AppModel: ObservableObject {
         if demo {
             try? await Task.sleep(for: .seconds(1))
             receipts[session.key] = Receipt(kind: .sent(Self.sentText(trimmed, session.label, via: "conductor")), turnId: session.turnId)
+            record(trimmed, for: session)
             return
         }
         guard let channel else { return }
@@ -159,6 +173,7 @@ final class AppModel: ObservableObject {
                         ? .sent(Self.sentText(trimmed, session.label, via: result.via))
                         : .refused(result.reason ?? "Your Mac refused that reply.")
                     receipts[session.key] = Receipt(kind: kind, turnId: session.turnId)
+                    if result.sent { record(trimmed, for: session) }
                     return
                 }
             }
@@ -166,6 +181,10 @@ final class AppModel: ObservableObject {
         } catch {
             receipts[session.key] = Receipt(kind: .refused("Couldn't send: \(error.localizedDescription)"), turnId: session.turnId)
         }
+    }
+
+    private func record(_ text: String, for session: PhoneSnapshot.Session) {
+        outbox[session.key, default: []].append(SentMessage(text: text, date: Date(), answersTurn: session.turnId))
     }
 
     /// DESIGN.md §9: "Sent B to orchard · irrigation in Conductor."

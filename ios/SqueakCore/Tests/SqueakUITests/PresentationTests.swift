@@ -1,0 +1,55 @@
+import SqueakCore
+import XCTest
+@testable import SqueakUI
+
+final class PresentationTests: XCTestCase {
+    private func session(state: String, steps: [String] = [], label: String = "storefront · Payment retry logic") -> PhoneSnapshot.Session {
+        .init(key: "k", conductorSessionId: "id", label: label, agent: "claude", state: state, lastActivityAt: "2026-10-19T10:00:00Z",
+              detail: nil, git: nil, contextPercent: nil, turnId: "t", message: nil, choices: nil,
+              activity: steps.isEmpty ? nil : .init(total: steps.count, steps: steps.map { .init(kind: "tool", text: $0) }))
+    }
+
+    func testLabelSplitsIntoRepoAndTitle() {
+        XCTAssertEqual(Presentation.split(label: "storefront · Payment retry logic").repo, "storefront")
+        XCTAssertEqual(Presentation.split(label: "orchard").title, "orchard")
+        XCTAssertEqual(Presentation.readable("irrigation-pull-to-refresh"), "Irrigation pull to refresh")
+        XCTAssertEqual(Presentation.readable("fix/foo-bar"), "fix/foo-bar")
+        XCTAssertEqual(Presentation.subtitle(session(state: "idle")), "storefront · Claude")
+    }
+
+    func testStatusUsesDesignVocabulary() {
+        XCTAssertEqual(Presentation.status(session(state: "awaiting_input")), .init(text: "needs an answer", tone: .needsYou))
+        XCTAssertEqual(Presentation.status(session(state: "awaiting_approval")).text, "needs approval")
+        XCTAssertEqual(Presentation.status(session(state: "working")).text, "working")
+        XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Read a.ts", "Running tests. All of them."])).text, "Running tests")
+        XCTAssertEqual(Presentation.status(session(state: "finished")).text, "done")
+    }
+
+    func testOptionSplit() {
+        XCTAssertEqual(Presentation.splitOption("Retry automatically — 3 attempts").detail, "3 attempts")
+        XCTAssertEqual(Presentation.splitOption("Do it: carefully").title, "Do it")
+        XCTAssertEqual(Presentation.splitOption("Arm it. Restart the add-on.").detail, "Restart the add-on.")
+        XCTAssertNil(Presentation.splitOption("Leave it off").detail)
+    }
+
+    func testMessageReadingTakesOptionsOutOfProse() {
+        let choices = PhoneSnapshot.Choices(question: "How should failures be retried?",
+            options: [.init(letter: "A", title: "Retry"), .init(letter: "B", title: "Customer retries")], recommended: "A")
+        let message = "I added a check.\n\n**How should failures be retried?**\n\n**A) Retry.** Three attempts.\n\n**B) Customer retries.** Keep checkout.\n\nBoth are safe."
+        let reading = Presentation.read(message: message, choices: choices)
+        XCTAssertEqual(reading.before, ["I added a check."])
+        XCTAssertEqual(reading.after, ["Both are safe."])
+        XCTAssertEqual(reading.details["A"], "Three attempts.")
+    }
+
+    func testReplyBlock() {
+        XCTAssertNotNil(Presentation.replyBlock(session(state: "awaiting_input")))
+        XCTAssertNil(Presentation.replyBlock(session(state: "finished")))
+    }
+
+    func testAges() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-19T10:05:00Z")!
+        XCTAssertEqual(Age.describe("2026-10-19T10:00:00Z", now: now), "5m")
+        XCTAssertEqual(Age.spoken("2026-10-19T10:00:00Z", now: now), "5 minutes ago")
+    }
+}

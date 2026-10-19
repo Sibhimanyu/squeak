@@ -2,11 +2,14 @@
 import SqueakCore
 import SwiftUI
 
-/// DESIGN.md §8.2: every active session, in attention order.
+/// DESIGN.md §8.2: every active session, in attention order,
+/// under a native large title with search and a segmented filter.
 struct HomeView: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject private var router = SqueakRouter.shared
-    @State private var confirmingUnpair = false
+    @State private var filter = Presentation.Filter.all
+    @State private var query = ""
+    @State private var showingSettings = ProcessInfo.processInfo.arguments.contains("-squeak-settings")
     /// `-squeak-open <key>` starts inside a session: screenshots of the demo only.
     @State private var path: [String] = {
         let args = ProcessInfo.processInfo.arguments
@@ -14,61 +17,92 @@ struct HomeView: View {
         return [args[index + 1]]
     }()
 
+    private var sessions: [PhoneSnapshot.Session] { model.snapshot?.sessions ?? [] }
+    private var needsCount: Int { sessions.filter(\.needsYou).count }
+
+    /// Sections in attention order (DESIGN.md §8.2), filtered and searched.
+    private var groups: [(title: String, members: [PhoneSnapshot.Session])] {
+        PhoneSnapshot.groups.compactMap { group in
+            let members = sessions.filter {
+                group.states.contains($0.state) && Presentation.inFilter($0, filter) && Presentation.matches($0, query: query)
+            }
+            return members.isEmpty ? nil : (group.title, members)
+        }
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                if let snapshot = model.snapshot {
-                    if snapshot.sessions.isEmpty {
-                        empty
-                    }
-                    ForEach(PhoneSnapshot.groups, id: \.title) { group in
-                        let members = snapshot.sessions.filter { group.states.contains($0.state) }
-                        if !members.isEmpty {
-                            Section {
-                                ForEach(members) { session in
-                                    NavigationLink(value: session.key) { SessionRow(session: session) }
-                                        .listRowBackground(Theme.surface)
-                                }
-                            } header: {
-                                HStack(spacing: 6) {
-                                    Text(group.title).textCase(.uppercase).tracking(0.6)
-                                    Text("\(members.count)").foregroundStyle(Theme.subtle)
-                                }
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(Theme.subtle)
+                if model.snapshot != nil {
+                    Text(subtitle).font(.body).foregroundStyle(Theme.muted)
+                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                    controls
+                    let visible = groups
+                    ForEach(visible, id: \.title) { group in
+                        let rows = group.members
+                        Section {
+                            ForEach(rows) { session in
+                                NavigationLink(value: session.key) { SessionRow(session: session) }
+                                    .listRowBackground(Color.clear)
+                                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                                    .overlay(alignment: .leading) { edge(session) }
                             }
+                        } header: {
+                            SectionHeader(title: group.title, count: rows.count)
                         }
                     }
+                    if visible.isEmpty { noResults }
                 } else {
                     waiting
                 }
-                footer
             }
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Squeak")
+            .navigationTitle("Sessions")
+            .navigationBarTitleDisplayMode(.large)
+            .searchable(text: $query, prompt: "Search sessions…")
             .navigationDestination(for: String.self) { key in SessionView(key: key) }
             .refreshable { await model.refresh() }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Unpair this iPhone", role: .destructive) { confirmingUnpair = true }
-                    } label: {
-                        Image(systemName: "ellipsis.circle").accessibilityLabel("More")
-                    }
-                }
-            }
+            .toolbar { toolbar }
+            .safeAreaInset(edge: .bottom) { ConnectionBar() }
+            .sheet(isPresented: $showingSettings) { SettingsView() }
             // A link from a Telegram card: open its session as soon as the
             // snapshot has it, on a fresh stack so Back leads to the list.
             .onChange(of: router.pendingSessionId, initial: true) { _, _ in openPending() }
             .onChange(of: model.snapshot) { _, _ in openPending() }
-            .confirmationDialog("Unpair this iPhone?", isPresented: $confirmingUnpair, titleVisibility: .visible) {
-                Button("Unpair", role: .destructive) { model.unpair() }
-            } message: {
-                Text("It will stop seeing and answering your agents until you pair again.")
-            }
         }
         .foregroundStyle(Theme.ink)
+    }
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        if #available(iOS 26, *) {
+            // Glass never sits behind the duck (DESIGN.md §5): no bar pill here.
+            ToolbarItem(placement: .topBarLeading) { duck }.sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .topBarLeading) { duck }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { showingSettings = true } label: {
+                Image(systemName: "gearshape").accessibilityLabel("Settings")
+            }
+        }
+    }
+
+    /// The one duck on this screen (§6.3); the empty state brings its own.
+    @ViewBuilder
+    private var duck: some View {
+        if !sessions.isEmpty {
+            Image("squeak-duck-compact", bundle: .module).resizable().scaledToFit().frame(width: 28, height: 28)
+                .accessibilityLabel("Squeak")
+        }
+    }
+
+    private var subtitle: String {
+        let count = sessions.count
+        return count == 0 ? "Nothing active on your Mac" : "\(count) active across your Mac"
     }
 
     private func openPending() {
@@ -79,21 +113,49 @@ struct HomeView: View {
         router.consume()
     }
 
-    private var summary: String {
-        guard let snapshot = model.snapshot else { return "" }
-        var bits: [String] = []
-        if snapshot.duck.blockedCount > 0 { bits.append("\(snapshot.duck.blockedCount) need\(snapshot.duck.blockedCount == 1 ? "s" : "") you") }
-        if snapshot.duck.workingCount > 0 { bits.append("\(snapshot.duck.workingCount) working") }
-        return bits.isEmpty ? "All quiet" : bits.joined(separator: " · ")
+    /// A state colour lives on the dot or the left edge (§3.3), never as a fill.
+    @ViewBuilder
+    private func edge(_ session: PhoneSnapshot.Session) -> some View {
+        if session.needsYou {
+            Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 6).offset(x: -12)
+                .accessibilityHidden(true)
+        }
     }
 
-    private var empty: some View {
-        VStack(spacing: 12) {
-            Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: 88, height: 88).accessibilityHidden(true)
-            Text("Nothing's running. The duck is resting.").foregroundStyle(Theme.muted)
+    /* ---------- pieces ---------- */
+
+    @ViewBuilder
+    private var controls: some View {
+        Section {
+            Picker("Show", selection: $filter) {
+                Text("All").tag(Presentation.Filter.all)
+                Text(needsCount > 0 ? "Needs you \(needsCount)" : "Needs you").tag(Presentation.Filter.needsYou)
+                Text("Working").tag(Presentation.Filter.working)
+            }
+            .pickerStyle(.segmented)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 40)
-        .listRowBackground(Color.clear)
+    }
+
+    private var noResults: some View {
+        Group {
+            if !query.isEmpty {
+                ContentUnavailableView.search(text: query)
+            } else if sessions.isEmpty {
+                VStack(spacing: 12) {
+                    Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: 88, height: 88).accessibilityHidden(true)
+                    Text("Nothing's running. The duck is resting.").foregroundStyle(Theme.muted)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 40)
+            } else {
+                ContentUnavailableView(filter == .needsYou ? "Nothing needs you" : "Nothing is working",
+                                       systemImage: filter == .needsYou ? "checkmark.circle" : "moon.zzz",
+                                       description: Text("Pull down to refresh."))
+            }
+        }
+        .listRowBackground(Color.clear).listRowSeparator(.hidden)
     }
 
     private var waiting: some View {
@@ -102,69 +164,99 @@ struct HomeView: View {
             Text(model.problem ?? "Waiting for your Mac…").foregroundStyle(Theme.muted).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
-        .listRowBackground(Color.clear)
+        .listRowBackground(Color.clear).listRowSeparator(.hidden)
     }
+}
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let snapshot = model.snapshot {
-                Text("\(summary) · \(snapshot.mac)")
-                Text("Updated \(Age.describe(snapshot.generatedAt))")
-            }
-            if let problem = model.problem, model.snapshot != nil {
-                Text(problem).foregroundStyle(Theme.needsYou)
-            }
+struct SectionHeader: View {
+    let title: String
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+            Text("\(count)").monospacedDigit()
         }
-        .font(.footnote)
+        .font(.subheadline.weight(.semibold))
         .foregroundStyle(Theme.muted)
-        .listRowBackground(Color.clear)
+        .textCase(nil)
+        .padding(.leading, 20)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
 struct SessionRow: View {
     let session: PhoneSnapshot.Session
 
+    private var status: Presentation.Status { Presentation.status(session) }
+
     var body: some View {
-        HStack(spacing: 11) {
-            // A state-coloured spine down the leading edge, as on the Mac.
-            RoundedRectangle(cornerRadius: 1.5)
-                .fill(Theme.stateColor(session.state))
-                .frame(width: 3)
-                .frame(maxHeight: .infinity)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 7) {
-                    StateDot(state: session.state)
-                    Text(session.label).font(.body.weight(.semibold)).lineLimit(1)
-                }
-                Text(meta).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1).monospacedDigit()
-                if let git = session.git {
-                    Text(git).font(.footnote).foregroundStyle(Theme.subtle).lineLimit(1).monospacedDigit()
-                }
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(Presentation.displayTitle(session)).font(.headline).lineLimit(1)
+                Spacer(minLength: 4)
+                Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
             }
+            Text(Presentation.subtitle(session)).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
+            HStack(spacing: 7) {
+                StatusDot(color: dotColor, pulses: status.tone == .needsYou || status.tone == .working, period: status.tone == .working ? 1.6 : 1.0)
+                Text(status.text).font(.subheadline.weight(status.tone == .needsYou ? .semibold : .regular)).foregroundStyle(status.tone == .needsYou ? Theme.ink : Theme.muted).lineLimit(1)
+            }
+            .padding(.top, 1)
         }
-        .padding(.vertical, 5)
-        .fixedSize(horizontal: false, vertical: true)
+        .padding(.vertical, 6)
+        .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(Presentation.displayTitle(session)), \(Presentation.subtitle(session)), \(status.text), \(Age.spoken(session.lastActivityAt))")
     }
 
-    var meta: String {
-        var parts = [session.agent, session.stateWord, Age.describe(session.lastActivityAt)]
-        if let context = session.contextPercent, context >= 60 { parts.append("ctx \(Int(context))%") }
-        return parts.joined(separator: " · ")
+    private var dotColor: Color {
+        switch status.tone {
+        case .needsYou: return Theme.needsYou
+        case .working: return Theme.working
+        case .done: return Theme.done
+        case .error: return Theme.error
+        case .idle: return Theme.idle
+        }
     }
 }
 
-enum Age {
-    static func describe(_ iso: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-        guard let date else { return "" }
-        let minutes = Int(Date().timeIntervalSince(date) / 60)
-        if minutes < 1 { return "just now" }
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        return hours < 24 ? "\(hours)h" : "\(hours / 24)d"
+/// "Mac connected", and honest when it is not: the phone only knows its
+/// last successful read of the Mac's snapshot, so that is all it claims.
+struct ConnectionBar: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 20)) { _ in
+            let state = Connection.read(snapshot: model.snapshot, problem: model.problem, demo: model.demo)
+            HStack(spacing: 8) {
+                StatusDot(color: state.color)
+                Text(state.text).font(.footnote.weight(.medium)).foregroundStyle(Theme.muted)
+            }
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(Theme.bg)
+            .accessibilityElement(children: .combine)
+        }
     }
 }
+
+enum Connection {
+    struct State { let text: String; let color: Color }
+
+    static func read(snapshot: PhoneSnapshot?, problem: String?, demo: Bool) -> State {
+        if demo { return State(text: "Mac connected", color: Theme.working) }
+        guard let snapshot else {
+            return problem == nil
+                ? State(text: "Connecting to your Mac…", color: Theme.subtle)
+                : State(text: "Can't reach Squeak's server", color: Theme.offline)
+        }
+        if problem != nil { return State(text: "Can't reach Squeak's server. Showing the last view.", color: Theme.offline) }
+        let age = Age.describe(snapshot.generatedAt)
+        let minutes = Age.minutes(snapshot.generatedAt) ?? 0
+        return State(text: minutes >= 2 ? "Mac connected · updated \(age) ago" : "Mac connected", color: Theme.working)
+    }
+}
+
 #endif
