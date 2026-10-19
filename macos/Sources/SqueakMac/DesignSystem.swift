@@ -392,7 +392,7 @@ struct NeedsYouCard: View {
             }
         }
         .padding(12)
-        .background(hovering ? Theme.surfaceRaised : Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .background(Theme.surfaceRaised.opacity(hovering ? 0.7 : 0.45), in: RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         .onHover { hovering = $0 }
         .accessibilityElement(children: .contain)
@@ -433,7 +433,7 @@ struct NeedsYouCard: View {
         .padding(.leading, 12)
         .padding(.trailing, 4)
         .frame(height: 32)
-        .background(Theme.bg, in: RoundedRectangle(cornerRadius: Radius.control))
+        .background(Theme.bg.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.control))
         .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
     }
 
@@ -471,7 +471,7 @@ struct SearchField: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 30)
-        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
+        .background(Theme.surfaceRaised.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.control))
         .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
     }
 

@@ -27,7 +27,7 @@ struct PopoverView: View {
             footer
         }
         .frame(width: Self.width)
-        .background(Theme.bg)
+        .background(PanelBackground())
         .task(id: model.hasLoaded) { await model.pollLiveSteps() }
     }
 
@@ -229,4 +229,39 @@ struct PopoverView: View {
 private struct PopoverHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+
+/// DESIGN.md §3.2 `panel-glass`: the system's own popover material, blurring what is behind the
+/// menu, with a light tint over it, so the panel reads as glass rather than a painted sheet.
+/// Reduce Transparency gets the near-opaque `panel-translucent`.
+struct PanelBackground: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        if reduceTransparency {
+            Theme.panelTranslucent
+        } else {
+            ZStack {
+                VisualEffectBackground(material: .popover)
+                Theme.panelGlass
+            }
+        }
+    }
+}
+
+struct VisualEffectBackground: NSViewRepresentable {
+    var material: NSVisualEffectView.Material
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+    }
 }
