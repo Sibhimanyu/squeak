@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.1
+
+- A usage window that has reset since its last reading now says Reset and
+  draws an empty bar, instead of keeping the old window's number (a 76% bar
+  for a window that had just started over).
+
 ## 2.1.0
 
 - Answer an agent's question from Squeak: when Claude asks you to choose (one
