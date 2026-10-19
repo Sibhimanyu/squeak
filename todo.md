@@ -55,7 +55,7 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
 - [x] **5. What changed on a finished turn.** "3 files · +84/−12" under the reply,
       tapping through to the diff (the Mac's diff-view already pages it).
 - [x] **6. Copy / share** any message or step on a long press.
-- [ ] **7. Swipe actions on Home rows**: A/B/C or Reply without opening the chat.
+- [x] **7. Swipe actions on Home rows**: A/B/C or Reply without opening the chat.
 - [ ] **8. Answer from the notification**: actionable push with A/B/C and reply
       (needs APNs from the Mac — its own project).
 - [ ] **9. Live Activity / Dynamic Island** while an agent works (needs push too).

@@ -15,6 +15,8 @@ struct HomeView: View {
         || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-filled")
         || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-error")
     @State private var showingUsage = ProcessInfo.processInfo.arguments.contains("-squeak-usage")
+    /// The chat a swipe's Reply is answering, without opening it.
+    @State private var quickReply: PhoneSnapshot.Session?
     /// `-squeak-open <key>` starts inside a session: screenshots of the demo only.
     @State private var path: [String] = {
         let args = ProcessInfo.processInfo.arguments
@@ -56,6 +58,7 @@ struct HomeView: View {
                                     .listRowBackground(Color.clear)
                                     .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                                     .overlay(alignment: .leading) { edge(session) }
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) { swipeActions(session) }
                             }
                         } header: {
                             SectionHeader(title: group.title, count: rows.count)
@@ -68,6 +71,7 @@ struct HomeView: View {
                                 NavigationLink(value: session.key) { SessionRow(session: session, recent: true) }
                                     .listRowBackground(Color.clear)
                                     .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) { swipeActions(session) }
                             }
                             if query.isEmpty, model.snapshot?.recentMore == true {
                                 let waiting = model.recentWanted > older.count
@@ -105,6 +109,12 @@ struct HomeView: View {
             .toolbar { toolbar }
             .safeAreaInset(edge: .bottom) { ConnectionBar() }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(item: $quickReply) { session in QuickReply(session: session) }
+            .onAppear {
+                // `-squeak-quick <key>`: the swipe's Reply sheet, for screenshots of the demo.
+                let args = ProcessInfo.processInfo.arguments
+                if let i = args.firstIndex(of: "-squeak-quick"), i + 1 < args.count { quickReply = model.snapshot?.session(args[i + 1]) }
+            }
             .sheet(isPresented: $showingUsage) { UsageView() }
             .sheet(isPresented: $showingNewChat) { NewChatView(workspaces: model.snapshot?.workspaces ?? []) }
             // A link from a Telegram card: open its session as soon as the
@@ -172,7 +182,10 @@ struct HomeView: View {
 
     private var subtitle: String {
         let count = sessions.count
-        return count == 0 ? "Nothing active" : "\(count) active"
+        let active = count == 0 ? "Nothing active" : "\(count) active"
+        // While an awake session runs its countdown takes the line: the list shows the count anyway.
+        guard let awake = model.awake else { return active }
+        return awake.until.map { "Mac awake · \(AppModel.awakeLeft($0))" } ?? "Mac kept awake"
     }
 
     private func openPending() {
@@ -181,6 +194,24 @@ struct HomeView: View {
         else { return }
         path = [session.key]
         router.consume()
+    }
+
+    /// Answer from the list (§8.2): a swipe offers the agent's lettered options (up to three, as
+    /// many as fit) and Reply, for a chat this phone can answer. A letter goes out at once, like a
+    /// tap on its card; Reply opens a small field over the list.
+    @ViewBuilder
+    private func swipeActions(_ session: PhoneSnapshot.Session) -> some View {
+        if Presentation.replyBlock(session) == nil, session.conductorSessionId != nil {
+            Button { quickReply = session } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+                .tint(Theme.subtle)
+            if session.state != "working", session.question == nil, let choices = session.choices {
+                ForEach(choices.options.prefix(3).reversed(), id: \.letter) { option in
+                    Button { Task { await model.send(option.letter, to: session) } } label: { Text(option.letter) }
+                        .tint(option.letter == choices.recommended ? Theme.done : Theme.lineStrong)
+                        .accessibilityLabel("Send \(option.letter): \(option.title)")
+                }
+            }
+        }
     }
 
     /// A state colour lives on the dot or the left edge (§3.3), never as a fill.
@@ -388,6 +419,53 @@ enum Connection {
         // Healthy while the phone heard from the server in the last minute (a streamed tick is 20s).
         let fresh = lastFetch.map { now.timeIntervalSince($0) < 60 } ?? false
         return State(text: synced + change, color: fresh ? Theme.working : Theme.subtle, healthy: fresh)
+    }
+}
+
+/// Reply to a chat from the list: one field and Send, over the list. The answer then shows in the
+/// chat like any other send.
+struct QuickReply: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let session: PhoneSnapshot.Session
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    private var agentName: String { Presentation.agentName(session.agent) }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                if let line = Presentation.firstLine(session.message ?? session.detail) {
+                    Text(line).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(3)
+                }
+                TextField("Reply to \(agentName)…", text: $text, axis: .vertical)
+                    .lineLimit(1...6)
+                    .focused($focused)
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(Theme.bg.ignoresSafeArea())
+            .navigationTitle(Presentation.displayTitle(session))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(session.state == "working" ? "Queue" : "Send") {
+                        let reply = text
+                        dismiss()
+                        Task { await model.send(reply, to: session) }
+                    }
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .foregroundStyle(Theme.ink)
+        .presentationDetents([.medium])
+        .onAppear { focused = true }
     }
 }
 
