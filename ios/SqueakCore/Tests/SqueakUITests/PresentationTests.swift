@@ -17,6 +17,7 @@ final class PresentationTests: XCTestCase {
         XCTAssertNil(Presentation.firstLine(nil))
     }
 
+    #if os(iOS) // Connection lives in iOS-only HomeView.swift; `swift test` also runs on the Mac.
     func testTheConnectionBarOnlyShowsWhenSomethingIsWrong() {
         let now = Date()
         let json = #"{"v":1,"mac":"Mac","generatedAt":"2026-10-19T08:00:00Z","duck":{"blockedCount":0,"workingCount":0},"sessions":[]}"#
@@ -26,6 +27,7 @@ final class PresentationTests: XCTestCase {
         XCTAssertFalse(Connection.read(snapshot: snapshot, problem: "down", demo: false, lastFetch: now, now: now).healthy)
         XCTAssertFalse(Connection.read(snapshot: nil, problem: nil, demo: false, now: now).healthy)
     }
+    #endif
 
     func testHeaderLinesNeverRepeat() {
         // A chat with no diff once crashed the app: two identical candidates in a ViewThatFits.
