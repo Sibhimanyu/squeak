@@ -16,6 +16,9 @@ settings:
 packages:
   SqueakCore:
     path: SqueakCore
+  Heresay:
+    url: https://github.com/Sibhimanyu/heresay-swift
+    from: 0.2.0
 targets:
   Squeak:
     type: application
@@ -28,6 +31,8 @@ targets:
     dependencies:
       - package: SqueakCore
         product: SqueakUI
+      - package: Heresay
+        product: Heresay
     info:
       path: Squeak/Info.plist
       properties:

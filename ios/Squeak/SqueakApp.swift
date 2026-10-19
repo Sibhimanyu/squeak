@@ -1,3 +1,4 @@
+import Heresay
 import SqueakUI
 import SwiftUI
 
@@ -5,10 +6,16 @@ import SwiftUI
 /// links (from Telegram cards, via the web redirect) open that session.
 @main
 struct SqueakApp: App {
+    init() {
+        Heresay.configure(key: "pk_ywg4d-und-rWBiNMlKdaVU0t", url: URL(string: "https://heresay-sibhi-42b1.web.app")!)
+    }
+
     var body: some Scene {
         WindowGroup {
-            SqueakRootView()
+            // Tell people once where Report is, when they reach the session list (never over pairing).
+            SqueakRootView(onMainScreen: { Heresay.introduce() })
                 .onOpenURL { SqueakRouter.shared.handle($0) }
+                .heresayReportButton()
         }
     }
 }

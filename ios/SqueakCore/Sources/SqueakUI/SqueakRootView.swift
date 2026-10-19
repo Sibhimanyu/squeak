@@ -12,8 +12,12 @@ public struct SqueakRootView: View {
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false
+    private let onMainScreen: (() -> Void)?
 
-    public init() {}
+    /// `onMainScreen` runs when the session list appears (paired, past onboarding).
+    public init(onMainScreen: (() -> Void)? = nil) {
+        self.onMainScreen = onMainScreen
+    }
 
     /// Squeak's duck as a tab-bar glyph (a template image, so the tab bar
     /// tints it), for an app that hosts this view as a tab. Generated from
@@ -21,7 +25,7 @@ public struct SqueakRootView: View {
     public static var tabIcon: Image { Image("squeak-tab-duck", bundle: .module) }
 
     public var body: some View {
-        RootView()
+        RootView(onMainScreen: onMainScreen)
             .environmentObject(model)
             .tint(Theme.done)
             .onAppear { visible = true; update() }
@@ -36,12 +40,13 @@ public struct SqueakRootView: View {
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
+    var onMainScreen: (() -> Void)?
 
     var body: some View {
         switch model.phase {
         case .unpaired: PairView()
         case let .awaitingApproval(code, mac): AwaitingApprovalView(code: code, mac: mac)
-        case .paired: HomeView()
+        case .paired: HomeView().onAppear { onMainScreen?() }
         }
     }
 }
