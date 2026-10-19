@@ -406,6 +406,10 @@ struct Composer: View {
         let text = draft
         // Clear at once and keep the keyboard up; hand the text back if nothing was sent (Face ID declined).
         draft = ""
+        // Again on the next turn of the run loop: tapping Send commits whatever the keyboard
+        // still holds (an autocorrection, an inline prediction, dictation), and that commit
+        // writes the old text back into the field just after the clear above.
+        DispatchQueue.main.async { draft = "" }
         composing.wrappedValue = true
         let wasWorking = working
         Task {

@@ -1,3 +1,4 @@
+import Foundation
 import SqueakIcons
 import SwiftUI
 #if os(macOS)
@@ -22,7 +23,7 @@ public struct MessageText: View {
     public init(markdown: String, style: MessageStyle = .mac) {
         self.markdown = markdown
         self.style = style
-        self.blocks = MessageMarkup.parse(markdown)
+        self.blocks = ParseCache.blocks(markdown)
         var lines = 1
         for b in markdown.utf8 where b == 10 { lines += 1 }
         self.isLong = lines > style.collapseLines
@@ -70,6 +71,23 @@ public struct MessageText: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
+    }
+}
+
+/// Parsed messages by their text. A chat view is rebuilt on every change the phone or Mac
+/// publishes (a send, each streamed step, every poll), and parsing a long message each
+/// time is what made the iPhone stutter right after you sent something.
+private enum ParseCache {
+    final class Entry { let blocks: [MessageMarkup.Block]; init(_ b: [MessageMarkup.Block]) { blocks = b } }
+    // NSCache is thread-safe and evicts under memory pressure.
+    nonisolated(unsafe) static let cache: NSCache<NSString, Entry> = { let c = NSCache<NSString, Entry>(); c.countLimit = 64; return c }()
+
+    static func blocks(_ markdown: String) -> [MessageMarkup.Block] {
+        let key = markdown as NSString
+        if let hit = cache.object(forKey: key) { return hit.blocks }
+        let blocks = MessageMarkup.parse(markdown)
+        cache.setObject(Entry(blocks), forKey: key)
+        return blocks
     }
 }
 
