@@ -9,6 +9,7 @@ import { CliqRelayInbox } from "../cliq/inbox.js";
 import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { CLAUDE_PROBE_SCHEMA, CLAUDE_PROBE_SYSTEM, ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
+import { Caffeinator } from "../fleet/caffeinate.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { readActivity } from "../fleet/activity.js";
@@ -95,6 +96,9 @@ export class SqueakApp {
   /** Claude's plan limits, as the assistant's own `claude` runs last reported them. */
   private readonly claudeLimits: ClaudeLimitsStore;
   private readonly claudeRefresher: ClaudeLimitsRefresher;
+  /** Keeps the Mac awake while an agent works (SQUEAK_CAFFEINATE=off: never). */
+  private readonly caffeinator = new Caffeinator();
+  private unwatchCaffeinate: (() => void) | null = null;
   private lastUpdateId = 0;
   private stopped = false;
 
@@ -263,6 +267,9 @@ export class SqueakApp {
   async start(): Promise<void> {
     // Before the controller, which starts the monitor: the first push must reach Cliq too.
     this.cliq?.start();
+    if (this.config.caffeinate) {
+      this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
+    }
     await this.controller.start();
     this.conductorRelay.start();
     this.remote?.start();
@@ -311,6 +318,8 @@ export class SqueakApp {
       return;
     }
     this.stopped = true;
+    this.unwatchCaffeinate?.();
+    this.caffeinator.stop();
     this.remote?.stop();
     this.cliq?.stop();
     await this.conductorRelay.stop().catch(() => undefined);

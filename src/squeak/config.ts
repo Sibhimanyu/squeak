@@ -73,6 +73,8 @@ const schema = z.object({
    * the snapshot. On by default; the phone's switch is off by default.
    */
   SQUEAK_REMOTE_VERBOSE: z.string().optional(),
+  /** "off": let the Mac sleep even while agents work. On by default (fleet/caffeinate.ts). */
+  SQUEAK_CAFFEINATE: z.string().optional(),
   /**
    * A Zoho Cliq incoming-webhook URL (a bot's or a channel's, with its
    * zapikey). Set: push cards go to Cliq too. One-way; see src/cliq/.
@@ -116,6 +118,8 @@ export interface SqueakConfig {
   remoteDatabaseUrl: string | null;
   /** Whether a phone may ask for a session's whole turn (live-turn.ts). */
   remoteVerbose: boolean;
+  /** Keep the Mac awake while an agent works. */
+  caffeinate: boolean;
   cliqWebhookUrl: string | null;
   /** Null unless every two-way setting is present. */
   cliqTwoWay: {
@@ -186,6 +190,7 @@ export function loadSqueakConfig(): SqueakConfig {
     remoteProjectId: parsed.SQUEAK_REMOTE_PROJECT?.trim() || null,
     remoteDatabaseUrl: databaseUrl(parsed.SQUEAK_REMOTE_DATABASE_URL),
     remoteVerbose: parsed.SQUEAK_REMOTE_VERBOSE?.trim().toLowerCase() !== "off",
+    caffeinate: parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() !== "off",
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
     cliqTwoWay: cliqTwoWay(parsed),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
