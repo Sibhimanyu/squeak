@@ -49,7 +49,7 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
       entry, or it leaving Conductor's queue), not when the Mac received it.
 - [x] **2. Stop while working.** A Stop control beside Send on a working chat,
       through the relay's `…/sessions/:sid/stop`, signed like every command.
-- [ ] **3. Keep my place.** Drafts survive leaving a chat; reopening returns to
+- [x] **3. Keep my place.** Drafts survive leaving a chat; reopening returns to
       where you were reading; a "↓ New" pill when something arrives above the fold.
 - [ ] **4. The last 3–4 exchanges in a chat** (also under "iPhone UI ideas" above).
 - [ ] **5. What changed on a finished turn.** "3 files · +84/−12" under the reply,

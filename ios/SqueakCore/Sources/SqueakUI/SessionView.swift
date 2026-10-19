@@ -16,11 +16,21 @@ struct SessionView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let key: String
-    @State private var draft: String = {
+    @State private var draft: String
+    /// The row at the top of the screen, while you read above the end.
+    @State private var topRow: String?
+    /// Something arrived below while you were reading further up.
+    @State private var newBelow = false
+
+    init(key: String) {
+        self.key = key
         let args = ProcessInfo.processInfo.arguments
-        if args.contains("-squeak-demo"), let i = args.firstIndex(of: "-squeak-draft"), i + 1 < args.count { return args[i + 1] }
-        return ""
-    }()
+        if args.contains("-squeak-demo"), let i = args.firstIndex(of: "-squeak-draft"), i + 1 < args.count {
+            _draft = State(initialValue: args[i + 1])
+        } else {
+            _draft = State(initialValue: ReadingPlace.draft(for: key))
+        }
+    }
     @FocusState private var composing: Bool
     /// The working row's steps, open or closed. Closed by default, like a chat app's "Thinking…"
     /// line, verbose or not, and closed again on every send; `-squeak-tab activity` opens it for
@@ -36,6 +46,7 @@ struct SessionView: View {
     private var session: PhoneSnapshot.Session? { model.snapshot?.session(key) }
 
     @Environment(\.squeakScreen) private var screen
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -78,26 +89,60 @@ struct SessionView: View {
                     .onAppear { atEnd = true }
                     .onDisappear { atEnd = false }
             }
-            .modifier(StickToBottom())
+            .scrollPosition(id: $topRow, anchor: .top)
+            .modifier(StickToBottom(following: atEnd))
             .scrollDismissesKeyboard(.interactively)
-            // Open at the newest message, after the first layout (markdown sizes itself late).
+            // Open where you were reading, or at the newest message; after the first layout too
+            // (markdown sizes itself late).
             .onAppear {
-                proxy.scrollTo(Self.end, anchor: .bottom)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { proxy.scrollTo(Self.end, anchor: .bottom) }
+                let place = ReadingPlace.row(for: key).flatMap { saved in rows.contains { $0.id == saved } ? saved : nil }
+                let go = { if let place { proxy.scrollTo(place, anchor: .top) } else { proxy.scrollTo(Self.end, anchor: .bottom) } }
+                go()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: go)
             }
+            .onDisappear { ReadingPlace.save(row: atEnd ? nil : topRow, draft: draft, for: key) }
+            // A draft survives the app being closed from the background, not just going back.
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { ReadingPlace.save(row: atEnd ? nil : topRow, draft: draft, for: key) }
+            }
+            .onChange(of: atEnd) { _, now in if now { newBelow = false } }
             // A new row (a message, a steer, the reply) eases into view; a new step inside the
             // live box just follows, so a busy turn does not run an animation a second.
             .onChange(of: rows.map(\.id)) { _, _ in
-                guard atEnd else { return }
+                guard atEnd else { newBelow = true; return }
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
             }
             .onChange(of: stepCount(rows)) { _, _ in
-                guard atEnd else { return }
+                guard atEnd else { newBelow = true; return }
                 proxy.scrollTo(Self.end, anchor: .bottom)
+            }
+            // Reading further up: what arrived below is one tap away, and nothing moves under you.
+            .overlay(alignment: .bottom) {
+                if newBelow, !atEnd {
+                    Button {
+                        newBelow = false
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Lucide(.chevronDown, size: 14, color: Theme.ink)
+                            Text("New").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
+                        }
+                        .padding(.horizontal, 14).frame(minHeight: 36)
+                        .background(Theme.surfaceRaised, in: Capsule())
+                        .overlay(Capsule().stroke(Theme.line))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 8)
+                    .accessibilityLabel("Jump to the newest message")
+                    .transition(.opacity)
+                }
             }
             // Sending is always a reason to look at the end, and starts a fresh, folded working row.
             .onChange(of: sends.count) { _, _ in
                 stepsOpen = false
+                ReadingPlace.save(row: nil, draft: draft, for: key)
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
             }
         }
@@ -223,6 +268,8 @@ private struct ChatRows: View {
                 QuestionCard(question: question, agentName: agentName, session: session)
             }
         }
+        // Each row is a scroll target, so the chat knows which one you were reading.
+        .scrollTargetLayout()
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: rows.map(\.id))
     }
 }
@@ -345,7 +392,7 @@ private struct LiveBox: View {
                         .lineLimit(1).truncationMode(.tail)
                 }
                 .id(first + offset)
-                .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, minHeight: CGFloat(WorkingRow.boxLines) * 20, alignment: .bottomLeading)
@@ -891,9 +938,13 @@ private struct SendFace: ViewModifier {
 
 /// Keeps the newest content in view as it grows (iOS 18); earlier, the view just grows downward.
 private struct StickToBottom: ViewModifier {
+    /// At the end: growth keeps the newest in view. Reading further up: growth below leaves the
+    /// text you are reading where it is (a bottom anchor would slide it up as each step arrived).
+    let following: Bool
+
     func body(content: Content) -> some View {
         if #available(iOS 18, *) {
-            content.defaultScrollAnchor(.bottom, for: .initialOffset).defaultScrollAnchor(.bottom, for: .sizeChanges)
+            content.defaultScrollAnchor(.bottom, for: .initialOffset).defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
         } else {
             content
         }
@@ -1000,6 +1051,28 @@ struct StepList: View {
         case "you": return "You"
         default: return "Background worker"
         }
+    }
+}
+
+/// Where you were in each chat, and what you had typed: kept when you go back to the list, and the
+/// drafts across launches. Local to this phone; nothing here is sent anywhere.
+@MainActor
+enum ReadingPlace {
+    private static var rows: [String: String] = [:]
+    private static let draftsKey = "squeak.drafts"
+
+    static func row(for key: String) -> String? { rows[key] }
+
+    static func draft(for key: String) -> String {
+        (UserDefaults.standard.dictionary(forKey: draftsKey) as? [String: String])?[key] ?? ""
+    }
+
+    static func save(row: String?, draft: String, for key: String) {
+        rows[key] = row
+        var drafts = (UserDefaults.standard.dictionary(forKey: draftsKey) as? [String: String]) ?? [:]
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { drafts[key] = nil } else { drafts[key] = draft }
+        UserDefaults.standard.set(drafts, forKey: draftsKey)
     }
 }
 
