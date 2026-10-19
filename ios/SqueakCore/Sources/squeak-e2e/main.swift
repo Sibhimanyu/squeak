@@ -36,5 +36,14 @@ let (id, document) = try channel.replyDocument(to: session, text: letter, signer
 try await channel.send(document, id: id)
 print("phone: sent \(letter)")
 let result = try await poll("result") { try await channel.result(for: id) }
-print("phone: mac says \(result.status)\(result.reason.map { " — \($0)" } ?? "")")
-exit(result.sent ? 0 : 1)
+print("phone: mac says \(result.status)\(result.reason.map { " — \($0)" } ?? "") delivery=\(result.delivery ?? "-")")
+guard result.sent else { exit(1) }
+
+// A steered reply: the mode is signed in, the Mac carries it to the replier and reports "steered".
+let (steerId, steerDocument) = try channel.replyDocument(to: session, text: "Use the timer instead", mode: .steer, signer: signer)
+try await channel.send(steerDocument, id: steerId)
+print("phone: sent a steer")
+let steered = try await poll("steer result") { try await channel.result(for: steerId) }
+print("phone: mac says \(steered.status) delivery=\(steered.delivery ?? "-")")
+print("phone: usage claude=\(snapshot.usage?.claude?.fiveHour?.usedPercent.description ?? "-") codex=\(snapshot.usage?.codex == nil ? "-" : "seen")")
+exit(steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42 ? 0 : 1)

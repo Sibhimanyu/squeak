@@ -51,6 +51,20 @@ enum DemoData {
 // MARK: Transcripts for the conversation window
 
 extension DemoData {
+    /// Claude's reading is a few hours old, as it is unless Refresh was pressed; Codex's is live.
+    static func usage(now: Date = Date()) -> UsageSnapshot {
+        UsageSnapshot(
+            claude: ProviderUsage(
+                fiveHour: UsageWindow(usedPercent: 42, resetsAt: now.addingTimeInterval(2 * 3600 + 10 * 60)),
+                longWindow: UsageWindow(usedPercent: 18, resetsAt: now.addingTimeInterval(4 * 86400 + 5 * 3600)),
+                observedAt: now.addingTimeInterval(-3 * 3600)),
+            codex: ProviderUsage(
+                fiveHour: UsageWindow(usedPercent: 9, resetsAt: now.addingTimeInterval(3 * 3600 + 40 * 60)),
+                longWindow: UsageWindow(usedPercent: 31, resetsAt: now.addingTimeInterval(5 * 86400)),
+                observedAt: now.addingTimeInterval(-30)),
+            todayCostUsd: 14.62, todayCostSessions: 6)
+    }
+
     static func transcript(for key: SessionKey, now: Date = Date()) -> [ChatMessage] {
         func at(_ h: Int, _ m: Int) -> Date {
             Calendar.current.date(bySettingHour: h, minute: m, second: 0, of: now) ?? now
@@ -69,8 +83,8 @@ extension DemoData {
             return [
                 m("1", .user, "Why does bold text show up as literal asterisks in Telegram?", at(10, 2), state: .confirmed),
                 m("2", .assistant, "The splitter cuts messages inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. I can fix the splitter and keep the fallback.", at(10, 9)),
-                m("3", .user, "Fix the splitter, and make sure tables still render.", at(10, 12), state: .accepted(via: "conductor")),
-                m("4", .user, "Also keep the plain-text fallback for anything it still can't parse.", at(10, 14), state: .accepted(via: "conductor")),
+                m("3", .user, "Fix the splitter, and make sure tables still render.", at(10, 12), state: .accepted(via: "conductor", delivery: .steered)),
+                m("4", .user, "Also keep the plain-text fallback for anything it still can't parse.", at(10, 14), state: .accepted(via: "conductor", delivery: .queued)),
             ]
         }
         if key.hostSessionId == "demo-6" {

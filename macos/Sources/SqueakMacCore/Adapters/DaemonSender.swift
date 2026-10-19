@@ -42,4 +42,8 @@ public final class DaemonSender: ConductorSender, @unchecked Sendable {
     public func send(workspaceId: String, sessionId: String, text: String) async -> SendResult {
         await client.reply(replyTarget: sessionId, text: text)
     }
+
+    public func send(workspaceId: String, sessionId: String, text: String, mode: SendMode) async -> SendResult {
+        await client.reply(replyTarget: sessionId, text: text, mode: mode)
+    }
 }

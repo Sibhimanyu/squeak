@@ -141,29 +141,34 @@ final class AppModel: ObservableObject {
 
     /* ---------- replying ---------- */
 
-    /// Sends a reply. The message is on screen at once as "Sending…" and settles to one of the delivery
+    /// Sends a reply. `mode` only matters while the agent is mid-turn: queue waits for the turn to end,
+    /// steer goes into it. The message is on screen at once as "Sending…" and settles to one of the delivery
     /// lines (`ChatSend.Status.line`). Returns false when nothing was sent (empty, or Face ID declined),
     /// so the composer can give the text back.
     @discardableResult
-    func send(_ text: String, to session: PhoneSnapshot.Session) async -> Bool {
+    func send(_ text: String, to session: PhoneSnapshot.Session, mode: ReplyMode = .queue) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         guard await confirmWithBiometrics(reason: "Send to \(session.label)") else { return false }
+        // Mode only means something mid-turn; an idle chat is simply sent.
+        let mode: ReplyMode = session.state == "working" ? mode : .queue
         let sentId = begin(trimmed, for: session)
+        let agent = Presentation.agentName(session.agent)
         if demo {
             try? await Task.sleep(for: .seconds(1))
-            finish(sentId, .sent, for: session)
+            let working = session.state == "working"
+            finish(sentId, !working ? .sent : mode == .steer ? .steered : .queued(agent: agent, steerUnavailable: false), for: session)
             return true
         }
         guard let channel else { finish(sentId, .refused("not connected to your Mac."), for: session); return true }
         do {
-            let (id, document) = try channel.replyDocument(to: session, text: trimmed, signer: signer)
+            let (id, document) = try channel.replyDocument(to: session, text: trimmed, mode: mode, signer: signer)
             try await channel.send(document, id: id)
             // The Mac answers within a few seconds while this app is open.
             for _ in 0..<40 {
                 try await Task.sleep(for: .milliseconds(750))
                 if let result = try await channel.result(for: id) {
-                    finish(sentId, result.sent ? .sent : .refused(result.reason ?? "your Mac refused that reply."), for: session)
+                    finish(sentId, result.sent ? .delivered(result, agent: agent) : .refused(result.reason ?? "your Mac refused that reply."), for: session)
                     return true
                 }
             }

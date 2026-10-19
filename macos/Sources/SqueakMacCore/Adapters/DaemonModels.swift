@@ -39,11 +39,13 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
     public var conductorWorkspaceId: String?
     public var replyTarget: String?
     public var distinctTitle: String?
+    /// The estimated cost of the whole session so far, when the model is priced.
+    public var costUsd: Double?
 
     enum CodingKeys: String, CodingKey {
         case key, agent, origin, originLabel, source, state, title, repoName, branch, cwd
         case lastActivityAt, contextPercent, alive, conductorSessionId, conductorWorkspaceId
-        case replyTarget, distinctTitle
+        case replyTarget, distinctTitle, costUsd
     }
 
     public init(from decoder: Decoder) throws {
@@ -69,16 +71,63 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
         conductorWorkspaceId = c.lenient(String.self, .conductorWorkspaceId)
         replyTarget = c.lenient(String.self, .replyTarget)
         distinctTitle = c.lenient(String.self, .distinctTitle)
+        costUsd = c.lenient(Double.self, .costUsd)
     }
 
     public init(key: String) { self.key = key }
 }
 
+/// Claude Code's plan limits as `/state` reports them (`claudeLimits`).
+struct DaemonClaudeLimits: Decodable, Equatable {
+    struct Window: Decodable, Equatable {
+        var utilization: Double
+        var resetsAt: String
+    }
+    var fiveHour: Window?
+    var sevenDay: Window?
+    var observedAt: String?
+
+    var usage: ProviderUsage {
+        func window(_ w: Window?) -> UsageWindow? {
+            w.map { UsageWindow(usedPercent: min(max($0.utilization, 0), 1) * 100, resetsAt: DaemonDate.parse($0.resetsAt)) }
+        }
+        return ProviderUsage(fiveHour: window(fiveHour), longWindow: window(sevenDay), observedAt: observedAt.flatMap(DaemonDate.parse))
+    }
+}
+
+/// Codex's account quota as `/state` reports it (`codexUsage`).
+struct DaemonCodexUsage: Decodable, Equatable {
+    struct Window: Decodable, Equatable {
+        var usedPercent: Double
+        var resetsAt: String
+    }
+    var primary: Window?
+    var secondary: Window?
+    var observedAt: String?
+
+    var usage: ProviderUsage {
+        func window(_ w: Window?) -> UsageWindow? {
+            w.map { UsageWindow(usedPercent: min(max($0.usedPercent, 0), 100), resetsAt: DaemonDate.parse($0.resetsAt)) }
+        }
+        return ProviderUsage(fiveHour: window(primary), longWindow: window(secondary), observedAt: observedAt.flatMap(DaemonDate.parse))
+    }
+}
+
 public struct DaemonState: Decodable, Sendable, Equatable {
     public var generatedAt: Date?
     public var sessions: [DaemonSession]
+    public var claudeUsage: ProviderUsage?
+    public var codexUsage: ProviderUsage?
 
-    enum CodingKeys: String, CodingKey { case generatedAt, active, others }
+    enum CodingKeys: String, CodingKey { case generatedAt, active, others, claudeLimits, codexUsage }
+
+    /// Both readings and today's estimated cost, for the usage screens.
+    public func usage(now: Date = Date(), calendar: Calendar = .current) -> UsageSnapshot {
+        let cost = UsageFormat.cost(of: sessions.map { ($0.lastActivityAt, $0.costUsd) }, now: now, calendar: calendar)
+        return UsageSnapshot(
+            claude: claudeUsage, codex: codexUsage,
+            todayCostUsd: cost.sessions > 0 ? cost.usd : nil, todayCostSessions: cost.sessions)
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -88,11 +137,15 @@ public struct DaemonState: Decodable, Sendable, Equatable {
         var seen = Set<String>()
         // A session can be listed once; first listing (active) wins.
         sessions = (active + others).filter { !$0.key.isEmpty && seen.insert($0.key).inserted }
+        claudeUsage = c.lenient(DaemonClaudeLimits.self, .claudeLimits)?.usage
+        codexUsage = c.lenient(DaemonCodexUsage.self, .codexUsage)?.usage
     }
 
-    public init(generatedAt: Date? = nil, sessions: [DaemonSession]) {
+    public init(generatedAt: Date? = nil, sessions: [DaemonSession], claudeUsage: ProviderUsage? = nil, codexUsage: ProviderUsage? = nil) {
         self.generatedAt = generatedAt
         self.sessions = sessions
+        self.claudeUsage = claudeUsage
+        self.codexUsage = codexUsage
     }
 }
 
@@ -166,17 +219,36 @@ public struct DaemonActivity: Decodable, Sendable, Equatable {
     }
 }
 
+struct DaemonClaudeRefreshBody: Decodable {
+    var claudeLimits: DaemonClaudeLimits?
+    var throttled: Bool?
+    var refreshed: Bool?
+    var error: String?
+    enum CodingKeys: String, CodingKey { case claudeLimits, throttled, refreshed, error }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        claudeLimits = c.lenient(DaemonClaudeLimits.self, .claudeLimits)
+        throttled = c.lenient(Bool.self, .throttled)
+        refreshed = c.lenient(Bool.self, .refreshed)
+        error = c.lenient(String.self, .error)
+    }
+}
+
 struct DaemonReplyBody: Decodable {
     var status: String?
     var via: String?
     var reason: String?
     var fallbackReason: String?
-    enum CodingKeys: String, CodingKey { case status, via, reason, fallbackReason }
+    var delivery: String?
+    var note: String?
+    enum CodingKeys: String, CodingKey { case status, via, reason, fallbackReason, delivery, note }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         status = c.lenient(String.self, .status)
         via = c.lenient(String.self, .via)
         reason = c.lenient(String.self, .reason)
         fallbackReason = c.lenient(String.self, .fallbackReason)
+        delivery = c.lenient(String.self, .delivery)
+        note = c.lenient(String.self, .note)
     }
 }

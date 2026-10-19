@@ -17,7 +17,7 @@ const project = process.argv[2] ?? "squeak-5c9gvo";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-e2e-"));
 const codeFile = path.join(dir, "phone-code");
 const phoneBin = path.resolve("ios/SqueakCore/.build/release/squeak-e2e");
-const sends: Array<[string, string]> = [];
+const sends: Array<[string, string, string | undefined]> = [];
 
 const session = {
   key: "claude-transcript:e2e",
@@ -52,11 +52,16 @@ const bridge = new RemoteBridge({
   replier: {
     lastTurnText: () => "**D1 — Arm it?**\n\n**A) Now.** a\n**B) Later.** b\n**C) Never.** c",
     lastTurnId: () => "turn-1",
-    send: async (id, text) => {
-      sends.push([id, text]);
-      return { status: "started", via: "conductor" };
+    send: async (id, text, _onFailed, options) => {
+      sends.push([id, text, options?.mode]);
+      return { status: "started", via: "conductor", delivery: options?.mode === "steer" ? "steered" : "sent" };
     },
   },
+  claudeLimits: () => ({
+    fiveHour: { utilization: 0.42, resetsAt: new Date(Date.now() + 2 * 3600_000).toISOString() },
+    sevenDay: null,
+    observedAt: new Date().toISOString(),
+  }),
   snapshot: () =>
     ({
       sessions: [session],
@@ -114,6 +119,11 @@ for (const kind of ["state", "pairing", "commands", "results"]) {
     await store.delete(`channels/${channelId}/${kind}/${id}`);
   }
 }
-const ok = result.code === 0 && sends.length === 1 && sends[0]![1] === "B";
+const ok =
+  result.code === 0 &&
+  sends.length === 2 &&
+  sends[0]![1] === "B" &&
+  sends[0]![2] === "queue" &&
+  sends[1]![2] === "steer";
 console.log(ok ? "E2E PASS" : "E2E FAIL");
 process.exit(ok ? 0 : 1);

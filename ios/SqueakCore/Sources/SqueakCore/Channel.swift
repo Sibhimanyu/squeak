@@ -48,6 +48,7 @@ public struct Channel: Sendable {
     public func replyDocument(
         to session: PhoneSnapshot.Session,
         text: String,
+        mode: ReplyMode = .queue,
         signer: CommandSigner,
         now: Date = Date()
     ) throws -> (id: String, document: ChannelDocument) {
@@ -59,6 +60,8 @@ public struct Channel: Sendable {
             sessionId: sessionId,
             answersTurn: session.turnId,
             text: text,
+            // A queued reply carries no mode at all, byte-identical to before.
+            mode: mode == .steer ? .steer : nil,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

@@ -9,8 +9,10 @@ import { parseChoices } from "../fleet/choices.js";
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import { describeGitState } from "../fleet/git-state.js";
 import { chatTitle, distinctTitles, sessionLabel } from "../fleet/radar.js";
-import type { ReplyOutcome } from "../fleet/session-reply.js";
+import type { ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/session-reply.js";
+import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
+import type { CodexUsage } from "../fleet/codex-usage.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { ChannelDoc } from "./firestore-rest.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
@@ -57,6 +59,11 @@ export interface RemoteCommand {
   /** The turn the phone was looking at; refused if the chat has moved on. */
   answersTurn: string | null;
   text: string;
+  /**
+   * Optional, signed with the rest. Absent means queue. Steer is still a plain
+   * reply: it only changes where Conductor puts it when the agent is mid-turn.
+   */
+  mode?: ReplyMode;
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
@@ -79,7 +86,12 @@ export interface ChannelStore {
 export interface RemoteReplier {
   lastTurnText(sessionId: string): string | null;
   lastTurnId(sessionId: string): string | null;
-  send(sessionId: string, text: string, onFailed: (message: string) => void): Promise<ReplyOutcome>;
+  send(
+    sessionId: string,
+    text: string,
+    onFailed: (message: string) => void,
+    options?: ReplyOptions,
+  ): Promise<ReplyOutcome>;
 }
 
 export interface RemoteBridgeDependencies {
@@ -94,6 +106,8 @@ export interface RemoteBridgeDependencies {
    * phone shows only the last message, as before.
    */
   activity?: ((session: FleetSession) => Activity | null) | null;
+  /** Claude's last plan-limit reading, for the read-only usage view on the phone. */
+  claudeLimits?: (() => ClaudeLimits | null) | null;
   now?: () => number;
   macName?: string;
 }
@@ -395,6 +409,9 @@ export class RemoteBridge {
     if (command.v !== 1 || typeof command.sessionId !== "string" || typeof command.text !== "string") {
       return refuse("Not a reply this Mac understands.");
     }
+    if (command.mode !== undefined && command.mode !== "queue" && command.mode !== "steer") {
+      return refuse("Not a reply this Mac understands.");
+    }
     const text = command.text.trim();
     if (!text || text.length > 20_000) {
       return refuse("There is nothing to send.");
@@ -407,9 +424,14 @@ export class RemoteBridge {
     }
 
     // 5. The same busy rules as Telegram and the Mac window.
-    const outcome = await this.deps.replier.send(command.sessionId, text, (message) => {
-      this.log(device.name, "refused", `the reply failed: ${message}`);
-    });
+    const outcome = await this.deps.replier.send(
+      command.sessionId,
+      text,
+      (message) => {
+        this.log(device.name, "refused", `the reply failed: ${message}`);
+      },
+      { mode: command.mode ?? "queue" },
+    );
     if (outcome.status === "refused") {
       this.log(device.name, "refused", outcome.reason);
       return { write: true, result: { id, status: "refused", reason: outcome.reason } };
@@ -422,6 +444,8 @@ export class RemoteBridge {
         status: "sent",
         via: outcome.via,
         ...(outcome.via === "background" ? { fallbackReason: outcome.fallbackReason } : {}),
+        ...(outcome.delivery ? { delivery: outcome.delivery } : {}),
+        ...(outcome.note ? { note: outcome.note } : {}),
       },
     };
   }
@@ -441,7 +465,12 @@ export class RemoteBridge {
       return;
     }
     const view = this.phoneView();
-    const serialized = JSON.stringify(view.sessions) + JSON.stringify(view.duck);
+    // Readings' ages are drawn on the phone from observedAt, so an unchanged
+    // reading must not republish the snapshot just because it was re-read.
+    const serialized =
+      JSON.stringify(view.sessions) +
+      JSON.stringify(view.duck) +
+      JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     if (serialized === this.lastPublished) {
       return;
     }
@@ -463,6 +492,8 @@ export class RemoteBridge {
       mac: this.macName(),
       generatedAt: new Date(this.now()).toISOString(),
       duck: { blockedCount: blocked, workingCount: working },
+      // Read-only. Refreshing Claude's reading is a Mac action; commands are plain replies only.
+      usage: phoneUsage(snapshot.codexUsage, this.deps.claudeLimits?.() ?? null),
       sessions: snapshot.active.map((session) => {
         const conductorSessionId = session.conductorSessionId;
         const title = titles.get(session.key);
@@ -572,6 +603,37 @@ export class RemoteBridge {
   private macName(): string {
     return this.deps.macName ?? os.hostname().replace(/\.local$/, "");
   }
+}
+
+/** One plan window as the phone draws it: percent used (0-100) and when it resets. */
+interface PhoneUsageWindow {
+  usedPercent: number;
+  resetsAt: string;
+}
+
+/** Both agents' readings in one shape, each with when it was observed. */
+export interface PhoneUsage {
+  claude: { fiveHour: PhoneUsageWindow | null; sevenDay: PhoneUsageWindow | null; observedAt: string } | null;
+  codex: { fiveHour: PhoneUsageWindow | null; weekly: PhoneUsageWindow | null; observedAt: string } | null;
+}
+
+export function phoneUsage(codex: CodexUsage | null, claude: ClaudeLimits | null): PhoneUsage {
+  const claudeWindow = (window: ClaudeLimits["fiveHour"]): PhoneUsageWindow | null =>
+    window ? { usedPercent: Math.round(window.utilization * 1000) / 10, resetsAt: window.resetsAt } : null;
+  const codexWindow = (window: CodexUsage["primary"]): PhoneUsageWindow | null =>
+    window ? { usedPercent: Math.round(window.usedPercent * 10) / 10, resetsAt: window.resetsAt } : null;
+  return {
+    claude: claude
+      ? {
+          fiveHour: claudeWindow(claude.fiveHour),
+          sevenDay: claudeWindow(claude.sevenDay),
+          observedAt: claude.observedAt,
+        }
+      : null,
+    codex: codex
+      ? { fiveHour: codexWindow(codex.primary), weekly: codexWindow(codex.secondary), observedAt: codex.observedAt }
+      : null,
+  };
 }
 
 /** What the phone gets of a turn: no timestamps, fewer and shorter steps. */

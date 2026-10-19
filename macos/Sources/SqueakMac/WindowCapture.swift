@@ -35,6 +35,10 @@ extension CaptureRunner {
         model.select(SessionKey(provider: "conductor", hostSessionId: "demo-6"))
         try? await Task.sleep(for: .milliseconds(1200))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-message.png")
+        // The Usage screen: its sidebar item selected, the fuller view in the detail column.
+        model.navFilter = .usage
+        try? await Task.sleep(for: .milliseconds(1200))
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-usage.png")
         win.orderOut(nil)
     }
 

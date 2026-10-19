@@ -19,8 +19,8 @@ function harness(sessions: FleetSession[], terminalAnswers = true) {
   const conductor = {
     lastTurnText: (id: string) => `conductor text for ${id}`,
     transcript: () => ({ messages: [], complete: true }),
-    send: async (id: string, text: string): Promise<ReplyOutcome> => {
-      calls.push(`conductor ${id} ${text}`);
+    send: async (id: string, text: string, _onFailed: unknown, options?: { mode?: string }): Promise<ReplyOutcome> => {
+      calls.push(`conductor ${id} ${text}${options?.mode ? ` [${options.mode}]` : ""}`);
       return { status: "started", via: "conductor" };
     },
   };
@@ -55,6 +55,7 @@ describe("FleetReplyRouter", () => {
     expect(await router.send("claude-transcript:t1", "yes", () => undefined)).toEqual({
       status: "started",
       via: "terminal",
+      delivery: "sent",
     });
     expect(calls).toEqual(["terminal claude-transcript:t1 yes"]);
     expect(router.lastTurnText("claude-transcript:t1")).toBe("terminal text for claude-transcript:t1");
@@ -72,5 +73,20 @@ describe("FleetReplyRouter", () => {
     expect((await router.send("claude-transcript:t1", "x", () => undefined)).status).toBe("refused");
     expect(router.lastTurnText("claude-transcript:t1")).toBeNull();
     expect(calls).toEqual([]);
+  });
+});
+
+describe("FleetReplyRouter modes", () => {
+  it("hands the mode to Conductor's replier", async () => {
+    const { router, calls } = harness([]);
+    await router.send("c1", "go", () => undefined, { mode: "steer" });
+    expect(calls).toEqual(["conductor c1 go [steer]"]);
+  });
+
+  it("tells the truth when a terminal agent was asked to steer", async () => {
+    const { router } = harness([session({})]);
+    const outcome = await router.send("claude-transcript:t1", "go", () => undefined, { mode: "steer" });
+    expect(outcome).toMatchObject({ status: "started", via: "terminal", delivery: "sent" });
+    expect(outcome.status === "started" && outcome.note).toMatch(/queued instead|Steer/);
   });
 });

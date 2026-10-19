@@ -79,4 +79,22 @@ struct DeliveryLineTests {
         #expect(MessageState.notSent(reason: "offline").deliveryLine == "Not sent: offline")
         #expect(MessageState.draft.deliveryLine == nil)
     }
+
+    @Test func queuedAndSteeredSayWhatHappened() {
+        let queued = MessageState.accepted(via: "conductor", delivery: .queued)
+        #expect(queued.deliveryLine(agent: "Claude") == "Queued · Claude reads it after this turn")
+        let fallback = MessageState.accepted(via: "conductor", delivery: .queued, note: "Steer needs Conductor's relay")
+        #expect(fallback.deliveryLine(agent: "Claude") == "Queued · Claude reads it after this turn (steering isn't available here)")
+        #expect(MessageState.accepted(via: "conductor", delivery: .steered).deliveryLine(agent: "Claude") == "Steered into the current turn")
+        #expect(MessageState.accepted(via: "conductor", delivery: .sent).deliveryLine(agent: "Claude") == "Sent")
+    }
+
+    @Test func aQueuedLineSurvivesConfirmationOnlyWhileTheAgentIsStillOnThatTurn() {
+        var m = ChatMessage(id: "1", role: .user, text: "next", state: .confirmed)
+        m.delivery = .queued
+        #expect(m.deliveryLine(agent: "Claude", agentWorking: true) == "Queued · Claude reads it after this turn")
+        #expect(m.deliveryLine(agent: "Claude", agentWorking: false) == "Sent")
+        m.delivery = .steered
+        #expect(m.deliveryLine(agent: "Claude", agentWorking: false) == "Steered into the current turn")
+    }
 }

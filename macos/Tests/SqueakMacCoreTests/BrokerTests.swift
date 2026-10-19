@@ -108,6 +108,19 @@ struct BrokerTests {
         #expect(shown.count == 1 && shown[0].text == "hello" && shown[0].state == .accepted(via: "conductor"))
     }
 
+    @Test func theModeReachesTheAdapterAndTheDeliverySurvivesConfirmation() async {
+        let s = makeSession("c1")
+        let a = FakeAdapter(sessions: [s])
+        await a.setSendResult(.accepted(via: "conductor", delivery: .queued))
+        let broker = make([a])
+        await broker.refresh()
+        await broker.setFocused(s.key)
+        _ = await broker.send("next", to: s.key, mode: .steer)
+        #expect(await a.sentModes == [.steer])
+        let shown = await broker.messages(for: s.key)
+        #expect(shown[0].state == .accepted(via: "conductor", delivery: .queued))
+    }
+
     @Test func refusedKeepsDraftForUserToEditAndRetry() async {
         let s = makeSession("c1")
         let a = FakeAdapter(sessions: [s])

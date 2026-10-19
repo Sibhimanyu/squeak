@@ -13,6 +13,8 @@ enum SessionFilter: Hashable {
 enum NavFilter: Hashable {
     case all, needsYou, working, done
     case source(SessionSource)
+    /// Not a list of sessions: opens the usage view in the detail column.
+    case usage
 }
 
 /// The UI's single source of truth. The Broker (an actor) owns the data; this
@@ -63,7 +65,10 @@ final class AppModel {
     // MARK: Browsing
     var query = ""
     var filter: SessionFilter = .all
-    var navFilter: NavFilter? = .all
+    var navFilter: NavFilter? = .all {
+        // Usage is a screen of its own, so no chat stays open behind it; picking a chat leaves it.
+        didSet { if navFilter == .usage, selected != nil { select(nil) } }
+    }
     /// A short live phrase per working session ("Running tests"), for the list rows.
     private(set) var liveSteps: [SessionKey: String] = [:]
     private(set) var pinned: Set<SessionKey>
@@ -184,6 +189,7 @@ final class AppModel {
         tokenPresent = true
         hasLoaded = true
         firstConnectionSeen = true
+        usage = DemoData.usage()
         Task { await refreshLiveSteps() }
     }
 
@@ -235,6 +241,7 @@ final class AppModel {
             case .working: return SessionGrouping.kind(of: s, now: now) == .working
             case .done: return SessionGrouping.kind(of: s, now: now) == .done
             case .source(let src): return s.source == src
+            case .usage: return true
             }
         }
     }
@@ -248,6 +255,7 @@ final class AppModel {
         case .working: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .working }.count
         case .done: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .done }.count
         case .source(let src): return sessions.filter { $0.source == src }.count
+        case .usage: return 0
         }
     }
 
@@ -351,6 +359,7 @@ final class AppModel {
     // MARK: Selection
 
     func select(_ key: SessionKey?) {
+        if key != nil, navFilter == .usage { navFilter = .all }
         guard key != selected else { return }
         if let old = selected { saveDraftNow(draft, for: old) }
         selected = key
@@ -387,6 +396,61 @@ final class AppModel {
 
     func recheck() { Task { await broker.refresh() } }
 
+    // MARK: Usage
+
+    /// Both readings, from /state; the cost is the sum of today's sessions. Nil until first read.
+    private(set) var usage: UsageSnapshot?
+    private(set) var claudeRefreshing = false
+    /// Why the last Refresh did not produce a new reading, in plain words; nil otherwise.
+    private(set) var claudeRefreshNote: String?
+    @ObservationIgnored private var claudeRefreshedAt: Date?
+
+    func readUsage() async {
+        if demoMode { usage = DemoData.usage(); return }
+        guard let state = try? await client.state() else { return }
+        let next = state.usage()
+        if next != usage { usage = next }
+    }
+
+    /// Re-reads while a usage view is on screen. Codex's reading is live; Claude's changes only
+    /// when Refresh is pressed (or Squeak's own chat asks a question).
+    func pollUsage() async {
+        while !Task.isCancelled {
+            await readUsage()
+            try? await Task.sleep(for: .seconds(15))
+        }
+    }
+
+    /// Takes one fresh Claude reading. Only ever called from the user pressing Refresh: it makes a
+    /// real, tiny Claude call, so it never runs on a timer.
+    func refreshClaude() async {
+        guard !claudeRefreshing else { return }
+        claudeRefreshing = true
+        claudeRefreshNote = nil
+        defer { claudeRefreshing = false }
+        if demoMode {
+            try? await Task.sleep(for: .seconds(1))
+            if var u = usage, var c = u.claude { c.observedAt = Date(); u.claude = c; usage = u }
+            return
+        }
+        do {
+            guard let result = try await client.refreshClaudeUsage() else {
+                claudeRefreshNote = "This version of the Squeak service can't refresh Claude's reading. Update it first."
+                return
+            }
+            if var u = usage { u.claude = result.claude ?? u.claude; usage = u } else { await readUsage() }
+            if result.throttled {
+                claudeRefreshNote = "Just refreshed. Squeak asks Claude at most once a minute."
+            } else if !result.refreshed {
+                claudeRefreshNote = result.error ?? "Claude did not report its limits this time."
+            }
+        } catch AdapterError.timedOut {
+            claudeRefreshNote = "Claude took too long to answer."
+        } catch {
+            claudeRefreshNote = "Couldn't reach Squeak to refresh. Check the connection and try again."
+        }
+    }
+
     // MARK: Drafts
 
     func setDraft(_ text: String) {
@@ -406,16 +470,16 @@ final class AppModel {
 
     // MARK: Sending (only ever on an explicit user action)
 
-    func send(_ text: String, to key: SessionKey) async -> SendResult? {
+    func send(_ text: String, to key: SessionKey, mode: SendMode = .queue) async -> SendResult? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         if demoMode { return .notSent(reason: "Demo data: nothing is sent.") }
         lastUsed = key
         defaults.set(key.stringValue, forKey: "lastUsed")
         if key == selected { draftTask?.cancel(); draft = "" }
-        let result = await broker.send(trimmed, to: key)
+        let result = await broker.send(trimmed, to: key, mode: mode)
         switch result {
-        case .accepted(let via): AppLog.info("send accepted via \(via)")
+        case .accepted(let via, let delivery, _): AppLog.info("send accepted via \(via), \(delivery?.rawValue ?? "sent")")
         case .refused: AppLog.info("send refused")
         case .uncertain: AppLog.info("send uncertain")
         case .notSent: AppLog.info("send not sent")

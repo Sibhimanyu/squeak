@@ -10,6 +10,9 @@ final class MacInteropTests: XCTestCase {
         let pairingURL: String
         let snapshotBox: String
         let resultBox: String
+        let queuedBox: String
+        let steeredBox: String
+        let steerFallbackBox: String
         let refusedBox: String
         let pairAnswerBox: String
     }
@@ -70,6 +73,35 @@ final class MacInteropTests: XCTestCase {
         XCTAssertTrue(try ChannelCrypto.open(PairingAnswer.self, box: f.pairAnswerBox, key: key).approved)
     }
 
+    func testDecodesTheMacsUsageReadings() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let usage = try XCTUnwrap(try ChannelCrypto.open(PhoneSnapshot.self, box: f.snapshotBox, key: key).usage)
+        XCTAssertEqual(usage.claude?.fiveHour?.usedPercent, 42)
+        XCTAssertEqual(usage.claude?.sevenDay?.usedPercent, 18)
+        XCTAssertEqual(usage.claude?.observedAt, "2026-09-25T00:00:00.000Z")
+        XCTAssertEqual(usage.codex?.fiveHour?.usedPercent, 9)
+        XCTAssertEqual(usage.codex?.weekly?.usedPercent, 31.4)
+        XCTAssertEqual(usage.codex?.weekly?.resetsAt, "2026-09-30T03:00:00.000Z")
+    }
+
+    func testStillDecodesASnapshotWithoutUsage() throws {
+        let json = #"{"v":1,"mac":"M","generatedAt":"x","duck":{"blockedCount":0,"workingCount":0},"sessions":[]}"#
+        XCTAssertNil(try JSONDecoder().decode(PhoneSnapshot.self, from: Data(json.utf8)).usage)
+    }
+
+    func testDecodesHowAMessageWasDelivered() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        XCTAssertEqual(try ChannelCrypto.open(CommandResult.self, box: f.queuedBox, key: key).delivery, "queued")
+        XCTAssertEqual(try ChannelCrypto.open(CommandResult.self, box: f.steeredBox, key: key).delivery, "steered")
+        let fallback = try ChannelCrypto.open(CommandResult.self, box: f.steerFallbackBox, key: key)
+        XCTAssertEqual(fallback.delivery, "queued")
+        XCTAssertNotNil(fallback.note)
+        // An older Mac says nothing about delivery.
+        XCTAssertNil(try ChannelCrypto.open(CommandResult.self, box: f.resultBox, key: key).delivery)
+    }
+
     func testRejectsThingsThatAreNotPairingCodes() {
         XCTAssertThrowsError(try PairingPayload.parse("https://example.com"))
         XCTAssertThrowsError(try PairingPayload.parse("squeak://pair?d=bm90LWpzb24"))
@@ -111,6 +143,19 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(command.text, "A")
         XCTAssertEqual(command.answersTurn, "t1")
         XCTAssertEqual(command.nonce.count, 32)
+        // A queued reply carries no mode at all, so it is byte-identical to before the field existed.
+        XCTAssertNil(command.mode)
+    }
+
+    func testASteeredReplySignsItsModeIn() throws {
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: Data(repeating: 7, count: 32).base64EncodedString(), n: "Mac")
+        let channel = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())
+        let session = PhoneSnapshot.Session(
+            key: "k", conductorSessionId: "s1", label: "l", agent: "claude", state: "working",
+            lastActivityAt: "", detail: nil, git: nil, contextPercent: nil, turnId: "t1", message: nil, choices: nil
+        )
+        let (_, document) = try channel.replyDocument(to: session, text: "A", mode: .steer, signer: SoftwareSigner())
+        XCTAssertEqual(try ChannelCrypto.open(ReplyCommand.self, box: document.box, key: pairing.k).mode, .steer)
     }
 
     func testAMissingSnapshotIsNilNotAnError() async throws {

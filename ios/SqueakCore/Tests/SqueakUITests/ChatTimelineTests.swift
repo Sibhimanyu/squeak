@@ -97,4 +97,31 @@ final class ChatTimelineTests: XCTestCase {
         let rows = ChatTimeline.rows(session: session("finished", message: "Earlier answer"), remembered: previous, sends: [send(.notConfirmed)], now: now)
         XCTAssertTrue(rows.contains { if case .working = $0 { true } else { false } })
     }
+
+    func testQueuedLineHoldsWhileTheAgentWorksThenReadsSent() {
+        let queued = send(.queued(agent: "Claude", steerUnavailable: false), turn: "t1")
+        let working = ChatTimeline.rows(session: session("working", turn: "t2"), remembered: previous, sends: [queued], now: now)
+        XCTAssertTrue(working.contains(.sent(queued)))
+        let after = ChatTimeline.rows(session: session("finished", turn: "t2", message: "Done"), remembered: previous, sends: [queued], now: now)
+        guard case .sent(let shown)? = after.first(where: { if case .sent = $0 { true } else { false } }) else { return XCTFail("no bubble") }
+        XCTAssertEqual(shown.status, .sent)
+    }
+
+    func testDeliveryLines() {
+        XCTAssertEqual(ChatSend.Status.queued(agent: "Claude", steerUnavailable: false).line, "Queued · Claude reads it after this turn")
+        XCTAssertEqual(ChatSend.Status.steered.line, "Steered into the current turn")
+        XCTAssertEqual(ChatSend.Status.sent.line, "Sent")
+        XCTAssertEqual(ChatSend.Status.refused("busy").line, "Not sent: busy")
+        XCTAssertTrue(ChatSend.Status.queued(agent: "Claude", steerUnavailable: true).line.contains("steering isn't available"))
+    }
+
+    func testDeliveredStatusFollowsTheMacsWord() throws {
+        func result(_ json: String) throws -> CommandResult { try JSONDecoder().decode(CommandResult.self, from: Data(json.utf8)) }
+        XCTAssertEqual(ChatSend.Status.delivered(try result(#"{"status":"sent","delivery":"queued"}"#), agent: "Claude"),
+                       .queued(agent: "Claude", steerUnavailable: false))
+        XCTAssertEqual(ChatSend.Status.delivered(try result(#"{"status":"sent","delivery":"queued","note":"x"}"#), agent: "Claude"),
+                       .queued(agent: "Claude", steerUnavailable: true))
+        XCTAssertEqual(ChatSend.Status.delivered(try result(#"{"status":"sent","delivery":"steered"}"#), agent: "Claude"), .steered)
+        XCTAssertEqual(ChatSend.Status.delivered(try result(#"{"status":"sent"}"#), agent: "Claude"), .sent)
+    }
 }

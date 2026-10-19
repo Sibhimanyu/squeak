@@ -1,4 +1,5 @@
 import { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
+import type { ClaudeLimits } from "./claude-limits.js";
 import { CodexUsageReader } from "./codex-usage.js";
 import { DiffReader } from "./diff-view.js";
 import { deriveDuckState } from "./duck-mood.js";
@@ -46,6 +47,8 @@ export interface FleetRuntime {
    * Set by whoever owns the replier; until then only Conductor chats can.
    */
   setCanReply(canReply: ((session: FleetSession) => boolean) | null): void;
+  /** Where /state reads Claude's last plan-limit reading from. */
+  setClaudeLimits(read: (() => ClaudeLimits | null) | null): void;
 }
 
 /**
@@ -88,10 +91,11 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     port: options.hookPort,
     tokenPath: defaultHookInstallPaths(options.supportDir).tokenPath,
     onEvent: (event) => monitor.ingestHookEvent(event),
-    readState: () => serializeState(monitor, canReply),
+    readState: () => serializeState(monitor, canReply, claudeLimits?.() ?? null),
   });
 
   let canReply: ((session: FleetSession) => boolean) | null = null;
+  let claudeLimits: (() => ClaudeLimits | null) | null = null;
   return {
     registry,
     store,
@@ -101,6 +105,9 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     codexUsage: new CodexUsageReader(),
     setCanReply: (next) => {
       canReply = next;
+    },
+    setClaudeLimits: (next) => {
+      claudeLimits = next;
     },
   };
 }
@@ -165,6 +172,7 @@ const MAX_OTHER_SESSIONS = 80;
 export function serializeState(
   monitor: FleetMonitor,
   canReply: ((session: FleetSession) => boolean) | null = null,
+  claudeLimits: ClaudeLimits | null = null,
 ): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
@@ -181,6 +189,9 @@ export function serializeState(
     trackedCount: snapshot.sessions.length,
     duck: deriveDuckState(snapshot.active, snapshot.attention, Date.now()),
     codexUsage: snapshot.codexUsage,
+    // Claude Code's last plan-limit reading (utilization 0-1), with when it was
+    // seen; null until one has been. Refreshed only by the owner's request.
+    claudeLimits,
     active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),
     others: others.map((session) => serializeSession(session, canReply, null)),
     attention: snapshot.attention.map((item) => ({

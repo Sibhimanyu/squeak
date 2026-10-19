@@ -71,9 +71,12 @@ public struct DaemonClient: Sendable {
     }
 
     /// Maps every outcome to a `SendResult`; this never throws and never retries.
-    public func reply(replyTarget: String, text: String) async -> SendResult {
+    public func reply(replyTarget: String, text: String, mode: SendMode = .queue) async -> SendResult {
         guard let token = tokenProvider() else { return .notSent(reason: "Squeak's access token was not found") }
-        guard let body = try? JSONEncoder().encode(["text": text]) else { return .notSent(reason: "Could not encode the message") }
+        // A queued message carries no mode at all: the body is exactly what older daemons expect.
+        var fields = ["text": text]
+        if mode == .steer { fields["mode"] = mode.rawValue }
+        guard let body = try? JSONEncoder().encode(fields) else { return .notSent(reason: "Could not encode the message") }
         let request = HTTPRequest(
             method: "POST",
             url: url("/control/session/\(Self.encode(replyTarget))/reply"),
@@ -98,13 +101,26 @@ public struct DaemonClient: Sendable {
         let parsed = try? JSONDecoder().decode(DaemonReplyBody.self, from: response.body)
         switch parsed?.status {
         case "started":
-            return .accepted(via: parsed?.via ?? "conductor")
+            return .accepted(via: parsed?.via ?? "conductor", delivery: parsed?.delivery.flatMap(Delivery.init(rawValue:)), note: parsed?.note)
         case "refused":
             return .refused(reason: parsed?.reason ?? "Squeak refused the message")
         default:
             if (400..<500).contains(response.status) { return .refused(reason: "Squeak rejected the request (HTTP \(response.status))") }
             return .uncertain(reason: "Unexpected reply from Squeak (HTTP \(response.status)). Check Conductor before sending again.")
         }
+    }
+
+    // MARK: Usage
+
+    /// Takes one fresh Claude limits reading. This runs a real, tiny Claude call on the daemon, so it
+    /// is only ever called from the user's own press of Refresh. Nil when the daemon predates the route.
+    public func refreshClaudeUsage() async throws -> ClaudeRefreshResult? {
+        let r = try await post("/control/usage/claude-refresh", timeout: 100)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        let body = try decode(DaemonClaudeRefreshBody.self, r.body)
+        return ClaudeRefreshResult(
+            claude: body.claudeLimits?.usage, throttled: body.throttled ?? false, refreshed: body.refreshed ?? false, error: body.error)
     }
 
     // MARK: Channels (nil means the daemon predates the route: 404)

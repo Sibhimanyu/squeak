@@ -96,9 +96,13 @@ public struct ConductorDaemonAdapter: HostAdapter {
     }
 
     public func send(_ text: String, to session: HostSession, clientId: UUID) async -> SendResult {
+        await send(text, to: session, clientId: clientId, mode: .queue)
+    }
+
+    public func send(_ text: String, to session: HostSession, clientId: UUID, mode: SendMode) async -> SendResult {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .notSent(reason: "Nothing to send") }
         guard let target = session.replyTarget else { return .notSent(reason: "Squeak has no way to reply to this session") }
-        return await client.reply(replyTarget: target, text: text)
+        return await client.reply(replyTarget: target, text: text, mode: mode)
     }
 
     public func openInHostURL(for session: HostSession) -> URL? {

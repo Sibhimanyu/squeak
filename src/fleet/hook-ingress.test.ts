@@ -259,7 +259,7 @@ describe("HookIngressServer control routes", () => {
   async function withControl() {
     const harness = await startServer();
     const server = servers.at(-1)!;
-    const replies: Array<{ id: string; text: string }> = [];
+    const replies: Array<{ id: string; text: string; mode?: string }> = [];
     server.setControl({
       sessionMessage: (id) => ({ id, text: "A) yes\nB) no" }),
       transcript: (id, limit) => ({
@@ -267,8 +267,8 @@ describe("HookIngressServer control routes", () => {
         complete: true,
       }),
       activity: (key) => ({ key, steps: [{ kind: "tool", text: "Run tests", at: null }], total: 1 }),
-      reply: async (id, text) => {
-        replies.push({ id, text });
+      reply: async (id, text, mode) => {
+        replies.push({ id, text, ...(mode ? { mode } : {}) });
         return { status: "started", via: "conductor" };
       },
     });
@@ -357,6 +357,51 @@ describe("HookIngressServer control routes", () => {
     });
     expect(await response.json()).toEqual({ status: "started", via: "conductor" });
     expect(replies).toEqual([{ id: "abc-123", text: "B" }]);
+  });
+
+  it("passes a steer or queue mode through, and refuses any other", async () => {
+    const { base, auth, replies } = await withControl();
+    for (const mode of ["steer", "queue"]) {
+      const response = await fetch(`${base}/reply`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ text: "go", mode }),
+      });
+      expect(response.status).toBe(200);
+    }
+    const bad = await fetch(`${base}/reply`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ text: "go", mode: "interrupt" }),
+    });
+    expect(bad.status).toBe(400);
+    expect(replies).toEqual([
+      { id: "abc-123", text: "go", mode: "steer" },
+      { id: "abc-123", text: "go", mode: "queue" },
+    ]);
+  });
+
+  it("refreshes Claude's usage only for a caller with the token, and only by POST", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    let calls = 0;
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      refreshClaudeUsage: async () => {
+        calls += 1;
+        return { claudeLimits: null, throttled: false, refreshed: false };
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/usage/claude-refresh`;
+    expect((await fetch(url, { method: "POST" })).status).toBe(403);
+    expect((await fetch(url, { headers: { "x-squeak-token": harness.token } })).status).toBe(405);
+    expect(calls).toBe(0);
+    const ok = await fetch(url, { method: "POST", headers: { "x-squeak-token": harness.token } });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ claudeLimits: null, throttled: false, refreshed: false });
+    expect(calls).toBe(1);
   });
 
   it("rejects an empty reply and an unknown route", async () => {

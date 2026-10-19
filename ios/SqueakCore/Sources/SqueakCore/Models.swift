@@ -90,14 +90,51 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var canReply: Bool { conductorSessionId != nil && !needsYou }
     }
 
+    /// One plan window: how much is used (0-100) and when it resets (ISO).
+    public struct UsageWindow: Codable, Equatable, Sendable {
+        public let usedPercent: Double
+        public let resetsAt: String
+        public init(usedPercent: Double, resetsAt: String) { self.usedPercent = usedPercent; self.resetsAt = resetsAt }
+    }
+
+    /// Claude's plan limits as Claude Code last reported them, with when that was.
+    public struct ClaudeUsage: Codable, Equatable, Sendable {
+        public let fiveHour: UsageWindow?
+        public let sevenDay: UsageWindow?
+        public let observedAt: String
+        public init(fiveHour: UsageWindow?, sevenDay: UsageWindow?, observedAt: String) {
+            self.fiveHour = fiveHour; self.sevenDay = sevenDay; self.observedAt = observedAt
+        }
+    }
+
+    /// Codex's account quota, live from its own files.
+    public struct CodexUsage: Codable, Equatable, Sendable {
+        public let fiveHour: UsageWindow?
+        public let weekly: UsageWindow?
+        public let observedAt: String
+        public init(fiveHour: UsageWindow?, weekly: UsageWindow?, observedAt: String) {
+            self.fiveHour = fiveHour; self.weekly = weekly; self.observedAt = observedAt
+        }
+    }
+
+    /// Read-only. Each is null until the Mac has seen a reading; refreshing Claude's is a Mac action.
+    public struct Usage: Codable, Equatable, Sendable {
+        public let claude: ClaudeUsage?
+        public let codex: CodexUsage?
+        public init(claude: ClaudeUsage?, codex: CodexUsage?) { self.claude = claude; self.codex = codex }
+    }
+
     public let v: Int
     public let mac: String
     public let generatedAt: String
     public let duck: Duck
+    /// Optional: a Mac older than the usage view does not send it.
+    public let usage: Usage?
     public let sessions: [Session]
 
-    public init(v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session]) {
+    public init(v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session], usage: Usage? = nil) {
         self.v = v; self.mac = mac; self.generatedAt = generatedAt; self.duck = duck; self.sessions = sessions
+        self.usage = usage
     }
 
     /// Attention order, DESIGN.md §8.2.
@@ -110,12 +147,19 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     ]
 }
 
+/// How a message meets an agent that is mid-turn. Queue waits for the turn to end; steer goes into it.
+public enum ReplyMode: String, Codable, Equatable, Sendable {
+    case queue, steer
+}
+
 /// A reply, exactly as the Mac verifies it (RemoteCommand on the Mac).
 public struct ReplyCommand: Codable, Equatable, Sendable {
     public let v: Int
     public let sessionId: String
     public let answersTurn: String?
     public let text: String
+    /// Optional, and signed with the rest. Left out for a queued reply: absent means queue.
+    public let mode: ReplyMode?
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
@@ -127,6 +171,10 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public let via: String?
     public let reason: String?
     public let fallbackReason: String?
+    /// "sent", "queued" or "steered"; absent from a Mac older than queue/steer.
+    public let delivery: String?
+    /// Set when a request could not be honoured as asked (steer fell back to queue).
+    public let note: String?
 
     public var sent: Bool { status == "sent" }
 }

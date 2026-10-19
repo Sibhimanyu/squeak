@@ -261,12 +261,26 @@ struct Composer: View {
     var composing: FocusState<Bool>.Binding
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    /// How the next message meets an agent that is mid-turn. Only offered while it works.
+    @State private var mode: ReplyMode = .queue
+    /// The long explanation is shown until the first message sent mid-turn; a short line after.
+    @AppStorage("squeak.queueSteerExplained") private var explained = false
+    private var working: Bool { session.state == "working" && block == nil }
+    private var agentName: String { Presentation.agentName(session.agent) }
     private var block: String? { Presentation.replyBlock(session) }
     private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Always there: after a send the field clears and keeps focus, so the next message can be typed at once.
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if working {
+                Picker("Delivery", selection: $mode) {
+                    Text("Queue").tag(ReplyMode.queue)
+                    Text("Steer now").tag(ReplyMode.steer)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityHint("Queue waits for \(agentName) to finish this turn. Steer now sends it into the turn in progress.")
+            }
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("Reply to \(Presentation.agentName(session.agent))…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
@@ -291,12 +305,16 @@ struct Composer: View {
         draft = ""
         composing.wrappedValue = true
         Task {
-            let started = await model.send(text, to: session)
+            let started = await model.send(text, to: session, mode: working ? mode : .queue)
             if !started, draft.isEmpty { draft = text }
+            if started, working { explained = true }
         }
     }
 
     private var sendDisabled: Bool { block != nil || empty }
+
+    /// "Queue" while the agent works, "Steer now" when chosen, otherwise "Send".
+    private var sendLabel: String { !working ? "Send" : mode == .steer ? "Steer now" : "Queue" }
 
     /// Send is the one primary control: the prominent glass button filled
     /// with duck on iOS 26 (§8.9, owner's decision), a flat duck fill before.
@@ -309,7 +327,7 @@ struct Composer: View {
                 .buttonBorderShape(.roundedRectangle(radius: 12))
                 .tint(Theme.primaryFill)
                 .disabled(sendDisabled)
-                .accessibilityLabel("Send")
+                .accessibilityLabel(sendLabel)
         } else {
             Button(action: send) {
                 arrow
@@ -317,7 +335,7 @@ struct Composer: View {
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             }
             .disabled(sendDisabled)
-            .accessibilityLabel("Send")
+            .accessibilityLabel(sendLabel)
         }
     }
 
@@ -325,9 +343,18 @@ struct Composer: View {
     private var caption: some View {
         if let block {
             Text(block).font(.footnote).foregroundStyle(Theme.muted)
+        } else if working {
+            Text(explained ? shortCaption : "Queue holds your message until \(agentName) finishes this turn. Steer now sends it into the turn in progress.")
+                .font(.footnote).foregroundStyle(Theme.muted)
         } else {
             Text("Sent to your Mac securely.").font(.footnote).foregroundStyle(Theme.muted)
         }
+    }
+}
+
+extension Composer {
+    fileprivate var shortCaption: String {
+        mode == .steer ? "Steer now: goes into the turn in progress." : "Queue: \(agentName) reads it after this turn."
     }
 }
 

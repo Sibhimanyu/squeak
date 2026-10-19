@@ -37,10 +37,40 @@ export interface ReplyAgentAdapter extends EventEmitter {
  * its next reload — `fallbackReason` says why the window was not used.
  */
 export type ReplyOutcome =
-  | { status: "started"; via: "conductor" }
-  | { status: "started"; via: "terminal" }
-  | { status: "started"; via: "background"; fallbackReason: string | null }
+  | ({ status: "started"; via: "conductor" } & DeliveryInfo)
+  | ({ status: "started"; via: "terminal" } & DeliveryInfo)
+  | ({ status: "started"; via: "background"; fallbackReason: string | null } & DeliveryInfo)
   | { status: "refused"; reason: string };
+
+/**
+ * How a message was meant to meet a working agent. `queue` waits for the turn
+ * to end; `steer` goes into the turn in progress. Only Conductor's own
+ * composer (the relay) can steer.
+ */
+export type ReplyMode = "queue" | "steer";
+
+/**
+ * What happened to a message that went through: `queued` (the agent was
+ * mid-turn and reads it after), `steered` (went into the current turn), or
+ * `sent` (the agent was idle). `note` is set when the request could not be
+ * honoured as asked, so the surface can say so.
+ */
+export type ReplyDelivery = "sent" | "queued" | "steered";
+export interface DeliveryInfo {
+  delivery?: ReplyDelivery;
+  note?: string;
+}
+
+export const STEER_UNAVAILABLE_NOTE = "Steer needs Conductor's relay, so this was queued instead.";
+
+export interface ReplyOptions {
+  mode?: ReplyMode;
+}
+
+/** Conductor statuses in which an agent is mid-turn, so a message waits or steers. */
+export function isInFlight(status: string): boolean {
+  return status === "working" || status === "waiting" || status === "cancelling";
+}
 
 /** Called once if a turn this replier started ends in failure. */
 export type ReplyFailureHandler = (message: string) => void;
@@ -66,6 +96,7 @@ export interface ConductorRelaySender {
     workspaceId: string;
     sessionId: string;
     text: string;
+    mode?: ReplyMode;
   }): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
@@ -167,7 +198,12 @@ export class ConductorReplier {
     return [...this.active.values()].some((reply) => reply.sessionId === sessionId);
   }
 
-  async send(sessionId: string, text: string, onFailed: ReplyFailureHandler): Promise<ReplyOutcome> {
+  async send(
+    sessionId: string,
+    text: string,
+    onFailed: ReplyFailureHandler,
+    options: ReplyOptions = {},
+  ): Promise<ReplyOutcome> {
     const input = text.trim();
     if (!input) {
       return { status: "refused", reason: "There is nothing to send." };
@@ -183,13 +219,23 @@ export class ConductorReplier {
       return { status: "refused", reason: busyReason(session.status)! };
     }
 
+    const inFlight = isInFlight(session.status);
+    const wantsSteer = options.mode === "steer";
+
     // The loopback relay delivers through Conductor's composer without the
     // screen, so it is preferred. On any failure we fall through to the window
     // and then the background CLI, exactly as before.
     if (this.deps.relay?.isReady() && !this.isReplying(sessionId)) {
-      const result = await this.deps.relay.send({ workspaceId: session.workspaceId, sessionId, text: input });
+      // Steering an idle chat means nothing: it is simply sent.
+      const steer = wantsSteer && inFlight;
+      const result = await this.deps.relay.send({
+        workspaceId: session.workspaceId,
+        sessionId,
+        text: input,
+        mode: steer ? "steer" : "queue",
+      });
       if (result.ok) {
-        return { status: "started", via: "conductor" };
+        return { status: "started", via: "conductor", delivery: steer ? "steered" : inFlight ? "queued" : "sent" };
       }
       logger.info("conductor relay reply failed; falling back", { sessionId, reason: result.reason });
     }
@@ -204,13 +250,13 @@ export class ConductorReplier {
         text: input,
       });
       if (result.ok) {
-        return { status: "started", via: "conductor" };
+        return { status: "started", via: "conductor", ...typedDelivery(inFlight, wantsSteer) };
       }
       if (mayHaveSent(result)) {
         // It may be in the chat already. Sending it again another way could
         // deliver it twice, so only Conductor's own record decides.
         if (await this.confirmUserMessage(sessionId, input, startedAt)) {
-          return { status: "started", via: "conductor" };
+          return { status: "started", via: "conductor", ...typedDelivery(inFlight, wantsSteer) };
         }
         logger.warn("reply through Conductor's window is unconfirmed", { sessionId, detail: result.detail });
         return {
@@ -288,7 +334,7 @@ export class ConductorReplier {
     const sentAt = new Date().toISOString();
     this.mirror.updateSessionStatus(sessionId, "working");
     this.mirror.appendUserMessage({ sessionId, turnId: reply.turnId, text: input, sentAt });
-    return { status: "started", via: "background", fallbackReason };
+    return { status: "started", via: "background", fallbackReason, delivery: "sent" };
   }
 
   /** Whether Conductor recorded `text` as a user message in this chat since `sinceIso`. */
@@ -372,6 +418,14 @@ export class ConductorReplier {
       })
       .catch(() => undefined);
   }
+}
+
+/** Typed into the window: Conductor queues it if mid-turn; it cannot steer. */
+function typedDelivery(inFlight: boolean, wantsSteer: boolean): DeliveryInfo {
+  return {
+    delivery: inFlight ? "queued" : "sent",
+    ...(wantsSteer && inFlight ? { note: STEER_UNAVAILABLE_NOTE } : {}),
+  };
 }
 
 /** Why a chat cannot take a message right now, or null if it can. */

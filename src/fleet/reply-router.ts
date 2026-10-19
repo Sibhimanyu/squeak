@@ -1,6 +1,11 @@
 import type { TranscriptResult } from "./transcript.js";
 import type { FleetReplier } from "./fleet-controller.js";
-import type { ReplyFailureHandler, ReplyOutcome } from "./session-reply.js";
+import {
+  STEER_UNAVAILABLE_NOTE,
+  type ReplyFailureHandler,
+  type ReplyOptions,
+  type ReplyOutcome,
+} from "./session-reply.js";
 import type { TerminalReplier } from "./terminal-reply.js";
 import type { FleetSession } from "./types.js";
 
@@ -22,7 +27,12 @@ function isFleetKey(target: string): boolean {
 interface ConductorSide {
   lastTurnText(conductorSessionId: string): string | null;
   transcript(conductorSessionId: string, limit: number): TranscriptResult;
-  send(conductorSessionId: string, text: string, onFailed: ReplyFailureHandler): Promise<ReplyOutcome>;
+  send(
+    conductorSessionId: string,
+    text: string,
+    onFailed: ReplyFailureHandler,
+    options?: ReplyOptions,
+  ): Promise<ReplyOutcome>;
 }
 
 export interface FleetReplyRouterDependencies {
@@ -68,9 +78,14 @@ export class FleetReplyRouter implements FleetReplier {
     return { messages: [], complete: false };
   }
 
-  async send(target: string, text: string, onFailed: ReplyFailureHandler): Promise<ReplyOutcome> {
+  async send(
+    target: string,
+    text: string,
+    onFailed: ReplyFailureHandler,
+    options: ReplyOptions = {},
+  ): Promise<ReplyOutcome> {
     if (!isFleetKey(target)) {
-      return this.deps.conductor.send(target, text, onFailed);
+      return this.deps.conductor.send(target, text, onFailed, options);
     }
     const session = this.resolve(target);
     if (!session) {
@@ -78,12 +93,22 @@ export class FleetReplyRouter implements FleetReplier {
     }
     // A session Conductor adopted since the card was sent goes through Conductor.
     if (session.conductorSessionId) {
-      return this.deps.conductor.send(session.conductorSessionId, text, onFailed);
+      return this.deps.conductor.send(session.conductorSessionId, text, onFailed, options);
     }
     if (!this.deps.terminal?.canReply(session)) {
       return { status: "refused", reason: "That session cannot be replied to from here." };
     }
-    return this.deps.terminal.send(session, text);
+    // A terminal agent is only typed into when idle, so there is nothing to
+    // queue or steer; say so if steering was asked for.
+    const outcome = await this.deps.terminal.send(session, text);
+    if (outcome.status !== "started") {
+      return outcome;
+    }
+    return {
+      ...outcome,
+      delivery: "sent",
+      ...(options.mode === "steer" ? { note: STEER_UNAVAILABLE_NOTE } : {}),
+    };
   }
 
   private resolve(key: string): FleetSession | null {

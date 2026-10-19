@@ -19,7 +19,7 @@ import {
   sessionLabel,
 } from "./radar.js";
 import { replyTargetFor } from "./reply-router.js";
-import type { ReplyFailureHandler, ReplyOutcome } from "./session-reply.js";
+import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "./session-reply.js";
 import type { AttentionItem, FleetSession } from "./types.js";
 
 /** Radar edits are cheap but not free; Telegram rate-limits edits per chat. */
@@ -35,7 +35,7 @@ const DIFF_CACHE_TTL_MS = 60_000;
  */
 export interface FleetReplier {
   lastTurnText(target: string): string | null;
-  send(target: string, text: string, onFailed: ReplyFailureHandler): Promise<ReplyOutcome>;
+  send(target: string, text: string, onFailed: ReplyFailureHandler, options?: ReplyOptions): Promise<ReplyOutcome>;
   /** Whether a session outside Conductor can be answered at all. Absent: only Conductor chats can. */
   canReply?(session: FleetSession): boolean;
 }

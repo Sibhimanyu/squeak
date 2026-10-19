@@ -6,17 +6,35 @@ import SqueakCore
 struct ChatSend: Identifiable, Equatable {
     enum Status: Equatable {
         case sending, sent
+        /// The agent was mid-turn and reads it once the turn ends. `steerUnavailable` when steering was
+        /// asked for but this chat's route cannot do it, so it was queued instead.
+        case queued(agent: String, steerUnavailable: Bool)
+        /// Went into the turn in progress.
+        case steered
         /// Written to the channel, but the Mac has not said it arrived.
         case notConfirmed
         case refused(String)
 
-        /// The one line under a "You" bubble, muted. (A later pass adds "Queued" / "Steered" here.)
+        /// The one line under a "You" bubble, muted: sent, queued, steered or not sent.
         var line: String {
             switch self {
             case .sending: "Sending…"
             case .sent: "Sent"
+            case .queued(let agent, let unavailable):
+                unavailable ? "Queued · \(agent) reads it after this turn (steering isn't available here)"
+                    : "Queued · \(agent) reads it after this turn"
+            case .steered: "Steered into the current turn"
             case .notConfirmed: "Not confirmed"
             case .refused(let why): "Not sent: \(why)"
+            }
+        }
+
+        /// What the Mac reported for a delivered message. An older Mac says nothing, which reads as sent.
+        static func delivered(_ result: CommandResult, agent: String) -> Status {
+            switch result.delivery {
+            case "queued": .queued(agent: agent, steerUnavailable: result.note != nil)
+            case "steered": .steered
+            default: .sent
             }
         }
     }
@@ -93,13 +111,21 @@ enum ChatTimeline {
             if awaiting.contains(where: { $0.id == s.id }) { return true }
             return s.answersTurn != nil && s.answersTurn == anchorTurn
         }
-        var rows: [Row] = sends.filter { !after($0) }.map { .sent($0) }
+        /// "Queued" is true only while the agent is still on the turn the message waited behind;
+        /// once that turn is over it has read it, so the line says "Sent". A steer stays "Steered".
+        func settled(_ s: ChatSend) -> ChatSend {
+            guard case .queued = s.status, !working else { return s }
+            var copy = s
+            copy.status = .sent
+            return copy
+        }
+        var rows: [Row] = sends.filter { !after($0) }.map { .sent(settled($0)) }
         if isWorking {
             if let r = remembered { rows.append(.agent(text: r.text, atISO: r.atISO, muted: true)) }
         } else if let current {
             rows.append(.agent(text: current, atISO: session.lastActivityAt, muted: false))
         }
-        rows += sends.filter(after).map { .sent($0) }
+        rows += sends.filter(after).map { .sent(settled($0)) }
         if isWorking { rows.append(.working(label: workingLabel(session.activity?.steps ?? []))) }
         return rows.isEmpty ? [.empty(emptyText(canReply: Presentation.replyBlock(session) == nil))] : rows
     }

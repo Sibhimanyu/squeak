@@ -15,6 +15,7 @@ let session = PhoneSnapshot.Session(
 )
 let madeAt = Date()
 let (id, document) = try channel.replyDocument(to: session, text: "B", signer: signer, now: madeAt)
+let (steerId, steerDocument) = try channel.replyDocument(to: session, text: "Use the timer instead", mode: .steer, signer: signer, now: madeAt)
 let fixture: [String: Any] = [
     "madeAt": Int64(madeAt.timeIntervalSince1970 * 1000),
     "key": key,
@@ -23,6 +24,9 @@ let fixture: [String: Any] = [
     "publicKey": signer.publicKeyX963.base64EncodedString(),
     "commandId": id,
     "command": ["box": document.box, "sig": document.sig!, "device": document.device!],
+    // The same reply with `mode: "steer"` signed in.
+    "steerCommandId": steerId,
+    "steerCommand": ["box": steerDocument.box, "sig": steerDocument.sig!, "device": steerDocument.device!],
 ]
 let data = try JSONSerialization.data(withJSONObject: fixture, options: [.prettyPrinted, .sortedKeys])
 FileManager.default.createFile(atPath: CommandLine.arguments[1], contents: data)

@@ -59,7 +59,15 @@ const sessions = [
     detail: "Run tests",
   }),
 ];
-const snapshot = { sessions, active: sessions, attention: [], generatedAt: "", codexUsage: null } as FleetSnapshot;
+const codexUsage = {
+  planType: "pro",
+  primary: { usedPercent: 9, windowMinutes: 300, resetsAt: "2026-09-25T06:40:00.000Z" },
+  secondary: { usedPercent: 31.4, windowMinutes: 10080, resetsAt: "2026-09-30T03:00:00.000Z" },
+  hasCredits: false,
+  creditBalance: null,
+  observedAt: "2026-09-25T02:59:30.000Z",
+};
+const snapshot = { sessions, active: sessions, attention: [], generatedAt: "", codexUsage } as FleetSnapshot;
 const noStore: ChannelStore = {
   get: async () => null,
   set: async () => {},
@@ -78,6 +86,11 @@ const bridge = new RemoteBridge({
     send: async () => ({ status: "refused", reason: "fixture" }),
   },
   snapshot: () => snapshot,
+  claudeLimits: () => ({
+    fiveHour: { utilization: 0.42, resetsAt: "2026-09-25T05:10:00.000Z" },
+    sevenDay: { utilization: 0.18, resetsAt: "2026-09-29T08:00:00.000Z" },
+    observedAt: "2026-09-25T00:00:00.000Z",
+  }),
   activity: (target) =>
     target.state === "working"
       ? {
@@ -107,6 +120,15 @@ fs.writeFileSync(
       pairingURL,
       snapshotBox: seal(key, view),
       resultBox: seal(key, { id: "c1", status: "sent", via: "conductor" }),
+      queuedBox: seal(key, { id: "c3", status: "sent", via: "conductor", delivery: "queued" }),
+      steeredBox: seal(key, { id: "c4", status: "sent", via: "conductor", delivery: "steered" }),
+      steerFallbackBox: seal(key, {
+        id: "c5",
+        status: "sent",
+        via: "conductor",
+        delivery: "queued",
+        note: "Steer needs Conductor's relay, so this was queued instead.",
+      }),
       refusedBox: seal(key, { id: "c2", status: "refused", reason: "That chat has moved on." }),
       pairAnswerBox: seal(key, { approved: true, mac: "Test Mac" }),
     },

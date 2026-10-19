@@ -71,6 +71,7 @@ export const CURATED = [
   "square-terminal",
   "inbox",
   "smartphone",
+  "gauge",
 ];
 
 const num = (s: string | undefined, d = 0) => (s === undefined ? d : Number(s));

@@ -10,9 +10,14 @@ public protocol ConductorSender: Sendable {
     /// sessions, so `isReady` is never older than one poll.
     func refresh() async
     func send(workspaceId: String, sessionId: String, text: String) async -> SendResult
+    /// Same, with how to meet an agent that is mid-turn. The default queues.
+    func send(workspaceId: String, sessionId: String, text: String, mode: SendMode) async -> SendResult
 }
 
 public extension ConductorSender {
+    func send(workspaceId: String, sessionId: String, text: String, mode: SendMode) async -> SendResult {
+        await send(workspaceId: workspaceId, sessionId: sessionId, text: text)
+    }
     var unavailableReason: String { "Squeak's relay is not set up yet" }
     func refresh() async {}
 }
@@ -143,10 +148,14 @@ public struct ConductorLocalAdapter: HostAdapter {
     }
 
     public func send(_ text: String, to session: HostSession, clientId: UUID) async -> SendResult {
+        await send(text, to: session, clientId: clientId, mode: .queue)
+    }
+
+    public func send(_ text: String, to session: HostSession, clientId: UUID, mode: SendMode) async -> SendResult {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .notSent(reason: "Nothing to send") }
         guard let workspace = session.conductorWorkspaceId else { return .notSent(reason: "This chat has no Conductor workspace") }
         guard sender.isReady else { return .notSent(reason: sender.unavailableReason) }
-        return await sender.send(workspaceId: workspace, sessionId: sessionId(of: session), text: text)
+        return await sender.send(workspaceId: workspace, sessionId: sessionId(of: session), text: text, mode: mode)
     }
 
     public func openInHostURL(for session: HostSession) -> URL? {

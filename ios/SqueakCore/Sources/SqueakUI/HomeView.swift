@@ -11,6 +11,7 @@ struct HomeView: View {
     @State private var filter = Presentation.Filter.all
     @State private var query = ""
     @State private var showingSettings = ProcessInfo.processInfo.arguments.contains("-squeak-settings")
+    @State private var showingUsage = ProcessInfo.processInfo.arguments.contains("-squeak-usage")
     /// `-squeak-open <key>` starts inside a session: screenshots of the demo only.
     @State private var path: [String] = {
         let args = ProcessInfo.processInfo.arguments
@@ -69,6 +70,7 @@ struct HomeView: View {
             .toolbar { toolbar }
             .safeAreaInset(edge: .bottom) { ConnectionBar() }
             .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $showingUsage) { UsageView() }
             // A link from a Telegram card: open its session as soon as the
             // snapshot has it, on a fresh stack so Back leads to the list.
             .onChange(of: router.pendingSessionId, initial: true) { _, _ in openPending() }
@@ -84,6 +86,11 @@ struct HomeView: View {
             ToolbarItem(placement: .topBarLeading) { duck }.sharedBackgroundVisibility(.hidden)
         } else {
             ToolbarItem(placement: .topBarLeading) { duck }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { showingUsage = true } label: {
+                Lucide(.gauge, size: 20, label: "Usage", color: Theme.muted)
+            }
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button { showingSettings = true } label: {

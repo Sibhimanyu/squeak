@@ -8,6 +8,7 @@ import { CliqWebhook } from "../cliq/client.js";
 import { CliqRelayInbox } from "../cliq/inbox.js";
 import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
+import { CLAUDE_PROBE_SCHEMA, CLAUDE_PROBE_SYSTEM, ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { readActivity } from "../fleet/activity.js";
@@ -91,6 +92,7 @@ export class SqueakApp {
   private readonly assistant: FleetAssistant;
   /** Claude's plan limits, as the assistant's own `claude` runs last reported them. */
   private readonly claudeLimits: ClaudeLimitsStore;
+  private readonly claudeRefresher: ClaudeLimitsRefresher;
   private lastUpdateId = 0;
   private stopped = false;
 
@@ -150,6 +152,7 @@ export class SqueakApp {
           replier: this.replier,
           snapshot: () => this.runtime.monitor.snapshot,
           activity: (session) => (session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null),
+          claudeLimits: () => this.claudeLimits?.latest() ?? null,
         })
       : null;
 
@@ -188,23 +191,33 @@ export class SqueakApp {
         const text = this.router.lastTurnText(target);
         return { text, choices: parseChoices(text) };
       },
+      refreshClaudeUsage: () => this.claudeRefresher.refresh(),
       transcript: (target, limit) => this.router.transcript(target, limit),
       activity: (key) => {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
         return session?.transcriptPath ? readActivity(session.agent, session.transcriptPath) : { steps: [], total: 0 };
       },
-      reply: (target, text) =>
-        this.router.send(target, text, (message) => {
-          logger.warn("reply from the Mac app failed", { target, message });
-        }),
+      reply: (target, text, mode) =>
+        this.router.send(
+          target,
+          text,
+          (message) => {
+            logger.warn("reply from the Mac app failed", { target, message });
+          },
+          { mode: mode ?? "queue" },
+        ),
     });
 
     this.claudeLimits = new ClaudeLimitsStore(path.join(config.supportDir, "claude-limits.json"));
-    this.assistant = new FleetAssistant(
-      claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
-        this.claudeLimits.record(limits),
-      ),
+    this.runtime.setClaudeLimits(() => this.claudeLimits.latest());
+    const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
+      this.claudeLimits.record(limits),
     );
+    this.assistant = new FleetAssistant(claudeRunner);
+    // Only the Mac app's Refresh button reaches this: nothing probes on a timer.
+    this.claudeRefresher = new ClaudeLimitsRefresher(this.claudeLimits, async () => {
+      await claudeRunner({ system: CLAUDE_PROBE_SYSTEM, user: "Reply with: ok", schema: CLAUDE_PROBE_SCHEMA });
+    });
     this.cliq = this.createCliq();
 
     this.controller = new FleetController({

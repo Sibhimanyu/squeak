@@ -24,6 +24,8 @@ struct PopoverView: View {
             Hairline()
             content
             Hairline()
+            UsageSection()
+            Hairline()
             footer
         }
         .frame(width: Self.width)
@@ -95,7 +97,7 @@ struct PopoverView: View {
                     )
             }
             .onPreferenceChange(PopoverHeightKey.self) { contentHeight = $0 }
-            .frame(height: min(max(contentHeight, 120), Self.maxHeight - 132))
+            .frame(height: min(max(contentHeight, 120), Self.maxHeight - 132 - 190))
             .scrollIndicators(.automatic)
         }
     }

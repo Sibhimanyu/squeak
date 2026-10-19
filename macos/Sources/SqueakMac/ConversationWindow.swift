@@ -71,6 +71,10 @@ struct SidebarView: View {
                 row(.working, "Working", .play)
                 row(.done, "Done", .circleCheck)
             }
+            Section {
+                LucideLabel("Usage", .gauge).tag(NavFilter.usage)
+                    .accessibilityLabel("Usage")
+            }
             Section("Sources") {
                 source(.conductor, .gitBranch)
                 source(.terminal, .terminal)
@@ -258,7 +262,9 @@ struct DetailView: View {
 
     var body: some View {
         Group {
-            if let s = model.selectedSession {
+            if model.navFilter == .usage {
+                UsageDetailView()
+            } else if let s = model.selectedSession {
                 SessionDetail(session: s).id(s.key)
             } else if model.selected != nil {
                 pick("Squeak no longer lists this chat. It may have been archived in Conductor.")
@@ -327,6 +333,8 @@ struct SessionDetail: View {
     @State private var focusToken = 0
     @State private var atBottom = false
     @State private var contentHeight: CGFloat = 0
+    /// The long queue/steer explanation shows until the first message sent mid-turn; a short line after.
+    @AppStorage("queueSteerExplained") private var queueSteerExplained = false
 
     private var agent: String { SessionRowView.agentName(session.agent) ?? "Agent" }
     private var rows: [ChatTimeline.Row] {
@@ -416,7 +424,7 @@ struct SessionDetail: View {
                             switch row {
                             case .message(let m, let muted):
                                 MessageView(
-                                    message: m, agentName: agent, canOpenHost: model.openURL != nil,
+                                    message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
                                     layout: !muted && m.id == needsYouMessageID ? ChoiceLayout.make(m.text) : nil,
                                     canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted
                                 )
@@ -515,8 +523,16 @@ struct SessionDetail: View {
     private var destinationNote: String {
         if let why = sendBlock { return "Can't reply here: \(why)" }
         if !model.isConnected { return "Not connected. Replies wait until Squeak's service is back." }
+        if working {
+            return queueSteerExplained
+                ? "Queue: \(agent) reads it after this turn. Steer now: it goes into the turn in progress."
+                : "Queue holds your message until \(agent) finishes this turn. Steer now sends it into the turn in progress."
+        }
         return "Replies go to \(session.source.replyDestination)."
     }
+
+    /// While the agent is mid-turn a message is either queued behind the turn or steered into it.
+    private var working: Bool { session.state == .working }
 
     private var hasText: Bool { !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var canSend: Bool { sendBlock == nil && model.isConnected && hasText }
@@ -529,7 +545,7 @@ struct SessionDetail: View {
         return VStack(alignment: .leading, spacing: 6) {
             ComposerField(
                 text: text, sendKey: .commandReturnSends, placeholder: placeholder,
-                isEnabled: editable, focusToken: focusToken, onSend: send,
+                isEnabled: editable, focusToken: focusToken, onSend: { send(.queue) },
                 onContentHeight: { contentHeight = $0 }
             )
             .frame(height: min(max(contentHeight, minH), maxH))
@@ -541,15 +557,27 @@ struct SessionDetail: View {
                         .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
                         .accessibilityHidden(true)
                 }
-                Button(action: send) {
-                    SendLabel()
+                if working {
+                    Button { send(.steer) } label: {
+                        Text("Steer now").font(Typo.label).padding(.horizontal, 6)
+                    }
+                    .modifier(GlassBorderedButton())
+                    .keyboardShortcut(.return, modifiers: [.command, .shift])
+                    .disabled(!canSend)
+                    .accessibilityLabel("Steer now")
+                    .accessibilityHint("Sends the message into the turn in progress")
+                    .help("Send it into the turn in progress (⇧⌘↩)")
+                }
+                Button { send(.queue) } label: {
+                    SendLabel(title: working ? "Queue" : "Send")
                         .padding(.horizontal, 6)
                 }
                 .modifier(SendButtonStyle())
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(!canSend)
-                .accessibilityLabel("Send message")
-                .help(session.capabilities.attachments.reason.map { "Send (⌘↩). Attachments: \($0)" } ?? "Send (⌘↩)")
+                .accessibilityLabel(working ? "Queue message" : "Send message")
+                .help(working ? "Queue: \(agent) reads it after this turn (⌘↩)"
+                    : (session.capabilities.attachments.reason.map { "Send (⌘↩). Attachments: \($0)" } ?? "Send (⌘↩)"))
             }
         }
         .padding(.leading, 14).padding(.trailing, 10).padding(.top, 8).padding(.bottom, 10)
@@ -557,13 +585,16 @@ struct SessionDetail: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func send() {
+    private func send(_ mode: SendMode) {
         let t = model.draft
         guard canSend, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let key = session.key
+        // The mode only means something mid-turn; an idle chat is simply sent.
+        let effective: SendMode = working ? mode : .queue
+        if working { queueSteerExplained = true }
         // The field clears as it sends and keeps focus, so the next message can be typed at once.
         focusToken += 1
-        Task { _ = await model.send(t, to: key) }
+        Task { _ = await model.send(t, to: key, mode: effective) }
     }
 }
 
@@ -629,6 +660,8 @@ struct MessageView: View {
     let message: ChatMessage
     var agentName: String
     var canOpenHost: Bool
+    /// Whether the agent is still mid-turn, which decides if a queued message still reads "Queued".
+    var agentWorking = true
     var layout: ChoiceLayout?
     var canAnswer = true
     var onChoose: (ChoiceCard) -> Void = { _ in }
@@ -660,7 +693,7 @@ struct MessageView: View {
                 .padding(.horizontal, 14).padding(.vertical, 11)
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
-            if let status = DeliveryText(state: message.state) { delivery(status) }
+            if let status = DeliveryText(message: message, agent: agentName, agentWorking: agentWorking) { delivery(status) }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
@@ -764,15 +797,15 @@ private struct CardPressStyle: ButtonStyle {
     }
 }
 
-/// The one muted line under a sent message ("Sending…", "Sent", "Not confirmed", "Not sent: reason"),
+/// The one muted line under a sent message ("Sending…", "Sent", "Queued · …", "Steered into the current turn", "Not confirmed", "Not sent: reason"),
 /// with the one action that fits a failure.
 struct DeliveryText {
     var text: String
     var offersOpen = false
     var offersReuse = false
 
-    init?(state: MessageState?) {
-        guard let state, let line = state.deliveryLine else { return nil }
+    init?(message: ChatMessage, agent: String, agentWorking: Bool) {
+        guard let state = message.state, let line = message.deliveryLine(agent: agent, agentWorking: agentWorking) else { return nil }
         text = line
         switch state {
         case .uncertain: offersOpen = true
@@ -784,9 +817,10 @@ struct DeliveryText {
 
 /// "Send" in the primary text colour while it can be pressed, muted while it cannot.
 private struct SendLabel: View {
+    var title = "Send"
     @Environment(\.isEnabled) private var isEnabled
     var body: some View {
-        Text("Send").font(Typo.label).foregroundStyle(isEnabled ? Theme.primaryText : Theme.muted)
+        Text(title).font(Typo.label).foregroundStyle(isEnabled ? Theme.primaryText : Theme.muted)
     }
 }
 

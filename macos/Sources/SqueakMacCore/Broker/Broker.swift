@@ -81,6 +81,8 @@ public actor Broker {
             if host[i].role == .user {
                 if let l = confirmedByHostId[host[i].id] {
                     host[i].clientId = l.clientId
+                    host[i].delivery = l.delivery
+                    host[i].deliveryNote = l.deliveryNote
                     host[i].state = .confirmed
                     lastConfirmed = l.clientId
                 } else {
@@ -220,7 +222,7 @@ public actor Broker {
     /// first time and never reaches the adapter again: a possibly-delivered message
     /// is confirmed from the transcript, not re-sent.
     @discardableResult
-    public func send(_ text: String, to key: SessionKey, clientId: UUID = UUID()) async -> SendResult {
+    public func send(_ text: String, to key: SessionKey, clientId: UUID = UUID(), mode: SendMode = .queue) async -> SendResult {
         if let existing = locals[key]?.first(where: { $0.clientId == clientId }) {
             return Self.result(from: existing.state)
         }
@@ -243,7 +245,7 @@ public actor Broker {
         }
         // Recorded before awaiting, so a re-entrant call with this id sees it.
         record(.pending)
-        let result = await adapter.send(text, to: session, clientId: clientId)
+        let result = await adapter.send(text, to: session, clientId: clientId, mode: mode)
         setLocalState(clientId, in: key, to: result.messageState)
         switch result {
         case .accepted, .uncertain:
@@ -299,7 +301,7 @@ public actor Broker {
 
     private static func result(from state: MessageState?) -> SendResult {
         switch state {
-        case .accepted(let via): .accepted(via: via)
+        case .accepted(let via, let delivery, let note): .accepted(via: via, delivery: delivery, note: note)
         case .refused(let r): .refused(reason: r)
         case .notSent(let r): .notSent(reason: r)
         case .uncertain(let r): .uncertain(reason: r)
@@ -349,6 +351,10 @@ public actor Broker {
                     && (m.at == nil || sentAt == nil || m.at! >= sentAt!.addingTimeInterval(-5))
             }) else { continue }
             claimed.insert(match.id)
+            if case .accepted(_, let delivery, let note) = list[i].state {
+                list[i].delivery = delivery
+                list[i].deliveryNote = note
+            }
             list[i].state = .confirmed
             list[i].turnId = match.id
             changed = true

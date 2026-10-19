@@ -9,7 +9,7 @@ import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import type { ReplyOutcome } from "../fleet/session-reply.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { ChannelDoc } from "./firestore-rest.js";
-import { RemoteBridge, type ChannelStore, type RemoteCommand } from "./remote-bridge.js";
+import { phoneUsage, RemoteBridge, type ChannelStore, type RemoteCommand } from "./remote-bridge.js";
 import { open, pairingCode, seal } from "./remote-crypto.js";
 
 const NOW = Date.parse("2026-09-25T03:00:00.000Z");
@@ -207,6 +207,28 @@ describe("RemoteBridge commands", () => {
     expect(f.store.docs.has(`${f.channel}/commands/c1`)).toBe(false);
   });
 
+  it("passes a signed steer through, defaults to queue, and reports the delivery", async () => {
+    const f = fixture({ outcome: { status: "started", via: "conductor", delivery: "steered" } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.command({ mode: "steer" }));
+    await f.store.set(`${f.channel}/commands/c2`, f.command());
+    await f.bridge.tick();
+    expect(f.replier.send.mock.calls.map((call) => (call as unknown[])[3])).toEqual([
+      { mode: "steer" },
+      { mode: "queue" },
+    ]);
+    expect(f.result("c1")).toMatchObject({ status: "sent", delivery: "steered" });
+  });
+
+  it("refuses a mode that is neither queue nor steer", async () => {
+    const f = fixture();
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.command({ mode: "interrupt" as never }));
+    await f.bridge.tick();
+    expect(f.sends).toEqual([]);
+    expect(f.result("c1")).toMatchObject({ status: "refused" });
+  });
+
   it("does nothing, and says nothing, for a command signed by an unpaired key", async () => {
     const f = fixture();
     await f.pair();
@@ -360,5 +382,36 @@ describe("RemoteBridge phone view activity", () => {
       0,
     );
     expect(view.sessions.map((s) => s.title)).toEqual(["Payment retry logic", null, null]);
+  });
+});
+
+describe("phoneUsage", () => {
+  it("normalises both readings to percent used, with when each was observed", () => {
+    const usage = phoneUsage(
+      {
+        planType: "pro",
+        primary: { usedPercent: 9.04, windowMinutes: 300, resetsAt: "2026-09-25T06:40:00.000Z" },
+        secondary: null,
+        hasCredits: false,
+        creditBalance: null,
+        observedAt: "2026-09-25T02:59:30.000Z",
+      },
+      {
+        fiveHour: { utilization: 0.4234, resetsAt: "2026-09-25T05:10:00.000Z" },
+        sevenDay: null,
+        observedAt: "2026-09-25T00:00:00.000Z",
+      },
+    );
+    expect(usage.claude).toEqual({
+      fiveHour: { usedPercent: 42.3, resetsAt: "2026-09-25T05:10:00.000Z" },
+      sevenDay: null,
+      observedAt: "2026-09-25T00:00:00.000Z",
+    });
+    expect(usage.codex?.fiveHour?.usedPercent).toBe(9);
+    expect(usage.codex?.weekly).toBeNull();
+  });
+
+  it("is honest about a reading that has not been seen", () => {
+    expect(phoneUsage(null, null)).toEqual({ claude: null, codex: null });
   });
 });

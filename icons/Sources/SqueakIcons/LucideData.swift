@@ -60,6 +60,7 @@ public enum LucideName: String, CaseIterable, Sendable {
     case squareTerminal = "square-terminal"
     case inbox = "inbox"
     case smartphone = "smartphone"
+    case gauge = "gauge"
 }
 
 extension LucideName {
@@ -336,6 +337,10 @@ extension LucideName {
         case .smartphone: return [
             .rect(x: 5, y: 2, width: 14, height: 20, rx: 2, ry: 2),
             .path("M12 18h.01"),
+        ]
+        case .gauge: return [
+            .path("m12 14 4-4"),
+            .path("M3.34 19a10 10 0 1 1 17.32 0"),
         ]
         }
     }

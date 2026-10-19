@@ -20,6 +20,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   publicKey: string;
   commandId: string;
   command: { box: string; sig: string; device: string };
+  steerCommandId: string;
+  steerCommand: { box: string; sig: string; device: string };
 };
 
 function bridge(turn: string) {
@@ -32,7 +34,7 @@ function bridge(turn: string) {
     devices: [{ id: fixture.deviceId, name: "iPhone", publicKey: fixture.publicKey, pairedAt: "2026-09-25T00:00:00Z" }],
   };
   fs.writeFileSync(configPath, JSON.stringify(config));
-  const sends: Array<[string, string]> = [];
+  const sends: Array<[string, string, string | undefined]> = [];
   const remote = new RemoteBridge({
     configPath,
     projectId: "squeak-test",
@@ -40,9 +42,9 @@ function bridge(turn: string) {
     replier: {
       lastTurnText: () => null,
       lastTurnId: () => turn,
-      send: async (sessionId, text) => {
-        sends.push([sessionId, text]);
-        return { status: "started", via: "conductor" };
+      send: async (sessionId, text, _onFailed, options) => {
+        sends.push([sessionId, text, options?.mode]);
+        return { status: "started", via: "conductor", delivery: options?.mode === "steer" ? "steered" : "sent" };
       },
     },
     snapshot: () => ({}) as FleetSnapshot,
@@ -57,7 +59,14 @@ describe("a reply made on the iPhone", () => {
     const { remote, config, sends } = bridge("turn-1");
     const verdict = await remote.handleCommand(config, fixture.commandId, fixture.command);
     expect(verdict.result).toMatchObject({ status: "sent" });
-    expect(sends).toEqual([["s1", "B"]]);
+    expect(sends).toEqual([["s1", "B", "queue"]]);
+  });
+
+  it("carries a signed steer mode through to the replier and reports the delivery", async () => {
+    const { remote, config, sends } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.steerCommandId, fixture.steerCommand);
+    expect(verdict.result).toMatchObject({ status: "sent", delivery: "steered" });
+    expect(sends).toEqual([["s1", "Use the timer instead", "steer"]]);
   });
 
   it("is refused once the chat has moved to another turn", async () => {

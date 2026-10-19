@@ -89,7 +89,7 @@ The phone talks straight to Squeak's loopback server over a private network.
   choices. Encrypted with a key shared only between the Mac and paired phones.
 - `events` — "needs you" / "done" pushes, carrying only a session handle and
   the three-line card text (so the lock screen can show it), encrypted.
-- `commands` — from the phone: `{ sessionId, answersTurn, text, nonce,
+- `commands` — from the phone: `{ sessionId, answersTurn, text, mode?, nonce,
   expiresAt }`, signed with the device key, encrypted to the Mac.
 - Retention: snapshot overwritten in place; events and commands deleted by the
   Mac as soon as they are processed, and expired server-side after 24 hours.
@@ -148,3 +148,24 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
   replies over the live project with both real implementations.
 - **The .ipa is published as .zip**: new projects on Spark refuse executable
   uploads. SideStore installs from the bytes, not the extension.
+- **Queue or steer (2026-10-19).** `ReplyCommand` gains an optional `mode`,
+  `"queue"` or `"steer"`, sealed and signed with the rest. Absent means queue,
+  and the phone leaves it out for a queued reply, so those commands are
+  byte-identical to before. It changes only where Conductor puts a message when
+  the agent is mid-turn (behind the turn, or into it), so a steer is still a
+  plain reply to an existing chat and every check in `handleCommand` still runs
+  unchanged; any other value is refused. Only Conductor's relay route can steer.
+  Typed into the window, or run in the background, a steer is queued instead and
+  the result says so.
+- **The result says what happened.** `CommandResult` gains optional
+  `delivery` (`"sent"`, `"queued"` or `"steered"`) and `note` (set when a steer
+  fell back to queue). A Mac older than this sends neither, which a phone reads
+  as "Sent". The phone shows it as the one delivery line under the bubble.
+- **Usage, read-only (2026-10-19).** The snapshot gains an optional `usage`:
+  `{ claude, codex }`, each null until the Mac has a reading. Windows are
+  `{ usedPercent (0-100), resetsAt }` with Claude `fiveHour` / `sevenDay`, Codex
+  `fiveHour` / `weekly`, and `observedAt` per provider so the phone can say how
+  old a reading is. There is no command to refresh it: Claude's reading costs a
+  real call and is taken only when the owner presses Refresh on the Mac, and
+  commands stay plain replies. A change in a reading republishes the snapshot;
+  a re-read of the same numbers does not.

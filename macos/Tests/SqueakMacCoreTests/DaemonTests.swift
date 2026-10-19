@@ -152,6 +152,26 @@ struct DaemonClientTests {
         #expect(String(decoding: reqs[0].body ?? Data(), as: UTF8.self).contains("do it"))
     }
 
+    @Test func queuedAndSteeredDeliveriesComeBackFromTheDaemon() async {
+        let (queued, _) = await sendOutcome(.success(HTTPResponse(status: 200, body: Data(#"{"status":"started","via":"conductor","delivery":"queued"}"#.utf8))))
+        #expect(queued == .accepted(via: "conductor", delivery: .queued))
+        let (steered, _) = await sendOutcome(.success(HTTPResponse(status: 200, body: Data(#"{"status":"started","via":"conductor","delivery":"steered"}"#.utf8))))
+        #expect(steered == .accepted(via: "conductor", delivery: .steered))
+        let (fallback, _) = await sendOutcome(.success(HTTPResponse(status: 200, body: Data(#"{"status":"started","via":"conductor","delivery":"queued","note":"Steer needs Conductor's relay, so this was queued instead."}"#.utf8))))
+        #expect(fallback == .accepted(via: "conductor", delivery: .queued, note: "Steer needs Conductor's relay, so this was queued instead."))
+    }
+
+    @Test func aQueuedSendCarriesNoModeAndASteerCarriesIt() async {
+        let t = FakeTransport()
+        await t.json("POST", "/control/session/t1/reply", #"{"status":"started","via":"conductor"}"#)
+        let a = adapter(t)
+        _ = await a.send("one", to: session, clientId: UUID())
+        _ = await a.send("two", to: session, clientId: UUID(), mode: .steer)
+        let bodies = await t.requests.map { String(decoding: $0.body ?? Data(), as: UTF8.self) }
+        #expect(!bodies[0].contains("mode"))
+        #expect(bodies[1].contains(#""mode":"steer""#))
+    }
+
     @Test func startedViaBackgroundKeepsVia() async {
         let (r, _) = await sendOutcome(.success(HTTPResponse(status: 200, body: Data(#"{"status":"started","via":"background","fallbackReason":"window hidden"}"#.utf8))))
         #expect(r == .accepted(via: "background"))

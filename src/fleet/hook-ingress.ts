@@ -35,7 +35,7 @@ export interface IngressControl {
   sessionMessage(replyTarget: string): unknown;
   /** A chat's readable history (user and assistant text only), oldest first. */
   transcript?(replyTarget: string, limit: number): unknown;
-  reply(replyTarget: string, text: string): Promise<unknown>;
+  reply(replyTarget: string, text: string, mode?: "queue" | "steer"): Promise<unknown>;
   /**
    * The current turn of a session, step by step, by its fleet key. Token-gated
    * like the rest: thinking and tool calls are the session's content.
@@ -43,6 +43,11 @@ export interface IngressControl {
   activity?(sessionKey: string): unknown;
   /** The phone channel: status, pair, approve, reject, revoke, reset. */
   remote?(action: string, deviceId: string | null): Promise<unknown>;
+  /**
+   * Take one fresh Claude limits reading. Runs a real (tiny) Claude call, so
+   * it is only ever reached by the owner pressing Refresh.
+   */
+  refreshClaudeUsage?(): Promise<unknown>;
   /** Which channels are set up and healthy. Never carries a secret. */
   channels?(): unknown;
   /** Chats that messaged the Telegram bot without being allowed. */
@@ -211,7 +216,7 @@ export class HookIngressServer {
 
   /**
    * `GET  /control/session/<replyTarget>/message`
-   * `POST /control/session/<replyTarget>/reply` with `{ "text": "..." }`
+   * `POST /control/session/<replyTarget>/reply` with `{ "text": "...", "mode"?: "queue" | "steer" }`
    * `GET  /control/session/<sessionKey>/activity`
    * `GET  /control/session/<replyTarget>/transcript?limit=N`
    *
@@ -248,6 +253,28 @@ export class HookIngressServer {
         .catch((error: unknown) => {
           logger.warn("control remote failed", { error: error instanceof Error ? error.message : String(error) });
           respond(response, 500, "remote failed");
+        });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/usage/claude-refresh") {
+      request.resume();
+      if (request.method !== "POST") {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!control.refreshClaudeUsage) {
+        respond(response, 503, "usage refresh unavailable");
+        return;
+      }
+      control
+        .refreshClaudeUsage()
+        .then((value) => respondJson(response, 200, value))
+        .catch((error: unknown) => {
+          logger.warn("control usage refresh failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          respond(response, 500, "refresh failed");
         });
       return;
     }
@@ -354,10 +381,17 @@ export class HookIngressServer {
           return;
         }
         let text: unknown;
+        let mode: unknown;
         try {
-          text = (JSON.parse(body || "{}") as { text?: unknown }).text;
+          const parsed = JSON.parse(body || "{}") as { text?: unknown; mode?: unknown };
+          text = parsed.text;
+          mode = parsed.mode;
         } catch {
           respond(response, 400, "bad json");
+          return;
+        }
+        if (mode !== undefined && mode !== "queue" && mode !== "steer") {
+          respond(response, 400, "mode must be queue or steer");
           return;
         }
         if (typeof text !== "string" || !text.trim()) {
@@ -365,7 +399,7 @@ export class HookIngressServer {
           return;
         }
         control
-          .reply(sessionId, text)
+          .reply(sessionId, text, mode)
           .then((outcome) => respondJson(response, 200, outcome))
           .catch((error: unknown) => {
             logger.warn("control reply failed", { error: error instanceof Error ? error.message : String(error) });

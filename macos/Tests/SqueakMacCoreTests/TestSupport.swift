@@ -66,6 +66,7 @@ actor FakeAdapter: HostAdapter {
     private var failure: AdapterError?
     private(set) var sendCount = 0
     private(set) var sentTexts: [String] = []
+    private(set) var sentModes: [SendMode] = []
     private(set) var discoverCount = 0
 
     init(id: String = "fake", sessions: [HostSession] = []) {
@@ -95,6 +96,11 @@ actor FakeAdapter: HostAdapter {
         sendCount += 1
         sentTexts.append(text)
         return sendResult
+    }
+
+    func send(_ text: String, to session: HostSession, clientId: UUID, mode: SendMode) async -> SendResult {
+        sentModes.append(mode)
+        return await send(text, to: session, clientId: clientId)
     }
 
     nonisolated func openInHostURL(for session: HostSession) -> URL? { nil }

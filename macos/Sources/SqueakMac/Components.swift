@@ -50,9 +50,14 @@ struct SendFeedback {
 
     init?(_ result: SendResult) {
         switch result {
-        case .accepted(let via):
+        case .accepted(let via, let delivery, _):
             let word = via == "terminal" ? "Terminal" : via == "conductor" ? "Conductor" : via
-            self = .init(text: "Sent in \(word)", symbol: .check, color: Theme.subtle, succeeded: true)
+            let text = switch delivery {
+            case .queued: "Queued in \(word). It reads it after this turn"
+            case .steered: "Steered into the current turn in \(word)"
+            case .sent, nil: "Sent in \(word)"
+            }
+            self = .init(text: text, symbol: .check, color: Theme.subtle, succeeded: true)
         case .uncertain:
             self = .init(text: "Couldn't confirm it was sent. Check Conductor before resending.", symbol: .circleAlert, color: Theme.muted, succeeded: false)
         case .refused(let r):

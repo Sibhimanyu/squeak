@@ -67,7 +67,16 @@ enum DemoData {
 
     static var snapshot: PhoneSnapshot {
         let raw = rawSnapshot
-        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: raw.sessions.map(titled))
+        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: raw.sessions.map(titled), usage: usage)
+    }
+
+    /// Claude's reading is a few hours old, as it would be unless Refresh was pressed on the Mac.
+    private static var usage: PhoneSnapshot.Usage {
+        .init(
+            claude: .init(fiveHour: .init(usedPercent: 42, resetsAt: now(2 * 3600 + 10 * 60)),
+                          sevenDay: .init(usedPercent: 18, resetsAt: now(4 * 86400 + 5 * 3600)), observedAt: now(-3 * 3600)),
+            codex: .init(fiveHour: .init(usedPercent: 9, resetsAt: now(3 * 3600 + 40 * 60)),
+                         weekly: .init(usedPercent: 31, resetsAt: now(5 * 86400)), observedAt: now(-30)))
     }
 
     private static var rawSnapshot: PhoneSnapshot {
@@ -121,8 +130,8 @@ enum DemoData {
     static var outbox: [String: [AppModel.SentMessage]] {
         ["pay": [.init(text: "Add retry handling for failed payments.\nPrevent duplicate charges.", date: Date().addingTimeInterval(-300), answersTurn: "t0")],
          // A reply just sent to the working chat: its bubble, then the working row.
-         "tg": [.init(text: "Fix the splitter, and make sure tables still render.", date: Date().addingTimeInterval(-150), answersTurn: "t1"),
-                .init(text: "Also keep the plain-text fallback for anything it still can't parse.", date: Date().addingTimeInterval(-60), answersTurn: "t1")]]
+         "tg": [.init(text: "Fix the splitter, and make sure tables still render.", date: Date().addingTimeInterval(-150), answersTurn: "t1", status: .steered),
+                .init(text: "Also keep the plain-text fallback for anything it still can't parse.", date: Date().addingTimeInterval(-60), answersTurn: "t1", status: .queued(agent: "Claude", steerUnavailable: false))]]
     }
 
     /// The agent's previous answer in the working chat, kept above its working row.

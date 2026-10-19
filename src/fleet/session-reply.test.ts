@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import type { ConductorSessionRef, SessionMessageRecord } from "../types.js";
 import type { ConductorUiSender, UiSendResult } from "./conductor-ui.js";
-import { busyReason, ConductorReplier, type ReplyAgentAdapter } from "./session-reply.js";
+import { busyReason, ConductorReplier, type ConductorRelaySender, type ReplyAgentAdapter } from "./session-reply.js";
 
 class FakeAdapter extends EventEmitter implements ReplyAgentAdapter {
   readonly turns: Array<{ threadId: string; input: string; cwd?: string | null; model?: string | null }> = [];
@@ -69,6 +69,7 @@ function fixture(
   current: ConductorSessionRef = session(),
   messages: SessionMessageRecord[] = [],
   ui: ConductorUiSender | null = null,
+  relay: ConductorRelaySender | null = null,
 ) {
   const appended: Array<{ role: string; content: string }> = [];
   const statuses: string[] = [];
@@ -85,7 +86,15 @@ function fixture(
   } as unknown as ConductorRegistryAdapter;
   const claude = new FakeAdapter();
   const codex = new FakeAdapter();
-  const replier = new ConductorReplier({ registry, claude, codex, ui, confirmTimeoutMs: 0, sleep: async () => {} });
+  const replier = new ConductorReplier({
+    registry,
+    claude,
+    codex,
+    ui,
+    relay,
+    confirmTimeoutMs: 0,
+    sleep: async () => {},
+  });
   return { replier, claude, codex, appended, statuses };
 }
 
@@ -94,7 +103,7 @@ describe("ConductorReplier.send", () => {
     const { replier, claude, appended, statuses } = fixture();
     const outcome = await replier.send("s1", "  A  ", () => undefined);
 
-    expect(outcome).toEqual({ status: "started", via: "background", fallbackReason: null });
+    expect(outcome).toEqual({ status: "started", via: "background", fallbackReason: null, delivery: "sent" });
     expect(claude.turns).toEqual([{ threadId: "thread-1", input: "A", cwd: "/work/farm", model: "opus-5-1m" }]);
     expect(appended).toEqual([{ role: "user", content: "A" }]);
     expect(statuses).toEqual(["working"]);
@@ -204,7 +213,11 @@ describe("ConductorReplier.send through Conductor's window", () => {
     const ui = fakeUi({ ok: true });
     const { replier, claude, appended, statuses } = fixture(session(), [], ui);
 
-    expect(await replier.send("s1", "A", () => undefined)).toEqual({ status: "started", via: "conductor" });
+    expect(await replier.send("s1", "A", () => undefined)).toEqual({
+      status: "started",
+      via: "conductor",
+      delivery: "sent",
+    });
     expect(ui.requests).toEqual([{ workspaceId: "w1", sessionId: "s1", sessionTitle: "Farm", text: "A" }]);
     expect(claude.turns).toHaveLength(0);
     expect(appended).toEqual([]);
@@ -225,6 +238,7 @@ describe("ConductorReplier.send through Conductor's window", () => {
       status: "started",
       via: "background",
       fallbackReason: "the Mac is locked",
+      delivery: "sent",
     });
     expect(claude.turns).toHaveLength(1);
   });
@@ -249,7 +263,11 @@ describe("ConductorReplier.send through Conductor's window", () => {
     } as unknown as SessionMessageRecord;
     const { replier, claude } = fixture(session(), [recorded], ui);
 
-    expect(await replier.send("s1", "A", () => undefined)).toEqual({ status: "started", via: "conductor" });
+    expect(await replier.send("s1", "A", () => undefined)).toEqual({
+      status: "started",
+      via: "conductor",
+      delivery: "sent",
+    });
     expect(claude.turns).toHaveLength(0);
   });
 
@@ -259,5 +277,55 @@ describe("ConductorReplier.send through Conductor's window", () => {
 
     expect((await replier.send("s1", "A", () => undefined)).status).toBe("refused");
     expect(ui.requests).toEqual([]);
+  });
+});
+
+describe("ConductorReplier.send queue and steer", () => {
+  function relayFixture(status: ConductorSessionRef["status"], ok = true) {
+    const sent: Array<{ text: string; mode?: string }> = [];
+    const relay: ConductorRelaySender = {
+      isReady: () => true,
+      send: async ({ text, mode }) => {
+        sent.push({ text, ...(mode ? { mode } : {}) });
+        return ok ? { ok: true } : { ok: false, reason: "down" };
+      },
+    };
+    return { ...fixture(session({ status }), [], null, relay), sent };
+  }
+
+  it("reports queued when the agent is mid-turn and the message was queued", async () => {
+    const { replier, sent } = relayFixture("working");
+    const outcome = await replier.send("s1", "next", () => undefined, { mode: "queue" });
+    expect(outcome).toEqual({ status: "started", via: "conductor", delivery: "queued" });
+    expect(sent).toEqual([{ text: "next", mode: "queue" }]);
+  });
+
+  it("defaults to queue and treats a background-working chat as mid-turn", async () => {
+    const { replier, sent } = relayFixture("waiting");
+    const outcome = await replier.send("s1", "next", () => undefined);
+    expect(outcome).toMatchObject({ delivery: "queued" });
+    expect(sent[0]?.mode).toBe("queue");
+  });
+
+  it("steers through the relay while the agent works", async () => {
+    const { replier, sent } = relayFixture("working");
+    const outcome = await replier.send("s1", "change course", () => undefined, { mode: "steer" });
+    expect(outcome).toEqual({ status: "started", via: "conductor", delivery: "steered" });
+    expect(sent).toEqual([{ text: "change course", mode: "steer" }]);
+  });
+
+  it("just sends to an idle chat, even if steer was asked for", async () => {
+    const { replier, sent } = relayFixture("idle");
+    const outcome = await replier.send("s1", "hi", () => undefined, { mode: "steer" });
+    expect(outcome).toEqual({ status: "started", via: "conductor", delivery: "sent" });
+    expect(sent[0]?.mode).toBe("queue");
+  });
+
+  it("queues instead, and says so, when steer lands on a route that cannot steer", async () => {
+    const ui: ConductorUiSender = { send: async () => ({ ok: true }) as UiSendResult };
+    const { replier } = fixture(session({ status: "working" }), [], ui);
+    const outcome = await replier.send("s1", "change course", () => undefined, { mode: "steer" });
+    expect(outcome).toMatchObject({ status: "started", via: "conductor", delivery: "queued" });
+    expect(outcome.status === "started" && outcome.note).toMatch(/queued instead/);
   });
 });
