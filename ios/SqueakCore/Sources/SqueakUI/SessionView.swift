@@ -319,8 +319,17 @@ private struct AgentMessage: View, Equatable {
             HStack(spacing: 6) {
                 Text(agentName).font(.subheadline.weight(.semibold))
                 Text(Age.clock(atISO)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+                    .accessibilityElement(children: .combine)
+                Spacer(minLength: 4)
+                // The whole message out of the phone in one tap; the text itself stays selectable.
+                Menu {
+                    Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
+                    ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
+                } label: {
+                    Lucide(.ellipsis, size: 16, label: "More for this message", color: Theme.muted)
+                        .frame(width: 44, height: 32).contentShape(Rectangle())
+                }
             }
-            .accessibilityElement(children: .combine)
             if !reading.before.isEmpty { MessageText(markdown: reading.before.joined(separator: "\n\n"), style: .squeak) }
             if let choices {
                 OptionsView(choices: choices, details: reading.details, disabled: disabled, onPick: onPick)
@@ -725,6 +734,11 @@ struct SentBubble: View, Equatable {
                 .padding(.horizontal, 14).padding(.vertical, 10)
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12))
+                .contextMenu {
+                    Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
+                    ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
+                }
             // Exactly one muted line per message this phone sent.
             if let line { Text(line).font(.footnote).foregroundStyle(Theme.muted).multilineTextAlignment(.trailing) }
         }
@@ -1050,6 +1064,10 @@ struct StepList: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button { UIPasteboard.general.string = step.text } label: { Label("Copy", systemImage: "doc.on.doc") }
+            ShareLink(item: step.text) { Label("Share", systemImage: "square.and.arrow.up") }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(label(step.kind)): \(step.text)")
         .accessibilityHint(more ? (open ? "Folds this step" : "Shows the whole step") : "")

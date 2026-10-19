@@ -54,7 +54,7 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
 - [x] **4. The last 3–4 exchanges in a chat** (also under "iPhone UI ideas" above).
 - [x] **5. What changed on a finished turn.** "3 files · +84/−12" under the reply,
       tapping through to the diff (the Mac's diff-view already pages it).
-- [ ] **6. Copy / share** any message or step on a long press.
+- [x] **6. Copy / share** any message or step on a long press.
 - [ ] **7. Swipe actions on Home rows**: A/B/C or Reply without opening the chat.
 - [ ] **8. Answer from the notification**: actionable push with A/B/C and reply
       (needs APNs from the Mac — its own project).
