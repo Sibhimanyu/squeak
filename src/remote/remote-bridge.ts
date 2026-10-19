@@ -294,7 +294,9 @@ export interface RemoteBridgeDependencies {
    * The question a session waiting on you asked, whole (fleet/question.ts),
    * so the phone can show every option instead of a one-line summary.
    */
-  question?: ((session: FleetSession) => { toolUseId: string; questions: QuestionPrompt[] } | null) | null;
+  question?:
+    | ((session: FleetSession) => { toolUseId: string; questions: QuestionPrompt[]; plan?: string | null } | null)
+    | null;
   /**
    * Subscribe to fresh snapshots. When one differs in what the phone shows
    * (state, title, detail — not just a newer timestamp) the bridge publishes
@@ -324,6 +326,9 @@ export interface RemoteBridgeDependencies {
   now?: () => number;
   macName?: string;
 }
+
+/** A pending question as the phone gets it: its prompts, or (for ExitPlanMode) the plan's text. */
+type PhoneQuestion = { toolUseId: string; questions: QuestionPrompt[]; plan?: string };
 
 /** A command older than this is refused even if nothing else is wrong. */
 export const MAX_COMMAND_LIFETIME_MS = 10 * 60_000;
@@ -382,7 +387,7 @@ export class RemoteBridge {
   private readonly activity: RemoteActivity[] = [];
   private readonly messageCache = new Map<string, { text: string | null; choices: ParsedChoices | null }>();
   private readonly activityCache = new Map<string, PhoneActivity | null>();
-  private readonly questionCache = new Map<string, { toolUseId: string; questions: QuestionPrompt[] } | null>();
+  private readonly questionCache = new Map<string, PhoneQuestion | null>();
   private readonly answerLimit = new AnswerRateLimit();
   private pairingOpenUntil = 0;
   private phoneSeenAt = 0;
@@ -1425,7 +1430,7 @@ export class RemoteBridge {
   }
 
   /** Read once per change: the key moves with the session's activity. */
-  private questionFor(session: FleetSession): { toolUseId: string; questions: QuestionPrompt[] } | null {
+  private questionFor(session: FleetSession): PhoneQuestion | null {
     const read = this.deps.question;
     if (!read) {
       return null;
@@ -1434,11 +1439,13 @@ export class RemoteBridge {
     if (this.questionCache.has(key)) {
       return this.questionCache.get(key) ?? null;
     }
-    let value: { toolUseId: string; questions: QuestionPrompt[] } | null = null;
+    let value: PhoneQuestion | null = null;
     try {
       const found = read(session);
-      // toolUseId lets the phone answer exactly this question (kind "answer").
-      value = found ? { toolUseId: found.toolUseId, questions: found.questions } : null;
+      // toolUseId lets the phone answer exactly this question (kind "answer"); a plan carries its text.
+      value = found
+        ? { toolUseId: found.toolUseId, questions: found.questions, ...(found.plan ? { plan: found.plan } : {}) }
+        : null;
     } catch (error) {
       logger.debug("could not read a pending question", {
         error: error instanceof Error ? error.message : String(error),

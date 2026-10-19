@@ -465,7 +465,7 @@ final class AppModel {
     /// Returns a line for the screen.
     /// Answers the question a chat is waiting on (ANSWER-CARD). Face ID first, like a reply: it is
     /// words to an agent. Returns the line to show under the card, and whether it was delivered.
-    func answer(_ answers: [AnswerCommand.Answer], to session: PhoneSnapshot.Session) async -> (delivered: Bool, line: String) {
+    func answer(_ answers: [AnswerCommand.Answer]?, plan: AnswerCommand.PlanAnswer? = nil, to session: PhoneSnapshot.Session) async -> (delivered: Bool, line: String) {
         guard let toolUseId = session.question?.toolUseId, let sessionId = session.conductorSessionId else {
             return (false, "Your Mac can't take answers from this phone yet. Update Squeak on your Mac.")
         }
@@ -478,7 +478,7 @@ final class AppModel {
         }
         guard let channel else { return (false, "Not connected to your Mac.") }
         do {
-            let (id, document) = try channel.answerDocument(sessionId: sessionId, toolUseId: toolUseId, answers: answers, signer: signer)
+            let (id, document) = try channel.answerDocument(sessionId: sessionId, toolUseId: toolUseId, answers: answers, plan: plan, signer: signer)
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else {
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)

@@ -953,6 +953,28 @@ describe("RemoteBridge snapshot", () => {
   });
 });
 
+describe("RemoteBridge pending plan", () => {
+  it("sends a plan waiting on approval with its text, so the phone can show the plan card", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-plan-"));
+    dirs.push(dir);
+    const waiting = session({ state: "awaiting_input" });
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store: new MemoryStore(),
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () =>
+        ({ sessions: [waiting], active: [waiting], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      question: () => ({ toolUseId: "toolu_p", questions: [], plan: "## Plan\n1. Do it" }),
+      now: () => NOW,
+      macName: "Test Mac",
+    });
+    expect(bridge.phoneView().sessions[0]).toMatchObject({
+      question: { toolUseId: "toolu_p", questions: [], plan: "## Plan\n1. Do it" },
+    });
+  });
+});
+
 describe("RemoteBridge phone view activity", () => {
   function viewWith(sessions: FleetSession[], steps: number) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-activity-"));

@@ -63,8 +63,20 @@ enum DemoData {
             key: s.key, conductorSessionId: s.conductorSessionId, label: s.label, agent: s.agent, state: s.state,
             lastActivityAt: s.lastActivityAt, detail: s.detail, git: s.git, contextPercent: s.contextPercent,
             turnId: s.turnId, message: s.message, choices: s.choices, activity: s.activity, title: titles[s.key],
-            question: s.key == "pay" && s.state == "awaiting_input" ? question : nil)
+            question: s.key == "pay" && s.state == "awaiting_input"
+                ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-plan") ? plan : question) : nil)
     }
+
+    /// `-squeak-demo-plan`: the payment chat waits on a plan instead (ExitPlanMode).
+    private static let plan = PhoneSnapshot.Question(toolUseId: "toolu_plan", questions: [], plan: """
+    ## Retry failed payments safely
+
+    1. Add an idempotency key to every charge request, stored with the order.
+    2. Retry temporary failures **three times** with backoff (1s, 4s, 16s).
+    3. Show the customer a retry button after the third failure.
+
+    Files: `src/payments/charge.ts`, `src/payments/retry.ts`, and their tests.
+    """)
 
     /// The question the payment chat waits on, as the Mac sends it (an AskUserQuestion, every option).
     private static let question = PhoneSnapshot.Question(toolUseId: "toolu_demo", questions: [

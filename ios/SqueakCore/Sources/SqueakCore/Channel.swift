@@ -268,7 +268,8 @@ public struct Channel: Sendable {
     public func answerDocument(
         sessionId: String,
         toolUseId: String,
-        answers: [AnswerCommand.Answer],
+        answers: [AnswerCommand.Answer]?,
+        plan: AnswerCommand.PlanAnswer? = nil,
         signer: CommandSigner,
         now: Date = Date()
     ) throws -> (id: String, document: ChannelDocument) {
@@ -280,6 +281,7 @@ public struct Channel: Sendable {
             sessionId: sessionId,
             toolUseId: toolUseId,
             answers: answers,
+            plan: plan,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

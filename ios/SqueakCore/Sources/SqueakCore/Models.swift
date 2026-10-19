@@ -60,7 +60,11 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// The pending tool call these questions came from. An answer names it, so the Mac can refuse one
         /// for a question that is no longer the one waiting (ANSWER-CARD). Absent from an older Mac.
         public let toolUseId: String?
-        public init(toolUseId: String? = nil, questions: [Prompt]) { self.questions = questions; self.toolUseId = toolUseId }
+        /// For a plan waiting on approval (ExitPlanMode), its text; `questions` is empty then.
+        public var plan: String? = nil
+        public init(toolUseId: String? = nil, questions: [Prompt], plan: String? = nil) {
+            self.questions = questions; self.toolUseId = toolUseId; self.plan = plan
+        }
     }
 
     public struct Session: Codable, Equatable, Sendable, Identifiable {
@@ -387,11 +391,19 @@ public struct AnswerCommand: Codable, Equatable, Sendable {
             self.question = question; self.picked = picked; self.other = other
         }
     }
+    /// Approve a plan, or send it back with what to change.
+    public struct PlanAnswer: Codable, Equatable, Sendable {
+        public let approve: Bool
+        public let note: String?
+        public init(approve: Bool, note: String? = nil) { self.approve = approve; self.note = note }
+    }
     public let v: Int
     public let kind: String
     public let sessionId: String
     public let toolUseId: String
-    public let answers: [Answer]
+    /// A question's answers, or nil for a plan (the Mac takes exactly one of the two).
+    public let answers: [Answer]?
+    public var plan: PlanAnswer? = nil
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

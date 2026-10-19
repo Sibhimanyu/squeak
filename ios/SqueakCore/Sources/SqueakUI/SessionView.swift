@@ -287,7 +287,11 @@ private struct ChatRows: View {
                 }
             }
             if session.state == "awaiting_input", let question = session.question {
-                QuestionCard(question: question, agentName: agentName, session: session)
+                if let plan = question.plan {
+                    PlanCard(plan: plan, agentName: agentName, session: session)
+                } else {
+                    QuestionCard(question: question, agentName: agentName, session: session)
+                }
             }
         }
         // Each row is a scroll target, so the chat knows which one you were reading.
@@ -557,6 +561,82 @@ private struct QueueCard: View {
 /// The question the agent is waiting on, every option written out (DESIGN.md §8.4's card, read-only).
 /// Conductor answers questions only in its own window, so the card says where to answer rather than
 /// offering taps that could not land. Agent text is plain text, never markdown.
+/// A plan waiting on your approval (ExitPlanMode): the plan as a document, then Approve, or Ask for
+/// changes with what to change. Either goes back through the same signed answer as a question.
+struct PlanCard: View {
+    let plan: String
+    let agentName: String
+    let session: PhoneSnapshot.Session
+    @Environment(AppModel.self) private var model
+    @State private var revising = false
+    @State private var note = ""
+    @State private var sending = false
+    @State private var result: (delivered: Bool, line: String)?
+    @FocusState private var noteFocused: Bool
+
+    private var canAnswer: Bool { session.question?.toolUseId != nil && session.conductorSessionId != nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("\(agentName)'s plan").font(.headline).accessibilityAddTraits(.isHeader)
+            MessageText(markdown: plan, style: .squeak)
+                .padding(14)
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+            if let result, result.delivered {
+                Label { Text(result.line) } icon: { Lucide(.check, size: 14, color: Theme.muted) }
+                    .font(.footnote).foregroundStyle(Theme.muted)
+            } else if canAnswer {
+                if revising {
+                    TextField("What should change?", text: $note, axis: .vertical)
+                        .lineLimit(2...6).focused($noteFocused)
+                        .padding(.horizontal, 14).padding(.vertical, 12)
+                        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                }
+                HStack(spacing: 10) {
+                    if revising {
+                        Button("Cancel") { revising = false; note = "" }
+                            .buttonStyle(.bordered).tint(Theme.muted).frame(minHeight: 44)
+                        Button { send(approve: false) } label: {
+                            Text(sending ? "Sending…" : "Send changes").frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.borderedProminent).tint(Theme.primaryFill).foregroundStyle(Theme.primaryText)
+                        .disabled(sending || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    } else {
+                        Button { revising = true; noteFocused = true } label: {
+                            Text("Ask for changes").frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered).tint(Theme.ink)
+                        Button { send(approve: true) } label: {
+                            Text(sending ? "Sending…" : "Approve").frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.borderedProminent).tint(Theme.primaryFill).foregroundStyle(Theme.primaryText)
+                        .disabled(sending)
+                    }
+                }
+                if let result, !result.delivered, !result.line.isEmpty {
+                    Text(result.line).font(.footnote).foregroundStyle(Theme.muted)
+                }
+            } else {
+                Text("Approve this plan in Conductor on your Mac; update Squeak on your Mac to answer from here.")
+                    .font(.footnote).foregroundStyle(Theme.muted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func send(approve: Bool) {
+        sending = true
+        let answer = AnswerCommand.PlanAnswer(approve: approve, note: approve ? nil : note.trimmingCharacters(in: .whitespacesAndNewlines))
+        Task {
+            let outcome = await model.answer(nil, plan: answer, to: session)
+            sending = false
+            result = outcome.delivered ? (true, approve ? "Approved" : "Sent back with your changes") : outcome
+        }
+    }
+}
+
 struct QuestionCard: View {
     let question: PhoneSnapshot.Question
     let agentName: String

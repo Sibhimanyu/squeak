@@ -299,6 +299,11 @@ answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
   chat the phone is shown, never from the phone. The result carries `diff`
   (the file list, fleet/diff-view.ts) and, when `file` is an index into it,
   `patch: { index, path, text }` (up to 12,000 characters). No Face ID.
+- **Plans on the phone (2026-10-19).** A session waiting on ExitPlanMode
+  carries `question: { toolUseId, questions: [], plan }` (the plan's text,
+  up to 20,000 characters, from `readPendingAsk`). The phone's plan card
+  answers it with the existing `answer` command's `plan: { approve: true }`
+  or `{ approve: false, note }`, and no `answers`.
 - **History in the live doc (2026-10-19).** `history: [{ role: "user" |
 "assistant", text, at }]`: the watched chat's own messages, every user
   message and the agent's last message of each turn, the newest eight, each

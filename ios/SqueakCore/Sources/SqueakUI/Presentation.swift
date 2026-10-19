@@ -312,7 +312,9 @@ enum Presentation {
     static func replyBlock(_ session: PhoneSnapshot.Session) -> String? {
         if session.conductorSessionId == nil { return "Not a Conductor session. Answer it where it runs." }
         // ANSWER-CARD: a question this phone can answer is answered on its card, not in the reply box.
-        if session.state == "awaiting_input", session.question?.toolUseId != nil { return "Answer the question above." }
+        if session.state == "awaiting_input", session.question?.toolUseId != nil {
+            return session.question?.plan != nil ? "Approve the plan above, or ask for changes." : "Answer the question above."
+        }
         if session.needsYou { return "Waiting inside Conductor. Answer it on your Mac." }
         return nil
     }

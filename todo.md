@@ -56,10 +56,10 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
       tapping through to the diff (the Mac's diff-view already pages it).
 - [x] **6. Copy / share** any message or step on a long press.
 - [x] **7. Swipe actions on Home rows**: A/B/C or Reply without opening the chat.
-- [ ] **8. Answer from the notification**: actionable push with A/B/C and reply
+- [ ] **8. Answer from the notification** — blocked: the app is installed unsigned through SideStore, which cannot carry Apple's push entitlement (`aps-environment`). Needs a paid Developer account and a push-capable build (TestFlight/ad hoc), or keep Telegram's cards for this. Owner's call.: actionable push with A/B/C and reply
       (needs APNs from the Mac — its own project).
-- [ ] **9. Live Activity / Dynamic Island** while an agent works (needs push too).
-- [ ] **10. Plan approvals on the phone** (also under "Not built yet").
+- [ ] **9. Live Activity / Dynamic Island** — blocked on the same push decision (without push it goes stale the moment the app is suspended). while an agent works (needs push too).
+- [x] **10. Plan approvals on the phone** (also under "Not built yet").
 - [ ] **11. Say why a control is missing**: a queue card without actions, a
       blocked composer — one line of reason where the tap would be.
 - [ ] **12. Haptics and motion pass**: a light tap when an open chat's agent

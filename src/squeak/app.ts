@@ -215,8 +215,9 @@ export class SqueakApp {
           snapshot: () => this.runtime.monitor.snapshot,
           onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
           activity: (session) => (session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null),
+          // A question's prompts, or a plan waiting on approval with its text (the phone's plan card).
           question: (session) =>
-            session.agent === "claude" && session.transcriptPath ? readPendingQuestion(session.transcriptPath) : null,
+            session.agent === "claude" && session.transcriptPath ? readPendingAsk(session.transcriptPath) : null,
           liveActivity: (session, limit, stepChars) =>
             session.transcriptPath ? readActivity(session.agent, session.transcriptPath, limit, { stepChars }) : null,
           verbose: config.remoteVerbose,
