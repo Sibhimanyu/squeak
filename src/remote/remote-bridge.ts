@@ -219,6 +219,14 @@ const WATCH_DEBOUNCE_MS = 50;
 /** Pairing is only listened for while the Mac app's pairing sheet is open. */
 const PAIRING_WINDOW_MS = 10 * 60_000;
 const MESSAGE_MAX_CHARS = 8_000;
+/**
+ * Recent chats: Conductor chats that are no longer active, so a phone can
+ * pick one up again. A short list, each with a shorter message: they change
+ * rarely, but every published view carries them.
+ */
+export const PHONE_RECENT_LIMIT = 10;
+const PHONE_RECENT_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
+const RECENT_MESSAGE_MAX_CHARS = 2_000;
 /** How many workspaces the snapshot offers a phone for a new chat. */
 export const PHONE_WORKSPACE_LIMIT = 20;
 /** One start per device in this window: a stolen phone cannot fan out agents. */
@@ -879,6 +887,7 @@ export class RemoteBridge {
     // reading must not republish the snapshot just because it was re-read.
     const serialized =
       JSON.stringify(view.sessions) +
+      JSON.stringify(view.recent) +
       JSON.stringify(view.duck) +
       JSON.stringify(view.workspaces) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
@@ -895,7 +904,8 @@ export class RemoteBridge {
 
   phoneView() {
     const snapshot = this.deps.snapshot();
-    const titles = distinctTitles(snapshot.active);
+    const recent = this.recentSessions(snapshot);
+    const titles = distinctTitles([...snapshot.active, ...recent]);
     const blocked = snapshot.active.filter((session) => session.state.startsWith("awaiting")).length;
     const working = snapshot.active.filter((session) => session.state === "working").length;
     return {
@@ -907,29 +917,55 @@ export class RemoteBridge {
       usage: phoneUsage(snapshot.codexUsage, this.deps.claudeLimits?.() ?? null),
       // Where a phone may start a chat; absent when this Mac can't (phones then hide the button).
       ...(this.deps.newChat ? { workspaces: this.phoneWorkspaces() } : {}),
-      sessions: snapshot.active.map((session) => {
-        const conductorSessionId = session.conductorSessionId;
-        const title = titles.get(session.key);
-        const message = conductorSessionId ? this.message(conductorSessionId, session.lastActivityAt) : null;
-        const git = session.git ? describeGitState(session.git, { countCommits: false }) : null;
-        return {
-          key: session.key,
-          conductorSessionId,
-          label: title ? `${sessionLabel(session)} (${title})` : sessionLabel(session),
-          // The phone's row headline (DESIGN.md §8.2); older phones ignore it.
-          title: chatTitle(session),
-          agent: session.agent,
-          state: session.state,
-          lastActivityAt: session.lastActivityAt,
-          detail: session.detail,
-          git: git && git !== "clean" ? git : null,
-          contextPercent: session.contextPercent,
-          turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
-          message: message?.text ?? null,
-          choices: message?.choices ?? null,
-          activity: session.state === "working" ? this.activityFor(session) : null,
-        };
-      }),
+      sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
+      // Older phones ignore it; newer ones list it under Recent and can reply to any of them.
+      recent: recent.map((session) => this.phoneSession(session, titles, RECENT_MESSAGE_MAX_CHARS)),
+    };
+  }
+
+  /**
+   * Conductor chats that are not active any more, newest first: not closed,
+   * not in an archived workspace (`retired`), touched in the last week. Only
+   * Conductor chats, because those are what a phone can reply to.
+   */
+  private recentSessions(snapshot: FleetSnapshot): FleetSession[] {
+    const active = new Set(snapshot.active.map((session) => session.key));
+    const since = this.now() - PHONE_RECENT_MAX_AGE_MS;
+    return snapshot.sessions
+      .filter(
+        (session) =>
+          !active.has(session.key) &&
+          !session.retired &&
+          Boolean(session.conductorSessionId) &&
+          Date.parse(session.lastActivityAt) >= since,
+      )
+      .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
+      .slice(0, PHONE_RECENT_LIMIT);
+  }
+
+  private phoneSession(session: FleetSession, titles: Map<string, string | null>, maxChars: number) {
+    const conductorSessionId = session.conductorSessionId;
+    const title = titles.get(session.key);
+    const message = conductorSessionId ? this.message(conductorSessionId, session.lastActivityAt) : null;
+    const git = session.git ? describeGitState(session.git, { countCommits: false }) : null;
+    const text =
+      message?.text && message.text.length > maxChars ? `${message.text.slice(0, maxChars)}…` : (message?.text ?? null);
+    return {
+      key: session.key,
+      conductorSessionId,
+      label: title ? `${sessionLabel(session)} (${title})` : sessionLabel(session),
+      // The phone's row headline (DESIGN.md §8.2); older phones ignore it.
+      title: chatTitle(session),
+      agent: session.agent,
+      state: session.state,
+      lastActivityAt: session.lastActivityAt,
+      detail: session.detail,
+      git: git && git !== "clean" ? git : null,
+      contextPercent: session.contextPercent,
+      turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
+      message: text,
+      choices: message?.choices ?? null,
+      activity: session.state === "working" ? this.activityFor(session) : null,
     };
   }
 

@@ -23,6 +23,12 @@ struct HomeView: View {
     }()
 
     private var sessions: [PhoneSnapshot.Session] { model.snapshot?.sessions ?? [] }
+    /// Chats that are not active any more, to pick up again: only under All, searched like the rest.
+    private var recent: [PhoneSnapshot.Session] {
+        guard filter == .all, let snapshot = model.snapshot else { return [] }
+        let active = Set(sessions.map(\.key))
+        return (snapshot.recent ?? []).filter { !active.contains($0.key) && Presentation.matches($0, query: query) }
+    }
     private var needsCount: Int { sessions.filter(\.needsYou).count }
 
     /// Sections in attention order (DESIGN.md §8.2), filtered and searched.
@@ -55,7 +61,19 @@ struct HomeView: View {
                             SectionHeader(title: group.title, count: rows.count)
                         }
                     }
-                    if visible.isEmpty { noResults }
+                    let older = recent
+                    if !older.isEmpty {
+                        Section {
+                            ForEach(older) { session in
+                                NavigationLink(value: session.key) { SessionRow(session: session) }
+                                    .listRowBackground(Color.clear)
+                                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                            }
+                        } header: {
+                            SectionHeader(title: "Recent", count: older.count)
+                        }
+                    }
+                    if visible.isEmpty && older.isEmpty { noResults }
                 } else {
                     waiting
                 }
@@ -136,7 +154,7 @@ struct HomeView: View {
 
     private func openPending() {
         guard let id = router.pendingSessionId,
-              let session = model.snapshot?.sessions.first(where: { $0.conductorSessionId == id })
+              let session = model.snapshot?.allSessions.first(where: { $0.conductorSessionId == id })
         else { return }
         path = [session.key]
         router.consume()

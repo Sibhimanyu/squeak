@@ -146,13 +146,27 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// Optional: a Mac older than new chats does not send it, and the phone then hides "New chat".
     public let workspaces: [Workspace]?
     public let sessions: [Session]
+    /// Conductor chats that are no longer active, newest first, to pick up
+    /// again. Optional: a Mac older than this does not send it.
+    public let recent: [Session]?
 
     public init(
         v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session], usage: Usage? = nil,
-        workspaces: [Workspace]? = nil
+        workspaces: [Workspace]? = nil, recent: [Session]? = nil
     ) {
         self.v = v; self.mac = mac; self.generatedAt = generatedAt; self.duck = duck; self.sessions = sessions
-        self.usage = usage; self.workspaces = workspaces
+        self.usage = usage; self.workspaces = workspaces; self.recent = recent
+    }
+
+    /// A session by key, active or recent.
+    public func session(_ key: String) -> Session? {
+        sessions.first { $0.key == key } ?? recent?.first { $0.key == key }
+    }
+
+    /// Active sessions, then recent ones not already among them.
+    public var allSessions: [Session] {
+        let active = Set(sessions.map(\.key))
+        return sessions + (recent ?? []).filter { !active.contains($0.key) }
     }
 
     /// Attention order, DESIGN.md §8.2.

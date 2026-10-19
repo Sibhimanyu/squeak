@@ -10,6 +10,15 @@ final class PresentationTests: XCTestCase {
               title: title)
     }
 
+    func testHeaderLinesNeverRepeat() {
+        // A chat with no diff once crashed the app: two identical candidates in a ViewThatFits.
+        XCTAssertEqual(Presentation.headerLines(state: "idle · 3h", subtitle: "storefront · Claude", git: nil),
+                       ["idle · 3h · storefront · Claude", "idle · 3h"])
+        XCTAssertEqual(Presentation.headerLines(state: "idle · 3h", subtitle: "", git: nil), ["idle · 3h"])
+        XCTAssertEqual(Presentation.headerLines(state: "working · 1m", subtitle: "atlas · Codex", git: "+3 −1"),
+                       ["working · 1m · atlas · Codex · +3 −1", "working · 1m · atlas · Codex", "working · 1m"])
+    }
+
     func testLabelSplitsIntoRepoAndTitle() {
         XCTAssertEqual(Presentation.split(label: "storefront · Payment retry logic").repo, "storefront")
         XCTAssertEqual(Presentation.split(label: "orchard").title, "orchard")

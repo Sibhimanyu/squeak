@@ -60,6 +60,19 @@ enum Presentation {
         ownTitle(session) ?? repoBranch(session)
     }
 
+    /// The chat header's second line, longest first, for ViewThatFits to pick
+    /// the one that fits. Never two the same: without a diff (or a repo) the
+    /// candidates repeat, and ViewThatFits crashes on duplicate children.
+    static func headerLines(state: String, subtitle: String, git: String?) -> [String] {
+        let candidates = [
+            [state, subtitle, git ?? ""],
+            [state, subtitle],
+            [state],
+        ].map { $0.filter { !$0.isEmpty }.joined(separator: " · ") }
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0).inserted }
+    }
+
     /* ---------- status ---------- */
 
     /// One tone per state (DESIGN.md §3.3); only the dot carries the colour.

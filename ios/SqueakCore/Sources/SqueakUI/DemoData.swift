@@ -67,7 +67,24 @@ enum DemoData {
 
     static var snapshot: PhoneSnapshot {
         let raw = rawSnapshot
-        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: raw.sessions.map(titled), usage: usage, workspaces: workspaces)
+        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: ProcessInfo.processInfo.arguments.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent)
+    }
+
+    /// Chats from earlier, to pick up again. `-squeak-demo-empty-active` shows them with nothing active.
+    private static var recent: [PhoneSnapshot.Session] {
+        let ago = { (hours: Double) in ISO8601DateFormatter().string(from: Date().addingTimeInterval(-hours * 3600)) }
+        return [
+            PhoneSnapshot.Session(
+                key: "r1", conductorSessionId: "00000000-0000-0000-0000-0000000000a1", label: "storefront · coupon-codes", agent: "claude",
+                state: "idle", lastActivityAt: ago(3), detail: "Coupons apply before tax now; tests pass.", git: nil, contextPercent: 41,
+                turnId: "r1t", message: "Coupons now apply before tax, and the rounding test covers the 0.5 cent case. Want me to add the admin toggle next?",
+                choices: nil, title: "Coupon codes at checkout"),
+            PhoneSnapshot.Session(
+                key: "r2", conductorSessionId: "00000000-0000-0000-0000-0000000000a2", label: "atlas · rate-limits", agent: "codex",
+                state: "idle", lastActivityAt: ago(26), detail: "Added a token bucket per API key.", git: nil, contextPercent: nil,
+                turnId: "r2t", message: "Added a token bucket per API key, 60 requests a minute. Nothing else changed.", choices: nil,
+                title: "Rate limits per key"),
+        ]
     }
 
     /// What the Mac lists for a new chat. `-squeak-demo-no-workspaces` plays a Mac too old to send any.

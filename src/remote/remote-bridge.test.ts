@@ -1036,3 +1036,54 @@ describe("RemoteBridge usage refresh from the phone", () => {
     t.bridge.stop();
   });
 });
+
+describe("RemoteBridge recent chats", () => {
+  function recent(sessions: FleetSession[], active: FleetSession[]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-recent-"));
+    dirs.push(dir);
+    return new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store: new MemoryStore(),
+      replier: {
+        lastTurnText: (id) => `Last words of ${id}. ${"x".repeat(3_000)}`,
+        lastTurnId: (id) => `turn-${id}`,
+        send: vi.fn(),
+      },
+      snapshot: () => ({ sessions, active, attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      now: () => NOW,
+    });
+  }
+  const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
+  const chat = (id: string, minutesAgo: number, overrides: Partial<FleetSession> = {}) =>
+    session({ key: `k:${id}`, conductorSessionId: id, state: "idle", lastActivityAt: at(minutesAgo), ...overrides });
+
+  it("lists inactive Conductor chats newest first, each with its turn so a reply is accepted", () => {
+    const working = chat("w", 1, { state: "working" });
+    const bridge = recent([working, chat("old", 120), chat("new", 30)], [working]);
+    const view = bridge.phoneView();
+    expect(view.sessions.map((s) => s.key)).toEqual(["k:w"]);
+    expect(view.recent.map((s) => s.key)).toEqual(["k:new", "k:old"]);
+    expect(view.recent[0]).toMatchObject({ conductorSessionId: "new", turnId: "turn-new" });
+  });
+
+  it("leaves out closed or archived chats, other agents' sessions, and anything older than a week", () => {
+    const bridge = recent(
+      [
+        chat("closed", 10, { retired: true }),
+        chat("terminal", 10, { conductorSessionId: null, key: "claude-transcript:t" }),
+        chat("stale", 8 * 24 * 60),
+        chat("ok", 10),
+      ],
+      [],
+    );
+    expect(bridge.phoneView().recent.map((s) => s.key)).toEqual(["k:ok"]);
+  });
+
+  it("keeps the list short and each message shorter than an active chat's", () => {
+    const many = Array.from({ length: 15 }, (_, i) => chat(`c${i}`, i + 1));
+    const view = recent(many, []).phoneView();
+    expect(view.recent).toHaveLength(10);
+    expect(view.recent[0]!.message!.length).toBeLessThanOrEqual(2_001);
+  });
+});

@@ -364,7 +364,8 @@ final class AppModel: ObservableObject {
                     contextPercent: nil, turnId: nil, message: nil, choices: nil)
                 snapshot = PhoneSnapshot(
                     v: current.v, mac: current.mac, generatedAt: current.generatedAt, duck: current.duck,
-                    sessions: [session] + current.sessions, usage: current.usage, workspaces: current.workspaces)
+                    sessions: [session] + current.sessions, usage: current.usage, workspaces: current.workspaces,
+                    recent: current.recent)
             }
             return .started
         }
@@ -431,7 +432,7 @@ final class AppModel: ObservableObject {
     }
 
     private func remember(_ snapshot: PhoneSnapshot?) {
-        for s in snapshot?.sessions ?? [] where s.state != "working" {
+        for s in snapshot?.allSessions ?? [] where s.state != "working" {
             guard let text = [s.message, s.detail].compactMap({ $0 }).first(where: { !$0.isEmpty }) else { continue }
             remembered[s.key] = RememberedMessage(text: text, atISO: s.lastActivityAt, turnId: s.turnId)
         }

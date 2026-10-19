@@ -28,7 +28,7 @@ struct SessionView: View {
         var id: String { rawValue }
     }
 
-    private var session: PhoneSnapshot.Session? { model.snapshot?.sessions.first { $0.key == key } }
+    private var session: PhoneSnapshot.Session? { model.snapshot?.session(key) }
 
     @Environment(\.squeakScreen) private var screen
 
@@ -89,11 +89,7 @@ struct SessionView: View {
     private func header(_ session: PhoneSnapshot.Session) -> some View {
         let state = "\(session.stateWord) · \(Age.describe(session.lastActivityAt))"
         let subtitle = Presentation.subtitle(session)
-        let lines = [
-            [state, subtitle, session.git].compactMap { $0 },
-            [state, subtitle],
-            [state],
-        ].map { $0.joined(separator: " · ") }
+        let lines = Presentation.headerLines(state: state, subtitle: subtitle, git: session.git)
         return VStack(spacing: 1) {
             Text(Presentation.displayTitle(session))
                 .font(.headline).lineLimit(1).truncationMode(.tail)
@@ -101,7 +97,8 @@ struct SessionView: View {
                 StatusDot(color: Theme.stateColor(session.state), pulses: session.needsYou || session.state == "working",
                           period: session.state == "working" ? 1.6 : 1.0)
                 ViewThatFits(in: .horizontal) {
-                    ForEach(lines, id: \.self) { Text($0).lineLimit(1) }
+                    // By position: ViewThatFits traps on two children with one id.
+                    ForEach(Array(lines.enumerated()), id: \.offset) { Text($0.element).lineLimit(1) }
                 }
                 .font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
             }
