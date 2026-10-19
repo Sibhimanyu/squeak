@@ -21,6 +21,10 @@ let (queuedId, queuedDocument) = try channel.replyDocument(
 let (promoteId, promoteDocument) = try channel.queueDocument(
     sessionId: "s1", messageId: "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31", action: .promote, signer: signer, now: madeAt)
 let (startId, startDocument) = try channel.startDocument(workspaceId: "w1", agent: .codex, text: "Add a timer", signer: signer, now: madeAt)
+// ANSWER-CARD: an answer to question 0 of the pending call toolu_fixture in chat s1: "Red", plus its own words.
+let (answerId, answerDocument) = try channel.answerDocument(
+    sessionId: "s1", toolUseId: "toolu_fixture",
+    answers: [.init(question: 0, picked: ["Red"], other: "and a bit of blue")], signer: signer, now: madeAt)
 let fixture: [String: Any] = [
     "madeAt": Int64(madeAt.timeIntervalSince1970 * 1000),
     "key": key,
@@ -41,6 +45,9 @@ let fixture: [String: Any] = [
     // A new chat in workspace w1 with codex: "Add a timer".
     "startCommandId": startId,
     "startCommand": ["box": startDocument.box, "sig": startDocument.sig!, "device": startDocument.device!],
+    // An answer to question 0 of toolu_fixture in s1: picked "Red", other "and a bit of blue".
+    "answerCommandId": answerId,
+    "answerCommand": ["box": answerDocument.box, "sig": answerDocument.sig!, "device": answerDocument.device!],
 ]
 let data = try JSONSerialization.data(withJSONObject: fixture, options: [.prettyPrinted, .sortedKeys])
 FileManager.default.createFile(atPath: CommandLine.arguments[1], contents: data)

@@ -26,6 +26,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   steerCommand: { box: string; sig: string; device: string };
   startCommandId: string;
   startCommand: { box: string; sig: string; device: string };
+  answerCommandId: string;
+  answerCommand: { box: string; sig: string; device: string };
   queuedCommandId: string;
   queuedCommand: { box: string; sig: string; device: string };
   promoteCommandId: string;
@@ -48,6 +50,7 @@ function bridge(turn: string) {
   const sent: Array<ReplyOptions | undefined> = [];
   const queueActions: Array<[string, string, QueueAction]> = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
+  const answers: Array<[string, unknown]> = [];
   const remote = new RemoteBridge({
     configPath,
     projectId: "squeak-test",
@@ -81,10 +84,17 @@ function bridge(turn: string) {
         return { ok: true, sessionId: "new-1" };
       },
     },
+    // Records what the phone's answer asks for; delivery itself is answer-command's business.
+    answerer: {
+      answer: async (sessionId: string, input: unknown) => {
+        answers.push([sessionId, input]);
+        return { status: "answered", via: "stopped-and-sent" } as const;
+      },
+    } as never,
     // As of when the phone made it, so the fixture never expires.
     now: () => fixture.madeAt + 1_000,
   });
-  return { remote, config, sends, sent, starts, queueActions };
+  return { remote, config, sends, sent, starts, queueActions, answers };
 }
 
 describe("a reply made on the iPhone", () => {
@@ -100,6 +110,17 @@ describe("a reply made on the iPhone", () => {
     const verdict = await remote.handleCommand(config, fixture.steerCommandId, fixture.steerCommand);
     expect(verdict.result).toMatchObject({ status: "sent", delivery: "steered" });
     expect(sends).toEqual([["s1", "Use the timer instead", "steer"]]);
+  });
+
+  it("delivers an answer the phone signed, picks and its own words as typed", async () => {
+    const { remote, config, answers } = bridge("turn-9");
+    const verdict = await remote.handleCommand(config, fixture.answerCommandId, fixture.answerCommand);
+    expect(verdict.result).toMatchObject({ id: fixture.answerCommandId, status: "answered", via: "stopped-and-sent" });
+    expect(answers).toHaveLength(1);
+    expect(answers[0]![0]).toBe("s1");
+    expect(JSON.stringify(answers[0]![1])).toContain("toolu_fixture");
+    expect(JSON.stringify(answers[0]![1])).toContain("Red");
+    expect(JSON.stringify(answers[0]![1])).toContain("and a bit of blue");
   });
 
   it("starts a new chat when the phone signs a start command", async () => {

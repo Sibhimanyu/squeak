@@ -218,7 +218,7 @@ private struct ChatRows: View {
                 }
             }
             if session.state == "awaiting_input", let question = session.question {
-                QuestionCard(question: question, agentName: agentName)
+                QuestionCard(question: question, agentName: agentName, session: session)
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: rows.map(\.id))
@@ -470,10 +470,31 @@ private struct QueueCard: View {
 struct QuestionCard: View {
     let question: PhoneSnapshot.Question
     let agentName: String
+    var session: PhoneSnapshot.Session? = nil
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Picks per question, "Something else" text per question, and where the answer stands.
+    @State private var picked: [Int: Set<String>] = [:]
+    @State private var other: [Int: String] = [:]
+    @State private var otherOpen: Set<Int> = []
+    @State private var sending = false
+    @State private var result: (delivered: Bool, line: String)?
+
+    /// The Mac names the pending call only once it can take answers; until then the card is to read.
+    private var canAnswer: Bool { question.toolUseId != nil && session?.conductorSessionId != nil }
+    private var answered: Bool { result?.delivered == true }
+
+    /// Every question has a pick or its own words (ANSWER-CARD).
+    private var complete: Bool {
+        question.questions.indices.allSatisfy { i in
+            !(picked[i] ?? []).isEmpty || !(other[i] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            ForEach(Array(question.questions.enumerated()), id: \.offset) { _, prompt in
+            ForEach(Array(question.questions.enumerated()), id: \.offset) { index, prompt in
                 VStack(alignment: .leading, spacing: 10) {
                     if let header = prompt.header, !header.isEmpty {
                         Text(header.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
@@ -483,27 +504,124 @@ struct QuestionCard: View {
                         Text("Pick any").font(.footnote).foregroundStyle(Theme.muted)
                     }
                     ForEach(Array(prompt.options.enumerated()), id: \.offset) { _, option in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(option.label).font(.body.weight(.medium))
-                            if let description = option.description, !description.isEmpty {
-                                Text(description).font(.subheadline).foregroundStyle(Theme.muted)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14).padding(.vertical, 11)
-                        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
-                        .accessibilityElement(children: .combine)
+                        optionRow(option, prompt: prompt, index: index)
                     }
+                    if canAnswer { otherRow(index) }
                 }
             }
+            footer
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .disabled(sending || answered)
+    }
+
+    private func optionRow(_ option: PhoneSnapshot.Question.Prompt.Option, prompt: PhoneSnapshot.Question.Prompt, index: Int) -> some View {
+        let on = picked[index]?.contains(option.label) == true
+        return Button {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
+                var set = picked[index] ?? []
+                if prompt.multiSelect {
+                    if on { set.remove(option.label) } else { set.insert(option.label) }
+                } else {
+                    set = on ? [] : [option.label]
+                    otherOpen.remove(index); other[index] = nil
+                }
+                picked[index] = set
+            }
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                if canAnswer {
+                    Lucide(on ? .circleCheck : .circle, size: 18,
+                           color: on ? Theme.ink : Theme.subtle)
+                        .accessibilityHidden(true)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(option.label).font(.body.weight(.medium)).foregroundStyle(Theme.ink)
+                    if let description = option.description, !description.isEmpty {
+                        Text(description).font(.subheadline).foregroundStyle(Theme.muted)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .background(on ? Theme.surfaceRaised : Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Theme.ink : Theme.line, lineWidth: on ? 1.5 : 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .allowsHitTesting(canAnswer)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+    }
+
+    @ViewBuilder
+    private func otherRow(_ index: Int) -> some View {
+        if otherOpen.contains(index) {
+            TextField("Your answer", text: Binding(get: { other[index] ?? "" }, set: { text in
+                other[index] = text
+                if !text.isEmpty, question.questions[index].multiSelect == false { picked[index] = [] }
+            }), axis: .vertical)
+            .lineLimit(1...4)
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+        } else {
+            Button {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { _ = otherOpen.insert(index) }
+            } label: {
+                Text("Something else…").font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        if canAnswer {
+            VStack(alignment: .leading, spacing: 8) {
+                if !answered {
+                    Button {
+                        guard let session else { return }
+                        let answers = question.questions.indices.map { i in
+                            AnswerCommand.Answer(
+                                question: i, picked: Array(picked[i] ?? []).sorted(),
+                                other: (other[i] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : other[i])
+                        }
+                        sending = true
+                        Task {
+                            let outcome = await model.answer(answers, to: session)
+                            sending = false
+                            if !outcome.line.isEmpty { result = outcome }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if sending { ProgressView().tint(Theme.primaryText) }
+                            Text(sending ? "Sending…" : "Send answer").font(.body.weight(.semibold))
+                        }
+                        .foregroundStyle(complete ? Theme.primaryText : Theme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(complete ? Theme.primaryFill : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!complete || sending)
+                }
+                if let result {
+                    Text(result.line).font(.footnote).foregroundStyle(result.delivered ? Theme.muted : Theme.needsYou)
+                } else {
+                    Text("Goes to \(agentName) in Conductor. If Conductor can't take it directly, Squeak stops the question and sends your answer as a message.")
+                        .font(.footnote).foregroundStyle(Theme.muted)
+                }
+            }
+        } else {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Lucide(.info, size: 14, color: Theme.muted).accessibilityHidden(true)
-                Text("\(agentName) asked this in Conductor. Answer it in Conductor on your Mac; this phone can't answer questions yet.")
+                Text("\(agentName) asked this in Conductor. Answer it in Conductor on your Mac; this phone can answer once Squeak on your Mac is updated.")
                     .font(.footnote).foregroundStyle(Theme.muted)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

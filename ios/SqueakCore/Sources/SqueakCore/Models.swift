@@ -57,7 +57,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             }
         }
         public let questions: [Prompt]
-        public init(questions: [Prompt]) { self.questions = questions }
+        /// The pending tool call these questions came from. An answer names it, so the Mac can refuse one
+        /// for a question that is no longer the one waiting (ANSWER-CARD). Absent from an older Mac.
+        public let toolUseId: String?
+        public init(toolUseId: String? = nil, questions: [Prompt]) { self.questions = questions; self.toolUseId = toolUseId }
     }
 
     public struct Session: Codable, Equatable, Sendable, Identifiable {
@@ -268,6 +271,29 @@ public struct UsageCommand: Codable, Equatable, Sendable {
     public let expiresAt: Int64
 }
 
+/// An answer to the question an agent is waiting on (docs/answering-questions.md). Signed like a reply;
+/// the Mac checks `toolUseId` is still the pending call before delivering it.
+public struct AnswerCommand: Codable, Equatable, Sendable {
+    public struct Answer: Codable, Equatable, Sendable {
+        /// The question's position in the call.
+        public let question: Int
+        public let picked: [String]
+        /// "Something else": the person's own words.
+        public let other: String?
+        public init(question: Int, picked: [String], other: String? = nil) {
+            self.question = question; self.picked = picked; self.other = other
+        }
+    }
+    public let v: Int
+    public let kind: String
+    public let sessionId: String
+    public let toolUseId: String
+    public let answers: [Answer]
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
 /// What the Mac wrote back for a command.
 public struct CommandResult: Codable, Equatable, Sendable {
     public let status: String
@@ -285,6 +311,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public let throttled: Bool?
 
     public var sent: Bool { status == "sent" }
+    /// For an answer: the Mac delivered it (`via` says how: "conductor", "stopped-and-sent").
+    public var answered: Bool { status == "answered" }
 }
 
 public struct PairingAnswer: Codable, Equatable, Sendable {

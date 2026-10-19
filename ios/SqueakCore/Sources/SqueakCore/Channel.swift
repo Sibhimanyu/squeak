@@ -232,6 +232,30 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed document answering the question `toolUseId` in a chat (ANSWER-CARD).
+    public func answerDocument(
+        sessionId: String,
+        toolUseId: String,
+        answers: [AnswerCommand.Answer],
+        signer: CommandSigner,
+        now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = AnswerCommand(
+            v: 1,
+            kind: "answer",
+            sessionId: sessionId,
+            toolUseId: toolUseId,
+            answers: answers,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
     public func send(_ document: ChannelDocument, id: String) async throws {
         try await store.set(path("commands", id), document)
     }

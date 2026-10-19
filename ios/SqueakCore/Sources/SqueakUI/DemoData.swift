@@ -67,7 +67,7 @@ enum DemoData {
     }
 
     /// The question the payment chat waits on, as the Mac sends it (an AskUserQuestion, every option).
-    private static let question = PhoneSnapshot.Question(questions: [
+    private static let question = PhoneSnapshot.Question(toolUseId: "toolu_demo", questions: [
         .init(question: "How should temporary failures be retried?", header: "Retries", multiSelect: false, options: [
             .init(label: "Retry automatically", description: "3 attempts with backoff"),
             .init(label: "Let the customer retry", description: "Keep checkout available"),

@@ -458,6 +458,39 @@ final class AppModel {
     /// Asks the Mac for a fresh Claude usage reading; the new numbers arrive in
     /// the snapshot. No Face ID: it reads, and sends nothing to an agent.
     /// Returns a line for the screen.
+    /// Answers the question a chat is waiting on (ANSWER-CARD). Face ID first, like a reply: it is
+    /// words to an agent. Returns the line to show under the card, and whether it was delivered.
+    func answer(_ answers: [AnswerCommand.Answer], to session: PhoneSnapshot.Session) async -> (delivered: Bool, line: String) {
+        guard let toolUseId = session.question?.toolUseId, let sessionId = session.conductorSessionId else {
+            return (false, "Your Mac can't take answers from this phone yet. Update Squeak on your Mac.")
+        }
+        guard await confirmWithBiometrics(reason: "Answer in \(session.label)") else { return (false, "") }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if demo {
+            try? await Task.sleep(for: .seconds(1))
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            return (true, "Answered")
+        }
+        guard let channel else { return (false, "Not connected to your Mac.") }
+        do {
+            let (id, document) = try channel.answerDocument(sessionId: sessionId, toolUseId: toolUseId, answers: answers, signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else {
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                return (false, "Your Mac didn't confirm it. Check the chat before answering again.")
+            }
+            guard result.answered || result.sent else {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                return (false, result.reason ?? "Your Mac couldn't deliver that answer.")
+            }
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            let how = result.via == "stopped-and-sent" ? " · sent as a message after stopping the question" : ""
+            return (true, (result.note ?? "Answered") + how)
+        } catch {
+            return (false, "Couldn't reach your Mac.")
+        }
+    }
+
     func refreshUsage() async -> String {
         if demo { try? await Task.sleep(for: .seconds(1)); return "Updated just now." }
         guard let channel else { return "Not connected to your Mac." }
