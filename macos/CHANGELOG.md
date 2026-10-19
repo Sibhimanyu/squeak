@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.0
+
+- Answer an agent's question from Squeak: when Claude asks you to choose (one
+  option, several, or your own words) or approve a plan, the window and the
+  menu-bar panel show it as a card. Squeak delivers your answer to that chat:
+  through Conductor when it can, otherwise by stopping the waiting question and
+  sending your answer as a message (the card says so first).
+
 ## 2.0.9
 
 - Start a new Conductor chat from Squeak: ⌘N, the menu-bar panel or Quick
