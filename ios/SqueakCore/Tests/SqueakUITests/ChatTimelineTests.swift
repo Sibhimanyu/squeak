@@ -19,6 +19,8 @@ final class ChatTimelineTests: XCTestCase {
     func send(_ status: ChatSend.Status = .sending, turn: String? = "t1", ago: TimeInterval = 5) -> ChatSend {
         ChatSend(text: "go", date: now.addingTimeInterval(-ago), answersTurn: turn, status: status)
     }
+    /// The same send as the chat shows it once the agent has it.
+    func read(_ s: ChatSend) -> ChatSend { var c = s; c.status = .read(agent: "Claude"); return c }
     let previous = RememberedMessage(text: "Earlier answer", atISO: "2026-01-01T10:00:00.000Z", turnId: "t1")
     func tool(_ text: String) -> PhoneSnapshot.Step { .init(kind: "tool", text: text) }
 
@@ -55,13 +57,14 @@ final class ChatTimelineTests: XCTestCase {
         let s = send(.sent)
         let rows = ChatTimeline.rows(session: session("finished", turn: "t2", message: "New answer", ago: 1), remembered: previous, sends: [s], now: now)
         // The send answered t1, so it sits before t2's reply; no working row, no duplicate, no empty.
-        XCTAssertEqual(rows, [.sent(s), .agent(text: "New answer", atISO: iso(1), muted: false)])
+        XCTAssertEqual(rows, [.sent(read(s)), .agent(text: "New answer", atISO: iso(1), muted: false)])
     }
 
     func testStillWorkingKeepsBubbleAfterThePreviousMessage() {
         let s = send(.sent)
         let rows = ChatTimeline.rows(session: session("working", turn: "t2"), remembered: previous, sends: [s], now: now)
-        XCTAssertEqual(rows, [.agent(text: "Earlier answer", atISO: previous.atISO, muted: true), .sent(s), .working(label: "Starting…")])
+        // Sent to a resting chat that is working now: the agent took it.
+        XCTAssertEqual(rows, [.agent(text: "Earlier answer", atISO: previous.atISO, muted: true), .sent(read(s)), .working(label: "Starting…")])
     }
 
     func testRefusedSendShowsItsReasonAndNoWorkingRow() {
@@ -103,7 +106,7 @@ final class ChatTimelineTests: XCTestCase {
     func testTwoSendsWhileWorkingKeepBothBubblesInOrderThenOneWorkingRow() {
         let a = send(.sent, ago: 120), b = send(.sending, ago: 5)
         let rows = ChatTimeline.rows(session: session("working", turn: "t2"), remembered: previous, sends: [a, b], now: now)
-        XCTAssertEqual(rows, [.agent(text: "Earlier answer", atISO: previous.atISO, muted: true), .sent(a), .sent(b), .working(label: "Starting…")])
+        XCTAssertEqual(rows, [.agent(text: "Earlier answer", atISO: previous.atISO, muted: true), .sent(read(a)), .sent(b), .working(label: "Starting…")])
     }
 
     func testNotConfirmedStillCountsAsWaiting() {
@@ -117,7 +120,7 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertTrue(working.contains(.sent(queued)))
         let after = ChatTimeline.rows(session: session("finished", turn: "t2", message: "Done"), remembered: previous, sends: [queued], now: now)
         guard case .sent(let shown)? = after.first(where: { if case .sent = $0 { true } else { false } }) else { return XCTFail("no bubble") }
-        XCTAssertEqual(shown.status, .sent)
+        XCTAssertEqual(shown.status, .read(agent: "Claude"))
     }
 
     func testDeliveryLines() {
@@ -200,7 +203,7 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertEqual(rows, [
             .agent(text: "Earlier answer", atISO: previous.atISO, muted: true),
             .folded(id: "part-0", steps: [TurnStep(kind: "tool", text: "Read a.ts")]),
-            .steer(id: steer.id.uuidString, text: "Keep the fallback", line: "Steered into the current turn"),
+            .steer(id: steer.id.uuidString, text: "Keep the fallback", line: "Read by Claude"),
             .working(label: "Editing a file…", steps: [TurnStep(kind: "tool", text: "Edit a.ts")]),
         ])
     }
@@ -219,7 +222,7 @@ final class ChatTimelineTests: XCTestCase {
     func testASteerTypedOnTheMacStillShowsWhereItLanded() {
         let live = liveTurn(steps: [.init(kind: "you", text: "From the Mac"), .init(kind: "tool", text: "Edit a.ts")])
         let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [], live: live, now: now)
-        XCTAssertEqual(rows.first, .steer(id: "you-0", text: "From the Mac", line: "Steered into the current turn"))
+        XCTAssertEqual(rows.first, .steer(id: "you-0", text: "From the Mac", line: "Read by Claude"))
     }
 
     func testClippedReportsStillMatchTheSteer() {
@@ -232,5 +235,30 @@ final class ChatTimelineTests: XCTestCase {
         let live = liveTurn(working: false, steps: [.init(kind: "tool", text: "Run tests"), .init(kind: "you", text: "x")])
         let rows = ChatTimeline.rows(session: session("finished", turn: "t2", message: "Done", ago: 1), remembered: previous, sends: [], live: live, now: now)
         XCTAssertEqual(rows, [.folded(id: "worked", steps: [TurnStep(kind: "tool", text: "Run tests")]), .agent(text: "Done", atISO: iso(1), muted: false)])
+    }
+    /* ---------- read receipts ---------- */
+
+    func testSentIsNotReadUntilTheAgentHasIt() {
+        // The Mac took it, the chat has not started working yet: still "Sent".
+        let s = send(.sent)
+        let rows = ChatTimeline.rows(session: session("finished", message: "Earlier answer"), remembered: previous, sends: [s], now: now)
+        XCTAssertTrue(rows.contains(.sent(s)))
+    }
+
+    func testAQueuedMessageIsReadWhenItLeavesConductorsQueue() {
+        var q = queuedSend(seen: true); q.status = .sent
+        let gone = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: previous, sends: [q], live: liveTurn(queue: []), now: now)
+        XCTAssertTrue(gone.contains(.sent(read(q))))
+    }
+
+    func testASteerIsSteeredUntilTheTranscriptShowsIt() {
+        let steer = ChatSend(text: "Use the timer", date: now.addingTimeInterval(-3), answersTurn: "t1", status: .steered, mode: .steer)
+        let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [steer],
+                                     live: liveTurn(steps: [.init(kind: "tool", text: "Read a.ts")]), now: now)
+        XCTAssertTrue(rows.contains(.steer(id: steer.id.uuidString, text: "Use the timer", line: "Steered into the current turn")))
+    }
+
+    func testReadLine() {
+        XCTAssertEqual(ChatSend.Status.read(agent: "Codex").line, "Read by Codex")
     }
 }

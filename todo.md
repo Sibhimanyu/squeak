@@ -44,7 +44,7 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
 
 ## iPhone UX plan (chat ushuaia-c6, 2026-10-19), worked top to bottom
 
-- [ ] **1. "Read by Claude" receipts.** A bubble's line moves from Sent to "Read by
+- [x] **1. "Read by Claude" receipts.** A bubble's line moves from Sent to "Read by
       Claude" when the agent actually picks the message up (the transcript's user
       entry, or it leaving Conductor's queue), not when the Mac received it.
 - [ ] **2. Stop while working.** A Stop control beside Send on a working chat,

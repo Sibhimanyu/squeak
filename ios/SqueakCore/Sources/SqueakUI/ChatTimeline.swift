@@ -14,6 +14,9 @@ struct ChatSend: Identifiable, Equatable {
         /// Written to the channel, but the Mac has not said it arrived.
         case notConfirmed
         case refused(String)
+        /// The agent has it: its turn started from it, it shows in the turn, or it left the queue.
+        /// Only ever worked out for display (`ChatTimeline.receipt`), never stored.
+        case read(agent: String)
 
         /// The one line under a "You" bubble, muted: sent, queued, steered or not sent.
         var line: String {
@@ -26,6 +29,7 @@ struct ChatSend: Identifiable, Equatable {
             case .steered: "Steered into the current turn"
             case .notConfirmed: "Not confirmed"
             case .refused(let why): "Not sent: \(why)"
+            case .read(let agent): "Read by \(agent)"
             }
         }
 
@@ -88,7 +92,7 @@ enum ChatQueue {
     static func isQueued(_ send: ChatSend, session: PhoneSnapshot.Session, live: LiveTurn?, now: Date = Date()) -> Bool {
         guard send.queuedBehindTurn, send.mode == .queue else { return false }
         switch send.status {
-        case .refused, .sent, .steered: return false
+        case .refused, .sent, .steered, .read: return false
         case .sending, .queued, .notConfirmed: break
         }
         if let queue = live?.queue {
@@ -201,13 +205,31 @@ enum ChatTimeline {
             if awaiting.contains(where: { $0.id == s.id }) { return true }
             return s.answersTurn != nil && s.answersTurn == anchorTurn
         }
-        /// "Queued" is true only while the agent is still on the turn the message waited behind;
-        /// once that turn is over it has read it, so the line says "Sent". A steer stays "Steered".
+        let agentName = Presentation.agentName(session.agent)
+        let steps = turnSteps(session: session, live: live)
+        /// "Sent" says the Mac has it; "Read by Claude" says the agent does. "Queued" holds while the
+        /// agent is still on the turn the message waited behind.
         func settled(_ s: ChatSend) -> ChatSend {
-            guard case .queued = s.status, !working else { return s }
             var copy = s
-            copy.status = .sent
+            if read(s) { copy.status = .read(agent: agentName) } else if case .queued = s.status, !working { copy.status = .sent }
             return copy
+        }
+        func read(_ s: ChatSend) -> Bool {
+            switch s.status {
+            case .sent, .queued, .steered: break
+            default: return false
+            }
+            // The agent answered after it.
+            if !working, current != nil {
+                if s.answersTurn == nil { return (Age.date(session.lastActivityAt) ?? .distantPast) > s.date }
+                if session.turnId != s.answersTurn { return true }
+            }
+            // A steer the transcript shows inside the turn.
+            if s.isSteer { return steps.contains { $0.kind == "you" && same($0.text, s.text) } }
+            // Queued: it left Conductor's queue, so the agent took it.
+            if s.queuedBehindTurn { return s.seenInQueue && !(live?.queue?.contains { $0.id == s.messageId } ?? true) }
+            // Sent to a chat that was resting: the turn it started is running.
+            return working && s.status == .sent
         }
         // While the turn runs, a steer belongs inside it, among the steps.
         let steers = isWorking ? sends.filter { s in s.isSteer && awaiting.contains(where: { $0.id == s.id }) } : []
@@ -224,7 +246,9 @@ enum ChatTimeline {
             rows.append(.agent(text: current, atISO: session.lastActivityAt, muted: false))
         }
         rows += plain.filter(after).map { .sent(settled($0)) }
-        if isWorking { rows += turn(steps: turnSteps(session: session, live: live), steers: steers, truncated: (live?.total ?? session.activity?.total ?? 0) > turnSteps(session: session, live: live).count) }
+        if isWorking {
+            rows += turn(steps: steps, steers: steers.map(settled), truncated: (live?.total ?? session.activity?.total ?? 0) > steps.count, agentName: agentName)
+        }
         return rows.isEmpty ? [.empty(emptyText(canReply: Presentation.replyBlock(session) == nil))] : rows
     }
 
@@ -237,7 +261,7 @@ enum ChatTimeline {
 
     /// The turn in parts: each steer where it landed, the steps before it folded, the live part last.
     /// A steer the Mac has not reported yet goes at the end, the agent still to read it.
-    static func turn(steps: [TurnStep], steers: [ChatSend], truncated: Bool) -> [Row] {
+    static func turn(steps: [TurnStep], steers: [ChatSend], truncated: Bool, agentName: String = "the agent") -> [Row] {
         var segments: [[TurnStep]] = [[]]
         var yous: [String] = []
         for step in steps {
@@ -247,7 +271,7 @@ enum ChatTimeline {
         var rows: [Row] = []
         // A steer that scrolled out of a clipped feed landed before everything shown.
         if truncated {
-            let early = unmatched.filter { s in s.status == .steered && !yous.contains { same($0, s.text) } }
+            let early = unmatched.filter { s in (s.status == .steered || s.status == .read(agent: agentName)) && !yous.contains { same($0, s.text) } }
             rows += early.map { .steer(id: $0.id.uuidString, text: $0.text, line: $0.status.line) }
             unmatched.removeAll { s in early.contains { $0.id == s.id } }
         }
@@ -257,7 +281,8 @@ enum ChatTimeline {
                 let s = unmatched.remove(at: mine)
                 rows.append(.steer(id: s.id.uuidString, text: s.text, line: s.status.line))
             } else {
-                rows.append(.steer(id: "you-\(i)", text: you, line: ChatSend.Status.steered.line))
+                // Typed on the Mac: in the transcript, so the agent has it.
+                rows.append(.steer(id: "you-\(i)", text: you, line: ChatSend.Status.read(agent: agentName).line))
             }
         }
         var live = segments[segments.count - 1]

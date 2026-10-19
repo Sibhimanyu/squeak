@@ -530,7 +530,9 @@ interaction on the phone and in Telegram.
 A single text field with the target named in its placeholder: *"Message for
 orchard · irrigation"*. Send is the only primary button. The composer stays;
 each sent message carries one delivery line (sent / queued / steered / not
-sent). It never sends to a session the user did not explicitly pick.
+sent), which becomes **Read by Claude** once the agent has it: its turn
+started from it, the turn shows the steer, or it left Conductor's queue.
+"Sent" only ever means the Mac has it. It never sends to a session the user did not explicitly pick.
 
 While the agent works, Send becomes **Queue** and is still the only control:
 a tap queues, and holding it (on the Mac, its chevron or ⇧⌘↩) offers
