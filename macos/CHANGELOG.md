@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.2
+
+- Usage bars show what is left, like a battery: "58% left", full once a
+  window resets.
+
 ## 2.1.1
 
 - A usage window that has reset since its last reading now says Reset and
