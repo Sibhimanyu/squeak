@@ -46,8 +46,7 @@ struct SessionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Text(session?.conductorSessionId != nil ? "Conductor" : "On your Mac")
-                    .font(.subheadline).foregroundStyle(Theme.muted)
+                if let session { header(session) }
             }
         }
     }
@@ -55,12 +54,13 @@ struct SessionView: View {
     @ViewBuilder
     private func content(_ session: PhoneSnapshot.Session) -> some View {
         VStack(spacing: 0) {
-            header(session)
             Picker("View", selection: $tab) {
                 ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
-            .padding(.horizontal, 20).padding(.bottom, 10)
+            .controlSize(.small)
+            .frame(maxWidth: 220)
+            .padding(.top, 2).padding(.bottom, 6)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -83,22 +83,34 @@ struct SessionView: View {
         }
     }
 
+    /// The header lives in the navigation bar, two lines: the chat's title, then
+    /// its state with as much context (age, repo, agent, diff) as the width
+    /// allows. The chat is what this screen is for, so it gets the room.
     private func header(_ session: PhoneSnapshot.Session) -> some View {
-        let status = Presentation.status(session)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(Presentation.displayTitle(session)).font(.system(size: 28, weight: .bold)).fixedSize(horizontal: false, vertical: true)
-            Text(Presentation.subtitle(session)).font(.body).foregroundStyle(Theme.muted)
-            HStack(spacing: 7) {
+        let state = "\(session.stateWord) · \(Age.describe(session.lastActivityAt))"
+        let subtitle = Presentation.subtitle(session)
+        let lines = [
+            [state, subtitle, session.git].compactMap { $0 },
+            [state, subtitle],
+            [state],
+        ].map { $0.joined(separator: " · ") }
+        return VStack(spacing: 1) {
+            Text(Presentation.displayTitle(session))
+                .font(.headline).lineLimit(1).truncationMode(.tail)
+            HStack(spacing: 5) {
                 StatusDot(color: Theme.stateColor(session.state), pulses: session.needsYou || session.state == "working",
                           period: session.state == "working" ? 1.6 : 1.0)
-                Text("\(session.stateWord) · \(Age.describe(session.lastActivityAt))").font(.subheadline).foregroundStyle(Theme.muted)
-                if let git = session.git { Text("· \(git)").font(.footnote).foregroundStyle(Theme.muted).monospacedDigit() }
+                ViewThatFits(in: .horizontal) {
+                    ForEach(lines, id: \.self) { Text($0).lineLimit(1) }
+                }
+                .font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
             }
-            .padding(.top, 2)
-            .accessibilityElement(children: .combine)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 14)
+        .frame(maxWidth: 260)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Presentation.displayTitle(session))
+        .accessibilityValue(lines[0])
+        .accessibilityAddTraits(.isHeader)
     }
 
     /* ---------- chat ---------- */
@@ -254,6 +266,11 @@ struct OptionsView: View {
 
 /// The reply composer (§8.5): the target in the placeholder, Send the one
 /// primary control, and the reason when this phone cannot reply.
+///
+/// While the agent works, a tap on Send queues the message behind the turn
+/// and holding Send offers Steer now, which puts it into the turn instead.
+/// Queue is the default because it never interrupts; steering is a
+/// deliberate act, so it is never sticky and every message starts queued.
 struct Composer: View {
     @EnvironmentObject var model: AppModel
     let session: PhoneSnapshot.Session
@@ -261,9 +278,7 @@ struct Composer: View {
     var composing: FocusState<Bool>.Binding
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    /// How the next message meets an agent that is mid-turn. Only offered while it works.
-    @State private var mode: ReplyMode = .queue
-    /// The long explanation is shown until the first message sent mid-turn; a short line after.
+    /// The hold-to-steer hint shows until the first message sent mid-turn; nothing after.
     @AppStorage("squeak.queueSteerExplained") private var explained = false
     private var working: Bool { session.state == "working" && block == nil }
     private var agentName: String { Presentation.agentName(session.agent) }
@@ -272,15 +287,7 @@ struct Composer: View {
 
     /// Always there: after a send the field clears and keeps focus, so the next message can be typed at once.
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if working {
-                Picker("Delivery", selection: $mode) {
-                    Text("Queue").tag(ReplyMode.queue)
-                    Text("Steer now").tag(ReplyMode.steer)
-                }
-                .pickerStyle(.segmented)
-                .accessibilityHint("Queue waits for \(agentName) to finish this turn. Steer now sends it into the turn in progress.")
-            }
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("Reply to \(Presentation.agentName(session.agent))…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
@@ -295,66 +302,98 @@ struct Composer: View {
             }
             caption
         }
-        .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
+        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func send() {
+    private func send(_ mode: ReplyMode = .queue) {
         let text = draft
         // Clear at once and keep the keyboard up; hand the text back if nothing was sent (Face ID declined).
         draft = ""
         composing.wrappedValue = true
+        let wasWorking = working
         Task {
-            let started = await model.send(text, to: session, mode: working ? mode : .queue)
+            let started = await model.send(text, to: session, mode: wasWorking ? mode : .queue)
             if !started, draft.isEmpty { draft = text }
-            if started, working { explained = true }
+            if started, wasWorking { explained = true }
         }
     }
 
     private var sendDisabled: Bool { block != nil || empty }
 
-    /// "Queue" while the agent works, "Steer now" when chosen, otherwise "Send".
-    private var sendLabel: String { !working ? "Send" : mode == .steer ? "Steer now" : "Queue" }
-
     /// Send is the one primary control: the prominent glass button filled
     /// with duck on iOS 26 (§8.9, owner's decision), a flat duck fill before.
+    /// Mid-turn it is a menu whose tap is Queue and whose hold is the choice.
     @ViewBuilder
     private var sendButton: some View {
-        let arrow = Lucide(.arrowUp, size: 20, color: sendDisabled ? Theme.muted : Theme.primaryText).frame(width: 44, height: 44)
-        if #available(iOS 26, *), !reduceTransparency {
-            Button(action: send) { Lucide(.arrowUp, size: 20, color: sendDisabled ? Theme.muted : Theme.primaryText).frame(width: 20, height: 24) }
-                .buttonStyle(.glassProminent)
-                .buttonBorderShape(.roundedRectangle(radius: 12))
-                .tint(Theme.primaryFill)
-                .disabled(sendDisabled)
-                .accessibilityLabel(sendLabel)
-        } else {
-            Button(action: send) {
-                arrow
-                    .background(sendDisabled ? Theme.surfaceRaised : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+        if working {
+            Menu {
+                Button { send(.steer) } label: {
+                    Text("Steer now")
+                    Text("Goes into the turn in progress")
+                }
+                Button { send(.queue) } label: {
+                    Text("Queue")
+                    Text("\(agentName) reads it after this turn")
+                }
+            } label: {
+                sendFace
+            } primaryAction: {
+                send(.queue)
             }
+            .menuStyle(.button)
+            .modifier(SendFace(disabled: sendDisabled, reduceTransparency: reduceTransparency))
             .disabled(sendDisabled)
-            .accessibilityLabel(sendLabel)
+            .accessibilityLabel("Queue")
+            .accessibilityHint("Holds your message until \(agentName) finishes this turn. Use the Steer now action to send it into the turn.")
+            .accessibilityAction(named: "Steer now") { if !sendDisabled { send(.steer) } }
+        } else {
+            Button { send() } label: { sendFace }
+                .modifier(SendFace(disabled: sendDisabled, reduceTransparency: reduceTransparency))
+                .disabled(sendDisabled)
+                .accessibilityLabel("Send")
         }
     }
 
+    private var sendFace: some View {
+        Lucide(.arrowUp, size: 20, color: sendDisabled ? Theme.muted : Theme.primaryText)
+            .frame(width: glass ? 20 : 44, height: glass ? 24 : 44)
+    }
+
+    private var glass: Bool {
+        if #available(iOS 26, *) { return !reduceTransparency }
+        return false
+    }
+
+    /// One line at most, and none at all once you know how it works.
     @ViewBuilder
     private var caption: some View {
         if let block {
             Text(block).font(.footnote).foregroundStyle(Theme.muted)
-        } else if working {
-            Text(explained ? shortCaption : "Queue holds your message until \(agentName) finishes this turn. Steer now sends it into the turn in progress.")
+        } else if working, !explained {
+            Text("Send queues it after this turn. Hold to steer now.")
                 .font(.footnote).foregroundStyle(Theme.muted)
-        } else {
-            Text("Sent to your Mac securely.").font(.footnote).foregroundStyle(Theme.muted)
         }
     }
 }
 
-extension Composer {
-    fileprivate var shortCaption: String {
-        mode == .steer ? "Steer now: goes into the turn in progress." : "Queue: \(agentName) reads it after this turn."
+/// The look of Send, shared by the plain button and the mid-turn menu.
+private struct SendFace: ViewModifier {
+    let disabled: Bool
+    let reduceTransparency: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *), !reduceTransparency {
+            content
+                .buttonStyle(.glassProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 12))
+                .tint(Theme.primaryFill)
+        } else {
+            content
+                .buttonStyle(.plain)
+                .background(disabled ? Theme.surfaceRaised : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+        }
     }
 }
 

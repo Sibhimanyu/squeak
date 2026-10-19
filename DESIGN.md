@@ -532,6 +532,16 @@ orchard · irrigation"*. Send is the only primary button. The composer stays;
 each sent message carries one delivery line (sent / queued / steered / not
 sent). It never sends to a session the user did not explicitly pick.
 
+While the agent works, Send becomes **Queue** and is still the only control:
+a tap queues, and holding it (on the Mac, its chevron or ⇧⌘↩) offers
+**Steer now**. No picker or second button: steering is the rarer, deliberate
+act, so it is never sticky and every message starts queued. The explanation
+is one line, shown until the first message sent mid-turn.
+
+The session header is two lines (in the iPhone's navigation bar): the title,
+then state, age and as much of repo, agent and diff as fits. The transcript
+gets the room.
+
 ### 8.6 Push card (Telegram and mobile notifications)
 
 Three short lines at most, as specified in `CLAUDE.md`:

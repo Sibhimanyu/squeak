@@ -368,38 +368,45 @@ struct SessionDetail: View {
 
     // MARK: Header
 
+    /// Two lines: the title with the view switch and Open beside it, then one
+    /// muted line of who, where and what changed. The transcript is what this
+    /// window is for, so the header takes as little of it as it can.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top) {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .center, spacing: 12) {
                 Text(verbatim: SessionText.headline(session))
-                    .font(Typo.title).lineLimit(2).accessibilityAddTraits(.isHeader)
+                    .font(Typo.heading).lineLimit(1).truncationMode(.tail)
+                    .help(SessionText.headline(session))
+                    .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 12)
+                Picker("View", selection: $tab) {
+                    ForEach(DetailTab.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().controlSize(.small).fixedSize()
+                .accessibilityLabel("Chat or activity")
                 if session.capabilities.openInHost.isSupported {
                     Button { model.openInHost() } label: {
-                        LucideLabel("Open in Conductor", .externalLink, color: Theme.ink)
+                        Lucide(.externalLink, size: 14, color: Theme.ink)
                     }
                     .modifier(GlassBorderedButton())
                     .help("Open this chat in Conductor")
+                    .accessibilityLabel("Open in Conductor")
                     .disabled(model.openURL == nil && !model.demoMode)
                 }
             }
-            if let line = repoBranch {
-                Text(verbatim: line).font(Typo.heading).foregroundStyle(Theme.muted).lineLimit(1)
-            }
-            // §8.2: the git line lives here, not in the list row.
-            if let git = model.summaryLine(for: session) {
-                Text(verbatim: git).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1)
-            }
-            Text(verbatim: "\(SessionText.agent(session.agent) ?? "agent") · \(SessionText.stateWord(session)) · \(session.source.title)").font(Typo.meta).foregroundStyle(Theme.muted)
-            Picker("View", selection: $tab) {
-                ForEach(DetailTab.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden().frame(width: 230)
-            .padding(.top, 12)
-            .accessibilityLabel("Chat or activity")
+            Text(verbatim: metaLine).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                .lineLimit(1).truncationMode(.middle)
+                .help(metaLine)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 28).padding(.top, 8).padding(.bottom, 14)
+        .padding(.horizontal, 28).padding(.top, 6).padding(.bottom, 10)
+    }
+
+    /// `Claude · working · Conductor · repo · branch · +12 −3` (§8.2: the git line lives here, not in the list row).
+    private var metaLine: String {
+        [SessionText.agent(session.agent) ?? "agent", SessionText.stateWord(session), session.source.title, repoBranch,
+         model.summaryLine(for: session)]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     private var repoBranch: String? {
@@ -525,8 +532,8 @@ struct SessionDetail: View {
         if !model.isConnected { return "Not connected. Replies wait until Squeak's service is back." }
         if working {
             return queueSteerExplained
-                ? "Queue: \(agent) reads it after this turn. Steer now: it goes into the turn in progress."
-                : "Queue holds your message until \(agent) finishes this turn. Steer now sends it into the turn in progress."
+                ? "Queues after this turn · ⇧⌘↩ steers now"
+                : "Queue holds it until \(agent) finishes this turn. Hold Queue, or press ⇧⌘↩, to steer it in now."
         }
         return "Replies go to \(session.source.replyDestination)."
     }
@@ -558,31 +565,52 @@ struct SessionDetail: View {
                         .accessibilityHidden(true)
                 }
                 if working {
-                    Button { send(.steer) } label: {
-                        Text("Steer now").font(Typo.label).padding(.horizontal, 6)
-                    }
-                    .modifier(GlassBorderedButton())
-                    .keyboardShortcut(.return, modifiers: [.command, .shift])
-                    .disabled(!canSend)
-                    .accessibilityLabel("Steer now")
-                    .accessibilityHint("Sends the message into the turn in progress")
-                    .help("Send it into the turn in progress (⇧⌘↩)")
-                }
-                Button { send(.queue) } label: {
-                    SendLabel(title: working ? "Queue" : "Send")
+                    // Click queues; the arrow or a click-and-hold offers Steer now.
+                    Menu {
+                        Button("Steer now: into the turn in progress") { send(.steer) }
+                        Button("Queue: after this turn") { send(.queue) }
+                    } label: {
+                        HStack(spacing: 5) {
+                            SendLabel(title: "Queue")
+                            Lucide(.chevronDown, size: 12, color: canSend ? Theme.ink : Theme.muted)
+                        }
                         .padding(.horizontal, 6)
+                    } primaryAction: {
+                        send(.queue)
+                    }
+                    .menuStyle(.button)
+                    .menuIndicator(.hidden)
+                    .modifier(SendButtonStyle())
+                    .fixedSize()
+                    .disabled(!canSend)
+                    .accessibilityLabel("Queue message")
+                    .accessibilityHint("Holds it until \(agent) finishes this turn. Steer now is in its menu, or press Shift-Command-Return.")
+                    .help("Queue: \(agent) reads it after this turn (⌘↩). Steer now: hold, or ⇧⌘↩")
+                    // The shortcuts work without opening the menu.
+                    shortcut(.queue, [.command])
+                    shortcut(.steer, [.command, .shift])
+                } else {
+                    Button { send(.queue) } label: {
+                        SendLabel(title: "Send").padding(.horizontal, 6)
+                    }
+                    .modifier(SendButtonStyle())
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(!canSend)
+                    .accessibilityLabel("Send message")
+                    .help(session.capabilities.attachments.reason.map { "Send (⌘↩). Attachments: \($0)" } ?? "Send (⌘↩)")
                 }
-                .modifier(SendButtonStyle())
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(!canSend)
-                .accessibilityLabel(working ? "Queue message" : "Send message")
-                .help(working ? "Queue: \(agent) reads it after this turn (⌘↩)"
-                    : (session.capabilities.attachments.reason.map { "Send (⌘↩). Attachments: \($0)" } ?? "Send (⌘↩)"))
             }
         }
         .padding(.leading, 14).padding(.trailing, 10).padding(.top, 8).padding(.bottom, 10)
         .squeakGlass(radius: Radius.card)
         .accessibilityElement(children: .contain)
+    }
+
+    private func shortcut(_ mode: SendMode, _ modifiers: EventModifiers) -> some View {
+        Button("") { send(mode) }
+            .keyboardShortcut(.return, modifiers: modifiers)
+            .disabled(!canSend)
+            .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
     }
 
     private func send(_ mode: SendMode) {
