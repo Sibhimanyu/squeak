@@ -42,6 +42,56 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
       "Show more": check why the other few are left out (retired flag, transcript
       time vs Conductor time) rather than assume they don't qualify.
 
+## From chat ushuaia-f7 (Mac app, service, releases)
+
+Not built yet:
+
+- [ ] **Answering Codex questions** — the answer service's `readAsk` only reads
+      Claude transcripts.
+- [ ] **New chat in a new workspace (phase 2)** — relay `POST /workspaces` body is
+      unknown; reverse-engineer it from Conductor's bundle first (`.context/re/`).
+- [ ] **Swift relay cutover** — `macos/Sources/SqueakMacCore/Relay/` is ported and
+      tested but not wired; the native app still needs the Node service to send.
+      Plan in `macos/README.md`.
+- [ ] **Relay setup inside the Mac app** — still the terminal CLI
+      (`scripts/conductor-relay.ts`); needs a fresh decision.
+- [ ] **Turn on the iPhone channel from Settings** (`SQUEAK_REMOTE_PROJECT`) — the
+      iPhone tab only explains it.
+- [ ] **Remember linked Telegram chat names** across restarts (memory only now).
+- [ ] **Retire the Electron app** (`desktop/`): `install-squeak-agents.sh` would
+      recreate `com.squeak.duck` for the deleted `~/Applications/Squeak.app`.
+- [ ] **New duck artwork** (DESIGN.md §12): mood sprites and the iPhone tab-bar duck
+      are still the old round-eyed art; §8.7 empty/offline states want moods.
+- [ ] `macos/README.md` is behind the last releases (new chats, answering,
+      channels, keep-awake).
+
+Never tried by hand (do once):
+
+- [ ] Start a real new chat (Mac ⌘N and iPhone) — the first real relay create.
+- [ ] Answer a real question / approve a real plan from the Mac card (2.1.0).
+- [ ] Claude usage **Refresh** (makes a real Claude call).
+- [ ] A real **Queue** vs **Steer now** send from the Mac.
+- [ ] The glass menu-bar panel on screen; the menu bar reading "Squeak" when the
+      window opens; the window staying off another app's full-screen Space.
+- [ ] Telegram / Cliq / iPhone pairing from Settings › Channels and › iPhone.
+- [ ] Verbose mode on the phone.
+
+Open design questions:
+
+- [ ] Usage bars neutral, or the needs-you colour past 90%?
+- [ ] "Today's cost": whole-session cost on its last day (now) or a per-day sum?
+- [ ] Offline menu-bar duck dimmed to 45% — does that count as recolouring?
+- [ ] Sidebar needs-you count: white on `#F87171` is ~2.8:1 in dark mode.
+- [ ] Permission prompts (allow this tool call?) from the phone — out of scope so far.
+
+Housekeeping:
+
+- [ ] `output/` in this worktree — not from ushuaia-f7; check what it is.
+- [ ] SNOF: remote branches named `squeak-*`, and workspaces `brasilia` /
+      `no-stale-when-unread` still contain `ios/SqueakKit` — rebase on `main`.
+- [ ] Heresay: the Squeak 2.0 brief disappeared from `heresay briefs`; check the
+      dashboard. Updates `nudge` and `design-apple` were offered, not applied.
+
 ## Notes for whoever picks this up
 
 - Several chats share this worktree. Commit only your own hunks through a private
