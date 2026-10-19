@@ -54,7 +54,7 @@ export interface FleetRuntime {
   /** Where /state reads Claude's last plan-limit reading from. */
   setClaudeLimits(read: (() => ClaudeLimits | null) | null): void;
   /** Where /state reads the awake session from (fleet/awake-session.ts). */
-  setAwake(read: (() => AwakeState | null) | null): void;
+  setAwake(read: (() => { state: AwakeState | null; lidReady: boolean }) | null): void;
 }
 
 /**
@@ -103,7 +103,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
 
   let canReply: ((session: FleetSession) => boolean) | null = null;
   let claudeLimits: (() => ClaudeLimits | null) | null = null;
-  let awake: (() => AwakeState | null) | null = null;
+  let awake: (() => { state: AwakeState | null; lidReady: boolean }) | null = null;
   return {
     registry,
     store,
@@ -184,7 +184,7 @@ export function serializeState(
   monitor: FleetMonitor,
   canReply: ((session: FleetSession) => boolean) | null = null,
   claudeLimits: ClaudeLimits | null = null,
-  awake: AwakeState | null = null,
+  awake: { state: AwakeState | null; lidReady: boolean } | null = null,
 ): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
@@ -205,8 +205,8 @@ export function serializeState(
     // seen; null until one has been. Refreshed only by the owner's request.
     claudeLimits,
     // The awake session (start, end time), for the menu bar; keepAwake is its on/off.
-    keepAwake: awake !== null,
-    awake,
+    // Present only when the daemon runs awake sessions; older surfaces read keepAwake.
+    ...(awake ? { keepAwake: awake.state !== null, awake: awake.state, awakeLidReady: awake.lidReady } : {}),
     active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),
     others: others.map((session) => serializeSession(session, canReply, null)),
     attention: snapshot.attention.map((item) => ({

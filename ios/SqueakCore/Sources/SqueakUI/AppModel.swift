@@ -117,7 +117,8 @@ final class AppModel {
                     self.snapshot = PhoneSnapshot(
                         v: current.v, mac: current.mac, generatedAt: ISO8601DateFormatter().string(from: Date()), duck: current.duck,
                         sessions: current.sessions, usage: current.usage, workspaces: current.workspaces, recent: current.recent,
-                        keepAwake: current.keepAwake, awakeUntil: current.awakeUntil)
+                        keepAwake: current.keepAwake, awakeUntil: current.awakeUntil,
+                        awakeLid: current.awakeLid, awakeLidProblem: current.awakeLidProblem, awakeLidReady: current.awakeLidReady)
                 }
                 n += 1
             }
@@ -419,7 +420,8 @@ final class AppModel {
                 snapshot = PhoneSnapshot(
                     v: current.v, mac: current.mac, generatedAt: current.generatedAt, duck: current.duck,
                     sessions: [session] + current.sessions, usage: current.usage, workspaces: current.workspaces,
-                    recent: current.recent, keepAwake: current.keepAwake, awakeUntil: current.awakeUntil)
+                    recent: current.recent, keepAwake: current.keepAwake, awakeUntil: current.awakeUntil,
+                        awakeLid: current.awakeLid, awakeLidProblem: current.awakeLidProblem, awakeLidReady: current.awakeLidReady)
             }
             return .started
         }
@@ -513,10 +515,13 @@ final class AppModel {
     struct AwakeStatus: Equatable {
         /// Nil: until it is ended.
         var until: Date?
+        /// "on", "starting" or "failed" for a lid-closed session; nil without the lid.
+        var lid: String? = nil
+        var lidProblem: String? = nil
     }
 
     enum AwakeChange {
-        case start(minutes: Int?)
+        case start(minutes: Int?, lid: Bool = false)
         case extend(minutes: Int)
         case end
     }
@@ -527,11 +532,15 @@ final class AppModel {
     /// Whether this Mac offers awake sessions at all.
     var awakeOffered: Bool { snapshot?.keepAwake != nil }
 
+    /// Whether this Mac can start a lid-closed session.
+    var awakeLidReady: Bool { snapshot?.awakeLidReady == true }
+
     /// The running awake session, or nil when there is none.
     var awake: AwakeStatus? {
         if let tapped = awakeTapped, Date().timeIntervalSince(tapped.at) < 30 { return tapped.status }
         guard snapshot?.keepAwake == true else { return nil }
-        return AwakeStatus(until: snapshot?.awakeUntil.flatMap(Self.parseISO))
+        return AwakeStatus(
+            until: snapshot?.awakeUntil.flatMap(Self.parseISO), lid: snapshot?.awakeLid, lidProblem: snapshot?.awakeLidProblem)
     }
 
     private static func parseISO(_ value: String) -> Date? {
@@ -545,8 +554,11 @@ final class AppModel {
     func changeAwake(_ change: AwakeChange) async -> String? {
         let expected: AwakeStatus?
         switch change {
-        case .start(let minutes): expected = AwakeStatus(until: minutes.map { Date().addingTimeInterval(Double($0) * 60) })
-        case .extend(let minutes): expected = AwakeStatus(until: awake?.until.map { max($0, Date()).addingTimeInterval(Double(minutes) * 60) })
+        case .start(let minutes, let lid):
+            expected = AwakeStatus(until: minutes.map { Date().addingTimeInterval(Double($0) * 60) }, lid: lid ? "starting" : nil)
+        case .extend(let minutes):
+            expected = AwakeStatus(
+                until: awake?.until.map { max($0, Date()).addingTimeInterval(Double(minutes) * 60) }, lid: awake?.lid)
         case .end: expected = nil
         }
         awakeTapped = (expected, Date())
@@ -555,7 +567,8 @@ final class AppModel {
         do {
             let (id, document): (String, ChannelDocument)
             switch change {
-            case .start(let minutes): (id, document) = try channel.awakeDocument(on: true, minutes: minutes, signer: signer)
+            case .start(let minutes, let lid):
+                (id, document) = try channel.awakeDocument(on: true, minutes: minutes, lid: lid ? true : nil, signer: signer)
             case .extend(let minutes): (id, document) = try channel.awakeDocument(on: true, extend: minutes, signer: signer)
             case .end: (id, document) = try channel.awakeDocument(on: false, signer: signer)
             }

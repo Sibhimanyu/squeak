@@ -48,11 +48,18 @@ export interface IngressControl {
    * it is only ever reached by the owner pressing Refresh.
    */
   refreshClaudeUsage?(): Promise<unknown>;
+  /** The sudoers file lid-closed sessions need, for the Mac app to install with an admin prompt. */
+  lidRule?(): { path: string; rule: string } | null;
   /**
    * Starts, extends or ends an awake session (fleet/awake-session.ts,
    * `readAwakeAction` shapes). Answers the session after, or why not.
    */
-  awake?(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
+  awake?(
+    request: unknown,
+  ):
+    | Promise<{ ok: true; state: unknown } | { ok: false; reason: string }>
+    | { ok: true; state: unknown }
+    | { ok: false; reason: string };
   /** Which channels are set up and healthy. Never carries a secret. */
   channels?(): unknown;
   /** Chats that messaged the Telegram bot without being allowed. */
@@ -338,6 +345,17 @@ export class HookIngressServer {
       return;
     }
 
+    if ((request.url ?? "").split("?")[0] === "/control/keep-awake/lid-rule") {
+      request.resume();
+      const rule = control.lidRule?.() ?? null;
+      if (!rule) {
+        respond(response, 503, "lid rule unavailable");
+        return;
+      }
+      respondJson(response, 200, rule);
+      return;
+    }
+
     if ((request.url ?? "").split("?")[0] === "/control/keep-awake") {
       if (request.method !== "POST") {
         request.resume();
@@ -370,12 +388,18 @@ export class HookIngressServer {
           respond(response, 400, "bad json");
           return;
         }
-        const outcome = control.awake!(parsed);
-        if (!outcome.ok) {
-          respondJson(response, 400, { error: outcome.reason });
-          return;
-        }
-        respondJson(response, 200, { keepAwake: outcome.state !== null, awake: outcome.state });
+        Promise.resolve(control.awake!(parsed))
+          .then((outcome) => {
+            if (!outcome.ok) {
+              respondJson(response, 400, { error: outcome.reason });
+              return;
+            }
+            respondJson(response, 200, { keepAwake: outcome.state !== null, awake: outcome.state });
+          })
+          .catch((error: unknown) => {
+            logger.warn("control keep-awake failed", { error: error instanceof Error ? error.message : String(error) });
+            respond(response, 500, "keep awake failed");
+          });
       });
       request.on("error", () => {
         aborted = true;

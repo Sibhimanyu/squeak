@@ -997,3 +997,21 @@ main {
 .decision + .muted-note {
   margin-top: 12px;
 }
+
+.lid-card {
+  margin-top: 12px;
+}
+
+.lid-card .muted-note {
+  margin-bottom: 10px;
+  max-width: 64ch;
+}
+
+.lid-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--sq-ink);
+  font-size: 13px;
+}

@@ -1370,6 +1370,15 @@ describe("RemoteBridge awake session from the phone", () => {
     t.bridge.stop();
   });
 
+  it("passes lid through, and shows the lid session and whether it can start", async () => {
+    const t = await awake();
+    expect(t.bridge.phoneView()).not.toHaveProperty("awakeLidReady");
+    await t.bridge.handleCommand(t.config, "a0", t.command({ on: true, minutes: 60, lid: true }));
+    expect(t.apply).toHaveBeenLastCalledWith({ on: true, minutes: 60, extend: undefined, lid: true });
+    t.session.stop();
+    t.bridge.stop();
+  });
+
   it("an old phone's bare on starts an untimed session", async () => {
     const t = await awake();
     await t.bridge.handleCommand(t.config, "a1", t.command({ on: true }));
@@ -1382,7 +1391,7 @@ describe("RemoteBridge awake session from the phone", () => {
   it("passes on only the awake fields, and refuses what the session refuses", async () => {
     const t = await awake();
     await t.bridge.handleCommand(t.config, "a1", t.command({ on: true, action: "end", minutes: 5 }));
-    expect(t.apply).toHaveBeenLastCalledWith({ on: true, minutes: 5, extend: undefined });
+    expect(t.apply).toHaveBeenLastCalledWith({ on: true, minutes: 5, extend: undefined, lid: undefined });
     t.session.end();
     const extend = await t.bridge.handleCommand(t.config, "a2", t.command({ on: true, extend: 30 }));
     expect(extend.result).toMatchObject({ status: "refused", reason: expect.stringMatching(/No awake session/) });

@@ -88,6 +88,7 @@ private struct AwakeSection: View {
     @Binding var problem: String?
     @State private var confirmingEnd = false
     @State private var untilTime = Date().addingTimeInterval(3 * 3600)
+    @State private var withLid = false
 
     private static let durations: [(String, Int)] = [("1h", 60), ("2h", 120), ("4h", 240), ("8h", 480)]
 
@@ -101,6 +102,12 @@ private struct AwakeSection: View {
                     }
                 }
                 .frame(minHeight: 44)
+                if let lid = awake.lid {
+                    LabeledContent("Lid closed") {
+                        Text(lid == "on" ? "Stays awake" : lid == "starting" ? "Turning on…" : "Didn't turn on")
+                    }
+                    .frame(minHeight: 44)
+                }
                 if awake.until != nil {
                     Button("Add 1 hour") { change(.extend(minutes: 60)) }
                         .frame(minHeight: 44)
@@ -111,9 +118,14 @@ private struct AwakeSection: View {
                         Button("End awake session", role: .destructive) { change(.end) }
                     }
             } else {
+                if model.awakeLidReady {
+                    Toggle("Lid closed too", isOn: $withLid)
+                        .tint(Theme.primaryFill)
+                        .frame(minHeight: 44)
+                }
                 HStack(spacing: 8) {
                     ForEach(Self.durations, id: \.0) { choice in
-                        Button(choice.0) { change(.start(minutes: choice.1)) }
+                        Button(choice.0) { change(.start(minutes: choice.1, lid: lid)) }
                             .buttonStyle(.bordered)
                             .frame(maxWidth: .infinity)
                     }
@@ -122,18 +134,30 @@ private struct AwakeSection: View {
                 .frame(minHeight: 44)
                 HStack(spacing: 12) {
                     DatePicker("Until", selection: $untilTime, displayedComponents: .hourAndMinute)
-                    Button("Start") { change(.start(minutes: Self.minutes(until: untilTime))) }
+                    Button("Start") { change(.start(minutes: Self.minutes(until: untilTime), lid: lid)) }
                         .buttonStyle(.bordered)
                         .tint(Theme.primaryFill)
                 }
                 .frame(minHeight: 44)
-                Button("Until I end it") { change(.start(minutes: nil)) }
-                    .tint(Theme.primaryFill)
-                    .frame(minHeight: 44)
+                // A lid-closed session always ends by itself.
+                if !lid {
+                    Button("Until I end it") { change(.start(minutes: nil)) }
+                        .tint(Theme.primaryFill)
+                        .frame(minHeight: 44)
+                }
             }
         } header: { Text("Keep Mac awake") } footer: {
-            Text(problem ?? "Stops your Mac sleeping, on battery too, so this iPhone can reach it. Closing the lid still sleeps it. Plugged in, your Mac stays awake anyway.")
+            Text(problem ?? model.awake?.lidProblem ?? footer)
         }
+    }
+
+    private var lid: Bool { withLid && model.awakeLidReady }
+
+    private var footer: String {
+        if model.awakeLidReady {
+            return "Stops your Mac sleeping, on battery too, so this iPhone can reach it. With the lid closed too, keep it on a hard, open surface — never in a bag."
+        }
+        return "Stops your Mac sleeping, on battery too, so this iPhone can reach it. Closing the lid still sleeps it unless you set up lid-closed in Squeak on the Mac."
     }
 
     private func change(_ change: AppModel.AwakeChange) {

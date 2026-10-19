@@ -76,7 +76,7 @@ switch in the menu bar and iPhone Settings (`keep-awake.json`, command `awake`).
       countdown on every surface; add time to a running session; ending it takes a
       deliberate gesture. Replaces the on/off switch (an old phone's `awake` on/off
       still works).
-- [ ] **2. Lid closed.** One admin prompt installs `/etc/sudoers.d/squeak` for exactly
+- [x] **2. Lid closed.** One admin prompt installs `/etc/sudoers.d/squeak` for exactly
       `pmset -a disablesleep 0|1` and `pmset -b lowpowermode 0|1`, explained in plain
       words first (any process running as you can then use those four commands). A
       lid-closed session needs an end time. Uninstall removes the rule.

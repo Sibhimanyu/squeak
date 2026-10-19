@@ -603,11 +603,28 @@ function awakeMenuItems(state) {
           click: () => void changeAwake({ action: "start", minutes: choice.minutes }),
         })),
       },
+      // Only once the sudoers rule is installed (the window's Stay awake pane sets it up); always timed.
+      ...(state.awakeLidReady
+        ? [
+            {
+              label: "Keep awake, lid closed too",
+              submenu: AWAKE_CHOICES.filter((choice) => choice.minutes !== null).map((choice) => ({
+                label: choice.label,
+                click: () => void changeAwake({ action: "start", minutes: choice.minutes, lid: true }),
+              })),
+            },
+          ]
+        : []),
     ];
   }
   const until = session?.until ?? null;
   return [
-    { label: until ? `Awake · ${awakeLeft(until)} left` : "Awake until you end it", enabled: false },
+    {
+      label: `${until ? `Awake · ${awakeLeft(until)} left` : "Awake until you end it"}${
+        session?.lid ? (session.lidStatus === "failed" ? " · lid-closed failed" : " · lid closed too") : ""
+      }`,
+      enabled: false,
+    },
     ...(until ? [{ label: "Add 1 hour", click: () => void changeAwake({ action: "extend", minutes: 60 }) }] : []),
     { label: "End awake session", click: () => void changeAwake({ action: "end" }) },
   ];

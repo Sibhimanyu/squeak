@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
@@ -11,6 +12,7 @@ import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { CLAUDE_PROBE_SCHEMA, CLAUDE_PROBE_SYSTEM, ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
 import { Caffeinator } from "../fleet/caffeinate.js";
 import { applyAwakeAction, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
+import { LidSleepGuard, SUDOERS_PATH, sudoersRule } from "../fleet/lid-sleep.js";
 import { readPendingAsk, readPendingQuestion } from "../fleet/question.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
@@ -104,6 +106,7 @@ export class SqueakApp {
   private readonly caffeinator: Caffeinator;
   /** The user's awake session (menu bar, window, phone); held through the caffeinator. */
   private readonly awake: AwakeSession;
+  private lidRuleTimer: NodeJS.Timeout | null = null;
   private unwatchCaffeinate: (() => void) | null = null;
   private lastUpdateId = 0;
   private stopped = false;
@@ -114,6 +117,7 @@ export class SqueakApp {
     this.awake = new AwakeSession({
       path: path.join(config.supportDir, "keep-awake.json"),
       hold: (on) => this.caffeinator.setKeepAwake(on),
+      lid: new LidSleepGuard({ journalPath: path.join(config.supportDir, "lid-journal.json") }),
       onChange: () => this.remote?.changed(),
     });
     this.telegram = config.botToken ? new TelegramClient(config.botToken) : null;
@@ -204,6 +208,7 @@ export class SqueakApp {
           refreshUsage: () => this.claudeRefresher.refresh(),
           awake: {
             state: () => this.awake.state,
+            lidReady: () => this.awake.lidReady,
             apply: (request) => this.applyAwake(request),
           },
           // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
@@ -255,6 +260,10 @@ export class SqueakApp {
       },
       refreshClaudeUsage: () => this.claudeRefresher.refresh(),
       awake: (request) => this.applyAwake(request),
+      lidRule: () => {
+        const rule = sudoersRule(os.userInfo().username);
+        return rule ? { path: SUDOERS_PATH, rule } : null;
+      },
       transcript: (target, limit) => this.router.transcript(target, limit),
       activity: (key) => {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
@@ -273,7 +282,7 @@ export class SqueakApp {
 
     this.claudeLimits = new ClaudeLimitsStore(path.join(config.supportDir, "claude-limits.json"));
     this.runtime.setClaudeLimits(() => this.claudeLimits.latest());
-    this.runtime.setAwake(() => this.awake.state);
+    this.runtime.setAwake(() => ({ state: this.awake.state, lidReady: this.awake.lidReady }));
     const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
       this.claudeLimits.record(limits),
     );
@@ -311,7 +320,11 @@ export class SqueakApp {
       this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
     }
     // The user's own switch is honoured even with SQUEAK_CAFFEINATE=off: they asked.
-    this.awake.restore();
+    // Undoes a sleep disable a previous run left behind before anything else.
+    await this.awake.restore();
+    void this.awake.refreshLidRule();
+    this.lidRuleTimer = setInterval(() => void this.awake.refreshLidRule(), 10 * 60_000);
+    this.lidRuleTimer.unref?.();
     if (this.config.caffeinateOnPower) {
       this.caffeinator.holdOnPower();
     }
@@ -364,7 +377,8 @@ export class SqueakApp {
     }
     this.stopped = true;
     this.unwatchCaffeinate?.();
-    this.awake.stop();
+    if (this.lidRuleTimer) clearInterval(this.lidRuleTimer);
+    await this.awake.stop().catch(() => undefined);
     this.caffeinator.stop();
     this.remote?.stop();
     this.cliq?.stop();
@@ -374,10 +388,18 @@ export class SqueakApp {
     logger.info("squeak stopped");
   }
 
-  private applyAwake(request: unknown) {
+  private async applyAwake(request: unknown) {
+    // The Mac app asks after installing or removing the lid rule.
+    if ((request as { action?: unknown } | null)?.action === "recheck-lid") {
+      await this.awake.refreshLidRule();
+      return { ok: true as const, state: this.awake.state };
+    }
     const action = readAwakeAction(request);
     if (!action) {
       return { ok: false as const, reason: "Not a request to change the awake session." };
+    }
+    if (action.kind === "start" && action.lid) {
+      await this.awake.refreshLidRule();
     }
     return applyAwakeAction(this.awake, action);
   }

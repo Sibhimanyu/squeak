@@ -163,6 +163,8 @@ export interface AwakeCommand {
   on: boolean;
   minutes?: number;
   extend?: number;
+  /** Stay awake with the lid closed too; needs `minutes` and the Mac's sudoers rule. */
+  lid?: boolean;
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
@@ -244,7 +246,14 @@ export interface RemoteBridgeDependencies {
   /** The awake session. Absent: phones hide it, and a change is refused. */
   awake?: {
     state(): AwakeState | null;
-    apply(request: unknown): { ok: true; state: AwakeState | null } | { ok: false; reason: string };
+    /** Whether a lid-closed session can start (the sudoers rule is installed). */
+    lidReady?(): boolean;
+    apply(
+      request: unknown,
+    ):
+      | Promise<{ ok: true; state: AwakeState | null } | { ok: false; reason: string }>
+      | { ok: true; state: AwakeState | null }
+      | { ok: false; reason: string };
   } | null;
   /** Claude's last plan-limit reading, for the read-only usage view on the phone. */
   claudeLimits?: (() => ClaudeLimits | null) | null;
@@ -1081,18 +1090,23 @@ export class RemoteBridge {
   }
 
   /** A keep-awake flip. Signature, freshness and nonce have already held. */
-  private handleAwake(
+  private async handleAwake(
     device: PairedDevice,
     id: string,
     command: AwakeCommand,
-  ): { write: boolean; result: Record<string, unknown> } {
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
     const awake = this.deps.awake;
     if (!awake || command.v !== 1) {
       this.log(device.name, "rejected", "keep awake: not available");
       return { write: true, result: { id, status: "refused", reason: "This Mac can't be kept awake from a phone." } };
     }
     // Only the fields an awake command has: the phone cannot reach the action shape's names.
-    const outcome = awake.apply({ on: command.on, minutes: command.minutes, extend: command.extend });
+    const outcome = await awake.apply({
+      on: command.on,
+      minutes: command.minutes,
+      extend: command.extend,
+      lid: command.lid,
+    });
     if (!outcome.ok) {
       this.log(device.name, "rejected", `keep awake: ${outcome.reason}`);
       return { write: true, result: { id, status: "refused", reason: outcome.reason } };
@@ -1167,6 +1181,8 @@ export class RemoteBridge {
       JSON.stringify(view.workspaces) +
       JSON.stringify(view.keepAwake) +
       JSON.stringify(view.awakeUntil) +
+      JSON.stringify(view.awakeLid) +
+      JSON.stringify(view.awakeLidReady) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     if (serialized === this.lastPublished) {
       return;
@@ -1211,12 +1227,26 @@ export class RemoteBridge {
   }
 
   /** The awake session for the phone: on/off, and its end when it has one. Absent when this Mac can't. */
-  private phoneAwake(): { keepAwake?: boolean; awakeUntil?: string } {
-    const state = this.deps.awake?.state();
-    if (state === undefined) {
+  private phoneAwake(): {
+    keepAwake?: boolean;
+    awakeUntil?: string;
+    awakeLid?: string;
+    awakeLidProblem?: string;
+    awakeLidReady?: boolean;
+  } {
+    const awake = this.deps.awake;
+    if (!awake) {
       return {};
     }
-    return { keepAwake: state !== null, ...(state?.until ? { awakeUntil: state.until } : {}) };
+    const state = awake.state();
+    return {
+      keepAwake: state !== null,
+      ...(state?.until ? { awakeUntil: state.until } : {}),
+      // "on" / "starting" / "failed" for a lid-closed session; absent otherwise.
+      ...(state?.lid ? { awakeLid: state.lidStatus } : {}),
+      ...(state?.lidProblem ? { awakeLidProblem: state.lidProblem } : {}),
+      ...(awake.lidReady?.() ? { awakeLidReady: true } : {}),
+    };
   }
 
   /**

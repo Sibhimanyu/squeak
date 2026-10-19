@@ -83,7 +83,9 @@ enum DemoData {
         let raw = rawSnapshot
         // -squeak-demo-awake: a timed awake session with 1h 23m left, for screenshots.
         let awake = ProcessInfo.processInfo.arguments.contains("-squeak-demo-awake") ? now(83 * 60 + 30) : nil
-        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: ProcessInfo.processInfo.arguments.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent, keepAwake: awake != nil, awakeUntil: awake)
+        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: ProcessInfo.processInfo.arguments.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent, keepAwake: awake != nil, awakeUntil: awake,
+                             awakeLid: awake != nil && ProcessInfo.processInfo.arguments.contains("-squeak-demo-lid") ? "on" : nil,
+                             awakeLidReady: ProcessInfo.processInfo.arguments.contains("-squeak-demo-lid") ? true : nil)
     }
 
     /// Chats from earlier, to pick up again. `-squeak-demo-empty-active` shows them with nothing active.

@@ -28,6 +28,7 @@ deployment section before changing anything under `src/` or `desktop/`.
 | `src/fleet/activity.ts` | a working session's current turn, step by step, for the window's "What it's doing" |
 | `src/fleet/choices.ts` | reads lettered options out of an agent's last message, for one-tap answers |
 | `src/fleet/caffeinate.ts` | keeps the Mac awake (`caffeinate -i -w <pid>`) while an agent works, 2 min grace, and (`-s`) always while plugged in so the phone can reach it; `SQUEAK_CAFFEINATE=working` / `off`. an awake session (`awake-session.ts`: tray submenu, the window's "Stay awake" pane, iPhone Settings; `POST /control/keep-awake`, phone command kind `awake`) holds `-i` on battery too, for a while or until ended, saved in `keep-awake.json` |
+| `src/fleet/lid-sleep.ts` | lid-closed awake sessions: `sudo -n pmset -a disablesleep 1` through a sudoers rule (`/etc/sudoers.d/squeak`, exactly four pmset commands) the Mac app installs with macOS's admin prompt; journalled in `lid-journal.json` and undone at start |
 | `src/fleet/git-state.ts` | cached working-tree reads, so "finished" says what changed |
 | `src/fleet/diff-view.ts` | reads and paginates a workspace diff for review in Telegram |
 | `src/fleet/duck-mood.ts` | what the duck is doing, derived where CI can test it |
@@ -262,6 +263,17 @@ test for anything you fix is expected; the suite is fast.
   asynchronous, so bootstrapping straight after it fails with "Input/output
   error" — leaving a service booted out and nothing bootstrapped in its place,
   which is worse than whatever the rerun was fixing.
+- **A Mac with `disablesleep 1` left on never sleeps, even in a bag.** That is
+  why a lid-closed awake session must have an end, the disable is journalled
+  *before* it is made, the daemon restores sleep when it stops (and disables it
+  again when it resumes the session), and `restore()` undoes a journalled
+  disable no session owns. `pmset` can exit 0 while another keep-awake tool's
+  daemon puts the bit back within seconds (Insomnia measured one doing it every
+  2 s), so the bit is read back after 5 s and a revert fails the lid loudly.
+  The sudoers rule is built from the daemon's own user name and refuses
+  anything but a plain account name — `ALL` would grant it to every user — and
+  the Mac app runs `visudo -c` on it before the admin prompt, because a broken
+  file in `sudoers.d` breaks sudo for everything.
 - **Codex quota is account-wide, not per-session.** `rate_limits` sits on
   every `token_count` event as a sibling of `info`, not nested inside it — a
   first attempt at `codex-usage.ts` nested it and silently returned null

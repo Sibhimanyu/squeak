@@ -55,6 +55,10 @@ const PHONE = "__phone__";
 const AWAKE = "__awake__";
 /** The last thing the awake pane could not do, shown until the next change. */
 let awakeProblem = null;
+/** "Also with the lid closed" for the next start; only offered once the rule is installed. */
+let awakeWithLid = false;
+/** The admin prompt is up. */
+let lidRuleBusy = false;
 /** The pairing QR, as an image the main process drew. Cleared once paired. */
 let pairingImage = null;
 
@@ -349,7 +353,11 @@ function renderList() {
       const toggle = el("button", `group-toggle${isCollapsed ? " collapsed" : ""}`);
       toggle.type = "button";
       toggle.setAttribute("aria-expanded", String(!isCollapsed));
-      toggle.append(el("span", "chevron"), el("span", "group-name", source), el("span", "count", String(members.length)));
+      toggle.append(
+        el("span", "chevron"),
+        el("span", "group-name", source),
+        el("span", "count", String(members.length)),
+      );
       toggle.addEventListener("click", () => {
         if (collapsed.has(source)) collapsed.delete(source);
         else collapsed.add(source);
@@ -528,10 +536,93 @@ function holdToEnd() {
   return node;
 }
 
+async function changeLidRule(action) {
+  lidRuleBusy = true;
+  lastDetailSignature = "";
+  renderAwake();
+  const result = await window.squeak.lidRule(action);
+  lidRuleBusy = false;
+  awakeProblem = result.ok ? null : result.message;
+  if (action === "install" && result.ok) awakeWithLid = true;
+  const next = await window.squeak.state();
+  if (next) state = next;
+  lastDetailSignature = "";
+  renderTitle();
+  renderAwake();
+}
+
+function lidLine(session) {
+  if (!session?.lid) return "";
+  if (session.lidStatus === "on") return " · lid closed too";
+  if (session.lidStatus === "starting") return " · turning on lid-closed…";
+  return " · lid-closed didn't turn on";
+}
+
+/** Setting up, choosing and removing lid-closed sessions. */
+function lidCard() {
+  const card = el("div", "decision lid-card");
+  card.append(el("h3", null, "With the lid closed"));
+  if (!state?.awakeLidReady) {
+    card.append(
+      el(
+        "p",
+        "muted-note",
+        "A closed lid sleeps your Mac whatever Squeak asks, unless sleep is switched off as an administrator. Setting this up asks for your password once and lets Squeak (and anything running as you) switch sleep and Low Power Mode on and off. A lid-closed session always has an end time.",
+      ),
+    );
+    const actions = el("div", "actions");
+    const setUp = button(
+      lidRuleBusy ? "Waiting for your password…" : "Set up…",
+      "secondary",
+      () => void changeLidRule("install"),
+    );
+    setUp.disabled = lidRuleBusy;
+    actions.append(setUp);
+    card.append(actions);
+    return card;
+  }
+  const label = el("label", "lid-choice");
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = awakeWithLid;
+  box.addEventListener("change", () => {
+    awakeWithLid = box.checked;
+    lastDetailSignature = "";
+    renderAwake();
+  });
+  label.append(box, el("span", null, "Also with the lid closed, for the sessions you start here"));
+  card.append(label);
+  card.append(
+    el(
+      "p",
+      "muted-note",
+      "Keep it on a hard, open surface: a closed Mac that never sleeps gets warm, and in a bag it overheats.",
+    ),
+  );
+  const actions = el("div", "actions");
+  const remove = button(
+    lidRuleBusy ? "Waiting for your password…" : "Remove lid-closed set-up",
+    "quiet",
+    () => void changeLidRule("remove"),
+  );
+  remove.disabled = lidRuleBusy;
+  actions.append(remove);
+  card.append(actions);
+  return card;
+}
+
 function renderAwake() {
   const session = state?.awake ?? null;
   // Whole minutes are all the countdown shows, so redraw once a minute at most.
-  const signature = JSON.stringify([AWAKE, session, awakeProblem, Math.floor(Date.now() / 60000)]);
+  const signature = JSON.stringify([
+    AWAKE,
+    session,
+    awakeProblem,
+    awakeWithLid,
+    lidRuleBusy,
+    state?.awakeLidReady,
+    Math.floor(Date.now() / 60000),
+  ]);
   if (signature === lastDetailSignature) return;
   lastDetailSignature = signature;
 
@@ -545,7 +636,7 @@ function renderAwake() {
       "state-line",
       session
         ? session.until
-          ? `Awake until ${clockTime(session.until)} · ${awakeLeft(session.until)} left`
+          ? `Awake until ${clockTime(session.until)} · ${awakeLeft(session.until)} left${lidLine(session)}`
           : "Awake until you end it"
         : "Your Mac sleeps as usual: awake while agents work, and while plugged in.",
     ),
@@ -562,6 +653,7 @@ function renderAwake() {
     }
     actions.append(holdToEnd());
     card.append(actions);
+    if (session.lidStatus === "failed" && session.lidProblem) card.append(el("p", "muted-note", session.lidProblem));
   } else {
     card.append(el("h3", null, "Keep your Mac awake, on battery too"));
     const actions = el("div", "actions");
@@ -572,7 +664,15 @@ function renderAwake() {
       ["8 hours", 480],
       ["Until I end it", null],
     ]) {
-      actions.append(button(text, "secondary", () => void changeAwake({ action: "start", minutes })));
+      const lid = awakeWithLid && Boolean(state?.awakeLidReady);
+      const choice = button(
+        text,
+        "secondary",
+        () => void changeAwake({ action: "start", minutes, ...(lid ? { lid } : {}) }),
+      );
+      // A lid-closed session always ends by itself.
+      choice.disabled = lid && minutes === null;
+      actions.append(choice);
     }
     card.append(actions);
     const until = el("div", "actions awake-until");
@@ -590,20 +690,16 @@ function renderAwake() {
           renderAwake();
           return;
         }
-        void changeAwake({ action: "start", minutes });
+        const lid = awakeWithLid && Boolean(state?.awakeLidReady);
+        void changeAwake({ action: "start", minutes, ...(lid ? { lid } : {}) });
       }),
     );
     card.append(until);
   }
   if (awakeProblem) card.append(el("p", "muted-note", awakeProblem));
   nodes.push(card);
-  nodes.push(
-    el(
-      "p",
-      "muted-note",
-      "Closing the lid still puts your Mac to sleep. Your iPhone can start, extend or end this too.",
-    ),
-  );
+  nodes.push(lidCard());
+  nodes.push(el("p", "muted-note", "Your iPhone can start, extend or end this too."));
   els.detail.replaceChildren(wrapScroll(nodes));
 }
 

@@ -220,7 +220,7 @@ async function pairingQr() {
   }
 }
 
-const AWAKE_ACTIONS = new Set(["start", "extend", "end"]);
+const AWAKE_ACTIONS = new Set(["start", "extend", "end", "recheck-lid"]);
 const MAX_AWAKE_MINUTES = 7 * 24 * 60;
 
 /**
@@ -231,6 +231,7 @@ const MAX_AWAKE_MINUTES = 7 * 24 * 60;
 async function awake(request) {
   const action = request?.action;
   const minutes = request?.minutes ?? null;
+  const lid = request?.lid === true;
   const validMinutes = Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_AWAKE_MINUTES;
   if (
     !AWAKE_ACTIONS.has(action) ||
@@ -239,13 +240,79 @@ async function awake(request) {
   ) {
     return { ok: false, message: "That is not a length of time Squeak can stay awake for." };
   }
-  const body = action === "end" ? { action } : { action, minutes };
+  if (lid && (action !== "start" || minutes === null)) {
+    return { ok: false, message: "A lid-closed session needs an end time." };
+  }
+  const body =
+    action === "end" || action === "recheck-lid" ? { action } : { action, minutes, ...(lid ? { lid } : {}) };
   try {
-    const result = await control("keep-awake", { method: "POST", body: JSON.stringify(body) });
+    const result = await control("keep-awake", { method: "POST", body: JSON.stringify(body) }, 15_000);
     return { ok: true, awake: result.awake ?? null };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function run(command, args) {
+  return new Promise((resolve) => {
+    execFile(command, args, { timeout: 120_000 }, (error, stdout, stderr) => {
+      resolve({ ok: !error, stdout: String(stdout), stderr: String(stderr), canceled: /-128/.test(String(stderr)) });
+    });
+  });
+}
+
+/**
+ * Installs or removes the sudoers rule lid-closed sessions need
+ * (src/fleet/lid-sleep.ts). The daemon writes the rule; this checks it with
+ * visudo, then macOS's own admin prompt copies it into /etc/sudoers.d (the
+ * password never reaches Squeak). Answers `{ ok, message? }`.
+ */
+async function lidRule(action) {
+  if (action !== "install" && action !== "remove") {
+    return { ok: false, message: "Unknown action." };
+  }
+  let rule;
+  try {
+    rule = await control("keep-awake/lid-rule");
+  } catch (error) {
+    return { ok: false, message: `Squeak isn't answering: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (rule?.path !== "/etc/sudoers.d/squeak" || typeof rule.rule !== "string") {
+    return { ok: false, message: "Squeak sent a rule this app doesn't recognise." };
+  }
+  let script;
+  let args = [];
+  let dir = null;
+  if (action === "install") {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-sudoers-"));
+    const file = path.join(dir, "squeak");
+    fs.writeFileSync(file, rule.rule, { mode: 0o600 });
+    // A broken file in sudoers.d breaks sudo for everything; never install one visudo rejects.
+    const check = await run("/usr/sbin/visudo", ["-c", "-f", file]);
+    if (!check.ok) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { ok: false, message: `The rule didn't pass visudo: ${check.stderr.trim() || check.stdout.trim()}` };
+    }
+    script = [
+      "on run argv",
+      'do shell script "/usr/bin/install -m 0440 -o root -g wheel " & quoted form of (item 1 of argv) & " /etc/sudoers.d/squeak" with prompt "Squeak wants to keep your Mac awake with the lid closed. This lets it turn sleep and Low Power Mode on and off without asking again." with administrator privileges',
+      "end run",
+    ];
+    args = [file];
+  } else {
+    // End a lid session first: restoring sleep needs the rule that is about to go.
+    await awake({ action: "end" });
+    script = [
+      'do shell script "/bin/rm -f /etc/sudoers.d/squeak" with prompt "Squeak will stop keeping your Mac awake with the lid closed." with administrator privileges',
+    ];
+  }
+  const result = await run("/usr/bin/osascript", [...script.flatMap((line) => ["-e", line]), ...args]);
+  if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  await awake({ action: "recheck-lid" });
+  if (!result.ok) {
+    return { ok: false, message: result.canceled ? "Cancelled." : result.stderr.trim() || "That didn't work." };
+  }
+  return { ok: true };
 }
 
 module.exports = {
@@ -259,4 +326,5 @@ module.exports = {
   sessionActivity,
   sessionMessage,
   awake,
+  lidRule,
 };

@@ -181,15 +181,22 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public let keepAwake: Bool?
     /// When a timed awake session ends (ISO); absent for one that runs until ended, and from older Macs.
     public let awakeUntil: String?
+    /// A lid-closed session's state: "on", "starting" or "failed"; absent without one.
+    public let awakeLid: String?
+    /// Why lid-closed did not turn on.
+    public let awakeLidProblem: String?
+    /// Whether this Mac can start a lid-closed session (its sudoers rule is installed).
+    public let awakeLidReady: Bool?
 
     public init(
         v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session], usage: Usage? = nil,
         workspaces: [Workspace]? = nil, recent: [Session]? = nil, recentMore: Bool? = nil, keepAwake: Bool? = nil,
-        awakeUntil: String? = nil
+        awakeUntil: String? = nil, awakeLid: String? = nil, awakeLidProblem: String? = nil, awakeLidReady: Bool? = nil
     ) {
         self.recentMore = recentMore
         self.keepAwake = keepAwake
         self.awakeUntil = awakeUntil
+        self.awakeLid = awakeLid; self.awakeLidProblem = awakeLidProblem; self.awakeLidReady = awakeLidReady
         self.v = v; self.mac = mac; self.generatedAt = generatedAt; self.duck = duck; self.sessions = sessions
         self.usage = usage; self.workspaces = workspaces; self.recent = recent
     }
@@ -298,6 +305,8 @@ public struct AwakeCommand: Codable, Equatable, Sendable {
     public let on: Bool
     public let minutes: Int?
     public let extend: Int?
+    /// Stay awake with the lid closed too; needs `minutes`.
+    public let lid: Bool?
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

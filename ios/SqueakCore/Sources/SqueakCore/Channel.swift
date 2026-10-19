@@ -277,7 +277,7 @@ public struct Channel: Sendable {
     /// The signed document changing the Mac's awake session: `on` false ends it; true starts one for
     /// `minutes` (nil: until ended), or with `extend` adds that many minutes to the running one.
     public func awakeDocument(
-        on: Bool, minutes: Int? = nil, extend: Int? = nil, signer: CommandSigner, now: Date = Date()
+        on: Bool, minutes: Int? = nil, extend: Int? = nil, lid: Bool? = nil, signer: CommandSigner, now: Date = Date()
     ) throws -> (id: String, document: ChannelDocument) {
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
@@ -287,6 +287,7 @@ public struct Channel: Sendable {
             on: on,
             minutes: minutes,
             extend: extend,
+            lid: lid,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

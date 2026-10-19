@@ -15,4 +15,5 @@ contextBridge.exposeInMainWorld("squeak", {
   remote: (action, deviceId) => ipcRenderer.invoke("squeak:remote", action, deviceId ?? null),
   pairingQr: () => ipcRenderer.invoke("squeak:pairing-qr"),
   awake: (request) => ipcRenderer.invoke("squeak:awake", request),
+  lidRule: (action) => ipcRenderer.invoke("squeak:lid-rule", action),
 });
