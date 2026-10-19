@@ -54,6 +54,13 @@ export interface IngressControl {
   telegramCandidates?(): unknown;
   /** Send a hello to every allowed Telegram chat. */
   telegramTest?(): Promise<unknown>;
+  /**
+   * A Conductor chat's pending question or plan, whole, with how an answer
+   * would be delivered; null when nothing waits. Token-gated: it is content.
+   */
+  question?(conductorSessionId: string): unknown;
+  /** Answer that pending question or plan (body validated by the implementation). */
+  answer?(conductorSessionId: string, body: unknown): Promise<unknown>;
   /** Workspaces that can take a new chat, recent first. */
   workspaces?(): unknown;
   /** Start a new chat in a workspace (validated by the implementation). */
@@ -223,6 +230,8 @@ export class HookIngressServer {
    * `POST /control/session/<replyTarget>/reply` with `{ "text": "...", "mode"?: "queue" | "steer" }`
    * `GET  /control/session/<sessionKey>/activity`
    * `GET  /control/session/<replyTarget>/transcript?limit=N`
+   * `GET  /control/session/<conductorSessionId>/question`
+   * `POST /control/session/<conductorSessionId>/answer` with `{ toolUseId, answers?, plan? }`
    *
    * `replyTarget` is a Conductor chat id or a terminal agent's fleet key, as
    * `/state` hands it out.
@@ -378,15 +387,75 @@ export class HookIngressServer {
     }
 
     // A Conductor chat id, or the fleet key of a terminal agent (`claude-transcript:<uuid>`).
-    const match = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity|transcript)$/.exec(
-      (request.url ?? "").split("?")[0] ?? "",
-    );
+    const match =
+      /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity|transcript|question|answer)$/.exec(
+        (request.url ?? "").split("?")[0] ?? "",
+      );
     if (!match) {
       respond(response, 404, "not found");
       request.resume();
       return;
     }
-    const [, sessionId, action] = match as unknown as [string, string, "message" | "reply" | "activity" | "transcript"];
+    const [, sessionId, action] = match as unknown as [
+      string,
+      string,
+      "message" | "reply" | "activity" | "transcript" | "question" | "answer",
+    ];
+
+    if (action === "question" && request.method === "GET") {
+      request.resume();
+      if (!control.question) {
+        respond(response, 503, "question unavailable");
+        return;
+      }
+      try {
+        respondJson(response, 200, control.question(sessionId));
+      } catch (error) {
+        logger.warn("control question read failed", { error: error instanceof Error ? error.message : String(error) });
+        respond(response, 500, "unavailable");
+      }
+      return;
+    }
+
+    if (action === "answer" && request.method === "POST") {
+      if (!control.answer) {
+        respond(response, 503, "answer unavailable");
+        request.resume();
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        control.answer!(sessionId, parsed)
+          .then((outcome) => respondJson(response, 200, outcome))
+          .catch((error: unknown) => {
+            logger.warn("control answer failed", { error: error instanceof Error ? error.message : String(error) });
+            respond(response, 500, "answer failed");
+          });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
 
     if (action === "message" && request.method === "GET") {
       request.resume();

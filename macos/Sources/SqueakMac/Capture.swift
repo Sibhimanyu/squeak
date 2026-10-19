@@ -11,6 +11,7 @@ enum CaptureRunner {
     static func run(prefix: String, model: AppModel) async {
         let env = ProcessInfo.processInfo.environment
         if let a = env["SQUEAK_MAC_APPEARANCE"] { NSApp.appearance = NSAppearance(named: a == "light" ? .aqua : .darkAqua) }
+        if model.demoMode { await runAskDemo(prefix: prefix, model: model) }
         if model.demoMode { await runWindowDemo(prefix: prefix, model: model) }
         if model.demoMode { await runDemo(prefix: prefix, model: model); return }
         await model.broker.setMode(.foreground)
@@ -175,7 +176,7 @@ enum CaptureRunner {
         while !condition(), Date() < end { try? await Task.sleep(for: .milliseconds(150)) }
     }
 
-    private static func write(_ view: NSView?, to path: String) {
+    static func write(_ view: NSView?, to path: String) {
         guard let view, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         guard let data = rep.representation(using: .png, properties: [:]) else { return }

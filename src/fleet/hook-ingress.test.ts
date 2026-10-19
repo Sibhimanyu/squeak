@@ -448,3 +448,44 @@ describe("HookIngressServer remote routes", () => {
     ]);
   });
 });
+
+describe("HookIngressServer answer routes", () => {
+  async function withAnswer() {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const answered: Array<{ id: string; body: unknown }> = [];
+    server.setControl({
+      sessionMessage: () => ({}),
+      reply: async () => ({}),
+      question: (id) => (id === "abc" ? { toolUseId: "t1", kind: "question", questions: [], plan: null } : null),
+      answer: async (id, body) => {
+        answered.push({ id, body });
+        return { status: "answered", via: "conductor" };
+      },
+    });
+    const base = `http://127.0.0.1:${harness.port}/control/session/abc`;
+    return { base, auth: { "x-squeak-token": harness.token }, answered };
+  }
+
+  it("serves the pending question and takes an answer, only with the token and never to a web page", async () => {
+    const { base, auth, answered } = await withAnswer();
+    expect((await fetch(`${base}/question`)).status).toBe(403);
+    const read = await fetch(`${base}/question`, { headers: auth });
+    expect(read.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await read.json()).toMatchObject({ toolUseId: "t1" });
+    expect(
+      await (
+        await fetch(`http://127.0.0.1:${new URL(base).port}/control/session/zzz/question`, { headers: auth })
+      ).json(),
+    ).toBeNull();
+
+    expect((await fetch(`${base}/answer`, { method: "POST", body: "{}" })).status).toBe(403);
+    const body = { toolUseId: "t1", plan: { approve: true } };
+    const response = await fetch(`${base}/answer`, { method: "POST", headers: auth, body: JSON.stringify(body) });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await response.json()).toEqual({ status: "answered", via: "conductor" });
+    expect(answered).toEqual([{ id: "abc", body }]);
+    expect((await fetch(`${base}/answer`, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
+    expect((await fetch(`${base}/answer`, { headers: auth })).status).toBe(405);
+  });
+});

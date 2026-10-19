@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { parseQuestions } from "./pending-question.js";
-import { readPendingQuestion } from "./question.js";
+import { readPendingAsk, readPendingQuestion } from "./question.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -85,5 +85,31 @@ describe("readPendingQuestion", () => {
       { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "Menu bar" }] } },
     ]);
     expect(readPendingQuestion(file)).toBeNull();
+  });
+});
+
+describe("readPendingAsk", () => {
+  it("reads a question and a plan, whole", () => {
+    const q = transcript([{ type: "user", message: { content: "go" } }, call("toolu_q")]);
+    expect(readPendingAsk(q)).toMatchObject({ toolUseId: "toolu_q", kind: "question", plan: null });
+    const p = transcript([
+      { type: "user", message: { content: "go" } },
+      call("toolu_p", "ExitPlanMode", { plan: "1. Add it\n2. Test it" }),
+    ]);
+    expect(readPendingAsk(p)).toEqual({
+      toolUseId: "toolu_p",
+      kind: "plan",
+      questions: [],
+      plan: "1. Add it\n2. Test it",
+    });
+    expect(readPendingQuestion(p)).toBeNull();
+  });
+
+  it("is null once answered", () => {
+    const file = transcript([
+      call("toolu_q"),
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "toolu_q", content: "ok" }] } },
+    ]);
+    expect(readPendingAsk(file)).toBeNull();
   });
 });

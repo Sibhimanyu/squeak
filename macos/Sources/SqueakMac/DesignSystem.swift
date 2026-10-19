@@ -347,6 +347,10 @@ struct NeedsYouCard: View {
     var onReply: (String) -> Void = { _ in }
     /// A quiet line under the card: a send is in flight, or why it did not go.
     var notice: String?
+    /// The structured question or plan this chat waits on; replaces the chips and Reply with the question card.
+    var ask: PendingAsk?
+    var askResult: AnswerOutcome?
+    var onAnswer: (AskForm) async -> AnswerOutcome = { _ in .refused(reason: "Nothing is sent here.") }
 
     @State private var replying = false
     @State private var text = ""
@@ -373,7 +377,10 @@ struct NeedsYouCard: View {
             }
             .buttonStyle(.plain)
 
-            if canReply {
+            if let ask {
+                AskCard(ask: ask, compact: true, canSend: canReply, onOpen: onOpen, onSend: onAnswer, result: askResult)
+                    .id(ask.toolUseId)
+            } else if canReply {
                 if replying {
                     if !choices.isEmpty { ChoiceChips(choices: choices, onChoose: onChoose) }
                     replyField

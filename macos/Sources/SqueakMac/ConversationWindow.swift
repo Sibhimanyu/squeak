@@ -432,7 +432,7 @@ struct SessionDetail: View {
                             case .message(let m, let muted):
                                 MessageView(
                                     message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
-                                    layout: !muted && m.id == needsYouMessageID ? ChoiceLayout.make(m.text) : nil,
+                                    layout: !muted && m.id == needsYouMessageID && model.askDisplay(for: session.key) == nil ? ChoiceLayout.make(m.text) : nil,
                                     canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted
                                 )
                                 .id(m.id)
@@ -443,6 +443,13 @@ struct SessionDetail: View {
                             case .empty:
                                 EmptyView()
                             }
+                        }
+                        if let display = model.askDisplay(for: session.key) {
+                            AskCard(
+                                ask: display.ask, canSend: sendBlock == nil && model.isConnected,
+                                onSend: { form in await model.answer(form, for: session.key) }, result: display.outcome
+                            )
+                            .id(display.ask.toolUseId)
                         }
                         Color.clear.frame(height: 1).id("bottom")
                             .onAppear { atBottom = true }

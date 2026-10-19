@@ -97,7 +97,7 @@ struct PopoverView: View {
                     )
             }
             .onPreferenceChange(PopoverHeightKey.self) { contentHeight = $0 }
-            .frame(height: min(max(contentHeight, 120), Self.maxHeight - 132 - 190))
+            .frame(height: min(max(contentHeight, 120), Self.maxHeight - 132 - (model.asks.isEmpty ? 190 : 20)))
             .scrollIndicators(.automatic)
         }
     }
@@ -173,12 +173,14 @@ struct PopoverView: View {
 
     private func card(_ s: HostSession) -> some View {
         NeedsYouCard(
-            session: s, question: model.question(for: s.key), choices: model.choices(for: s.key),
+            session: s, question: model.askDisplay(for: s.key) == nil ? model.question(for: s.key) : nil, choices: model.choices(for: s.key),
             canReply: model.canSend(s) && model.isConnected,
             onOpen: { model.open(s.key) },
             onChoose: { send($0.letter, to: s.key) },
             onReply: { send($0, to: s.key) },
-            notice: notices[s.key]
+            notice: notices[s.key],
+            ask: model.askDisplay(for: s.key)?.ask, askResult: model.askDisplay(for: s.key)?.outcome,
+            onAnswer: { form in await model.answer(form, for: s.key) }
         )
     }
 

@@ -7,6 +7,7 @@ enum DemoData {
     struct Bundle {
         var sessions: [HostSession]
         var needsYouText: [SessionKey: String]
+        var asks: [SessionKey: PendingAsk] = [:]
     }
 
     static let question = """
@@ -19,6 +20,55 @@ enum DemoData {
 
     Both approaches prevent duplicate charges.
     """
+
+    static let singleAsk = PendingAsk(
+        toolUseId: "toolu_demo_1",
+        questions: [
+            AskQuestion(
+                question: "How should temporary failures be retried?", header: "Retries",
+                options: [
+                    AskOption(label: "Retry automatically", description: "Up to 3 attempts with exponential backoff."),
+                    AskOption(label: "Let the customer retry", description: "Show a clear error and keep checkout available."),
+                ])
+        ])
+
+    static let multiAsk = PendingAsk(
+        toolUseId: "toolu_demo_2",
+        questions: [
+            AskQuestion(
+                question: "Where should the answer switch appear?", header: "Surfaces", multiSelect: true,
+                options: [
+                    AskOption(label: "Menu bar", description: "Toggle before you walk away."),
+                    AskOption(label: "Squeak window", description: "Next to the chat it belongs to."),
+                    AskOption(label: "iPhone app"),
+                ])
+        ])
+
+    static let twoAsk = PendingAsk(
+        toolUseId: "toolu_demo_3",
+        questions: [
+            AskQuestion(
+                question: "Which database should the index live in?", header: "Storage",
+                options: [
+                    AskOption(label: "SQLite", description: "One file, no service to run."),
+                    AskOption(label: "Postgres", description: "Shared with the rest of the stack."),
+                ]),
+            AskQuestion(
+                question: "Migrate existing data now?", header: "Data",
+                options: [AskOption(label: "Yes, in this change"), AskOption(label: "No, leave it for later")]),
+        ])
+
+    static let planAsk = PendingAsk(
+        toolUseId: "toolu_demo_4", kind: .plan,
+        plan: """
+        ## Plan
+
+        1. Add an `answer` route to the daemon, checked against the pending question.
+        2. Build the question card in the window and the popover.
+        3. Cover every refusal with a test.
+
+        I will not touch `conductor.db`.
+        """)
 
     static func make(now: Date = Date()) -> Bundle {
         func s(_ id: String, _ provider: String, _ title: String, _ state: SessionState, min: Double, _ repo: String, _ branch: String, _ agent: String,
@@ -44,7 +94,7 @@ enum DemoData {
             s("demo-9", "conductor", "Flaky checkout test", .error, min: 45, "storefront", "checkout-flake", "codex"),
             s("demo-10", "conductor", "Untitled", .idle, min: 300, "compass", "release-notes", "claude"),
         ]
-        return Bundle(sessions: list, needsYouText: [pay.key: question])
+        return Bundle(sessions: list, needsYouText: [pay.key: question], asks: [pay.key: singleAsk])
     }
 }
 

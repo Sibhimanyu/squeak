@@ -58,6 +58,10 @@ final class AppModel {
     private(set) var draft = ""
     /// The agent's last message for sessions that need you, so cards can show the question and options.
     private(set) var needsYouText: [SessionKey: String] = [:]
+    /// The structured question or plan each blocked Conductor chat waits on (the question card).
+    private(set) var asks: [SessionKey: PendingAsk] = [:]
+    private(set) var answeredAsks: [SessionKey: (ask: PendingAsk, outcome: AnswerOutcome, at: Date)] = [:]
+    @ObservationIgnored private var askFetchedAt: [SessionKey: Date?] = [:]
     @ObservationIgnored private var needsYouFetchedAt: [SessionKey: Date?] = [:]
     @ObservationIgnored private var knownMessages: [SessionKey: [ChatMessage]] = [:]
     @ObservationIgnored private var draftTask: Task<Void, Never>?
@@ -152,6 +156,7 @@ final class AppModel {
             hasLoaded = true
             if let selected, openURL == nil { openURL = await broker.openInHostURL(for: selected) }
             await refreshNeedsYouText()
+            await refreshAsks()
         case .messagesChanged(let key):
             let all = await broker.messages(for: key)
             knownMessages[key] = all
@@ -184,6 +189,7 @@ final class AppModel {
         let d = DemoData.make()
         sessions = d.sessions
         needsYouText = d.needsYouText
+        asks = d.asks
         health = AdapterHealth(adapterId: "demo", status: .connected, lastSyncedAt: Date())
         adapterHealths = [
             "conductor-local": AdapterHealth(adapterId: "conductor-local", status: .connected, lastSyncedAt: Date()),
@@ -334,6 +340,48 @@ final class AppModel {
         guard let t = lastAgentText(key), !t.isEmpty else { return nil }
         if let q = Choices.parseFull(t)?.question { return q }
         return Choices.stripMarkdown(t)
+    }
+
+    func ask(for key: SessionKey) -> PendingAsk? { asks[key] }
+
+    /// The card to show: the live question, or for 90 seconds the one just answered, so its result line stays.
+    func askDisplay(for key: SessionKey) -> (ask: PendingAsk, outcome: AnswerOutcome?)? {
+        if let a = asks[key] { return (a, nil) }
+        if let d = answeredAsks[key], Date().timeIntervalSince(d.at) < 90 { return (d.ask, d.outcome) }
+        return nil
+    }
+
+    /// Reads the question card's data for blocked Conductor chats, once per change of the chat.
+    private func refreshAsks() async {
+        guard !demoMode, !captureMode else { return }
+        let blocked = sessions.filter { $0.state == .blocked && $0.alive != false && $0.key.provider == "conductor" }
+        askFetchedAt = askFetchedAt.filter { k, _ in blocked.contains { $0.key == k } }
+        for s in blocked where askFetchedAt[s.key] != .some(s.lastActivityAt) {
+            askFetchedAt[s.key] = .some(s.lastActivityAt)
+            guard let target = s.replyTarget else { continue }
+            if let found = try? await client.pendingAsk(conductorSessionId: target) { asks[s.key] = found } else { asks[s.key] = nil }
+        }
+        asks = asks.filter { k, _ in blocked.contains { $0.key == k } }
+        answeredAsks = answeredAsks.filter { _, d in Date().timeIntervalSince(d.at) < 90 }
+    }
+
+    /// Delivers an answer. Only ever called from the card's Send button; never retried.
+    func answer(_ form: AskForm, for key: SessionKey) async -> AnswerOutcome {
+        if demoMode { return .refused(reason: "Demo data: nothing is sent.") }
+        guard let target = session(key)?.replyTarget else { return .refused(reason: "Squeak has no way to answer this chat.") }
+        let outcome = await client.answer(
+            conductorSessionId: target, toolUseId: form.ask.toolUseId,
+            answers: form.ask.kind == .question ? form.answers() : nil, plan: form.plan)
+        switch outcome {
+        case .answered(let via, _): AppLog.info("answer delivered via \(via)")
+        case .refused: AppLog.info("answer refused")
+        case .uncertain: AppLog.info("answer uncertain")
+        }
+        if outcome.isAnswered {
+            askFetchedAt[key] = nil
+            answeredAsks[key] = (form.ask, outcome, Date())
+        }
+        return outcome
     }
 
     private func refreshNeedsYouText() async {
