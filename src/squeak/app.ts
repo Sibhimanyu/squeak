@@ -22,11 +22,12 @@ import { RemoteBridge } from "../remote/remote-bridge.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
-import type { TelegramConversationTarget, TelegramUpdate } from "../types.js";
+import type { TelegramChat, TelegramConversationTarget, TelegramUpdate } from "../types.js";
 import { logger } from "../utils/logger.js";
 import { normalizeTelegramCommand } from "../utils/telegram-command.js";
 import { splitMarkdown } from "../utils/tg-format.js";
 import type { SqueakConfig } from "./config.js";
+import { channelsControl, TelegramStatus } from "./telegram-status.js";
 
 const COMMANDS = [
   { command: "radar", description: "Show what every agent is doing right now" },
@@ -75,7 +76,8 @@ function helpText(): string {
  */
 export class SqueakApp {
   private readonly config: SqueakConfig;
-  private readonly telegram: TelegramClient;
+  private readonly telegram: TelegramClient | null;
+  private readonly telegramStatus: TelegramStatus;
   private readonly runtime: FleetRuntime;
   private readonly controller: FleetController;
   private readonly replier: ConductorReplier;
@@ -94,7 +96,13 @@ export class SqueakApp {
 
   constructor(config: SqueakConfig) {
     this.config = config;
-    this.telegram = new TelegramClient(config.botToken);
+    this.telegram = config.botToken ? new TelegramClient(config.botToken) : null;
+    const telegram = this.telegram;
+    this.telegramStatus = new TelegramStatus({
+      sender: telegram ? { sendMessage: (chatId, text) => telegram.sendMessage(chatId, text) } : null,
+      allowedChatIds: config.allowedChatIds,
+      redact: config.botToken ? [config.botToken] : [],
+    });
     this.runtime = createFleetRuntime({
       conductorDbPath: config.conductorDbPath,
       workspacesRoot: config.workspacesRoot,
@@ -171,6 +179,11 @@ export class SqueakApp {
             return { ok: false };
         }
       },
+      ...channelsControl(this.telegramStatus, () => ({
+        cliqOneWay: Boolean(config.cliqWebhookUrl),
+        cliqTwoWay: Boolean(config.cliqTwoWay),
+        phone: this.remote !== null,
+      })),
       sessionMessage: (target) => {
         const text = this.router.lastTurnText(target);
         return { text, choices: parseChoices(text) };
@@ -220,15 +233,44 @@ export class SqueakApp {
     await this.controller.start();
     this.conductorRelay.start();
     this.remote?.start();
-    await this.telegram.setMyCommands(COMMANDS).catch((error) => {
-      logger.warn("could not publish squeak commands", { error: summarizeTelegramError(error) });
-    });
+    if (this.telegram) {
+      await this.startTelegram(this.telegram);
+    } else {
+      logger.info("telegram is off: no SQUEAK_BOT_TOKEN; the fleet, phone channel and Cliq still run");
+    }
 
     process.on("SIGINT", () => void this.stop());
     process.on("SIGTERM", () => void this.stop());
 
     logger.info("squeak started", { hookPort: this.config.hookPort });
-    await this.pollLoop();
+    if (this.telegram) {
+      await this.pollLoop(this.telegram);
+    } else {
+      // Nothing to poll: stay alive for the ingress, relay and Cliq until stopped.
+      await new Promise<void>((resolve) => {
+        const timer = setInterval(() => {
+          if (this.stopped) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 1000);
+      });
+    }
+  }
+
+  private async startTelegram(telegram: TelegramClient): Promise<void> {
+    if (!this.config.allowedChatIds) {
+      logger.warn("SQUEAK_ALLOWED_CHAT_IDS is not set: every chat that messages the bot is trusted");
+    }
+    try {
+      this.telegramStatus.setBot((await telegram.getMe()).username);
+    } catch (error) {
+      this.telegramStatus.setBot(null);
+      this.telegramStatus.pollFailed(summarizeTelegramError(error).message);
+    }
+    await telegram.setMyCommands(COMMANDS).catch((error) => {
+      logger.warn("could not publish squeak commands", { error: summarizeTelegramError(error) });
+    });
   }
 
   async stop(): Promise<void> {
@@ -244,15 +286,17 @@ export class SqueakApp {
     logger.info("squeak stopped");
   }
 
-  private async pollLoop(): Promise<void> {
+  private async pollLoop(telegram: TelegramClient): Promise<void> {
     while (!this.stopped) {
       try {
-        const updates = await this.telegram.getUpdates(this.lastUpdateId + 1, this.config.pollTimeoutSeconds);
+        const updates = await telegram.getUpdates(this.lastUpdateId + 1, this.config.pollTimeoutSeconds);
+        this.telegramStatus.pollOk();
         for (const update of updates) {
           this.lastUpdateId = Math.max(this.lastUpdateId, update.update_id);
           await this.handleUpdate(update);
         }
       } catch (error) {
+        this.telegramStatus.pollFailed(summarizeTelegramError(error).message);
         if (!isTransientTelegramError(error)) {
           logger.error("squeak poll failed", { error: summarizeTelegramError(error) });
         }
@@ -261,21 +305,26 @@ export class SqueakApp {
     }
   }
 
-  private authorized(chatId: number): boolean {
-    return !this.config.allowedChatIds || this.config.allowedChatIds.has(chatId);
+  /** A chat that is not allowed is remembered for the app to offer, never acted on. */
+  private authorized(chat: TelegramChat): boolean {
+    if (this.telegramStatus.isAllowed(chat.id)) {
+      return true;
+    }
+    this.telegramStatus.noteChat(chat);
+    return false;
   }
 
   private async handleUpdate(update: TelegramUpdate): Promise<void> {
     if (update.callback_query) {
       const message = update.callback_query.message;
-      if (!message || !this.authorized(message.chat.id)) {
+      if (!message || !this.authorized(message.chat)) {
         return;
       }
       const location: TelegramConversationTarget = {
         chatId: message.chat.id,
         messageThreadId: message.message_thread_id ?? null,
       };
-      await this.telegram.answerCallbackQuery(update.callback_query.id).catch(() => undefined);
+      await this.telegram?.answerCallbackQuery(update.callback_query.id).catch(() => undefined);
       const result = await this.controller.handleCallback(
         location,
         update.callback_query.data ?? "",
@@ -288,7 +337,10 @@ export class SqueakApp {
     }
 
     const message = update.message;
-    if (!message?.text || !this.authorized(message.chat.id)) {
+    if (message && !message.text) {
+      this.authorized(message.chat);
+    }
+    if (!message?.text || !this.authorized(message.chat)) {
       return;
     }
     const location: TelegramConversationTarget = {
@@ -419,8 +471,12 @@ export class SqueakApp {
   }
 
   private async send(location: TelegramConversationTarget, text: string): Promise<void> {
+    const telegram = this.telegram;
+    if (!telegram) {
+      return;
+    }
     for (const chunk of splitMarkdown(text)) {
-      await this.telegram
+      await telegram
         .sendMessage(location.chatId, chunk, {
           ...(location.messageThreadId !== null ? { message_thread_id: location.messageThreadId } : {}),
         })

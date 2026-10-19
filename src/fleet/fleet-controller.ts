@@ -41,7 +41,8 @@ export interface FleetReplier {
 }
 
 export interface FleetControllerDependencies {
-  telegram: TelegramClient;
+  /** Null when no bot token is set: the fleet still runs, nothing is sent to Telegram. */
+  telegram: TelegramClient | null;
   store: FleetStore;
   monitor: FleetMonitor;
   ingress: HookIngressServer | null;
@@ -178,7 +179,7 @@ export class FleetController {
     const text = renderRadar(snapshot, this.now());
     const keyboard = radarKeyboard(snapshot, (key) => this.deps.store.handleFor(key));
 
-    const messageId = await this.deps.telegram.sendMessage(location.chatId, text, {
+    const messageId = await this.tg().sendMessage(location.chatId, text, {
       reply_markup: { inline_keyboard: keyboard },
       disable_web_page_preview: true,
       ...(location.messageThreadId !== null ? { message_thread_id: location.messageThreadId } : {}),
@@ -343,7 +344,7 @@ export class FleetController {
     const answered: TelegramInlineKeyboard = [[{ text: `✓ Sent ${letter} ${where}`, callback_data: "fleet:noop" }]];
     if (messageId !== null) {
       try {
-        await this.deps.telegram.editMessageReplyMarkup(location.chatId, messageId, answered);
+        await this.tg().editMessageReplyMarkup(location.chatId, messageId, answered);
         // A background send also needs its reason, which does not fit a button.
         return outcome.via !== "background"
           ? { handled: true }
@@ -364,7 +365,7 @@ export class FleetController {
   private async promptForReply(location: TelegramConversationTarget, session: FleetSession): Promise<void> {
     const label = cardLabel(session);
     try {
-      const messageId = await this.deps.telegram.sendForceReply(location.chatId, `Reply to **${label}**:`, {
+      const messageId = await this.tg().sendForceReply(location.chatId, `Reply to **${label}**:`, {
         placeholder: `Message for ${label}`,
         messageThreadId: location.messageThreadId,
       });
@@ -553,7 +554,17 @@ export class FleetController {
     await this.send(location, lines.join("\n"), rows);
   }
 
+  private tg(): TelegramClient {
+    if (!this.deps.telegram) {
+      throw new Error("Telegram is not set up");
+    }
+    return this.deps.telegram;
+  }
+
   private async refreshRadars(snapshot: FleetSnapshot): Promise<void> {
+    if (!this.deps.telegram) {
+      return;
+    }
     const text = renderRadar(snapshot, this.now());
     const keyboard = radarKeyboard(snapshot, (key) => this.deps.store.handleFor(key));
 
@@ -568,7 +579,7 @@ export class FleetController {
       }
 
       try {
-        await this.deps.telegram.editMessageText(anchor.chatId, anchor.messageId, text, keyboard);
+        await this.tg().editMessageText(anchor.chatId, anchor.messageId, text, keyboard);
         this.lastRadarText.set(key, text);
         this.lastRadarEditAt.set(key, this.now());
       } catch (error) {
@@ -651,6 +662,9 @@ export class FleetController {
    * would go nowhere.
    */
   private pushTargets(): TelegramConversationTarget[] {
+    if (!this.deps.telegram) {
+      return [];
+    }
     const anchors = this.deps.store.listRadarAnchors();
     if (anchors.length > 0) {
       return anchors.map((anchor) => ({
@@ -673,7 +687,7 @@ export class FleetController {
     for (const [index, chunk] of chunks.entries()) {
       const isLast = index === chunks.length - 1;
       try {
-        lastId = await this.deps.telegram.sendMessage(location.chatId, chunk, {
+        lastId = await this.tg().sendMessage(location.chatId, chunk, {
           ...(keyboard && isLast ? { reply_markup: { inline_keyboard: keyboard } } : {}),
           ...(location.messageThreadId !== null ? { message_thread_id: location.messageThreadId } : {}),
         });

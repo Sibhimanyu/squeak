@@ -43,6 +43,12 @@ export interface IngressControl {
   activity?(sessionKey: string): unknown;
   /** The phone channel: status, pair, approve, reject, revoke, reset. */
   remote?(action: string, deviceId: string | null): Promise<unknown>;
+  /** Which channels are set up and healthy. Never carries a secret. */
+  channels?(): unknown;
+  /** Chats that messaged the Telegram bot without being allowed. */
+  telegramCandidates?(): unknown;
+  /** Send a hello to every allowed Telegram chat. */
+  telegramTest?(): Promise<unknown>;
 }
 
 export const TRANSCRIPT_DEFAULT_LIMIT = 40;
@@ -242,6 +248,37 @@ export class HookIngressServer {
         .catch((error: unknown) => {
           logger.warn("control remote failed", { error: error instanceof Error ? error.message : String(error) });
           respond(response, 500, "remote failed");
+        });
+      return;
+    }
+
+    const channelRoute = /^\/control\/(channels|telegram\/candidates|telegram\/test)$/.exec(
+      (request.url ?? "").split("?")[0] ?? "",
+    );
+    if (channelRoute) {
+      request.resume();
+      const route = channelRoute[1]!;
+      const expectedMethod = route === "telegram/test" ? "POST" : "GET";
+      if (request.method !== expectedMethod) {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      const handler =
+        route === "channels"
+          ? control.channels
+          : route === "telegram/candidates"
+            ? control.telegramCandidates
+            : control.telegramTest;
+      if (!handler) {
+        respond(response, 503, "channels unavailable");
+        return;
+      }
+      Promise.resolve()
+        .then(() => handler.call(control))
+        .then((value) => respondJson(response, 200, value))
+        .catch((error: unknown) => {
+          logger.warn("control channels failed", { error: error instanceof Error ? error.message : String(error) });
+          respond(response, 500, "channels failed");
         });
       return;
     }

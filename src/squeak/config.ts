@@ -40,8 +40,11 @@ export class SqueakConfigError extends Error {
 }
 
 const schema = z.object({
-  /** A bot of its own, so status pings never interleave with the bridge's chat. */
-  SQUEAK_BOT_TOKEN: z.string().min(10),
+  /**
+   * A bot of its own, so status pings never interleave with the bridge's chat.
+   * Optional: without it the fleet, ingress, phone channel and Cliq still run.
+   */
+  SQUEAK_BOT_TOKEN: z.string().optional(),
   SQUEAK_ALLOWED_CHAT_IDS: z.string().optional(),
   SQUEAK_DB_PATH: z.string().optional(),
   CONDUCTOR_DB_PATH: z.string().default("~/Library/Application Support/com.conductor.app/conductor.db"),
@@ -83,7 +86,8 @@ const schema = z.object({
 });
 
 export interface SqueakConfig {
-  botToken: string;
+  /** Null when Telegram is not set up. */
+  botToken: string | null;
   allowedChatIds: Set<number> | null;
   dbPath: string;
   supportDir: string;
@@ -130,7 +134,7 @@ export function loadSqueakConfig(): SqueakConfig {
   } catch (error) {
     if (error instanceof ZodError) {
       throw new SqueakConfigError(
-        `Squeak is not configured (missing SQUEAK_BOT_TOKEN?). Run \`squeak setup\` or edit ${envFilePath}.`,
+        `Squeak's settings are not valid. Check ${envFilePath} (or run \`squeak setup\`): ${error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`,
         envFilePath,
         error,
       );
@@ -152,7 +156,7 @@ export function loadSqueakConfig(): SqueakConfig {
   };
 
   return {
-    botToken: parsed.SQUEAK_BOT_TOKEN,
+    botToken: parsed.SQUEAK_BOT_TOKEN?.trim() || null,
     allowedChatIds,
     dbPath: parsed.SQUEAK_DB_PATH ? resolve(parsed.SQUEAK_DB_PATH) : defaultSqueakDbPath(),
     supportDir: baseDir,

@@ -150,6 +150,10 @@ export interface TelegramChat {
   type: string;
   is_forum?: boolean;
   has_topics_enabled?: boolean;
+  title?: string;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
 }
 
 export interface TelegramMessage {

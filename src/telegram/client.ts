@@ -430,6 +430,16 @@ export class TelegramClient {
     );
   }
 
+  /** The bot's own identity; also proves the token works. */
+  async getMe(): Promise<{ id: number; username: string | null }> {
+    const response = await this.callApi<{ ok: boolean; result?: { id: number; username?: string } }>(
+      "getMe",
+      {},
+      { lane: "control", timeoutMs: 10_000 },
+    );
+    return { id: response.result?.id ?? 0, username: response.result?.username ?? null };
+  }
+
   async setMyCommands(commands: TelegramBotCommand[]): Promise<void> {
     await this.callApi(
       "setMyCommands",
