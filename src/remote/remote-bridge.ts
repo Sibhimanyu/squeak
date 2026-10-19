@@ -19,13 +19,14 @@ import { chatTitle, distinctTitles, sessionLabel } from "../fleet/radar.js";
 import type { QueueAction, QueueItem, ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/session-reply.js";
 import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
+import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
 import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
 import type { ChannelDoc } from "./firestore-rest.js";
-import { LIVE_STEP_CHARS, LIVE_STEPS, LiveTurnPublisher } from "./live-turn.js";
+import { condenseHistory, LIVE_STEP_CHARS, LIVE_STEPS, LiveTurnPublisher } from "./live-turn.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
 
 /**
@@ -211,6 +212,8 @@ export interface RemoteReplier {
     messageId: string,
     action: QueueAction,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** The chat's readable messages, oldest first, for the phone's history above the turn. */
+  transcript?(sessionId: string, limit: number): { messages: TranscriptMessage[] };
   /** Conductor's Stop for a working chat. Absent: a phone's Stop is refused. */
   stopTurn?(sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
@@ -385,6 +388,14 @@ export class RemoteBridge {
               ? { activity: liveActivity(session, LIVE_STEPS, LIVE_STEP_CHARS), working: session.state === "working" }
               : null;
           },
+          history: deps.replier.transcript
+            ? (key) => {
+                const session = this.deps.snapshot().active.find((candidate) => candidate.key === key);
+                const conductorSessionId = session?.conductorSessionId;
+                const read = conductorSessionId ? this.deps.replier.transcript?.(conductorSessionId, 40) : null;
+                return read ? condenseHistory(read.messages) : null;
+              }
+            : null,
           queue: deps.replier.queue
             ? async (key) => {
                 const session = this.deps.snapshot().active.find((candidate) => candidate.key === key);

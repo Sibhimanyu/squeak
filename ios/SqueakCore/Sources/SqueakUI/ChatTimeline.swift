@@ -147,6 +147,8 @@ enum ChatTimeline {
         case folded(id: String, steps: [TurnStep])
         /// The live part of the turn: its newest steps under "Claude · Running tests…".
         case working(label: String, steps: [TurnStep] = [])
+        /// Earlier in the chat, from the Mac's history: yours on the right, the agent's answers muted.
+        case history(id: String, fromUser: Bool, text: String, atISO: String?)
         case empty(String)
 
         var id: String {
@@ -156,6 +158,7 @@ enum ChatTimeline {
             case .steer(let id, _, _): id
             case .folded(let id, _): id
             case .working: "working"
+            case .history(let id, _, _, _): id
             case .empty: "empty"
             }
         }
@@ -246,10 +249,31 @@ enum ChatTimeline {
             rows.append(.agent(text: current, atISO: session.lastActivityAt, muted: false))
         }
         rows += plain.filter(after).map { .sent(settled($0)) }
+        rows = earlier(live?.history, shown: rows, remembered: remembered, steps: steps) + rows
         if isWorking {
             rows += turn(steps: steps, steers: steers.map(settled), truncated: (live?.total ?? session.activity?.total ?? 0) > steps.count, agentName: agentName)
         }
         return rows.isEmpty ? [.empty(emptyText(canReply: Presentation.replyBlock(session) == nil))] : rows
+    }
+
+    /// The chat before what is on screen: the Mac's history less anything already shown (the agent's
+    /// latest message, the previous one kept above a working turn, this phone's own sends, a steer).
+    static func earlier(_ history: [LiveTurn.HistoryEntry]?, shown: [Row], remembered: RememberedMessage?, steps: [TurnStep]) -> [Row] {
+        guard let history, !history.isEmpty else { return [] }
+        var onScreen: [String] = steps.filter { $0.kind == "you" }.map(\.text)
+        if let remembered { onScreen.append(remembered.text) }
+        for row in shown {
+            switch row {
+            case .agent(let text, _, _): onScreen.append(text)
+            case .sent(let s): onScreen.append(s.text)
+            default: break
+            }
+        }
+        func shownAlready(_ text: String) -> Bool { onScreen.contains { same(text, $0) || same($0, text) } }
+        return history.enumerated().compactMap { i, entry in
+            shownAlready(entry.text) ? nil
+                : .history(id: "h-\(entry.at ?? "")-\(i)-\(entry.text.prefix(16))", fromUser: entry.role == "user", text: entry.text, atISO: entry.at)
+        }
     }
 
     /// The working turn's steps: the live turn's whole steps when the Mac streams them for this turn,

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Activity } from "../fleet/activity.js";
 import type { QueueItem } from "../fleet/session-reply.js";
 import {
+  condenseHistory,
   LIVE_QUEUE_TEXT_CHARS,
   LIVE_STEP_CHARS,
   LIVE_STEPS,
@@ -37,6 +38,38 @@ function setup() {
     setActivity: (next: Activity | null) => (activity = next),
   };
 }
+
+describe("condenseHistory", () => {
+  const m = (role: "user" | "assistant", text: string, i: number) => ({
+    id: `m${i}`,
+    role,
+    text,
+    at: null,
+    turnId: null,
+  });
+
+  it("keeps every user message and only the last agent message of each run", () => {
+    const history = condenseHistory([
+      m("user", "Fix the splitter", 0),
+      m("assistant", "Looking at it", 1),
+      m("assistant", "Fixed: the splitter keeps tags balanced.", 2),
+      m("user", "Add tests", 3),
+      m("assistant", "Added three.", 4),
+    ]);
+    expect(history.map((h) => [h.role, h.text])).toEqual([
+      ["user", "Fix the splitter"],
+      ["assistant", "Fixed: the splitter keeps tags balanced."],
+      ["user", "Add tests"],
+      ["assistant", "Added three."],
+    ]);
+  });
+
+  it("keeps the newest few and clips each", () => {
+    const many = Array.from({ length: 20 }, (_, i) => m(i % 2 ? "assistant" : "user", `${i}`, i));
+    expect(condenseHistory(many, 4).map((h) => h.text)).toEqual(["16", "17", "18", "19"]);
+    expect(condenseHistory([m("user", "y".repeat(50), 0)], 8, 10)[0]!.text).toBe(`${"y".repeat(9)}…`);
+  });
+});
 
 describe("liveHandle", () => {
   it("is a fixed-length id the rules accept, and does not spell out the session key", () => {

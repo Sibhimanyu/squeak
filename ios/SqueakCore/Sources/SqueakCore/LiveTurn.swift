@@ -22,6 +22,18 @@ public struct LiveTurn: Codable, Equatable, Sendable {
     /// Conductor's queue for this chat, oldest first. Absent when the Mac cannot read it
     /// (Conductor's relay is not connected); empty when nothing is queued.
     public var queue: [QueuedMessage]? = nil
+    /// The chat before this turn, oldest first: what you typed and the agent's answer to each,
+    /// the newest eight. Absent when the Mac cannot read the chat.
+    public var history: [HistoryEntry]? = nil
+
+    public struct HistoryEntry: Codable, Equatable, Sendable {
+        /// "user" or "assistant".
+        public let role: String
+        public let text: String
+        public let at: String?
+
+        public init(role: String, text: String, at: String? = nil) { self.role = role; self.text = text; self.at = at }
+    }
 
     public struct QueuedMessage: Codable, Equatable, Sendable, Identifiable {
         public let id: String
@@ -34,8 +46,10 @@ public struct LiveTurn: Codable, Equatable, Sendable {
         }
     }
 
-    public init(v: Int = 1, key: String, working: Bool, total: Int, steps: [Step], queue: [QueuedMessage]? = nil) {
+    public init(v: Int = 1, key: String, working: Bool, total: Int, steps: [Step], queue: [QueuedMessage]? = nil,
+                history: [HistoryEntry]? = nil) {
         self.v = v; self.key = key; self.working = working; self.total = total; self.steps = steps; self.queue = queue
+        self.history = history
     }
 
     /// The document id for a session: the same as the Mac's `liveHandle`.

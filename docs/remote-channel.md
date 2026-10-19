@@ -287,6 +287,19 @@ else on the machine. Each of those is a separate, later decision.
   revision and generation Conductor's write needs itself, so the phone never
   supplies them. It can only move or drop a message the owner already sent;
   it adds no text.
+- **Stop from the phone (2026-10-19).** `{ v: 1, kind: "stop", sessionId,
+answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
+  Stop over the relay (`…/sessions/:sid/stop`, which also pauses the queue).
+  It must name the chat's current turn (absent means none), so a Stop sent
+  during one turn cannot stop the next, and the replier refuses a chat
+  Conductor does not call working.
+- **History in the live doc (2026-10-19).** `history: [{ role: "user" |
+"assistant", text, at }]`: the watched chat's own messages, every user
+  message and the agent's last message of each turn, the newest eight, each
+  up to 2,000 characters (`condenseHistory`, read from `session_messages`).
+  It has the same narrowness as the rest of the live doc: only the chat on
+  screen, deleted when the phone leaves it, and only for a Conductor chat.
+  The phone shows it above the chat, less what it already shows.
 - **Usage refresh from the phone (2026-10-19).** A third signed command,
   `{ v: 1, kind: "usage", nonce, expiresAt }`, with no text and no target. It
   passes the same signature, freshness and nonce checks, then runs the Mac's

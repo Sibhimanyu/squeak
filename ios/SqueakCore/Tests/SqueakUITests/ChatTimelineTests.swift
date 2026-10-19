@@ -261,4 +261,25 @@ final class ChatTimelineTests: XCTestCase {
     func testReadLine() {
         XCTAssertEqual(ChatSend.Status.read(agent: "Codex").line, "Read by Codex")
     }
+    /* ---------- history ---------- */
+
+    func testEarlierExchangesShowAboveLessWhatIsAlreadyOnScreen() {
+        let s = send(.sent, turn: "t1")
+        var live = liveTurn(working: false)
+        live.history = [
+            .init(role: "user", text: "Find out why", at: iso(900)),
+            .init(role: "assistant", text: "It cuts inside a tag.", at: iso(800)),
+            .init(role: "user", text: "go", at: iso(5)),          // this phone's own send: already a bubble
+            .init(role: "assistant", text: "New answer", at: iso(1)), // the latest message: already shown
+        ]
+        let rows = ChatTimeline.rows(session: session("finished", turn: "t2", message: "New answer", ago: 1), remembered: previous, sends: [s], live: live, now: now)
+        let earlier = rows.compactMap { row -> String? in if case .history(_, _, let text, _) = row { text } else { nil } }
+        XCTAssertEqual(earlier, ["Find out why", "It cuts inside a tag."])
+        guard case .history(_, true, _, _)? = rows.first else { return XCTFail("history first, the user's on the right") }
+    }
+
+    func testNoHistoryWithoutTheLiveTurn() {
+        let rows = ChatTimeline.rows(session: session("finished", message: "Earlier answer"), remembered: previous, sends: [], now: now)
+        XCTAssertFalse(rows.contains { if case .history = $0 { true } else { false } })
+    }
 }

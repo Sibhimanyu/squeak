@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import type { Activity } from "../fleet/activity.js";
+import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { QueueItem } from "../fleet/session-reply.js";
 import { logger } from "../utils/logger.js";
 
@@ -29,6 +30,9 @@ import { logger } from "../utils/logger.js";
 
 export const LIVE_STEPS = 50;
 export const LIVE_STEP_CHARS = 4_000;
+/** How much of the chat before this turn the phone is shown: about four exchanges. */
+export const HISTORY_MESSAGES = 8;
+export const HISTORY_CHARS = 2_000;
 /** The transcript is read this often while watched; a write needs a change too. */
 export const LIVE_INTERVAL_MS = 1_000;
 export const LIVE_QUEUE_TEXT_CHARS = 2_000;
@@ -43,6 +47,14 @@ export interface LiveTurn {
   total: number;
   steps: Array<{ kind: string; text: string; at: string | null }>;
   /**
+   * The chat so far, oldest first: what you typed and the agent's last words
+   * of each turn (its notes between tool calls left out), the newest
+   * HISTORY_MESSAGES of them, each clipped. Absent for a chat the Mac cannot
+   * read (not Conductor's). Only the chat on screen has one, like the rest of
+   * this document.
+   */
+  history?: HistoryEntry[];
+  /**
    * Conductor's queue for this chat, in order. Absent when the Mac cannot
    * read it (relay down, not a Conductor chat): the phone then keeps its own
    * list. `[]` means the queue is empty.
@@ -50,9 +62,44 @@ export interface LiveTurn {
   queue?: QueueItem[];
 }
 
+export interface HistoryEntry {
+  role: "user" | "assistant";
+  text: string;
+  at: string | null;
+}
+
+/**
+ * A chat's readable transcript cut down to what a phone shows above the turn:
+ * every user message, and of each run of agent messages only the last (the
+ * answer; the rest are its running commentary), newest `max` kept, each clipped.
+ */
+export function condenseHistory(
+  messages: TranscriptMessage[],
+  max = HISTORY_MESSAGES,
+  chars = HISTORY_CHARS,
+): HistoryEntry[] {
+  const kept: HistoryEntry[] = [];
+  for (const message of messages) {
+    const entry: HistoryEntry = {
+      role: message.role,
+      text: message.text.length > chars ? `${message.text.slice(0, chars - 1).trimEnd()}…` : message.text,
+      at: message.at,
+    };
+    const previous = kept[kept.length - 1];
+    if (entry.role === "assistant" && previous?.role === "assistant") {
+      kept[kept.length - 1] = entry;
+    } else {
+      kept.push(entry);
+    }
+  }
+  return kept.slice(-max);
+}
+
 export interface LiveTurnDependencies {
   /** The session's current turn, read with whole steps; null when it is gone. */
   read: (sessionKey: string) => { activity: Activity | null; working: boolean } | null;
+  /** The chat's condensed history; null when it cannot be read. */
+  history?: ((sessionKey: string) => HistoryEntry[] | null) | null;
   write: (handle: string, turn: LiveTurn) => Promise<void>;
   clear: (handle: string) => Promise<void>;
   /** The chat's Conductor queue; null when it cannot be read. */
@@ -104,6 +151,15 @@ export class LiveTurnPublisher {
   }
 
   /** One look at the watched session; writes only what changed. Never throws. */
+  /** Never throws: a chat whose history cannot be read just goes without it. */
+  private readHistory(key: string): HistoryEntry[] | null {
+    try {
+      return this.deps.history?.(key) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async publish(): Promise<void> {
     const key = this.watched;
     if (!key || this.running) {
@@ -124,6 +180,10 @@ export class LiveTurnPublisher {
           at: step.at,
         })),
       };
+      const history = this.readHistory(key);
+      if (history) {
+        turn.history = history;
+      }
       const queue = await this.readQueue(key);
       if (queue) {
         turn.queue = queue.map((item) => ({

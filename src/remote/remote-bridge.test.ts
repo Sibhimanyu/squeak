@@ -8,6 +8,7 @@ import { applyAwakeAction, AwakeSession, readAwakeAction } from "../fleet/awake-
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
+import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { QueueAction, QueueItem, ReplyOutcome } from "../fleet/session-reply.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { ChannelDoc } from "./firestore-rest.js";
@@ -1138,6 +1139,7 @@ describe("RemoteBridge verbose view (live turn)", () => {
       verbose?: boolean;
       firestore?: boolean;
       queue?: (sessionId: string) => Promise<QueueItem[] | null>;
+      transcript?: (sessionId: string, limit: number) => { messages: TranscriptMessage[] };
     } = {},
   ) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-live-"));
@@ -1159,6 +1161,7 @@ describe("RemoteBridge verbose view (live turn)", () => {
         lastTurnId: () => null,
         send: vi.fn(),
         ...(options.queue ? { queue: options.queue } : {}),
+        ...(options.transcript ? { transcript: options.transcript } : {}),
       },
       snapshot: () => ({ sessions: active, active, attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
       liveActivity,
@@ -1233,6 +1236,32 @@ describe("RemoteBridge verbose view (live turn)", () => {
     const [plain] = bare.liveDocs();
     expect(open<Record<string, unknown>>(bare.payload.k, bare.store.docs.get(plain!)!.box)).not.toHaveProperty("queue");
     bare.bridge.stop();
+  });
+
+  it("carries the chat's history before this turn, read for its Conductor id", async () => {
+    const transcript = vi.fn((sessionId: string) => ({
+      messages:
+        sessionId === "s1"
+          ? [
+              { id: "a", role: "user" as const, text: "Fix it", at: null, turnId: "t1" },
+              { id: "b", role: "assistant" as const, text: "On it", at: null, turnId: "t1" },
+              { id: "c", role: "assistant" as const, text: "Fixed.", at: "2026-10-19T09:00:00.000Z", turnId: "t1" },
+            ]
+          : [],
+    }));
+    const t = verbose({ transcript });
+    await t.pair();
+    await t.presence("claude-transcript:s1");
+    await t.bridge.tick();
+    await settle();
+    const [doc] = t.liveDocs();
+    const turn = open<{ history?: unknown }>(t.payload.k, t.store.docs.get(doc!)!.box);
+    expect(transcript).toHaveBeenCalledWith("s1", 40);
+    expect(turn.history).toEqual([
+      { role: "user", text: "Fix it", at: null },
+      { role: "assistant", text: "Fixed.", at: "2026-10-19T09:00:00.000Z" },
+    ]);
+    t.bridge.stop();
   });
 
   it("deletes it when the phone stops watching", async () => {

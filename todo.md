@@ -51,7 +51,7 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
       through the relay's `…/sessions/:sid/stop`, signed like every command.
 - [x] **3. Keep my place.** Drafts survive leaving a chat; reopening returns to
       where you were reading; a "↓ New" pill when something arrives above the fold.
-- [ ] **4. The last 3–4 exchanges in a chat** (also under "iPhone UI ideas" above).
+- [x] **4. The last 3–4 exchanges in a chat** (also under "iPhone UI ideas" above).
 - [ ] **5. What changed on a finished turn.** "3 files · +84/−12" under the reply,
       tapping through to the diff (the Mac's diff-view already pages it).
 - [ ] **6. Copy / share** any message or step on a long press.

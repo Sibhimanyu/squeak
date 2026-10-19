@@ -256,6 +256,13 @@ private struct ChatRows: View {
                     FoldedSteps(steps: steps, open: Binding(
                         get: { openParts.contains(id) },
                         set: { if $0 { openParts.insert(id) } else { openParts.remove(id) } }))
+                case .history(_, let fromUser, let text, let atISO):
+                    if fromUser {
+                        SentBubble(text: text, date: atISO.flatMap(Age.date), line: nil)
+                    } else {
+                        AgentMessage(agentName: agentName, text: text, atISO: atISO ?? "", muted: true, choices: nil, disabled: true) { _ in }
+                            .equatable()
+                    }
                 case .working(let label, let steps):
                     // After a steer the live part is its own count; "the latest 3 of 7" would count the folded parts too.
                     WorkingRow(agentName: agentName, label: stopping ? "Stopping…" : label, steps: steps, total: parted ? steps.count : total, live: live, open: $stepsOpen)
@@ -688,7 +695,8 @@ struct SentBubble: View, Equatable {
     let text: String
     /// nil for a steer the Mac reported, which carries no time of its own.
     let date: Date?
-    let line: String
+    /// nil for an earlier message from the chat's history: no delivery to report.
+    let line: String?
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
@@ -701,12 +709,12 @@ struct SentBubble: View, Equatable {
                 .padding(.horizontal, 14).padding(.vertical, 10)
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
-            // Exactly one muted line per message.
-            Text(line).font(.footnote).foregroundStyle(Theme.muted).multilineTextAlignment(.trailing)
+            // Exactly one muted line per message this phone sent.
+            if let line { Text(line).font(.footnote).foregroundStyle(Theme.muted).multilineTextAlignment(.trailing) }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("You\(date.map { ", \($0.formatted(date: .omitted, time: .shortened))" } ?? ""): \(text). \(line)")
+        .accessibilityLabel("You\(date.map { ", \($0.formatted(date: .omitted, time: .shortened))" } ?? ""): \(text)\(line.map { ". \($0)" } ?? "")")
     }
 }
 
