@@ -70,7 +70,7 @@ export class ConductorObserver {
       lastActivityAt,
       transcriptPath: null,
       contextPercent: normalizePercent(row.contextUsedPercent),
-      retired: isRetiredWorkspace(row),
+      retired: isRetiredWorkspace(row, this.now()),
       // Conductor does not track spend locally.
       baseRef: row.defaultBranch ? `origin/${row.defaultBranch}` : null,
       costUsd: null,
@@ -163,7 +163,15 @@ function normalizePercent(value: number | null): number | null {
  * A workspace the user already finished with. Conductor tracks this itself, so
  * honour it rather than nagging about work that has been signed off.
  */
-function isRetiredWorkspace(row: FleetRegistrySessionRef): boolean {
+/**
+ * A workspace Conductor derives as "done" (its PR merged) is still a place
+ * people keep chatting: on a real machine two chats in a merged workspace ran
+ * while Squeak hid them everywhere. So "done" retires only a chat nobody has
+ * used for a week; a chat that is running, or that you spoke in lately, shows.
+ */
+const DONE_WORKSPACE_GRACE_MS = 7 * 24 * 60 * 60_000;
+
+function isRetiredWorkspace(row: FleetRegistrySessionRef, now: number): boolean {
   // A chat you closed is done with, whatever its workspace says.
   if (row.isHidden) {
     return true;
@@ -175,5 +183,12 @@ function isRetiredWorkspace(row: FleetRegistrySessionRef): boolean {
   if (row.workspaceState?.trim().toLowerCase() === "archived") {
     return true;
   }
-  return row.derivedStatus?.trim().toLowerCase() === "done";
+  if (row.derivedStatus?.trim().toLowerCase() !== "done") {
+    return false;
+  }
+  if (row.status === "working" || row.status === "waiting" || row.status === "needs_user_input") {
+    return false;
+  }
+  const lastUser = row.lastUserMessageAt ? Date.parse(row.lastUserMessageAt) : Number.NaN;
+  return !(now - lastUser < DONE_WORKSPACE_GRACE_MS);
 }

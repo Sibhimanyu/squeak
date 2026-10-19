@@ -116,6 +116,23 @@ describe("ConductorObserver", () => {
     expect(session?.state).toBe("idle");
   });
 
+  it("shows a chat in a workspace Conductor calls done while it is used, and retires it after a quiet week", () => {
+    // A merged PR makes the workspace "done", but people keep chatting there.
+    const [recent] = observe([row({ derivedStatus: "done" })]);
+    expect(recent?.retired).toBe(false);
+    expect(recent?.state).toBe("finished");
+    const [running] = observe([
+      row({ derivedStatus: "done", status: "working", lastUserMessageAt: "2026-01-01T00:00:00.000Z" }),
+    ]);
+    expect(running?.retired).toBe(false);
+    const [quiet] = observe([
+      row({ derivedStatus: "done", lastUserMessageAt: new Date(NOW - 8 * 24 * 60 * 60_000).toISOString() }),
+    ]);
+    expect(quiet?.retired).toBe(true);
+    const [never] = observe([row({ derivedStatus: "done", lastUserMessageAt: null })]);
+    expect(never?.retired).toBe(true);
+  });
+
   it("keeps a closed chat as Conductor's, but retired", () => {
     // Left out entirely, its transcript resurfaced as an anonymous session.
     const [session] = observe([row({ isHidden: true, status: "working" })]);
