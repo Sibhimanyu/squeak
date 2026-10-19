@@ -210,7 +210,9 @@ export function readClaudeTranscript(
  * question the agent asked in words, not a permission prompt (those are never
  * written to the file and stay hook-only).
  */
-function findPendingQuestion(entries: Record<string, unknown>[]): { id: string; detail: string } | null {
+export function findPendingQuestion(
+  entries: Record<string, unknown>[],
+): { id: string; detail: string; name: string; input: unknown } | null {
   const answered = new Set<string>();
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];

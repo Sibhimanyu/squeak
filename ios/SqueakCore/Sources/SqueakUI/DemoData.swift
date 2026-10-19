@@ -62,8 +62,22 @@ enum DemoData {
         PhoneSnapshot.Session(
             key: s.key, conductorSessionId: s.conductorSessionId, label: s.label, agent: s.agent, state: s.state,
             lastActivityAt: s.lastActivityAt, detail: s.detail, git: s.git, contextPercent: s.contextPercent,
-            turnId: s.turnId, message: s.message, choices: s.choices, activity: s.activity, title: titles[s.key])
+            turnId: s.turnId, message: s.message, choices: s.choices, activity: s.activity, title: titles[s.key],
+            question: s.key == "pay" && s.state == "awaiting_input" ? question : nil)
     }
+
+    /// The question the payment chat waits on, as the Mac sends it (an AskUserQuestion, every option).
+    private static let question = PhoneSnapshot.Question(questions: [
+        .init(question: "How should temporary failures be retried?", header: "Retries", multiSelect: false, options: [
+            .init(label: "Retry automatically", description: "3 attempts with backoff"),
+            .init(label: "Let the customer retry", description: "Keep checkout available"),
+        ]),
+        .init(question: "Which payment errors count as temporary?", header: "Scope", multiSelect: true, options: [
+            .init(label: "Network timeouts", description: nil),
+            .init(label: "Rate limits", description: "429 from the provider"),
+            .init(label: "Card declines", description: "Usually not worth retrying"),
+        ]),
+    ])
 
     static var snapshot: PhoneSnapshot {
         let raw = rawSnapshot

@@ -39,6 +39,27 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public init(total: Int, steps: [Step]) { self.total = total; self.steps = steps }
     }
 
+    /// A question the agent is waiting on (its AskUserQuestion), whole: every option, read-only on
+    /// the phone for now. Agent text: render as plain text only.
+    public struct Question: Codable, Equatable, Sendable {
+        public struct Prompt: Codable, Equatable, Sendable {
+            public struct Option: Codable, Equatable, Sendable {
+                public let label: String
+                public let description: String?
+                public init(label: String, description: String?) { self.label = label; self.description = description }
+            }
+            public let question: String
+            public let header: String?
+            public let multiSelect: Bool
+            public let options: [Option]
+            public init(question: String, header: String?, multiSelect: Bool, options: [Option]) {
+                self.question = question; self.header = header; self.multiSelect = multiSelect; self.options = options
+            }
+        }
+        public let questions: [Prompt]
+        public init(questions: [Prompt]) { self.questions = questions }
+    }
+
     public struct Session: Codable, Equatable, Sendable, Identifiable {
         public let key: String
         public let conductorSessionId: String?
@@ -56,15 +77,17 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public let choices: Choices?
         /// Only while working, and only from a Mac new enough to send it.
         public let activity: Activity?
+        /// Only while it waits on an answer, and only from a Mac new enough to send it.
+        public let question: Question?
         public var id: String { key }
 
         public init(
             key: String, conductorSessionId: String?, label: String, agent: String, state: String,
             lastActivityAt: String, detail: String?, git: String?, contextPercent: Double?,
             turnId: String?, message: String?, choices: Choices?, activity: Activity? = nil,
-            title: String? = nil
+            title: String? = nil, question: Question? = nil
         ) {
-            self.title = title
+            self.title = title; self.question = question
             self.key = key; self.conductorSessionId = conductorSessionId; self.label = label
             self.agent = agent; self.state = state; self.lastActivityAt = lastActivityAt
             self.detail = detail; self.git = git; self.contextPercent = contextPercent

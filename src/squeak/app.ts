@@ -10,6 +10,7 @@ import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { CLAUDE_PROBE_SCHEMA, CLAUDE_PROBE_SYSTEM, ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
 import { Caffeinator } from "../fleet/caffeinate.js";
+import { readPendingQuestion } from "../fleet/question.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { readActivity } from "../fleet/activity.js";
@@ -164,6 +165,8 @@ export class SqueakApp {
           snapshot: () => this.runtime.monitor.snapshot,
           onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
           activity: (session) => (session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null),
+          question: (session) =>
+            session.agent === "claude" && session.transcriptPath ? readPendingQuestion(session.transcriptPath) : null,
           liveActivity: (session, limit, stepChars) =>
             session.transcriptPath ? readActivity(session.agent, session.transcriptPath, limit, { stepChars }) : null,
           verbose: config.remoteVerbose,

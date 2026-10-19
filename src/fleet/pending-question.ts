@@ -41,7 +41,7 @@ export function describeQuestionCall(name: string, input: unknown): string {
  * The newest question-tool call in an assistant entry's content blocks, or
  * null. `id` is the tool_use id the answer's tool_result will carry.
  */
-export function questionCallIn(content: unknown): { id: string; detail: string } | null {
+export function questionCallIn(content: unknown): { id: string; detail: string; name: string; input: unknown } | null {
   const blocks = asArray(content);
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const block = asRecord(blocks[index]);
@@ -51,10 +51,60 @@ export function questionCallIn(content: unknown): { id: string; detail: string }
     const name = asString(block.name);
     const id = asString(block.id);
     if (name && id && isQuestionTool(name)) {
-      return { id, detail: describeQuestionCall(name, block.input) };
+      return { id, detail: describeQuestionCall(name, block.input), name, input: block.input };
     }
   }
   return null;
+}
+
+/** One question an agent asked, whole: what the phone shows so you can read every option. */
+export interface QuestionPrompt {
+  question: string;
+  header: string | null;
+  multiSelect: boolean;
+  options: Array<{ label: string; description: string | null }>;
+}
+
+const QUESTION_MAX_CHARS = 1_000;
+const OPTION_MAX_CHARS = 400;
+
+/**
+ * The questions of an `AskUserQuestion` call, structured. Null for anything
+ * else (a plan review is not a set of options). Every string is the agent's
+ * own output: clipped here, and rendered as plain text on the phone.
+ */
+export function parseQuestions(name: string, input: unknown): QuestionPrompt[] | null {
+  if (!isQuestionTool(name) || name === "ExitPlanMode") {
+    return null;
+  }
+  const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+  const questions = asArray(asRecord(input)?.questions).flatMap((raw) => {
+    const item = asRecord(raw);
+    const question = item ? asString(item.question) : null;
+    if (!item || !question) {
+      return [];
+    }
+    const options = asArray(item.options).flatMap((option) => {
+      const record = asRecord(option);
+      const label = asString(option) ?? (record ? asString(record.label) : null);
+      if (!label) {
+        return [];
+      }
+      const description = record ? asString(record.description) : null;
+      return [
+        { label: clip(label, OPTION_MAX_CHARS), description: description ? clip(description, OPTION_MAX_CHARS) : null },
+      ];
+    });
+    return [
+      {
+        question: clip(question, QUESTION_MAX_CHARS),
+        header: asString(item.header),
+        multiSelect: item.multiSelect === true,
+        options: options.slice(0, 10),
+      },
+    ];
+  });
+  return questions.length > 0 ? questions.slice(0, 4) : null;
 }
 
 /** Whether a user entry's content answers the tool_use with this id. */

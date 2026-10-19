@@ -51,14 +51,35 @@ struct SessionView: View {
     @ViewBuilder
     private func content(_ session: PhoneSnapshot.Session) -> some View {
         // One view: the conversation, with the working turn's steps folded into its working row.
-        ScrollView {
-            chat(session, sending: model.isSending(session.key))
-                .padding(.horizontal, 20).padding(.vertical, 16)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollViewReader { proxy in
+            ScrollView {
+                chat(session, sending: model.isSending(session.key))
+                    .padding(.horizontal, 20).padding(.top, 16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                // The end of the chat: whether it is on screen says whether to follow new content.
+                Color.clear.frame(height: 16).id(Self.end)
+                    .onAppear { atEnd = true }
+                    .onDisappear { atEnd = false }
+            }
+            .modifier(StickToBottom())
+            .scrollDismissesKeyboard(.interactively)
+            // Open at the newest message, after the first layout (markdown sizes itself late).
+            .onAppear {
+                proxy.scrollTo(Self.end, anchor: .bottom)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { proxy.scrollTo(Self.end, anchor: .bottom) }
+            }
+            // Follow new messages, sends and steps, unless you have scrolled up to read.
+            .onChange(of: followKey(session)) { _, _ in
+                guard atEnd else { return }
+                if reduceMotion { proxy.scrollTo(Self.end, anchor: .bottom) } else {
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
+                }
+            }
+            // Sending is always a reason to look at the end.
+            .onChange(of: model.outbox[session.key]?.count ?? 0) { _, _ in
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
+            }
         }
-        // New steps and replies arrive at the bottom; keep it in view as they do.
-        .modifier(StickToBottom())
-        .scrollDismissesKeyboard(.interactively)
         .background(Theme.bg.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Composer(session: session, draft: $draft, composing: $composing)
@@ -92,12 +113,24 @@ struct SessionView: View {
         .accessibilityAddTraits(.isHeader)
     }
 
+    private static let end = "chat-end"
+    @State private var atEnd = true
+
+    /// What, changing, means there is something new at the bottom.
+    private func followKey(_ session: PhoneSnapshot.Session) -> String {
+        let live = model.verbose ? model.liveTurns[session.key] : nil
+        return [session.turnId ?? "", session.state, session.message?.count.description ?? "",
+                String(session.activity?.total ?? 0), String(live?.steps.count ?? 0), String(live?.steps.last?.text.count ?? 0),
+                (model.outbox[session.key] ?? []).map { "\($0.status)" }.joined()].joined(separator: "|")
+    }
+
     /* ---------- chat ---------- */
 
     @ViewBuilder
     private func chat(_ session: PhoneSnapshot.Session, sending: Bool) -> some View {
         let rows = ChatTimeline.rows(session: session, remembered: model.remembered[session.key], sends: model.outbox[session.key] ?? [])
-        let choices = session.state == "working" ? nil : session.choices
+        // A pending question has its own card; letters read from the message would repeat it.
+        let choices = session.state == "working" || session.question != nil ? nil : session.choices
 
         VStack(alignment: .leading, spacing: 16) {
             ForEach(rows) { row in
@@ -117,6 +150,9 @@ struct SessionView: View {
                 case .empty(let text):
                     Text(text).foregroundStyle(Theme.muted)
                 }
+            }
+            if session.state == "awaiting_input", let question = session.question {
+                QuestionCard(question: question, agentName: Presentation.agentName(session.agent))
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: rows.map(\.id))
@@ -187,6 +223,49 @@ struct WorkingRow: View {
                 StepList(steps: steps, total: total, live: live)
                     .padding(.leading, 4)
                     .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The question the agent is waiting on, every option written out (DESIGN.md §8.4's card, read-only).
+/// Conductor answers questions only in its own window, so the card says where to answer rather than
+/// offering taps that could not land. Agent text is plain text, never markdown.
+struct QuestionCard: View {
+    let question: PhoneSnapshot.Question
+    let agentName: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(Array(question.questions.enumerated()), id: \.offset) { _, prompt in
+                VStack(alignment: .leading, spacing: 10) {
+                    if let header = prompt.header, !header.isEmpty {
+                        Text(header.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
+                    }
+                    Text(prompt.question).font(.headline)
+                    if prompt.multiSelect {
+                        Text("Pick any").font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                    ForEach(Array(prompt.options.enumerated()), id: \.offset) { _, option in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(option.label).font(.body.weight(.medium))
+                            if let description = option.description, !description.isEmpty {
+                                Text(description).font(.subheadline).foregroundStyle(Theme.muted)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.vertical, 11)
+                        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Lucide(.info, size: 14, color: Theme.muted).accessibilityHidden(true)
+                Text("\(agentName) asked this in Conductor. Answer it in Conductor on your Mac; this phone can't answer questions yet.")
+                    .font(.footnote).foregroundStyle(Theme.muted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

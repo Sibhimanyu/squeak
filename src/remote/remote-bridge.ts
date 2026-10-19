@@ -20,6 +20,7 @@ import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import type { FleetSession } from "../fleet/types.js";
+import type { QuestionPrompt } from "../fleet/pending-question.js";
 import type { ChannelDoc } from "./firestore-rest.js";
 import { LIVE_STEP_CHARS, LIVE_STEPS, LiveTurnPublisher } from "./live-turn.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
@@ -173,6 +174,11 @@ export interface RemoteBridgeDependencies {
   /** Claude's last plan-limit reading, for the read-only usage view on the phone. */
   claudeLimits?: (() => ClaudeLimits | null) | null;
   /**
+   * The question a session waiting on you asked, whole (fleet/question.ts),
+   * so the phone can show every option instead of a one-line summary.
+   */
+  question?: ((session: FleetSession) => { toolUseId: string; questions: QuestionPrompt[] } | null) | null;
+  /**
    * Subscribe to fresh snapshots. When one differs in what the phone shows
    * (state, title, detail — not just a newer timestamp) the bridge publishes
    * at once instead of waiting for its next pass. Optional; without it the
@@ -250,6 +256,7 @@ export class RemoteBridge {
   private readonly activity: RemoteActivity[] = [];
   private readonly messageCache = new Map<string, { text: string | null; choices: ParsedChoices | null }>();
   private readonly activityCache = new Map<string, PhoneActivity | null>();
+  private readonly questionCache = new Map<string, { questions: QuestionPrompt[] } | null>();
   private pairingOpenUntil = 0;
   private phoneSeenAt = 0;
   private lastPublishedAt = 0;
@@ -966,7 +973,35 @@ export class RemoteBridge {
       message: text,
       choices: message?.choices ?? null,
       activity: session.state === "working" ? this.activityFor(session) : null,
+      // Only while it waits for an answer; older phones ignore it.
+      ...(session.state === "awaiting_input" ? { question: this.questionFor(session) } : {}),
     };
+  }
+
+  /** Read once per change: the key moves with the session's activity. */
+  private questionFor(session: FleetSession): { questions: QuestionPrompt[] } | null {
+    const read = this.deps.question;
+    if (!read) {
+      return null;
+    }
+    const key = `${session.key}|${session.lastActivityAt}`;
+    if (this.questionCache.has(key)) {
+      return this.questionCache.get(key) ?? null;
+    }
+    let value: { questions: QuestionPrompt[] } | null = null;
+    try {
+      const found = read(session);
+      value = found ? { questions: found.questions } : null;
+    } catch (error) {
+      logger.debug("could not read a pending question", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (this.questionCache.size > 100) {
+      this.questionCache.clear();
+    }
+    this.questionCache.set(key, value);
+    return value;
   }
 
   private phoneWorkspaces(): PhoneWorkspace[] {
