@@ -52,7 +52,7 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
 - [x] **3. Keep my place.** Drafts survive leaving a chat; reopening returns to
       where you were reading; a "↓ New" pill when something arrives above the fold.
 - [x] **4. The last 3–4 exchanges in a chat** (also under "iPhone UI ideas" above).
-- [ ] **5. What changed on a finished turn.** "3 files · +84/−12" under the reply,
+- [x] **5. What changed on a finished turn.** "3 files · +84/−12" under the reply,
       tapping through to the diff (the Mac's diff-view already pages it).
 - [ ] **6. Copy / share** any message or step on a long press.
 - [ ] **7. Swipe actions on Home rows**: A/B/C or Reply without opening the chat.
@@ -85,8 +85,8 @@ switch in the menu bar and iPhone Settings (`keep-awake.json`, command `awake`).
       Every system change is journalled before it is made and undone at session end,
       at daemon start (launchd restarts it), and by a small launchd backstop if Squeak
       is gone for good — a Mac left with `disablesleep 1` never sleeps, even in a bag.
-- [ ] **4. Lid-closed actions.** When the lid shuts during a session: display off,
-      mute, Low Power Mode, optionally SIGSTOP chat apps (Slack, WhatsApp, Discord);
+- [x] **4. Lid-closed actions.** When the lid shuts during a session: display off,
+      mute, Low Power Mode, optionally SIGSTOP chat apps (Slack, WhatsApp, Discord, Telegram);
       all reversed when it opens. Each one a setting.
 - [ ] **5. Status on the phone.** Lid state, battery %, power draw and the countdown on
       the iPhone; a push when a safety rule ends a session.

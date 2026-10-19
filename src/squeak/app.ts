@@ -206,6 +206,8 @@ export class SqueakApp {
           liveActivity: (session, limit, stepChars) =>
             session.transcriptPath ? readActivity(session.agent, session.transcriptPath, limit, { stepChars }) : null,
           verbose: config.remoteVerbose,
+          // The phone's "what changed": the same reader Telegram's diff pages use.
+          diff: this.runtime.diff,
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
           // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
           refreshUsage: () => this.claudeRefresher.refresh(),

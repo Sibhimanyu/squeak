@@ -19,6 +19,7 @@ import { chatTitle, distinctTitles, sessionLabel } from "../fleet/radar.js";
 import type { QueueAction, QueueItem, ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/session-reply.js";
 import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
+import type { DiffFile, WorkspaceDiff } from "../fleet/diff-view.js";
 import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import type { FleetSession } from "../fleet/types.js";
@@ -107,6 +108,28 @@ export interface StopCommand {
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
+}
+
+/**
+ * A signed request to see what a chat changed: its file list against the
+ * base branch, and one file's patch when `file` names its index in that list.
+ * Read-only, but it reveals code, so it is signed like everything else and
+ * answered only for a chat the phone is shown.
+ */
+export interface DiffCommand {
+  v: 1;
+  kind: "diff";
+  sessionId: string;
+  file?: number;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/** What reads a workspace's diff (fleet/diff-view.ts). */
+export interface RemoteDiffReader {
+  readSummary(dir: string, baseRef: string | null): Promise<WorkspaceDiff | null>;
+  readFilePatch(dir: string, baseRef: string | null, file: DiffFile): Promise<string | null>;
 }
 
 export interface QueueCommand {
@@ -289,6 +312,8 @@ export interface RemoteBridgeDependencies {
    */
   liveActivity?: ((session: FleetSession, limit: number, stepChars: number) => Activity | null) | null;
   verbose?: boolean;
+  /** Reads a chat's diff for the phone's "what changed". Absent: refused. */
+  diff?: RemoteDiffReader | null;
   now?: () => number;
   macName?: string;
 }
@@ -855,6 +880,9 @@ export class RemoteBridge {
     if (kind === "queue") {
       return this.handleQueue(device, id, command as unknown as QueueCommand);
     }
+    if (kind === "diff") {
+      return this.handleDiff(device, id, command as unknown as DiffCommand);
+    }
     if (kind === "stop") {
       return this.handleStop(device, id, command as unknown as StopCommand);
     }
@@ -1088,6 +1116,75 @@ export class RemoteBridge {
     }
     this.log(device.name, "sent", `stopped ${command.sessionId.slice(0, 8)}`);
     return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
+   * What a chat changed, for the phone's diff view. Signature, freshness and
+   * nonce have already held. The folder and base branch come from the Mac's
+   * own snapshot of a chat the phone is shown, never from the phone.
+   */
+  private async handleDiff(
+    device: PairedDevice,
+    id: string,
+    command: DiffCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `diff: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (
+      command.v !== 1 ||
+      typeof command.sessionId !== "string" ||
+      (command.file !== undefined && (!Number.isInteger(command.file) || command.file < 0))
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const reader = this.deps.diff;
+    if (!reader) {
+      return refuse("This Mac can't show changes on a phone.");
+    }
+    const session = this.shownSession(command.sessionId);
+    if (!session) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    if (!session.cwd) {
+      return refuse("This chat has no folder on the Mac to read.");
+    }
+    let summary: WorkspaceDiff | null;
+    try {
+      summary = await reader.readSummary(session.cwd, session.baseRef);
+    } catch {
+      summary = null;
+    }
+    if (!summary) {
+      return refuse("This Mac couldn't read that chat's changes.");
+    }
+    const result: Record<string, unknown> = { id, status: "sent", diff: summary };
+    if (command.file !== undefined) {
+      const file = summary.files[command.file];
+      if (!file) {
+        return refuse("That file isn't in the changes any more.");
+      }
+      let patch: string | null;
+      try {
+        patch = await reader.readFilePatch(session.cwd, session.baseRef, file);
+      } catch {
+        patch = null;
+      }
+      result.patch = { index: command.file, path: file.path, text: patch ?? "" };
+    }
+    this.log(device.name, "sent", `changes of ${command.sessionId.slice(0, 8)}`);
+    return { write: true, result };
+  }
+
+  /** The Mac's own record of a Conductor chat the phone is shown, or null. */
+  private shownSession(conductorSessionId: string): FleetSession | null {
+    if (!this.phoneShows(conductorSessionId)) {
+      return null;
+    }
+    const snapshot = this.deps.snapshot();
+    const named = (session: FleetSession) => session.conductorSessionId === conductorSessionId;
+    return snapshot.active.find(named) ?? snapshot.sessions.find(named) ?? null;
   }
 
   /** Whether a Conductor chat is in what the phone is shown: active, or in its Recent list. */

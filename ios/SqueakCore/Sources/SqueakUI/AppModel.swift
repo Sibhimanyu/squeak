@@ -601,6 +601,32 @@ final class AppModel {
         return send.id
     }
 
+    /* ---------- what changed ---------- */
+
+    enum DiffAnswer { case diff(WorkspaceDiff, FilePatch?), refused(String) }
+
+    /// What a chat changed, from the Mac (read-only, so no Face ID): the file list, and one file's
+    /// patch when `file` is its index in that list.
+    func loadDiff(_ session: PhoneSnapshot.Session, file: Int? = nil) async -> DiffAnswer {
+        if demo {
+            try? await Task.sleep(for: .milliseconds(300))
+            return .diff(DemoData.diff, file.map { DemoData.patch(for: $0) })
+        }
+        guard let channel, let sessionId = session.conductorSessionId else { return .refused("Not connected to your Mac.") }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.diffDocument(sessionId: sessionId, file: file, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return .refused("Your Mac didn't answer. Is Squeak running?") }
+            guard result.sent, let diff = result.diff else { return .refused(result.reason ?? "Your Mac couldn't read the changes.") }
+            return .diff(diff, result.patch)
+        } catch {
+            return .refused("Couldn't reach your Mac.")
+        }
+    }
+
     /* ---------- stop ---------- */
 
     /// Chats a Stop was sent to, until the Mac stops calling them working (or 30 s pass).

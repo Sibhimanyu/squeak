@@ -34,6 +34,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   promoteCommand: { box: string; sig: string; device: string };
   stopCommandId: string;
   stopCommand: { box: string; sig: string; device: string };
+  diffCommandId: string;
+  diffCommand: { box: string; sig: string; device: string };
 };
 
 const QUEUED_ID = "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31";
@@ -76,11 +78,21 @@ function bridge(turn: string) {
         return { ok: true };
       },
     },
+    diff: {
+      readSummary: async () => ({
+        baseRef: null,
+        files: [{ path: "a.ts", insertions: 1, deletions: 0, binary: false, untracked: false }],
+        insertions: 1,
+        deletions: 0,
+        truncated: false,
+      }),
+      readFilePatch: async () => "+b",
+    },
     // The chat the phone's commands name, as the Mac's own snapshot shows it.
     snapshot: () =>
       ({
         sessions: [],
-        active: [{ key: "claude-transcript:s1", conductorSessionId: "s1" } as FleetSession],
+        active: [{ key: "claude-transcript:s1", conductorSessionId: "s1", cwd: "/w", baseRef: null } as FleetSession],
       }) as unknown as FleetSnapshot,
     newChat: {
       workspaces: () => [
@@ -160,6 +172,12 @@ describe("a reply made on the iPhone", () => {
     expect(verdict.result).toEqual({ id: fixture.stopCommandId, status: "sent" });
     expect(stops).toEqual(["s1"]);
     expect(sends).toEqual([]);
+  });
+
+  it("answers what a chat changed when the phone signs a diff request", async () => {
+    const { remote, config } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.diffCommandId, fixture.diffCommand);
+    expect(verdict.result).toMatchObject({ status: "sent", patch: { index: 0, path: "a.ts", text: "+b" } });
   });
 
   it("is refused once the chat has moved to another turn", async () => {

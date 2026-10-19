@@ -208,6 +208,31 @@ enum DemoData {
         ])]
     }
 
+    static let diff = WorkspaceDiff(baseRef: "origin/main", files: [
+        .init(path: "src/utils/tg-format.ts", insertions: 64, deletions: 12, binary: false, untracked: false),
+        .init(path: "src/utils/tg-format.test.ts", insertions: 41, deletions: 0, binary: false, untracked: true),
+        .init(path: "docs/telegram.md", insertions: 6, deletions: 2, binary: false, untracked: false),
+    ], insertions: 111, deletions: 14, truncated: false)
+
+    static func patch(for index: Int) -> FilePatch {
+        FilePatch(index: index, path: diff.files[index].path, text: """
+        @@ -41,9 +41,14 @@ export function splitMarkdown(text: string, limit = 4096): string[] {
+           const chunks: string[] = [];
+        -  let current = "";
+        +  // Split on block boundaries first, so a chunk never ends inside an open tag.
+        +  const blocks = text.split(/\\n{2,}/);
+        +  let current = "";
+           for (const block of blocks) {
+        -    if (current.length + block.length > limit) chunks.push(current);
+        +    if (current.length + block.length + 2 > limit) {
+        +      chunks.push(current.trimEnd());
+        +      current = "";
+        +    }
+             current += block + "\\n\\n";
+           }
+        """)
+    }
+
     /// `-squeak-stream`: the working chat keeps adding steps, for profiling a streamed turn.
     static let streamSteps: [LiveTurn.Step] = [
         .init(kind: "thinking", text: "Two tests fail on nested lists; the tag stack needs to survive a chunk boundary."),

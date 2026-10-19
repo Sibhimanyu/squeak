@@ -293,6 +293,12 @@ answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
   It must name the chat's current turn (absent means none), so a Stop sent
   during one turn cannot stop the next, and the replier refuses a chat
   Conductor does not call working.
+- **What changed, from the phone (2026-10-19).** `{ v: 1, kind: "diff",
+  sessionId, file?, nonce, expiresAt }`, read-only but signed, since it
+  reveals code. The folder and base branch come from the Mac's snapshot of a
+  chat the phone is shown, never from the phone. The result carries `diff`
+  (the file list, fleet/diff-view.ts) and, when `file` is an index into it,
+  `patch: { index, path, text }` (up to 12,000 characters). No Face ID.
 - **History in the live doc (2026-10-19).** `history: [{ role: "user" |
 "assistant", text, at }]`: the watched chat's own messages, every user
   message and the agent's last message of each turn, the newest eight, each

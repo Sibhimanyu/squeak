@@ -20,6 +20,7 @@ import {
   type ChannelStore,
   type RemoteChatStarter,
   type QueueCommand,
+  type RemoteDiffReader,
   type RemoteCommand,
   type StartCommand,
 } from "./remote-bridge.js";
@@ -106,6 +107,7 @@ function fixture(
     /** What the replier's Stop answers; `"none"` = a replier that cannot stop. */
     stopOutcome?: { ok: true } | { ok: false; reason: string } | "none";
     answerer?: Answerer | null;
+    diff?: RemoteDiffReader | null;
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
@@ -165,6 +167,7 @@ function fixture(
     snapshot: () => snapshot,
     newChat: options.newChat ?? null,
     answerer: options.answerer ?? null,
+    diff: options.diff ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -257,6 +260,19 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const diffCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "diff",
+      sessionId: "s1",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const result = (id: string) => {
     const doc = store.docs.get(`${channel}/results/${id}`);
     return doc ? open<Record<string, unknown>>(payload.k, doc.box) : null;
@@ -276,6 +292,7 @@ function fixture(
     answerCommand,
     queueCommand,
     stopCommand,
+    diffCommand,
     result,
     configPath,
     emit,
@@ -444,6 +461,54 @@ describe("RemoteBridge commands", () => {
     await f.store.set(`${f.channel}/commands/c1`, f.command());
     await f.bridge.tick();
     expect(f.result("c1")).toEqual({ id: "c1", status: "refused", reason: "That chat is still working in Conductor." });
+  });
+});
+
+describe("RemoteBridge diff", () => {
+  const file = { path: "src/a.ts", insertions: 3, deletions: 1, binary: false, untracked: false };
+  const summary = { baseRef: "origin/main", files: [file], insertions: 3, deletions: 1, truncated: false };
+  const reader = () => ({
+    readSummary: vi.fn(async () => summary),
+    readFilePatch: vi.fn(async () => "@@ -1 +1 @@\n-a\n+b"),
+  });
+
+  it("answers with the chat's file list, read from the Mac's own folder and base branch", async () => {
+    const diff = reader();
+    const f = fixture({ diff });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.diffCommand());
+    await f.bridge.tick();
+    expect(diff.readSummary).toHaveBeenCalledWith("/w", null);
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent", diff: summary });
+    expect(diff.readFilePatch).not.toHaveBeenCalled();
+  });
+
+  it("adds one file's patch when the phone names its index", async () => {
+    const diff = reader();
+    const f = fixture({ diff });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.diffCommand({ file: 0 }));
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ patch: { index: 0, path: "src/a.ts", text: "@@ -1 +1 @@\n-a\n+b" } });
+    await f.store.set(`${f.channel}/commands/c2`, f.diffCommand({ file: 5 }));
+    await f.bridge.tick();
+    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That file isn't in the changes any more." });
+  });
+
+  it("refuses a chat the phone is not shown, a Mac without a reader, and a malformed request", async () => {
+    const f = fixture({ diff: reader() });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.diffCommand({ sessionId: "s-elsewhere" }));
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That chat isn't on your phone any more." });
+    await f.store.set(`${f.channel}/commands/c2`, f.diffCommand({ file: -1 }));
+    await f.bridge.tick();
+    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "Not a request this Mac understands." });
+    const bare = fixture();
+    await bare.pair();
+    await bare.store.set(`${bare.channel}/commands/c1`, bare.diffCommand());
+    await bare.bridge.tick();
+    expect(bare.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't show changes on a phone." });
   });
 });
 

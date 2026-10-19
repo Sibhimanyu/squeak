@@ -247,6 +247,50 @@ public struct ReplyCommand: Codable, Equatable, Sendable {
     public var messageId: String? = nil
 }
 
+/// Ask what a chat changed: its file list, and one file's patch when `file` is its index.
+public struct DiffCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let sessionId: String
+    public let file: Int?
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// A chat's changes against its base branch, as the Mac read them (fleet/diff-view.ts).
+public struct WorkspaceDiff: Codable, Equatable, Sendable {
+    public struct File: Codable, Equatable, Sendable, Identifiable {
+        public let path: String
+        public let insertions: Int
+        public let deletions: Int
+        public let binary: Bool
+        public let untracked: Bool
+        public var id: String { path }
+
+        public init(path: String, insertions: Int, deletions: Int, binary: Bool, untracked: Bool) {
+            self.path = path; self.insertions = insertions; self.deletions = deletions; self.binary = binary; self.untracked = untracked
+        }
+    }
+    public let baseRef: String?
+    public let files: [File]
+    public let insertions: Int
+    public let deletions: Int
+    public let truncated: Bool
+
+    public init(baseRef: String?, files: [File], insertions: Int, deletions: Int, truncated: Bool) {
+        self.baseRef = baseRef; self.files = files; self.insertions = insertions; self.deletions = deletions; self.truncated = truncated
+    }
+}
+
+public struct FilePatch: Codable, Equatable, Sendable {
+    public let index: Int
+    public let path: String
+    public let text: String
+
+    public init(index: Int, path: String, text: String) { self.index = index; self.path = path; self.text = text }
+}
+
 /// Stop a working chat, as Conductor's own Stop button does. It names the turn the phone saw,
 /// so a Stop sent while one turn ran cannot stop the next.
 public struct StopCommand: Codable, Equatable, Sendable {
@@ -354,6 +398,9 @@ public struct CommandResult: Codable, Equatable, Sendable {
     /// For a usage refresh: whether a new reading was taken, or the last minute's was reused.
     public let refreshed: Bool?
     public let throttled: Bool?
+    /// For a diff request: the chat's changes, and the patch of the file asked for.
+    public var diff: WorkspaceDiff? = nil
+    public var patch: FilePatch? = nil
 
     public var sent: Bool { status == "sent" }
     /// For an answer: the Mac delivered it (`via` says how: "conductor", "stopped-and-sent").

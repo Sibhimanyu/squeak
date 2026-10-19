@@ -230,6 +230,7 @@ private struct ChatRows: View {
     let live: Bool
     @Binding var stepsOpen: Bool
     @Binding var openParts: Set<String>
+    @State private var showingDiff = ProcessInfo.processInfo.arguments.contains("-squeak-diff")
 
     var body: some View {
         // A pending question has its own card; letters read from the message would repeat it.
@@ -252,6 +253,20 @@ private struct ChatRows: View {
                         Task { await model.send(letter, to: session) }
                     }
                     .equatable()
+                    // What the turn left on disk, a tap from its diff.
+                    if !muted, session.state != "working", let git = session.git, session.conductorSessionId != nil {
+                        Button { showingDiff = true } label: {
+                            HStack(spacing: 6) {
+                                Lucide(.gitBranch, size: 14, color: Theme.muted).accessibilityHidden(true)
+                                Text(git).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+                                Lucide(.chevronRight, size: 12, color: Theme.subtle)
+                            }
+                            .frame(minHeight: 36).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("What changed: \(git)")
+                        .accessibilityHint("Shows the files and their changes")
+                    }
                 case .folded(let id, let steps):
                     FoldedSteps(steps: steps, open: Binding(
                         get: { openParts.contains(id) },
@@ -277,6 +292,7 @@ private struct ChatRows: View {
         }
         // Each row is a scroll target, so the chat knows which one you were reading.
         .scrollTargetLayout()
+        .sheet(isPresented: $showingDiff) { DiffView(session: session) }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: rows.map(\.id))
     }
 }
