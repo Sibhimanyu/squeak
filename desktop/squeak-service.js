@@ -41,7 +41,12 @@ function readToken() {
 async function fetchJson(url, init = {}, timeoutMs = 5_000) {
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) {
-    throw new Error(`${response.status}`);
+    // A refusal the daemon explains ({ error }) reads as its reason, not a status code.
+    const reason = await response
+      .json()
+      .then((body) => (typeof body?.error === "string" ? body.error : null))
+      .catch(() => null);
+    throw new Error(reason ?? `${response.status}`);
   }
   return response.json();
 }
@@ -243,8 +248,7 @@ async function awake(request) {
   if (lid && (action !== "start" || minutes === null)) {
     return { ok: false, message: "A lid-closed session needs an end time." };
   }
-  const body =
-    action === "end" || action === "recheck-lid" ? { action } : { action, minutes, ...(lid ? { lid } : {}) };
+  const body = action === "end" || action === "recheck-lid" ? { action } : { action, minutes, ...(lid ? { lid } : {}) };
   try {
     const result = await control("keep-awake", { method: "POST", body: JSON.stringify(body) }, 15_000);
     return { ok: true, awake: result.awake ?? null };
