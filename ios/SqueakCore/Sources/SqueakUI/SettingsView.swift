@@ -19,13 +19,13 @@ struct SettingsView: View {
                 Section("Your Mac") {
                     LabeledContent("Name", value: model.snapshot?.mac ?? "Not seen yet")
                     TimelineView(.periodic(from: .now, by: 20)) { _ in
-                        let state = Connection.read(snapshot: model.snapshot, problem: model.problem, demo: model.demo)
+                        let state = Connection.read(snapshot: model.snapshot, problem: model.problem, demo: model.demo, lastFetch: model.lastFetch)
                         LabeledContent("Status") {
                             HStack(spacing: 7) { StatusDot(color: state.color); Text(state.text) }
                         }
                     }
                     if let snapshot = model.snapshot {
-                        LabeledContent("Last update", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")
+                        LabeledContent("Last change", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")
                     }
                 }
                 Section {

@@ -142,7 +142,10 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
   else and were checked against the live database.
 - **Presence throttles cost.** The phone writes an encrypted presence ping
   every 20s while open; the Mac polls every 2s then, every 15s otherwise, and
-  publishes the snapshot every 3s (open) or 60s (not) when it changed.
+  publishes the snapshot every 3s (open) or 60s (not) when it changed. A change
+  in what the phone shows (state, title, detail) publishes within ~300 ms
+  regardless, at most once a second; the phone looks for a new view every 2s
+  while on screen.
 - **Compatibility is pinned by fixtures** both ways (`src/remote/fixtures`,
   `ios/SqueakCore/Tests/…/Fixtures`), and `scripts/e2e-remote.ts` pairs and
   replies over the live project with both real implementations.

@@ -363,6 +363,15 @@ test for anything you fix is expected; the suite is fast.
 that to every Claude Code and Codex session on the machine by reading their
 transcripts, and ranks them by what is blocked on the human.
 
+- **Refreshes are event-driven; the poll is only the safety net.** The monitor
+  watches `conductor.db` / `-wal` and the Claude/Codex transcript folders
+  (`change-watcher.ts`: `fs.watch`, stat-poll fallback), coalesces a burst to
+  one refresh 250 ms after the first event and never more than one per 600 ms
+  (a working agent writes constantly). A Stop hook for a chat Conductor still
+  calls working schedules re-reads at 0.5/1.5/4 s, since Conductor flips its
+  status a moment after the turn-end row. `RemoteBridge` publishes on a change
+  in what the phone shows, not on timestamps alone. A refresh costs ~440 ms,
+  ~300 of it the Conductor query, so that is the floor on latency.
 - **Observers are independent and must stay that way.** Each one answers "what
   does my source say" and nothing else; `merge.ts` is the only place that
   reconciles them. That is what keeps them testable against fixture files.

@@ -94,13 +94,18 @@ function fixture(options: { outcome?: ReplyOutcome; turn?: string } = {}) {
       return options.outcome ?? ({ status: "started", via: "conductor" } as ReplyOutcome);
     }),
   };
-  const snapshot = {
+  let snapshot = {
     sessions: [session()],
     active: [session()],
     attention: [],
     generatedAt: "",
     codexUsage: null,
   } as FleetSnapshot;
+  const listeners = new Set<(s: FleetSnapshot) => void>();
+  const emit = (active: FleetSession[]) => {
+    snapshot = { ...snapshot, sessions: active, active };
+    for (const listener of listeners) listener(snapshot);
+  };
   const configPath = path.join(dir, "remote.json");
   const bridge = new RemoteBridge({
     configPath,
@@ -108,6 +113,10 @@ function fixture(options: { outcome?: ReplyOutcome; turn?: string } = {}) {
     store,
     replier,
     snapshot: () => snapshot,
+    onSnapshot: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     now: () => now,
     macName: "Test Mac",
   });
@@ -154,6 +163,7 @@ function fixture(options: { outcome?: ReplyOutcome; turn?: string } = {}) {
     command,
     result,
     configPath,
+    emit,
     advance: (ms: number) => {
       now += ms;
     },
@@ -316,6 +326,62 @@ describe("RemoteBridge snapshot", () => {
         ],
       },
     });
+  });
+
+  it("publishes a state change within about 300 ms instead of waiting for the next pass", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture();
+      await f.pair();
+      f.bridge.start();
+      await vi.advanceTimersByTimeAsync(0);
+      f.emit([session()]); // first snapshot only sets the baseline
+      const readState = () =>
+        open<{ sessions: Array<{ state: string }> }>(f.payload.k, f.store.docs.get(`${f.channel}/state/snapshot`)!.box)
+          .sessions[0]!.state;
+      expect(readState()).toBe("finished");
+
+      f.advance(2_000); // past the minimum gap between publishes
+      f.emit([session({ state: "working" })]);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(readState()).toBe("finished"); // debounced
+      await vi.advanceTimersByTimeAsync(250);
+      expect(readState()).toBe("working");
+
+      // A newer timestamp alone is not a change worth a write.
+      const before = f.store.docs.get(`${f.channel}/state/snapshot`)!.box;
+      f.advance(2_000);
+      f.emit([session({ state: "working", lastActivityAt: "2026-09-25T03:00:01.000Z" })]);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(f.store.docs.get(`${f.channel}/state/snapshot`)!.box).toBe(before);
+      f.bridge.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a minimum gap between change-driven publishes", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture();
+      await f.pair();
+      f.bridge.start();
+      await vi.advanceTimersByTimeAsync(0);
+      f.emit([session()]);
+      f.advance(2_000);
+      f.emit([session({ state: "working" })]);
+      await vi.advanceTimersByTimeAsync(350);
+      const sets = vi.spyOn(f.store, "set");
+      f.emit([session({ state: "finished" })]); // 350 ms after the last write
+      await vi.advanceTimersByTimeAsync(400);
+      expect(sets).not.toHaveBeenCalled();
+      f.advance(1_000);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(sets).toHaveBeenCalledTimes(1);
+      f.bridge.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("publishes nothing before any phone is paired", async () => {

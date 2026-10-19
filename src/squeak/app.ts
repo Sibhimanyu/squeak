@@ -151,6 +151,7 @@ export class SqueakApp {
           store: new FirestoreRest(config.remoteProjectId),
           replier: this.replier,
           snapshot: () => this.runtime.monitor.snapshot,
+          onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
           activity: (session) => (session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null),
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
         })

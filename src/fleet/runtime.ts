@@ -1,3 +1,5 @@
+import os from "node:os";
+import path from "node:path";
 import { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import type { ClaudeLimits } from "./claude-limits.js";
 import { CodexUsageReader } from "./codex-usage.js";
@@ -16,6 +18,7 @@ import { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import { ConductorObserver } from "./observers/conductor.js";
 import { ProcessLivenessObserver } from "./observers/process-liveness.js";
+import type { WatchSpec } from "./change-watcher.js";
 import type { FleetSession } from "./types.js";
 
 export interface FleetRuntimeOptions {
@@ -82,6 +85,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     },
     {
       pollIntervalMs: options.pollIntervalMs,
+      watch: watchSpecsFor(options.conductorDbPath),
       contextPressurePercent: options.contextPressurePercent,
       codexQuotaWarnPercent: options.codexQuotaWarnPercent,
     },
@@ -200,4 +204,18 @@ export function serializeState(
       since: item.since,
     })),
   };
+}
+
+/**
+ * What to watch so a change is seen in a quarter second, not at the next poll:
+ * Conductor's database (its WAL gets the writes first) and the folders agents
+ * append transcripts to. The periodic poll remains the safety net.
+ */
+export function watchSpecsFor(conductorDbPath: string, home: string = os.homedir()): WatchSpec[] {
+  const dbName = path.basename(conductorDbPath);
+  return [
+    { dir: path.dirname(conductorDbPath), names: [dbName, `${dbName}-wal`] },
+    { dir: path.join(home, ".claude", "projects"), recursive: true },
+    { dir: path.join(home, ".codex", "sessions"), recursive: true },
+  ];
 }

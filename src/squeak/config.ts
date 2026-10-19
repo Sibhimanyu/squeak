@@ -77,7 +77,7 @@ const schema = z.object({
   SQUEAK_CLIQ_OWNER_EMAIL: z.string().optional(),
   POLL_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(50).default(30),
   FLEET_HOOK_PORT: z.coerce.number().int().min(1024).max(65535).default(8477),
-  FLEET_POLL_INTERVAL_MS: z.coerce.number().int().min(2000).default(20000),
+  FLEET_POLL_INTERVAL_MS: z.coerce.number().int().min(2000).default(5000),
   FLEET_ACTIVE_WINDOW_MINUTES: z.coerce.number().int().min(5).default(360),
   FLEET_IDLE_AFTER_MINUTES: z.coerce.number().int().min(1).default(10),
   FLEET_CONTEXT_PRESSURE_PERCENT: z.coerce.number().int().min(10).max(100).default(80),

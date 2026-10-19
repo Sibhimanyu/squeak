@@ -244,8 +244,8 @@ struct ConnectionBar: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 20)) { _ in
-            let state = Connection.read(snapshot: model.snapshot, problem: model.problem, demo: model.demo)
+        TimelineView(.periodic(from: .now, by: 2)) { _ in
+            let state = Connection.read(snapshot: model.snapshot, problem: model.problem, demo: model.demo, lastFetch: model.lastFetch)
             HStack(spacing: 8) {
                 StatusDot(color: state.color)
                 Text(state.text).font(.footnote.weight(.medium)).foregroundStyle(Theme.muted)
@@ -261,7 +261,7 @@ struct ConnectionBar: View {
 enum Connection {
     struct State { let text: String; let color: Color }
 
-    static func read(snapshot: PhoneSnapshot?, problem: String?, demo: Bool) -> State {
+    static func read(snapshot: PhoneSnapshot?, problem: String?, demo: Bool, lastFetch: Date? = nil, now: Date = Date()) -> State {
         if demo { return State(text: "Mac connected", color: Theme.working) }
         guard let snapshot else {
             return problem == nil
@@ -269,9 +269,13 @@ enum Connection {
                 : State(text: "Can't reach Squeak's server", color: Theme.offline)
         }
         if problem != nil { return State(text: "Can't reach Squeak's server. Showing the last view.", color: Theme.offline) }
-        let age = Age.describe(snapshot.generatedAt)
-        let minutes = Age.minutes(snapshot.generatedAt) ?? 0
-        return State(text: minutes >= 2 ? "Mac connected · updated \(age) ago" : "Mac connected", color: Theme.working)
+        // "Synced" is when this phone last heard from the server, which is what
+        // it can honestly say. The Mac only writes a new view when something
+        // changed, so the view's own age is "last change", not staleness.
+        let synced = lastFetch.map { "Synced \(Age.sync($0, now: now))" } ?? "Mac connected"
+        let minutes = Age.minutes(snapshot.generatedAt, now: now) ?? 0
+        let change = minutes >= 2 ? " · last change \(Age.describe(snapshot.generatedAt, now: now)) ago" : ""
+        return State(text: synced + change, color: Theme.working)
     }
 }
 

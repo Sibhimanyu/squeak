@@ -84,6 +84,8 @@ final class AppModel {
     var cacheNotice: String?
 
     @ObservationIgnored private let defaults = UserDefaults.standard
+    /// Wakes the broker the moment Conductor writes its database, in either poll mode.
+    @ObservationIgnored private var databaseWatcher: FileChangeWatcher?
 
     init() {
         let env = ProcessInfo.processInfo.environment
@@ -129,6 +131,7 @@ final class AppModel {
             if let cache { knownMessages = (try? await cache.allMessages()) ?? [:] }
             await broker.setMode(.background)
             await broker.start()
+            await startDatabaseWatcher()
         }
         Task { [weak self] in
             guard let self else { return }
@@ -206,6 +209,18 @@ final class AppModel {
                 Task { @MainActor in self?.recomputeVisibility() }
             })
         }
+    }
+
+    /// Read-only file-system events on conductor.db and its WAL; the timers keep running as the fallback.
+    private func startDatabaseWatcher() {
+        guard usesLocalConductor, databaseWatcher == nil else { return }
+        let path = ConductorDatabase.defaultPath
+        let broker = self.broker
+        let watcher = FileChangeWatcher(paths: [path, path + "-wal"]) {
+            Task { await broker.nudge() }
+        }
+        watcher.start()
+        databaseWatcher = watcher
     }
 
     func recomputeVisibility() {

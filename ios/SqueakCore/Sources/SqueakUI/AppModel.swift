@@ -93,10 +93,15 @@ final class AppModel: ObservableObject {
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.tick()
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: .seconds(Self.pollSeconds))
             }
         }
     }
+
+    /// How often the phone looks for a new view while it is on screen. The Mac
+    /// publishes within about a second of a change, so this is most of what a
+    /// finish waits for on the phone.
+    static let pollSeconds = 2
 
     func pause() {
         loop?.cancel()
@@ -107,8 +112,12 @@ final class AppModel: ObservableObject {
         await tick()
     }
 
+    private var ticking = false
+
     private func tick() async {
-        guard let channel else { return }
+        guard let channel, !ticking else { return }
+        ticking = true
+        defer { ticking = false }
         do {
             if case .awaitingApproval = phase {
                 if let answer = try await channel.pairingAnswer() {

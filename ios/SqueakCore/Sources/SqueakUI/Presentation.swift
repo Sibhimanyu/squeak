@@ -312,6 +312,15 @@ enum Age {
         return hours < 24 ? "\(hours)h" : "\(hours / 24)d"
     }
 
+    /// How long ago the phone last heard from the server: "just now", "12s", "3m", "2h".
+    static func sync(_ date: Date, now: Date = Date()) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        if seconds < 5 { return "just now" }
+        if seconds < 60 { return "\(seconds)s ago" }
+        if seconds < 3600 { return "\(seconds / 60)m ago" }
+        return "\(seconds / 3600)h ago"
+    }
+
     /// For VoiceOver: "2 minutes ago".
     static func spoken(_ iso: String, now: Date = Date()) -> String {
         guard let minutes = minutes(iso, now: now) else { return "" }

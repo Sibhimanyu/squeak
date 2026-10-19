@@ -63,5 +63,9 @@ final class PresentationTests: XCTestCase {
         let now = ISO8601DateFormatter().date(from: "2026-10-19T10:05:00Z")!
         XCTAssertEqual(Age.describe("2026-10-19T10:00:00Z", now: now), "5m")
         XCTAssertEqual(Age.spoken("2026-10-19T10:00:00Z", now: now), "5 minutes ago")
+        let fetched = now.addingTimeInterval(-12)
+        XCTAssertEqual(Age.sync(fetched, now: now), "12s ago")
+        XCTAssertEqual(Age.sync(now.addingTimeInterval(-2), now: now), "just now")
+        XCTAssertEqual(Age.sync(now.addingTimeInterval(-190), now: now), "3m ago")
     }
 }

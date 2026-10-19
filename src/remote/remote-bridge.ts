@@ -108,6 +108,13 @@ export interface RemoteBridgeDependencies {
   activity?: ((session: FleetSession) => Activity | null) | null;
   /** Claude's last plan-limit reading, for the read-only usage view on the phone. */
   claudeLimits?: (() => ClaudeLimits | null) | null;
+  /**
+   * Subscribe to fresh snapshots. When one differs in what the phone shows
+   * (state, title, detail — not just a newer timestamp) the bridge publishes
+   * at once instead of waiting for its next pass. Optional; without it the
+   * cadence alone applies.
+   */
+  onSnapshot?: ((listener: (snapshot: FleetSnapshot) => void) => () => void) | null;
   now?: () => number;
   macName?: string;
 }
@@ -120,6 +127,10 @@ const ACTIVE_POLL_MS = 2_000;
 const IDLE_POLL_MS = 15_000;
 const ACTIVE_PUBLISH_MS = 3_000;
 const IDLE_PUBLISH_MS = 60_000;
+/** A change publishes after this long, so a burst of snapshots becomes one write. */
+const CHANGE_PUBLISH_DELAY_MS = 300;
+/** Even change-driven publishes keep this gap, to bound Firestore writes. */
+const CHANGE_PUBLISH_MIN_GAP_MS = 1_000;
 /** Pairing is only listened for while the Mac app's pairing sheet is open. */
 const PAIRING_WINDOW_MS = 10 * 60_000;
 const MESSAGE_MAX_CHARS = 8_000;
@@ -147,7 +158,11 @@ export class RemoteBridge {
   private lastPublished = "";
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
+  private publishing = false;
   private stopped = false;
+  private unsubscribe: (() => void) | null = null;
+  private lastSignature: string | null = null;
+  private changeTimer: NodeJS.Timeout | null = null;
 
   constructor(deps: RemoteBridgeDependencies) {
     this.deps = deps;
@@ -158,10 +173,55 @@ export class RemoteBridge {
   start(): void {
     this.stopped = false;
     this.schedule(0);
+    this.unsubscribe?.();
+    this.unsubscribe =
+      this.deps.onSnapshot?.((snapshot) => {
+        const signature = snapshotSignature(snapshot);
+        const changed = this.lastSignature !== null && signature !== this.lastSignature;
+        this.lastSignature = signature;
+        if (changed) {
+          this.nudgePublish(CHANGE_PUBLISH_DELAY_MS);
+        }
+      }) ?? null;
+  }
+
+  /** Publish soon because what the phone shows just changed. */
+  private nudgePublish(delayMs: number): void {
+    if (this.stopped || this.changeTimer || !this.config?.devices.some((device) => !device.revokedAt)) {
+      return;
+    }
+    this.changeTimer = setTimeout(() => {
+      this.changeTimer = null;
+      void this.publishForChange();
+    }, delayMs);
+    this.changeTimer.unref?.();
+  }
+
+  private async publishForChange(): Promise<void> {
+    const config = this.config;
+    if (this.stopped || !config || !config.devices.some((device) => !device.revokedAt)) {
+      return;
+    }
+    const wait = this.lastPublishedAt + CHANGE_PUBLISH_MIN_GAP_MS - this.now();
+    if (wait > 0 || this.publishing) {
+      this.nudgePublish(Math.max(wait, CHANGE_PUBLISH_DELAY_MS));
+      return;
+    }
+    try {
+      await this.publish(config, true);
+    } catch (error) {
+      logger.warn("remote change publish failed", { error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   stop(): void {
     this.stopped = true;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    if (this.changeTimer) {
+      clearTimeout(this.changeTimer);
+      this.changeTimer = null;
+    }
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -459,11 +519,20 @@ export class RemoteBridge {
   }
 
   /** The phone's whole view, encrypted. Written only when it changed. */
-  private async publish(config: RemoteConfig): Promise<void> {
+  private async publish(config: RemoteConfig, force = false): Promise<void> {
     const interval = this.phoneOpen() ? ACTIVE_PUBLISH_MS : IDLE_PUBLISH_MS;
-    if (this.now() - this.lastPublishedAt < interval) {
+    if (this.publishing || (!force && this.now() - this.lastPublishedAt < interval)) {
       return;
     }
+    this.publishing = true;
+    try {
+      await this.publishView(config);
+    } finally {
+      this.publishing = false;
+    }
+  }
+
+  private async publishView(config: RemoteConfig): Promise<void> {
     const view = this.phoneView();
     // Readings' ages are drawn on the phone from observedAt, so an unchanged
     // reading must not republish the snapshot just because it was re-read.
@@ -649,4 +718,21 @@ function readConfig(configPath: string): RemoteConfig | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * What differs between two snapshots *as the phone would draw them*. Not
+ * lastActivityAt: a working chat bumps that constantly, and the phone redraws
+ * ages from its own clock.
+ */
+export function snapshotSignature(snapshot: FleetSnapshot): string {
+  return JSON.stringify(
+    snapshot.active.map((session) => [
+      session.key,
+      session.state,
+      session.title,
+      session.detail,
+      session.conductorSessionId,
+    ]),
+  );
 }

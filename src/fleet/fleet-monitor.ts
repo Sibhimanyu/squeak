@@ -9,7 +9,9 @@ import {
 } from "./attention.js";
 import type { FleetStore } from "./fleet-store.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
-import { isSessionEndEvent } from "./hook-protocol.js";
+import { isSessionEndEvent, stateFromHookEvent } from "./hook-protocol.js";
+import { Coalescer, realTimers, realWatchDeps, watchFiles } from "./change-watcher.js";
+import type { Timers, WatchDeps, WatchHandle, WatchSpec } from "./change-watcher.js";
 import type { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
 import type { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import type { CodexRolloutObserver } from "./observers/codex-rollout.js";
@@ -58,9 +60,30 @@ export interface FleetMonitorOptions {
   /** Codex quota usage past which a one-time warning is pushed. */
   codexQuotaWarnPercent?: number;
   now?: () => number;
+  /**
+   * Files whose changes should trigger a refresh right away (Conductor's
+   * database, transcript folders). The periodic poll stays as the safety net.
+   */
+  watch?: WatchSpec[];
+  /** Burst window before a watched change refreshes. */
+  watchDelayMs?: number;
+  /** Never refresh from watch events more often than this. */
+  watchMinGapMs?: number;
+  /** Re-reads after a Stop hook for a chat Conductor still calls working. */
+  stopFollowUpsMs?: number[];
+  timers?: Timers;
+  watchDeps?: WatchDeps;
 }
 
-const DEFAULT_POLL_INTERVAL_MS = 20_000;
+const DEFAULT_POLL_INTERVAL_MS = 5_000;
+const DEFAULT_WATCH_DELAY_MS = 250;
+// A working agent writes all the time and a refresh costs ~440 ms (mostly the
+// Conductor query), so file-change refreshes are at least 2 s apart: ~20% of a
+// core at worst instead of ~40% at 600 ms. A finish still lands within ~2 s,
+// and Stop-hook follow-ups catch Conductor's status flip.
+const DEFAULT_WATCH_MIN_GAP_MS = 2_000;
+/** Conductor flips status a moment after the turn-end row; look again soon, then less eagerly. */
+const DEFAULT_STOP_FOLLOW_UPS_MS = [500, 1_500, 4_000];
 const DEFAULT_HOOK_DEBOUNCE_MS = 400;
 const DEFAULT_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_CODEX_QUOTA_WARN_PERCENT = 85;
@@ -82,6 +105,15 @@ export class FleetMonitor {
   private readonly contextPressurePercent: number;
   private readonly codexQuotaWarnPercent: number;
   private readonly now: () => number;
+  private readonly watchSpecs: WatchSpec[];
+  private readonly watchDelayMs: number;
+  private readonly watchMinGapMs: number;
+  private readonly stopFollowUpsMs: number[];
+  private readonly timers: Timers;
+  private readonly watchDeps: WatchDeps;
+  private watcher: WatchHandle | null = null;
+  private watchCoalescer: Coalescer | null = null;
+  private readonly followUpTimers = new Set<unknown>();
 
   /** Latest hook report per agent session id. */
   private readonly hookEvents = new Map<string, HookEvent>();
@@ -111,6 +143,12 @@ export class FleetMonitor {
     this.contextPressurePercent = options.contextPressurePercent ?? DEFAULT_CONTEXT_PRESSURE_PERCENT;
     this.codexQuotaWarnPercent = options.codexQuotaWarnPercent ?? DEFAULT_CODEX_QUOTA_WARN_PERCENT;
     this.now = options.now ?? Date.now;
+    this.watchSpecs = options.watch ?? [];
+    this.watchDelayMs = options.watchDelayMs ?? DEFAULT_WATCH_DELAY_MS;
+    this.watchMinGapMs = options.watchMinGapMs ?? DEFAULT_WATCH_MIN_GAP_MS;
+    this.stopFollowUpsMs = options.stopFollowUpsMs ?? DEFAULT_STOP_FOLLOW_UPS_MS;
+    this.timers = options.timers ?? realTimers;
+    this.watchDeps = options.watchDeps ?? realWatchDeps;
   }
 
   get snapshot(): FleetSnapshot {
@@ -139,10 +177,36 @@ export class FleetMonitor {
       void this.refresh();
     }, this.pollIntervalMs);
     this.pollTimer.unref?.();
+    this.startWatching();
+  }
+
+  /** A watched file changed: refresh soon, coalescing bursts. Safe to call any time. */
+  requestRefresh(): void {
+    this.watchCoalescer?.poke();
+  }
+
+  private startWatching(): void {
+    if (this.watcher || this.watchSpecs.length === 0) {
+      return;
+    }
+    this.watchCoalescer = new Coalescer(() => void this.refresh(), {
+      delayMs: this.watchDelayMs,
+      minGapMs: this.watchMinGapMs,
+      timers: this.timers,
+    });
+    this.watcher = watchFiles(this.watchSpecs, () => this.requestRefresh(), this.watchDeps);
   }
 
   stop(): void {
     this.stopped = true;
+    this.watcher?.close();
+    this.watcher = null;
+    this.watchCoalescer?.close();
+    this.watchCoalescer = null;
+    for (const handle of this.followUpTimers) {
+      this.timers.clearTimeout(handle);
+    }
+    this.followUpTimers.clear();
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -168,7 +232,11 @@ export class FleetMonitor {
       }
     }
 
-    if (this.hookTimer || this.stopped) {
+    if (this.stopped) {
+      return;
+    }
+    this.scheduleStopFollowUps(event);
+    if (this.hookTimer) {
       return;
     }
     this.hookTimer = setTimeout(() => {
@@ -176,6 +244,33 @@ export class FleetMonitor {
       void this.refresh();
     }, this.hookDebounceMs);
     this.hookTimer.unref?.();
+  }
+
+  /**
+   * A Stop hook is instant, but Conductor writes the turn-end row and flips
+   * its status a moment later — and while it still says working the hook is
+   * rightly held (merge.ts). So look again shortly after, rather than waiting
+   * for the next poll, so the finish lands as soon as Conductor lets it.
+   */
+  private scheduleStopFollowUps(event: HookEvent): void {
+    if (stateFromHookEvent(event) !== "finished") {
+      return;
+    }
+    const held = this.latest.sessions.some(
+      (session) => session.agentSessionId === event.sessionId && session.conductorState === "working",
+    );
+    if (!held) {
+      return;
+    }
+    for (const delay of this.stopFollowUpsMs) {
+      const handle = this.timers.setTimeout(() => {
+        this.followUpTimers.delete(handle);
+        if (!this.stopped) {
+          void this.refresh();
+        }
+      }, delay);
+      this.followUpTimers.add(handle);
+    }
   }
 
   async refresh(): Promise<FleetSnapshot> {

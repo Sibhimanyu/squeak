@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FleetMonitor, type FleetMonitorDependencies } from "./fleet-monitor.js";
 import { FleetStore } from "./fleet-store.js";
@@ -576,5 +576,118 @@ describe("claude cost enrichment", () => {
     const snapshot = await monitor.refresh();
 
     expect(snapshot.sessions).toHaveLength(1);
+  });
+});
+
+describe("event-driven refresh", () => {
+  function conductorHarness() {
+    const store = makeStore();
+    let conductor: ObservedSession[] = [
+      observed({
+        key: "conductor:c1",
+        source: "conductor",
+        origin: "conductor",
+        sourceId: "c1",
+        agentSessionId: "abc",
+        conductorSessionId: "c1",
+        state: "working",
+        lastActivityAt: "2026-09-20T11:59:50.000Z",
+      }),
+    ];
+    const observe = vi.fn(() => conductor);
+    const deps: FleetMonitorDependencies = {
+      store,
+      conductor: { observe } as unknown as FleetMonitorDependencies["conductor"],
+      claude: { observe: () => [] } as unknown as FleetMonitorDependencies["claude"],
+      codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
+      liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
+    };
+    return {
+      deps,
+      observe,
+      setConductor: (next: ObservedSession[]) => {
+        conductor = next;
+      },
+      current: () => conductor,
+    };
+  }
+
+  it("keeps a Stop hook held while Conductor says working, then lands the finish on a follow-up read", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = conductorHarness();
+      const monitor = new FleetMonitor(h.deps, {
+        now: () => Date.parse("2026-09-20T12:00:00.000Z"),
+        pollIntervalMs: 3_600_000,
+      });
+      await monitor.refresh();
+      expect(monitor.snapshot.sessions[0]?.state).toBe("working");
+
+      monitor.ingestHookEvent(hookEvent({ event: "Stop", message: null, receivedAt: "2026-09-20T12:00:00.000Z" }));
+      await vi.advanceTimersByTimeAsync(450); // the 400 ms hook debounce re-read: still held
+      expect(monitor.snapshot.sessions[0]?.state).toBe("working");
+
+      // Conductor flips status a moment after the turn-end row.
+      h.setConductor([{ ...h.current()[0]!, state: "finished", lastActivityAt: "2026-09-20T12:00:00.500Z" }]);
+      await vi.advanceTimersByTimeAsync(1_100); // the 1.5 s follow-up
+      expect(monitor.snapshot.sessions[0]?.state).toBe("finished");
+      monitor.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not schedule follow-ups for a Stop on a session Conductor does not hold", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = conductorHarness();
+      h.setConductor([]);
+      const monitor = new FleetMonitor(h.deps, { now: () => Date.parse("2026-09-20T12:00:00.000Z") });
+      await monitor.refresh();
+      h.observe.mockClear();
+      monitor.ingestHookEvent(hookEvent({ event: "Stop", message: null }));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(h.observe).toHaveBeenCalledTimes(1); // only the 400 ms hook debounce
+      monitor.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes shortly after a watched file changes, coalescing a burst", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = conductorHarness();
+      let notify: (() => void) | null = null;
+      const monitor = new FleetMonitor(h.deps, {
+        now: () => Date.parse("2026-09-20T12:00:00.000Z"),
+        pollIntervalMs: 3_600_000,
+        watch: [{ dir: "/c", names: ["conductor.db"] }],
+        watchDeps: {
+          watch: (_dir, _opts, listener) => {
+            notify = () => listener("change", "conductor.db");
+            return { close: () => undefined, on: () => undefined };
+          },
+          stat: () => null,
+        },
+      });
+      monitor.start();
+      await vi.advanceTimersByTimeAsync(10);
+      h.observe.mockClear();
+
+      notify!();
+      notify!();
+      notify!();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(h.observe).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(h.observe).toHaveBeenCalledTimes(1);
+      monitor.stop();
+      notify!();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(h.observe).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

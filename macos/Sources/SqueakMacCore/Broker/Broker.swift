@@ -26,6 +26,7 @@ public actor Broker {
     private let foregroundInterval: Duration
     private let backgroundInterval: Duration
     private let transcriptLimit: Int
+    private let nudgeDebounce: Duration
 
     private var perAdapter: [String: [HostSession]] = [:]
     private var owner: [SessionKey: String] = [:]
@@ -39,6 +40,9 @@ public actor Broker {
     private var mode: PollMode = .background
     private var focused: SessionKey?
     private var pollTask: Task<Void, Never>?
+    private var nudgeTask: Task<Void, Never>?
+    private var refreshing = false
+    private var refreshAgain = false
 
     public init(
         adapters: [any HostAdapter],
@@ -47,8 +51,10 @@ public actor Broker {
         draftStore: DraftStore? = nil,
         foregroundInterval: Duration = .seconds(2),
         backgroundInterval: Duration = .seconds(10),
-        transcriptLimit: Int = 200
+        transcriptLimit: Int = 200,
+        nudgeDebounce: Duration = .milliseconds(200)
     ) {
+        self.nudgeDebounce = nudgeDebounce
         self.adapters = adapters
         self.clock = clock
         self.cache = cache
@@ -118,6 +124,28 @@ public actor Broker {
     public func stop() {
         pollTask?.cancel()
         pollTask = nil
+        nudgeTask?.cancel()
+        nudgeTask = nil
+    }
+
+    /// Something the adapters read just changed (Conductor wrote its database):
+    /// refresh now rather than at the next tick. A burst of nudges becomes one
+    /// refresh `nudgeDebounce` after the first. The timers stay as the fallback.
+    public func nudge() {
+        guard nudgeTask == nil else { return }
+        let debounce = nudgeDebounce
+        nudgeTask = Task { [weak self] in
+            try? await Task.sleep(for: debounce)
+            guard !Task.isCancelled, let self else { return }
+            await self.runNudge()
+        }
+    }
+
+    private func runNudge() async {
+        // Cleared first, so a write landing during the refresh schedules another.
+        nudgeTask = nil
+        await refresh()
+        if mode == .foreground { await refreshTranscript() }
     }
 
     /// Ends the event stream (consumers' `for await` loops finish).
@@ -138,6 +166,21 @@ public actor Broker {
 
     /// One discover pass over every adapter.
     public func refresh() async {
+        // Polls and nudges can arrive together; two overlapping discovers would
+        // only race to publish the same answer. Run once more afterwards instead.
+        if refreshing {
+            refreshAgain = true
+            return
+        }
+        refreshing = true
+        defer { refreshing = false }
+        repeat {
+            refreshAgain = false
+            await refreshOnce()
+        } while refreshAgain && !Task.isCancelled
+    }
+
+    private func refreshOnce() async {
         var anySuccess = false
         for adapter in adapters {
             do {
