@@ -91,7 +91,7 @@ The phone talks straight to Squeak's loopback server over a private network.
   the three-line card text (so the lock screen can show it), encrypted.
 - `commands` — from the phone: `{ sessionId, answersTurn, text, mode?,
 messageId?, nonce, expiresAt }`, signed with the device key, encrypted to the
-Mac (and the `kind: "start"`, `"usage"` and `"queue"` commands below).
+  Mac (and the `kind: "start"`, `"usage"` and `"queue"` commands below).
 - Retention: snapshot overwritten in place; events and commands deleted by the
   Mac as soon as they are processed, and expired server-side after 24 hours.
 
@@ -245,6 +245,7 @@ directory, a model, a permission mode or a branch, only a workspace the owner
 already made; and every start, accepted or refused, in the Mac app's device
 activity. It cannot create a workspace, and it cannot start a chat anywhere
 else on the machine. Each of those is a separate, later decision.
+
 - **Verbose: thinking live (2026-10-19).** iPhone Settings › "Show thinking
   live" (on by default on the phone since the queue below; the Mac's
   `SQUEAK_REMOTE_VERBOSE=off` still refuses it). With it on, the phone's sealed presence names the
@@ -270,7 +271,7 @@ else on the machine. Each of those is a separate, later decision.
   flows through the snapshot's six steps and the live doc unchanged.
   The live doc gains `queue`: `[{ id, text, mode: "queue" | "steer", position }]`,
   Conductor's pending messages for the watched chat (`deliveryStatus:
-  "pending"` only, in queue order, text up to 2,000 characters), read over
+"pending"` only, in queue order, text up to 2,000 characters), read over
   the loopback relay each tick. Absent means the Mac can't read it (relay
   down, not a Conductor chat), and the phone keeps its own list; `[]` is an
   empty queue. A reply may carry `messageId`, a lowercase UUID the phone
@@ -294,3 +295,18 @@ else on the machine. Each of those is a separate, later decision.
   reading, `throttled: true`). The result says `refreshed`/`throttled`; the
   reading itself arrives in the snapshot, published at once. No Face ID: it
   sends nothing to an agent.
+
+## Answering an agent's question from the phone (2026-10-19)
+
+**`answer`.** A signed command `{v:1, kind:"answer", sessionId, toolUseId, answers?, plan?, nonce, expiresAt}`
+answers an agent's pending `AskUserQuestion` or `ExitPlanMode` (design: `docs/answering-questions.md`).
+The Mac keeps every reply check (paired unrevoked key, signature, ≤10 min, fresh nonce) and adds:
+unknown fields are refused; the chat's pending tool call must still be `toolUseId`, read fresh from the
+transcript; every picked label must exist; single-select takes exactly one pick or `other`; `other` and a
+plan note are ≤2,000 characters; one entry per question; one answer per device per 15 s. The phone view
+carries the pending question's `toolUseId` so the phone can name exactly the question it answers.
+
+**Threat.** A paired phone can answer a pending question or approve a plan: the same power as a reply, no
+more, since the answer is something the agent reads. It cannot approve a permission prompt. While
+Conductor's API can't take answers (501 in 0.91.1), the Mac stops the waiting turn first, so a stolen
+paired phone could also interrupt a question. Revoking the device removes all of this.

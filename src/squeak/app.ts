@@ -10,7 +10,9 @@ import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { CLAUDE_PROBE_SCHEMA, CLAUDE_PROBE_SYSTEM, ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
 import { Caffeinator } from "../fleet/caffeinate.js";
-import { readPendingQuestion } from "../fleet/question.js";
+import { readPendingAsk, readPendingQuestion } from "../fleet/question.js";
+import { AnswerService, answerControl } from "../fleet/answer.js";
+import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { readActivity } from "../fleet/activity.js";
@@ -149,6 +151,24 @@ export class SqueakApp {
     });
     this.runtime.setCanReply((session) => this.router.canReply(session));
 
+    // Answers an agent's pending question or plan, for the Mac app and the phone
+    // (docs/answering-questions.md): Conductor's API when it accepts answers,
+    // else stop the waiting turn and send the answer as a message.
+    const answers = new AnswerService({
+      registry: this.runtime.registry,
+      relay: answerRelayFrom({
+        isReady: () => this.conductorRelay.isReady(),
+        send: (args) => this.conductorRelay.send(args),
+        request: () => this.conductorRelay.requestFn(),
+      }),
+      readAsk: (conductorSessionId) => {
+        const session = this.runtime.monitor.snapshot.sessions.find(
+          (candidate) => candidate.conductorSessionId === conductorSessionId,
+        );
+        return session?.agent === "claude" && session.transcriptPath ? readPendingAsk(session.transcriptPath) : null;
+      },
+    });
+
     // The phone channel, when a Firebase project is configured. Same replier,
     // same busy rules; the bridge adds pairing and signature checks on top.
     this.remote = config.remoteProjectId
@@ -174,6 +194,7 @@ export class SqueakApp {
           // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
           refreshUsage: () => this.claudeRefresher.refresh(),
           // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
+          answerer: answers,
           newChat: {
             workspaces: () => listNewChatWorkspaces(config.conductorDbPath, 20),
             start: (args) =>
@@ -185,6 +206,7 @@ export class SqueakApp {
     // The Mac app answers chats through the same replier as Telegram, over
     // the loopback ingress, gated by the hook token.
     this.runtime.ingress.setControl({
+      ...answerControl(answers),
       remote: async (action, deviceId) => {
         const remote = this.remote;
         if (!remote) {

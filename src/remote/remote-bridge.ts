@@ -21,6 +21,8 @@ import type { Activity } from "../fleet/activity.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
+import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
+import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
 import type { ChannelDoc } from "./firestore-rest.js";
 import { LIVE_STEP_CHARS, LIVE_STEPS, LiveTurnPublisher } from "./live-turn.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
@@ -196,6 +198,8 @@ export interface RemoteBridgeDependencies {
   activity?: ((session: FleetSession) => Activity | null) | null;
   /** Workspaces a phone may start a chat in, and the way to start one. */
   newChat?: RemoteChatStarter | null;
+  /** Answers a chat's pending question or plan (src/fleet/answer.ts). */
+  answerer?: Answerer | null;
   /**
    * Take a fresh Claude usage reading (`ClaudeLimitsRefresher.refresh`,
    * throttled to once a minute). Absent: a phone's Refresh is refused.
@@ -293,7 +297,8 @@ export class RemoteBridge {
   private readonly activity: RemoteActivity[] = [];
   private readonly messageCache = new Map<string, { text: string | null; choices: ParsedChoices | null }>();
   private readonly activityCache = new Map<string, PhoneActivity | null>();
-  private readonly questionCache = new Map<string, { questions: QuestionPrompt[] } | null>();
+  private readonly questionCache = new Map<string, { toolUseId: string; questions: QuestionPrompt[] } | null>();
+  private readonly answerLimit = new AnswerRateLimit();
   private pairingOpenUntil = 0;
   private phoneSeenAt = 0;
   private lastPublishedAt = 0;
@@ -781,6 +786,16 @@ export class RemoteBridge {
     if (kind === "queue") {
       return this.handleQueue(device, id, command as unknown as QueueCommand);
     }
+    if (kind === "answer") {
+      const result = await runAnswerCommand(command as unknown as AnswerCommand, {
+        answerer: this.deps.answerer ?? null,
+        limit: this.answerLimit,
+        deviceId: device.id,
+        now,
+      });
+      this.log(device.name, result.status === "answered" ? "sent" : "refused", "answer to a question");
+      return { write: true, result: { id, ...result } };
+    }
     if (kind !== undefined && kind !== "reply") {
       return refuse("Not a request this Mac understands.");
     }
@@ -1126,7 +1141,7 @@ export class RemoteBridge {
   }
 
   /** Read once per change: the key moves with the session's activity. */
-  private questionFor(session: FleetSession): { questions: QuestionPrompt[] } | null {
+  private questionFor(session: FleetSession): { toolUseId: string; questions: QuestionPrompt[] } | null {
     const read = this.deps.question;
     if (!read) {
       return null;
@@ -1135,10 +1150,11 @@ export class RemoteBridge {
     if (this.questionCache.has(key)) {
       return this.questionCache.get(key) ?? null;
     }
-    let value: { questions: QuestionPrompt[] } | null = null;
+    let value: { toolUseId: string; questions: QuestionPrompt[] } | null = null;
     try {
       const found = read(session);
-      value = found ? { questions: found.questions } : null;
+      // toolUseId lets the phone answer exactly this question (kind "answer").
+      value = found ? { toolUseId: found.toolUseId, questions: found.questions } : null;
     } catch (error) {
       logger.debug("could not read a pending question", {
         error: error instanceof Error ? error.message : String(error),

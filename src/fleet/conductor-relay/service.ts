@@ -57,6 +57,16 @@ export class ConductorRelayService {
   }
 
   /**
+   * The authenticated connection's tunnelled request, or null while there is
+   * none: the answer service uses it for Conductor's answer-question,
+   * respond-to-plan and stop routes.
+   */
+  requestFn(): import("../answer-relay.js").RelayRequest | null {
+    const client = this.client;
+    return client ? (args) => client.request(args) : null;
+  }
+
+  /**
    * Deliver a message into a Conductor chat through the real composer. Returns
    * a plain ok/err so the replier can fall back silently when we are not up.
    */

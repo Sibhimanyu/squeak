@@ -1,3 +1,4 @@
+import type { Answerer } from "../fleet/answer-command.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -100,6 +101,7 @@ function fixture(
     /** The chat's queue as the replier reads it; `"none"` = a replier without queue support. */
     queue?: QueueItem[] | null | "none";
     queueOutcome?: { ok: true } | { ok: false; reason: string };
+    answerer?: Answerer | null;
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
@@ -151,6 +153,7 @@ function fixture(
     replier,
     snapshot: () => snapshot,
     newChat: options.newChat ?? null,
+    answerer: options.answerer ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -199,6 +202,21 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const answerCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "answer",
+      sessionId: "s1",
+      toolUseId: "toolu_q1",
+      answers: [{ question: 0, picked: ["Red"] }],
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const queueCommand = (overrides: Partial<QueueCommand> = {}, signer = phone) => {
     const body: QueueCommand = {
       v: 1,
@@ -230,6 +248,7 @@ function fixture(
     pair,
     command,
     startCommand,
+    answerCommand,
     queueCommand,
     result,
     configPath,
@@ -544,6 +563,33 @@ describe("RemoteBridge starting a chat", () => {
     await f.bridge.tick();
     return f.result("n1");
   }
+
+  it("answers a pending question through the Mac's answerer, exactly as the phone signed it", async () => {
+    const calls: Array<{ id: string; input: unknown }> = [];
+    const answerer: Answerer = {
+      answer: async (id, input) => {
+        calls.push({ id, input });
+        return { status: "answered", via: "stopped-and-sent" };
+      },
+    };
+    const f = fixture({ answerer });
+    await f.pair();
+    expect(await run(f, f.answerCommand())).toMatchObject({ status: "answered", via: "stopped-and-sent" });
+    expect(calls).toEqual([
+      { id: "s1", input: { toolUseId: "toolu_q1", answers: [{ question: 0, picked: ["Red"] }] } },
+    ]);
+    expect(f.sends).toEqual([]); // never goes through the reply path
+  });
+
+  it("refuses an answer when this Mac has no answerer, and one with fields it doesn't know", async () => {
+    const none = fixture();
+    await none.pair();
+    expect(await run(none, none.answerCommand())).toMatchObject({ status: "refused" });
+    const answerer: Answerer = { answer: async () => ({ status: "answered", via: "conductor" }) };
+    const f = fixture({ answerer });
+    await f.pair();
+    expect(await run(f, f.answerCommand({ text: "B" }))).toMatchObject({ status: "refused" });
+  });
 
   it("starts a chat in a listed workspace, with the agent and trimmed text the phone signed", async () => {
     const { starter, starts } = chatStarter();
