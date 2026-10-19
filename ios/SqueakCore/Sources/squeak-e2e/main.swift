@@ -31,7 +31,16 @@ let answer = try await poll("approval") { try await channel.pairingAnswer() }
 print("phone: approved=\(answer.approved) by \(answer.mac ?? "?")")
 guard answer.approved else { exit(1) }
 try await channel.touchPresence()
-let snapshot = try await poll("snapshot") { try await channel.snapshot() }
+let snapshot: PhoneSnapshot
+if let snapshots = await channel.snapshots() {
+    // Streamed: the view arrives in the stream's first event.
+    var first: PhoneSnapshot?
+    for try await next in snapshots where next != nil { first = next; break }
+    if let first { snapshot = first } else { snapshot = try await poll("snapshot") { try await channel.snapshot() } }
+    print("phone: view decoded from the stream")
+} else {
+    snapshot = try await poll("snapshot") { try await channel.snapshot() }
+}
 guard let session = snapshot.sessions.first(where: { $0.choices != nil }), let choices = session.choices else {
     print("phone: no question in the snapshot"); exit(1)
 }
@@ -86,10 +95,11 @@ if streamed {
     let watchAt = Date()
     try await channel.touchPresence(watching: session.key)
     var turn: LiveTurn?
-    if let changes = await channel.liveChanges(for: session.key) {
-        for await _ in changes {
-            turn = try await channel.liveTurn(for: session.key)
-            if turn != nil { break }
+    // Decoded from the stream's own events: no second download.
+    if let turns = await channel.liveTurns(for: session.key) {
+        for await next in turns where next != nil {
+            turn = next
+            break
         }
     }
     let longest = turn?.steps.map(\.text.count).max() ?? 0

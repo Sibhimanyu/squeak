@@ -53,6 +53,55 @@ public struct Channel: Sendable {
         return host.hasSuffix(".firebasedatabase.app") || host.hasSuffix(".firebaseio.com")
     }
 
+    /// The Mac's view as it is written, decoded from the stream itself (no
+    /// second download), or nil when the channel can only be polled. A
+    /// partial change is re-read.
+    public func snapshots() async -> AsyncThrowingStream<PhoneSnapshot?, Error>? {
+        guard let documents = await store.documents(path("state", "snapshot")) else { return nil }
+        let key = pairing.k
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                for await change in documents {
+                    do {
+                        switch change {
+                        case .value(let document):
+                            continuation.yield(try document.map { try ChannelCrypto.open(PhoneSnapshot.self, box: $0.box, key: key) })
+                        case .refetch:
+                            continuation.yield(try await self.snapshot())
+                        }
+                    } catch {
+                        continuation.finish(throwing: error)
+                        return
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// A session's live turn as it is written, decoded from the stream; nil on Firestore.
+    public func liveTurns(for sessionKey: String) async -> AsyncStream<LiveTurn?>? {
+        guard let documents = await store.documents(path("live", LiveTurn.handle(for: sessionKey))) else { return nil }
+        let key = pairing.k
+        return AsyncStream { continuation in
+            let task = Task {
+                for await change in documents {
+                    let turn: LiveTurn?
+                    switch change {
+                    case .value(let document):
+                        turn = document.flatMap { try? ChannelCrypto.open(LiveTurn.self, box: $0.box, key: key) }
+                    case .refetch:
+                        turn = try? await self.liveTurn(for: sessionKey)
+                    }
+                    continuation.yield(turn?.key == sessionKey ? turn : nil)
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     public func snapshot() async throws -> PhoneSnapshot? {
         guard let document = try await store.get(path("state", "snapshot")) else { return nil }
         return try ChannelCrypto.open(PhoneSnapshot.self, box: document.box, key: pairing.k)

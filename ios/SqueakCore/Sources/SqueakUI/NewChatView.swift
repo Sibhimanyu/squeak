@@ -82,7 +82,7 @@ struct NewChatView: View {
                         if tooLong {
                             Text("That's over the \(Self.maxCharacters)-character limit.").foregroundStyle(Theme.error)
                         } else {
-                            Text("Signed on this iPhone and checked by your Mac. Face ID is asked before it is sent.")
+                            Text("Signed on this iPhone and checked by your Mac.")
                         }
                     }
                     if let problem {

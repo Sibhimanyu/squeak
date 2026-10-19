@@ -51,6 +51,7 @@ final class AppModel: ObservableObject {
 
     private var channel: Channel?
     private var loop: Task<Void, Never>?
+    private var unlock = SendUnlock()
     /// The session open on screen.
     private var watching: String?
     private var liveTask: Task<Void, Never>?
@@ -116,11 +117,12 @@ final class AppModel: ObservableObject {
     /* ---------- the loop: only while the app is on screen ---------- */
 
     func resume() {
+        unlock.foregrounded()
         guard !demo, loop == nil, let channel else { return }
         loop = Task { [weak self] in
             await self?.tick()
             self?.restartLive()
-            guard let snapshots = await channel.snapshotChanges(), let results = await channel.resultChanges() else {
+            guard let snapshots = await channel.snapshots(), let results = await channel.resultChanges() else {
                 // Firestore: look again every couple of seconds.
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(Self.pollSeconds))
@@ -129,15 +131,22 @@ final class AppModel: ObservableObject {
                 return
             }
             // Realtime Database: a new view (or the Mac's pairing answer)
-            // arrives as it is written. The slow tick only keeps presence
-            // fresh and covers a stream that dropped without saying so.
+            // arrives as it is written, carried in the event itself so it is
+            // downloaded once. The slow tick only keeps presence fresh, and
+            // re-reads only if the view has gone quiet for a minute.
             await withTaskGroup(of: Void.self) { group in
-                group.addTask { for await _ in snapshots { await self?.tick() } }
+                group.addTask {
+                    do {
+                        for try await next in snapshots { await self?.apply(next) }
+                    } catch {
+                        await self?.tick() // undecryptable: let the full read say why
+                    }
+                }
                 group.addTask { for await _ in results { await self?.tickIfAwaitingApproval() } }
                 group.addTask {
                     while !Task.isCancelled {
                         try? await Task.sleep(for: .seconds(Self.streamedTickSeconds))
-                        await self?.tick()
+                        await self?.keepAlive()
                     }
                 }
             }
@@ -152,6 +161,7 @@ final class AppModel: ObservableObject {
     static let streamedTickSeconds = 20
 
     func pause() {
+        unlock.backgrounded()
         loop?.cancel()
         loop = nil
         let wasStreaming = presenceWatching != nil
@@ -178,13 +188,12 @@ final class AppModel: ObservableObject {
             try? await channel.touchPresence(watching: key)
             self?.lastPresence = Date()
             guard let key else { return }
-            guard let changes = await channel.liveChanges(for: key) else {
+            guard let turns = await channel.liveTurns(for: key) else {
                 self?.liveAvailable = false
                 return
             }
             self?.liveAvailable = true
-            for await _ in changes {
-                let turn = try? await channel.liveTurn(for: key)
+            for await turn in turns {
                 if Task.isCancelled { break }
                 self?.liveTurns[key] = turn
             }
@@ -201,6 +210,31 @@ final class AppModel: ObservableObject {
 
     private func tickIfAwaitingApproval() async {
         if case .awaitingApproval = phase { await tick() }
+    }
+
+    /// A view straight from the stream.
+    private func apply(_ next: PhoneSnapshot?) {
+        guard phase == .paired else { return }
+        if let next { snapshot = next }
+        lastFetch = Date()
+        problem = nil
+    }
+
+    /// Streamed: keep presence inside the Mac's window. No re-read: a quiet
+    /// Mac is normal, and a dead stream reconnects by itself and is sent the
+    /// whole view again. A presence write that lands proves the channel is
+    /// up, so it counts as synced.
+    private func keepAlive() async {
+        guard let channel else { return }
+        guard phase == .paired else { await tick(); return }
+        do {
+            try await channel.touchPresence(watching: presenceWatching)
+            lastPresence = Date()
+            lastFetch = Date()
+            problem = nil
+        } catch {
+            problem = "Can't reach Squeak's server right now."
+        }
     }
 
     private func tick() async {
@@ -385,12 +419,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Face ID once, then not again until the app has been away for a while (`SendUnlock`).
     private func confirmWithBiometrics(reason: String) async -> Bool {
-        if demo { return true }
+        if demo || !unlock.needsAuthentication { return true }
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else { return true }
-        return (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
+        let passed = (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
+        if passed { unlock.authenticated() }
+        return passed
     }
 }
 #endif

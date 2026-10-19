@@ -9,10 +9,21 @@ public protocol ChannelBackend: Sendable {
     /// Yields whenever anything at or under `path` changes, or nil when this
     /// backend cannot stream (Firestore over REST), in which case poll.
     func changes(_ path: String) -> AsyncStream<Void>?
+    /// Like `changes`, for one document, carrying its new value when the
+    /// event has it, so the caller does not download it a second time.
+    func documents(_ path: String) -> AsyncStream<DocumentChange>?
+}
+
+/// One event on a document's stream: its whole new value (nil: deleted), or
+/// a partial change the caller must re-read.
+public enum DocumentChange: Equatable, Sendable {
+    case value(ChannelDocument?)
+    case refetch
 }
 
 extension FirestoreClient: ChannelBackend {
     public func changes(_ path: String) -> AsyncStream<Void>? { nil }
+    public func documents(_ path: String) -> AsyncStream<DocumentChange>? { nil }
 }
 
 /// Reads a response body line by line; injectable so the stream is testable.
@@ -84,6 +95,43 @@ public struct RealtimeDatabaseClient: ChannelBackend {
     /// Reconnects with backoff until the consumer stops iterating. Yields once
     /// per `put`/`patch`, including the one the server sends on connect.
     public func changes(_ path: String) -> AsyncStream<Void>? {
+        let events = events(path)
+        return AsyncStream { continuation in
+            let task = Task {
+                for await _ in events { continuation.yield(()) }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// The document at `path` as it changes. The server sends the whole value
+    /// on connect and with every overwrite (`set` always writes the whole
+    /// document), so a re-read is only needed for a partial change.
+    public func documents(_ path: String) -> AsyncStream<DocumentChange>? {
+        let events = events(path)
+        return AsyncStream { continuation in
+            let task = Task {
+                for await data in events { continuation.yield(Self.change(from: data)) }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// What a `put`/`patch` event's data line says about the document at the watched path.
+    static func change(from data: String?) -> DocumentChange {
+        guard let data,
+              let event = try? JSONSerialization.jsonObject(with: Data(data.utf8), options: .fragmentsAllowed) as? [String: Any],
+              event["path"] as? String == "/"
+        else { return .refetch }
+        if event["data"] is NSNull { return .value(nil) }
+        guard let body = event["data"] as? [String: Any], let document = decoded(body) else { return .refetch }
+        return .value(document)
+    }
+
+    /// The data line of every `put`/`patch` (nil when a `put`/`patch` came without one).
+    private func events(_ path: String) -> AsyncStream<String?> {
         var request = request(path, method: "GET")
         request.setValue("text/event-stream", forHTTPHeaderField: "accept")
         request.timeoutInterval = 75 // keep-alives come every 30s
@@ -93,14 +141,21 @@ public struct RealtimeDatabaseClient: ChannelBackend {
                 var retry: Double = 1
                 while !Task.isCancelled {
                     do {
+                        // Blank lines are dropped by the line reader, so an event is its `event:` line and the `data:` after it.
+                        var pending: String?
                         for try await line in try await streams.lines(for: request) {
                             retry = 1
                             if line.hasPrefix("event:") {
+                                if pending != nil { continuation.yield(nil) }
                                 let name = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
-                                if name == "put" || name == "patch" { continuation.yield(()) }
+                                pending = (name == "put" || name == "patch") ? name : nil
                                 if name == "cancel" || name == "auth_revoked" { throw Failure.streamCancelled }
+                            } else if line.hasPrefix("data:"), pending != nil {
+                                pending = nil
+                                continuation.yield(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
                             }
                         }
+                        if pending != nil { continuation.yield(nil) }
                     } catch {}
                     if Task.isCancelled { break }
                     try? await Task.sleep(for: .seconds(retry))

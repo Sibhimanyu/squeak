@@ -130,3 +130,52 @@ final class RealtimeDatabaseTests: XCTestCase {
         XCTAssertThrowsError(try PairingPayload.parse(code))
     }
 }
+
+final class StreamedDocumentTests: XCTestCase {
+    func testAWholeDocumentEventCarriesItsValue() {
+        XCTAssertEqual(RealtimeDatabaseClient.change(from: #"{"path":"/","data":{"box":"b","at":3}}"#),
+                       .value(ChannelDocument(box: "b", at: 3)))
+    }
+
+    func testADeletionIsAnEmptyValue() {
+        XCTAssertEqual(RealtimeDatabaseClient.change(from: #"{"path":"/","data":null}"#), .value(nil))
+    }
+
+    func testAPartialChangeOrAnythingOddIsReRead() {
+        XCTAssertEqual(RealtimeDatabaseClient.change(from: #"{"path":"/box","data":"b"}"#), .refetch)
+        XCTAssertEqual(RealtimeDatabaseClient.change(from: #"{"path":"/","data":{"nope":1}}"#), .refetch)
+        XCTAssertEqual(RealtimeDatabaseClient.change(from: "not json"), .refetch)
+        XCTAssertEqual(RealtimeDatabaseClient.change(from: nil), .refetch)
+    }
+
+    func testDocumentsReadTheDataLineAfterEachEvent() async throws {
+        let lines = FakeLines([[
+            "event: put", #"data: {"path":"/","data":{"box":"one"}}"#,
+            "event: keep-alive", "data: null",
+            "event: put", #"data: {"path":"/","data":null}"#,
+        ]])
+        let client = RealtimeDatabaseClient(databaseURL: "https://x-default-rtdb.firebasedatabase.app", streams: lines)
+        var seen: [DocumentChange] = []
+        for await change in try XCTUnwrap(client.documents("channels/c/state/snapshot")) {
+            seen.append(change)
+            if seen.count == 2 { break }
+        }
+        XCTAssertEqual(seen, [.value(ChannelDocument(box: "one")), .value(nil)])
+    }
+
+    func testTheSnapshotIsDecodedFromTheStreamWithoutAnotherRequest() async throws {
+        let key = Data(repeating: 7, count: 32).base64EncodedString()
+        let json = #"{"v":1,"mac":"Mac","generatedAt":"","duck":{"blockedCount":0,"workingCount":0},"sessions":[]}"#
+        let view = try JSONDecoder().decode(PhoneSnapshot.self, from: Data(json.utf8))
+        let box = try ChannelCrypto.seal(view, key: key)
+        let body = String(data: try JSONSerialization.data(withJSONObject: ["path": "/", "data": ["box": box]]), encoding: .utf8)!
+        let transport = FakeTransport()
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: key, n: "Mac", r: "https://x-default-rtdb.firebasedatabase.app")
+        let channel = Channel(pairing: pairing, deviceId: "d", transport: transport, streams: FakeLines([["event: put", "data: \(body)"]]))
+        var first: PhoneSnapshot?
+        let snapshots = await channel.snapshots()
+        for try await next in try XCTUnwrap(snapshots) { first = next; break }
+        XCTAssertEqual(first?.mac, "Mac")
+        XCTAssertTrue(transport.requests.isEmpty)
+    }
+}

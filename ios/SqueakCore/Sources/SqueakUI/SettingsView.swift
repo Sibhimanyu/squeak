@@ -42,7 +42,7 @@ struct SettingsView: View {
                         : "Needs your Mac on Squeak's faster channel. Until then, Activity shows the latest six steps.")
                 }
                 Section {
-                    Text("Replies are signed on this iPhone and checked by your Mac. Face ID is asked before anything is sent.")
+                    Text("Replies are signed on this iPhone and checked by your Mac. Face ID is asked before the first one, and again after Squeak has been away for five minutes.")
                         .font(.subheadline).foregroundStyle(Theme.muted)
                 } header: { Text("Security") }
                 if let openReport = screen.openReport {
