@@ -268,6 +268,8 @@ function syncGlass() {
  * (which is all the duck needs) without that special handling.
  */
 function applyFloatingBehavior(win, relativeLevel = 1) {
+  // Closing the app window while quitting runs this after the duck's window is gone.
+  if (!win || win.isDestroyed()) return;
   // The duck sits one step above "floating" so the glass window, at
   // "floating" itself, is always just behind it.
   win.setAlwaysOnTop(true, "floating", relativeLevel);
