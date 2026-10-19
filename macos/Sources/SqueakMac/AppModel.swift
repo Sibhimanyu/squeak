@@ -37,16 +37,8 @@ final class AppModel {
     /// False when conductor.db is missing and the daemon serves Conductor chats too.
     let usesLocalConductor: Bool
 
-    // MARK: Updates (a notice only; nothing is downloaded or installed)
-    private(set) var availableUpdate: AvailableUpdate?
-    private(set) var lastUpdateCheck: Date?
-    var updateChecksEnabled: Bool {
-        didSet {
-            defaults.set(updateChecksEnabled, forKey: "updateChecks")
-            if updateChecksEnabled { startUpdateChecks() } else { updateTask?.cancel(); updateTask = nil; availableUpdate = nil }
-        }
-    }
-    @ObservationIgnored private var updateTask: Task<Void, Never>?
+    // MARK: Updates (Sparkle installs them; see Updater.swift)
+    let updater = AppUpdater()
 
     // MARK: Selection and conversation
     private(set) var selected: SessionKey?
@@ -91,7 +83,6 @@ final class AppModel {
         let draftStore = cache.map { DraftStore(cache: $0) }
         usesLocalConductor = ConductorDatabase().exists
         broker = Broker(adapters: ConductorSources.adapters(client: client), cache: cache, draftStore: draftStore)
-        updateChecksEnabled = UserDefaults.standard.object(forKey: "updateChecks") as? Bool ?? true
         let d = UserDefaults.standard
         pinned = Set((d.stringArray(forKey: "pinned") ?? []).compactMap(SessionKey.init(stringValue:)))
         hotKeyID = d.string(forKey: "hotKey")
@@ -115,7 +106,7 @@ final class AppModel {
         observeWindowVisibility()
         AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")
         if demoMode { installDemo(); return }
-        startUpdateChecks()
+        updater.start(enabled: !captureMode)
         Task { [weak self] in
             guard let self else { return }
             await broker.restoreFromCache()
@@ -369,7 +360,7 @@ final class AppModel {
     }
 
     func showConversationWindow() {
-        NSApp.activate()
+        ActivationPolicyController.shared.willShowWindow()
         openConversationWindow?()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.recomputeVisibility() }
     }
@@ -384,7 +375,7 @@ final class AppModel {
     }
 
     func openSettings() {
-        NSApp.activate()
+        ActivationPolicyController.shared.willShowWindow()
         openSettingsWindow?()
     }
 
@@ -414,41 +405,6 @@ final class AppModel {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0-dev"
     }
 
-    /// On launch and every 24 hours. Never in a capture run.
-    private func startUpdateChecks() {
-        guard updateChecksEnabled, !captureMode, updateTask == nil else { return }
-        updateTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.checkForUpdate()
-                try? await Task.sleep(for: .seconds(24 * 3600))
-            }
-        }
-    }
-
-    private func checkForUpdate() async {
-        let result = await UpdateChecker().check(currentVersion: Self.appVersion)
-        lastUpdateCheck = Date()
-        switch result {
-        case .available(let u):
-            AppLog.info("update check: \(u.version) available")
-            availableUpdate = u.tag == defaults.string(forKey: "dismissedUpdate") ? nil : u
-        case .upToDate:
-            AppLog.info("update check: up to date")
-            availableUpdate = nil
-        case .failed(let why):
-            AppLog.info("update check failed: \(why)")
-        }
-    }
-
-    func viewRelease() {
-        if let url = availableUpdate?.releaseURL { NSWorkspace.shared.open(url) }
-    }
-
-    func dismissUpdate() {
-        if let u = availableUpdate { defaults.set(u.tag, forKey: "dismissedUpdate") }
-        availableUpdate = nil
-    }
-
     // MARK: Connections and diagnostics
 
     var connectionsReport: ConnectionsReport {
@@ -470,7 +426,7 @@ final class AppModel {
             osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
             adapters: adapters,
             stateCounts: DiagnosticsInput.counts(of: sessions),
-            lastUpdateCheck: lastUpdateCheck,
+            lastUpdateCheck: updater.lastCheck,
             logLines: AppLog.buffer.last(50)))
     }
 

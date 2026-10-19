@@ -185,10 +185,12 @@ private struct AboutSettings: View {
             .padding(.top, 24)
             Form {
                 Section {
-                    Toggle("Check for new versions", isOn: $model.updateChecksEnabled)
-                        .help("Asks GitHub once a day whether a newer release exists. Never downloads or installs anything.")
+                    Toggle("Automatically check for updates", isOn: Binding(get: { model.updater.automaticallyChecks }, set: { model.updater.automaticallyChecks = $0 }))
+                        .disabled(!model.updater.isActive)
+                    Button("Check for Updates…") { model.updater.checkForUpdates() }
+                        .disabled(!model.updater.canCheck)
                 } footer: {
-                    SectionFootnote("Asks GitHub once a day. Never downloads or installs anything.")
+                    SectionFootnote("Squeak checks once a day, and installs a new version for you when you quit or relaunch it. Nothing about your chats is sent.")
                 }
                 Section {
                     Button(copied ? "Copied" : "Copy diagnostics") {

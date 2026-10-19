@@ -45,63 +45,6 @@ struct DiagnosticsTests {
     }
 }
 
-@Suite("Update check")
-struct UpdateCheckTests {
-    @Test func parsesAndComparesSemver() {
-        #expect(SemanticVersion("v2.0.0") == SemanticVersion("2.0.0"))
-        #expect(SemanticVersion("2.0.1")! > SemanticVersion("2.0.0")!)
-        #expect(SemanticVersion("2.10.0")! > SemanticVersion("2.9.9")!)
-        #expect(SemanticVersion("3.0.0")! > SemanticVersion("2.99.99")!)
-        #expect(SemanticVersion("2.1.0-beta.1")! < SemanticVersion("2.1.0")!)
-        #expect(SemanticVersion("2.1.0-beta.2")! > SemanticVersion("2.1.0-beta.1")!)
-        #expect(SemanticVersion("2.1.0-beta.10")! > SemanticVersion("2.1.0-beta.2")!)
-        #expect(SemanticVersion("2.1")! == SemanticVersion("2.1.0")!)
-        #expect(SemanticVersion("banana") == nil && SemanticVersion("") == nil && SemanticVersion("1.x.0") == nil)
-        #expect(SemanticVersion("1.2.3.4") == nil)
-    }
-
-    private func checker(_ status: Int, _ body: String) async -> UpdateChecker {
-        let t = FakeTransport()
-        await t.json("GET", "/repos/Sibhimanyu/squeak/releases/latest", status: status, body)
-        return UpdateChecker(transport: t)
-    }
-
-    @Test func newerReleaseIsOffered() async {
-        let c = await checker(200, #"{"tag_name":"v2.1.0","html_url":"https://github.com/Sibhimanyu/squeak/releases/tag/v2.1.0"}"#)
-        let r = await c.check(currentVersion: "2.0.0")
-        guard case .available(let u) = r else { Issue.record("expected available, got \(r)"); return }
-        #expect(u.version.description == "2.1.0" && u.releaseURL.host == "github.com")
-    }
-
-    @Test func sameOlderPrereleaseAndDraftAreQuiet() async {
-        let url = "https://github.com/x/y"
-        #expect(await checker(200, #"{"tag_name":"v2.0.0","html_url":"\#(url)"}"#).check(currentVersion: "2.0.0") == .upToDate)
-        #expect(await checker(200, #"{"tag_name":"v1.9.0","html_url":"\#(url)"}"#).check(currentVersion: "2.0.0") == .upToDate)
-        #expect(await checker(200, #"{"tag_name":"v3.0.0","prerelease":true,"html_url":"\#(url)"}"#).check(currentVersion: "2.0.0") == .upToDate)
-        #expect(await checker(200, #"{"tag_name":"v3.0.0","draft":true,"html_url":"\#(url)"}"#).check(currentVersion: "2.0.0") == .upToDate)
-    }
-
-    @Test func failuresAndHostileLinksNeverOffer() async {
-        for (status, body) in [(404, "{}"), (200, "nope"), (200, #"{"tag_name":"junk"}"#),
-                               (200, #"{"tag_name":"v9.0.0","html_url":"https://evil.example/x"}"#),
-                               (200, #"{"tag_name":"v9.0.0","html_url":"file:///etc/passwd"}"#)] {
-            let r = await checker(status, body).check(currentVersion: "2.0.0")
-            if case .failed = r {} else { Issue.record("expected failed for \(body), got \(r)") }
-        }
-        let down = FakeTransport()
-        await down.route("GET", "/repos/Sibhimanyu/squeak/releases/latest", .failure(.timedOut))
-        if case .failed = await UpdateChecker(transport: down).check(currentVersion: "2.0.0") {} else { Issue.record("timeout should fail") }
-    }
-
-    @Test func requestIsUnauthenticatedWithUserAgentAndTimeout() async {
-        let t = FakeTransport()
-        await t.json("GET", "/repos/Sibhimanyu/squeak/releases/latest", #"{"tag_name":"v2.0.0"}"#)
-        _ = await UpdateChecker(transport: t).check(currentVersion: "2.0.0")
-        let req = await t.requests[0]
-        #expect(req.headers["User-Agent"] == "Squeak" && req.headers["Authorization"] == nil && req.timeout == 10)
-    }
-}
-
 @Suite("Connections report")
 struct ConnectionsReportTests {
     let ok = AdapterHealth(adapterId: "x", status: .connected)

@@ -1,8 +1,10 @@
 #!/bin/bash
 # Usage: macos/scripts/release.sh <version>   e.g. 2.0.1
 # Bumps the version in build-app.sh (which writes Info.plist), runs the tests,
-# builds the app, writes build/RELEASE_NOTES.md from CHANGELOG.md plus the
-# checksum, and PRINTS the `gh release create` command. It never runs it.
+# builds the app and the DMG, signs the DMG for Sparkle (EdDSA key in the login
+# Keychain, account "squeak"), writes build/appcast.xml (keeping older items from the
+# live appcast) and build/RELEASE_NOTES.md, and PRINTS the publish commands.
+# It never runs them.
 set -euo pipefail
 
 VERSION="${1:-}"
@@ -34,8 +36,30 @@ swift test
 BUILT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Squeak.app/Contents/Info.plist)"
 [ "$BUILT" = "$VERSION" ] || { echo "built app says $BUILT, expected $VERSION" >&2; exit 1; }
 
-ZIP="Squeak-$VERSION.zip"
-SUM="$(cd build && shasum -a 256 "$ZIP" | awk '{print $1}')"
+./scripts/make-dmg.sh
+
+# Sparkle compares CFBundleVersion; read it back from the built app.
+BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/Squeak.app/Contents/Info.plist)"
+DMG="Squeak-$VERSION.dmg"
+[ -f "build/$DMG" ] || { echo "build/$DMG missing" >&2; exit 1; }
+SUM="$(cd build && shasum -a 256 "$DMG" | awk '{print $1}')"
+(cd build && shasum -a 256 "$DMG" > "$DMG.sha256")
+
+# Sign the update archive (the DMG itself is the Sparkle enclosure).
+SIGN="$HERE/.build/artifacts/sparkle/Sparkle/bin/sign_update"
+SIGNED="$("$SIGN" --account squeak "build/$DMG")"
+SIG="$(sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p' <<<"$SIGNED")"
+LEN="$(sed -n 's/.*length="\([0-9]*\)".*/\1/p' <<<"$SIGNED")"
+[ -n "$SIG" ] && [ -n "$LEN" ] || { echo "sign_update gave no signature: $SIGNED" >&2; exit 1; }
+
+# Keep the items already published.
+FEED="https://sibhimanyu.github.io/squeak/appcast.xml"
+PREV="$(mktemp)"; trap 'rm -f "$PREV"' EXIT
+curl -fsSL --max-time 20 "$FEED" -o "$PREV" 2>/dev/null || { echo "(no published appcast yet; starting a new one)"; : > "$PREV"; }
+python3 -I scripts/update-appcast.py "$PREV" build/appcast.xml "$VERSION" "$BUILD" \
+  "https://github.com/Sibhimanyu/squeak/releases/download/v$VERSION/$DMG" \
+  "https://github.com/Sibhimanyu/squeak/releases/tag/v$VERSION" "$LEN" "$SIG"
+
 {
   echo "# Squeak $VERSION"
   echo
@@ -43,7 +67,7 @@ SUM="$(cd build && shasum -a 256 "$ZIP" | awk '{print $1}')"
   echo
   echo "## Download"
   echo
-  echo "\`$ZIP\` (macOS 14+, Apple silicon)."
+  echo "\`$DMG\` (macOS 14+, Apple silicon). Existing installs update themselves."
   echo
   echo "SHA-256: \`$SUM\`"
   echo
@@ -52,9 +76,14 @@ SUM="$(cd build && shasum -a 256 "$ZIP" | awk '{print $1}')"
 
 echo
 echo "Release notes: $HERE/build/RELEASE_NOTES.md"
-echo "Nothing has been published. When you are ready, run:"
+echo "Appcast:       $HERE/build/appcast.xml"
+echo "Nothing has been published. When you are ready, run these two steps, in this order:"
 echo
-echo "  gh release create v$VERSION \\"
-echo "    \"$HERE/build/$ZIP\" \"$HERE/build/$ZIP.sha256\" \\"
-echo "    --repo Sibhimanyu/squeak --title \"Squeak $VERSION\" \\"
-echo "    --notes-file \"$HERE/build/RELEASE_NOTES.md\""
+echo "  1. gh release create v$VERSION \\"
+echo "       \"$HERE/build/$DMG\" \"$HERE/build/$DMG.sha256\" \\"
+echo "       --repo Sibhimanyu/squeak --title \"Squeak $VERSION\" \\"
+echo "       --notes-file \"$HERE/build/RELEASE_NOTES.md\""
+echo
+echo "  2. git clone git@github.com:Sibhimanyu/sibhimanyu.github.io.git /tmp/pages \\"
+echo "       && mkdir -p /tmp/pages/squeak && cp \"$HERE/build/appcast.xml\" /tmp/pages/squeak/appcast.xml \\"
+echo "       && cd /tmp/pages && git add squeak/appcast.xml && git commit -m \"Squeak $VERSION appcast\" && git push"

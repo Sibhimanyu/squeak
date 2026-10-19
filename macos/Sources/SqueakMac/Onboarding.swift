@@ -25,7 +25,7 @@ final class OnboardingController {
             w.center()
             window = w
         }
-        NSApp.activate()
+        ActivationPolicyController.shared.willShowWindow()
         window?.makeKeyAndOrderFront(nil)
     }
 

@@ -47,6 +47,10 @@ struct SqueakCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { model.updater.checkForUpdates() }
+                .disabled(!model.updater.canCheck)
+        }
         CommandMenu("Sessions") {
             ForEach(0..<9, id: \.self) { i in
                 let list = model.ordered.flattened
@@ -72,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MenuBarIconSheet.write(to: sheet, master: ProcessInfo.processInfo.environment["SQUEAK_MAC_ICON_MASTER"])
             exit(0)
         }
+        ActivationPolicyController.shared.start()
         let model = AppModel.shared
         model.start()
         if let prefix = ProcessInfo.processInfo.environment["SQUEAK_MAC_CAPTURE"] {
@@ -79,6 +84,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             OnboardingController.shared.showIfNeeded()
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows _: Bool) -> Bool {
+        // A Dock click with no window open brings the conversation back.
+        // AppKit counts the popover and hidden panels in `flag`, so look for a real window ourselves.
+        if !NSApp.windows.contains(where: ActivationPolicyController.isAppWindow) {
+            AppModel.shared.showConversationWindow()
+        }
+        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

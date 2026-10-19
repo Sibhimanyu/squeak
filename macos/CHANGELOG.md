@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.0.2
+
+Updates install themselves, and Squeak behaves like a real app while its window is open.
+
+- Updates install themselves (Sparkle 2). Squeak checks once a day, downloads a new
+  version signed with Squeak's own key, and installs it when you quit or relaunch.
+  "Check for Updates…" is in the app menu, the popover's gear menu and Settings,
+  About; "Automatically check for updates" is a switch there. This replaces the old
+  notice that only linked to the GitHub release.
+- While the conversation window, Settings or Welcome is open, Squeak shows a Dock
+  icon, appears in Cmd-Tab and has its own menu bar (About, Check for Updates…,
+  Settings…, Edit, Sessions, Window, Help). When the last of them closes it goes
+  back to the menu-bar duck alone; it never quits. The popover on its own does not
+  change this. Clicking the Dock icon with no window open reopens the conversation.
+- The build number now grows with every version (2.0.2 is 20002) so updates compare
+  correctly.
+
 ## 2.0.1
 
 A calmer redesign of every screen.

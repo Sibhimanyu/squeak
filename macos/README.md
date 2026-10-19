@@ -1,7 +1,7 @@
 # Squeak 2.0 (native macOS app)
 
 Squeak 2.0 is a native SwiftUI/AppKit menu-bar app (`LSUIElement`, bundle id
-`com.squeak.mac`, macOS 14+, Swift 6, no third-party dependencies). It is a
+`com.squeak.mac`, macOS 14+, Swift 6, one dependency: Sparkle 2 for updates). It is a
 separate Swift package; the Node daemon and the Electron app in `desktop/` are
 untouched by it.
 
@@ -27,7 +27,7 @@ Built and unit tested (`swift test`, about 120 test cases):
 - Daemon client and adapter, the local Conductor reader and `DaemonSender`
   (against fixture databases and a stubbed transport).
 - Safe Markdown parser (`MessageMarkup`), including a 200 KB speed check.
-- Diagnostics redaction, Connections report and update check (fake transport).
+- Diagnostics redaction and Connections report.
 - Broker: catalog, polling, send correlation, reconciliation.
 - Encrypted cache and drafts (in-memory key store, never the real Keychain).
 - Policies: session ordering, search, notification wording.
@@ -51,8 +51,8 @@ Untested:
   sleep/wake, disconnect).
 
 The relay is set up only through the terminal CLI; the app has no relay
-setup UI. The Swift relay is written but not wired in. The update check has
-not talked to the real GitHub API.
+setup UI. The Swift relay is written but not wired in. Sparkle updates have
+not yet been exercised end to end against a published appcast (see Updates).
 
 The release zip is ad-hoc signed and not notarized.
 
@@ -67,14 +67,15 @@ macos/Sources/
                    ConductorSources
     Conductor/     ConductorLocalAdapter, ConductorDatabase (read-only SQLite),
                    ConductorRegistry, ClaudeActivityReader, ConductorText/Time
-    Support/       ConnectionsReport, Diagnostics, UpdateCheck, MessageMarkup
+    Support/       ConnectionsReport, Diagnostics, MessageMarkup
     Broker/        Broker actor + BrokerClock
     Storage/       KeyStore (+ Keychain), EncryptedCache, DraftStore
     Policy/        SessionOrdering, SearchIndex, NotificationPolicy
     Relay/         Swift port of src/fleet/conductor-relay (not wired in)
   SqueakMac/       App, AppModel, PopoverView, ConversationWindow,
                    QuickComposer, ComposerField, SettingsView, Onboarding,
-                   HotKey (Carbon), Theme, Components, System, Capture,
+                   HotKey (Carbon), Theme, Components, System, Capture, Updater (Sparkle),
+                   ActivationPolicy (Dock icon while a window is open),
                    MarkdownView, AppLog
 ```
 
@@ -109,9 +110,41 @@ macos/Sources/
 Settings has a Connections tab with one row per source: Conductor database
 (readable or not), Squeak service (connected, down, token missing, trouble) and
 Sending (available or why not). About has "Copy diagnostics", which is redacted
-(no message text, titles, paths, ids, tokens or URLs), and a switch for the
-update check. The update check asks GitHub once a day for a newer release and
-shows a notice with a link; it never downloads or installs anything.
+(no message text, titles, paths, ids, tokens or URLs), "Check for Updates…" and
+the "Automatically check for updates" switch (see Updates).
+
+### Dock icon and menus
+
+Squeak launches as a menu-bar accessory (`LSUIElement`). While the conversation
+window, Settings or Welcome is open, `ActivationPolicyController` switches the
+app to `.regular` (Dock icon, Cmd-Tab, its own menu bar: app menu with About,
+Check for Updates…, Settings…, Hide, Quit; Edit; Sessions; Window; Help) and
+activates it. When the last of those windows closes it goes back to `.accessory`.
+The popover and the quick composer are panels and never trigger it. Clicking the
+Dock icon with no window open reopens the conversation. Nothing here quits the app.
+
+## Updates
+
+Squeak uses Sparkle 2 (`Sparkle.framework` in `Contents/Frameworks`, started by
+`AppUpdater` only when running from the `com.squeak.mac` bundle, never in a capture
+or `swift run`). Info.plist carries `SUFeedURL`
+(`https://sibhimanyu.github.io/squeak/appcast.xml`), `SUPublicEDKey`,
+`SUEnableAutomaticChecks`, `SUScheduledCheckInterval` (86400) and
+`SUAllowsAutomaticUpdates`; the user can turn automatic checks off in Settings, About.
+
+- The update archive is the release DMG. Sparkle accepts it only if its EdDSA
+  signature matches `SUPublicEDKey`; the app's own ad-hoc code signature is not what
+  protects updates.
+- `CFBundleVersion` is the build number Sparkle compares: `major*10000 + minor*100 +
+  patch` (2.0.2 is 20002). It must grow with every release.
+- The EdDSA private key lives in the login Keychain (account `squeak`, made with
+  Sparkle's `generate_keys --account squeak`) and is backed up, mode 0600, at
+  `~/Library/Application Support/squeak/sparkle-ed25519-private.key`. Never commit
+  it. Restore on a new Mac with `generate_keys --account squeak -f <that file>`.
+  Losing it means installed copies can never be updated; they would need a manual
+  reinstall with a new public key.
+- The frameworks and the app are signed ad hoc, inside out, without the hardened
+  runtime (its library validation refuses an ad-hoc framework: no Team ID).
 
 ### Message rendering
 
@@ -161,14 +194,22 @@ swift run SqueakMac            # needs the daemon running for real data
 ```
 
 `scripts/build-app.sh` writes only inside `macos/build/`: `Squeak.app`
-(ad-hoc signed, icon taken from `desktop/build/squeak.icns` if present),
-`Squeak-2.0.0.zip` and `Squeak-2.0.0.zip.sha256`. It installs nothing and makes
-no DMG.
+(Sparkle embedded, ad-hoc signed inside out, icon taken from
+`desktop/build/squeak.icns` if present), `Squeak-<version>.zip` and its `.sha256`.
+It installs nothing and makes no DMG.
 
-`scripts/release.sh <version>` bumps the version, runs the tests, builds the
-app, writes `build/RELEASE_NOTES.md` from the matching `## <version>` section of
-`CHANGELOG.md` plus the checksum, and prints the `gh release create` command.
-It never runs it. Add the CHANGELOG section first.
+`scripts/release.sh <version>` (add the `## <version>` CHANGELOG section first) bumps
+the version, runs the tests, builds the app, builds the DMG (`make-dmg.sh`), signs
+it with Sparkle's `sign_update`, fetches the published appcast and adds the new
+item to it (`scripts/update-appcast.py`, older items are kept), and writes
+`build/Squeak-<version>.dmg`, `build/appcast.xml` and `build/RELEASE_NOTES.md`.
+It then prints the two publish steps and never runs them:
+
+1. `gh release create v<version> build/Squeak-<version>.dmg … --repo Sibhimanyu/squeak`
+   (upload the DMG first: the appcast points at it).
+2. Copy `build/appcast.xml` to `squeak/appcast.xml` in
+   `github.com/Sibhimanyu/sibhimanyu.github.io`, commit and push. Installed copies
+   see the update on their next check.
 
 Environment variables:
 
@@ -186,11 +227,12 @@ Gatekeeper will warn the first time.
 1. Check the download against its checksum file:
 
    ```bash
-   shasum -a 256 Squeak-2.0.0.zip
+   shasum -a 256 Squeak-<version>.dmg
    ```
 
-   The output must match the contents of `Squeak-2.0.0.zip.sha256`.
-2. Unzip and move `Squeak.app` to Applications (or `~/Applications`).
+   The output must match the contents of `Squeak-<version>.dmg.sha256`.
+2. Open the DMG and drag `Squeak.app` to Applications (or `~/Applications`).
+   After that, Squeak updates itself.
 3. Right-click the app and choose Open, then Open again in the dialog. If macOS
    still blocks it, go to System Settings, Privacy & Security, and choose
    "Open Anyway" next to the Squeak message.
@@ -212,8 +254,9 @@ sessions, need the Squeak daemon running on the same Mac (step 1 above).
   finished, and show session names only if you turn on "Show session names in
   notifications". They never carry message content.
 - The app as wired today reads Conductor's database locally and talks to the
-  local daemon on loopback. The only other network call is the optional daily
-  update check to GitHub (it sends no message content). Once the
+  local daemon on loopback. The only other network call is Sparkle's daily
+  check of the appcast on `sibhimanyu.github.io` (Sparkle sends the app and OS
+  version, no message content, and no system profile). Once the
   Swift relay is cut over, it also proxies Conductor's own cloud traffic to
   `api.conductor.build` (the redirect is global, as with the daemon's relay);
   Squeak adds nothing of its own to that traffic.

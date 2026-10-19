@@ -52,7 +52,7 @@ struct PopoverView: View {
 
     @ViewBuilder private var banners: some View {
         let showHelp = model.health != nil && model.connectionHelp != nil
-        if showHelp || model.launchOfferPending || model.availableUpdate != nil {
+        if showHelp || model.launchOfferPending {
             VStack(alignment: .leading, spacing: Space.s) {
                 if showHelp, let help = model.connectionHelp {
                     HStack(alignment: .top, spacing: Space.s) {
@@ -63,7 +63,6 @@ struct PopoverView: View {
                     }
                 }
                 LaunchOfferBanner()
-                UpdateBanner()
             }
             .padding(.horizontal, 20)
             .padding(.bottom, Space.m)
@@ -204,6 +203,7 @@ struct PopoverView: View {
                 .foregroundStyle(Theme.ink)
             Menu {
                 Button("Settings…") { model.openSettings() }.keyboardShortcut(",")
+                Button("Check for Updates…") { model.updater.checkForUpdates() }.disabled(!model.updater.canCheck)
                 Divider()
                 Button("Quit Squeak") { NSApp.terminate(nil) }.keyboardShortcut("q")
             } label: {
