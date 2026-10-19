@@ -267,3 +267,45 @@ describe("applyLiveness", () => {
     expect(applied[0]?.alive).toBe(false);
   });
 });
+
+describe("pending question tools", () => {
+  it("keeps the question text over a transcript's 'Running <tool>' detail", () => {
+    const [merged] = mergeObservations([
+      observed({
+        key: "conductor:c1",
+        source: "conductor",
+        conductorSessionId: "c1",
+        state: "awaiting_input",
+        detail: "Which database? [A / B]",
+        lastActivityAt: "2026-09-20T12:00:05.000Z",
+      }),
+      observed({
+        key: "claude-transcript:agent-1",
+        source: "claude-transcript",
+        state: "working",
+        detail: "Running mcp__conductor__AskUserQuestion",
+      }),
+    ]);
+    expect(merged?.state).toBe("awaiting_input");
+    expect(merged?.detail).toBe("Which database? [A / B]");
+  });
+
+  it("does not let the PreToolUse hook for a question tool turn it back into working", () => {
+    const session = mergeObservations([
+      observed({ key: "t", source: "claude-transcript", state: "awaiting_input", detail: "Which one?" }),
+    ]);
+    const event: HookEvent = {
+      agent: "claude",
+      event: "PreToolUse",
+      sessionId: "agent-1",
+      cwd: null,
+      transcriptPath: null,
+      message: null,
+      toolName: "AskUserQuestion",
+      receivedAt: "2026-09-20T12:00:01.000Z",
+    };
+    const [after] = applyHookEvents(session, new Map([["agent-1", event]]));
+    expect(after?.state).toBe("awaiting_input");
+    expect(after?.detail).toBe("Which one?");
+  });
+});

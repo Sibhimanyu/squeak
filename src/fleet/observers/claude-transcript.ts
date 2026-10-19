@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { answersToolUse, questionCallIn } from "../pending-question.js";
 import type { FleetState, ObservedSession, SessionOrigin } from "../types.js";
 import { asArray, asRecord, asString, parseJsonLines, readTailLines, summarize } from "./tail.js";
 
@@ -169,7 +170,8 @@ export function readClaudeTranscript(
 
   const mtimeIso = transcriptMtimeIso(transcriptPath, options.now);
   const lastActivityAt = lastTimestamp ?? mtimeIso;
-  const state = deriveState(last, lastActivityAt, options);
+  const pendingQuestion = findPendingQuestion(entries);
+  const state = pendingQuestion ? "awaiting_input" : deriveState(last, lastActivityAt, options);
 
   return {
     key: `claude-transcript:${sessionId}`,
@@ -184,7 +186,7 @@ export function readClaudeTranscript(
     branch,
     title: title ?? firstUserPrompt(entries),
     state,
-    detail: describe(last, state),
+    detail: pendingQuestion ? pendingQuestion.detail : describe(last, state),
     lastActivityAt,
     transcriptPath,
     // Only Conductor knows these; a transcript cannot see either.
@@ -192,9 +194,80 @@ export function readClaudeTranscript(
     retired: false,
     baseRef: null,
     costUsd: readLatestCost(entries),
-    waitingOn: waitingOn(last),
+    // A human is the thing being waited on, never the model: no stall timer.
+    waitingOn: pendingQuestion ? null : waitingOn(last),
     waitingSince: lastActivityAt,
   };
+}
+
+/**
+ * An `AskUserQuestion` / `ExitPlanMode` call the agent has made and nobody has
+ * answered: the newest such tool_use with no later tool_result carrying its
+ * id, in the current turn. Walks back and gives up at the turn's edge — a
+ * human prompt, or an assistant message that ended its turn.
+ *
+ * This is the one blocked state a transcript can show, because it is a
+ * question the agent asked in words, not a permission prompt (those are never
+ * written to the file and stay hook-only).
+ */
+function findPendingQuestion(entries: Record<string, unknown>[]): { id: string; detail: string } | null {
+  const answered = new Set<string>();
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    const type = asString(entry?.type);
+    if (!entry || entry.isSidechain === true || (type !== "user" && type !== "assistant")) {
+      continue;
+    }
+    const message = asRecord(entry.message);
+    const content = message?.content;
+    if (type === "user") {
+      const blocks = asArray(content);
+      let isResult = false;
+      for (const raw of blocks) {
+        const block = asRecord(raw);
+        if (block && asString(block.type) === "tool_result") {
+          isResult = true;
+          const id = asString(block.tool_use_id);
+          if (id) {
+            answered.add(id);
+          }
+        }
+      }
+      if (!isResult && !isTaskNotification(content)) {
+        return null;
+      }
+      continue;
+    }
+    const call = questionCallIn(content);
+    if (call && !answered.has(call.id) && !answersInLater(entries, index, call.id)) {
+      return call;
+    }
+    const stopReason = message ? asString(message.stop_reason) : null;
+    if (stopReason === "end_turn" || stopReason === "stop_sequence") {
+      return null;
+    }
+  }
+  return null;
+}
+
+function answersInLater(entries: Record<string, unknown>[], from: number, id: string): boolean {
+  for (let index = from + 1; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (asString(entry?.type) === "user" && answersToolUse(asRecord(entry?.message)?.content, id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isTaskNotification(content: unknown): boolean {
+  if (typeof content === "string") {
+    return content.trimStart().startsWith("<task-notification>");
+  }
+  return asArray(content).some((raw) => {
+    const text = asString(asRecord(raw)?.text);
+    return text !== null && text.trimStart().startsWith("<task-notification>");
+  });
 }
 
 /**

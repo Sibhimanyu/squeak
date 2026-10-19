@@ -1,3 +1,4 @@
+import { isQuestionTool } from "./pending-question.js";
 import type { AgentKind, FleetState, HookEvent } from "./types.js";
 
 function pick(record: Record<string, unknown>, keys: string[]): string | null {
@@ -54,9 +55,13 @@ export function stateFromHookEvent(event: HookEvent): FleetState | null {
       return classifyNotification(event.message);
     case "Stop":
       return "finished";
+    // A question tool is the agent asking the human, not working: without
+    // this the hook fired just before the prompt would read as "working" and
+    // outrank the transcript's pending question.
+    case "PreToolUse":
+      return isQuestionTool(event.toolName) ? "awaiting_input" : "working";
     case "UserPromptSubmit":
     case "SessionStart":
-    case "PreToolUse":
       return "working";
     case "Interrupt":
     case "SessionEnd":

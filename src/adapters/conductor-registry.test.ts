@@ -854,4 +854,55 @@ describe("ConductorRegistryAdapter", () => {
     expect(byId.get("open")?.isHidden).toBe(false);
     expect(byId.get("closed")?.isHidden).toBe(true);
   });
+
+  it("finds the question a working chat is stuck on from its newest rows", () => {
+    const { adapter, db } = createRegistryFixture();
+    db.prepare(
+      `INSERT INTO repos (id, name, root_path, default_branch, updated_at, remote, hidden) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("repo-1", "repo", "/repos/repo", "main", "2026-09-22T04:00:00.000Z", "origin", 0);
+    db.prepare(
+      `INSERT INTO workspaces (id, repository_id, directory_name, branch, updated_at, state, derived_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("ws", "repo-1", "ws", "ws", "2026-09-22T04:00:00.000Z", "ready", "in-progress");
+    const insertSession = db.prepare(
+      `INSERT INTO sessions (id, workspace_id, status, agent_type, updated_at, last_user_message_at) VALUES (?, ?, ?, ?, ?, ?);`,
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO session_messages (id, session_id, role, content, sent_at) VALUES (?, ?, ?, ?, ?);`,
+    );
+    const at = "2026-09-22T04:10:00.000Z";
+    const tool = (id: string, name: string, input: unknown) =>
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id, name, input }] } });
+    const answer = (id: string) =>
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "x" }] },
+      });
+    const ask = tool("q1", "mcp__conductor__AskUserQuestion", {
+      questions: [{ question: "Which one?", options: [{ label: "A", description: "a" }, "B"] }],
+    });
+    const cases: Record<string, string[]> = {
+      pending: [ask],
+      answered: [ask, answer("q1")],
+      plan: [tool("p1", "ExitPlanMode", { plan: "..." })],
+      notLast: [ask, tool("b1", "Bash", { command: "ls" }), answer("b1")],
+      ended: [ask, '{"type":"result","subtype":"success"}'],
+      malformed: ['{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion"'],
+    };
+    for (const [id, rows] of Object.entries(cases)) {
+      insertSession.run(id, "ws", "working", "claude", at, at);
+      rows.forEach((content, index) => insertMessage.run(`${id}-${index}`, id, "assistant", content, at));
+    }
+    insertSession.run("idle", "ws", "idle", "claude", at, at);
+    insertMessage.run("idle-0", "idle", "assistant", ask, at);
+
+    const byId = new Map(adapter.listFleetSessions(20).map((session) => [session.id, session]));
+    expect(byId.get("pending")?.pendingQuestion).toBe("Which one? [A / B]");
+    expect(byId.get("answered")?.pendingQuestion).toBeNull();
+    expect(byId.get("plan")?.pendingQuestion).toBe("has a plan for you to review");
+    expect(byId.get("notLast")?.pendingQuestion).toBe("Which one? [A / B]");
+    expect(byId.get("ended")?.pendingQuestion).toBeNull();
+    expect(byId.get("malformed")?.pendingQuestion).toBeNull();
+    expect(byId.get("idle")?.pendingQuestion).toBeNull();
+  });
 });

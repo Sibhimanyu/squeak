@@ -127,4 +127,16 @@ describe("ConductorObserver", () => {
     const [session] = observe([row({ lastTurnEndedAt: null, lastTurnOutcome: null })]);
     expect(session?.state).toBe("idle");
   });
+
+  it("maps a working chat with an unanswered question to awaiting_input, carrying the question", () => {
+    const [session] = observe([row({ status: "working", pendingQuestion: "Which database? [A / B]" })]);
+    expect(session?.state).toBe("awaiting_input");
+    expect(session?.detail).toBe("Which database? [A / B]");
+  });
+
+  it("falls back to the status mapping when nothing is pending", () => {
+    const [session] = observe([row({ status: "working", pendingQuestion: null })]);
+    expect(session?.state).toBe("working");
+    expect(session?.detail).toBeNull();
+  });
 });

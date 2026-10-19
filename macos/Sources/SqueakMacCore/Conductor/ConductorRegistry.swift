@@ -25,6 +25,10 @@ public struct ConductorSessionRow: Hashable, Sendable {
     public var lastTurnOutcome: TurnOutcome?
     /// The chat was closed in Conductor, or its repo hidden.
     public var isHidden: Bool
+    /// What the agent is waiting to be told, when its newest unanswered tool
+    /// call is a question tool. Conductor's own `status` stays `working` while
+    /// its question modal is open.
+    public var pendingQuestion: String?
 
     public enum TurnOutcome: String, Hashable, Sendable { case success, failed, aborted }
 
@@ -34,7 +38,8 @@ public struct ConductorSessionRow: Hashable, Sendable {
         contextUsedPercent: Double? = nil, directoryName: String? = nil, branch: String? = nil,
         derivedStatus: String? = nil, manualStatus: String? = nil, workspaceState: String? = nil,
         workspacePath: String? = nil, defaultBranch: String? = nil, repositoryName: String? = nil,
-        lastTurnEndedAt: String? = nil, lastTurnOutcome: TurnOutcome? = nil, isHidden: Bool = false
+        lastTurnEndedAt: String? = nil, lastTurnOutcome: TurnOutcome? = nil, isHidden: Bool = false,
+        pendingQuestion: String? = nil
     ) {
         self.id = id
         self.workspaceId = workspaceId
@@ -56,6 +61,7 @@ public struct ConductorSessionRow: Hashable, Sendable {
         self.lastTurnEndedAt = lastTurnEndedAt
         self.lastTurnOutcome = lastTurnOutcome
         self.isHidden = isHidden
+        self.pendingQuestion = pendingQuestion
     }
 }
 
@@ -142,6 +148,11 @@ public struct ConductorRegistry: Sendable {
                 }
             }
             let updated = row["updatedAt"]?.string
+            let hidden = row["hidden"]?.int == 1
+            let status = row["status"]?.string
+            let pending: String? =
+                !hidden && ["working", "waiting", "needs_user_input"].contains(status ?? "")
+                ? pendingQuestion(sessionId: id) : nil
             return ConductorSessionRow(
                 id: id, workspaceId: workspaceId, status: row["status"]?.string,
                 agentType: row["agentType"]?.string, title: row["title"]?.string,
@@ -154,8 +165,48 @@ public struct ConductorRegistry: Sendable {
                 workspaceState: row["workspaceState"]?.string, workspacePath: row["workspacePath"]?.string,
                 defaultBranch: row["defaultBranch"]?.string, repositoryName: row["repositoryName"]?.string,
                 lastTurnEndedAt: endedAt, lastTurnOutcome: outcome,
-                isHidden: row["hidden"]?.int == 1)
+                isHidden: hidden, pendingQuestion: pending)
         }
+    }
+
+    /// The question a chat is stuck on, from its newest few rows: a
+    /// question-tool call with no tool_result after it and no turn end or human
+    /// message after it. Only the newest rows are read (session_id index), and
+    /// only rows that could matter carry their body. Port of
+    /// `pendingQuestionFor` in conductor-registry.ts.
+    func pendingQuestion(sessionId: String) -> String? {
+        let sql = """
+            SELECT CASE
+              WHEN content LIKE '{"type":"assistant"%' AND (
+                   content LIKE '%"name":"mcp__conductor__AskUserQuestion"%'
+                OR content LIKE '%"name":"AskUserQuestion"%'
+                OR content LIKE '%"name":"ExitPlanMode"%') THEN content
+              WHEN content LIKE '{"type":"user"%' THEN substr(content, 1, 600)
+              WHEN content LIKE '{"type":"result"%' OR content LIKE '{"type":"error"%' THEN '{"type":"result"}'
+              ELSE NULL
+            END AS body
+            FROM (
+              SELECT rowid, content FROM session_messages
+              WHERE session_id = ? ORDER BY rowid DESC LIMIT 12
+            )
+            ORDER BY rowid DESC
+            """
+        guard let rows = try? database.query(sql, [.text(sessionId)]) else { return nil }
+        var answered = Set<String>()
+        for row in rows {
+            guard let body = row["body"]?.string else { continue }
+            if body.hasPrefix(#"{"type":"result""#) || body.hasPrefix(#"{"type":"error""#) { return nil }
+            if body.hasPrefix(#"{"type":"user""#) {
+                // A human message after the question: the turn moved on without it.
+                if !body.contains(#""type":"tool_result""#) && !body.contains("<task-notification>") { return nil }
+                for id in PendingQuestion.toolUseIds(in: body) { answered.insert(id) }
+                continue
+            }
+            if let call = PendingQuestion.call(inEnvelope: body), !answered.contains(call.id) {
+                return call.detail
+            }
+        }
+        return nil
     }
 
     /// Newest first. Ordered by `datetime()` so both timestamp spellings sort by
@@ -187,6 +238,9 @@ public enum ConductorStatus {
     public static let recentlyFinished: TimeInterval = 15 * 60
 
     public static func state(of row: ConductorSessionRow, now: Date) -> SessionState {
+        // Conductor keeps `working` while its question modal is open; the only
+        // trace is an unanswered question-tool call in the chat's newest rows.
+        if row.pendingQuestion != nil, !row.isHidden { return .blocked }
         switch row.status {
         // `waiting`: the turn ended but background work is still running, so
         // the chat is not done.

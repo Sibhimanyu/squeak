@@ -14,6 +14,7 @@ import type {
   SupportedAgentType,
   WorkspaceRef,
 } from "../types.js";
+import { questionCallIn } from "../fleet/pending-question.js";
 import { branchLookupCandidates, matchesRemoteBranchName } from "../utils/branch-name.js";
 import { sortRepositoryWorkspaces, type RepositoryWorkspacePriorityRef } from "../utils/workspace-priority.js";
 
@@ -43,6 +44,12 @@ export interface FleetRegistrySessionRef extends ConductorSessionRef {
   lastTurnOutcome?: "success" | "failed" | "aborted" | null;
   /** The chat was closed in Conductor, or its repo hidden. */
   isHidden?: boolean;
+  /**
+   * What the agent is waiting to be told, when its newest unanswered tool call
+   * is a question tool (`AskUserQuestion`, `ExitPlanMode`). Conductor's own
+   * `status` stays `working` while its question modal is open.
+   */
+  pendingQuestion?: string | null;
 }
 
 interface DbSessionRow {
@@ -584,6 +591,10 @@ export class ConductorRegistryAdapter {
       const [endedAt, outcome] = lastTurnEnd ? lastTurnEnd.split("|") : [null, null];
       return {
         ...row,
+        pendingQuestion:
+          hidden === 0 && (row.status === "working" || row.status === "waiting" || row.status === "needs_user_input")
+            ? this.pendingQuestionFor(row.id)
+            : null,
         updatedAt: conductorTimestampToIso(row.updatedAt) ?? row.updatedAt,
         lastUserMessageAt: conductorTimestampToIso(row.lastUserMessageAt),
         lastTurnEndedAt: conductorTimestampToIso(endedAt ?? null),
@@ -591,6 +602,70 @@ export class ConductorRegistryAdapter {
         isHidden: hidden === 1,
       };
     });
+  }
+
+  /**
+   * The question a chat is stuck on, from its newest few rows: a question-tool
+   * call with no tool_result after it and no turn end after it. Only the
+   * newest rows are read (session_id index), and only rows that could matter
+   * carry their body: a tool result's id sits in its first few hundred bytes.
+   */
+  private pendingQuestionFor(sessionId: string): string | null {
+    let rows: Array<{ rowid: number; body: string | null }>;
+    try {
+      rows = this.db
+        .prepare(
+          `
+            SELECT rowid, CASE
+              WHEN content LIKE '{"type":"assistant"%' AND (
+                   content LIKE '%"name":"mcp__conductor__AskUserQuestion"%'
+                OR content LIKE '%"name":"AskUserQuestion"%'
+                OR content LIKE '%"name":"ExitPlanMode"%') THEN content
+              WHEN content LIKE '{"type":"user"%' THEN substr(content, 1, 600)
+              WHEN content LIKE '{"type":"result"%' OR content LIKE '{"type":"error"%' THEN '{"type":"result"}'
+              ELSE NULL
+            END AS body
+            FROM (
+              SELECT rowid, content FROM session_messages
+              WHERE session_id = ? ORDER BY rowid DESC LIMIT 12
+            )
+            ORDER BY rowid DESC
+          `,
+        )
+        .all(sessionId) as Array<{ rowid: number; body: string | null }>;
+    } catch {
+      return null;
+    }
+    const answered = new Set<string>();
+    for (const row of rows) {
+      if (!row.body) {
+        continue;
+      }
+      if (row.body.startsWith('{"type":"result"') || row.body.startsWith('{"type":"error"')) {
+        return null;
+      }
+      if (row.body.startsWith('{"type":"user"')) {
+        // A human message after the question: the turn moved on without it.
+        if (!row.body.includes('"type":"tool_result"') && !row.body.includes("<task-notification>")) {
+          return null;
+        }
+        for (const match of row.body.matchAll(/"tool_use_id":"([^"]+)"/g)) {
+          answered.add(match[1] as string);
+        }
+        continue;
+      }
+      let entry: unknown;
+      try {
+        entry = JSON.parse(row.body);
+      } catch {
+        continue;
+      }
+      const call = questionCallIn((entry as { message?: { content?: unknown } } | null)?.message?.content);
+      if (call && !answered.has(call.id)) {
+        return call.detail;
+      }
+    }
+    return null;
   }
 
   getSessionDefaults(workspaceId: string): SessionDefaults {

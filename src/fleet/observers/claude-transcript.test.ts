@@ -253,4 +253,70 @@ describe("originFromEntrypoint", () => {
     expect(originFromEntrypoint("claude-vscode")).toBe("ide");
     expect(originFromEntrypoint(null)).toBe("unknown");
   });
+
+  describe("pending question tools", () => {
+    const now = Date.parse("2026-09-20T12:00:00.000Z");
+    const ask = (id: string) => ({
+      type: "tool_use",
+      id,
+      name: "AskUserQuestion",
+      input: { questions: [{ question: "Which database?", options: [{ label: "Postgres" }, "SQLite"] }] },
+    });
+    const result = (id: string) => ({ type: "tool_result", tool_use_id: id, content: "ok" });
+    const observe = (entries: unknown[]) => {
+      const projectsDir = makeProjectsDir();
+      writeTranscript(projectsDir, "q", entries);
+      return new ClaudeTranscriptObserver({ projectsDir, now: () => now }).observe()[0];
+    };
+
+    it("reads an unanswered AskUserQuestion as awaiting input, with its text and no stall timer", () => {
+      const session = observe([
+        userEntry("2026-09-20T11:58:00.000Z", "pick one"),
+        assistantEntry("2026-09-20T11:59:00.000Z", "tool_use", [ask("t1")]),
+      ]);
+      expect(session?.state).toBe("awaiting_input");
+      expect(session?.detail).toBe("Which database? [Postgres / SQLite]");
+      expect(session?.waitingOn).toBeNull();
+    });
+
+    it("returns to the ordinary mapping once the tool_result is written", () => {
+      const session = observe([
+        userEntry("2026-09-20T11:58:00.000Z", "pick one"),
+        assistantEntry("2026-09-20T11:59:00.000Z", "tool_use", [ask("t1")]),
+        { type: "user", timestamp: "2026-09-20T11:59:30.000Z", message: { role: "user", content: [result("t1")] } },
+      ]);
+      expect(session?.state).toBe("working");
+      expect(session?.waitingOn).toBe("model");
+    });
+
+    it("says an ExitPlanMode is a plan to review", () => {
+      const session = observe([
+        userEntry("2026-09-20T11:58:00.000Z", "plan it"),
+        assistantEntry("2026-09-20T11:59:00.000Z", "tool_use", [
+          { type: "tool_use", id: "p1", name: "ExitPlanMode", input: { plan: "x" } },
+        ]),
+      ]);
+      expect(session?.state).toBe("awaiting_input");
+      expect(session?.detail).toBe("has a plan for you to review");
+    });
+
+    it("finds the question when other tool calls follow it, and ignores one from an earlier turn", () => {
+      const pending = observe([
+        userEntry("2026-09-20T11:58:00.000Z", "go"),
+        assistantEntry("2026-09-20T11:58:30.000Z", "tool_use", [ask("t1")]),
+        assistantEntry("2026-09-20T11:58:40.000Z", "tool_use", [
+          { type: "tool_use", id: "b1", name: "Bash", input: {} },
+        ]),
+        { type: "user", timestamp: "2026-09-20T11:58:50.000Z", message: { role: "user", content: [result("b1")] } },
+      ]);
+      expect(pending?.state).toBe("awaiting_input");
+
+      const old = observe([
+        assistantEntry("2026-09-20T11:50:00.000Z", "tool_use", [ask("t0")]),
+        userEntry("2026-09-20T11:51:00.000Z", "never mind, do X"),
+        assistantEntry("2026-09-20T11:59:00.000Z", "end_turn", [{ type: "text", text: "Done." }]),
+      ]);
+      expect(old?.state).toBe("finished");
+    });
+  });
 });

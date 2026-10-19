@@ -66,7 +66,7 @@ export class ConductorObserver {
       branch: row.branch ?? row.directoryName,
       title: row.title,
       state,
-      detail: null,
+      detail: state === "awaiting_input" ? (row.pendingQuestion ?? null) : null,
       lastActivityAt,
       transcriptPath: null,
       contextPercent: normalizePercent(row.contextUsedPercent),
@@ -78,6 +78,11 @@ export class ConductorObserver {
   }
 
   private toFleetState(row: FleetRegistrySessionRef): FleetState {
+    // Conductor keeps `working` while its question modal is open; the only
+    // trace is an unanswered question-tool call in the chat's newest rows.
+    if (row.pendingQuestion && !row.isHidden) {
+      return "awaiting_input";
+    }
     switch (row.status) {
       // `waiting`: the turn ended but background work it started —
       // subagents, a background shell — is still running, and Conductor shows

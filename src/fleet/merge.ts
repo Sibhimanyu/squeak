@@ -2,6 +2,7 @@ import path from "node:path";
 
 import type { LiveAgentProcess } from "./observers/process-liveness.js";
 import type { FleetSession, HookEvent, ObservedSession } from "./types.js";
+import { isQuestionTool } from "./pending-question.js";
 import { stateFromHookEvent } from "./hook-protocol.js";
 
 /**
@@ -80,7 +81,11 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     cwd: transcript?.cwd ?? base.cwd,
     transcriptPath: transcript?.transcriptPath ?? base.transcriptPath,
     state: stateOwner?.state ?? base.state,
-    detail: transcript?.detail ?? conductor?.detail ?? null,
+    // A pending question's text beats a transcript's "Running <tool>".
+    detail:
+      stateOwner?.state === "awaiting_input" && stateOwner.detail
+        ? stateOwner.detail
+        : (transcript?.detail ?? conductor?.detail ?? null),
     // Conductor is the only source for these two, so take them from it
     // whichever observer supplied the rest of the identity.
     contextPercent: conductor?.contextPercent ?? base.contextPercent,
@@ -137,6 +142,9 @@ export function applyHookEvents(sessions: FleetSession[], hookEvents: Map<string
 }
 
 function describeHook(event: string, toolName: string | null): string | null {
+  if (isQuestionTool(toolName)) {
+    return null;
+  }
   if (event === "PreToolUse" && toolName) {
     return `About to run ${toolName}`;
   }

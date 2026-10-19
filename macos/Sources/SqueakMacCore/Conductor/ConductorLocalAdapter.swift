@@ -108,7 +108,8 @@ public struct ConductorLocalAdapter: HostAdapter {
                 discover: .supported, readTranscript: .supported, send: sendCapability, activity: .supported,
                 approve: .unsupported("Approve in Conductor"), openInHost: .supported,
                 attachments: .unsupported("Attachments are not supported yet")),
-            origin: .hostOwned)
+            origin: .hostOwned,
+            pendingQuestion: state == .blocked ? row.pendingQuestion : nil)
         return (session, retired)
     }
 

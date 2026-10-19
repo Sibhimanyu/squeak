@@ -41,6 +41,9 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var origin: SessionOwnership
     /// The daemon said `awaiting_approval` (not just input). Nil when the source cannot tell.
     public var awaitingApproval: Bool?
+    /// What a blocked agent is asking (first question plus its options, or
+    /// "has a plan for you to review"). Nil unless it is waiting on a question.
+    public var pendingQuestion: String?
 
     public var id: SessionKey { key }
 
@@ -50,7 +53,7 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         lastActivityAt: Date? = nil, alive: Bool? = nil, replyTarget: String? = nil,
         conductorWorkspaceId: String? = nil, conductorSessionId: String? = nil,
         capabilities: Capabilities = Capabilities(), origin: SessionOwnership = .hostOwned,
-        awaitingApproval: Bool? = nil
+        awaitingApproval: Bool? = nil, pendingQuestion: String? = nil
     ) {
         self.key = key
         self.title = title
@@ -68,6 +71,7 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         self.capabilities = capabilities
         self.origin = origin
         self.awaitingApproval = awaitingApproval
+        self.pendingQuestion = pendingQuestion
     }
 
     /// What the UI and notifications call this session.

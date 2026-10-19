@@ -505,3 +505,64 @@ struct ConductorLocalAdapterTests {
         #expect(await adapter(bare).health().status == .degraded("Conductor's database could not be read"))
     }
 }
+
+struct PendingQuestionTests {
+    private func tool(_ id: String, _ name: String, _ input: [String: Any]) -> String {
+        // Hand-built so `"type":"assistant"` leads, as it does in Conductor's rows.
+        let block: [String: Any] = ["type": "tool_use", "id": id, "name": name, "input": input]
+        let blocks = String(data: try! JSONSerialization.data(withJSONObject: [block]), encoding: .utf8)!
+        return #"{"type":"assistant","message":{"role":"assistant","content":\#(blocks)}}"#
+    }
+    private func answer(_ id: String) -> String {
+        #"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"\#(id)","content":"ok"}]}}"#
+    }
+    private let ask: [String: Any] = [
+        "questions": [["question": "Which one?", "options": [["label": "A", "description": "a"], "B"]]]
+    ]
+
+    private func rows(_ cases: [String: (String, [String])]) throws -> [String: ConductorSessionRow] {
+        let f = try ConductorFixture()
+        for (id, (status, messages)) in cases {
+            try f.addSession(id, status: status)
+            for (i, m) in messages.enumerated() {
+                try f.addMessage(id, role: "assistant", content: m, sentAt: iso(minutesAgo: Double(20 - i)))
+            }
+        }
+        let list = try ConductorRegistry(database: f.database).listFleetSessions(limit: 50)
+        return Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
+    }
+
+    @Test func pendingQuestionOnAWorkingChatIsBlockedWithItsText() throws {
+        let q = tool("q1", "mcp__conductor__AskUserQuestion", ask)
+        let byId = try rows([
+            "pending": ("working", [q]),
+            "answered": ("working", [q, answer("q1")]),
+            "plan": ("working", [tool("p1", "ExitPlanMode", ["plan": "x"])]),
+            "notLast": ("waiting", [q, tool("b1", "Bash", ["command": "ls"]), answer("b1")]),
+            "ended": ("working", [q, resultRow]),
+            "malformed": ("working", [#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion""#]),
+            "idle": ("idle", [q]),
+        ])
+        #expect(byId["pending"]?.pendingQuestion == "Which one? [A / B]")
+        #expect(ConductorStatus.state(of: byId["pending"]!, now: NOW) == .blocked)
+        #expect(byId["answered"]?.pendingQuestion == nil)
+        #expect(ConductorStatus.state(of: byId["answered"]!, now: NOW) == .working)
+        #expect(byId["plan"]?.pendingQuestion == "has a plan for you to review")
+        #expect(byId["notLast"]?.pendingQuestion == "Which one? [A / B]")
+        #expect(byId["ended"]?.pendingQuestion == nil)
+        #expect(byId["malformed"]?.pendingQuestion == nil)
+        #expect(byId["idle"]?.pendingQuestion == nil)
+    }
+
+    @Test func adapterCarriesTheQuestionOntoTheBlockedSession() async throws {
+        let f = try ConductorFixture()
+        try f.addSession("s", status: "working")
+        try f.addMessage("s", role: "assistant", content: tool("q1", "AskUserQuestion", ask), sentAt: iso(minutesAgo: 2))
+        let adapter = ConductorLocalAdapter(
+            database: f.database, activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path),
+            now: { NOW })
+        let s = try await adapter.discover().first
+        #expect(s?.state == .blocked)
+        #expect(s?.pendingQuestion == "Which one? [A / B]")
+    }
+}
