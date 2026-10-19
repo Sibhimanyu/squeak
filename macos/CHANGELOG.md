@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.8
+
+- Settings › About has Report a problem… to tell us what's broken, confusing
+  or could be better (Help › Report a problem still works).
+
 ## 2.0.7
 
 - Messages read like documents: headings, lists, tables, code with Copy,
