@@ -303,12 +303,21 @@ struct WorkingRow: View {
             .accessibilityLabel("\(agentName) is working: \(label)")
             .accessibilityHint(steps.isEmpty ? "" : open ? "Hides the steps" : "Shows the steps of this turn")
             if open, !steps.isEmpty {
-                StepList(steps: steps, total: max(total, steps.count), live: live)
+                // Opened to read: thinking and notes whole, tool calls one line each.
+                StepList(steps: steps, total: max(total, steps.count), live: live, readable: true)
                     .padding(.leading, 4)
                     .transition(.opacity)
             } else if !steps.isEmpty {
-                LiveBox(steps: Array(steps.suffix(Self.boxLines)), first: max(total, steps.count) - min(steps.count, Self.boxLines))
-                    .transition(.opacity)
+                // The box opens the turn too: it is what you see, so it is what you tap.
+                Button {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open = true }
+                } label: {
+                    LiveBox(steps: Array(steps.suffix(Self.boxLines)), first: max(total, steps.count) - min(steps.count, Self.boxLines))
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows every step of this turn, thinking included")
+                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -373,7 +382,7 @@ private struct FoldedSteps: View {
             .buttonStyle(.plain)
             .accessibilityHint(open ? "Hides these steps" : "Shows these steps")
             if open {
-                StepList(steps: steps, total: steps.count, live: false)
+                StepList(steps: steps, total: steps.count, live: false, readable: true)
                     .padding(.leading, 4)
                     .transition(.opacity)
             }
@@ -874,14 +883,20 @@ struct StepList: View {
     let steps: [Step]
     let total: Int
     let live: Bool
+    /// Opened from the working row to read the turn: thinking, notes and steers start whole, tool
+    /// calls one line. Elsewhere every step starts as one line.
+    var readable = false
 
     static func steps(session: PhoneSnapshot.Session, live: LiveTurn?) -> [Step] {
         if let live, !live.steps.isEmpty { return live.steps.map { Step(kind: $0.kind, text: $0.text) } }
         return (session.activity?.steps ?? []).map { Step(kind: $0.kind, text: $0.text) }
     }
 
-    /// Steps opened to their full text, by position in the whole turn (stable as new steps arrive).
-    @State private var expanded: Set<Int> = []
+    /// Steps tapped open (or, when `readable`, tapped shut), by position in the whole turn (stable as
+    /// new steps arrive).
+    @State private var toggled: Set<Int> = []
+
+    private func startsOpen(_ step: Step) -> Bool { readable && (step.kind == "thinking" || step.kind == "note" || step.kind == "you") }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -902,12 +917,12 @@ struct StepList: View {
     /// One line per step, like a chat app's collapsed reasoning: icon, kind, first line. A step with
     /// more to say opens on a tap to its whole text.
     private func row(_ step: Step, index: Int) -> some View {
-        let open = expanded.contains(index)
         let more = step.text.count > 60 || step.text.contains("\n")
+        let open = more && startsOpen(step) != toggled.contains(index)
         return Button {
             guard more else { return }
             withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.88)) {
-                if open { expanded.remove(index) } else { expanded.insert(index) }
+                if toggled.contains(index) { toggled.remove(index) } else { toggled.insert(index) }
             }
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
