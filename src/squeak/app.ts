@@ -17,6 +17,7 @@ import { ensureBackstop } from "../fleet/awake-backstop.js";
 import { readPower, type PowerReading } from "../fleet/power-monitor.js";
 import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { readPendingAsk } from "../fleet/question.js";
+import { readPhoneImage } from "../remote/phone-image.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
@@ -223,6 +224,8 @@ export class SqueakApp {
           verbose: config.remoteVerbose,
           // The phone's "what changed": the same reader Telegram's diff pages use.
           diff: this.runtime.diff,
+          // An image a chat's agent showed, for the phone: only inside that chat's workspace.
+          image: (source, cwd) => readPhoneImage(source, cwd),
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
           // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
           refreshUsage: () => this.claudeRefresher.refresh(),

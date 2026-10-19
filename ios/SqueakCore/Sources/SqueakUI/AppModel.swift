@@ -610,6 +610,43 @@ final class AppModel {
         return send.id
     }
 
+    /* ---------- images ---------- */
+
+    enum ImageAnswer { case image(UIImage), refused(String) }
+
+    /// Images already fetched this run, by chat and source: memory only, the newest 24.
+    @ObservationIgnored private var images: [String: UIImage] = [:]
+    @ObservationIgnored private var imageOrder: [String] = []
+
+    /// An image the chat's agent showed, from the Mac (read-only, so no Face ID). Kept in memory
+    /// only, never written to the phone.
+    func loadImage(_ session: PhoneSnapshot.Session, source: String) async -> ImageAnswer {
+        let cacheKey = session.key + "\u{1}" + source
+        if let hit = images[cacheKey] { return .image(hit) }
+        if demo {
+            try? await Task.sleep(for: .milliseconds(400))
+            return UIImage(named: "duck-asleep", in: .module, with: nil).map(ImageAnswer.image) ?? .refused("No demo image.")
+        }
+        guard let channel, let sessionId = session.conductorSessionId else { return .refused("Not connected to your Mac.") }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.imageDocument(sessionId: sessionId, source: source, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return .refused("Your Mac didn't answer. Is Squeak running?") }
+            guard result.sent, let image = result.image else { return .refused(result.reason ?? "Your Mac couldn't send that image.") }
+            let decoded = await Task.detached { Data(base64Encoded: image.data).flatMap(UIImage.init(data:)) }.value
+            guard let decoded else { return .refused("That image arrived damaged.") }
+            images[cacheKey] = decoded
+            imageOrder.append(cacheKey)
+            if imageOrder.count > 24 { images[imageOrder.removeFirst()] = nil }
+            return .image(decoded)
+        } catch {
+            return .refused("Couldn't reach your Mac.")
+        }
+    }
+
     /* ---------- what changed ---------- */
 
     enum DiffAnswer { case diff(WorkspaceDiff, FilePatch?), refused(String) }

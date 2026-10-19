@@ -163,7 +163,29 @@ private struct BlockView: View {
             Rectangle().fill(ctx.style.line).frame(height: 1).padding(.vertical, 2)
         case .table(let header, let alignments, let rows):
             TableView(header: header, alignments: alignments, rows: rows, ctx: ctx)
+        case .image(let alt, let source):
+            if let render = imageView {
+                render(alt, source)
+            } else {
+                // No host to load it: its description, as before.
+                Text("[image: \(alt.isEmpty ? (source as NSString).lastPathComponent : alt)]")
+                    .font(.system(size: ctx.body)).foregroundStyle(ctx.style.muted)
+            }
         }
+    }
+
+    @Environment(\.messageImage) private var imageView
+}
+
+/// How a host shows an image block (`![alt](source)`): the iPhone asks the Mac for the file.
+/// Without one, the image is its description. The source is the agent's text, untrusted.
+public typealias MessageImageView = @MainActor @Sendable (_ alt: String, _ source: String) -> AnyView
+
+private struct ImageViewKey: EnvironmentKey { static let defaultValue: MessageImageView? = nil }
+public extension EnvironmentValues {
+    var messageImage: MessageImageView? {
+        get { self[ImageViewKey.self] }
+        set { self[ImageViewKey.self] = newValue }
     }
 }
 

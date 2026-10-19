@@ -571,6 +571,12 @@ The session header is two lines (in the iPhone's navigation bar): the title,
 then state, age and as much of repo, agent and diff as fits. The transcript
 gets the room.
 
+An image the agent put in its answer (`![alt](path)` on its own line) is a
+`surface-raised` card with its description and "Image · tap to show": the
+file is on the Mac, and nothing leaves it until you tap. Loaded, it shows
+inline (at most 360pt tall, `radius-card`, `line` border); a tap opens it
+full screen on black, pinch to zoom, with Share.
+
 ### 8.6 Push card (Telegram and mobile notifications)
 
 Three short lines at most, as specified in `CLAUDE.md`:

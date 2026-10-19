@@ -38,6 +38,22 @@ public enum MessageMarkup {
         case quote([Block])
         case rule
         case table(header: [[Inline]], alignments: [Alignment], rows: [[[Inline]]])
+        /// `![alt](source)` alone in its paragraph: an image the agent made. `source` is a string
+        /// to show and to ask the host for, nothing more; the parser never opens it.
+        case image(alt: String, source: String)
+    }
+
+    /// `![alt](source)` and nothing else, the way agents put a screenshot in an answer; `<…>`
+    /// around the source is the angle form some write.
+    static func standaloneImage(_ text: String) -> Block? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix("!["), t.hasSuffix(")"), !t.contains("\n"),
+              let close = t.range(of: "]("), t.distance(from: t.startIndex, to: close.lowerBound) > 1 else { return nil }
+        let alt = String(t[t.index(t.startIndex, offsetBy: 2)..<close.lowerBound])
+        var source = String(t[close.upperBound..<t.index(before: t.endIndex)])
+        if source.hasPrefix("<"), source.hasSuffix(">") { source = String(source.dropFirst().dropLast()) }
+        guard !source.isEmpty, source.count <= 2_000, !alt.contains("]"), !source.contains("\n") else { return nil }
+        return .image(alt: alt, source: source)
     }
 
     public static func parse(_ text: String) -> [Block] {
@@ -56,7 +72,10 @@ public enum MessageMarkup {
         var item: (marker: ListMarker, depth: Int, lines: [String])?
 
         func flushPara() {
-            if !para.isEmpty { blocks.append(.paragraph(parseInlines(para.joined(separator: "\n")))) }
+            if !para.isEmpty {
+                let text = para.joined(separator: "\n")
+                blocks.append(standaloneImage(text) ?? .paragraph(parseInlines(text)))
+            }
             para = []
         }
         func flushQuote() {

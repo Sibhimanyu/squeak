@@ -36,6 +36,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   stopCommand: { box: string; sig: string; device: string };
   diffCommandId: string;
   diffCommand: { box: string; sig: string; device: string };
+  imageCommandId: string;
+  imageCommand: { box: string; sig: string; device: string };
 };
 
 const QUEUED_ID = "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31";
@@ -61,7 +63,8 @@ function bridge(turn: string) {
     projectId: "squeak-test",
     store: { get: async () => null, set: async () => {}, list: async () => [], delete: async () => {} },
     replier: {
-      lastTurnText: () => null,
+      // The chat's latest answer, which names the image the phone asks for.
+      lastTurnText: () => "![Shot](/w/.context/shot.png)",
       lastTurnId: () => turn,
       send: async (sessionId, text, _onFailed, options) => {
         sends.push([sessionId, text, options?.mode]);
@@ -78,6 +81,7 @@ function bridge(turn: string) {
         return { ok: true };
       },
     },
+    image: async () => ({ ok: true, image: { mime: "image/jpeg", data: "AAAA" } }),
     diff: {
       readSummary: async () => ({
         baseRef: null,
@@ -172,6 +176,16 @@ describe("a reply made on the iPhone", () => {
     expect(verdict.result).toEqual({ id: fixture.stopCommandId, status: "sent" });
     expect(stops).toEqual(["s1"]);
     expect(sends).toEqual([]);
+  });
+
+  it("sends an image the chat showed when the phone signs an image request", async () => {
+    const { remote, config } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.imageCommandId, fixture.imageCommand);
+    expect(verdict.result).toEqual({
+      id: fixture.imageCommandId,
+      status: "sent",
+      image: { mime: "image/jpeg", data: "AAAA" },
+    });
   });
 
   it("answers what a chat changed when the phone signs a diff request", async () => {

@@ -265,6 +265,24 @@ public struct ReplyCommand: Codable, Equatable, Sendable {
     public var messageId: String? = nil
 }
 
+/// Ask for an image a chat's agent showed (`![alt](source)`); `source` exactly as the chat wrote it.
+public struct ImageCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let sessionId: String
+    public let source: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// An image as the Mac sends it: shrunk to a JPEG, base64.
+public struct PhoneImage: Codable, Equatable, Sendable {
+    public let mime: String
+    public let data: String
+    public init(mime: String, data: String) { self.mime = mime; self.data = data }
+}
+
 /// Ask what a chat changed: its file list, and one file's patch when `file` is its index.
 public struct DiffCommand: Codable, Equatable, Sendable {
     public let v: Int
@@ -427,6 +445,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     /// For a diff request: the chat's changes, and the patch of the file asked for.
     public var diff: WorkspaceDiff? = nil
     public var patch: FilePatch? = nil
+    /// For an image request: the image.
+    public var image: PhoneImage? = nil
 
     public var sent: Bool { status == "sent" }
     /// For an answer: the Mac delivered it (`via` says how: "conductor", "stopped-and-sent").

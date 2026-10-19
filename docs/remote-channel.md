@@ -299,6 +299,16 @@ answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
   chat the phone is shown, never from the phone. The result carries `diff`
   (the file list, fleet/diff-view.ts) and, when `file` is an index into it,
   `patch: { index, path, text }` (up to 12,000 characters). No Face ID.
+- **Images from a chat (2026-10-19).** `{ v: 1, kind: "image", sessionId,
+  source, nonce, expiresAt }` asks for an image the chat's agent showed
+  (`![alt](source)` alone in a paragraph). Read-only but signed. After the
+  shared checks: the chat must be one the phone is shown; `source` must appear
+  in the chat's own messages (its latest answer or its history), so a phone
+  cannot name an arbitrary path; and `phone-image.ts` resolves it (symlinks
+  followed) to a file inside the chat's workspace folder, an image type, at
+  most 30 MB, then sends it shrunk by `sips` to a JPEG of at most 1,600 px
+  (`result.image: { mime, data }`, base64, at most 700 KB). The phone asks
+  only when you tap, and keeps it in memory only.
 - **Plans on the phone (2026-10-19).** A session waiting on ExitPlanMode
   carries `question: { toolUseId, questions: [], plan }` (the plan's text,
   up to 20,000 characters, from `readPendingAsk`). The phone's plan card

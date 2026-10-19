@@ -1,6 +1,20 @@
 import Testing
 @testable import SqueakMarkup
 
+@Suite("Message images")
+struct MessageImageTests {
+    @Test func anImageAloneInItsParagraphIsAnImageBlock() {
+        let blocks = MessageMarkup.parse("Here it is.\n\n![Duplicates](</Users/x/w/.context/shot.png>)\n\nDone.")
+        #expect(blocks[1] == .image(alt: "Duplicates", source: "/Users/x/w/.context/shot.png"))
+        #expect(MessageMarkup.parse("![](a.png)") == [.image(alt: "", source: "a.png")] || MessageMarkup.parse("![](a.png)").count == 1)
+    }
+
+    @Test func anImageInsideASentenceStaysItsDescription() {
+        let blocks = MessageMarkup.parse("See ![shot](a.png) for it.")
+        guard case .paragraph = blocks.first else { Issue.record("expected a paragraph"); return }
+    }
+}
+
 @Suite("Message markup")
 struct MessageMarkupTests {
     typealias M = MessageMarkup

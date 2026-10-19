@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import type { TranscriptMessage } from "../fleet/transcript.js";
+import type { PhoneImageResult } from "./phone-image.js";
 import type { QueueAction, QueueItem, ReplyOutcome } from "../fleet/session-reply.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { ChannelDoc } from "./firestore-rest.js";
@@ -108,6 +109,9 @@ function fixture(
     stopOutcome?: { ok: true } | { ok: false; reason: string } | "none";
     answerer?: Answerer | null;
     diff?: RemoteDiffReader | null;
+    image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
+    /** The chat's latest message, as the replier reads it. */
+    lastText?: string;
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
@@ -116,7 +120,7 @@ function fixture(
   const sends: Array<{ sessionId: string; text: string }> = [];
   let now = NOW;
   const replier = {
-    lastTurnText: () => "Pick one?\nA) Arm now\nB) Later",
+    lastTurnText: () => options.lastText ?? "Pick one?\nA) Arm now\nB) Later",
     lastTurnId: vi.fn(() => options.turn ?? "turn-1"),
     send: vi.fn(async (sessionId: string, text: string) => {
       sends.push({ sessionId, text });
@@ -168,6 +172,7 @@ function fixture(
     newChat: options.newChat ?? null,
     answerer: options.answerer ?? null,
     diff: options.diff ?? null,
+    image: options.image ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -273,6 +278,20 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const imageCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "image",
+      sessionId: "s1",
+      source: "/w/.context/shot.png",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const result = (id: string) => {
     const doc = store.docs.get(`${channel}/results/${id}`);
     return doc ? open<Record<string, unknown>>(payload.k, doc.box) : null;
@@ -293,6 +312,7 @@ function fixture(
     queueCommand,
     stopCommand,
     diffCommand,
+    imageCommand,
     result,
     configPath,
     emit,
@@ -461,6 +481,47 @@ describe("RemoteBridge commands", () => {
     await f.store.set(`${f.channel}/commands/c1`, f.command());
     await f.bridge.tick();
     expect(f.result("c1")).toEqual({ id: "c1", status: "refused", reason: "That chat is still working in Conductor." });
+  });
+});
+
+describe("RemoteBridge image", () => {
+  const shown = "Here it is.\n\n![Shot](</w/.context/shot.png>)";
+  const ok = async (): Promise<PhoneImageResult> => ({ ok: true, image: { mime: "image/jpeg", data: "AAAA" } });
+
+  it("sends an image the chat's own message names, read in the chat's workspace", async () => {
+    const image = vi.fn(ok);
+    const f = fixture({ image, lastText: shown });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.imageCommand());
+    await f.bridge.tick();
+    expect(image).toHaveBeenCalledWith("/w/.context/shot.png", "/w");
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent", image: { mime: "image/jpeg", data: "AAAA" } });
+  });
+
+  it("refuses a path the chat never named, without reading anything", async () => {
+    const image = vi.fn(ok);
+    const f = fixture({ image, lastText: shown });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.imageCommand({ source: "/Users/me/.ssh/id_rsa.png" }));
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That image isn't in this chat." });
+    expect(image).not.toHaveBeenCalled();
+  });
+
+  it("passes the reader's refusal back, and refuses without a reader or for another chat", async () => {
+    const f = fixture({ image: async () => ({ ok: false, reason: "That isn't an image file." }), lastText: shown });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.imageCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That isn't an image file." });
+    await f.store.set(`${f.channel}/commands/c2`, f.imageCommand({ sessionId: "s-elsewhere" }));
+    await f.bridge.tick();
+    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That chat isn't on your phone any more." });
+    const bare = fixture({ lastText: shown });
+    await bare.pair();
+    await bare.store.set(`${bare.channel}/commands/c1`, bare.imageCommand());
+    await bare.bridge.tick();
+    expect(bare.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't send images to a phone." });
   });
 });
 

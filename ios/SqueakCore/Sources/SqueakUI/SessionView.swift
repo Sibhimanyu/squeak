@@ -258,6 +258,8 @@ private struct ChatRows: View {
                         Task { await model.send(letter, to: session) }
                     }
                     .equatable()
+                    // Images in the answer load from the Mac on a tap.
+                    .environment(\.messageImage, { alt, source in AnyView(ChatImage(alt: alt, source: source, session: session)) })
                     // What the turn left on disk, a tap from its diff.
                     if !muted, session.state != "working", let git = session.git, session.conductorSessionId != nil {
                         Button { showingDiff = true } label: {

@@ -20,6 +20,7 @@ import type { QueueAction, QueueItem, ReplyMode, ReplyOptions, ReplyOutcome } fr
 import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
 import type { DiffFile, WorkspaceDiff } from "../fleet/diff-view.js";
+import type { PhoneImageResult } from "./phone-image.js";
 import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import type { FleetSession } from "../fleet/types.js";
@@ -121,6 +122,22 @@ export interface DiffCommand {
   kind: "diff";
   sessionId: string;
   file?: number;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/**
+ * A signed request for an image the chat's agent put in its answer
+ * (`![alt](source)`), which the phone cannot open itself. Read-only; answered
+ * only for a source the chat's own messages name, inside its workspace
+ * (phone-image.ts).
+ */
+export interface ImageCommand {
+  v: 1;
+  kind: "image";
+  sessionId: string;
+  source: string;
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
@@ -323,6 +340,8 @@ export interface RemoteBridgeDependencies {
   verbose?: boolean;
   /** Reads a chat's diff for the phone's "what changed". Absent: refused. */
   diff?: RemoteDiffReader | null;
+  /** Reads an image a chat's agent named, for the phone (phone-image.ts). Absent: refused. */
+  image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
   now?: () => number;
   macName?: string;
 }
@@ -892,6 +911,9 @@ export class RemoteBridge {
     if (kind === "queue") {
       return this.handleQueue(device, id, command as unknown as QueueCommand);
     }
+    if (kind === "image") {
+      return this.handleImage(device, id, command as unknown as ImageCommand);
+    }
     if (kind === "diff") {
       return this.handleDiff(device, id, command as unknown as DiffCommand);
     }
@@ -1187,6 +1209,62 @@ export class RemoteBridge {
     }
     this.log(device.name, "sent", `changes of ${command.sessionId.slice(0, 8)}`);
     return { write: true, result };
+  }
+
+  /**
+   * An image the chat's agent showed. Signature, freshness and nonce have
+   * already held. The source must be named in the chat's own messages (so a
+   * phone cannot ask for any path it likes), and phone-image.ts then keeps it
+   * inside the chat's workspace, an image, and shrunk.
+   */
+  private async handleImage(
+    device: PairedDevice,
+    id: string,
+    command: ImageCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `image: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (
+      command.v !== 1 ||
+      typeof command.sessionId !== "string" ||
+      typeof command.source !== "string" ||
+      !command.source.trim() ||
+      command.source.length > 2_000
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const read = this.deps.image;
+    if (!read) {
+      return refuse("This Mac can't send images to a phone.");
+    }
+    const session = this.shownSession(command.sessionId);
+    if (!session) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    if (!session.cwd) {
+      return refuse("This chat has no folder on the Mac to read.");
+    }
+    const replier = this.deps.replier;
+    const texts = [
+      replier.lastTurnText(command.sessionId) ?? "",
+      ...(replier.transcript?.(command.sessionId, 40).messages.map((message) => message.text) ?? []),
+    ];
+    if (!texts.some((text) => text.includes(command.source))) {
+      return refuse("That image isn't in this chat.");
+    }
+    let outcome: PhoneImageResult;
+    try {
+      outcome = await read(command.source, session.cwd);
+    } catch {
+      outcome = { ok: false, reason: "Your Mac couldn't read that image." };
+    }
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.log(device.name, "sent", `an image from ${command.sessionId.slice(0, 8)}`);
+    return { write: true, result: { id, status: "sent", image: outcome.image } };
   }
 
   /** The Mac's own record of a Conductor chat the phone is shown, or null. */
