@@ -13,6 +13,7 @@ final class MacInteropTests: XCTestCase {
         let queuedBox: String
         let steeredBox: String
         let steerFallbackBox: String
+        let startedBox: String
         let refusedBox: String
         let pairAnswerBox: String
     }
@@ -102,6 +103,23 @@ final class MacInteropTests: XCTestCase {
         XCTAssertNil(try ChannelCrypto.open(CommandResult.self, box: f.resultBox, key: key).delivery)
     }
 
+    func testDecodesTheWorkspacesTheMacOffersAndTheStartedChat() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let snapshot = try ChannelCrypto.open(PhoneSnapshot.self, box: f.snapshotBox, key: key)
+        let workspaces = try XCTUnwrap(snapshot.workspaces)
+        XCTAssertEqual(workspaces.map(\.label), ["farm · arm", "farm · timer"])
+        XCTAssertEqual(workspaces.map(\.agent), [.claude, .codex])
+        let started = try ChannelCrypto.open(CommandResult.self, box: f.startedBox, key: key)
+        XCTAssertTrue(started.sent)
+        XCTAssertEqual(started.sessionId, "new-1")
+    }
+
+    func testStillDecodesASnapshotFromAMacThatCannotStartChats() throws {
+        let json = #"{"v":1,"mac":"M","generatedAt":"x","duck":{"blockedCount":0,"workingCount":0},"sessions":[]}"#
+        XCTAssertNil(try JSONDecoder().decode(PhoneSnapshot.self, from: Data(json.utf8)).workspaces)
+    }
+
     func testRejectsThingsThatAreNotPairingCodes() {
         XCTAssertThrowsError(try PairingPayload.parse("https://example.com"))
         XCTAssertThrowsError(try PairingPayload.parse("squeak://pair?d=bm90LWpzb24"))
@@ -156,6 +174,36 @@ final class ChannelTests: XCTestCase {
         )
         let (_, document) = try channel.replyDocument(to: session, text: "A", mode: .steer, signer: SoftwareSigner())
         XCTAssertEqual(try ChannelCrypto.open(ReplyCommand.self, box: document.box, key: pairing.k).mode, .steer)
+    }
+
+    func testAStartCommandCarriesNoSessionAndSignsItsKind() throws {
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: Data(repeating: 7, count: 32).base64EncodedString(), n: "Mac")
+        let channel = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())
+        let now = Date()
+        let (_, document) = try channel.startDocument(workspaceId: "w1", agent: .claude, text: "Hi", signer: SoftwareSigner(), now: now)
+        XCTAssertNotNil(document.sig)
+        XCTAssertEqual(document.device, "phone-1")
+        let command = try ChannelCrypto.open(StartCommand.self, box: document.box, key: pairing.k)
+        XCTAssertEqual(command.kind, "start")
+        XCTAssertEqual(command.workspaceId, "w1")
+        XCTAssertEqual(command.agent, .claude)
+        XCTAssertEqual(command.nonce.count, 32)
+        XCTAssertEqual(command.expiresAt, Int64((now.timeIntervalSince1970 + Channel.commandLifetime) * 1000))
+        // Sealed as a plain object: no sessionId or answersTurn key for a reply path to misread.
+        struct Keys: Decodable {
+            struct Key: CodingKey {
+                var stringValue: String
+                var intValue: Int? { nil }
+                init?(stringValue: String) { self.stringValue = stringValue }
+                init?(intValue: Int) { nil }
+            }
+            let names: Set<String>
+            init(from decoder: Decoder) throws {
+                names = Set(try decoder.container(keyedBy: Key.self).allKeys.map(\.stringValue))
+            }
+        }
+        let keys = try ChannelCrypto.open(Keys.self, box: document.box, key: pairing.k)
+        XCTAssertEqual(keys.names, ["v", "kind", "workspaceId", "agent", "text", "nonce", "expiresAt"])
     }
 
     func testAMissingSnapshotIsNilNotAnError() async throws {

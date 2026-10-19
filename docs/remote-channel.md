@@ -4,7 +4,7 @@
 > Firebase project `squeak-5c9gvo` (Firestore in asia-south1), iOS via SideStore.
 >
 > This is the first step where a device that is not your Mac can make agents
-> on your Mac *do things*. That is remote code execution with extra steps: an
+> on your Mac _do things_. That is remote code execution with extra steps: an
 > agent running `bypassPermissions` will run whatever a reply asks for. So the
 > security model is decided here, on paper, before the first line of code.
 
@@ -16,22 +16,22 @@
    chat finishes (the same events Telegram gets today).
 3. **Answer** — tap a letter or send text to one specific chat.
 4. **Work when the Mac is not reachable directly** — the phone is on cellular,
-   the Mac is behind home NAT. The Mac only ever makes *outbound* connections.
+   the Mac is behind home NAT. The Mac only ever makes _outbound_ connections.
 
-Explicitly **not** in scope for step 4: starting new chats, stopping agents,
+Explicitly **not** in scope for step 4 (starting new chats was later added, see the end): stopping agents,
 approving permission prompts, reading diffs of arbitrary files, anything that
 touches a machine other than this Mac. Each is a later, separate decision.
 
 ## Threat model
 
-| Threat | What it would mean | Mitigation (below) |
-| --- | --- | --- |
-| Someone else's phone sends a reply | Arbitrary instructions to a `bypassPermissions` agent on your Mac | Device pairing + per-device keys; Mac verifies every command's signature |
-| The cloud provider (or a leaked admin key) forges a command | Same as above, at scale | Commands are **signed on the phone with a key the cloud never sees**; the Mac rejects anything unsigned |
-| Replay of an old, legitimately signed "A" | An old decision re-sent to a new question | Each command names the chat **and the turn it answers**, carries a nonce and expiry; the Mac rejects stale or reused ones |
-| Conversation text leaks from the cloud | Your code, paths, business details exposed | Store only what the phone must render, encrypted end-to-end; short retention |
-| Phone lost or stolen | Holder can answer agents | Revocation from the Mac app in one click; biometric unlock before sending |
-| Prompt injection *through* the channel | A message crafted to look like a reply | Only the paired human can author commands; nothing from an agent is ever turned into a command |
+| Threat                                                      | What it would mean                                                | Mitigation (below)                                                                                                        |
+| ----------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Someone else's phone sends a reply                          | Arbitrary instructions to a `bypassPermissions` agent on your Mac | Device pairing + per-device keys; Mac verifies every command's signature                                                  |
+| The cloud provider (or a leaked admin key) forges a command | Same as above, at scale                                           | Commands are **signed on the phone with a key the cloud never sees**; the Mac rejects anything unsigned                   |
+| Replay of an old, legitimately signed "A"                   | An old decision re-sent to a new question                         | Each command names the chat **and the turn it answers**, carries a nonce and expiry; the Mac rejects stale or reused ones |
+| Conversation text leaks from the cloud                      | Your code, paths, business details exposed                        | Store only what the phone must render, encrypted end-to-end; short retention                                              |
+| Phone lost or stolen                                        | Holder can answer agents                                          | Revocation from the Mac app in one click; biometric unlock before sending                                                 |
+| Prompt injection _through_ the channel                      | A message crafted to look like a reply                            | Only the paired human can author commands; nothing from an agent is ever turned into a command                            |
 
 The single most important property: **the Mac trusts a key, not a server.**
 Firebase (or anything) is a dumb, untrusted pipe.
@@ -90,7 +90,7 @@ The phone talks straight to Squeak's loopback server over a private network.
 - `events` — "needs you" / "done" pushes, carrying only a session handle and
   the three-line card text (so the lock screen can show it), encrypted.
 - `commands` — from the phone: `{ sessionId, answersTurn, text, mode?, nonce,
-  expiresAt }`, signed with the device key, encrypted to the Mac.
+expiresAt }`, signed with the device key, encrypted to the Mac.
 - Retention: snapshot overwritten in place; events and commands deleted by the
   Mac as soon as they are processed, and expired server-side after 24 hours.
 
@@ -103,7 +103,7 @@ A command is executed only if **all** hold:
    was never seen.
 3. `answersTurn` is the chat's **current** latest turn — a letter tapped for
    yesterday's question is refused.
-4. The action is on the allow-list: *reply to an existing Conductor chat*.
+4. The action is on the allow-list: _reply to an existing Conductor chat_.
    Nothing else in step 4.
 5. The same busy rules as Telegram and the Mac window (`ConductorReplier`).
 
@@ -126,8 +126,8 @@ one codebase on both platforms and first-class FCM support.
    exact setup steps for you to follow.
 3. **Phones:** iPhone, Android, or both? (Changes what gets tested first,
    not the codebase.)
-4. **Scope check:** step 4 lets a paired phone *reply to existing Conductor
-   chats* and nothing else. Anything you want in or out?
+4. **Scope check:** step 4 lets a paired phone _reply to existing Conductor
+   chats_ and nothing else. Anything you want in or out?
 
 ## As built (2026-09-25)
 
@@ -183,7 +183,7 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
   without an SDK. The Mac holds one stream each on `state/presence`, `pairing`
   and `commands` and runs a pass within ~50 ms of a phone's write, polling only
   every 60s as a safety net; the phone streams `state/snapshot` and `results`
-  and ticks every 20s only to keep presence fresh. A stream event only *wakes*
+  and ticks every 20s only to keep presence fresh. A stream event only _wakes_
   a pass: everything is still read through the same verbs and every check in
   `handleCommand` runs unchanged, so a forged write to the stream runs nothing.
   On the emulator (`SQUEAK_E2E_DATABASE_URL=… scripts/e2e-remote.ts`) a reply's
@@ -199,3 +199,49 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
   - **Cutover.** Firestore stays the default. Set the URL only once the phone
     runs a build that can follow (1.6+); an older phone keeps polling Firestore,
     which the Mac then no longer updates. There is no dual-write.
+
+## New chats from the phone (2026-10-19)
+
+The first capability beyond replying: a paired phone can **start a new Conductor
+chat** in an existing workspace. This lifts the "no new chats" line from the
+original scope, deliberately and only this far.
+
+- **Snapshot.** An optional `workspaces: [{ id, label ("repo · branch"),
+defaultAgent }]`: the non-archived, non-hidden workspaces from Conductor's
+  registry (the same list as `GET /control/workspaces`), newest first, at most 20. It is absent from a Mac that cannot start chats; the phone then hides
+  "New chat" and Settings says the Mac needs updating. A change in the list
+  republishes the snapshot.
+- **Command.** The same signed envelope as a reply, sealed and signed as one
+  box, with `kind: "start"`: `{ v: 1, kind: "start", workspaceId, agent
+("claude" | "codex"), text, nonce, expiresAt }`. It has no `sessionId` and no
+  `answersTurn`. A reply carries no `kind` (or `"reply"`), so replies are
+  byte-identical to before; any other `kind` is refused. The result is
+  `{ id, status: "sent", sessionId }` or `{ id, status: "refused", reason }`;
+  `sessionId` is Conductor's id for the chat, which the snapshot carries as
+  `conductorSessionId` once the chat shows up, and the phone opens it then.
+- **What the Mac checks, after every check a reply gets** (paired unrevoked
+  device key signed the exact box, not expired and at most 10 minutes ahead,
+  fresh nonce, decryptable): the Mac offers new chats at all; `agent` is
+  claude or codex; the text is non-empty after trimming and at most 20,000
+  characters; the workspace is in the list the Mac publishes **read from the
+  registry again for this command**, never the phone's copy (so an archived or
+  hidden workspace is refused even if the phone still lists it); one start per
+  device per 15 seconds. There is no turn check, since there is no turn. Then
+  `ConductorRelayService.startChat`, which validates the workspace once more.
+- **The phone** signs behind Face ID, like a reply, says "Starting…" until the
+  Mac answers and then until the chat appears in the snapshot, and shows the
+  Mac's refusal in words. If the Mac does not answer in 30 seconds it says so
+  and warns that the chat may still appear, rather than inviting a resend.
+
+**The threat this adds.** Replying could only steer a chat you had already
+started and could see. A paired phone, or whoever holds one unlocked, can now
+**start an agent in any listed workspace with that workspace's defaults** —
+which for a third of Conductor chats means `bypassPermissions` — and give it
+its first instruction. The mitigations are the ones replies already rely on
+(a device key the cloud never sees, Face ID, revocation on the Mac, short
+expiry, nonces) plus: only workspaces that exist today and are not archived
+or hidden; at most one start per device every 15 seconds; no way to choose a
+directory, a model, a permission mode or a branch, only a workspace the owner
+already made; and every start, accepted or refused, in the Mac app's device
+activity. It cannot create a workspace, and it cannot start a chat anywhere
+else on the machine. Each of those is a separate, later decision.

@@ -67,7 +67,19 @@ enum DemoData {
 
     static var snapshot: PhoneSnapshot {
         let raw = rawSnapshot
-        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: raw.sessions.map(titled), usage: usage)
+        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: raw.sessions.map(titled), usage: usage, workspaces: workspaces)
+    }
+
+    /// What the Mac lists for a new chat. `-squeak-demo-no-workspaces` plays a Mac too old to send any.
+    private static var workspaces: [PhoneSnapshot.Workspace]? {
+        guard !ProcessInfo.processInfo.arguments.contains("-squeak-demo-no-workspaces") else { return nil }
+        return [
+            .init(id: "w-pay", label: "storefront · payment-retries", defaultAgent: "claude"),
+            .init(id: "w-search", label: "atlas · search-migration", defaultAgent: "codex"),
+            .init(id: "w-tg", label: "squeak · telegram-formatting", defaultAgent: "claude"),
+            .init(id: "w-link", label: "compass · onboarding-link", defaultAgent: "codex"),
+            .init(id: "w-cache", label: "atlas · api-caching", defaultAgent: "claude"),
+        ]
     }
 
     /// Claude's reading is a few hours old, as it would be unless Refresh was pressed on the Mac.

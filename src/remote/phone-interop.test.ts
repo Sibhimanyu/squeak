@@ -22,6 +22,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   command: { box: string; sig: string; device: string };
   steerCommandId: string;
   steerCommand: { box: string; sig: string; device: string };
+  startCommandId: string;
+  startCommand: { box: string; sig: string; device: string };
 };
 
 function bridge(turn: string) {
@@ -35,6 +37,7 @@ function bridge(turn: string) {
   };
   fs.writeFileSync(configPath, JSON.stringify(config));
   const sends: Array<[string, string, string | undefined]> = [];
+  const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
   const remote = new RemoteBridge({
     configPath,
     projectId: "squeak-test",
@@ -48,10 +51,19 @@ function bridge(turn: string) {
       },
     },
     snapshot: () => ({}) as FleetSnapshot,
+    newChat: {
+      workspaces: () => [
+        { id: "w1", repoName: "farm", branch: "arm", lastActivityAt: "", defaultAgent: "claude" as const },
+      ],
+      start: async (args) => {
+        starts.push(args);
+        return { ok: true, sessionId: "new-1" };
+      },
+    },
     // As of when the phone made it, so the fixture never expires.
     now: () => fixture.madeAt + 1_000,
   });
-  return { remote, config, sends };
+  return { remote, config, sends, starts };
 }
 
 describe("a reply made on the iPhone", () => {
@@ -67,6 +79,14 @@ describe("a reply made on the iPhone", () => {
     const verdict = await remote.handleCommand(config, fixture.steerCommandId, fixture.steerCommand);
     expect(verdict.result).toMatchObject({ status: "sent", delivery: "steered" });
     expect(sends).toEqual([["s1", "Use the timer instead", "steer"]]);
+  });
+
+  it("starts a new chat when the phone signs a start command", async () => {
+    const { remote, config, sends, starts } = bridge("turn-9");
+    const verdict = await remote.handleCommand(config, fixture.startCommandId, fixture.startCommand);
+    expect(verdict.result).toEqual({ id: fixture.startCommandId, status: "sent", sessionId: "new-1" });
+    expect(starts).toEqual([{ workspaceId: "w1", agent: "codex", text: "Add a timer" }]);
+    expect(sends).toEqual([]);
   });
 
   it("is refused once the chat has moved to another turn", async () => {

@@ -16,6 +16,7 @@ import { parseChoices } from "../fleet/choices.js";
 import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
+import { listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
 import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
 import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
@@ -160,6 +161,12 @@ export class SqueakApp {
           onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
           activity: (session) => (session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null),
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
+          // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
+          newChat: {
+            workspaces: () => listNewChatWorkspaces(config.conductorDbPath, 20),
+            start: (args) =>
+              newChatControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }).startChat(args),
+          },
         })
       : null;
 
@@ -189,6 +196,7 @@ export class SqueakApp {
             return { ok: false };
         }
       },
+      ...newChatControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }),
       ...channelsControl(this.telegramStatus, () => ({
         cliqOneWay: Boolean(config.cliqWebhookUrl),
         cliqTwoWay: Boolean(config.cliqTwoWay),

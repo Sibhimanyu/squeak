@@ -8,6 +8,12 @@ import type { ParsedChoices } from "../fleet/choices.js";
 import { parseChoices } from "../fleet/choices.js";
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import { describeGitState } from "../fleet/git-state.js";
+import {
+  NEW_CHAT_MAX_TEXT,
+  type NewChatAgent,
+  type NewChatWorkspace,
+  type StartChatOutcome,
+} from "../fleet/new-chat.js";
 import { chatTitle, distinctTitles, sessionLabel } from "../fleet/radar.js";
 import type { ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/session-reply.js";
 import type { ClaudeLimits } from "../fleet/claude-limits.js";
@@ -69,6 +75,23 @@ export interface RemoteCommand {
   expiresAt: number;
 }
 
+/**
+ * A signed request to start a new chat in an existing workspace. Same
+ * envelope as a reply (nonce, expiry, device signature over the sealed box);
+ * the `kind` is what tells them apart. A reply carries no `kind` at all, so
+ * replies stay byte-identical to before.
+ */
+export interface StartCommand {
+  v: 1;
+  kind: "start";
+  workspaceId: string;
+  agent: NewChatAgent;
+  text: string;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
 export interface RemoteActivity {
   at: string;
   device: string;
@@ -105,6 +128,13 @@ export interface RemoteReplier {
   ): Promise<ReplyOutcome>;
 }
 
+/** Starting chats from a phone. Absent means this Mac does not offer it. */
+export interface RemoteChatStarter {
+  /** Re-read from the registry on every call: the phone's copy is never trusted. */
+  workspaces(): NewChatWorkspace[];
+  start(args: { workspaceId: string; agent: NewChatAgent; text: string }): Promise<StartChatOutcome>;
+}
+
 export interface RemoteBridgeDependencies {
   configPath: string;
   projectId: string;
@@ -117,6 +147,8 @@ export interface RemoteBridgeDependencies {
    * phone shows only the last message, as before.
    */
   activity?: ((session: FleetSession) => Activity | null) | null;
+  /** Workspaces a phone may start a chat in, and the way to start one. */
+  newChat?: RemoteChatStarter | null;
   /** Claude's last plan-limit reading, for the read-only usage view on the phone. */
   claudeLimits?: (() => ClaudeLimits | null) | null;
   /**
@@ -157,6 +189,10 @@ const WATCH_DEBOUNCE_MS = 50;
 /** Pairing is only listened for while the Mac app's pairing sheet is open. */
 const PAIRING_WINDOW_MS = 10 * 60_000;
 const MESSAGE_MAX_CHARS = 8_000;
+/** How many workspaces the snapshot offers a phone for a new chat. */
+export const PHONE_WORKSPACE_LIMIT = 20;
+/** One start per device in this window: a stolen phone cannot fan out agents. */
+export const START_MIN_GAP_MS = 15_000;
 /**
  * The phone gets less of a turn than the Mac window does: what leaves the Mac
  * is only what the phone must render (docs/remote-channel.md), so the newest
@@ -172,6 +208,7 @@ export class RemoteBridge {
   private config: RemoteConfig | null;
   private readonly pending = new Map<string, PendingPairing>();
   private readonly seenNonces = new Map<string, number>();
+  private readonly lastStartAt = new Map<string, number>();
   private readonly activity: RemoteActivity[] = [];
   private readonly messageCache = new Map<string, { text: string | null; choices: ParsedChoices | null }>();
   private readonly activityCache = new Map<string, PhoneActivity | null>();
@@ -579,7 +616,14 @@ export class RemoteBridge {
     }
     this.seenNonces.set(command.nonce, command.expiresAt);
 
-    // 3. The only action there is: a reply to an existing chat.
+    // 3. The actions there are: a reply to an existing chat, or a new chat.
+    const kind = (command as { kind?: unknown }).kind;
+    if (kind === "start") {
+      return this.handleStart(device, id, command as unknown as StartCommand, now);
+    }
+    if (kind !== undefined && kind !== "reply") {
+      return refuse("Not a request this Mac understands.");
+    }
     if (command.v !== 1 || typeof command.sessionId !== "string" || typeof command.text !== "string") {
       return refuse("Not a reply this Mac understands.");
     }
@@ -624,6 +668,70 @@ export class RemoteBridge {
     };
   }
 
+  /**
+   * A new chat. Everything above (signature, freshness, nonce) has already
+   * held. There is no turn to match, so the guards are the workspace (looked up
+   * again in the registry, never taken from the phone's copy), the text, the
+   * agent and a per-device rate limit.
+   */
+  private async handleStart(
+    device: PairedDevice,
+    id: string,
+    command: StartCommand,
+    now: number,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `new chat: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const starter = this.deps.newChat;
+    if (!starter) {
+      return refuse("This Mac can't start chats from a phone.");
+    }
+    if (
+      command.v !== 1 ||
+      typeof command.workspaceId !== "string" ||
+      typeof command.text !== "string" ||
+      (command.agent !== "claude" && command.agent !== "codex")
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const text = command.text.trim();
+    if (!text) {
+      return refuse("Write a first message.");
+    }
+    if (text.length > NEW_CHAT_MAX_TEXT) {
+      return refuse(`That message is too long (limit ${NEW_CHAT_MAX_TEXT} characters).`);
+    }
+    let offered: NewChatWorkspace[];
+    try {
+      offered = starter.workspaces().slice(0, PHONE_WORKSPACE_LIMIT);
+    } catch {
+      return refuse("This Mac couldn't read its workspaces.");
+    }
+    const workspace = offered.find((candidate) => candidate.id === command.workspaceId);
+    if (!workspace) {
+      return refuse("That workspace isn't available any more. Pick another.");
+    }
+    const last = this.lastStartAt.get(device.id);
+    if (last !== undefined && now - last < START_MIN_GAP_MS) {
+      return refuse("You just started a chat. Wait a few seconds and try again.");
+    }
+    this.lastStartAt.set(device.id, now);
+    let outcome: StartChatOutcome;
+    try {
+      outcome = await starter.start({ workspaceId: workspace.id, agent: command.agent, text });
+    } catch (error) {
+      outcome = { ok: false, reason: error instanceof Error ? error.message : "The chat could not be started." };
+    }
+    if (!outcome.ok) {
+      this.log(device.name, "refused", `new chat in ${workspace.repoName} failed: ${outcome.reason}`);
+      return { write: true, result: { id, status: "refused", reason: outcome.reason } };
+    }
+    this.log(device.name, "sent", `new ${command.agent} chat in ${workspace.repoName} · ${workspace.branch}`);
+    return { write: true, result: { id, status: "sent", sessionId: outcome.sessionId } };
+  }
+
   private forgetOldNonces(now: number): void {
     for (const [nonce, expiresAt] of this.seenNonces) {
       if (expiresAt < now) {
@@ -653,6 +761,7 @@ export class RemoteBridge {
     const serialized =
       JSON.stringify(view.sessions) +
       JSON.stringify(view.duck) +
+      JSON.stringify(view.workspaces) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     if (serialized === this.lastPublished) {
       return;
@@ -677,6 +786,8 @@ export class RemoteBridge {
       duck: { blockedCount: blocked, workingCount: working },
       // Read-only. Refreshing Claude's reading is a Mac action; commands are plain replies only.
       usage: phoneUsage(snapshot.codexUsage, this.deps.claudeLimits?.() ?? null),
+      // Where a phone may start a chat; absent when this Mac can't (phones then hide the button).
+      ...(this.deps.newChat ? { workspaces: this.phoneWorkspaces() } : {}),
       sessions: snapshot.active.map((session) => {
         const conductorSessionId = session.conductorSessionId;
         const title = titles.get(session.key);
@@ -701,6 +812,21 @@ export class RemoteBridge {
         };
       }),
     };
+  }
+
+  private phoneWorkspaces(): PhoneWorkspace[] {
+    try {
+      return (this.deps.newChat?.workspaces() ?? []).slice(0, PHONE_WORKSPACE_LIMIT).map((workspace) => ({
+        id: workspace.id,
+        label: `${workspace.repoName} · ${workspace.branch}`,
+        defaultAgent: workspace.defaultAgent,
+      }));
+    } catch (error) {
+      logger.debug("could not list workspaces for the phone", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
   }
 
   /** Read once per step: the key moves with the session's activity. */
@@ -817,6 +943,14 @@ export function phoneUsage(codex: CodexUsage | null, claude: ClaudeLimits | null
       ? { fiveHour: codexWindow(codex.primary), weekly: codexWindow(codex.secondary), observedAt: codex.observedAt }
       : null,
   };
+}
+
+/** A workspace as the phone lists it for a new chat. */
+export interface PhoneWorkspace {
+  id: string;
+  /** "repo · branch" */
+  label: string;
+  defaultAgent: NewChatAgent;
 }
 
 /** What the phone gets of a turn: no timestamps, fewer and shorter steps. */

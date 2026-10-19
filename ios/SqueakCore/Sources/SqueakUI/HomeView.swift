@@ -11,6 +11,9 @@ struct HomeView: View {
     @State private var filter = Presentation.Filter.all
     @State private var query = ""
     @State private var showingSettings = ProcessInfo.processInfo.arguments.contains("-squeak-settings")
+    @State private var showingNewChat = ProcessInfo.processInfo.arguments.contains("-squeak-newchat")
+        || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-filled")
+        || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-error")
     @State private var showingUsage = ProcessInfo.processInfo.arguments.contains("-squeak-usage")
     /// `-squeak-open <key>` starts inside a session: screenshots of the demo only.
     @State private var path: [String] = {
@@ -40,6 +43,7 @@ struct HomeView: View {
                         .listRowBackground(Color.clear).listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                     controls
+                    if let starting = model.startingChat { StartingRow(label: starting.label) }
                     let visible = groups
                     ForEach(visible, id: \.title) { group in
                         let rows = group.members
@@ -71,6 +75,7 @@ struct HomeView: View {
             .safeAreaInset(edge: .bottom) { ConnectionBar() }
             .sheet(isPresented: $showingSettings) { SettingsView() }
             .sheet(isPresented: $showingUsage) { UsageView() }
+            .sheet(isPresented: $showingNewChat) { NewChatView(workspaces: model.snapshot?.workspaces ?? []) }
             // A link from a Telegram card: open its session as soon as the
             // snapshot has it, on a fresh stack so Back leads to the list.
             .onChange(of: router.pendingSessionId, initial: true) { _, _ in openPending() }
@@ -86,6 +91,14 @@ struct HomeView: View {
             ToolbarItem(placement: .topBarLeading) { duck }.sharedBackgroundVisibility(.hidden)
         } else {
             ToolbarItem(placement: .topBarLeading) { duck }
+        }
+        // Only a Mac new enough to list workspaces can start a chat; Settings says so otherwise.
+        if model.snapshot?.workspaces != nil {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showingNewChat = true } label: {
+                    Lucide(.squarePen, size: 20, label: "New chat", color: Theme.muted)
+                }
+            }
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button { showingUsage = true } label: {
@@ -179,6 +192,26 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
         .listRowBackground(Color.clear).listRowSeparator(.hidden)
+    }
+}
+
+/// A chat the Mac accepted that the snapshot does not have yet.
+struct StartingRow: View {
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ProgressView().frame(width: 9)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Starting…").font(.headline)
+                Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+        }
+        .padding(.vertical, 6).frame(minHeight: 44)
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Starting a chat in \(label)")
     }
 }
 

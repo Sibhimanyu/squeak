@@ -17,7 +17,12 @@ final class AppModel: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .unpaired
-    @Published private(set) var snapshot: PhoneSnapshot? { didSet { remember(snapshot) } }
+    @Published private(set) var snapshot: PhoneSnapshot? { didSet { remember(snapshot); settleStarting(snapshot) } }
+    /// A chat the Mac accepted, until it shows up in the snapshot (the row's "Starting…").
+    @Published private(set) var startingChat: StartingChat?
+
+    struct StartingChat: Equatable { let sessionId: String; let label: String }
+    enum StartResult: Equatable { case started, cancelled, refused(String) }
     @Published private(set) var lastFetch: Date?
     @Published private(set) var problem: String?
     /// What this phone sent since the app opened, per session. Local only:
@@ -247,6 +252,58 @@ final class AppModel: ObservableObject {
             group.cancelAll()
             return first
         }
+    }
+
+    /* ---------- starting a chat ---------- */
+
+    /// Asks the Mac to start a chat in `workspace`. Face ID first, like a reply. On success the new chat
+    /// is opened as soon as the snapshot has it (`SqueakRouter`), and the list shows "Starting…" until then.
+    func startChat(in workspace: PhoneSnapshot.Workspace, agent: NewChatAgent, text: String) async -> StartResult {
+        guard await confirmWithBiometrics(reason: "Start a chat in \(workspace.label)") else { return .cancelled }
+        if demo {
+            try? await Task.sleep(for: .seconds(1))
+            let id = UUID().uuidString.lowercased()
+            accept(sessionId: id, label: workspace.label)
+            try? await Task.sleep(for: .seconds(2))
+            if let current = snapshot {
+                let session = PhoneSnapshot.Session(
+                    key: "new-\(id)", conductorSessionId: id, label: workspace.label, agent: agent.rawValue, state: "working",
+                    lastActivityAt: ISO8601DateFormatter().string(from: Date()), detail: "Reading the request", git: nil,
+                    contextPercent: nil, turnId: nil, message: nil, choices: nil)
+                snapshot = PhoneSnapshot(
+                    v: current.v, mac: current.mac, generatedAt: current.generatedAt, duck: current.duck,
+                    sessions: [session] + current.sessions, usage: current.usage, workspaces: current.workspaces)
+            }
+            return .started
+        }
+        guard let channel else { return .refused("This iPhone isn't connected to your Mac.") }
+        do {
+            let (id, document) = try channel.startDocument(workspaceId: workspace.id, agent: agent, text: text, signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else {
+                return .refused("Your Mac didn't confirm. If a new chat appears in Sessions it worked, so don't send this again.")
+            }
+            guard result.sent else { return .refused(result.reason ?? "Your Mac refused to start that chat.") }
+            if let sessionId = result.sessionId { accept(sessionId: sessionId, label: workspace.label) }
+            return .started
+        } catch {
+            return .refused("Couldn't reach your Mac: \(error.localizedDescription)")
+        }
+    }
+
+    private func accept(sessionId: String, label: String) {
+        startingChat = StartingChat(sessionId: sessionId, label: label)
+        SqueakRouter.shared.open(sessionId: sessionId)
+        // A chat that never appears (Conductor failed to make it) must not spin forever.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(90))
+            if self?.startingChat?.sessionId == sessionId { self?.startingChat = nil }
+        }
+    }
+
+    private func settleStarting(_ snapshot: PhoneSnapshot?) {
+        guard let starting = startingChat, snapshot?.sessions.contains(where: { $0.conductorSessionId == starting.sessionId }) == true else { return }
+        startingChat = nil
     }
 
     /// Any send of this session still waiting on the Mac.

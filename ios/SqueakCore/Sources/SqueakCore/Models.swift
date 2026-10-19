@@ -124,17 +124,35 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public init(claude: ClaudeUsage?, codex: CodexUsage?) { self.claude = claude; self.codex = codex }
     }
 
+    /// A workspace a new chat can start in (the Mac lists at most 20, newest first).
+    public struct Workspace: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        /// "repo · branch"
+        public let label: String
+        /// "claude" or "codex": what that workspace last used.
+        public let defaultAgent: String
+        public init(id: String, label: String, defaultAgent: String) {
+            self.id = id; self.label = label; self.defaultAgent = defaultAgent
+        }
+        public var agent: NewChatAgent { NewChatAgent(rawValue: defaultAgent) ?? .claude }
+    }
+
     public let v: Int
     public let mac: String
     public let generatedAt: String
     public let duck: Duck
     /// Optional: a Mac older than the usage view does not send it.
     public let usage: Usage?
+    /// Optional: a Mac older than new chats does not send it, and the phone then hides "New chat".
+    public let workspaces: [Workspace]?
     public let sessions: [Session]
 
-    public init(v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session], usage: Usage? = nil) {
+    public init(
+        v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session], usage: Usage? = nil,
+        workspaces: [Workspace]? = nil
+    ) {
         self.v = v; self.mac = mac; self.generatedAt = generatedAt; self.duck = duck; self.sessions = sessions
-        self.usage = usage
+        self.usage = usage; self.workspaces = workspaces
     }
 
     /// Attention order, DESIGN.md §8.2.
@@ -165,6 +183,24 @@ public struct ReplyCommand: Codable, Equatable, Sendable {
     public let expiresAt: Int64
 }
 
+/// Which agent a new chat starts with.
+public enum NewChatAgent: String, Codable, Equatable, Sendable, CaseIterable {
+    case claude, codex
+}
+
+/// A request to start a new chat in an existing workspace, exactly as the Mac
+/// verifies it (StartCommand on the Mac). It has no session and no turn.
+public struct StartCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let workspaceId: String
+    public let agent: NewChatAgent
+    public let text: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
 /// What the Mac wrote back for a command.
 public struct CommandResult: Codable, Equatable, Sendable {
     public let status: String
@@ -175,6 +211,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public let delivery: String?
     /// Set when a request could not be honoured as asked (steer fell back to queue).
     public let note: String?
+    /// For a started chat: Conductor's id for it, which the snapshot carries as `conductorSessionId`.
+    public let sessionId: String?
 
     public var sent: Bool { status == "sent" }
 }

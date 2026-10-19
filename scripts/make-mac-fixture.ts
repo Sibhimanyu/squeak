@@ -86,6 +86,25 @@ const bridge = new RemoteBridge({
     send: async () => ({ status: "refused", reason: "fixture" }),
   },
   snapshot: () => snapshot,
+  newChat: {
+    workspaces: () => [
+      {
+        id: "w-arm",
+        repoName: "farm",
+        branch: "arm",
+        lastActivityAt: "2026-09-25T02:59:00.000Z",
+        defaultAgent: "claude",
+      },
+      {
+        id: "w-timer",
+        repoName: "farm",
+        branch: "timer",
+        lastActivityAt: "2026-09-24T02:59:00.000Z",
+        defaultAgent: "codex",
+      },
+    ],
+    start: async () => ({ ok: true, sessionId: "new-1" }),
+  },
   claudeLimits: () => ({
     fiveHour: { utilization: 0.42, resetsAt: "2026-09-25T05:10:00.000Z" },
     sevenDay: { utilization: 0.18, resetsAt: "2026-09-29T08:00:00.000Z" },
@@ -129,6 +148,7 @@ fs.writeFileSync(
         delivery: "queued",
         note: "Steer needs Conductor's relay, so this was queued instead.",
       }),
+      startedBox: seal(key, { id: "c6", status: "sent", sessionId: "new-1" }),
       refusedBox: seal(key, { id: "c2", status: "refused", reason: "That chat has moved on." }),
       pairAnswerBox: seal(key, { approved: true, mac: "Test Mac" }),
     },

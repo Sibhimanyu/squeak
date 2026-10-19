@@ -103,6 +103,31 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed document for starting a new chat in `workspace`. Same envelope and
+    /// signature as a reply; `kind: "start"` is what the Mac dispatches on.
+    public func startDocument(
+        workspaceId: String,
+        agent: NewChatAgent,
+        text: String,
+        signer: CommandSigner,
+        now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = StartCommand(
+            v: 1,
+            kind: "start",
+            workspaceId: workspaceId,
+            agent: agent,
+            text: text,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
     public func send(_ document: ChannelDocument, id: String) async throws {
         try await store.set(path("commands", id), document)
     }

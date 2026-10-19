@@ -9,7 +9,16 @@ import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import type { ReplyOutcome } from "../fleet/session-reply.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { ChannelDoc } from "./firestore-rest.js";
-import { phoneUsage, RemoteBridge, type ChannelStore, type RemoteCommand } from "./remote-bridge.js";
+import type { NewChatWorkspace, StartChatOutcome } from "../fleet/new-chat.js";
+import {
+  phoneUsage,
+  RemoteBridge,
+  START_MIN_GAP_MS,
+  type ChannelStore,
+  type RemoteChatStarter,
+  type RemoteCommand,
+  type StartCommand,
+} from "./remote-bridge.js";
 import { open, pairingCode, seal } from "./remote-crypto.js";
 
 const NOW = Date.parse("2026-09-25T03:00:00.000Z");
@@ -80,7 +89,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function fixture(options: { outcome?: ReplyOutcome; turn?: string } = {}) {
+function fixture(options: { outcome?: ReplyOutcome; turn?: string; newChat?: RemoteChatStarter } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
   dirs.push(dir);
   const store = new MemoryStore();
@@ -113,6 +122,7 @@ function fixture(options: { outcome?: ReplyOutcome; turn?: string } = {}) {
     store,
     replier,
     snapshot: () => snapshot,
+    newChat: options.newChat ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -146,6 +156,21 @@ function fixture(options: { outcome?: ReplyOutcome; turn?: string } = {}) {
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const startCommand = (overrides: Partial<StartCommand> = {}, signer = phone) => {
+    const body: StartCommand = {
+      v: 1,
+      kind: "start",
+      workspaceId: "w1",
+      agent: "claude",
+      text: "Add a timer",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const result = (id: string) => {
     const doc = store.docs.get(`${channel}/results/${id}`);
     return doc ? open<Record<string, unknown>>(payload.k, doc.box) : null;
@@ -161,6 +186,7 @@ function fixture(options: { outcome?: ReplyOutcome; turn?: string } = {}) {
     phone,
     pair,
     command,
+    startCommand,
     result,
     configPath,
     emit,
@@ -304,6 +330,171 @@ describe("RemoteBridge commands", () => {
     await f.store.set(`${f.channel}/commands/c1`, f.command());
     await f.bridge.tick();
     expect(f.result("c1")).toEqual({ id: "c1", status: "refused", reason: "That chat is still working in Conductor." });
+  });
+});
+
+function workspace(id: string, overrides: Partial<NewChatWorkspace> = {}): NewChatWorkspace {
+  return {
+    id,
+    repoName: "farm",
+    branch: `b-${id}`,
+    lastActivityAt: "2026-09-25T02:00:00Z",
+    defaultAgent: "codex",
+    ...overrides,
+  };
+}
+
+function chatStarter(workspaces: NewChatWorkspace[] = [workspace("w1")], outcome?: StartChatOutcome) {
+  const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
+  const starter: RemoteChatStarter = {
+    workspaces: vi.fn(() => workspaces),
+    start: vi.fn(async (args): Promise<StartChatOutcome> => {
+      starts.push(args);
+      return outcome ?? ({ ok: true, sessionId: "new-session" } as const);
+    }),
+  };
+  return { starter, starts, workspaces };
+}
+
+describe("RemoteBridge starting a chat", () => {
+  async function run(f: ReturnType<typeof fixture>, doc: ReturnType<ReturnType<typeof fixture>["startCommand"]>) {
+    await f.store.set(`${f.channel}/commands/n1`, doc);
+    await f.bridge.tick();
+    return f.result("n1");
+  }
+
+  it("starts a chat in a listed workspace, with the agent and trimmed text the phone signed", async () => {
+    const { starter, starts } = chatStarter();
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    expect(await run(f, f.startCommand({ agent: "codex", text: "  Add a timer \n" }))).toEqual({
+      id: "n1",
+      status: "sent",
+      sessionId: "new-session",
+    });
+    expect(starts).toEqual([{ workspaceId: "w1", agent: "codex", text: "Add a timer" }]);
+    expect(f.sends).toEqual([]); // never goes through the reply path
+  });
+
+  it("passes the relay's own refusal back", async () => {
+    const { starter } = chatStarter([workspace("w1")], { ok: false, reason: "Conductor isn't connected." });
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    expect(await run(f, f.startCommand())).toEqual({
+      id: "n1",
+      status: "refused",
+      reason: "Conductor isn't connected.",
+    });
+  });
+
+  it("refuses everything when this Mac offers no new chats", async () => {
+    const f = fixture();
+    await f.pair();
+    expect(await run(f, f.startCommand())).toMatchObject({ status: "refused" });
+  });
+
+  it("refuses a workspace the Mac does not publish, judged against the registry now", async () => {
+    const { starter, starts } = chatStarter([workspace("w1")]);
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    expect(await run(f, f.startCommand({ workspaceId: "archived-one" }))).toMatchObject({
+      status: "refused",
+      reason: expect.stringContaining("isn't available"),
+    });
+    expect(starts).toEqual([]);
+  });
+
+  it("refuses a workspace beyond the twenty it publishes", async () => {
+    const many = Array.from({ length: 25 }, (_, i) => workspace(`w${i}`));
+    const { starter, starts } = chatStarter(many);
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    expect(await run(f, f.startCommand({ workspaceId: "w21" }))).toMatchObject({ status: "refused" });
+    expect(starts).toEqual([]);
+  });
+
+  it("refuses an empty message, one over 20,000 characters, and an unknown agent", async () => {
+    const { starter, starts } = chatStarter();
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/a`, f.startCommand({ text: "   " }));
+    await f.store.set(`${f.channel}/commands/b`, f.startCommand({ text: "x".repeat(20_001) }));
+    await f.store.set(`${f.channel}/commands/c`, f.startCommand({ agent: "gemini" as never }));
+    await f.bridge.tick();
+    for (const id of ["a", "b", "c"]) expect(f.result(id)).toMatchObject({ status: "refused" });
+    expect(starts).toEqual([]);
+  });
+
+  it("allows one start per device every 15 seconds", async () => {
+    const { starter, starts } = chatStarter();
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/a`, f.startCommand());
+    await f.bridge.tick();
+    await f.store.set(`${f.channel}/commands/b`, f.startCommand());
+    await f.bridge.tick();
+    expect(f.result("a")).toMatchObject({ status: "sent" });
+    expect(f.result("b")).toMatchObject({ status: "refused", reason: expect.stringContaining("just started") });
+    expect(starts).toHaveLength(1);
+    f.advance(START_MIN_GAP_MS);
+    await f.store.set(`${f.channel}/commands/c`, f.startCommand());
+    await f.bridge.tick();
+    expect(f.result("c")).toMatchObject({ status: "sent" });
+    expect(starts).toHaveLength(2);
+  });
+
+  it("keeps every existing check: signature, expiry, replay, revocation", async () => {
+    const { starter, starts } = chatStarter();
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/forged`, f.startCommand({}, device()));
+    await f.store.set(`${f.channel}/commands/old`, f.startCommand({ expiresAt: NOW - 1 }));
+    await f.store.set(`${f.channel}/commands/far`, f.startCommand({ expiresAt: NOW + 3_600_000 }));
+    await f.bridge.tick();
+    expect(f.result("forged")).toBeNull();
+    expect(f.result("old")).toMatchObject({ status: "refused" });
+    expect(f.result("far")).toMatchObject({ status: "refused" });
+    const signed = f.startCommand();
+    await f.store.set(`${f.channel}/commands/one`, signed);
+    await f.bridge.tick();
+    f.advance(START_MIN_GAP_MS);
+    await f.store.set(`${f.channel}/commands/replay`, signed);
+    await f.bridge.tick();
+    expect(f.result("replay")).toMatchObject({ status: "refused", reason: expect.stringContaining("already") });
+    f.bridge.revoke("iphone-1");
+    await f.store.set(`${f.channel}/commands/late`, f.startCommand());
+    await f.bridge.tick();
+    expect(f.result("late")).toBeNull();
+    expect(starts).toHaveLength(1);
+  });
+
+  it("refuses a kind it does not know, and a start shaped like a reply", async () => {
+    const { starter, starts } = chatStarter();
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/a`, f.startCommand({ kind: "stop" as never }));
+    await f.store.set(`${f.channel}/commands/b`, f.startCommand({ workspaceId: undefined as never }));
+    await f.bridge.tick();
+    expect(f.result("a")).toMatchObject({ status: "refused" });
+    expect(f.result("b")).toMatchObject({ status: "refused" });
+    expect(starts).toEqual([]);
+    expect(f.sends).toEqual([]);
+  });
+
+  it("publishes the workspaces, newest first, at most twenty, as 'repo · branch'", () => {
+    const many = Array.from({ length: 25 }, (_, i) =>
+      workspace(`w${i}`, { defaultAgent: i === 0 ? "claude" : "codex" }),
+    );
+    const f = fixture({ newChat: chatStarter(many).starter });
+    const view = f.bridge.phoneView() as { workspaces?: Array<{ id: string; label: string; defaultAgent: string }> };
+    expect(view.workspaces).toHaveLength(20);
+    expect(view.workspaces![0]).toEqual({ id: "w0", label: "farm · b-w0", defaultAgent: "claude" });
+    expect(view.workspaces![19]!.id).toBe("w19");
+  });
+
+  it("leaves workspaces out of the view when this Mac cannot start chats", () => {
+    const f = fixture();
+    expect("workspaces" in f.bridge.phoneView()).toBe(false);
   });
 });
 

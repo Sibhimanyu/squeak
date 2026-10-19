@@ -25,6 +25,10 @@ struct SettingsView: View {
                         }
                     }
                     if let snapshot = model.snapshot {
+                        if snapshot.workspaces == nil {
+                            Text("New chats from this iPhone need a newer Squeak on your Mac. Update it and the button appears.")
+                                .font(.subheadline).foregroundStyle(Theme.muted)
+                        }
                         LabeledContent("Last change", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")
                     }
                 }

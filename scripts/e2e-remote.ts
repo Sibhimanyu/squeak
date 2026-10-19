@@ -24,6 +24,8 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-e2e-"));
 const codeFile = path.join(dir, "phone-code");
 const phoneBin = path.resolve("ios/SqueakCore/.build/release/squeak-e2e");
 const sends: Array<[string, string, string | undefined]> = [];
+// A fake relay: the new-chat command is proven end to end without creating any chat.
+const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
 
 const session = {
   key: "claude-transcript:e2e",
@@ -62,6 +64,21 @@ const bridge = new RemoteBridge({
     send: async (id, text, _onFailed, options) => {
       sends.push([id, text, options?.mode]);
       return { status: "started", via: "conductor", delivery: options?.mode === "steer" ? "steered" : "sent" };
+    },
+  },
+  newChat: {
+    workspaces: () => [
+      {
+        id: "e2e-ws",
+        repoName: "farm",
+        branch: "arm",
+        lastActivityAt: new Date().toISOString(),
+        defaultAgent: "codex",
+      },
+    ],
+    start: async (args) => {
+      starts.push(args);
+      return { ok: true, sessionId: "e2e-new-session" };
     },
   },
   claudeLimits: () => ({
@@ -129,6 +146,8 @@ process.stdout.write(
 );
 console.log(`mac:   replies delivered to the (fake) chat: ${JSON.stringify(sends)}`);
 
+console.log(`mac:   chats started on the (fake) relay: ${JSON.stringify(starts)}`);
+
 // Leave nothing behind in the real database.
 for (const kind of ["state", "pairing", "commands", "results"]) {
   for (const { id } of await store.list(`channels/${channelId}/${kind}`)) {
@@ -140,6 +159,10 @@ const ok =
   sends.length === 2 &&
   sends[0]![1] === "B" &&
   sends[0]![2] === "queue" &&
-  sends[1]![2] === "steer";
+  sends[1]![2] === "steer" &&
+  starts.length === 1 &&
+  starts[0]!.workspaceId === "e2e-ws" &&
+  starts[0]!.agent === "codex" &&
+  starts[0]!.text === "Add a timer";
 console.log(ok ? "E2E PASS" : "E2E FAIL");
 process.exit(ok ? 0 : 1);

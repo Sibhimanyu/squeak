@@ -63,5 +63,21 @@ let steerAt = Date()
 let steered = try await verdict(steerId, "steer result")
 print("phone: steer round trip \(Int(Date().timeIntervalSince(steerAt) * 1000)) ms")
 print("phone: mac says \(steered.status) delivery=\(steered.delivery ?? "-")")
+
+// A new chat: the Mac lists workspaces in the snapshot, the phone signs a start, the Mac's (fake) relay answers.
+guard let workspace = snapshot.workspaces?.first else { print("phone: no workspaces in the snapshot"); exit(1) }
+print("phone: workspaces \(snapshot.workspaces!.map(\.label))")
+let (startId, startDocument) = try channel.startDocument(workspaceId: workspace.id, agent: workspace.agent, text: "Add a timer", signer: signer)
+try await channel.send(startDocument, id: startId)
+let startAt = Date()
+let started = try await verdict(startId, "start result")
+print("phone: start round trip \(Int(Date().timeIntervalSince(startAt) * 1000)) ms")
+print("phone: mac says \(started.status) sessionId=\(started.sessionId ?? "-")")
+// A second start inside 15 s is refused by the Mac's rate limit.
+let (againId, againDocument) = try channel.startDocument(workspaceId: workspace.id, agent: workspace.agent, text: "Again", signer: signer)
+try await channel.send(againDocument, id: againId)
+let again = try await verdict(againId, "second start result")
+print("phone: second start \(again.status) — \(again.reason ?? "-")")
+let startOk = started.sent && started.sessionId == "e2e-new-session" && again.status == "refused"
 print("phone: usage claude=\(snapshot.usage?.claude?.fiveHour?.usedPercent.description ?? "-") codex=\(snapshot.usage?.codex == nil ? "-" : "seen")")
-exit(steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42 ? 0 : 1)
+exit(startOk && steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42 ? 0 : 1)
