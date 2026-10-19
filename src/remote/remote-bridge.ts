@@ -21,6 +21,7 @@ import type { Activity } from "../fleet/activity.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { ChannelDoc } from "./firestore-rest.js";
+import { LIVE_STEP_CHARS, LIVE_STEPS, LiveTurnPublisher } from "./live-turn.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
 
 /**
@@ -166,6 +167,15 @@ export interface RemoteBridgeDependencies {
    */
   databaseUrl?: string | null;
   announce?: ChannelStore | null;
+  /**
+   * A session's current turn with whole steps (`readActivity` with
+   * `stepChars`), for the phone's verbose view (live-turn.ts). Used only
+   * with a streaming store (the Realtime Database). Without it, on
+   * Firestore, or with `verbose: false` (SQUEAK_REMOTE_VERBOSE=off), a phone
+   * asking for verbose gets nothing beyond the snapshot.
+   */
+  liveActivity?: ((session: FleetSession, limit: number, stepChars: number) => Activity | null) | null;
+  verbose?: boolean;
   now?: () => number;
   macName?: string;
 }
@@ -225,6 +235,9 @@ export class RemoteBridge {
   /** A change arrived during a pass; run another as soon as it ends. */
   private dirty = false;
   private announcedFor = "";
+  /** The session the phone's last presence said it is watching in verbose mode. */
+  private presenceWatching: string | null = null;
+  private readonly live: LiveTurnPublisher | null;
   private lastSignature: string | null = null;
   private changeTimer: NodeJS.Timeout | null = null;
 
@@ -232,6 +245,34 @@ export class RemoteBridge {
     this.deps = deps;
     this.now = deps.now ?? Date.now;
     this.config = readConfig(deps.configPath);
+    // Verbose needs the Realtime Database: a write a second is what it is
+    // cheap at, and Firestore's rules have no `live` collection.
+    const liveActivity = deps.store.watch ? deps.liveActivity : null;
+    this.live = liveActivity
+      ? new LiveTurnPublisher({
+          read: (key) => {
+            const session = this.deps.snapshot().active.find((candidate) => candidate.key === key);
+            return session
+              ? { activity: liveActivity(session, LIVE_STEPS, LIVE_STEP_CHARS), working: session.state === "working" }
+              : null;
+          },
+          write: async (handle, turn) => {
+            const config = this.config;
+            if (config) {
+              await this.deps.store.set(this.channel(config, "live", handle), {
+                box: seal(config.key, turn),
+                at: this.now(),
+              });
+            }
+          },
+          clear: async (handle) => {
+            const config = this.config;
+            if (config) {
+              await this.deps.store.delete(this.channel(config, "live", handle));
+            }
+          },
+        })
+      : null;
   }
 
   start(): void {
@@ -281,6 +322,7 @@ export class RemoteBridge {
 
   stop(): void {
     this.stopped = true;
+    this.live?.stop();
     this.stopWatches();
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -379,6 +421,8 @@ export class RemoteBridge {
    * copy of the old key, can no longer read anything new.
    */
   reset(): void {
+    // Before the config goes, so the live document can still be deleted.
+    this.live?.stop();
     this.config = null;
     this.pending.clear();
     this.stopWatches();
@@ -416,6 +460,7 @@ export class RemoteBridge {
       if (config) {
         await this.announceTransport(config);
         await this.readPresence(config);
+        this.updateLive();
         if (this.pairingOpenUntil > this.now()) {
           await this.readPairing(config);
         }
@@ -437,6 +482,23 @@ export class RemoteBridge {
         this.schedule(this.phoneOpen() || this.pairingOpenUntil > this.now() ? ACTIVE_POLL_MS : IDLE_POLL_MS);
       }
     }
+  }
+
+  /**
+   * Verbose: publish the turn of the session the phone is watching, only
+   * while it is open, a phone is paired, the owner has not switched verbose
+   * off, and that session is one the phone can see. Anything else stops it,
+   * which deletes the document.
+   */
+  private updateLive(): void {
+    const key = this.presenceWatching;
+    const allowed =
+      this.deps.verbose !== false &&
+      key !== null &&
+      this.phoneOpen() &&
+      this.hasPairedPhone() &&
+      this.deps.snapshot().active.some((session) => session.key === key);
+    this.live?.watch(allowed ? key : null);
   }
 
   /* ---------- streaming (Realtime Database) ---------- */
@@ -518,9 +580,11 @@ export class RemoteBridge {
       return;
     }
     try {
-      const presence = open<{ at: number }>(config.key, doc.box);
+      const presence = open<{ at: number; watching?: unknown }>(config.key, doc.box);
       // A phone's clock is not ours; only trust it not to be in the future.
       this.phoneSeenAt = Math.max(this.phoneSeenAt, Math.min(presence.at, this.now()));
+      this.presenceWatching =
+        typeof presence.watching === "string" && presence.watching.length <= 300 ? presence.watching : null;
     } catch {
       // Not ours — ignore it.
     }

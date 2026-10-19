@@ -41,8 +41,8 @@ struct SessionView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.bg)
             }
         }
-        .onAppear { screen.report?("Session") }
-        .onDisappear { screen.report?("Sessions") }
+        .onAppear { screen.report?("Session"); model.watch(key) }
+        .onDisappear { screen.report?("Sessions"); model.watch(nil) }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -67,7 +67,7 @@ struct SessionView: View {
                     if tab == .chat {
                         chat(session, sending: model.isSending(session.key))
                     } else {
-                        ActivityView(session: session)
+                        ActivityView(session: session, live: model.verbose ? model.liveTurns[session.key] : nil)
                     }
                 }
                 .padding(.horizontal, 20).padding(.vertical, 16)
@@ -401,15 +401,27 @@ private struct SendFace: ViewModifier {
 /// six, clipped), with an honest empty state.
 struct ActivityView: View {
     let session: PhoneSnapshot.Session
+    /// The whole turn, in verbose mode ("Show thinking live"); else the snapshot's newest six steps.
+    var live: LiveTurn? = nil
+
+    private var steps: [(kind: String, text: String)] {
+        if let live, !live.steps.isEmpty { return live.steps.map { ($0.kind, $0.text) } }
+        return (session.activity?.steps ?? []).map { ($0.kind, $0.text) }
+    }
+
+    private var total: Int { live.map(\.total) ?? session.activity?.total ?? 0 }
 
     var body: some View {
-        if session.state == "working", let activity = session.activity, !activity.steps.isEmpty {
+        if session.state == "working" || live?.working == true, !steps.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
-                if activity.total > activity.steps.count {
-                    Text("The latest \(activity.steps.count) of \(activity.total) steps this turn.")
+                if live != nil {
+                    Text(total > steps.count ? "Live · the latest \(steps.count) of \(total) steps." : "Live · every step of this turn.")
+                        .font(.footnote).foregroundStyle(Theme.muted)
+                } else if total > steps.count {
+                    Text("The latest \(steps.count) of \(total) steps this turn.")
                         .font(.footnote).foregroundStyle(Theme.muted)
                 }
-                ForEach(Array(activity.steps.enumerated()), id: \.offset) { _, step in
+                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Lucide(icon(step.kind), size: 16, color: Theme.muted).frame(width: 22)
                             .accessibilityHidden(true)

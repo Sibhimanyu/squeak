@@ -160,6 +160,9 @@ export class SqueakApp {
           snapshot: () => this.runtime.monitor.snapshot,
           onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
           activity: (session) => (session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null),
+          liveActivity: (session, limit, stepChars) =>
+            session.transcriptPath ? readActivity(session.agent, session.transcriptPath, limit, { stepChars }) : null,
+          verbose: config.remoteVerbose,
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
           // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
           newChat: {

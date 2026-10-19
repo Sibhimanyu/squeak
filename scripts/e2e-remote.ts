@@ -86,6 +86,14 @@ const bridge = new RemoteBridge({
     sevenDay: null,
     observedAt: new Date().toISOString(),
   }),
+  // Verbose: a working turn with a thinking step longer than the snapshot's 200 characters.
+  liveActivity: () => ({
+    total: 2,
+    steps: [
+      { kind: "thinking", text: `Weighing whether to arm now. ${"Checking the timer path. ".repeat(30)}`, at: null },
+      { kind: "tool", text: "Run npm test", at: null },
+    ],
+  }),
   snapshot: () =>
     ({
       sessions: [session],
@@ -148,8 +156,11 @@ console.log(`mac:   replies delivered to the (fake) chat: ${JSON.stringify(sends
 
 console.log(`mac:   chats started on the (fake) relay: ${JSON.stringify(starts)}`);
 
-// Leave nothing behind in the real database.
-for (const kind of ["state", "pairing", "commands", "results"]) {
+// Leave nothing behind in the real database. `live` exists only in the
+// Realtime Database; Firestore's rules refuse to list it.
+for (const kind of databaseUrl
+  ? ["state", "pairing", "commands", "results", "live"]
+  : ["state", "pairing", "commands", "results"]) {
   for (const { id } of await store.list(`channels/${channelId}/${kind}`)) {
     await store.delete(`channels/${channelId}/${kind}/${id}`);
   }

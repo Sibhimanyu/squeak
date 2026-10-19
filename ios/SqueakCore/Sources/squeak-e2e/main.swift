@@ -79,5 +79,25 @@ try await channel.send(againDocument, id: againId)
 let again = try await verdict(againId, "second start result")
 print("phone: second start \(again.status) — \(again.reason ?? "-")")
 let startOk = started.sent && started.sessionId == "e2e-new-session" && again.status == "refused"
+
+// Verbose (Realtime Database only): presence names the session, the Mac streams its whole turn, and deletes it after.
+var liveOk = true
+if streamed {
+    let watchAt = Date()
+    try await channel.touchPresence(watching: session.key)
+    var turn: LiveTurn?
+    if let changes = await channel.liveChanges(for: session.key) {
+        for await _ in changes {
+            turn = try await channel.liveTurn(for: session.key)
+            if turn != nil { break }
+        }
+    }
+    let longest = turn?.steps.map(\.text.count).max() ?? 0
+    print("phone: live turn \(turn?.steps.count ?? 0) step(s), longest \(longest) chars, after \(Int(Date().timeIntervalSince(watchAt) * 1000)) ms")
+    try await channel.touchPresence(watching: nil)
+    let gone = try await poll("live turn deleted", seconds: 10) { try await channel.liveTurn(for: session.key) == nil ? true : nil }
+    print("phone: live turn deleted after leaving: \(gone)")
+    liveOk = longest > 200 && gone
+}
 print("phone: usage claude=\(snapshot.usage?.claude?.fiveHour?.usedPercent.description ?? "-") codex=\(snapshot.usage?.codex == nil ? "-" : "seen")")
-exit(startOk && steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42 ? 0 : 1)
+exit(liveOk && startOk && steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42 ? 0 : 1)

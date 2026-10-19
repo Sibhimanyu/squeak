@@ -59,10 +59,24 @@ public struct Channel: Sendable {
     }
 
     /// Tells the Mac a phone is looking, so it polls and publishes faster.
-    public func touchPresence(now: Date = Date()) async throws {
-        struct Presence: Codable { let at: Int64 }
-        let box = try ChannelCrypto.seal(Presence(at: Int64(now.timeIntervalSince1970 * 1000)), key: pairing.k)
+    /// `watching` names the session open on screen, only in verbose mode;
+    /// the Mac then publishes its whole turn (`liveTurn`) until it is nil.
+    public func touchPresence(watching: String? = nil, now: Date = Date()) async throws {
+        let presence = Presence(at: Int64(now.timeIntervalSince1970 * 1000), watching: watching)
+        let box = try ChannelCrypto.seal(presence, key: pairing.k)
         try await store.set(path("state", "presence"), ChannelDocument(box: box))
+    }
+
+    /// The verbose view of a session, while this phone's presence names it.
+    public func liveTurn(for sessionKey: String) async throws -> LiveTurn? {
+        guard let document = try await store.get(path("live", LiveTurn.handle(for: sessionKey))) else { return nil }
+        let turn = try ChannelCrypto.open(LiveTurn.self, box: document.box, key: pairing.k)
+        return turn.key == sessionKey ? turn : nil
+    }
+
+    /// Yields when the Mac rewrites that session's live turn; nil on Firestore (poll `liveTurn`).
+    public func liveChanges(for sessionKey: String) async -> AsyncStream<Void>? {
+        await store.changes(path("live", LiveTurn.handle(for: sessionKey)))
     }
 
     public func requestPairing(name: String, signer: CommandSigner) async throws {

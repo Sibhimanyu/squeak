@@ -33,6 +33,15 @@ struct SettingsView: View {
                     }
                 }
                 Section {
+                    Toggle("Show thinking live", isOn: $model.verbose)
+                        .tint(Theme.primaryFill)
+                        .frame(minHeight: 44)
+                } header: { Text("Activity") } footer: {
+                    Text(model.liveAvailable
+                        ? "A session's Activity shows its whole turn as it happens, thinking included. Your Mac sends it only while that session is open here, and deletes it when you leave."
+                        : "Needs your Mac on Squeak's faster channel. Until then, Activity shows the latest six steps.")
+                }
+                Section {
                     Text("Replies are signed on this iPhone and checked by your Mac. Face ID is asked before anything is sent.")
                         .font(.subheadline).foregroundStyle(Theme.muted)
                 } header: { Text("Security") }

@@ -826,3 +826,146 @@ describe("RemoteBridge on a streaming store (Realtime Database)", () => {
     expect((bridge.status() as { pending: unknown[] }).pending).toHaveLength(1);
   });
 });
+
+describe("RemoteBridge verbose view (live turn)", () => {
+  function verbose(options: { verbose?: boolean; firestore?: boolean } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-live-"));
+    dirs.push(dir);
+    const store = options.firestore ? new MemoryStore() : new WatchingStore();
+    let now = NOW;
+    const working = session({ key: "claude-transcript:s1", state: "working" });
+    let active = [working];
+    const liveActivity = vi.fn((_session: FleetSession, _limit: number, stepChars: number) => ({
+      total: 1,
+      steps: [{ kind: "thinking" as const, text: "x".repeat(Math.min(stepChars, 900)), at: null }],
+    }));
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: active, active, attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      liveActivity,
+      ...(options.verbose === undefined ? {} : { verbose: options.verbose }),
+      now: () => now,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const channel = `channels/${payload.c}`;
+    const phone = device();
+    const presence = (watching?: string) =>
+      store.set(`${channel}/state/presence`, { box: seal(payload.k, { at: now, ...(watching ? { watching } : {}) }) });
+    const liveDocs = () => [...store.docs.keys()].filter((key) => key.startsWith(`${channel}/live/`));
+    const pair = async () => {
+      await store.set(`${channel}/pairing/iphone-1`, {
+        box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }),
+      });
+      await bridge.tick();
+      await bridge.approve("iphone-1");
+    };
+    return {
+      bridge,
+      store,
+      payload,
+      presence,
+      liveDocs,
+      pair,
+      liveActivity,
+      advance: (ms: number) => (now += ms),
+      setActive: (next: FleetSession[]) => (active = next),
+    };
+  }
+
+  // The publisher's own timer and writes run on microtasks; let them land.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  it("publishes the watched session's whole turn, sealed, while the phone watches it", async () => {
+    const t = verbose();
+    await t.pair();
+    await t.presence("claude-transcript:s1");
+    await t.bridge.tick();
+    await settle();
+    const [doc] = t.liveDocs();
+    expect(doc).toBeDefined();
+    const turn = open<{ key: string; steps: Array<{ text: string }> }>(t.payload.k, t.store.docs.get(doc!)!.box);
+    expect(turn.key).toBe("claude-transcript:s1");
+    expect(turn.steps[0]!.text).toHaveLength(900); // not clipped to the snapshot's 200
+    t.bridge.stop();
+  });
+
+  it("deletes it when the phone stops watching", async () => {
+    const t = verbose();
+    await t.pair();
+    await t.presence("claude-transcript:s1");
+    await t.bridge.tick();
+    await settle();
+    await t.presence();
+    await t.bridge.tick();
+    await settle();
+    expect(t.liveDocs()).toEqual([]);
+    t.bridge.stop();
+  });
+
+  it("deletes it when the phone goes quiet (closed without saying so)", async () => {
+    const t = verbose();
+    await t.pair();
+    await t.presence("claude-transcript:s1");
+    await t.bridge.tick();
+    await settle();
+    t.advance(61_000);
+    await t.bridge.tick();
+    await settle();
+    expect(t.liveDocs()).toEqual([]);
+    t.bridge.stop();
+  });
+
+  it("publishes nothing for a session the phone cannot see", async () => {
+    const t = verbose();
+    await t.pair();
+    await t.presence("claude-transcript:not-active");
+    await t.bridge.tick();
+    await settle();
+    expect(t.liveDocs()).toEqual([]);
+    expect(t.liveActivity).not.toHaveBeenCalled();
+    t.bridge.stop();
+  });
+
+  it("publishes nothing when the owner switched verbose off on the Mac", async () => {
+    const t = verbose({ verbose: false });
+    await t.pair();
+    await t.presence("claude-transcript:s1");
+    await t.bridge.tick();
+    await settle();
+    expect(t.liveDocs()).toEqual([]);
+    t.bridge.stop();
+  });
+
+  it("publishes nothing on Firestore, whose rules have no live collection", async () => {
+    const t = verbose({ firestore: true });
+    await t.pair();
+    await t.presence("claude-transcript:s1");
+    await t.bridge.tick();
+    await settle();
+    expect(t.liveDocs()).toEqual([]);
+    t.bridge.stop();
+  });
+
+  it("publishes nothing before a phone is paired", async () => {
+    const t = verbose();
+    await t.presence("claude-transcript:s1");
+    await t.bridge.tick();
+    await settle();
+    expect(t.liveDocs()).toEqual([]);
+    t.bridge.stop();
+  });
+
+  it("a plain presence ping from an older phone keeps working", async () => {
+    const t = verbose();
+    await t.pair();
+    await t.presence();
+    await t.bridge.tick();
+    expect((t.bridge.status() as { phoneOpen: boolean }).phoneOpen).toBe(true);
+    expect(t.liveDocs()).toEqual([]);
+    t.bridge.stop();
+  });
+});

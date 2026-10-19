@@ -245,3 +245,17 @@ directory, a model, a permission mode or a branch, only a workspace the owner
 already made; and every start, accepted or refused, in the Mac app's device
 activity. It cannot create a workspace, and it cannot start a chat anywhere
 else on the machine. Each of those is a separate, later decision.
+- **Verbose: thinking live (2026-10-19).** iPhone Settings › "Show thinking
+  live" (off by default). With it on, the phone's sealed presence names the
+  session open on screen (`watching`), and the Mac publishes that session's
+  whole current turn (`src/remote/live-turn.ts`: up to 50 steps of up to
+  4,000 characters, thinking included) to `live/<handle>`, sealed, at most
+  once a second and only when it changed. The handle is a hash, not the key.
+  It stops, and **deletes the document**, the moment the phone leaves the
+  session, backgrounds, or its presence lapses (60s), so a turn's thinking
+  does not sit in the database afterwards. Only for a session the phone can
+  already see, only with a paired phone, and only on the Realtime Database
+  (Firestore's rules have no `live`, and a write a second is what it bills
+  for). `SQUEAK_REMOTE_VERBOSE=off` on the Mac refuses it outright. An older
+  phone's plain `{ at }` presence keeps working. Measured on the live
+  project: the turn arrived 786 ms after the phone opened the session.

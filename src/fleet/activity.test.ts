@@ -110,6 +110,21 @@ describe("readActivity for Claude", () => {
     ]);
   });
 
+  it("keeps whole thinking and notes when asked (the phone's verbose view), tool labels still short", () => {
+    const long = "Considering the splitter. ".repeat(40).trim();
+    const file = transcript([
+      user("fix it"),
+      block("m1", { type: "thinking", thinking: long }),
+      block("m1", { type: "text", text: long }),
+      block("m1", { type: "tool_use", id: "t1", name: "Bash", input: { command: `echo ${"x".repeat(400)}` } }),
+    ]);
+    const short = readActivity("claude", file);
+    expect(short.steps[0]!.text.length).toBeLessThanOrEqual(280);
+    const whole = readActivity("claude", file, 50, { stepChars: 4000 });
+    expect(whole.steps.map((step) => step.text.length)).toEqual([long.length, long.length, expect.any(Number)]);
+    expect(whole.steps[2]!.text.length).toBeLessThanOrEqual(120);
+  });
+
   it("is empty for a transcript that is not there", () => {
     expect(readActivity("claude", "/nonexistent/t.jsonl")).toEqual({ steps: [], total: 0 });
   });

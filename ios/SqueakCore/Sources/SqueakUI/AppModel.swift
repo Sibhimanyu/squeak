@@ -35,8 +35,27 @@ final class AppModel: ObservableObject {
     /// The last agent message seen per session, so a working turn keeps the previous answer on screen.
     private(set) var remembered: [String: RememberedMessage] = [:]
 
+    /// "Show thinking live" (Settings): the open session's whole turn, as it
+    /// happens, instead of its newest six steps. Off by default; the Mac
+    /// sends it only while this phone has that session open.
+    @Published var verbose: Bool = UserDefaults.standard.bool(forKey: "squeak.verbose") {
+        didSet {
+            UserDefaults.standard.set(verbose, forKey: "squeak.verbose")
+            restartLive()
+        }
+    }
+    /// The verbose view per session key, while it is being watched.
+    @Published private(set) var liveTurns: [String: LiveTurn] = [:]
+    /// False once it is known the Mac's channel cannot stream (Firestore), so verbose cannot work.
+    @Published private(set) var liveAvailable = true
+
     private var channel: Channel?
     private var loop: Task<Void, Never>?
+    /// The session open on screen.
+    private var watching: String?
+    private var liveTask: Task<Void, Never>?
+    /// What presence tells the Mac to stream: only in verbose mode.
+    private var presenceWatching: String? { verbose ? watching : nil }
     private var lastPresence = Date.distantPast
     private let signer: CommandSigner
     let demo: Bool
@@ -89,6 +108,9 @@ final class AppModel: ObservableObject {
         snapshot = nil
         phase = .unpaired
         loop?.cancel()
+        liveTask?.cancel()
+        liveTask = nil
+        liveTurns = [:]
     }
 
     /* ---------- the loop: only while the app is on screen ---------- */
@@ -97,6 +119,7 @@ final class AppModel: ObservableObject {
         guard !demo, loop == nil, let channel else { return }
         loop = Task { [weak self] in
             await self?.tick()
+            self?.restartLive()
             guard let snapshots = await channel.snapshotChanges(), let results = await channel.resultChanges() else {
                 // Firestore: look again every couple of seconds.
                 while !Task.isCancelled {
@@ -131,6 +154,41 @@ final class AppModel: ObservableObject {
     func pause() {
         loop?.cancel()
         loop = nil
+        let wasStreaming = presenceWatching != nil
+        liveTask?.cancel()
+        liveTask = nil
+        // Ask the Mac to stop (and delete) the live turn now rather than when presence lapses.
+        if wasStreaming, let channel { Task { try? await channel.touchPresence(watching: nil) } }
+    }
+
+    /// The session on screen, or nil when none is. In verbose mode the Mac streams its turn.
+    func watch(_ key: String?) {
+        guard watching != key else { return }
+        watching = key
+        restartLive()
+    }
+
+    /// Tell the Mac what this phone watches now, and follow that session's live turn.
+    private func restartLive() {
+        liveTask?.cancel()
+        liveTask = nil
+        guard !demo, loop != nil, let channel else { return }
+        let key = presenceWatching
+        liveTask = Task { [weak self] in
+            try? await channel.touchPresence(watching: key)
+            self?.lastPresence = Date()
+            guard let key else { return }
+            guard let changes = await channel.liveChanges(for: key) else {
+                self?.liveAvailable = false
+                return
+            }
+            self?.liveAvailable = true
+            for await _ in changes {
+                let turn = try? await channel.liveTurn(for: key)
+                if Task.isCancelled { break }
+                self?.liveTurns[key] = turn
+            }
+        }
     }
 
     func refresh() async {
@@ -173,7 +231,7 @@ final class AppModel: ObservableObject {
             }
             // Tell the Mac someone is looking, so it publishes and polls faster.
             if Date().timeIntervalSince(lastPresence) > 20 {
-                try await channel.touchPresence()
+                try await channel.touchPresence(watching: presenceWatching)
                 lastPresence = Date()
             }
             if let next = try await channel.snapshot() {

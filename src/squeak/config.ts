@@ -69,6 +69,11 @@ const schema = z.object({
    */
   SQUEAK_REMOTE_DATABASE_URL: z.string().optional(),
   /**
+   * "off": a phone that turns on "Show thinking live" gets nothing more than
+   * the snapshot. On by default; the phone's switch is off by default.
+   */
+  SQUEAK_REMOTE_VERBOSE: z.string().optional(),
+  /**
    * A Zoho Cliq incoming-webhook URL (a bot's or a channel's, with its
    * zapikey). Set: push cards go to Cliq too. One-way; see src/cliq/.
    */
@@ -109,6 +114,8 @@ export interface SqueakConfig {
   remoteProjectId: string | null;
   /** Null: the channel stays on Firestore. */
   remoteDatabaseUrl: string | null;
+  /** Whether a phone may ask for a session's whole turn (live-turn.ts). */
+  remoteVerbose: boolean;
   cliqWebhookUrl: string | null;
   /** Null unless every two-way setting is present. */
   cliqTwoWay: {
@@ -178,6 +185,7 @@ export function loadSqueakConfig(): SqueakConfig {
     handsAppPath: parsed.SQUEAK_HANDS_APP === "off" ? null : resolve(parsed.SQUEAK_HANDS_APP),
     remoteProjectId: parsed.SQUEAK_REMOTE_PROJECT?.trim() || null,
     remoteDatabaseUrl: databaseUrl(parsed.SQUEAK_REMOTE_DATABASE_URL),
+    remoteVerbose: parsed.SQUEAK_REMOTE_VERBOSE?.trim().toLowerCase() !== "off",
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
     cliqTwoWay: cliqTwoWay(parsed),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,

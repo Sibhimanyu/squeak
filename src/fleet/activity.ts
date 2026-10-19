@@ -34,13 +34,24 @@ const DEFAULT_LIMIT = 14;
 /** A step is a line in a feed, not the message itself. */
 const MAX_STEP_CHARS = 280;
 
-export function readActivity(agent: AgentKind, transcriptPath: string, limit = DEFAULT_LIMIT): Activity {
+/**
+ * `stepChars` lifts the cap on what the agent wrote (thinking, notes, a
+ * worker's report); tool labels keep theirs. The phone's verbose view asks
+ * for whole steps; everything else keeps a feed of short lines.
+ */
+export function readActivity(
+  agent: AgentKind,
+  transcriptPath: string,
+  limit = DEFAULT_LIMIT,
+  options: { stepChars?: number } = {},
+): Activity {
   const entries = parseJsonLines(readTailLines(transcriptPath));
-  const steps = agent === "claude" ? claudeSteps(entries) : codexSteps(entries);
+  const max = options.stepChars ?? MAX_STEP_CHARS;
+  const steps = agent === "claude" ? claudeSteps(entries, max) : codexSteps(entries, max);
   return { steps: steps.slice(-limit), total: steps.length };
 }
 
-function claudeSteps(entries: Record<string, unknown>[]): ActivityStep[] {
+function claudeSteps(entries: Record<string, unknown>[], max: number): ActivityStep[] {
   // Claude Code writes each block of a message as its own entry, all under
   // one message id, and may write a block again as it streams; a block is
   // keyed by what it is, so repeats collapse and distinct blocks stay.
@@ -58,7 +69,7 @@ function claudeSteps(entries: Record<string, unknown>[]): ActivityStep[] {
         // typed starts a new turn.
         const finished = /<task-notification>[\s\S]*?<summary>([^<]*)<\/summary>/.exec(message.content);
         if (finished) {
-          steps.set(`bg:${steps.size}`, { kind: "background", text: clip(finished[1]!.trim()), at });
+          steps.set(`bg:${steps.size}`, { kind: "background", text: clip(finished[1]!.trim(), max), at });
         } else if (!message.content.startsWith("<")) {
           steps = new Map();
         }
@@ -73,7 +84,7 @@ function claudeSteps(entries: Record<string, unknown>[]): ActivityStep[] {
     const id = asString(message.id) ?? `${at}`;
     for (const raw of asArray(message.content)) {
       const block = asRecord(raw);
-      const step = block ? claudeStep(block, at) : null;
+      const step = block ? claudeStep(block, at, max) : null;
       if (step) {
         steps.set(`${id}:${asString(block!.id) ?? `${step.kind}:${step.text}`}`, step);
       }
@@ -82,15 +93,15 @@ function claudeSteps(entries: Record<string, unknown>[]): ActivityStep[] {
   return [...steps.values()];
 }
 
-function claudeStep(block: Record<string, unknown>, at: string | null): ActivityStep | null {
+function claudeStep(block: Record<string, unknown>, at: string | null, max: number): ActivityStep | null {
   switch (asString(block.type)) {
     case "thinking": {
       const text = asString(block.thinking)?.trim();
-      return text ? { kind: "thinking", text: clip(text), at } : null;
+      return text ? { kind: "thinking", text: clip(text, max), at } : null;
     }
     case "text": {
       const text = asString(block.text)?.trim();
-      return text ? { kind: "note", text: clip(text), at } : null;
+      return text ? { kind: "note", text: clip(text, max), at } : null;
     }
     case "tool_use":
       return {
@@ -146,7 +157,7 @@ export function describeClaudeTool(name: string, input: Record<string, unknown>)
   }
 }
 
-function codexSteps(entries: Record<string, unknown>[]): ActivityStep[] {
+function codexSteps(entries: Record<string, unknown>[], max: number): ActivityStep[] {
   let steps: ActivityStep[] = [];
   for (const entry of entries) {
     const at = asString(entry.timestamp);
@@ -166,7 +177,7 @@ function codexSteps(entries: Record<string, unknown>[]): ActivityStep[] {
           steps = [];
         }
       } else if (asString(payload.role) === "assistant" && text) {
-        steps.push({ kind: "note", text: clip(text), at });
+        steps.push({ kind: "note", text: clip(text, max), at });
       }
     } else if (kind === "reasoning") {
       const text = asArray(payload.summary)
@@ -174,7 +185,7 @@ function codexSteps(entries: Record<string, unknown>[]): ActivityStep[] {
         .join("\n")
         .trim();
       if (text) {
-        steps.push({ kind: "thinking", text: clip(text), at });
+        steps.push({ kind: "thinking", text: clip(text, max), at });
       }
     } else if (kind === "function_call" || kind === "custom_tool_call" || kind === "local_shell_call") {
       steps.push({ kind: "tool", text: describeCodexTool(payload), at });
