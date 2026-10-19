@@ -170,7 +170,13 @@ public actor EncryptedCache {
             container = empty
             return empty
         }
-        guard let key = try symmetricKey(create: false) else { throw CacheError.decryptionFailed }
+        // A cache whose key is gone (it lived in the Keychain before 2.0.3) can never be read:
+        // start empty, and the next save writes it again under a new key.
+        guard let key = try symmetricKey(create: false) else {
+            let empty = Container()
+            container = empty
+            return empty
+        }
         let plain: Data
         do {
             plain = try AES.GCM.open(try AES.GCM.SealedBox(combined: blob), using: key)

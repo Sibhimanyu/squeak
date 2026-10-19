@@ -31,8 +31,9 @@ struct EncryptedCacheTests {
         let dir = tempDirectory()
         let c1 = cache(dir: dir)
         try await c1.putMessages([ChatMessage(id: "m1", role: .user, text: "hi")], for: key)
-        let c2 = cache(dir: dir, keys: MemoryKeyStore()) // fresh store: no key
-        await #expect(throws: CacheError.decryptionFailed) { try await c2.messages(for: key) }
+        // Key gone (it lived in the Keychain before 2.0.3): unreadable, so start empty, never throw.
+        let c2 = cache(dir: dir, keys: MemoryKeyStore())
+        #expect(try await c2.messages(for: key).isEmpty)
 
         let other = MemoryKeyStore()
         try other.setKey(Data(repeating: 7, count: 32), for: "cache-key")
@@ -135,6 +136,21 @@ struct DraftStoreTests {
 
 @Suite("Key stores")
 struct KeyStoreTests {
+    @Test func fileKeyStoreIsOwnerOnlyAndRoundTrips() throws {
+        let dir = tempDirectory().appending(path: "keys")
+        let store = FileKeyStore(directory: dir)
+        #expect(try store.key(for: "cache-key") == nil)
+        let k = Data(repeating: 3, count: 32)
+        try store.setKey(k, for: "cache-key")
+        #expect(try store.key(for: "cache-key") == k)
+        let file = dir.appending(path: "cache-key.key")
+        let mode = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
+        try store.removeKey(for: "cache-key")
+        #expect(try store.key(for: "cache-key") == nil)
+        try store.removeKey(for: "cache-key") // removing twice is fine
+    }
+
     @Test func memoryStoreStoresAndRemoves() throws {
         let k = MemoryKeyStore()
         #expect(try k.key(for: "x") == nil)

@@ -9,8 +9,11 @@ enum AppLog {
     static let buffer = LogBuffer(capacity: 200)
     private static let logger = Logger(subsystem: "com.squeak.mac", category: "app")
 
+    private static let echo = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEBUG"] == "1"
+
     static func info(_ line: String) {
         buffer.append(line)
+        if echo { FileHandle.standardError.write(Data("[squeak] \(line)\n".utf8)) }
         logger.info("\(line, privacy: .private)")
     }
 

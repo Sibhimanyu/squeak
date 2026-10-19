@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.3
+
+- Opening the Squeak window from the menu-bar duck now gives Squeak the menu bar
+  (it said "Finder" or whichever app was in front before).
+- No more Keychain prompts: the key for the local message cache is now a private
+  file beside the cache (0600), not a Keychain item that macOS asked about again
+  after every update. The old cache is rebuilt once.
+
 ## 2.0.2
 
 Updates install themselves, and Squeak behaves like a real app while its window is open.

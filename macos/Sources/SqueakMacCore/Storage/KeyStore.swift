@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 public protocol KeyStore: Sendable {
     func key(for account: String) throws -> Data?
@@ -27,50 +26,42 @@ public final class MemoryKeyStore: KeyStore, @unchecked Sendable {
     }
 }
 
-public struct KeychainError: Error, Equatable, Sendable {
-    public var status: OSStatus
-}
+/// Keys as files beside the cache: `<directory>/<account>.key`, mode 0600 in a 0700 folder,
+/// excluded from backups. Not the Keychain on purpose: Squeak is ad-hoc signed, so every build
+/// and every update has a new code identity, and macOS would ask the user to allow the Keychain
+/// item again each time. The cache it protects is a local, rebuildable copy.
+public struct FileKeyStore: KeyStore {
+    public let directory: URL
 
-/// Generic-password items in the user's login Keychain, service `com.squeak.mac`.
-public struct KeychainKeyStore: KeyStore {
-    public let service: String
-
-    public init(service: String = "com.squeak.mac") {
-        self.service = service
+    public init(directory: URL) {
+        self.directory = directory
     }
 
-    private func base(_ account: String) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
+    private func url(_ account: String) -> URL {
+        let safe = account.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "." ? $0 : "_" }
+        return directory.appending(path: String(safe) + ".key")
     }
 
     public func key(for account: String) throws -> Data? {
-        var q = base(account)
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var out: CFTypeRef?
-        let status = SecItemCopyMatching(q as CFDictionary, &out)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess else { throw KeychainError(status: status) }
-        return out as? Data
+        let file = url(account)
+        guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+        return try Data(contentsOf: file)
     }
 
     public func setKey(_ key: Data, for account: String) throws {
-        let update = SecItemUpdate(base(account) as CFDictionary, [kSecValueData as String: key] as CFDictionary)
-        if update == errSecSuccess { return }
-        guard update == errSecItemNotFound else { throw KeychainError(status: update) }
-        var add = base(account)
-        add[kSecValueData as String] = key
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(add as CFDictionary, nil)
-        guard status == errSecSuccess else { throw KeychainError(status: status) }
+        let fm = FileManager.default
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        var file = url(account)
+        try key.write(to: file, options: [.atomic])
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? file.setResourceValues(values)
     }
 
     public func removeKey(for account: String) throws {
-        let status = SecItemDelete(base(account) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError(status: status) }
+        let file = url(account)
+        guard FileManager.default.fileExists(atPath: file.path) else { return }
+        try FileManager.default.removeItem(at: file)
     }
 }

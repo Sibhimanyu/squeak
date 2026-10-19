@@ -69,7 +69,7 @@ macos/Sources/
                    ConductorRegistry, ClaudeActivityReader, ConductorText/Time
     Support/       ConnectionsReport, Diagnostics, MessageMarkup
     Broker/        Broker actor + BrokerClock
-    Storage/       KeyStore (+ Keychain), EncryptedCache, DraftStore
+    Storage/       KeyStore (FileKeyStore), EncryptedCache, DraftStore
     Policy/        SessionOrdering, SearchIndex, NotificationPolicy
     Relay/         Swift port of src/fleet/conductor-relay (not wired in)
   SqueakMac/       App, AppModel, PopoverView, ConversationWindow,
@@ -216,7 +216,7 @@ Environment variables:
 | variable | effect |
 | --- | --- |
 | `SQUEAK_DAEMON_PORT` | daemon port to talk to instead of 8477 |
-| `SQUEAK_MAC_CAPTURE=<prefix>` | open the conversation window, save screenshots with that prefix, quit; uses no real Keychain or cache |
+| `SQUEAK_MAC_CAPTURE=<prefix>` | open the conversation window, save screenshots with that prefix, quit; uses no real cache or key file |
 | `SQUEAK_MAC_APPEARANCE=light` | with capture, force light appearance (otherwise dark) |
 
 ## Install (for users)
@@ -245,8 +245,9 @@ sessions, need the Squeak daemon running on the same Mac (step 1 above).
 
 - Messages the app has seen are cached in one encrypted file,
   `~/Library/Application Support/Squeak Mac/cache.squeak` (directory mode 0700).
-- The cache key is stored in the Keychain under the service `com.squeak.mac`
-  (account `cache-key`).
+- The cache key is a private file beside the cache (`cache-key.key`, mode 0600, excluded
+  from backups), not a Keychain item: Squeak is ad-hoc signed, so every update has a new
+  code identity and macOS would ask about a Keychain item again each time.
 - Messages expire after 14 days and the cache is capped at 50 MB.
   Settings has a "Delete cache" button that purges it; Squeak rebuilds it as you
   open conversations.

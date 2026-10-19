@@ -36,9 +36,31 @@ final class ActivationPolicyController {
     /// cannot activate), so no notification would tell us; settle it once the window had time to appear.
     func willShowWindow() {
         apply(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        takeMenuBar()
         for delay in [0.3, 1.0] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.update(closing: nil) }
+        }
+    }
+
+    /// Make the menu bar read "Squeak" once a window is open.
+    ///
+    /// On macOS 14 and later an app may only activate itself when the system agrees it is the
+    /// user's intent, and a click inside the menu-bar popover often does not count, so
+    /// `NSApp.activate` is quietly ignored and the previous app keeps the menu bar. Asking Launch
+    /// Services to open Squeak itself is always honoured (it is what a Dock click does), so that is
+    /// the fallback when the direct request did not take.
+    private func takeMenuBar() {
+        if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            let owner = NSWorkspace.shared.menuBarOwningApplication
+            AppLog.info("menu bar owner after activate: \(owner == NSRunningApplication.current ? "squeak" : "other")")
+            guard owner != NSRunningApplication.current else { return }
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            config.addsToRecentItems = false
+            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, error in
+                if let error { AppLog.info("activate via Launch Services failed: \(error.localizedDescription)") }
+            }
         }
     }
 
@@ -52,10 +74,7 @@ final class ActivationPolicyController {
         guard wanted != policy else { return }
         policy = wanted
         NSApp.setActivationPolicy(wanted)
-        if wanted == .regular {
-            // So the menu bar reads "Squeak", not the app that was in front.
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        if wanted == .regular { takeMenuBar() }
         AppLog.info("activation policy: \(wanted == .regular ? "regular" : "accessory")")
     }
 }

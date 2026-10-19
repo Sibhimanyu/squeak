@@ -47,7 +47,10 @@ SUM="$(cd build && shasum -a 256 "$DMG" | awk '{print $1}')"
 
 # Sign the update archive (the DMG itself is the Sparkle enclosure).
 SIGN="$HERE/.build/artifacts/sparkle/Sparkle/bin/sign_update"
-SIGNED="$("$SIGN" --account squeak "build/$DMG")"
+# Sign from the private key file, not the Keychain item, so releasing never raises a Keychain prompt.
+KEY_FILE="$HOME/Library/Application Support/squeak/sparkle-ed25519-private.key"
+[ -f "$KEY_FILE" ] || { echo "missing $KEY_FILE (Sparkle's private key)" >&2; exit 1; }
+SIGNED="$("$SIGN" --ed-key-file "$KEY_FILE" "build/$DMG")"
 SIG="$(sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p' <<<"$SIGNED")"
 LEN="$(sed -n 's/.*length="\([0-9]*\)".*/\1/p' <<<"$SIGNED")"
 [ -n "$SIG" ] && [ -n "$LEN" ] || { echo "sign_update gave no signature: $SIGNED" >&2; exit 1; }

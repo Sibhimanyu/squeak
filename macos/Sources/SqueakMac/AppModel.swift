@@ -74,11 +74,11 @@ final class AppModel {
         captureMode = env["SQUEAK_MAC_CAPTURE"] != nil
         demoMode = env["SQUEAK_MAC_DEMO"] == "1"
         client = DaemonClient.live()
-        // The capture run never touches the real Keychain or the real cache file.
+        // The capture run never touches the real cache file or its key.
         if captureMode || demoMode {
             cache = nil
         } else {
-            cache = EncryptedCache(keyStore: KeychainKeyStore())
+            cache = EncryptedCache(keyStore: FileKeyStore(directory: EncryptedCache.defaultDirectory))
         }
         let draftStore = cache.map { DraftStore(cache: $0) }
         usesLocalConductor = ConductorDatabase().exists
