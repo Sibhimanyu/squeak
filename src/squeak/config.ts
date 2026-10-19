@@ -73,7 +73,11 @@ const schema = z.object({
    * the snapshot. On by default; the phone's switch is off by default.
    */
   SQUEAK_REMOTE_VERBOSE: z.string().optional(),
-  /** "off": let the Mac sleep even while agents work. On by default (fleet/caffeinate.ts). */
+  /**
+   * Keeping the Mac awake (fleet/caffeinate.ts). Default: while agents work,
+   * and always while plugged in, so the phone can reach it. "working": only
+   * while agents work. "off": never.
+   */
   SQUEAK_CAFFEINATE: z.string().optional(),
   /**
    * A Zoho Cliq incoming-webhook URL (a bot's or a channel's, with its
@@ -120,6 +124,8 @@ export interface SqueakConfig {
   remoteVerbose: boolean;
   /** Keep the Mac awake while an agent works. */
   caffeinate: boolean;
+  /** And always while it is plugged in. */
+  caffeinateOnPower: boolean;
   cliqWebhookUrl: string | null;
   /** Null unless every two-way setting is present. */
   cliqTwoWay: {
@@ -191,6 +197,7 @@ export function loadSqueakConfig(): SqueakConfig {
     remoteDatabaseUrl: databaseUrl(parsed.SQUEAK_REMOTE_DATABASE_URL),
     remoteVerbose: parsed.SQUEAK_REMOTE_VERBOSE?.trim().toLowerCase() !== "off",
     caffeinate: parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() !== "off",
+    caffeinateOnPower: !["off", "working"].includes(parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() ?? ""),
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
     cliqTwoWay: cliqTwoWay(parsed),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,

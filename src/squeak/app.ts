@@ -96,7 +96,7 @@ export class SqueakApp {
   /** Claude's plan limits, as the assistant's own `claude` runs last reported them. */
   private readonly claudeLimits: ClaudeLimitsStore;
   private readonly claudeRefresher: ClaudeLimitsRefresher;
-  /** Keeps the Mac awake while an agent works (SQUEAK_CAFFEINATE=off: never). */
+  /** Keeps the Mac awake while an agent works, and while plugged in (SQUEAK_CAFFEINATE). */
   private readonly caffeinator = new Caffeinator();
   private unwatchCaffeinate: (() => void) | null = null;
   private lastUpdateId = 0;
@@ -269,6 +269,9 @@ export class SqueakApp {
     this.cliq?.start();
     if (this.config.caffeinate) {
       this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
+    }
+    if (this.config.caffeinateOnPower) {
+      this.caffeinator.holdOnPower();
     }
     await this.controller.start();
     this.conductorRelay.start();

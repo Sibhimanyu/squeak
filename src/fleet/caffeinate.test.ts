@@ -68,4 +68,18 @@ describe("Caffeinator", () => {
     t.caffeinator.stop();
     expect(t.children[0]!.kill).toHaveBeenCalled();
   });
+
+  it("holds the Mac awake on power for Squeak's whole life, and stop lets go", () => {
+    const t = setup();
+    t.caffeinator.holdOnPower();
+    t.caffeinator.holdOnPower();
+    expect(t.spawn).toHaveBeenCalledTimes(1);
+    expect(t.spawn).toHaveBeenCalledWith("/usr/bin/caffeinate", ["-s", "-w", "777"]);
+    t.caffeinator.update(t.snapshot("working"));
+    t.caffeinator.update(t.snapshot());
+    expect(t.children[0]!.kill).not.toHaveBeenCalled();
+    t.caffeinator.stop();
+    expect(t.children[0]!.kill).toHaveBeenCalled();
+    expect(t.children[1]!.kill).toHaveBeenCalled();
+  });
 });
