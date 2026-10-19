@@ -13,9 +13,13 @@ public struct PairingPayload: Codable, Equatable, Sendable {
     public let k: String
     /// The Mac's name, for the screen.
     public let n: String
+    /// The Realtime Database URL, when the Mac's channel lives there. Absent
+    /// in codes from before it did; such a phone learns it from the sealed
+    /// `state/transport` document (`Channel`).
+    public let r: String?
 
-    public init(v: Int, p: String, c: String, k: String, n: String) {
-        self.v = v; self.p = p; self.c = c; self.k = k; self.n = n
+    public init(v: Int, p: String, c: String, k: String, n: String, r: String? = nil) {
+        self.v = v; self.p = p; self.c = c; self.k = k; self.n = n; self.r = r
     }
 
     public enum Failure: Error, Equatable { case notAPairingCode, unsupportedVersion }
@@ -29,6 +33,7 @@ public struct PairingPayload: Codable, Equatable, Sendable {
         let payload = try JSONDecoder().decode(PairingPayload.self, from: data)
         guard payload.v == 1 else { throw Failure.unsupportedVersion }
         guard Data(base64Encoded: payload.k)?.count == 32, payload.c.count >= 22 else { throw Failure.notAPairingCode }
+        guard payload.r.map(Channel.isDatabaseURL) ?? true else { throw Failure.notAPairingCode }
         return payload
     }
 }

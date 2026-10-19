@@ -19,6 +19,7 @@ import { ConductorReplier } from "../fleet/session-reply.js";
 import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
 import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
+import { RtdbRest } from "../remote/rtdb-rest.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
@@ -148,7 +149,12 @@ export class SqueakApp {
       ? new RemoteBridge({
           configPath: path.join(config.supportDir, "remote.json"),
           projectId: config.remoteProjectId,
-          store: new FirestoreRest(config.remoteProjectId),
+          // The Realtime Database when configured: streamed, billed by bytes not reads.
+          store: config.remoteDatabaseUrl
+            ? new RtdbRest(config.remoteDatabaseUrl)
+            : new FirestoreRest(config.remoteProjectId),
+          databaseUrl: config.remoteDatabaseUrl,
+          announce: config.remoteDatabaseUrl ? new FirestoreRest(config.remoteProjectId) : null,
           replier: this.replier,
           snapshot: () => this.runtime.monitor.snapshot,
           onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),

@@ -133,8 +133,8 @@ final class ChannelTests: XCTestCase {
         let (id, document) = try channel.replyDocument(to: session, text: "A", signer: SoftwareSigner())
         try await channel.send(document, id: id)
 
-        let request = try XCTUnwrap(transport.requests.first)
-        XCTAssertEqual(request.httpMethod, "PATCH")
+        // A phone paired before the move first asks where the channel lives; this one hears "Firestore".
+        let request = try XCTUnwrap(transport.requests.first { $0.httpMethod == "PATCH" })
         XCTAssertTrue(request.url!.path.hasSuffix("/channels/AAAAAAAAAAAAAAAAAAAAAA/commands/\(id)"))
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody!) as? [String: Any])
         let fields = try XCTUnwrap(body["fields"] as? [String: Any])

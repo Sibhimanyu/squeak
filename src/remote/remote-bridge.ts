@@ -81,6 +81,17 @@ export interface ChannelStore {
   set(path: string, doc: ChannelDoc): Promise<void>;
   list(collection: string): Promise<Array<{ id: string; doc: ChannelDoc }>>;
   delete(path: string): Promise<void>;
+  /**
+   * Present when the store can stream changes (the Realtime Database). The
+   * bridge then runs a pass as soon as a phone writes, and polls only as a
+   * fallback. A change only wakes the pass; every check still runs on what
+   * the pass reads.
+   */
+  watch?(
+    path: string,
+    onChange: () => void,
+    options?: { onOpen?: () => void; onError?: (error: Error) => void },
+  ): () => void;
 }
 
 export interface RemoteReplier {
@@ -115,6 +126,14 @@ export interface RemoteBridgeDependencies {
    * cadence alone applies.
    */
   onSnapshot?: ((listener: (snapshot: FleetSnapshot) => void) => () => void) | null;
+  /**
+   * The Realtime Database URL when `store` is one. It goes into the pairing
+   * code, and is announced, sealed with the channel key, in Firestore's
+   * `state/transport` through `announce`, so a phone paired before the move
+   * follows without pairing again.
+   */
+  databaseUrl?: string | null;
+  announce?: ChannelStore | null;
   now?: () => number;
   macName?: string;
 }
@@ -131,6 +150,10 @@ const IDLE_PUBLISH_MS = 60_000;
 const CHANGE_PUBLISH_DELAY_MS = 300;
 /** Even change-driven publishes keep this gap, to bound Firestore writes. */
 const CHANGE_PUBLISH_MIN_GAP_MS = 1_000;
+/** With a streaming store a pass runs on every change; this is only the safety net. */
+const STREAM_FALLBACK_MS = 60_000;
+/** A burst of changes (a command, then its deletion) becomes one pass. */
+const WATCH_DEBOUNCE_MS = 50;
 /** Pairing is only listened for while the Mac app's pairing sheet is open. */
 const PAIRING_WINDOW_MS = 10 * 60_000;
 const MESSAGE_MAX_CHARS = 8_000;
@@ -161,6 +184,10 @@ export class RemoteBridge {
   private publishing = false;
   private stopped = false;
   private unsubscribe: (() => void) | null = null;
+  private watching: { channelId: string; stops: Array<() => void> } | null = null;
+  /** A change arrived during a pass; run another as soon as it ends. */
+  private dirty = false;
+  private announcedFor = "";
   private lastSignature: string | null = null;
   private changeTimer: NodeJS.Timeout | null = null;
 
@@ -173,6 +200,7 @@ export class RemoteBridge {
   start(): void {
     this.stopped = false;
     this.schedule(0);
+    this.ensureWatches();
     this.unsubscribe?.();
     this.unsubscribe =
       this.deps.onSnapshot?.((snapshot) => {
@@ -216,6 +244,7 @@ export class RemoteBridge {
 
   stop(): void {
     this.stopped = true;
+    this.stopWatches();
     this.unsubscribe?.();
     this.unsubscribe = null;
     if (this.changeTimer) {
@@ -257,7 +286,14 @@ export class RemoteBridge {
     this.pairingOpenUntil = this.now() + PAIRING_WINDOW_MS;
     this.schedule(0);
     const payload = Buffer.from(
-      JSON.stringify({ v: 1, p: config.projectId, c: config.channelId, k: config.key, n: this.macName() }),
+      JSON.stringify({
+        v: 1,
+        p: config.projectId,
+        c: config.channelId,
+        k: config.key,
+        n: this.macName(),
+        ...(this.deps.databaseUrl ? { r: this.deps.databaseUrl } : {}),
+      }),
     ).toString("base64url");
     return { url: `squeak://pair?d=${payload}` };
   }
@@ -308,6 +344,8 @@ export class RemoteBridge {
   reset(): void {
     this.config = null;
     this.pending.clear();
+    this.stopWatches();
+    this.announcedFor = "";
     try {
       fs.rmSync(this.deps.configPath, { force: true });
     } catch {
@@ -330,12 +368,16 @@ export class RemoteBridge {
   /** One pass: presence, pairing, commands, snapshot. Never throws. */
   async tick(): Promise<void> {
     if (this.busy) {
+      this.dirty = true;
       return;
     }
     this.busy = true;
+    this.dirty = false;
     try {
       const config = this.config;
+      this.ensureWatches();
       if (config) {
+        await this.announceTransport(config);
         await this.readPresence(config);
         if (this.pairingOpenUntil > this.now()) {
           await this.readPairing(config);
@@ -349,7 +391,79 @@ export class RemoteBridge {
       logger.warn("remote channel pass failed", { error: error instanceof Error ? error.message : String(error) });
     } finally {
       this.busy = false;
-      this.schedule(this.phoneOpen() || this.pairingOpenUntil > this.now() ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+      if (this.dirty) {
+        this.dirty = false;
+        this.schedule(0);
+      } else if (this.watching) {
+        this.schedule(STREAM_FALLBACK_MS);
+      } else {
+        this.schedule(this.phoneOpen() || this.pairingOpenUntil > this.now() ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+      }
+    }
+  }
+
+  /* ---------- streaming (Realtime Database) ---------- */
+
+  /** Watch what phones write: presence, pairing requests and commands. One stream each. */
+  private ensureWatches(): void {
+    const watch = this.deps.store.watch?.bind(this.deps.store);
+    const config = this.config;
+    if (!watch || this.stopped || !config) {
+      if (!config) this.stopWatches();
+      return;
+    }
+    if (this.watching?.channelId === config.channelId) {
+      return;
+    }
+    this.stopWatches();
+    const onError = (error: Error) => logger.debug("remote watch dropped; reconnecting", { error: error.message });
+    this.watching = {
+      channelId: config.channelId,
+      stops: [
+        this.channel(config, "state", "presence"),
+        this.channel(config, "pairing"),
+        this.channel(config, "commands"),
+      ].map((path) => watch(path, () => this.wake(), { onError })),
+    };
+  }
+
+  private stopWatches(): void {
+    for (const stop of this.watching?.stops ?? []) {
+      stop();
+    }
+    this.watching = null;
+  }
+
+  /** A phone wrote something: run a pass now (or right after the one running). */
+  private wake(): void {
+    if (this.stopped) {
+      return;
+    }
+    if (this.busy) {
+      this.dirty = true;
+      return;
+    }
+    this.schedule(WATCH_DEBOUNCE_MS);
+  }
+
+  /** Tell phones paired before the move where the channel lives now. Once per channel per run. */
+  private async announceTransport(config: RemoteConfig): Promise<void> {
+    const url = this.deps.databaseUrl;
+    const store = this.deps.announce;
+    if (!url || !store || this.announcedFor === config.channelId) {
+      return;
+    }
+    try {
+      await store.set(this.channel(config, "state", "transport"), {
+        box: seal(config.key, { r: url }),
+        at: this.now(),
+      });
+      this.announcedFor = config.channelId;
+    } catch (error) {
+      // Best effort, retried next pass; it must never hold up a command.
+      logger.warn("remote transport announcement failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

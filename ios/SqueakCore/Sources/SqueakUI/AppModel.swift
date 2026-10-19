@@ -89,19 +89,39 @@ final class AppModel: ObservableObject {
     /* ---------- the loop: only while the app is on screen ---------- */
 
     func resume() {
-        guard !demo, loop == nil, channel != nil else { return }
+        guard !demo, loop == nil, let channel else { return }
         loop = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.tick()
-                try? await Task.sleep(for: .seconds(Self.pollSeconds))
+            await self?.tick()
+            guard let snapshots = await channel.snapshotChanges(), let results = await channel.resultChanges() else {
+                // Firestore: look again every couple of seconds.
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(Self.pollSeconds))
+                    await self?.tick()
+                }
+                return
+            }
+            // Realtime Database: a new view (or the Mac's pairing answer)
+            // arrives as it is written. The slow tick only keeps presence
+            // fresh and covers a stream that dropped without saying so.
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { for await _ in snapshots { await self?.tick() } }
+                group.addTask { for await _ in results { await self?.tickIfAwaitingApproval() } }
+                group.addTask {
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(Self.streamedTickSeconds))
+                        await self?.tick()
+                    }
+                }
             }
         }
     }
 
-    /// How often the phone looks for a new view while it is on screen. The Mac
-    /// publishes within about a second of a change, so this is most of what a
-    /// finish waits for on the phone.
+    /// How often the phone looks for a new view while it is on screen, when
+    /// it has to poll. The Mac publishes within about a second of a change, so
+    /// this is most of what a finish waits for on the phone.
     static let pollSeconds = 2
+    /// When streamed: presence must reach the Mac inside its 60s window.
+    static let streamedTickSeconds = 20
 
     func pause() {
         loop?.cancel()
@@ -113,11 +133,26 @@ final class AppModel: ObservableObject {
     }
 
     private var ticking = false
+    /// A change arrived while a fetch was running; fetch once more after it.
+    private var tickAgain = false
+
+    private func tickIfAwaitingApproval() async {
+        if case .awaitingApproval = phase { await tick() }
+    }
 
     private func tick() async {
-        guard let channel, !ticking else { return }
+        guard channel != nil else { return }
+        guard !ticking else { tickAgain = true; return }
         ticking = true
-        defer { ticking = false }
+        repeat {
+            tickAgain = false
+            await fetch()
+        } while tickAgain && !Task.isCancelled
+        ticking = false
+    }
+
+    private func fetch() async {
+        guard let channel else { return }
         do {
             if case .awaitingApproval = phase {
                 if let answer = try await channel.pairingAnswer() {
@@ -174,12 +209,9 @@ final class AppModel: ObservableObject {
             let (id, document) = try channel.replyDocument(to: session, text: trimmed, mode: mode, signer: signer)
             try await channel.send(document, id: id)
             // The Mac answers within a few seconds while this app is open.
-            for _ in 0..<40 {
-                try await Task.sleep(for: .milliseconds(750))
-                if let result = try await channel.result(for: id) {
-                    finish(sentId, result.sent ? .delivered(result, agent: agent) : .refused(result.reason ?? "your Mac refused that reply."), for: session)
-                    return true
-                }
+            if let result = try await awaitResult(id, on: channel) {
+                finish(sentId, result.sent ? .delivered(result, agent: agent) : .refused(result.reason ?? "your Mac refused that reply."), for: session)
+                return true
             }
             // Written, but the Mac never said: it may still arrive within its five minutes.
             finish(sentId, .notConfirmed, for: session)
@@ -187,6 +219,34 @@ final class AppModel: ObservableObject {
             finish(sentId, .refused(error.localizedDescription), for: session)
         }
         return true
+    }
+
+    /// The Mac's answer to command `id`, or nil after 30 seconds. Streamed, it
+    /// is read the moment the Mac writes it; otherwise every 750 ms.
+    private func awaitResult(_ id: String, on channel: Channel) async throws -> CommandResult? {
+        let deadline = Date().addingTimeInterval(30)
+        guard let changes = await channel.resultChanges() else {
+            while Date() < deadline {
+                try await Task.sleep(for: .milliseconds(750))
+                if let result = try await channel.result(for: id) { return result }
+            }
+            return nil
+        }
+        return try await withThrowingTaskGroup(of: CommandResult?.self) { group in
+            group.addTask {
+                for await _ in changes {
+                    if let result = try await channel.result(for: id) { return result }
+                }
+                return nil
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(deadline.timeIntervalSinceNow))
+                return try await channel.result(for: id) // one last look
+            }
+            let first = try await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     /// Any send of this session still waiting on the Mac.

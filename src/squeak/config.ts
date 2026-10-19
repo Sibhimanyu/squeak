@@ -62,6 +62,13 @@ const schema = z.object({
   /** Firebase project for the phone channel (docs/remote-channel.md). Unset: no phone. */
   SQUEAK_REMOTE_PROJECT: z.string().optional(),
   /**
+   * The project's Realtime Database URL. Set: the phone channel moves there
+   * and streams instead of polling Firestore. Set it once the phone runs a
+   * build that can follow (Squeak for iPhone 1.6+); an older one stops
+   * seeing updates until it is updated.
+   */
+  SQUEAK_REMOTE_DATABASE_URL: z.string().optional(),
+  /**
    * A Zoho Cliq incoming-webhook URL (a bot's or a channel's, with its
    * zapikey). Set: push cards go to Cliq too. One-way; see src/cliq/.
    */
@@ -100,6 +107,8 @@ export interface SqueakConfig {
   /** Null when switched off. */
   handsAppPath: string | null;
   remoteProjectId: string | null;
+  /** Null: the channel stays on Firestore. */
+  remoteDatabaseUrl: string | null;
   cliqWebhookUrl: string | null;
   /** Null unless every two-way setting is present. */
   cliqTwoWay: {
@@ -168,6 +177,7 @@ export function loadSqueakConfig(): SqueakConfig {
     codexBin: resolve(parsed.CODEX_BIN),
     handsAppPath: parsed.SQUEAK_HANDS_APP === "off" ? null : resolve(parsed.SQUEAK_HANDS_APP),
     remoteProjectId: parsed.SQUEAK_REMOTE_PROJECT?.trim() || null,
+    remoteDatabaseUrl: databaseUrl(parsed.SQUEAK_REMOTE_DATABASE_URL),
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
     cliqTwoWay: cliqTwoWay(parsed),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
@@ -179,6 +189,29 @@ export function loadSqueakConfig(): SqueakConfig {
     codexQuotaWarnPercent: parsed.FLEET_CODEX_QUOTA_WARN_PERCENT,
     envFilePath,
   };
+}
+
+/** Only an https Realtime Database host: it goes into pairing codes, and the phone refuses anything else. */
+export function databaseUrl(raw: string | undefined): string | null {
+  const value = raw?.trim().replace(/\/+$/, "");
+  if (!value) {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    if (
+      url.protocol === "https:" &&
+      !url.search &&
+      (url.pathname === "/" || url.pathname === "") &&
+      (host.endsWith(".firebasedatabase.app") || host.endsWith(".firebaseio.com"))
+    ) {
+      return `https://${host}`;
+    }
+  } catch {
+    // Not a URL.
+  }
+  throw new Error(`SQUEAK_REMOTE_DATABASE_URL is not a Realtime Database URL: ${value}`);
 }
 
 function cliqTwoWay(parsed: z.infer<typeof schema>): SqueakConfig["cliqTwoWay"] {

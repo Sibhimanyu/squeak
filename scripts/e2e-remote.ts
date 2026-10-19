@@ -4,6 +4,11 @@
 // replier, so no agent is touched) and your eyes on the pairing code.
 //
 //   npx tsx scripts/e2e-remote.ts [firebase-project-id]
+//
+// With SQUEAK_E2E_DATABASE_URL set, the channel runs on that Realtime
+// Database instead (the emulator works: http://127.0.0.1:9000?ns=<name>).
+// The bridge then runs on its own, woken only by the stream, so the run
+// proves nothing waits for a poll.
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,6 +17,7 @@ import path from "node:path";
 import type { FleetSnapshot } from "../src/fleet/fleet-monitor.js";
 import { FirestoreRest } from "../src/remote/firestore-rest.js";
 import { RemoteBridge } from "../src/remote/remote-bridge.js";
+import { RtdbRest } from "../src/remote/rtdb-rest.js";
 
 const project = process.argv[2] ?? "squeak-5c9gvo";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-e2e-"));
@@ -44,7 +50,8 @@ const session = {
   costUsd: null,
   git: null,
 };
-const store = new FirestoreRest(project);
+const databaseUrl = process.env.SQUEAK_E2E_DATABASE_URL ?? null;
+const store = databaseUrl ? new RtdbRest(databaseUrl) : new FirestoreRest(project);
 const bridge = new RemoteBridge({
   configPath: path.join(dir, "remote.json"),
   projectId: project,
@@ -74,12 +81,18 @@ const bridge = new RemoteBridge({
 });
 
 const { url } = bridge.startPairing();
-bridge.stop(); // this script drives the ticks itself
+if (databaseUrl) {
+  bridge.start(); // streamed: the bridge reacts to the phone by itself
+} else {
+  bridge.stop(); // this script drives the ticks itself
+}
 const channelId = JSON.parse(Buffer.from(new URL(url).searchParams.get("d")!, "base64url").toString()).c as string;
-console.log(`mac:   channel ${channelId.slice(0, 6)}… on ${project}`);
+console.log(
+  `mac:   channel ${channelId.slice(0, 6)}… on ${databaseUrl ? `the Realtime Database at ${databaseUrl}` : project}`,
+);
 
 const phone = new Promise<{ code: number; out: string }>((resolve) => {
-  execFile(phoneBin, [url, codeFile], { timeout: 180_000 }, (error, stdout, stderr) =>
+  execFile(phoneBin, [url, codeFile], { timeout: 180_000, env: { ...process.env } }, (error, stdout, stderr) =>
     resolve({ code: error ? ((error as { code?: number }).code ?? 1) : 0, out: `${stdout}${stderr}` }),
   );
 });
@@ -88,8 +101,10 @@ void phone.then(() => (done = true));
 
 const deadline = Date.now() + 180_000;
 while (!done && Date.now() < deadline) {
-  await bridge.tick();
-  bridge.stop();
+  if (!databaseUrl) {
+    await bridge.tick();
+    bridge.stop();
+  }
   const status = bridge.status() as { pending: Array<{ id: string; code: string }> };
   for (const request of status.pending) {
     const phoneCode = fs.existsSync(codeFile) ? fs.readFileSync(codeFile, "utf8") : null;
@@ -101,8 +116,9 @@ while (!done && Date.now() < deadline) {
       await bridge.reject(request.id);
     }
   }
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await new Promise((resolve) => setTimeout(resolve, databaseUrl ? 100 : 1000));
 }
+bridge.stop();
 
 const result = await phone;
 process.stdout.write(

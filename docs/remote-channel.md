@@ -172,3 +172,30 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
   real call and is taken only when the owner presses Refresh on the Mac, and
   commands stay plain replies. A change in a reading republishes the snapshot;
   a re-read of the same numbers does not.
+- **The Realtime Database, streamed (2026-10-19).** With
+  `SQUEAK_REMOTE_DATABASE_URL` set, the channel's documents (same paths, same
+  `{ box, sig?, device?, at? }`) live in the project's Realtime Database
+  instead of Firestore (`src/remote/rtdb-rest.ts`,
+  `SqueakCore/RealtimeDatabase.swift`, rules in `firebase/database.rules.json`,
+  checked by `scripts/check-database-rules.sh` on the emulator). Why: it bills
+  for bytes stored and downloaded, never per read or write, and its REST API
+  streams changes as Server-Sent Events, which `fetch` and `URLSession` read
+  without an SDK. The Mac holds one stream each on `state/presence`, `pairing`
+  and `commands` and runs a pass within ~50 ms of a phone's write, polling only
+  every 60s as a safety net; the phone streams `state/snapshot` and `results`
+  and ticks every 20s only to keep presence fresh. A stream event only *wakes*
+  a pass: everything is still read through the same verbs and every check in
+  `handleCommand` runs unchanged, so a forged write to the stream runs nothing.
+  On the emulator (`SQUEAK_E2E_DATABASE_URL=… scripts/e2e-remote.ts`) a reply's
+  round trip was 74 ms and a steer's 16 ms.
+  - **Finding the database.** New pairing codes carry it as `r`. A phone paired
+    before the move reads the sealed `state/transport` document the Mac writes
+    in Firestore (`{ r }`, sealed with the channel key) and follows it,
+    re-checking every five minutes while it is still on Firestore. Both the
+    Mac's config and the phone accept only an `https` host under
+    `firebasedatabase.app` or `firebaseio.com`: the phone sends signed commands
+    wherever this points, so a code or a forged announcement must not be able
+    to aim it at another server (a forged one cannot be sealed anyway).
+  - **Cutover.** Firestore stays the default. Set the URL only once the phone
+    runs a build that can follow (1.6+); an older phone keeps polling Firestore,
+    which the Mac then no longer updates. There is no dual-write.

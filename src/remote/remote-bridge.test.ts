@@ -481,3 +481,157 @@ describe("phoneUsage", () => {
     expect(phoneUsage(null, null)).toEqual({ claude: null, codex: null });
   });
 });
+
+/** A MemoryStore that streams like the Realtime Database: every write under a watched path wakes its watcher. */
+class WatchingStore extends MemoryStore {
+  readonly watchers = new Map<string, () => void>();
+  stopped: string[] = [];
+  watch(p: string, onChange: () => void) {
+    this.watchers.set(p, onChange);
+    return () => {
+      this.watchers.delete(p);
+      this.stopped.push(p);
+    };
+  }
+  override async set(p: string, doc: ChannelDoc) {
+    await super.set(p, doc);
+    for (const [watched, onChange] of this.watchers) if (p === watched || p.startsWith(`${watched}/`)) onChange();
+  }
+}
+
+describe("RemoteBridge on a streaming store (Realtime Database)", () => {
+  const DB = "https://squeak-test-default-rtdb.asia-southeast1.firebasedatabase.app";
+
+  function streaming() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-rtdb-"));
+    dirs.push(dir);
+    const store = new WatchingStore();
+    const firestore = new MemoryStore();
+    const sends: string[] = [];
+    const replier = {
+      lastTurnText: () => "Pick one?",
+      lastTurnId: () => "turn-1",
+      send: vi.fn(async (_sessionId: string, text: string) => {
+        sends.push(text);
+        return { status: "started", via: "conductor" } as ReplyOutcome;
+      }),
+    };
+    const snapshot = {
+      sessions: [session()],
+      active: [session()],
+      attention: [],
+      generatedAt: "",
+      codexUsage: null,
+    } as FleetSnapshot;
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      announce: firestore,
+      databaseUrl: DB,
+      replier,
+      snapshot: () => snapshot,
+      now: () => Date.now(),
+      macName: "Test Mac",
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    return { bridge, store, firestore, sends, payload, channel: `channels/${payload.c}`, phone: device() };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("puts the database URL in the pairing code", () => {
+    expect(streaming().payload.r).toBe(DB);
+    expect(fixture().payload.r).toBeUndefined();
+  });
+
+  it("announces the database, sealed with the channel key, in Firestore for phones paired before the move", async () => {
+    const { bridge, firestore, channel, payload } = streaming();
+    await bridge.tick();
+    await bridge.tick();
+    const doc = firestore.docs.get(`${channel}/state/transport`)!;
+    expect(open(payload.k, doc.box)).toEqual({ r: DB });
+    expect(firestore.docs.size).toBe(1);
+  });
+
+  it("watches only what phones write: presence, pairing and commands", async () => {
+    vi.useFakeTimers();
+    const { bridge, store, channel } = streaming();
+    bridge.start();
+    expect([...store.watchers.keys()].sort()).toEqual([
+      `${channel}/commands`,
+      `${channel}/pairing`,
+      `${channel}/state/presence`,
+    ]);
+    bridge.stop();
+    expect(store.watchers.size).toBe(0);
+  });
+
+  it("runs a command as soon as it is written, without waiting for a poll", async () => {
+    vi.useFakeTimers();
+    const { bridge, store, channel, payload, phone, sends } = streaming();
+    bridge.start();
+    await vi.advanceTimersByTimeAsync(10);
+    await store.set(`${channel}/pairing/iphone-1`, { box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }) });
+    await vi.advanceTimersByTimeAsync(100);
+    await bridge.approve("iphone-1");
+
+    const body: RemoteCommand = {
+      v: 1,
+      sessionId: "s1",
+      answersTurn: "turn-1",
+      text: "B",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: Date.now() + 60_000,
+    };
+    const box = seal(payload.k, body);
+    await store.set(`${channel}/commands/c1`, { box, sig: phone.sign(box), device: "iphone-1" });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(sends).toEqual(["B"]);
+    expect(store.docs.has(`${channel}/commands/c1`)).toBe(false);
+    expect(open(payload.k, store.docs.get(`${channel}/results/c1`)!.box)).toMatchObject({ status: "sent" });
+    bridge.stop();
+  });
+
+  it("an unsigned command written to the stream still runs nothing", async () => {
+    vi.useFakeTimers();
+    const { bridge, store, channel, payload, sends } = streaming();
+    bridge.start();
+    await vi.advanceTimersByTimeAsync(10);
+    await store.set(`${channel}/commands/forged`, { box: seal(payload.k, { v: 1, sessionId: "s1", text: "rm -rf" }) });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(sends).toEqual([]);
+    bridge.stop();
+  });
+
+  it("a change during a pass runs another pass right after it", async () => {
+    vi.useFakeTimers();
+    const { bridge, store, channel } = streaming();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const list = vi.spyOn(store, "list");
+    // Hold the first pass inside its pairing read.
+    list.mockImplementationOnce(async () => {
+      await gate;
+      return [];
+    });
+    const first = bridge.tick();
+    await bridge.tick(); // arrives while busy: remembered, not dropped
+    release();
+    await first;
+    await vi.advanceTimersByTimeAsync(5);
+    expect(list.mock.calls.filter(([p]) => p === `${channel}/pairing`).length).toBeGreaterThanOrEqual(2);
+    bridge.stop();
+  });
+
+  it("an announcement that fails never holds up the pass", async () => {
+    const { bridge, firestore, store, channel, payload, phone } = streaming();
+    vi.spyOn(firestore, "set").mockRejectedValue(new Error("firestore down"));
+    await store.set(`${channel}/pairing/iphone-1`, { box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }) });
+    await bridge.tick();
+    expect((bridge.status() as { pending: unknown[] }).pending).toHaveLength(1);
+  });
+});

@@ -334,6 +334,13 @@ test for anything you fix is expected; the suite is fast.
   it has not expired (≤10 min), its nonce is new, it names the chat's
   *current* turn, and it is a plain reply. Keep every check; add tests for
   any new one. Pairing always waits for the human to approve on the Mac.
+- **The channel can live in the Realtime Database** (`SQUEAK_REMOTE_DATABASE_URL`),
+  streamed over Server-Sent Events instead of polled. A stream event only wakes
+  a pass; never act on the event's data, read through the store so every check
+  runs. A change that lands while a pass runs must schedule another (`dirty` in
+  the bridge, `tickAgain` on the phone), or it is silently dropped until the
+  60s safety poll. The database URL is accepted only for an https
+  `*.firebasedatabase.app` / `*.firebaseio.com` host on both sides.
 - **Swift and Node must agree byte-for-byte.** Change a shape on one side and
   regenerate the fixtures (`swift run -c release squeak-fixtures
   ../../src/remote/fixtures/swift-command.json` in `ios/SqueakCore`; the Mac

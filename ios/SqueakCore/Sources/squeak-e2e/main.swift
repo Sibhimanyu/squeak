@@ -6,7 +6,12 @@ import SqueakCore
 // answer the first lettered question with its second option, and wait for
 // the Mac's verdict. Usage: squeak-e2e <pairing-url> <code-out-file>
 let args = CommandLine.arguments
-let payload = try PairingPayload.parse(args[1])
+let parsed = try PairingPayload.parse(args[1])
+// SQUEAK_E2E_DATABASE_URL points the phone at a Realtime Database the code
+// does not name (the emulator, which is http and so never in a real code).
+let payload = ProcessInfo.processInfo.environment["SQUEAK_E2E_DATABASE_URL"].map {
+    PairingPayload(v: parsed.v, p: parsed.p, c: parsed.c, k: parsed.k, n: parsed.n, r: $0)
+} ?? parsed
 let channel = Channel(pairing: payload, deviceId: "e2e-" + UUID().uuidString.prefix(8).lowercased())
 let signer = SoftwareSigner()
 let code = ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963)
@@ -35,7 +40,18 @@ let letter = choices.options[1].letter
 let (id, document) = try channel.replyDocument(to: session, text: letter, signer: signer)
 try await channel.send(document, id: id)
 print("phone: sent \(letter)")
-let result = try await poll("result") { try await channel.result(for: id) }
+/// The Mac's verdict: on the stream when there is one, else polled.
+func verdict(_ id: String, _ label: String) async throws -> CommandResult {
+    if let changes = await channel.resultChanges() {
+        for await _ in changes { if let result = try await channel.result(for: id) { return result } }
+    }
+    return try await poll(label) { try await channel.result(for: id) }
+}
+let streamed = await channel.streams
+print("phone: channel is \(streamed ? "streamed (Realtime Database)" : "polled (Firestore)")")
+let sentAt = Date()
+let result = try await verdict(id, "result")
+print("phone: round trip \(Int(Date().timeIntervalSince(sentAt) * 1000)) ms")
 print("phone: mac says \(result.status)\(result.reason.map { " — \($0)" } ?? "") delivery=\(result.delivery ?? "-")")
 guard result.sent else { exit(1) }
 
@@ -43,7 +59,9 @@ guard result.sent else { exit(1) }
 let (steerId, steerDocument) = try channel.replyDocument(to: session, text: "Use the timer instead", mode: .steer, signer: signer)
 try await channel.send(steerDocument, id: steerId)
 print("phone: sent a steer")
-let steered = try await poll("steer result") { try await channel.result(for: steerId) }
+let steerAt = Date()
+let steered = try await verdict(steerId, "steer result")
+print("phone: steer round trip \(Int(Date().timeIntervalSince(steerAt) * 1000)) ms")
 print("phone: mac says \(steered.status) delivery=\(steered.delivery ?? "-")")
 print("phone: usage claude=\(snapshot.usage?.claude?.fiveHour?.usedPercent.description ?? "-") codex=\(snapshot.usage?.codex == nil ? "-" : "seen")")
 exit(steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42 ? 0 : 1)
