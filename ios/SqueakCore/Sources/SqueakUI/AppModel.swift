@@ -209,7 +209,7 @@ final class AppModel: ObservableObject {
             self?.liveAvailable = true
             for await turn in turns {
                 if Task.isCancelled { break }
-                self?.liveTurns[key] = turn
+                if self?.liveTurns[key] != turn { self?.liveTurns[key] = turn }
             }
         }
     }
@@ -229,7 +229,8 @@ final class AppModel: ObservableObject {
     /// A view straight from the stream.
     private func apply(_ next: PhoneSnapshot?) {
         guard phase == .paired else { return }
-        if let next { snapshot = next }
+        // An unchanged view must not redraw every screen.
+        if let next, next != snapshot { snapshot = next }
         lastFetch = Date()
         problem = nil
     }
@@ -282,7 +283,7 @@ final class AppModel: ObservableObject {
                 try await channel.touchPresence(watching: presenceWatching, recent: recentAsk)
                 lastPresence = Date()
             }
-            if let next = try await channel.snapshot() {
+            if let next = try await channel.snapshot(), next != snapshot {
                 snapshot = next
             }
             lastFetch = Date()
@@ -304,12 +305,16 @@ final class AppModel: ObservableObject {
     func send(_ text: String, to session: PhoneSnapshot.Session, mode: ReplyMode = .queue) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        guard await confirmWithBiometrics(reason: "Send to \(session.label)") else { return false }
         // Mode only means something mid-turn; an idle chat is simply sent.
         let mode: ReplyMode = session.state == "working" ? mode : .queue
-        // A tap on send; a firmer one for a steer, which interrupts.
+        // On screen first, like any chat app: the bubble ("Sending…") and the agent's "Starting…"
+        // row appear on the tap, and Face ID, signing and the network all happen behind them.
         UIImpactFeedbackGenerator(style: mode == .steer ? .medium : .light).impactOccurred()
         let sentId = begin(trimmed, for: session)
+        guard await confirmWithBiometrics(reason: "Send to \(session.label)") else {
+            withdraw(sentId, for: session)
+            return false
+        }
         let agent = Presentation.agentName(session.agent)
         if demo {
             try? await Task.sleep(for: .seconds(1))
@@ -319,7 +324,10 @@ final class AppModel: ObservableObject {
         }
         guard let channel else { finish(sentId, .refused("not connected to your Mac."), for: session); return true }
         do {
-            let (id, document) = try channel.replyDocument(to: session, text: trimmed, mode: mode, signer: signer)
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.replyDocument(to: session, text: trimmed, mode: mode, signer: signer)
+            }.value
             try await channel.send(document, id: id)
             // The Mac answers within a few seconds while this app is open.
             if let result = try await awaitResult(id, on: channel) {
@@ -387,7 +395,10 @@ final class AppModel: ObservableObject {
         }
         guard let channel else { return .refused("This iPhone isn't connected to your Mac.") }
         do {
-            let (id, document) = try channel.startDocument(workspaceId: workspace.id, agent: agent, text: text, signer: signer)
+            let signer = signer, workspaceId = workspace.id
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.startDocument(workspaceId: workspaceId, agent: agent, text: text, signer: signer)
+            }.value
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else {
                 return .refused("Your Mac didn't confirm. If a new chat appears in Sessions it worked, so don't send this again.")
@@ -440,6 +451,11 @@ final class AppModel: ObservableObject {
         let send = ChatSend(text: text, date: Date(), answersTurn: session.turnId ?? remembered[session.key]?.turnId, status: .sending)
         outbox[session.key, default: []].append(send)
         return send.id
+    }
+
+    /// A send that never left the phone (Face ID declined): gone from the chat, its text back in the field.
+    private func withdraw(_ id: UUID, for session: PhoneSnapshot.Session) {
+        outbox[session.key]?.removeAll { $0.id == id }
     }
 
     private func finish(_ id: UUID, _ status: ChatSend.Status, for session: PhoneSnapshot.Session) {

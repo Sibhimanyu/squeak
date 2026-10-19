@@ -37,7 +37,9 @@ public enum ChannelCrypto {
 
 /// Something that can sign commands: the Secure Enclave on a phone, a
 /// software key in tests and on a Mac without one.
-public protocol CommandSigner {
+/// Sendable so a command can be signed off the main thread: a Secure Enclave signature
+/// takes long enough to drop frames if it runs there.
+public protocol CommandSigner: Sendable {
     var publicKeyX963: Data { get }
     func sign(_ message: String) throws -> String
 }
