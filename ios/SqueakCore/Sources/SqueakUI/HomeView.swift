@@ -65,7 +65,7 @@ struct HomeView: View {
                     if !older.isEmpty {
                         Section {
                             ForEach(older) { session in
-                                NavigationLink(value: session.key) { SessionRow(session: session) }
+                                NavigationLink(value: session.key) { SessionRow(session: session, recent: true) }
                                     .listRowBackground(Color.clear)
                                     .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                             }
@@ -112,7 +112,15 @@ struct HomeView: View {
             VStack(spacing: 1) {
                 Text("Sessions").font(.headline)
                 if model.snapshot != nil {
-                    Text(subtitle).font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
+                    // The connection lives here while it is fine: a dot, not a bar (ConnectionBar says when it is not).
+                    TimelineView(.periodic(from: .now, by: 5)) { _ in
+                        let connection = Connection.read(snapshot: model.snapshot, problem: model.problem, demo: model.demo, lastFetch: model.lastFetch)
+                        HStack(spacing: 5) {
+                            StatusDot(color: connection.color).accessibilityHidden(true)
+                            Text(subtitle).font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
+                        }
+                        .accessibilityLabel("\(subtitle), \(connection.text)")
+                    }
                 }
             }
             .accessibilityElement(children: .combine)
@@ -263,6 +271,8 @@ struct SectionHeader: View {
 struct SessionRow: View {
     @EnvironmentObject var model: AppModel
     let session: PhoneSnapshot.Session
+    /// A chat from Recent: its second line is what the agent last said, not a state word.
+    var recent = false
 
     /// The Mac's state, except while this phone's own message is about to start a turn: then
     /// "starting", the same rule the chat uses (ChatTimeline.isStarting), so the two agree.
@@ -273,25 +283,36 @@ struct SessionRow: View {
     }
 
     var body: some View {
-        // §8.2: dot, then title and age, `repo · agent`, and the state word or the live step.
+        // §8.2, two lines: dot, title and age; then the state word (or the live step) and
+        // `repo · agent`. A recent chat's second line is the agent's last words instead.
         HStack(alignment: .top, spacing: 12) {
             StatusDot(color: dotColor, pulses: status.tone == .needsYou || status.tone == .working, period: status.tone == .working ? 1.6 : 1.0)
                 .padding(.top, 7)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(Presentation.displayTitle(session)).font(.headline).lineLimit(1)
                     Spacer(minLength: 4)
                     Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
                 }
-                Text(Presentation.subtitle(session)).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
-                Text(status.text).font(.subheadline.weight(status.tone == .needsYou ? .semibold : .regular))
-                    .foregroundStyle(status.tone == .needsYou ? Theme.ink : Theme.muted).lineLimit(1)
+                secondLine.font(.subheadline).lineLimit(1)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(Presentation.displayTitle(session)), \(Presentation.subtitle(session)), \(status.text), \(Age.spoken(session.lastActivityAt))")
+        .accessibilityLabel("\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text), \(Presentation.subtitle(session)), \(Age.spoken(session.lastActivityAt))")
+    }
+
+    private var lastWords: String? { Presentation.firstLine(session.message ?? session.detail) }
+
+    private var secondLine: Text {
+        if recent, let lastWords {
+            return Text(lastWords).foregroundStyle(Theme.muted)
+        }
+        let word = Text(status.text)
+            .fontWeight(status.tone == .needsYou ? .semibold : .regular)
+            .foregroundStyle(status.tone == .needsYou ? Theme.ink : Theme.muted)
+        return Text("\(word)\(Text(" · \(Presentation.subtitle(session))").foregroundStyle(Theme.muted))")
     }
 
     private var dotColor: Color {
@@ -313,6 +334,7 @@ struct ConnectionBar: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2)) { _ in
             let state = Connection.read(snapshot: model.snapshot, problem: model.problem, demo: model.demo, lastFetch: model.lastFetch)
+            if !state.healthy {
             HStack(spacing: 8) {
                 StatusDot(color: state.color)
                 Text(state.text).font(.footnote.weight(.medium)).foregroundStyle(Theme.muted)
@@ -321,15 +343,21 @@ struct ConnectionBar: View {
             .frame(maxWidth: .infinity)
             .background(Theme.bg)
             .accessibilityElement(children: .combine)
+            }
         }
     }
 }
 
 enum Connection {
-    struct State { let text: String; let color: Color }
+    struct State {
+        let text: String
+        let color: Color
+        /// Fine: the header's dot says so and no bar is shown.
+        var healthy = false
+    }
 
     static func read(snapshot: PhoneSnapshot?, problem: String?, demo: Bool, lastFetch: Date? = nil, now: Date = Date()) -> State {
-        if demo { return State(text: "Mac connected", color: Theme.working) }
+        if demo { return State(text: "Mac connected", color: Theme.working, healthy: true) }
         guard let snapshot else {
             return problem == nil
                 ? State(text: "Connecting to your Mac…", color: Theme.subtle)
@@ -342,7 +370,9 @@ enum Connection {
         let synced = lastFetch.map { "Synced \(Age.sync($0, now: now))" } ?? "Mac connected"
         let minutes = Age.minutes(snapshot.generatedAt, now: now) ?? 0
         let change = minutes >= 2 ? " · last change \(Age.describe(snapshot.generatedAt, now: now)) ago" : ""
-        return State(text: synced + change, color: Theme.working)
+        // Healthy while the phone heard from the server in the last minute (a streamed tick is 20s).
+        let fresh = lastFetch.map { now.timeIntervalSince($0) < 60 } ?? false
+        return State(text: synced + change, color: fresh ? Theme.working : Theme.subtle, healthy: fresh)
     }
 }
 

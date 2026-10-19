@@ -10,6 +10,23 @@ final class PresentationTests: XCTestCase {
               title: title)
     }
 
+    func testFirstLineIsThePreviewOfAMessage() {
+        XCTAssertEqual(Presentation.firstLine("\n## **Done.** Tests pass\nMore"), "Done. Tests pass")
+        XCTAssertEqual(Presentation.firstLine("- `npm test` is green"), "npm test is green")
+        XCTAssertNil(Presentation.firstLine("  \n\n"))
+        XCTAssertNil(Presentation.firstLine(nil))
+    }
+
+    func testTheConnectionBarOnlyShowsWhenSomethingIsWrong() {
+        let now = Date()
+        let json = #"{"v":1,"mac":"Mac","generatedAt":"2026-10-19T08:00:00Z","duck":{"blockedCount":0,"workingCount":0},"sessions":[]}"#
+        let snapshot = try! JSONDecoder().decode(PhoneSnapshot.self, from: Data(json.utf8))
+        XCTAssertTrue(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now.addingTimeInterval(-10), now: now).healthy)
+        XCTAssertFalse(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now.addingTimeInterval(-120), now: now).healthy)
+        XCTAssertFalse(Connection.read(snapshot: snapshot, problem: "down", demo: false, lastFetch: now, now: now).healthy)
+        XCTAssertFalse(Connection.read(snapshot: nil, problem: nil, demo: false, now: now).healthy)
+    }
+
     func testHeaderLinesNeverRepeat() {
         // A chat with no diff once crashed the app: two identical candidates in a ViewThatFits.
         XCTAssertEqual(Presentation.headerLines(state: "idle · 3h", subtitle: "storefront · Claude", git: nil),

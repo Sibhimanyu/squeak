@@ -293,6 +293,8 @@ final class AppModel: ObservableObject {
         guard await confirmWithBiometrics(reason: "Send to \(session.label)") else { return false }
         // Mode only means something mid-turn; an idle chat is simply sent.
         let mode: ReplyMode = session.state == "working" ? mode : .queue
+        // A tap on send; a firmer one for a steer, which interrupts.
+        UIImpactFeedbackGenerator(style: mode == .steer ? .medium : .light).impactOccurred()
         let sentId = begin(trimmed, for: session)
         let agent = Presentation.agentName(session.agent)
         if demo {
@@ -429,6 +431,12 @@ final class AppModel: ObservableObject {
     private func finish(_ id: UUID, _ status: ChatSend.Status, for session: PhoneSnapshot.Session) {
         guard let i = outbox[session.key]?.firstIndex(where: { $0.id == id }) else { return }
         outbox[session.key]?[i].status = status
+        // The Mac's verdict, felt: success when it took it, an error when it refused.
+        switch status {
+        case .refused: UINotificationFeedbackGenerator().notificationOccurred(.error)
+        case .notConfirmed: UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        default: UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
     }
 
     private func remember(_ snapshot: PhoneSnapshot?) {

@@ -60,6 +60,18 @@ enum Presentation {
         ownTitle(session) ?? repoBranch(session)
     }
 
+    /// The first non-empty line of an agent's message, markdown markers stripped, for a one-line preview.
+    static func firstLine(_ text: String?) -> String? {
+        guard let text else { return nil }
+        for raw in text.split(whereSeparator: \.isNewline) {
+            var line = raw.trimmingCharacters(in: .whitespaces)
+            while let first = line.first, "#>*-•".contains(first) { line.removeFirst(); line = line.trimmingCharacters(in: .whitespaces) }
+            line = line.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+            if !line.isEmpty { return line }
+        }
+        return nil
+    }
+
     /// The chat header's second line, longest first, for ViewThatFits to pick
     /// the one that fits. Never two the same: without a diff (or a repo) the
     /// candidates repeat, and ViewThatFits crashes on duplicate children.
