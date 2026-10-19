@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.4
+
+- A new main window: a native three-column layout with a translucent sidebar
+  (filters with counts, sources, service status), a session list whose rows say
+  what each agent is doing right now ("Running tests", "Waiting for your answer"),
+  and a conversation pane with Conversation and Activity tabs.
+- Questions with lettered options show as large answer cards with a
+  "Recommended" badge; one click sends the letter.
+- Liquid Glass on macOS 26 for the reply box, answer cards and Send, with
+  fallbacks on older macOS; Reduce Motion and Reduce Transparency are respected.
+- The main window and Settings now open on a normal desktop instead of on top of
+  another app's full-screen window. The popover and Quick message still appear
+  over full screen.
+
 ## 2.0.3
 
 - Opening the Squeak window from the menu-bar duck now gives Squeak the menu bar
