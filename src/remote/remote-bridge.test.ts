@@ -1473,6 +1473,23 @@ describe("RemoteBridge awake session from the phone", () => {
     t.bridge.stop();
   });
 
+  it("shows the Mac's battery, draw and lid when the daemon has read them", async () => {
+    const t = await awake();
+    expect(t.bridge.phoneView()).not.toHaveProperty("macPower");
+    const power = { percent: 50, onBattery: true, watts: 35, lidClosed: false };
+    const bridge = new RemoteBridge({
+      configPath: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-power-")), "remote.json"),
+      projectId: "squeak-test",
+      store: new MemoryStore(),
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      awake: { state: () => null, apply: () => ({ ok: true, state: null }), power: () => power },
+      now: () => NOW,
+    });
+    expect(bridge.phoneView()).toMatchObject({ keepAwake: false, macPower: power });
+    t.bridge.stop();
+  });
+
   it("an old phone's bare on starts an untimed session", async () => {
     const t = await awake();
     await t.bridge.handleCommand(t.config, "a1", t.command({ on: true }));

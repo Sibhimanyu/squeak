@@ -11,10 +11,10 @@ import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { CLAUDE_PROBE_SCHEMA, CLAUDE_PROBE_SYSTEM, ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
 import { Caffeinator } from "../fleet/caffeinate.js";
-import { applyAwakeAction, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
+import { applyAwakeAction, type AwakeEnd, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
 import { LidSleepGuard, SUDOERS_PATH, sudoersRule } from "../fleet/lid-sleep.js";
 import { ensureBackstop } from "../fleet/awake-backstop.js";
-import { readPower } from "../fleet/power-monitor.js";
+import { readPower, type PowerReading } from "../fleet/power-monitor.js";
 import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { readPendingAsk, readPendingQuestion } from "../fleet/question.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
@@ -100,6 +100,8 @@ export class SqueakApp {
   private readonly router: FleetReplyRouter;
   private readonly remote: RemoteBridge | null;
   private readonly cliq: CliqChannel | null;
+  /** The Cliq webhook the channel posts through, for one-off notes (an awake session's end). */
+  private cliqWebhook: CliqWebhook | null = null;
   /** Plain-language questions from Cliq, answered through the Mac's own `claude`. */
   private readonly assistant: FleetAssistant;
   /** Claude's plan limits, as the assistant's own `claude` runs last reported them. */
@@ -113,6 +115,8 @@ export class SqueakApp {
   private readonly lidActions: LidActions;
   private lidRuleTimer: NodeJS.Timeout | null = null;
   private safetyTimer: NodeJS.Timeout | null = null;
+  /** The Mac's last battery/heat/lid reading, for the phone; refreshed once a minute. */
+  private power: PowerReading | null = null;
   private unwatchCaffeinate: (() => void) | null = null;
   private lastUpdateId = 0;
   private stopped = false;
@@ -125,6 +129,7 @@ export class SqueakApp {
       hold: (on) => this.caffeinator.setKeepAwake(on),
       lid: new LidSleepGuard({ journalPath: path.join(config.supportDir, "lid-journal.json") }),
       onChange: () => this.remote?.changed(),
+      onEnd: (end) => this.announceAwakeEnd(end),
     });
     this.lidActions = new LidActions({
       settingsPath: path.join(config.supportDir, "awake-settings.json"),
@@ -223,6 +228,7 @@ export class SqueakApp {
           awake: {
             state: () => this.awake.state,
             lidReady: () => this.awake.lidReady,
+            power: () => (this.power ? phonePower(this.power) : null),
             apply: (request) => this.applyAwake(request),
           },
           // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
@@ -461,10 +467,25 @@ export class SqueakApp {
   }
 
   private async checkAwakeSafety(): Promise<void> {
+    const before = JSON.stringify(this.power && phonePower(this.power));
+    this.power = await readPower();
+    if (JSON.stringify(phonePower(this.power)) !== before) this.remote?.changed();
     if (!this.awake.active) {
       return;
     }
-    await this.awake.checkSafety(await readPower(), this.config.awakeSafety);
+    await this.awake.checkSafety(this.power, this.config.awakeSafety);
+  }
+
+  /** A safety rule ended a session: say so wherever the owner hears from Squeak. */
+  private announceAwakeEnd(end: AwakeEnd): void {
+    if (end.reason !== "battery" && end.reason !== "heat") {
+      return;
+    }
+    const text = `Squeak let your Mac sleep again: ${end.why ?? (end.reason === "heat" ? "it was too hot" : "the battery was low")}.`;
+    for (const chatId of this.config.allowedChatIds ?? []) {
+      void this.telegram?.sendMessage(chatId, text).catch(() => undefined);
+    }
+    void this.cliqWebhook?.post(text).catch(() => null);
   }
 
   private async pollLoop(telegram: TelegramClient): Promise<void> {
@@ -587,6 +608,7 @@ export class SqueakApp {
     }
     try {
       const webhook = new CliqWebhook(url);
+      this.cliqWebhook = webhook;
       const twoWay = this.config.cliqTwoWay;
       return new CliqChannel({
         webhook,
@@ -671,4 +693,14 @@ export class SqueakApp {
         });
     }
   }
+}
+
+/** What the phone shows of the Mac's power: whole percent and watts, so a reading does not republish every minute. */
+function phonePower(reading: PowerReading) {
+  return {
+    percent: reading.percent,
+    onBattery: reading.onBattery,
+    watts: reading.watts == null ? null : Math.round(reading.watts),
+    lidClosed: reading.lidClosed ?? null,
+  };
 }

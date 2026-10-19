@@ -53,3 +53,14 @@ private struct AnyJSONValue: Codable {
     init(from decoder: Decoder) throws { _ = try? decoder.singleValueContainer() }
     func encode(to encoder: Encoder) throws {}
 }
+
+final class MacPowerTests: XCTestCase {
+    func testThePowerFieldIsOptionalAndReadsNulls() throws {
+        let base = #"{"v":1,"mac":"Mac","generatedAt":"2026-10-19T00:00:00Z","duck":{"blockedCount":0,"workingCount":0},"sessions":[]"#
+        XCTAssertNil(try JSONDecoder().decode(PhoneSnapshot.self, from: Data((base + "}").utf8)).macPower)
+        let snapshot = try JSONDecoder().decode(
+            PhoneSnapshot.self,
+            from: Data((base + #","macPower":{"percent":50,"onBattery":false,"watts":null,"lidClosed":true}}"#).utf8))
+        XCTAssertEqual(snapshot.macPower, .init(percent: 50, onBattery: false, watts: nil, lidClosed: true))
+    }
+}

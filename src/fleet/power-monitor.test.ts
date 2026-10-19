@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decideSafety, readBattery, readNotifyValue, readPower } from "./power-monitor.js";
+import { decideSafety, readBattery, readNotifyValue, readPower, readWatts } from "./power-monitor.js";
 
 describe("readBattery", () => {
   it("reads a laptop on battery and on AC", () => {
@@ -40,7 +40,7 @@ describe("readPower", () => {
       if (args[1] === "com.apple.system.thermalpressurelevel") return "com.apple.system.thermalpressurelevel 1\n";
       return null;
     });
-    expect(reading).toEqual({ onBattery: true, percent: 41, thermal: 1, lowPower: null });
+    expect(reading).toEqual({ onBattery: true, percent: 41, thermal: 1, lowPower: null, watts: null, lidClosed: null });
   });
 });
 
@@ -68,5 +68,16 @@ describe("decideSafety", () => {
       lowPower: false,
       why: null,
     });
+  });
+});
+
+describe("readWatts", () => {
+  it("reads a discharge from ioreg's unsigned amperage", () => {
+    expect(readWatts('"Amperage" = 18446744073709545765\n"Voltage" = 11296\n')).toBe(66.1);
+  });
+
+  it("charging or unread is null", () => {
+    expect(readWatts('"Amperage" = 1200\n"Voltage" = 12000\n')).toBeNull();
+    expect(readWatts('"Voltage" = 12000\n')).toBeNull();
   });
 });

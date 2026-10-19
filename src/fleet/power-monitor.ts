@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 
+import { readClamshell } from "./lid-sleep.js";
+
 /**
  * Battery and heat, for an awake session's safety rules (todo.md, stay-awake
  * plan item 3). Read without root:
@@ -21,6 +23,10 @@ export interface PowerReading {
   thermal: number | null;
   /** Whether Low Power Mode is on; null when unread. */
   lowPower: boolean | null;
+  /** Watts drawn from the battery while on it (AppleSmartBattery); null otherwise. */
+  watts?: number | null;
+  /** Whether the lid is closed; null on a Mac without one. */
+  lidClosed?: boolean | null;
 }
 
 export const THERMAL_SERIOUS = 2;
@@ -31,6 +37,26 @@ export function readBattery(output: string): { onBattery: boolean | null; percen
   const onBattery = source === undefined ? null : source === "Battery Power";
   const percent = /InternalBattery[^\n]*?\t(\d{1,3})%/.exec(output)?.[1];
   return { onBattery, percent: percent === undefined ? null : Math.min(100, Number(percent)) };
+}
+
+/**
+ * Watts drawn from the battery: Voltage (mV) × Amperage (mA) from
+ * `ioreg -rn AppleSmartBattery`. ioreg prints a negative (discharging)
+ * amperage as its unsigned 64-bit value, so it is read back as signed.
+ * Null when charging, idle, or unread.
+ */
+export function readWatts(output: string): number | null {
+  const volts = /"Voltage" = (\d+)/.exec(output)?.[1];
+  const amps = /"(?:Instant)?Amperage" = (\d+)/.exec(output)?.[1];
+  if (!volts || !amps) {
+    return null;
+  }
+  let milliamps = BigInt(amps);
+  if (milliamps >= 1n << 63n) milliamps -= 1n << 64n;
+  if (milliamps >= 0n) {
+    return null;
+  }
+  return Math.round(((Number(volts) * Number(-milliamps)) / 1e6) * 10) / 10;
 }
 
 /** The number after a `notifyutil -g <name>` line's name; null when absent. */
@@ -47,10 +73,12 @@ const defaultRun: Run = (command, args) =>
   });
 
 export async function readPower(run: Run = defaultRun): Promise<PowerReading> {
-  const [batt, thermal, lowPower] = await Promise.all([
+  const [batt, thermal, lowPower, smartBattery, clamshell] = await Promise.all([
     run("/usr/bin/pmset", ["-g", "batt"]),
     run("/usr/bin/notifyutil", ["-g", "com.apple.system.thermalpressurelevel"]),
     run("/usr/bin/notifyutil", ["-g", "com.apple.system.lowpowermode"]),
+    run("/usr/sbin/ioreg", ["-rn", "AppleSmartBattery"]),
+    run("/usr/sbin/ioreg", ["-r", "-k", "AppleClamshellState", "-d", "1"]),
   ]);
   const battery = batt === null ? { onBattery: null, percent: null } : readBattery(batt);
   const thermalLevel = thermal === null ? null : readNotifyValue(thermal, "com.apple.system.thermalpressurelevel");
@@ -59,6 +87,8 @@ export async function readPower(run: Run = defaultRun): Promise<PowerReading> {
     ...battery,
     thermal: thermalLevel,
     lowPower: lowPowerLevel === null ? null : lowPowerLevel === 1,
+    watts: battery.onBattery && smartBattery !== null ? readWatts(smartBattery) : null,
+    lidClosed: clamshell === null ? null : readClamshell(clamshell),
   };
 }
 

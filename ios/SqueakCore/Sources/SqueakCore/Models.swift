@@ -189,18 +189,32 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public let awakeLidReady: Bool?
     /// A safety rule acting on the session now ("Low Power Mode on · Battery at 38%").
     public let awakeSafety: String?
+    /// The Mac's battery, power draw and lid, as last read. Optional: older Macs omit it.
+    public let macPower: MacPower?
+
+    public struct MacPower: Codable, Equatable, Sendable {
+        public let percent: Int?
+        public let onBattery: Bool?
+        /// Whole watts drawn from the battery; nil when plugged in or unread.
+        public let watts: Int?
+        public let lidClosed: Bool?
+        public init(percent: Int?, onBattery: Bool?, watts: Int?, lidClosed: Bool?) {
+            self.percent = percent; self.onBattery = onBattery; self.watts = watts; self.lidClosed = lidClosed
+        }
+    }
 
     public init(
         v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session], usage: Usage? = nil,
         workspaces: [Workspace]? = nil, recent: [Session]? = nil, recentMore: Bool? = nil, keepAwake: Bool? = nil,
         awakeUntil: String? = nil, awakeLid: String? = nil, awakeLidProblem: String? = nil, awakeLidReady: Bool? = nil,
-        awakeSafety: String? = nil
+        awakeSafety: String? = nil, macPower: MacPower? = nil
     ) {
         self.recentMore = recentMore
         self.keepAwake = keepAwake
         self.awakeUntil = awakeUntil
         self.awakeLid = awakeLid; self.awakeLidProblem = awakeLidProblem; self.awakeLidReady = awakeLidReady
         self.awakeSafety = awakeSafety
+        self.macPower = macPower
         self.v = v; self.mac = mac; self.generatedAt = generatedAt; self.duck = duck; self.sessions = sessions
         self.usage = usage; self.workspaces = workspaces; self.recent = recent
     }

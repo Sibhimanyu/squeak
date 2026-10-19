@@ -119,7 +119,7 @@ final class AppModel {
                         sessions: current.sessions, usage: current.usage, workspaces: current.workspaces, recent: current.recent,
                         keepAwake: current.keepAwake, awakeUntil: current.awakeUntil,
                         awakeLid: current.awakeLid, awakeLidProblem: current.awakeLidProblem, awakeLidReady: current.awakeLidReady,
-                        awakeSafety: current.awakeSafety)
+                        awakeSafety: current.awakeSafety, macPower: current.macPower)
                 }
                 n += 1
             }
@@ -423,7 +423,7 @@ final class AppModel {
                     sessions: [session] + current.sessions, usage: current.usage, workspaces: current.workspaces,
                     recent: current.recent, keepAwake: current.keepAwake, awakeUntil: current.awakeUntil,
                         awakeLid: current.awakeLid, awakeLidProblem: current.awakeLidProblem, awakeLidReady: current.awakeLidReady,
-                        awakeSafety: current.awakeSafety)
+                        awakeSafety: current.awakeSafety, macPower: current.macPower)
             }
             return .started
         }
@@ -546,6 +546,15 @@ final class AppModel {
         return AwakeStatus(
             until: snapshot?.awakeUntil.flatMap(Self.parseISO), lid: snapshot?.awakeLid, lidProblem: snapshot?.awakeLidProblem,
             safety: snapshot?.awakeSafety)
+    }
+
+    /// "1h 23m" / "45m" / "under a minute" until `until`.
+    static func awakeLeft(_ until: Date) -> String {
+        let minutes = Int((until.timeIntervalSinceNow / 60).rounded(.up))
+        if minutes <= 1 { return "under a minute" }
+        let hours = minutes / 60
+        if hours >= 24 { return "\(hours / 24)d \(hours % 24)h" }
+        return hours > 0 ? "\(hours)h \(minutes % 60)m" : "\(minutes)m"
     }
 
     private static func parseISO(_ value: String) -> Date? {

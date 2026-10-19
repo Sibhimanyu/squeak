@@ -85,7 +85,8 @@ enum DemoData {
         let awake = ProcessInfo.processInfo.arguments.contains("-squeak-demo-awake") ? now(83 * 60 + 30) : nil
         return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: ProcessInfo.processInfo.arguments.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent, keepAwake: awake != nil, awakeUntil: awake,
                              awakeLid: awake != nil && ProcessInfo.processInfo.arguments.contains("-squeak-demo-lid") ? "on" : nil,
-                             awakeLidReady: ProcessInfo.processInfo.arguments.contains("-squeak-demo-lid") ? true : nil)
+                             awakeLidReady: ProcessInfo.processInfo.arguments.contains("-squeak-demo-lid") ? true : nil,
+                             macPower: .init(percent: 64, onBattery: true, watts: 12, lidClosed: false))
     }
 
     /// Chats from earlier, to pick up again. `-squeak-demo-empty-active` shows them with nothing active.

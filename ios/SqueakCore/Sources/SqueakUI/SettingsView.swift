@@ -10,6 +10,14 @@ struct SettingsView: View {
     @State private var confirmingUnpair = false
     @State private var awakeProblem: String?
 
+    /// "64% · on battery · 35 W", "100% · plugged in".
+    static func battery(percent: Int, power: PhoneSnapshot.MacPower) -> String {
+        var parts = ["\(percent)%"]
+        if let onBattery = power.onBattery { parts.append(onBattery ? "on battery" : "plugged in") }
+        if let watts = power.watts { parts.append("\(watts) W") }
+        return parts.joined(separator: " · ")
+    }
+
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     }
@@ -29,6 +37,14 @@ struct SettingsView: View {
                         if snapshot.workspaces == nil {
                             Text("New chats from this iPhone need a newer Squeak on your Mac. Update it and the button appears.")
                                 .font(.subheadline).foregroundStyle(Theme.muted)
+                        }
+                        if let power = snapshot.macPower {
+                            if let percent = power.percent {
+                                LabeledContent("Battery", value: Self.battery(percent: percent, power: power))
+                            }
+                            if let closed = power.lidClosed {
+                                LabeledContent("Lid", value: closed ? "Closed" : "Open")
+                            }
                         }
                         LabeledContent("Last change", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")
                     }
@@ -175,12 +191,6 @@ private struct AwakeSection: View {
         return max(1, Int((next.timeIntervalSince(now) / 60).rounded()))
     }
 
-    static func left(_ until: Date) -> String {
-        let minutes = Int((until.timeIntervalSinceNow / 60).rounded(.up))
-        if minutes <= 1 { return "under a minute" }
-        let hours = minutes / 60
-        if hours >= 24 { return "\(hours / 24)d \(hours % 24)h" }
-        return hours > 0 ? "\(hours)h \(minutes % 60)m" : "\(minutes)m"
-    }
+    static func left(_ until: Date) -> String { AppModel.awakeLeft(until) }
 }
 #endif

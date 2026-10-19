@@ -274,6 +274,13 @@ export interface RemoteBridgeDependencies {
     state(): AwakeState | null;
     /** Whether a lid-closed session can start (the sudoers rule is installed). */
     lidReady?(): boolean;
+    /** The Mac's battery, power draw and lid, as last read. */
+    power?(): {
+      percent: number | null;
+      onBattery: boolean | null;
+      watts: number | null;
+      lidClosed: boolean | null;
+    } | null;
     apply(
       request: unknown,
     ):
@@ -1292,6 +1299,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeLid) +
       JSON.stringify(view.awakeLidReady) +
       JSON.stringify(view.awakeSafety) +
+      JSON.stringify(view.macPower) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     if (serialized === this.lastPublished) {
       return;
@@ -1343,6 +1351,7 @@ export class RemoteBridge {
     awakeLidProblem?: string;
     awakeLidReady?: boolean;
     awakeSafety?: string;
+    macPower?: { percent: number | null; onBattery: boolean | null; watts: number | null; lidClosed: boolean | null };
   } {
     const awake = this.deps.awake;
     if (!awake) {
@@ -1358,6 +1367,8 @@ export class RemoteBridge {
       ...(awake.lidReady?.() ? { awakeLidReady: true } : {}),
       // A safety rule acting now: "Low Power Mode on · Battery at 38%".
       ...(state?.safety ? { awakeSafety: state.lowPower ? `Low Power Mode on · ${state.safety}` : state.safety } : {}),
+      // Battery, draw and lid, for the phone's "Your Mac".
+      ...(awake.power?.() ? { macPower: awake.power()! } : {}),
     };
   }
 

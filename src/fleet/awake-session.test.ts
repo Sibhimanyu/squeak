@@ -374,6 +374,17 @@ describe("AwakeSession safety rules", () => {
     expect(t.session.lastEnd?.reason).toBe("battery");
   });
 
+  it("tells onEnd how a session ended", async () => {
+    const t = setup();
+    const ends: unknown[] = [];
+    const session = new AwakeSession({ path: t.sessionPath, hold: () => undefined, onEnd: (end) => ends.push(end) });
+    session.start(60);
+    await session.checkSafety(reading({ percent: 8 }));
+    session.start(60);
+    session.end();
+    expect(ends).toMatchObject([{ reason: "battery", why: "Battery at 8%" }, { reason: "ended" }]);
+  });
+
   it("plugged in, a low battery is not a reason", async () => {
     const t = safetySetup();
     await t.session.refreshLidRule();

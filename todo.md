@@ -88,8 +88,9 @@ switch in the menu bar and iPhone Settings (`keep-awake.json`, command `awake`).
 - [x] **4. Lid-closed actions.** When the lid shuts during a session: display off,
       mute, Low Power Mode, optionally SIGSTOP chat apps (Slack, WhatsApp, Discord, Telegram);
       all reversed when it opens. Each one a setting.
-- [ ] **5. Status on the phone.** Lid state, battery %, power draw and the countdown on
-      the iPhone; a push when a safety rule ends a session.
+- [x] **5. Status on the phone.** Lid state, battery %, power draw and the countdown on
+      the iPhone; a push when a safety rule ends a session (Telegram and Cliq: there
+      is no APNs yet).
 - [ ] Not planned unless asked: hotspot failover (stores Wi-Fi passwords), tmux
       "continue" nudge (overlaps terminal replies), browser relaunch.
 

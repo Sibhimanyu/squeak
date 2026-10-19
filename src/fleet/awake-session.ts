@@ -76,6 +76,8 @@ export interface AwakeSessionOptions {
   now?: () => number;
   /** Told whenever the session starts, changes or ends, so surfaces can republish. */
   onChange?: () => void;
+  /** Told when a session ends, and why. */
+  onEnd?: (end: AwakeEnd) => void;
 }
 
 /** Whole minutes in 1..MAX_AWAKE_MINUTES, or null for anything else. */
@@ -267,6 +269,7 @@ export class AwakeSession {
     this.write(null);
     void this.syncLid();
     logger.info("awake session over", { reason, why });
+    this.options.onEnd?.(this.ended);
     this.options.onChange?.();
   }
 
