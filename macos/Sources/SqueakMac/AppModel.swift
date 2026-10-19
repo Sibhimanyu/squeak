@@ -11,7 +11,7 @@ enum SessionFilter: Hashable {
 
 /// The sidebar's filters: sections of the list, or where a session runs.
 enum NavFilter: Hashable {
-    case all, needsYou, working, recent
+    case all, needsYou, working, done
     case source(SessionSource)
 }
 
@@ -231,7 +231,7 @@ final class AppModel {
             case .all: return true
             case .needsYou: return SessionGrouping.kind(of: s, now: now) == .needsYou
             case .working: return SessionGrouping.kind(of: s, now: now) == .working
-            case .recent: return SessionGrouping.kind(of: s, now: now) == .recent
+            case .done: return SessionGrouping.kind(of: s, now: now) == .done
             case .source(let src): return s.source == src
             }
         }
@@ -241,37 +241,60 @@ final class AppModel {
     func count(_ f: NavFilter) -> Int {
         let now = Date()
         switch f {
-        case .all: return sessions.filter { SessionGrouping.kind(of: $0, now: now) != .earlier }.count
+        case .all: return sessions.filter { !SessionGrouping.isEarlier($0, now: now) }.count
         case .needsYou: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .needsYou }.count
         case .working: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .working }.count
-        case .recent: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .recent }.count
+        case .done: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .done }.count
         case .source(let src): return sessions.filter { $0.source == src }.count
         }
     }
 
-    /// "8 active across your Mac": everything that is not Earlier.
+    /// "8 active across your Mac": everything except idle for more than a day.
     var activeCount: Int { count(.all) }
     var hasCodexApp: Bool { sessions.contains { $0.source == .codexApp } }
 
     func liveStep(_ key: SessionKey) -> String? { liveSteps[key] }
 
-    /// Reads the newest step of each working session (at most 8) into one short phrase each.
-    func refreshLiveSteps() async {
-        let working = sessions.filter { SessionGrouping.kind(of: $0, now: Date()) == .working }.prefix(8)
+    @ObservationIgnored private var liveStepsAt = Date.distantPast
+    @ObservationIgnored private var liveStepsRefreshing = false
+
+    /// The newest step of each working session in the list (at most 8) as one short phrase each, read
+    /// from the same activity feed as the detail. Cheap by construction: only working sessions that
+    /// are listed, at most one pass every 4s however many views ask, and a failed read keeps the last
+    /// phrase. A session with no steps yet gets no phrase, so its row says "working", never a guess.
+    func refreshLiveSteps(force: Bool = false) async {
+        guard force || Date().timeIntervalSince(liveStepsAt) >= 4, !liveStepsRefreshing else { return }
+        liveStepsRefreshing = true
+        defer { liveStepsRefreshing = false }
+        liveStepsAt = Date()
+        let now = Date()
+        let working = visibleSessions.filter { SessionGrouping.kind(of: $0, now: now) == .working }.prefix(8)
         var out: [SessionKey: String] = [:]
         for s in working {
-            if demoMode { out[s.key] = ActivityPhrase.short(DemoData.activity(for: s.key)) } else {
-                let steps = (try? await broker.activity(for: s.key)) ?? []
-                out[s.key] = ActivityPhrase.short(steps)
+            let steps: [ActivityStep]
+            if demoMode { steps = DemoData.activity(for: s.key) } else if let read = try? await broker.activity(for: s.key) {
+                steps = read
+            } else {
+                if let old = liveSteps[s.key] { out[s.key] = old }
+                continue
             }
+            if let line = ActivityPhrase.rowLine(steps) { out[s.key] = line }
         }
         if out != liveSteps { liveSteps = out }
+    }
+
+    /// Polls about every 5s for as long as the calling view is on screen.
+    func pollLiveSteps() async {
+        while !Task.isCancelled {
+            await refreshLiveSteps()
+            try? await Task.sleep(for: .seconds(5))
+        }
     }
 
     /// Real data only. Squeak's adapters expose no diff or test results, so live sessions have none.
     func summaryLine(for s: HostSession) -> String? { demoMode ? DemoData.summary(for: s.key) : nil }
 
-    /// The brief's sections (Needs you / Working / Recent / Earlier), pinned first inside each.
+    /// §8.2 sections: needs you, done, working, error, idle; pinned first inside each.
     var grouped: [SessionSection] { SessionGrouping.group(visibleSessions, pinned: pinned) }
 
     /// The agent's latest message for a session: the open transcript, else the cached card text.

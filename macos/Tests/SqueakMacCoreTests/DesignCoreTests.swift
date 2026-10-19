@@ -94,14 +94,25 @@ struct SessionGroupingTests {
             s("old", .finished, ago: 86400 * 3), s("rec", .finished, ago: 7200), s("idle", .idle, ago: 600),
             s("w1", .working, ago: 60), s("w2", .working, ago: 10), s("b", .blocked, ago: 5),
             s("dead", .working, ago: 100, alive: false), s("none", .idle, ago: nil),
+            s("err", .error, ago: 300), s("olderr", .error, ago: 86400 * 2),
         ]
         let pinned = Set([all[3].key])  // w1
         let g = SessionGrouping.group(all, pinned: pinned, now: now)
-        #expect(g.map(\.kind) == [.needsYou, .working, .recent, .earlier])
+        // Attention order: needs you, done, working, error, idle.
+        #expect(g.map(\.kind) == [.needsYou, .done, .working, .error, .idle])
         #expect(g[0].sessions.map(\.title) == ["b"])
-        #expect(g[1].sessions.map(\.title) == ["w1", "w2"])  // pinned first
-        #expect(g[2].sessions.map(\.title) == ["dead", "idle", "rec"])
-        #expect(g[3].sessions.map(\.title) == ["old", "none"])
+        #expect(g[1].sessions.map(\.title) == ["rec"])
+        #expect(g[2].sessions.map(\.title) == ["w1", "w2"])  // pinned first
+        #expect(g[3].sessions.map(\.title) == ["err"])
+        #expect(g[4].sessions.map(\.title) == ["dead", "idle", "olderr", "old", "none"])
+    }
+
+    @Test func staleFinishesFallToIdleAndAreEarlier() {
+        let old = s("old", .finished, ago: 86400 * 3)
+        #expect(SessionGrouping.kind(of: old, now: now) == .idle)
+        #expect(SessionGrouping.isEarlier(old, now: now))
+        #expect(!SessionGrouping.isEarlier(s("i", .idle, ago: 600), now: now))
+        #expect(!SessionGrouping.isEarlier(s("w", .working, ago: 1), now: now))
     }
 
     @Test func emptySectionsHidden() {
@@ -156,5 +167,15 @@ struct AnswerCardTests {
             == [0xDC2626, 0x15803D, 0x0369A1, 0x7C3AED, 0x71717A, 0xA1A1AA])
         #expect(Tokens.Dark.surfaceRaised == 0x27272A && Tokens.Light.surfaceRaised == 0xFFFFFF)
         #expect(Tokens.Dark.sidebar == 0x0E0E11 && Tokens.Light.sidebar == 0xEBEBEC)
+    }
+}
+
+@Suite struct RowLineTests {
+    @Test func liveStepIsLowercaseAndNeverInvented() {
+        #expect(ActivityPhrase.rowLine([]) == nil)
+        #expect(ActivityPhrase.rowLine([ActivityStep(kind: "tool", text: "Run npm test -- x")]) == "running tests")
+        #expect(ActivityPhrase.rowLine([ActivityStep(kind: "tool", text: "Mystery tool")]) == nil)
+        let edits = [ActivityStep(kind: "tool", text: "Edit a.ts"), ActivityStep(kind: "tool", text: "Edit b.ts")]
+        #expect(ActivityPhrase.rowLine(edits) == "editing 2 files")
     }
 }

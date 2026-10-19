@@ -1,4 +1,5 @@
 import AppKit
+import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
@@ -144,7 +145,7 @@ struct QuickComposerView: View {
         } label: {
             HStack(spacing: Space.s) {
                 Text(verbatim: destinationTitle).font(.system(size: 14)).foregroundStyle(Theme.ink).lineLimit(1)
-                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
+                Lucide(.chevronDown, size: 16, color: Theme.muted)
             }
             .padding(.horizontal, Space.m)
             .frame(height: 30)
@@ -171,7 +172,7 @@ struct QuickComposerView: View {
         if state.sending {
             Text("Sending…").foregroundStyle(Theme.muted)
         } else if let r = state.result, let f = SendFeedback(r) {
-            Label(f.text, systemImage: f.symbol).foregroundStyle(f.color).lineLimit(2)
+            HStack(spacing: 6) { Lucide(f.symbol, size: 16, color: f.color); Text(f.text).foregroundStyle(f.color).lineLimit(2) }
         } else if !model.isConnected, model.health != nil {
             Text("Offline. Nothing is sent until you press ⌘↩ while connected.").foregroundStyle(Theme.muted)
         }

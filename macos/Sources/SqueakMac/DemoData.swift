@@ -41,6 +41,8 @@ enum DemoData {
             s("demo-6", "conductor", "Session isolation checks", .finished, min: 60, "squeak", "session-isolation", "claude"),
             s("demo-7", "codex-desktop", "Native notifications", .finished, min: 120, "compass", "native-notifications", "codex"),
             s("demo-8", "claude-terminal", "CLI help cleanup", .finished, min: 180, "atlas", "cli-help", "claude"),
+            s("demo-9", "conductor", "Flaky checkout test", .error, min: 45, "storefront", "checkout-flake", "codex"),
+            s("demo-10", "conductor", "Untitled", .idle, min: 300, "compass", "release-notes", "claude"),
         ]
         return Bundle(sessions: list, needsYouText: [pay.key: question])
     }

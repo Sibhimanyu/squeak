@@ -3,10 +3,11 @@ import XCTest
 @testable import SqueakUI
 
 final class PresentationTests: XCTestCase {
-    private func session(state: String, steps: [String] = [], label: String = "storefront · Payment retry logic") -> PhoneSnapshot.Session {
+    private func session(state: String, steps: [String] = [], label: String = "storefront · payment-retries", title: String? = "Payment retry logic") -> PhoneSnapshot.Session {
         .init(key: "k", conductorSessionId: "id", label: label, agent: "claude", state: state, lastActivityAt: "2026-10-19T10:00:00Z",
               detail: nil, git: nil, contextPercent: nil, turnId: "t", message: nil, choices: nil,
-              activity: steps.isEmpty ? nil : .init(total: steps.count, steps: steps.map { .init(kind: "tool", text: $0) }))
+              activity: steps.isEmpty ? nil : .init(total: steps.count, steps: steps.map { .init(kind: "tool", text: $0) }),
+              title: title)
     }
 
     func testLabelSplitsIntoRepoAndTitle() {
@@ -17,11 +18,22 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(Presentation.subtitle(session(state: "idle")), "storefront · Claude")
     }
 
+    func testHeadlineIsTheChatTitleElseRepoBranch() {
+        XCTAssertEqual(Presentation.displayTitle(session(state: "idle")), "Payment retry logic")
+        XCTAssertEqual(Presentation.displayTitle(session(state: "idle", title: nil)), "storefront · payment-retries")
+        XCTAssertEqual(Presentation.displayTitle(session(state: "idle", title: "Untitled")), "storefront · payment-retries")
+        // A Mac that only sends the disambiguated label still gives the title.
+        XCTAssertEqual(Presentation.displayTitle(session(state: "idle", label: "storefront · payment-retries (Retry logic)", title: nil)), "Retry logic")
+        XCTAssertEqual(Presentation.repoBranch(session(state: "idle", label: "storefront · payment-retries (Retry logic)")), "storefront · payment-retries")
+    }
+
     func testStatusUsesDesignVocabulary() {
         XCTAssertEqual(Presentation.status(session(state: "awaiting_input")), .init(text: "needs an answer", tone: .needsYou))
         XCTAssertEqual(Presentation.status(session(state: "awaiting_approval")).text, "needs approval")
         XCTAssertEqual(Presentation.status(session(state: "working")).text, "working")
-        XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Read a.ts", "Running tests. All of them."])).text, "Running tests")
+        XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Read a.ts", "Run npm test -- x"])).text, "running tests")
+        XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Edit a.ts", "Edit b.ts"])).text, "editing 2 files")
+        XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Mystery tool"])).text, "working")
         XCTAssertEqual(Presentation.status(session(state: "finished")).text, "done")
     }
 

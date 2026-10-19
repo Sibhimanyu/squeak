@@ -12,9 +12,12 @@ let package = Package(
         // The iPhone screens: the whole UI of the Squeak app (see SqueakRootView).
         .library(name: "SqueakUI", targets: ["SqueakUI"]),
     ],
+    dependencies: [
+        .package(path: "../../icons"),
+    ],
     targets: [
         .target(name: "SqueakCore"),
-        .target(name: "SqueakUI", dependencies: ["SqueakCore"], resources: [.process("Resources")]),
+        .target(name: "SqueakUI", dependencies: ["SqueakCore", .product(name: "SqueakIcons", package: "icons")], resources: [.process("Resources")]),
         // Writes the fixtures the Mac's tests verify against (src/remote/fixtures).
         .executableTarget(name: "squeak-fixtures", dependencies: ["SqueakCore"]),
         // A phone in a terminal: pairs and replies over real Firestore (scripts/e2e-remote.sh).

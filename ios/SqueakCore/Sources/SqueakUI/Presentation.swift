@@ -32,14 +32,32 @@ enum Presentation {
         }
     }
 
-    /// "storefront · Claude"
+    /// "storefront · Claude" (§8.2: `repo · agent`).
     static func subtitle(_ session: PhoneSnapshot.Session) -> String {
         let repo = split(label: session.label).repo
         return [repo, agentName(session.agent)].compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// `repo · branch`: the label without a trailing "(title)" the Mac adds when two rows collide.
+    static func repoBranch(_ session: PhoneSnapshot.Session) -> String {
+        var label = session.label
+        if label.hasSuffix(")"), let open = label.range(of: " (", options: .backwards) { label = String(label[..<open.lowerBound]) }
+        return label
+    }
+
+    /// The chat's title: the `title` the Mac sends, else the "(title)" in a disambiguated label.
+    static func ownTitle(_ session: PhoneSnapshot.Session) -> String? {
+        var title = session.title
+        if title == nil, session.label.hasSuffix(")"), let open = session.label.range(of: " (", options: .backwards) {
+            title = String(session.label[open.upperBound...].dropLast())
+        }
+        let t = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return t.isEmpty || t.lowercased() == "untitled" ? nil : t
+    }
+
+    /// §8.2's headline: the chat's own title, else `repo · branch` (untitled chats, terminal sessions).
     static func displayTitle(_ session: PhoneSnapshot.Session) -> String {
-        readable(split(label: session.label).title)
+        ownTitle(session) ?? repoBranch(session)
     }
 
     /* ---------- status ---------- */
@@ -59,7 +77,7 @@ enum Presentation {
         case "awaiting_approval": return .init(text: "needs approval", tone: .needsYou)
         case "awaiting_input": return .init(text: "needs an answer", tone: .needsYou)
         case "working":
-            guard let step = session.activity?.steps.last, let phrase = phrase(from: step.text) else {
+            guard let phrase = stepPhrase(session.activity?.steps ?? []) else {
                 return .init(text: "working", tone: .working)
             }
             return .init(text: phrase, tone: .working)
@@ -67,6 +85,49 @@ enum Presentation {
         case "error": return .init(text: "error", tone: .error)
         default: return .init(text: "idle", tone: .idle)
         }
+    }
+
+    /// §8.2's third line while working, the same phrasing as the Mac's row ("running tests", "editing 2
+    /// files"). Nil when there are no steps or the newest is not recognised: the row says "working".
+    static func stepPhrase(_ steps: [PhoneSnapshot.Step]) -> String? {
+        guard let last = steps.last else { return nil }
+        let phrase: String
+        switch last.kind {
+        case "thinking": phrase = "thinking"
+        case "note", "text": phrase = "writing"
+        case "background": phrase = "waiting on workers"
+        default:
+            let lower = last.text.lowercased()
+            if lower.hasPrefix("edit") || lower.hasPrefix("write") {
+                var files = Set<String>()
+                for step in steps.reversed() {
+                    guard step.kind == "tool" else { continue }
+                    let l = step.text.lowercased()
+                    guard l.hasPrefix("edit") || l.hasPrefix("write") else { break }
+                    files.insert(step.text.split(separator: " ", maxSplits: 1).dropFirst().first.map(String.init) ?? step.text)
+                }
+                phrase = files.count <= 1 ? "editing a file" : "editing \(files.count) files"
+            } else if lower.hasPrefix("read") {
+                phrase = "reading code"
+            } else if lower.hasPrefix("search") || lower.hasPrefix("find") {
+                phrase = "searching code"
+            } else if lower.hasPrefix("run") || lower.contains("test") {
+                if lower.contains("test") || lower.contains("vitest") || lower.contains("pytest") || lower.contains("jest") { phrase = "running tests" }
+                else if lower.contains("build") || lower.contains("compile") || lower.contains("tsc") { phrase = "building" }
+                else if lower.contains("lint") { phrase = "linting" }
+                else if lower.contains("git ") { phrase = "checking git" }
+                else { phrase = "running a command" }
+            } else if lower.hasPrefix("fetch") || lower.contains("web") {
+                phrase = "browsing the web"
+            } else if lower.hasPrefix("start") {
+                phrase = "starting a helper"
+            } else if lower.hasPrefix("update the plan") {
+                phrase = "planning"
+            } else {
+                return nil
+            }
+        }
+        return phrase
     }
 
     /// A short phrase: the step's first sentence, capped.

@@ -43,6 +43,8 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public let key: String
         public let conductorSessionId: String?
         public let label: String
+        /// The chat's own title, when the Mac sends it (optional: an older Mac does not).
+        public let title: String?
         public let agent: String
         public let state: String
         public let lastActivityAt: String
@@ -59,8 +61,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public init(
             key: String, conductorSessionId: String?, label: String, agent: String, state: String,
             lastActivityAt: String, detail: String?, git: String?, contextPercent: Double?,
-            turnId: String?, message: String?, choices: Choices?, activity: Activity? = nil
+            turnId: String?, message: String?, choices: Choices?, activity: Activity? = nil,
+            title: String? = nil
         ) {
+            self.title = title
             self.key = key; self.conductorSessionId = conductorSessionId; self.label = label
             self.agent = agent; self.state = state; self.lastActivityAt = lastActivityAt
             self.detail = detail; self.git = git; self.contextPercent = contextPercent

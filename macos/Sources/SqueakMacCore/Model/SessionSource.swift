@@ -39,6 +39,17 @@ public extension HostSession {
     var source: SessionSource { SessionSource(provider: key.provider) }
 }
 
+public extension ActivityPhrase {
+    /// §8.2's third line while a session works: "running tests", "editing 2 files". Nil when the feed
+    /// has no steps yet or the newest one is not recognised, so the row falls back to the state word.
+    static func rowLine(_ steps: [ActivityStep]) -> String? {
+        guard !steps.isEmpty else { return nil }
+        let phrase = short(steps)
+        guard phrase != "Working", let first = phrase.first else { return nil }
+        return first.lowercased() + phrase.dropFirst()
+    }
+}
+
 /// One short present-tense phrase for a working session's row ("Running tests", "Editing 2 files").
 public enum ActivityPhrase {
     public static func short(_ steps: [ActivityStep]) -> String {

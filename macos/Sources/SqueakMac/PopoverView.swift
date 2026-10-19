@@ -1,3 +1,4 @@
+import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
@@ -27,6 +28,7 @@ struct PopoverView: View {
         }
         .frame(width: Self.width)
         .background(Theme.bg)
+        .task(id: model.hasLoaded) { await model.pollLiveSteps() }
     }
 
     // MARK: Header
@@ -74,11 +76,11 @@ struct PopoverView: View {
         if model.sessions.isEmpty {
             VStack {
                 if model.health == nil {
-                    EmptyStateView(symbol: "ellipsis.circle", title: "Connecting…", message: "Looking for the Squeak service on this Mac.")
+                    EmptyStateView(symbol: .ellipsis, title: "Connecting…", message: "Looking for the Squeak service on this Mac.")
                 } else if !model.isConnected {
-                    EmptyStateView(symbol: "bolt.slash", title: "No sessions to show", message: "Squeak can't reach its service yet, so there is nothing to list.")
+                    EmptyStateView(symbol: .zapOff, title: "No sessions to show", message: "Squeak can't reach its service yet, so there is nothing to list.")
                 } else {
-                    EmptyStateView(symbol: "tray", title: "No sessions yet", message: "Start a chat in Conductor and it shows up here, with its replies.")
+                    EmptyStateView(symbol: .inbox, title: "No sessions yet", message: "Start a chat in Conductor and it shows up here, with its replies.")
                 }
             }
             .frame(maxWidth: .infinity)
@@ -102,7 +104,7 @@ struct PopoverView: View {
         if model.isSearching {
             let hits = model.searchHits
             if hits.isEmpty {
-                EmptyStateView(symbol: "magnifyingglass", title: "No matches", message: "Search looks at titles and messages Squeak has already opened on this Mac.")
+                EmptyStateView(symbol: .search, title: "No matches", message: "Search looks at titles and messages Squeak has already opened on this Mac.")
                     .frame(maxWidth: .infinity)
             } else {
                 VStack(spacing: 0) {
@@ -114,11 +116,12 @@ struct PopoverView: View {
         } else {
             let sections = model.grouped
             let quiet = !sections.contains { $0.kind == .needsYou || $0.kind == .working }
+            let now = Date()
             VStack(alignment: .leading, spacing: 0) {
                 if quiet { allQuiet }
                 ForEach(Array(sections.enumerated()), id: \.element.id) { i, section in
                     if i > 0 { Hairline().padding(.vertical, Space.s).padding(.horizontal, Space.m) }
-                    sectionView(section)
+                    sectionView(section, now: now)
                 }
             }
         }
@@ -134,7 +137,7 @@ struct PopoverView: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder private func sectionView(_ section: SessionSection) -> some View {
+    @ViewBuilder private func sectionView(_ section: SessionSection, now: Date) -> some View {
         VStack(alignment: .leading, spacing: Space.xs) {
             SectionLabel(section.kind.title).padding(.horizontal, Space.m).padding(.bottom, 2)
             switch section.kind {
@@ -142,9 +145,14 @@ struct PopoverView: View {
                 ForEach(Array(section.sessions.enumerated()), id: \.element.id) { i, s in
                     if i < 2 { card(s) } else { row(s) }
                 }
-            case .earlier:
-                ShowEarlierRow(count: section.sessions.count, expanded: showEarlier) { showEarlier.toggle() }
-                if showEarlier { ForEach(section.sessions) { row($0) } }
+            case .idle:
+                // Idle for more than a day is tucked away behind one quiet row.
+                let earlier = section.sessions.filter { SessionGrouping.isEarlier($0, now: now) }
+                ForEach(section.sessions.filter { !earlier.contains($0) }) { row($0) }
+                if !earlier.isEmpty {
+                    ShowEarlierRow(count: earlier.count, expanded: showEarlier) { showEarlier.toggle() }
+                    if showEarlier { ForEach(earlier) { row($0) } }
+                }
             default:
                 ForEach(section.sessions) { row($0) }
             }
@@ -205,7 +213,7 @@ struct PopoverView: View {
                 Divider()
                 Button("Quit Squeak") { NSApp.terminate(nil) }.keyboardShortcut("q")
             } label: {
-                Image(systemName: "gearshape").font(.system(size: 13)).foregroundStyle(Theme.muted)
+                Lucide(.settings, size: 20, color: Theme.muted)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)

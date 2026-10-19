@@ -13,10 +13,14 @@ public struct SqueakRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false
     private let onMainScreen: (() -> Void)?
+    private let onScreen: ((String) -> Void)?
 
     /// `onMainScreen` runs when the session list appears (paired, past onboarding).
-    public init(onMainScreen: (() -> Void)? = nil) {
+    /// `onScreen` names the screen in front ("Pairing", "Sessions", "Session"), for the host's
+    /// feedback tool.
+    public init(onMainScreen: (() -> Void)? = nil, onScreen: ((String) -> Void)? = nil) {
         self.onMainScreen = onMainScreen
+        self.onScreen = onScreen
     }
 
     /// Squeak's duck as a tab-bar glyph (a template image, so the tab bar
@@ -27,6 +31,7 @@ public struct SqueakRootView: View {
     public var body: some View {
         RootView(onMainScreen: onMainScreen)
             .environmentObject(model)
+            .environment(\.squeakScreen, ScreenReporter(report: onScreen))
             .tint(Theme.done)
             .onAppear { visible = true; update() }
             .onDisappear { visible = false; update() }
@@ -40,14 +45,23 @@ public struct SqueakRootView: View {
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.squeakScreen) private var screen
     var onMainScreen: (() -> Void)?
 
     var body: some View {
         switch model.phase {
-        case .unpaired: PairView()
+        case .unpaired: PairView().onAppear { screen.report?("Pairing") }
         case let .awaitingApproval(code, mac): AwaitingApprovalView(code: code, mac: mac)
-        case .paired: HomeView().onAppear { onMainScreen?() }
+        case .paired: HomeView().onAppear { screen.report?("Sessions"); onMainScreen?() }
         }
     }
+}
+/// Tells the host which screen is in front.
+struct ScreenReporter: @unchecked Sendable {
+    var report: ((String) -> Void)?
+}
+
+extension EnvironmentValues {
+    @Entry var squeakScreen = ScreenReporter()
 }
 #endif

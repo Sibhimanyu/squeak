@@ -1,5 +1,6 @@
 #if os(iOS)
 import SqueakCore
+import SqueakIcons
 import SwiftUI
 
 /// DESIGN.md §8.2: every active session, in attention order,
@@ -86,7 +87,7 @@ struct HomeView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button { showingSettings = true } label: {
-                Image(systemName: "gearshape").accessibilityLabel("Settings")
+                Lucide(.settings, size: 20, label: "Settings", color: Theme.muted)
             }
         }
     }
@@ -150,9 +151,15 @@ struct HomeView: View {
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 40)
             } else {
-                ContentUnavailableView(filter == .needsYou ? "Nothing needs you" : "Nothing is working",
-                                       systemImage: filter == .needsYou ? "checkmark.circle" : "moon.zzz",
-                                       description: Text("Pull down to refresh."))
+                ContentUnavailableView {
+                    Label {
+                        Text(filter == .needsYou ? "Nothing needs you" : "Nothing is working")
+                    } icon: {
+                        Lucide(filter == .needsYou ? .circleCheck : .moon, size: 28, color: Theme.muted)
+                    }
+                } description: {
+                    Text("Pull down to refresh.")
+                }
             }
         }
         .listRowBackground(Color.clear).listRowSeparator(.hidden)
@@ -192,18 +199,20 @@ struct SessionRow: View {
     private var status: Presentation.Status { Presentation.status(session) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(Presentation.displayTitle(session)).font(.headline).lineLimit(1)
-                Spacer(minLength: 4)
-                Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+        // §8.2: dot, then title and age, `repo · agent`, and the state word or the live step.
+        HStack(alignment: .top, spacing: 12) {
+            StatusDot(color: dotColor, pulses: status.tone == .needsYou || status.tone == .working, period: status.tone == .working ? 1.6 : 1.0)
+                .padding(.top, 7)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(Presentation.displayTitle(session)).font(.headline).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+                }
+                Text(Presentation.subtitle(session)).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
+                Text(status.text).font(.subheadline.weight(status.tone == .needsYou ? .semibold : .regular))
+                    .foregroundStyle(status.tone == .needsYou ? Theme.ink : Theme.muted).lineLimit(1)
             }
-            Text(Presentation.subtitle(session)).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
-            HStack(spacing: 7) {
-                StatusDot(color: dotColor, pulses: status.tone == .needsYou || status.tone == .working, period: status.tone == .working ? 1.6 : 1.0)
-                Text(status.text).font(.subheadline.weight(status.tone == .needsYou ? .semibold : .regular)).foregroundStyle(status.tone == .needsYou ? Theme.ink : Theme.muted).lineLimit(1)
-            }
-            .padding(.top, 1)
         }
         .padding(.vertical, 6)
         .frame(minHeight: 44)

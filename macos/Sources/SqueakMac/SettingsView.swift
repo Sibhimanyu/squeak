@@ -1,4 +1,5 @@
 import AppKit
+import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
@@ -16,10 +17,10 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }.tag(Tab.general)
-            ConnectionsSettings().tabItem { Label("Connections", systemImage: "link") }.tag(Tab.connections)
-            PrivacySettings().tabItem { Label("Privacy", systemImage: "hand.raised") }.tag(Tab.privacy)
-            AboutSettings().tabItem { Label("About", systemImage: "info.circle") }.tag(Tab.about)
+            GeneralSettings().tabItem { Label { Text("General") } icon: { LucideImage.template(.settings) } }.tag(Tab.general)
+            ConnectionsSettings().tabItem { Label { Text("Connections") } icon: { LucideImage.template(.link) } }.tag(Tab.connections)
+            PrivacySettings().tabItem { Label { Text("Privacy") } icon: { LucideImage.template(.hand) } }.tag(Tab.privacy)
+            AboutSettings().tabItem { Label { Text("About") } icon: { LucideImage.template(.info) } }.tag(Tab.about)
         }
         .frame(width: 520, height: 440)
     }

@@ -1,14 +1,17 @@
 import Foundation
 
+/// DESIGN.md 8.2: rows are grouped and ordered by attention: needs you, then done, then working,
+/// then error, then idle.
 public enum SessionSectionKind: String, CaseIterable, Sendable {
-    case needsYou, working, recent, earlier
+    case needsYou, done, working, error, idle
 
     public var title: String {
         switch self {
         case .needsYou: "Needs you"
+        case .done: "Done"
         case .working: "Working"
-        case .recent: "Recent"
-        case .earlier: "Earlier"
+        case .error: "Error"
+        case .idle: "Idle"
         }
     }
 }
@@ -20,8 +23,11 @@ public struct SessionSection: Equatable, Sendable, Identifiable {
     public var id: String { kind.rawValue }
 }
 
-/// The brief's sections: Needs you, Working, Recent (finished or idle within 24h), Earlier.
-/// Empty sections are omitted. Dead (`alive == false`) working/blocked sessions fall to Recent/Earlier.
+/// Sections in attention order; empty ones are omitted.
+/// - Blocked and working sessions count only while alive; a dead one is idle.
+/// - Finished and errored sessions stay in Done / Error for `recentWindow` (24h) after their last
+///   activity, then fall to Idle, so the list is not an archive.
+/// - Everything else (idle, unknown, dead) is Idle; `isEarlier` marks the ones a list may tuck away.
 public enum SessionGrouping {
     public static let recentWindow: TimeInterval = 24 * 3600
 
@@ -29,10 +35,20 @@ public enum SessionGrouping {
         switch s.state {
         case .blocked where s.alive != false: return .needsYou
         case .working where s.alive != false: return .working
-        default:
-            if let t = s.lastActivityAt, now.timeIntervalSince(t) <= recentWindow { return .recent }
-            return .earlier
+        case .finished where isRecent(s, now: now): return .done
+        case .error where isRecent(s, now: now): return .error
+        default: return .idle
         }
+    }
+
+    /// An idle session with no activity in the last 24h: lists collapse these behind "Show earlier".
+    public static func isEarlier(_ s: HostSession, now: Date) -> Bool {
+        kind(of: s, now: now) == .idle && !isRecent(s, now: now)
+    }
+
+    static func isRecent(_ s: HostSession, now: Date) -> Bool {
+        guard let t = s.lastActivityAt else { return false }
+        return now.timeIntervalSince(t) <= recentWindow
     }
 
     public static func group(_ sessions: [HostSession], pinned: Set<SessionKey> = [], now: Date = Date()) -> [SessionSection] {

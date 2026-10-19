@@ -1,4 +1,5 @@
 import AppKit
+import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
@@ -103,13 +104,27 @@ struct StateChip: View {
 
 // MARK: Row
 
-/// What a session is called and said about, in DESIGN.md §8.2's words: `repo · branch` (the daemon's
-/// disambiguated title when two rows would read the same), then `agent · state · age`.
+/// What a session is called and said about, in DESIGN.md §8.2's words: the chat's own title (or
+/// `repo · branch` when it has none), `repo · agent`, then the state word or the live step.
 enum SessionText {
-    static func name(_ s: HostSession) -> String {
+    /// `repo · branch` (the daemon's disambiguated title when two rows would read the same).
+    static func repoBranch(_ s: HostSession) -> String {
         if let d = s.distinctTitle, !d.isEmpty { return d }
         let parts = [s.repoName, s.branch].compactMap { $0 }.filter { !$0.isEmpty }
         return parts.isEmpty ? s.label : parts.joined(separator: " · ")
+    }
+
+    /// §8.2: the headline is the chat's own title. Conductor's "Untitled" placeholder and terminal
+    /// sessions (their title is only a folder or a command) fall back to `repo · branch`.
+    static func headline(_ s: HostSession) -> String {
+        let t = s.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.source == .terminal || t.isEmpty || t.lowercased() == "untitled" { return repoBranch(s) }
+        return t
+    }
+
+    /// `repo · agent`.
+    static func secondLine(_ s: HostSession) -> String {
+        [s.repoName.flatMap { $0.isEmpty ? nil : $0 }, agent(s.agent)].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// §3.3: the word for the state. Both blocked states share one colour; the word says which.
@@ -130,28 +145,46 @@ enum SessionText {
     }
 }
 
-/// `agent · state · age`, muted, with the state word in its colour only when the session needs you.
-struct MetaLine: View {
+/// The three lines of a session row (§8.2): headline and age, `repo · agent`, then the state word,
+/// or while it works the agent's newest step from the activity feed. The caller draws the dot.
+/// `subtitleOverride` (a search snippet) replaces the third line.
+struct SessionRowLines: View {
     let session: HostSession
+    var isPinned = false
+    var subtitleOverride: String?
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { ctx in
-            text(now: ctx.date).font(Typo.meta).monospacedDigit().lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(verbatim: SessionText.headline(session)).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
+                    if isPinned { Lucide(.pin, size: 16, label: "Pinned", color: Theme.subtle) }
+                    Spacer(minLength: Space.xs)
+                    if let at = session.lastActivityAt {
+                        Text(verbatim: ShortRelativeTime.format(at, now: ctx.date))
+                            .font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
+                    }
+                }
+                Text(verbatim: SessionText.secondLine(session)).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+                third
+            }
         }
     }
 
-    private func text(now: Date) -> Text {
-        let sep = Text(verbatim: " · ").foregroundStyle(Theme.subtle)
-        var t = Text(verbatim: "")
-        if let a = SessionText.agent(session.agent) { t = t + Text(verbatim: a).foregroundStyle(Theme.muted) + sep }
-        let word = Text(verbatim: SessionText.stateWord(session))
-        t = t + (session.state == .blocked ? word.foregroundStyle(Theme.needsYou) : word.foregroundStyle(Theme.muted))
-        if let at = session.lastActivityAt { t = t + sep + Text(verbatim: ShortRelativeTime.format(at, now: now)).foregroundStyle(Theme.muted) }
-        return t
+    @ViewBuilder private var third: some View {
+        if let o = subtitleOverride {
+            Text(verbatim: o).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+        } else if session.state == .working, let step = model.liveStep(session.key) {
+            Text(verbatim: step).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+        } else {
+            Text(verbatim: SessionText.stateWord(session)).font(Typo.meta)
+                .foregroundStyle(session.state == .blocked ? Theme.needsYou : Theme.muted).lineLimit(1)
+        }
     }
 }
 
-/// dot · name / meta. Hover fills `surfaceRaised` (§8.2), selected a little more. No icon.
+/// dot · three lines (SessionRowLines). Hover fills `surfaceRaised` (§8.2), selected a little more. No icon.
 /// The pin shows only on hover or selection. Taps are the caller's (wrap in Button or onTapGesture).
 struct SessionRowView: View {
     let session: HostSession
@@ -166,23 +199,7 @@ struct SessionRowView: View {
         HStack(alignment: .top, spacing: Space.m) {
             StateDot(state: session.state)
                 .frame(height: 19)  // aligned to the first text line
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    Text(verbatim: SessionText.name(session))
-                        .font(Typo.label)
-                        .foregroundStyle(Theme.ink)
-                        .lineLimit(1)
-                    if isPinned && (hovering || isSelected) {
-                        Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(Theme.subtle)
-                            .accessibilityLabel("Pinned")
-                    }
-                }
-                if let o = subtitleOverride {
-                    Text(verbatim: o).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
-                } else {
-                    MetaLine(session: session)
-                }
-            }
+            SessionRowLines(session: session, isPinned: isPinned && (hovering || isSelected), subtitleOverride: subtitleOverride)
             Spacer(minLength: Space.s)
         }
         .padding(.horizontal, Space.m)
@@ -193,7 +210,7 @@ struct SessionRowView: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(SessionText.name(session)), \(SessionText.agent(session.agent) ?? "agent"), \(SessionText.stateWord(session))")
+        .accessibilityLabel("\(SessionText.headline(session)), \(SessionText.secondLine(session)), \(SessionText.stateWord(session))")
     }
 
     static func agentName(_ raw: String?) -> String? {
@@ -216,7 +233,7 @@ struct ShowEarlierRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .semibold))
+                Lucide(expanded ? .chevronUp : .chevronDown, size: 16, color: Theme.muted)
                 Text(expanded ? "Hide earlier" : "Show \(count) earlier").font(.system(size: 12))
                 Spacer()
             }
@@ -341,12 +358,7 @@ struct NeedsYouCard: View {
                 VStack(alignment: .leading, spacing: Space.s) {
                     HStack(alignment: .top, spacing: Space.m) {
                         StateDot(state: .blocked).frame(height: 19)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(verbatim: SessionText.name(session))
-                                .font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
-                            MetaLine(session: session)
-                        }
-                        Spacer(minLength: Space.s)
+                        SessionRowLines(session: session)
                     }
                     if let question, !question.isEmpty {
                         Text(verbatim: question)
@@ -403,16 +415,14 @@ struct NeedsYouCard: View {
 
     private var replyField: some View {
         HStack(spacing: Space.s) {
-            TextField("Message for \(SessionText.name(session))", text: $text)
+            TextField("Message for \(SessionText.headline(session))", text: $text)
                 .textFieldStyle(.plain)
                 .font(Typo.body)
                 .focused($fieldFocused)
                 .onSubmit(submit)
                 .onExitCommand { replying = false; text = "" }
             Button(action: submit) {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(trimmed.isEmpty ? Theme.muted : Theme.primaryText)
+                Lucide(.arrowUp, size: 16, color: trimmed.isEmpty ? Theme.muted : Theme.primaryText)
                     .frame(width: 24, height: 24)
                     .background(trimmed.isEmpty ? Theme.surfaceRaised : Theme.primaryFill, in: RoundedRectangle(cornerRadius: Radius.control))
             }
@@ -448,12 +458,11 @@ struct SearchField: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(Theme.subtle)
-                .accessibilityHidden(true)
+            Lucide(.search, size: 16, color: Theme.subtle)
             field
             if !text.isEmpty {
                 Button { text = "" } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 12)).foregroundStyle(Theme.subtle)
+                    Lucide(.circleX, size: 16, color: Theme.subtle)
                 }
                 .buttonStyle(.plain).accessibilityLabel("Clear search")
             } else if let hint {

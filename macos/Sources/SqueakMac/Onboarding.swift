@@ -1,4 +1,5 @@
 import AppKit
+import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
@@ -132,18 +133,18 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: Space.m) {
             heading("What works").frame(maxWidth: .infinity)
             VStack(alignment: .leading, spacing: Space.m) {
-                bullet("checkmark", "Read conversations and see what an agent is doing")
-                bullet("checkmark", "Reply to Conductor chats, one message at a time")
-                bullet("checkmark", "Quick message from anywhere with a shortcut you choose")
-                bullet("minus", "Approvals and attachments aren't supported yet. Squeak says so and offers Open in Conductor.")
+                bullet(.check, "Read conversations and see what an agent is doing")
+                bullet(.check, "Reply to Conductor chats, one message at a time")
+                bullet(.check, "Quick message from anywhere with a shortcut you choose")
+                bullet(.minus, "Approvals and attachments aren't supported yet. Squeak says so and offers Open in Conductor.")
             }
             .padding(.top, Space.s)
         }
     }
 
-    private func bullet(_ symbol: String, _ text: String) -> some View {
+    private func bullet(_ symbol: LucideName, _ text: String) -> some View {
         HStack(alignment: .top, spacing: Space.m) {
-            Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.subtle).frame(width: 14).padding(.top, 3)
+            Lucide(symbol, size: 16, color: Theme.subtle).padding(.top, 1)
             Text(text).font(.system(size: 13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
         }
     }

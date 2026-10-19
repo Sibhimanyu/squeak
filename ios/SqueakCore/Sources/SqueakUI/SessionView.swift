@@ -1,5 +1,6 @@
 #if os(iOS)
 import SqueakCore
+import SqueakIcons
 import SwiftUI
 
 /// One session: the agent's latest message, its options as cards, what this
@@ -28,6 +29,8 @@ struct SessionView: View {
 
     private var session: PhoneSnapshot.Session? { model.snapshot?.sessions.first { $0.key == key } }
 
+    @Environment(\.squeakScreen) private var screen
+
     var body: some View {
         Group {
             if let session {
@@ -37,6 +40,8 @@ struct SessionView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.bg)
             }
         }
+        .onAppear { screen.report?("Session") }
+        .onDisappear { screen.report?("Sessions") }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -264,18 +269,18 @@ struct Composer: View {
     /// with duck on iOS 26 (§8.9, owner's decision), a flat duck fill before.
     @ViewBuilder
     private var sendButton: some View {
-        let arrow = Image(systemName: "arrow.up").font(.body.weight(.bold)).frame(width: 44, height: 44)
+        let arrow = Lucide(.arrowUp, size: 20, color: sendDisabled ? Theme.muted : Theme.primaryText).frame(width: 44, height: 44)
         if #available(iOS 26, *), !reduceTransparency {
-            Button(action: send) { Image(systemName: "arrow.up").font(.body.weight(.bold)).frame(width: 20, height: 24).foregroundStyle(Theme.duckOutline) }
+            Button(action: send) { Lucide(.arrowUp, size: 20, color: sendDisabled ? Theme.muted : Theme.primaryText).frame(width: 20, height: 24) }
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.roundedRectangle(radius: 12))
-                .tint(Theme.duck)
+                .tint(Theme.primaryFill)
                 .disabled(sendDisabled)
                 .accessibilityLabel("Send")
         } else {
             Button(action: send) {
-                arrow.foregroundStyle(sendDisabled ? Theme.muted : Theme.duckOutline)
-                    .background(sendDisabled ? Theme.surfaceRaised : Theme.duck, in: RoundedRectangle(cornerRadius: 12))
+                arrow
+                    .background(sendDisabled ? Theme.surfaceRaised : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             }
             .disabled(sendDisabled)
@@ -311,7 +316,7 @@ struct ActivityView: View {
                 }
                 ForEach(Array(activity.steps.enumerated()), id: \.offset) { _, step in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Image(systemName: icon(step.kind)).foregroundStyle(Theme.muted).frame(width: 22)
+                        Lucide(icon(step.kind), size: 16, color: Theme.muted).frame(width: 22)
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(label(step.kind)).font(.caption).foregroundStyle(Theme.muted)
@@ -323,21 +328,26 @@ struct ActivityView: View {
                 }
             }
         } else {
-            ContentUnavailableView(
-                session.state == "working" ? "No steps from your Mac" : "Nothing in progress",
-                systemImage: "list.bullet",
-                description: Text(session.state == "working"
+            ContentUnavailableView {
+                Label {
+                    Text(session.state == "working" ? "No steps from your Mac" : "Nothing in progress")
+                } icon: {
+                    Lucide(.list, size: 28, color: Theme.muted)
+                }
+            } description: {
+                Text(session.state == "working"
                     ? "This session is working, but your Mac didn't send its steps."
-                    : "Steps appear here while the session is working."))
+                    : "Steps appear here while the session is working.")
+            }
         }
     }
 
-    private func icon(_ kind: String) -> String {
+    private func icon(_ kind: String) -> LucideName {
         switch kind {
-        case "thinking": return "brain"
-        case "note": return "text.bubble"
-        case "tool": return "terminal"
-        default: return "person.2"
+        case "thinking": return .brain
+        case "note": return .messageSquareText
+        case "tool": return .terminal
+        default: return .users
         }
     }
 
@@ -360,9 +370,9 @@ struct ReceiptView: View {
             case .sending:
                 ProgressView(); Text("Sending…")
             case let .sent(text):
-                Image(systemName: "checkmark").foregroundStyle(Theme.done); Text(text)
+                Lucide(.check, size: 16, color: Theme.done); Text(text)
             case let .refused(reason):
-                Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.error); Text(reason)
+                Lucide(.triangleAlert, size: 16, color: Theme.error); Text(reason)
             }
         }
         .font(.subheadline)

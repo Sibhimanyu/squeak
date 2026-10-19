@@ -1,4 +1,5 @@
 import AppKit
+import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
@@ -64,16 +65,16 @@ struct SidebarView: View {
         @Bindable var model = model
         List(selection: $model.navFilter) {
             Section {
-                row(.all, "All sessions", "doc.text")
-                row(.needsYou, "Needs you", "bell")
-                row(.working, "Working", "play")
-                row(.recent, "Recent", "clock")
+                row(.all, "All sessions", .list)
+                row(.needsYou, "Needs you", .bell)
+                row(.working, "Working", .play)
+                row(.done, "Done", .circleCheck)
             }
             Section("Sources") {
-                source(.conductor, "arrow.triangle.branch")
-                source(.terminal, "terminal")
-                source(.claudeDesktop, "macwindow")
-                if model.hasCodexApp { source(.codexApp, "chevron.left.forwardslash.chevron.right") }
+                source(.conductor, .gitBranch)
+                source(.terminal, .terminal)
+                source(.claudeDesktop, .monitor)
+                if model.hasCodexApp { source(.codexApp, .code) }
             }
         }
         .listStyle(.sidebar)
@@ -81,9 +82,9 @@ struct SidebarView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { footer }
     }
 
-    private func row(_ f: NavFilter, _ title: String, _ symbol: String) -> some View {
+    private func row(_ f: NavFilter, _ title: String, _ symbol: LucideName) -> some View {
         HStack {
-            Label(title, systemImage: symbol)
+            LucideLabel(title, symbol)
             Spacer(minLength: 4)
             count(model.count(f), needsYou: f == .needsYou)
         }
@@ -103,8 +104,8 @@ struct SidebarView: View {
         }
     }
 
-    private func source(_ s: SessionSource, _ symbol: String) -> some View {
-        Label(s.title, systemImage: symbol).tag(NavFilter.source(s))
+    private func source(_ s: SessionSource, _ symbol: LucideName) -> some View {
+        LucideLabel(s.title, symbol).tag(NavFilter.source(s))
     }
 
     /// No duck here: the sidebar sits on the system's glass, and glass never sits behind the duck (DESIGN.md 5).
@@ -112,7 +113,7 @@ struct SidebarView: View {
         HStack(spacing: 8) {
             Spacer(minLength: 0)
             Button { QuickComposerController.shared.show() } label: {
-                Image(systemName: "square.and.pencil").frame(width: 26, height: 26).contentShape(Rectangle())
+                Lucide(.squarePen, size: 20, color: Theme.muted).frame(width: 26, height: 26).contentShape(Rectangle())
             }
             .buttonStyle(.plain).foregroundStyle(Theme.muted)
             .accessibilityLabel("Quick message").help("Quick message")
@@ -129,7 +130,7 @@ struct SidebarView: View {
             }
             .accessibilityElement(children: .combine)
             Button { model.openSettings() } label: {
-                Label("Settings", systemImage: "gearshape").font(Typo.body)
+                LucideLabel("Settings", .settings).font(Typo.body)
             }
             .buttonStyle(.plain).foregroundStyle(Theme.muted)
         }
@@ -171,12 +172,7 @@ struct SessionListView: View {
         .scrollContentBackground(.hidden)
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .overlay { if model.sessions.isEmpty { emptyNote } }
-        .task(id: model.hasLoaded) {
-            while !Task.isCancelled {
-                await model.refreshLiveSteps()
-                try? await Task.sleep(for: .seconds(5))
-            }
-        }
+        .task(id: model.hasLoaded) { await model.pollLiveSteps() }
     }
 
     private var selection: Binding<SessionKey?> {
@@ -193,17 +189,19 @@ struct SessionListView: View {
     }
 
     @ViewBuilder private func sectionView(_ section: SessionSection) -> some View {
-        let earlier = section.kind == .earlier
+        // Idle for more than a day is tucked away behind one quiet row.
+        let now = Date()
+        let earlier = section.kind == .idle ? section.sessions.filter { SessionGrouping.isEarlier($0, now: now) } : []
+        let shown = section.sessions.filter { !earlier.contains($0) }
         Section {
-            SectionLabel(section.kind.title, count: earlier ? nil : section.sessions.count)
+            SectionLabel(section.kind.title, count: shown.count)
                 .padding(.top, 6)
                 .listRowSeparator(.hidden)
-            if earlier {
-                ShowEarlierRow(count: section.sessions.count, expanded: showEarlier) { showEarlier.toggle() }
+            ForEach(shown) { s in row(s) }
+            if !earlier.isEmpty {
+                ShowEarlierRow(count: earlier.count, expanded: showEarlier) { showEarlier.toggle() }
                     .listRowSeparator(.hidden)
-            }
-            if !earlier || showEarlier {
-                ForEach(section.sessions) { s in row(s) }
+                if showEarlier { ForEach(earlier) { s in row(s) } }
             }
         }
     }
@@ -235,7 +233,7 @@ struct SessionListView: View {
     }
 }
 
-/// 8.2: dot, `repo · branch`, then `agent · state · age`. No icon.
+/// 8.2: dot, then three lines (SessionRowLines). No icon.
 struct SessionListRow: View {
     let session: HostSession
     var isPinned = false
@@ -244,23 +242,11 @@ struct SessionListRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: Space.m) {
             StateDot(state: session.state).frame(height: 19)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(verbatim: SessionText.name(session)).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
-                    if isPinned {
-                        Image(systemName: "pin.fill").font(.system(size: 8)).foregroundStyle(Theme.subtle).accessibilityLabel("Pinned")
-                    }
-                }
-                if let o = subtitleOverride {
-                    Text(verbatim: o).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
-                } else {
-                    MetaLine(session: session)
-                }
-            }
+            SessionRowLines(session: session, isPinned: isPinned, subtitleOverride: subtitleOverride)
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(SessionText.name(session)), \(SessionText.agent(session.agent) ?? "agent"), \(SessionText.stateWord(session))")
+        .accessibilityLabel("\(SessionText.headline(session)), \(SessionText.secondLine(session)), \(SessionText.stateWord(session))")
     }
 }
 
@@ -328,7 +314,7 @@ struct ConnectionNotice: View {
 }
 
 enum DetailTab: String, CaseIterable, Identifiable {
-    case conversation = "Conversation", activity = "Activity"
+    case chat = "Chat", activity = "Activity"
     var id: String { rawValue }
 }
 
@@ -336,7 +322,7 @@ struct SessionDetail: View {
     let session: HostSession
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var tab: DetailTab = .conversation
+    @State private var tab: DetailTab = .chat
     @State private var focusToken = 0
     @State private var atBottom = false
     @State private var contentHeight: CGFloat = 0
@@ -352,7 +338,7 @@ struct SessionDetail: View {
             }
             Divider()
             switch tab {
-            case .conversation: transcript.transition(.opacity)
+            case .chat: transcript.transition(.opacity)
             case .activity: ActivityList(session: session).transition(.opacity)
             }
         }
@@ -372,12 +358,12 @@ struct SessionDetail: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
-                Text(verbatim: session.label)
+                Text(verbatim: SessionText.headline(session))
                     .font(Typo.title).lineLimit(2).accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 12)
                 if session.capabilities.openInHost.isSupported {
                     Button { model.openInHost() } label: {
-                        Label("Open in Conductor", systemImage: "arrow.up.forward.square")
+                        LucideLabel("Open in Conductor", .externalLink, color: Theme.ink)
                     }
                     .modifier(GlassBorderedButton())
                     .help("Open this chat in Conductor")
@@ -387,13 +373,17 @@ struct SessionDetail: View {
             if let line = repoBranch {
                 Text(verbatim: line).font(Typo.heading).foregroundStyle(Theme.muted).lineLimit(1)
             }
+            // §8.2: the git line lives here, not in the list row.
+            if let git = model.summaryLine(for: session) {
+                Text(verbatim: git).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1)
+            }
             Text(verbatim: "\(SessionText.agent(session.agent) ?? "agent") · \(SessionText.stateWord(session)) · \(session.source.title)").font(Typo.meta).foregroundStyle(Theme.muted)
             Picker("View", selection: $tab) {
                 ForEach(DetailTab.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented).labelsHidden().frame(width: 230)
             .padding(.top, 12)
-            .accessibilityLabel("Conversation or activity")
+            .accessibilityLabel("Chat or activity")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 28).padding(.top, 8).padding(.bottom, 14)
@@ -409,9 +399,9 @@ struct SessionDetail: View {
     @ViewBuilder
     private var transcript: some View {
         if case .unsupported(let why) = session.capabilities.readTranscript {
-            note("eye.slash", "Can't show this conversation", why)
+            note(.eyeOff, "Can't show this conversation", why)
         } else if model.messages.isEmpty {
-            note("text.bubble", "No messages yet", "Messages appear here as the agent and you exchange them.")
+            note(.messageSquareText, "No messages yet", "Messages appear here as the agent and you exchange them.")
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         } else {
             ScrollViewReader { proxy in
@@ -450,9 +440,9 @@ struct SessionDetail: View {
         }
     }
 
-    private func note(_ symbol: String, _ title: String, _ message: String) -> some View {
+    private func note(_ symbol: LucideName, _ title: String, _ message: String) -> some View {
         VStack(spacing: Space.s) {
-            Image(systemName: symbol).font(.system(size: 26)).foregroundStyle(Theme.subtle)
+            Lucide(symbol, size: 28, color: Theme.subtle)
             Text(title).font(Typo.heading)
             Text(message).font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
         }
@@ -504,12 +494,6 @@ struct SessionDetail: View {
             }
             .padding(.leading, 4)
             .accessibilityLabel("What it's doing: \(model.activity.last?.text ?? "working")")
-        } else if let line = model.summaryLine(for: session) {
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text").foregroundStyle(Theme.muted)
-                Text(verbatim: line).font(Typo.body).foregroundStyle(Theme.muted)
-            }
-            .padding(.leading, 4)
         }
     }
 
@@ -589,7 +573,7 @@ struct ActivityList: View {
     var body: some View {
         if model.activity.isEmpty {
             VStack(spacing: Space.s) {
-                Image(systemName: "list.bullet.clipboard").font(.system(size: 26)).foregroundStyle(Theme.subtle)
+                Lucide(.clipboardList, size: 28, color: Theme.subtle)
                 Text("No activity to show").font(Typo.heading)
                 Text(session.state == .working ? "Steps appear here as the agent works." : "Steps appear here while the agent works on a turn.")
                     .font(Typo.body).foregroundStyle(Theme.muted)
@@ -600,8 +584,7 @@ struct ActivityList: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(model.activity.enumerated()), id: \.offset) { i, step in
                         HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: Self.icon(step))
-                                .font(.system(size: 12)).foregroundStyle(Theme.muted)
+                            Lucide(Self.icon(step), size: 16, color: Theme.muted)
                                 .frame(width: 28, height: 28)
                                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
                             Text(verbatim: step.text).font(.body).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
@@ -621,18 +604,18 @@ struct ActivityList: View {
         }
     }
 
-    static func icon(_ step: ActivityStep) -> String {
+    static func icon(_ step: ActivityStep) -> LucideName {
         switch step.kind {
-        case "thinking": return "brain"
-        case "note", "text": return "text.alignleft"
-        case "background": return "clock.arrow.circlepath"
+        case "thinking": return .brain
+        case "note", "text": return .alignLeft
+        case "background": return .history
         default:
             let l = step.text.lowercased()
-            if l.hasPrefix("read") { return "doc.text" }
-            if l.hasPrefix("edit") || l.hasPrefix("write") { return "pencil" }
-            if l.hasPrefix("run") { return "terminal" }
-            if l.hasPrefix("search") || l.hasPrefix("find") { return "magnifyingglass" }
-            return "wrench.and.screwdriver"
+            if l.hasPrefix("read") { return .fileText }
+            if l.hasPrefix("edit") || l.hasPrefix("write") { return .filePen }
+            if l.hasPrefix("run") { return .terminal }
+            if l.hasPrefix("search") || l.hasPrefix("find") { return .search }
+            return .wrench
         }
     }
 }
@@ -706,7 +689,7 @@ struct MessageView: View {
 
     private func delivery(_ status: DeliveryText) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: status.symbol).font(.system(size: 10, weight: .medium)).foregroundStyle(status.color)
+            Lucide(status.symbol, size: 16, color: status.color)
             Text(status.text).font(Typo.meta).foregroundStyle(status.color)
                 .fixedSize(horizontal: false, vertical: true)
             if status.offersOpen, canOpenHost {
@@ -779,7 +762,7 @@ private struct CardPressStyle: ButtonStyle {
 
 struct DeliveryText {
     var text: String
-    var symbol: String
+    var symbol: LucideName
     var color: Color
     var offersOpen = false
     var offersReuse = false
@@ -787,17 +770,17 @@ struct DeliveryText {
     init?(state: MessageState?) {
         switch state {
         case nil, .draft: return nil
-        case .pending: self = .init(text: "Sending…", symbol: "ellipsis", color: Theme.subtle)
-        case .accepted(let via): self = .init(text: Self.delivered(via), symbol: "checkmark", color: Theme.subtle)
-        case .confirmed: self = .init(text: "Sent", symbol: "checkmark", color: Theme.subtle)
+        case .pending: self = .init(text: "Sending…", symbol: .ellipsis, color: Theme.subtle)
+        case .accepted(let via): self = .init(text: Self.delivered(via), symbol: .check, color: Theme.subtle)
+        case .confirmed: self = .init(text: "Sent", symbol: .check, color: Theme.subtle)
         case .uncertain:
-            self = .init(text: "Typed it in, but couldn't confirm it was sent. Check Conductor before resending.", symbol: "exclamationmark.circle", color: Theme.muted, offersOpen: true)
-        case .refused(let r): self = .init(text: "Refused: \(r)", symbol: "xmark.circle", color: Theme.error, offersReuse: true)
-        case .notSent(let r): self = .init(text: "Not sent: \(r)", symbol: "exclamationmark.circle", color: Theme.error, offersReuse: true)
+            self = .init(text: "Typed it in, but couldn't confirm it was sent. Check Conductor before resending.", symbol: .circleAlert, color: Theme.muted, offersOpen: true)
+        case .refused(let r): self = .init(text: "Refused: \(r)", symbol: .circleX, color: Theme.error, offersReuse: true)
+        case .notSent(let r): self = .init(text: "Not sent: \(r)", symbol: .circleAlert, color: Theme.error, offersReuse: true)
         }
     }
 
-    private init(text: String, symbol: String, color: Color, offersOpen: Bool = false, offersReuse: Bool = false) {
+    private init(text: String, symbol: LucideName, color: Color, offersOpen: Bool = false, offersReuse: Bool = false) {
         self.text = text
         self.symbol = symbol
         self.color = color
