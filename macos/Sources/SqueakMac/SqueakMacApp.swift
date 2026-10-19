@@ -66,6 +66,10 @@ struct SqueakCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New chat…") { NewChatController.shared.show() }
+                .keyboardShortcut("n", modifiers: .command)
+        }
         CommandGroup(after: .appInfo) {
             Button("Check for updates…") { model.updater.checkForUpdates() }
                 .disabled(!model.updater.canCheck)

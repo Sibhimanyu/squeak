@@ -7,7 +7,7 @@ public struct DaemonClient: Sendable {
 
     public let baseURL: URL
     private let transport: any HTTPTransport
-    private let tokenProvider: @Sendable () -> String?
+    let tokenProvider: @Sendable () -> String?
 
     public init(baseURL: URL, transport: any HTTPTransport = URLSessionTransport(), tokenProvider: @escaping @Sendable () -> String?) {
         self.baseURL = baseURL
@@ -182,6 +182,11 @@ public struct DaemonClient: Sendable {
     }
 
     // MARK: Plumbing
+
+    // Reached by the New chat extension (NewChat.swift) in this module.
+    var transportForControl: any HTTPTransport { transport }
+    func controlURL(_ pathAndQuery: String) -> URL { url(pathAndQuery) }
+    func getControl(_ path: String) async throws -> HTTPResponse { try await get(path, token: true) }
 
     private static let pathAllowed: CharacterSet = {
         var s = CharacterSet.alphanumerics

@@ -142,6 +142,12 @@ struct QuickComposerView: View {
             ForEach(model.sendableSessions) { s in
                 Button(destinationName(s)) { state.target = s.key }
             }
+            Divider()
+            Button("New chat in…") {
+                let ws = state.target.flatMap { model.session($0)?.conductorWorkspaceId }
+                QuickComposerController.shared.hide()
+                NewChatController.shared.show(preselect: ws)
+            }
         } label: {
             HStack(spacing: Space.s) {
                 Text(verbatim: destinationTitle).font(.system(size: 14)).foregroundStyle(Theme.ink).lineLimit(1)

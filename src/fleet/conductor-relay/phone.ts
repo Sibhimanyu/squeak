@@ -247,4 +247,77 @@ export class PhoneClient {
     }
     return res;
   }
+
+  /**
+   * Start a NEW chat in an existing workspace by sending its first message
+   * (spec §5.4: a send to an unknown session id creates it, agent type from
+   * `config.harness`). Falls back to `sessions/register` first if the host
+   * answers 404 or 409 "not-found" for the new id. Never writes anything but
+   * through Conductor's own API.
+   */
+  async startChat(args: {
+    workspaceLocalId: string;
+    sessionId: string;
+    agent: "claude" | "codex";
+    text: string;
+  }): Promise<TunnelResponse> {
+    const ws = `/workspaces/${encodeURIComponent(args.workspaceLocalId)}`;
+    const base = `${ws}/sessions/${encodeURIComponent(args.sessionId)}/pending-messages`;
+    const messageId = crypto.randomUUID(); // stable across retries: the host dedupes on it
+    const post = (generation: number) =>
+      this.request({
+        method: "POST",
+        target: `${base}/send`,
+        headers: { "content-type": "application/json" },
+        body: {
+          messageId,
+          deliveryPayload: { message: args.text },
+          config: { harness: args.agent },
+          mode: "queue",
+          expectedGeneration: generation,
+        },
+      });
+    const notFound = (r: TunnelResponse): boolean => {
+      if (r.status === 404) return true;
+      if (r.status !== 409) return false;
+      try {
+        return (JSON.parse(r.body) as { reason?: string }).reason === "not-found";
+      } catch {
+        return false;
+      }
+    };
+    const generationOf = (r: TunnelResponse): number | undefined => {
+      try {
+        const body = JSON.parse(r.body) as { generation?: number; state?: { generation?: number } };
+        return body.state?.generation ?? body.generation;
+      } catch {
+        return undefined;
+      }
+    };
+
+    const queue = await this.request({ method: "GET", target: base });
+    let generation = queue.status >= 200 && queue.status < 300 ? (generationOf(queue) ?? 0) : 0;
+    let registered = false;
+    let res = await post(generation);
+    for (let attempt = 0; attempt < 3 && res.status >= 400; attempt++) {
+      if (notFound(res) && !registered) {
+        registered = true;
+        const reg = await this.request({
+          method: "POST",
+          target: `${ws}/sessions/register`,
+          headers: { "content-type": "application/json" },
+          body: { sessionId: args.sessionId, agentType: args.agent },
+        });
+        if (reg.status < 200 || reg.status >= 300) return reg;
+        const again = await this.request({ method: "GET", target: base });
+        generation = generationOf(again) ?? generation;
+      } else if (res.status === 409) {
+        generation = generationOf(res) ?? generation;
+      } else {
+        break;
+      }
+      res = await post(generation);
+    }
+    return res;
+  }
 }

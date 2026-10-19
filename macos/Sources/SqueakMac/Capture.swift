@@ -94,6 +94,27 @@ enum CaptureRunner {
         write(cw.contentView, to: "\(prefix)-composer.png")
         cw.orderOut(nil)
 
+        // New chat sheet (demo workspaces; Start never sends in demo mode).
+        let ns = NewChatController.shared.state
+        ns.prepare(model: model, preselect: nil)
+        try? await Task.sleep(for: .milliseconds(600))
+        ns.form.text = "Add retries with backoff to the checkout call, and a test for the timeout case."
+        let nw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: NewChatSheet.width, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
+        let nHost = NSHostingView(rootView: NewChatSheet(close: {}).environment(model).environment(ns))
+        nw.contentView = nHost
+        nw.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(900))
+        nw.setContentSize(nHost.fittingSize)
+        try? await Task.sleep(for: .milliseconds(500))
+        write(nw.contentView, to: "\(prefix)-newchat.png")
+        ns.form.query = "light"
+        ns.error = "Conductor's relay isn't connected"
+        try? await Task.sleep(for: .milliseconds(500))
+        nw.setContentSize(nHost.fittingSize)
+        try? await Task.sleep(for: .milliseconds(400))
+        write(nw.contentView, to: "\(prefix)-newchat-error.png")
+        nw.orderOut(nil)
+
         // The real Settings window, so the native tab toolbar is in the picture.
         setenv("SQUEAK_MAC_SETTINGS_TAB", "connections", 1)
         model.openSettings()

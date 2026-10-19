@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import Database from "better-sqlite3";
 import { logger } from "../../utils/logger.js";
@@ -72,6 +73,35 @@ export class ConductorRelayService {
       return { ok: false, reason: `relay HTTP ${res.status}` };
     } catch (e) {
       // A dead connection surfaces here; drop it so isReady() goes false.
+      this.client = undefined;
+      return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /**
+   * Start a new chat in an existing workspace by sending its first message.
+   * Relay only: no window typing, no database writes. The id is ours, so the
+   * caller can open the chat as soon as Conductor lists it.
+   */
+  async startChat(args: {
+    workspaceId: string;
+    agent: "claude" | "codex";
+    text: string;
+  }): Promise<{ ok: true; sessionId: string } | { ok: false; reason: string }> {
+    const client = this.client;
+    if (!client) return { ok: false, reason: "Conductor's relay isn't connected" };
+    const sessionId = crypto.randomUUID();
+    try {
+      const res = await client.startChat({
+        workspaceLocalId: args.workspaceId,
+        sessionId,
+        agent: args.agent,
+        text: args.text,
+      });
+      if (res.status >= 200 && res.status < 300) return { ok: true, sessionId };
+      if (res.status === 404) return { ok: false, reason: "Conductor doesn't know that workspace" };
+      return { ok: false, reason: `Conductor refused it (relay HTTP ${res.status})` };
+    } catch (e) {
       this.client = undefined;
       return { ok: false, reason: e instanceof Error ? e.message : String(e) };
     }

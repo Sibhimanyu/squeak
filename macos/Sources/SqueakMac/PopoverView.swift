@@ -194,16 +194,23 @@ struct PopoverView: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: Space.m) {
+        HStack(spacing: Space.s) {
             Button { QuickComposerController.shared.show() } label: {
                 HStack(spacing: 6) {
-                    Text("Quick message").foregroundStyle(Theme.muted)
+                    Text("Quick message").foregroundStyle(Theme.muted).lineLimit(1)
                     Text("⌘K").foregroundStyle(Theme.subtle)
                 }
                 .font(.system(size: 12))
+                .fixedSize()
             }
             .buttonStyle(.plain)
             .keyboardShortcut("k")
+            Button { NewChatController.shared.show() } label: {
+                Lucide(.squarePen, size: 18, color: Theme.muted)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("New chat")
+            .help("New chat (⌘N)")
             Spacer()
             Button("Open Squeak") { model.showConversationWindow() }
                 .buttonStyle(.plain)

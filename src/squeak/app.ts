@@ -16,6 +16,7 @@ import { parseChoices } from "../fleet/choices.js";
 import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
+import { newChatControl } from "../fleet/new-chat.js";
 import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
 import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
@@ -189,6 +190,7 @@ export class SqueakApp {
             return { ok: false };
         }
       },
+      ...newChatControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }),
       ...channelsControl(this.telegramStatus, () => ({
         cliqOneWay: Boolean(config.cliqWebhookUrl),
         cliqTwoWay: Boolean(config.cliqTwoWay),

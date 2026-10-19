@@ -54,6 +54,10 @@ export interface IngressControl {
   telegramCandidates?(): unknown;
   /** Send a hello to every allowed Telegram chat. */
   telegramTest?(): Promise<unknown>;
+  /** Workspaces that can take a new chat, recent first. */
+  workspaces?(): unknown;
+  /** Start a new chat in a workspace (validated by the implementation). */
+  startChat?(body: { workspaceId?: unknown; agent?: unknown; text?: unknown }): Promise<unknown>;
 }
 
 export const TRANSCRIPT_DEFAULT_LIMIT = 40;
@@ -254,6 +258,69 @@ export class HookIngressServer {
           logger.warn("control remote failed", { error: error instanceof Error ? error.message : String(error) });
           respond(response, 500, "remote failed");
         });
+      return;
+    }
+
+    const chatsPath = (request.url ?? "").split("?")[0];
+    if (chatsPath === "/control/workspaces" || chatsPath === "/control/chats") {
+      const isList = chatsPath === "/control/workspaces";
+      if (request.method !== (isList ? "GET" : "POST")) {
+        respond(response, 405, "method not allowed");
+        request.resume();
+        return;
+      }
+      if (isList) {
+        request.resume();
+        if (!control.workspaces) {
+          respond(response, 503, "workspaces unavailable");
+          return;
+        }
+        try {
+          respondJson(response, 200, control.workspaces());
+        } catch (error) {
+          logger.warn("control workspaces failed", { error: error instanceof Error ? error.message : String(error) });
+          respond(response, 500, "unavailable");
+        }
+        return;
+      }
+      if (!control.startChat) {
+        respond(response, 503, "new chats unavailable");
+        request.resume();
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: { workspaceId?: unknown; agent?: unknown; text?: unknown };
+        try {
+          const value: unknown = JSON.parse(body || "{}");
+          if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("not an object");
+          parsed = value;
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        control.startChat!(parsed)
+          .then((outcome) => respondJson(response, 200, outcome))
+          .catch((error: unknown) => {
+            logger.warn("control new chat failed", { error: error instanceof Error ? error.message : String(error) });
+            respond(response, 500, "new chat failed");
+          });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
       return;
     }
 
