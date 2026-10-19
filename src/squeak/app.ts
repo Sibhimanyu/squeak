@@ -16,7 +16,7 @@ import { LidSleepGuard, SUDOERS_PATH, sudoersRule } from "../fleet/lid-sleep.js"
 import { ensureBackstop } from "../fleet/awake-backstop.js";
 import { readPower, type PowerReading } from "../fleet/power-monitor.js";
 import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
-import { readPendingAsk, readPendingQuestion } from "../fleet/question.js";
+import { readPendingAsk } from "../fleet/question.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
