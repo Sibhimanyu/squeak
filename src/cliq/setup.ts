@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import { databaseUrl as remoteDatabaseUrl } from "../squeak/config.js";
+
 /** Longest message a handler forwards; the relay's rules cap a record at 12000 characters. */
 export const CLIQ_MAX_MESSAGE_CHARS = 4000;
 
@@ -37,13 +39,32 @@ interface RelaySettings {
   projectId: string;
   relayId: string;
   secret: string;
+  /** The Realtime Database, when the relay lives there (SQUEAK_REMOTE_DATABASE_URL). */
+  databaseUrl?: string | null;
 }
 
 /**
  * The Deluge that ends every handler: sign the record and post it to the
- * relay. Firestore answers a create with the document, which has a `name`.
+ * relay. Both stores answer a create with a `name`: Firestore the document's,
+ * the Realtime Database the new key.
  */
 function postToRelay(settings: RelaySettings, failure: string): string {
+  if (settings.databaseUrl) {
+    return `box = record.toString();
+sig = zoho.encryption.hmacsha256("${settings.secret}",box,"hex");
+payload = {"box":box,"sig":sig,"at":zoho.currenttime.toLong()};
+response = invokeurl
+[
+	url :"${settings.databaseUrl}/cliq/${settings.relayId}/inbox.json"
+	type :POST
+	parameters:payload.toString()
+	headers:{"Content-Type":"application/json"}
+];
+if(response.get("name") == null)
+{
+	${failure}
+}`;
+  }
   const url = `https://firestore.googleapis.com/v1/projects/${settings.projectId}/databases/(default)/documents/cliq/${settings.relayId}/inbox`;
   return `box = record.toString();
 sig = zoho.encryption.hmacsha256("${settings.secret}",box,"hex");
@@ -141,12 +162,16 @@ export function runCliqRelay(envPath: string, env: Record<string, string>, args:
   setEnvValues(envPath, { SQUEAK_CLIQ_RELAY_ID: relayId, SQUEAK_CLIQ_RELAY_SECRET: secret });
 
   const handlersPath = path.join(path.dirname(envPath), "cliq-handlers.txt");
-  fs.writeFileSync(handlersPath, cliqHandlerScripts({ projectId, relayId, secret }), { mode: 0o600 });
+  const databaseUrl = remoteDatabaseUrl(env.SQUEAK_REMOTE_DATABASE_URL);
+  fs.writeFileSync(handlersPath, cliqHandlerScripts({ projectId, relayId, secret, databaseUrl }), { mode: 0o600 });
   fs.chmodSync(handlersPath, 0o600);
 
   return [
     rotate ? "Made a new relay id and secret; paste the handlers into Cliq again." : "Relay saved to .env.",
     `The three Cliq handlers, filled in, are in ${handlersPath}`,
+    databaseUrl
+      ? "They post to the Realtime Database. Until they are pasted, records still arriving in Firestore are read too."
+      : "They post to Firestore. Set SQUEAK_REMOTE_DATABASE_URL and run this again to stream instead of polling.",
     env.SQUEAK_CLIQ_OWNER_ID && env.SQUEAK_CLIQ_OWNER_EMAIL
       ? "Restart Squeak to turn on two-way Cliq."
       : "Set SQUEAK_CLIQ_OWNER_ID and SQUEAK_CLIQ_OWNER_EMAIL too (docs/cliq.md), then restart Squeak.",

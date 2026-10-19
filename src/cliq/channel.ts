@@ -24,6 +24,10 @@ const MAX_AGE_MS = 10 * 60_000;
 /** A Cliq clock a little ahead of the Mac's is not a forged record. */
 const MAX_CLOCK_SKEW_MS = 2 * 60_000;
 const DEFAULT_POLL_MS = 5_000;
+/** With a streamed inbox a pass runs on every record; this is only the safety net. */
+const STREAMED_POLL_MS = 60_000;
+/** A record and its claim (a delete, also a change) become one pass. */
+const WAKE_DEBOUNCE_MS = 50;
 const BACKOFF_MS = 30_000;
 const SNOOZE_MS = 60 * 60_000;
 
@@ -62,7 +66,7 @@ export function turnStamp(text: string | null): string {
 
 /** What makes the channel two-way; without it, cards carry no buttons and nothing is read back. */
 export interface CliqInbound {
-  inbox: Pick<CliqRelayInbox, "list" | "delete">;
+  inbox: Pick<CliqRelayInbox, "list" | "delete"> & Partial<Pick<CliqRelayInbox, "watch">>;
   replier: FleetReplier;
   /** The Zoho user id allowed to act. A record written for anyone else is dropped. */
   ownerId: string;
@@ -111,6 +115,10 @@ export class CliqChannel {
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
   private failing = false;
+  private polling = false;
+  /** A record landed during a pass; run another as soon as it ends. */
+  private dirty = false;
+  private unwatch: (() => void) | null = null;
 
   constructor(deps: CliqChannelDependencies) {
     this.deps = deps;
@@ -125,8 +133,21 @@ export class CliqChannel {
     this.listen();
     if (this.deps.inbound) {
       this.stopped = false;
+      this.unwatch = this.deps.inbound.inbox.watch?.(() => this.wake()) ?? null;
       this.schedule(0);
     }
+  }
+
+  /** A record landed: run a pass now, or right after the one running. */
+  private wake(): void {
+    if (this.stopped) {
+      return;
+    }
+    if (this.polling) {
+      this.dirty = true;
+      return;
+    }
+    this.schedule(WAKE_DEBOUNCE_MS);
   }
 
   /** Just the cards, without the poll timer; `pollOnce` then runs the inbox by hand. */
@@ -143,6 +164,8 @@ export class CliqChannel {
 
   stop(): void {
     this.stopped = true;
+    this.unwatch?.();
+    this.unwatch = null;
     for (const unsubscribe of this.unsubscribe) {
       unsubscribe();
     }
@@ -181,13 +204,22 @@ export class CliqChannel {
     if (this.stopped) {
       return;
     }
+    if (this.timer) {
+      clearTimeout(this.timer);
+    }
     this.timer = setTimeout(() => {
+      this.timer = null;
+      this.polling = true;
+      this.dirty = false;
       void this.pollOnce().then(
         () => {
+          this.polling = false;
           this.failing = false;
-          this.schedule(this.deps.inbound?.pollIntervalMs ?? DEFAULT_POLL_MS);
+          const idle = this.unwatch ? STREAMED_POLL_MS : (this.deps.inbound?.pollIntervalMs ?? DEFAULT_POLL_MS);
+          this.schedule(this.dirty ? 0 : idle);
         },
         (error) => {
+          this.polling = false;
           // Log a failure streak once, not every thirty seconds.
           if (!this.failing) {
             logCliqFailure("cliq inbox poll failed", error);

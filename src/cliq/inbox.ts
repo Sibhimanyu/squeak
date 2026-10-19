@@ -42,11 +42,15 @@ export function signCliqBox(secret: string, box: string): string {
   return createHmac("sha256", secret).update(box, "utf8").digest("hex");
 }
 
-/** The Firestore calls the relay needs; `FirestoreRest` in real use. */
+/** The calls the relay needs: `RtdbRest` (streamed) or `FirestoreRest` (polled) in real use. */
 export interface RelayStore {
   list(collection: string): Promise<Array<{ id: string; doc: ChannelDoc }>>;
   delete(path: string): Promise<void>;
+  watch?(path: string, onChange: () => void, options?: { onError?: (error: Error) => void }): () => void;
 }
+
+/** Ids of records read from the legacy store carry this, so a delete goes back to where they came from. */
+const LEGACY = "legacy~";
 
 /** Signatures already acted on, so a copied record cannot run twice. */
 export interface SeenSignatures {
@@ -68,35 +72,75 @@ export interface SeenSignatures {
  */
 export class CliqRelayInbox {
   private readonly store: RelayStore;
+  /**
+   * Firestore, read as well while the relay lives in the Realtime Database:
+   * handlers pasted before the move still post there until they are pasted
+   * again, and their records must not be stranded.
+   */
+  private readonly legacy: RelayStore | null;
   private readonly collection: string;
   private readonly secret: string;
   private readonly seen: SeenSignatures;
   /** Signatures of the records the last `list` returned, by document id. */
   private readonly pending = new Map<string, string>();
 
-  constructor(options: { store: RelayStore; relayId: string; secret: string; seen: SeenSignatures }) {
+  constructor(options: {
+    store: RelayStore;
+    legacy?: RelayStore | null;
+    relayId: string;
+    secret: string;
+    seen: SeenSignatures;
+  }) {
     this.store = options.store;
+    this.legacy = options.legacy ?? null;
     this.collection = `cliq/${options.relayId}/inbox`;
     this.secret = options.secret;
     this.seen = options.seen;
   }
 
   async list(): Promise<CliqInboxRecord[]> {
+    const listed = (await this.store.list(this.collection)).map(({ id, doc }) => ({ id, doc }));
+    if (this.legacy) {
+      // A legacy store that is down must not hold up the live one.
+      const old = await this.legacy.list(this.collection).catch(() => []);
+      listed.push(...old.map(({ id, doc }) => ({ id: `${LEGACY}${id}`, doc })));
+    }
     const records: CliqInboxRecord[] = [];
-    for (const { id, doc } of await this.store.list(this.collection)) {
+    for (const { id, doc } of listed) {
       const record = this.verify(id, doc);
       if (record) {
         records.push(record);
       } else {
-        await this.store.delete(`${this.collection}/${id}`).catch(() => undefined);
+        await this.remove(id).catch(() => undefined);
       }
     }
     return records.sort((a, b) => (a.sentAt ?? 0) - (b.sentAt ?? 0));
   }
 
+  /**
+   * Calls `onChange` when a record lands, when the store can stream (the
+   * Realtime Database); null when it can only be polled. A change only wakes
+   * a pass: every record is still verified as it is listed.
+   */
+  watch(onChange: () => void): (() => void) | null {
+    if (!this.store.watch) {
+      return null;
+    }
+    return this.store.watch(this.collection, onChange, {
+      onError: (error) => logger.debug("cliq relay watch dropped; reconnecting", { error: error.message }),
+    });
+  }
+
+  private remove(id: string): Promise<void> {
+    if (this.legacy && id.startsWith(LEGACY)) {
+      return this.legacy.delete(`${this.collection}/${id.slice(LEGACY.length)}`);
+    }
+    return this.store.delete(`${this.collection}/${id}`);
+  }
+
   /** Claim a record: delete it, and remember its signature so a copy is refused. */
   async delete(id: string): Promise<void> {
-    await this.store.delete(`${this.collection}/${id}`);
+    await this.remove(id);
     const sig = this.pending.get(id);
     this.pending.delete(id);
     if (sig) {

@@ -87,3 +87,69 @@ describe("CliqRelayInbox", () => {
     expect(await t.inbox.list()).toEqual([]);
   });
 });
+
+describe("CliqRelayInbox on the Realtime Database", () => {
+  function streamed() {
+    const seen = new Set<string>();
+    type Docs = Array<{ id: string; doc: { box: string; sig?: string; at?: number } }>;
+    const live: Docs = [];
+    const old: Docs = [];
+    const watchers: Array<() => void> = [];
+    const store = {
+      list: vi.fn<(collection: string) => Promise<Docs>>(async () => live.splice(0)),
+      delete: vi.fn<(path: string) => Promise<void>>(async () => undefined),
+      watch: vi.fn((_path: string, onChange: () => void) => {
+        watchers.push(onChange);
+        return () => undefined;
+      }),
+    };
+    const legacy = {
+      list: vi.fn<(collection: string) => Promise<Docs>>(async () => old.splice(0)),
+      delete: vi.fn<(path: string) => Promise<void>>(async () => undefined),
+    };
+    const inbox = new CliqRelayInbox({
+      store,
+      legacy,
+      relayId: RELAY,
+      secret: SECRET,
+      seen: { hasSeenCliqSignature: (sig) => seen.has(sig), markCliqSignatureSeen: (sig) => seen.add(sig) },
+    });
+    return { inbox, store, legacy, live, old, watchers };
+  }
+
+  it("reads records from both stores while handlers pasted before the move still post to Firestore", async () => {
+    const t = streamed();
+    t.live.push({ id: "-Nnew", doc: signed({ kind: "message", body: "new", userid: "7", sentat: 300 }) });
+    t.old.push({ id: "abc", doc: signed({ kind: "message", body: "old", userid: "7", sentat: 100 }) });
+    const records = await t.inbox.list();
+    expect(records.map((r) => r.body)).toEqual(["old", "new"]);
+
+    // Each claim goes back to the store the record came from.
+    await t.inbox.delete(records[0]!.id);
+    await t.inbox.delete(records[1]!.id);
+    expect(t.legacy.delete).toHaveBeenCalledWith(`cliq/${RELAY}/inbox/abc`);
+    expect(t.store.delete).toHaveBeenCalledWith(`cliq/${RELAY}/inbox/-Nnew`);
+  });
+
+  it("drops a forged record from the legacy store too, in that store", async () => {
+    const t = streamed();
+    t.old.push({ id: "forged", doc: signed({ kind: "message", body: "x" }, "b".repeat(64)) });
+    expect(await t.inbox.list()).toEqual([]);
+    expect(t.legacy.delete).toHaveBeenCalledWith(`cliq/${RELAY}/inbox/forged`);
+  });
+
+  it("a legacy store that is down does not hold up the live one", async () => {
+    const t = streamed();
+    t.legacy.list.mockRejectedValueOnce(new Error("firestore down"));
+    t.live.push({ id: "-N1", doc: signed({ kind: "message", body: "hi", userid: "7", sentat: 1 }) });
+    expect((await t.inbox.list()).map((r) => r.body)).toEqual(["hi"]);
+  });
+
+  it("watches only the relay's own inbox, and only when the store can stream", () => {
+    const t = streamed();
+    const onChange = vi.fn();
+    expect(t.inbox.watch(onChange)).toBeTypeOf("function");
+    expect(t.store.watch).toHaveBeenCalledWith(`cliq/${RELAY}/inbox`, onChange, expect.any(Object));
+    expect(setup([]).inbox.watch(() => undefined)).toBeNull();
+  });
+});

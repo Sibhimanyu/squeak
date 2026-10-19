@@ -375,3 +375,31 @@ describe("CliqChannel conversation", () => {
     expect(lastPost(t.webhook)).toContain("the assistant took too long");
   });
 });
+
+describe("CliqChannel with a streamed inbox", () => {
+  it("runs a pass as soon as a record lands, not on the next poll", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup();
+      let wake: (() => void) | null = null;
+      const inbox = t.inbox as typeof t.inbox & { watch: (onChange: () => void) => () => void };
+      inbox.watch = (onChange) => {
+        wake = onChange;
+        return () => (wake = null);
+      };
+      t.channel.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const passes = t.inbox.list.mock.calls.length;
+      wake!();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(t.inbox.list.mock.calls.length).toBe(passes + 1);
+      // Streamed, the safety poll is a minute, not five seconds.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(t.inbox.list.mock.calls.length).toBe(passes + 1);
+      t.channel.stop();
+      expect(wake).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

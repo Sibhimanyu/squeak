@@ -22,6 +22,17 @@ card ──► bot /message ──► you tap / reply / type
       Squeak polls it every 5s, verifies, deletes each record, then acts
 ```
 
+**Streamed, with the Realtime Database.** With `SQUEAK_REMOTE_DATABASE_URL`
+set, `squeak cliq-relay` writes handlers that post plain JSON to
+`<database>/cliq/<relay>/inbox.json` (it answers with a `name` too, so the
+handlers' success check is unchanged), and Squeak streams that inbox: a tap
+runs within a fraction of a second instead of up to five, and it polls only
+once a minute as a safety net. Until the new handlers are pasted into Cliq,
+records still arriving in Firestore are read as well (`legacy` in
+`CliqRelayInbox`), so nothing is stranded by the move. The rules for the
+inbox (`firebase/database.rules.json`) are the Firestore ones: create or
+delete only, `{box, sig, at}`, a 64-character signature.
+
 - **Cards go out** through the bot's `/message` endpoint with the webhook
   token (`SQUEAK_CLIQ_WEBHOOK_URL`). Not `/incoming`: that runs the bot's
   incoming-webhook handler, and with none written it answers 200 with the

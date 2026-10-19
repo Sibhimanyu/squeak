@@ -70,3 +70,16 @@ describe("cliqHandlerScripts", () => {
     }
   });
 });
+
+describe("cliqHandlerScripts on the Realtime Database", () => {
+  it("posts plain JSON to the relay's inbox under the database, still signed", () => {
+    const db = "https://squeak-test-default-rtdb.asia-southeast1.firebasedatabase.app";
+    const relay = "r".repeat(43);
+    const scripts = cliqHandlerScripts({ projectId: "p", relayId: relay, secret: "s".repeat(64), databaseUrl: db });
+    expect(scripts.match(new RegExp(`url :"${db}/cliq/${relay}/inbox\\.json"`, "g"))).toHaveLength(3);
+    expect(scripts).not.toContain("firestore.googleapis.com");
+    expect(scripts).not.toContain("stringValue");
+    expect(scripts.match(/zoho\.encryption\.hmacsha256/g)).toHaveLength(3);
+    expect(scripts).toContain('payload = {"box":box,"sig":sig,"at":zoho.currenttime.toLong()};');
+  });
+});

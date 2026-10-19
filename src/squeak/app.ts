@@ -16,7 +16,6 @@ import { parseChoices } from "../fleet/choices.js";
 import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
-import { newChatControl } from "../fleet/new-chat.js";
 import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
 import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
@@ -190,7 +189,6 @@ export class SqueakApp {
             return { ok: false };
         }
       },
-      ...newChatControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }),
       ...channelsControl(this.telegramStatus, () => ({
         cliqOneWay: Boolean(config.cliqWebhookUrl),
         cliqTwoWay: Boolean(config.cliqTwoWay),
@@ -437,7 +435,12 @@ export class SqueakApp {
         inbound: twoWay
           ? {
               inbox: new CliqRelayInbox({
-                store: new FirestoreRest(twoWay.projectId),
+                // Streamed from the Realtime Database when configured, still
+                // reading Firestore for handlers pasted before the move.
+                store: this.config.remoteDatabaseUrl
+                  ? new RtdbRest(this.config.remoteDatabaseUrl)
+                  : new FirestoreRest(twoWay.projectId),
+                legacy: this.config.remoteDatabaseUrl ? new FirestoreRest(twoWay.projectId) : null,
                 relayId: twoWay.relayId,
                 secret: twoWay.relaySecret,
                 seen: this.runtime.store,
