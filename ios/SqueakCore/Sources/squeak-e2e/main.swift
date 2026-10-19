@@ -89,6 +89,14 @@ let again = try await verdict(againId, "second start result")
 print("phone: second start \(again.status) — \(again.reason ?? "-")")
 let startOk = started.sent && started.sessionId == "e2e-new-session" && again.status == "refused"
 
+// Usage: a signed refresh; the Mac runs its (fake) refresher and says it took a reading.
+let (usageId, usageDocument) = try channel.usageDocument(signer: signer)
+try await channel.send(usageDocument, id: usageId)
+let usageAt = Date()
+let usage = try await verdict(usageId, "usage result")
+print("phone: usage refresh \(usage.status) refreshed=\(usage.refreshed.map(String.init) ?? "-") in \(Int(Date().timeIntervalSince(usageAt) * 1000)) ms")
+let usageOk = usage.sent && usage.refreshed == true
+
 // Verbose (Realtime Database only): presence names the session, the Mac streams its whole turn, and deletes it after.
 var liveOk = true
 if streamed {
@@ -110,4 +118,4 @@ if streamed {
     liveOk = longest > 200 && gone
 }
 print("phone: usage claude=\(snapshot.usage?.claude?.fiveHour?.usedPercent.description ?? "-") codex=\(snapshot.usage?.codex == nil ? "-" : "seen")")
-exit(liveOk && startOk && steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42 ? 0 : 1)
+exit(usageOk && liveOk && startOk && steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42 ? 0 : 1)

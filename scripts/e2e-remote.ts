@@ -86,6 +86,8 @@ const bridge = new RemoteBridge({
     sevenDay: null,
     observedAt: new Date().toISOString(),
   }),
+  // The phone's Refresh on Usage: a fake refresher, so no real Claude call.
+  refreshUsage: async () => ({ refreshed: true, throttled: false }),
   // Verbose: a working turn with a thinking step longer than the snapshot's 200 characters.
   liveActivity: () => ({
     total: 2,

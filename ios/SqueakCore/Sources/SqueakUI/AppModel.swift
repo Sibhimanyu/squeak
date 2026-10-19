@@ -398,6 +398,24 @@ final class AppModel: ObservableObject {
         startingChat = nil
     }
 
+    /// Asks the Mac for a fresh Claude usage reading; the new numbers arrive in
+    /// the snapshot. No Face ID: it reads, and sends nothing to an agent.
+    /// Returns a line for the screen.
+    func refreshUsage() async -> String {
+        if demo { try? await Task.sleep(for: .seconds(1)); return "Updated just now." }
+        guard let channel else { return "Not connected to your Mac." }
+        do {
+            let (id, document) = try channel.usageDocument(signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return "Your Mac didn't answer. Is Squeak running?" }
+            guard result.sent else { return result.reason ?? "Your Mac couldn't refresh usage." }
+            if let note = result.note { return note }
+            return result.throttled == true ? "Already up to date: read in the last minute." : "Updated just now."
+        } catch {
+            return "Couldn't reach your Mac."
+        }
+    }
+
     /// Any send of this session still waiting on the Mac.
     func isSending(_ key: String) -> Bool { outbox[key]?.contains { $0.status == .sending } ?? false }
 

@@ -164,6 +164,8 @@ export class SqueakApp {
             session.transcriptPath ? readActivity(session.agent, session.transcriptPath, limit, { stepChars }) : null,
           verbose: config.remoteVerbose,
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
+          // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
+          refreshUsage: () => this.claudeRefresher.refresh(),
           // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
           newChat: {
             workspaces: () => listNewChatWorkspaces(config.conductorDbPath, 20),

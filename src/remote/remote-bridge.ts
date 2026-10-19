@@ -93,6 +93,21 @@ export interface StartCommand {
   expiresAt: number;
 }
 
+/**
+ * A signed request to take a fresh Claude usage reading (the Mac's Refresh,
+ * from the phone). It carries nothing but the envelope: no text, no target.
+ * The reading costs one small real call, so the Mac's refresher runs it at
+ * most once a minute whoever asks, and the phone gets the cached one inside
+ * that minute.
+ */
+export interface UsageCommand {
+  v: 1;
+  kind: "usage";
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
 export interface RemoteActivity {
   at: string;
   device: string;
@@ -150,6 +165,11 @@ export interface RemoteBridgeDependencies {
   activity?: ((session: FleetSession) => Activity | null) | null;
   /** Workspaces a phone may start a chat in, and the way to start one. */
   newChat?: RemoteChatStarter | null;
+  /**
+   * Take a fresh Claude usage reading (`ClaudeLimitsRefresher.refresh`,
+   * throttled to once a minute). Absent: a phone's Refresh is refused.
+   */
+  refreshUsage?: (() => Promise<{ refreshed: boolean; throttled: boolean; error?: string }>) | null;
   /** Claude's last plan-limit reading, for the read-only usage view on the phone. */
   claudeLimits?: (() => ClaudeLimits | null) | null;
   /**
@@ -685,6 +705,9 @@ export class RemoteBridge {
     if (kind === "start") {
       return this.handleStart(device, id, command as unknown as StartCommand, now);
     }
+    if (kind === "usage") {
+      return this.handleUsage(device, id, command as unknown as UsageCommand);
+    }
     if (kind !== undefined && kind !== "reply") {
       return refuse("Not a request this Mac understands.");
     }
@@ -794,6 +817,38 @@ export class RemoteBridge {
     }
     this.log(device.name, "sent", `new ${command.agent} chat in ${workspace.repoName} · ${workspace.branch}`);
     return { write: true, result: { id, status: "sent", sessionId: outcome.sessionId } };
+  }
+
+  /** A usage refresh. Signature, freshness and nonce have already held. */
+  private async handleUsage(
+    device: PairedDevice,
+    id: string,
+    command: UsageCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refresh = this.deps.refreshUsage;
+    if (!refresh || command.v !== 1) {
+      this.log(device.name, "rejected", "usage refresh: not available");
+      return { write: true, result: { id, status: "refused", reason: "This Mac can't refresh usage from a phone." } };
+    }
+    let outcome: { refreshed: boolean; throttled: boolean; error?: string };
+    try {
+      outcome = await refresh();
+    } catch (error) {
+      outcome = { refreshed: false, throttled: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    // The reading travels in the snapshot; send it now rather than on the next pass.
+    this.nudgePublish(0);
+    this.log(device.name, "sent", outcome.throttled ? "usage (read in the last minute)" : "usage refreshed");
+    return {
+      write: true,
+      result: {
+        id,
+        status: "sent",
+        refreshed: outcome.refreshed,
+        throttled: outcome.throttled,
+        ...(outcome.error ? { note: "Claude didn't answer this time; showing the last reading." } : {}),
+      },
+    };
   }
 
   private forgetOldNonces(now: number): void {

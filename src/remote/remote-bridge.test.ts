@@ -969,3 +969,70 @@ describe("RemoteBridge verbose view (live turn)", () => {
     t.bridge.stop();
   });
 });
+
+describe("RemoteBridge usage refresh from the phone", () => {
+  async function usage(options: { refresh?: boolean } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-usage-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    const refreshUsage = vi.fn(async () => ({ refreshed: true, throttled: false }));
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      ...(options.refresh === false ? {} : { refreshUsage }),
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const channel = `channels/${payload.c}`;
+    const phone = device();
+    await store.set(`${channel}/pairing/iphone-1`, { box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }) });
+    await bridge.tick();
+    await bridge.approve("iphone-1");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    const command = (nonce = crypto.randomBytes(16).toString("hex"), signer = phone) => {
+      const box = seal(payload.k, { v: 1, kind: "usage", nonce, expiresAt: NOW + 60_000 });
+      return { box, sig: signer.sign(box), device: "iphone-1" };
+    };
+    return { bridge, config, command, refreshUsage, phone };
+  }
+
+  it("a signed request takes a reading and says whether it was fresh", async () => {
+    const t = await usage();
+    const verdict = await t.bridge.handleCommand(t.config, "u1", t.command());
+    expect(t.refreshUsage).toHaveBeenCalledTimes(1);
+    expect(verdict.result).toMatchObject({ status: "sent", refreshed: true, throttled: false });
+    t.bridge.stop();
+  });
+
+  it("an unsigned or replayed request takes nothing", async () => {
+    const t = await usage();
+    const forged = await t.bridge.handleCommand(t.config, "u1", t.command(undefined, device()));
+    expect(forged.write).toBe(false);
+    const nonce = crypto.randomBytes(16).toString("hex");
+    await t.bridge.handleCommand(t.config, "u2", t.command(nonce));
+    const again = await t.bridge.handleCommand(t.config, "u3", t.command(nonce));
+    expect(again.result).toMatchObject({ status: "refused" });
+    expect(t.refreshUsage).toHaveBeenCalledTimes(1);
+    t.bridge.stop();
+  });
+
+  it("is refused by a Mac that cannot refresh", async () => {
+    const t = await usage({ refresh: false });
+    const verdict = await t.bridge.handleCommand(t.config, "u1", t.command());
+    expect(verdict.result).toMatchObject({ status: "refused" });
+    t.bridge.stop();
+  });
+
+  it("a failed call still answers, from the last reading", async () => {
+    const t = await usage();
+    t.refreshUsage.mockRejectedValueOnce(new Error("claude exited 1"));
+    const verdict = await t.bridge.handleCommand(t.config, "u1", t.command());
+    expect(verdict.result).toMatchObject({ status: "sent", refreshed: false });
+    expect(verdict.result.note).toMatch(/last reading/);
+    t.bridge.stop();
+  });
+});

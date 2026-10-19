@@ -3,12 +3,14 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
-/// Plan usage, read-only: what the Mac last saw for Claude and Codex. Bars are ink, not state
-/// colours (DESIGN.md §3.3: a state colour is never a fill). Refreshing Claude's reading is a Mac
-/// action, since it makes a real call, so this view says so rather than offering a button.
+/// Plan usage: what the Mac last saw for Claude and Codex. Bars are ink, not state colours
+/// (DESIGN.md §3.3: a state colour is never a fill). Refresh asks the Mac for a new Claude reading,
+/// signed like a reply; it makes one small real call, at most once a minute.
 struct UsageView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var refreshing = false
+    @State private var refreshNote: String?
 
     var body: some View {
         NavigationStack {
@@ -23,7 +25,7 @@ struct UsageView: View {
                             : "Your Mac hasn't sent usage yet. Update Squeak on your Mac to see it here.")
                             .foregroundStyle(Theme.muted)
                     }
-                    Text("Claude's reading is taken when you press Refresh in Squeak on your Mac, because it makes a small real call. This screen only shows what the Mac last saw.")
+                    Text(refreshNote ?? "Refresh asks your Mac for a new Claude reading. It makes one small real call, so it runs at most once a minute.")
                         .font(.footnote).foregroundStyle(Theme.muted)
                 }
                 .padding(20)
@@ -32,7 +34,22 @@ struct UsageView: View {
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Usage")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        refreshing = true
+                        Task {
+                            refreshNote = await model.refreshUsage()
+                            refreshing = false
+                        }
+                    } label: {
+                        if refreshing { ProgressView() } else { Text("Refresh") }
+                    }
+                    .disabled(refreshing || model.snapshot == nil)
+                    .accessibilityHint("Asks your Mac for a new Claude reading")
+                }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
         }
         .foregroundStyle(Theme.ink)
     }
@@ -44,7 +61,7 @@ struct UsageView: View {
                 row("5 hours", usage.fiveHour)
                 row("7 days", usage.sevenDay)
             } else {
-                Text("Not seen yet. Press Refresh in Squeak on your Mac.").foregroundStyle(Theme.muted)
+                Text("Not seen yet. Press Refresh.").foregroundStyle(Theme.muted)
             }
         }
     }

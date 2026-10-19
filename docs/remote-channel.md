@@ -168,9 +168,8 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
   `{ claude, codex }`, each null until the Mac has a reading. Windows are
   `{ usedPercent (0-100), resetsAt }` with Claude `fiveHour` / `sevenDay`, Codex
   `fiveHour` / `weekly`, and `observedAt` per provider so the phone can say how
-  old a reading is. There is no command to refresh it: Claude's reading costs a
-  real call and is taken only when the owner presses Refresh on the Mac, and
-  commands stay plain replies. A change in a reading republishes the snapshot;
+  old a reading is. Refreshing it from the phone came later (see "Usage
+  refresh" below). A change in a reading republishes the snapshot;
   a re-read of the same numbers does not.
 - **The Realtime Database, streamed (2026-10-19).** With
   `SQUEAK_REMOTE_DATABASE_URL` set, the channel's documents (same paths, same
@@ -259,3 +258,11 @@ else on the machine. Each of those is a separate, later decision.
   for). `SQUEAK_REMOTE_VERBOSE=off` on the Mac refuses it outright. An older
   phone's plain `{ at }` presence keeps working. Measured on the live
   project: the turn arrived 786 ms after the phone opened the session.
+- **Usage refresh from the phone (2026-10-19).** A third signed command,
+  `{ v: 1, kind: "usage", nonce, expiresAt }`, with no text and no target. It
+  passes the same signature, freshness and nonce checks, then runs the Mac's
+  own `ClaudeLimitsRefresher`, which spends one small real call at most once
+  a minute whoever asks (a second press inside the minute gets the cached
+  reading, `throttled: true`). The result says `refreshed`/`throttled`; the
+  reading itself arrives in the snapshot, published at once. No Face ID: it
+  sends nothing to an agent.

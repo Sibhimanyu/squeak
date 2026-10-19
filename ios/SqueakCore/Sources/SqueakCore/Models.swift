@@ -201,6 +201,16 @@ public struct StartCommand: Codable, Equatable, Sendable {
     public let expiresAt: Int64
 }
 
+/// A signed request for a fresh Claude usage reading (the Mac's Refresh, from
+/// the phone). Only the envelope: the Mac runs it at most once a minute.
+public struct UsageCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
 /// What the Mac wrote back for a command.
 public struct CommandResult: Codable, Equatable, Sendable {
     public let status: String
@@ -213,6 +223,9 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public let note: String?
     /// For a started chat: Conductor's id for it, which the snapshot carries as `conductorSessionId`.
     public let sessionId: String?
+    /// For a usage refresh: whether a new reading was taken, or the last minute's was reused.
+    public let refreshed: Bool?
+    public let throttled: Bool?
 
     public var sent: Bool { status == "sent" }
 }
