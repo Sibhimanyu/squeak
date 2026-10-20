@@ -182,6 +182,50 @@ struct NotificationTests {
         #expect(drafts.text(for: key("a")) == "hello again")
     }
 
+    @Test func textTypedBeforeAnyChatSurvivesHidingAndGoesToTheFirstChatChosen() {
+        var drafts = ComposerDrafts()
+        drafts.stash("typed early", for: nil)
+        #expect(drafts.text(for: nil) == "typed early")
+        #expect(drafts.text(for: key("a")).isEmpty)
+        #expect(drafts.choose(key("a"), from: nil, current: "typed early") == "typed early")
+        #expect(drafts.text(for: nil).isEmpty) // moved, not copied
+    }
+
+    @Test func choosingAChatKeepsBothTheCarriedTextAndItsOwnDraft() {
+        var drafts = ComposerDrafts()
+        drafts.stash("old draft", for: key("a"))
+        #expect(drafts.choose(key("a"), from: nil, current: "new") == "old draft\n\nnew")
+        #expect(drafts.choose(key("b"), from: nil, current: "  ").isEmpty)
+    }
+
+    @Test func switchingChatsSwapsDraftsAndKeepsEachSeparate() {
+        var drafts = ComposerDrafts()
+        drafts.stash("for b", for: key("b"))
+        #expect(drafts.choose(key("b"), from: key("a"), current: "for a") == "for b")
+        #expect(drafts.text(for: key("a")) == "for a")
+        #expect(drafts.choose(key("b"), from: key("b"), current: "same") == "same")
+    }
+
+    @Test func aLateAcceptedSendClearsTheSameTextRestoredInTheSameChatOnly() {
+        func settle(target: SessionKey?, text: String, accepted: Bool, started: Int = 1, current: Int = 3) -> ComposerDrafts.Settlement {
+            ComposerDrafts.settlement(sent: "hi", to: key("a"), startedEpoch: started, currentEpoch: current, target: target, text: text, accepted: accepted)
+        }
+        #expect(settle(target: key("a"), text: "hi", accepted: true).clearText)
+        #expect(!settle(target: key("a"), text: "hi", accepted: true).adoptResult) // never closes or reports for a reopened composer
+        #expect(!settle(target: key("a"), text: "hi edited", accepted: true).clearText)
+        #expect(!settle(target: key("b"), text: "hi", accepted: true).clearText)
+        #expect(settle(target: key("a"), text: "hi", accepted: true, started: 3).adoptResult)
+    }
+
+    @Test func aLateFailureOnlyInformsTheSameRestoredText() {
+        func adopt(target: SessionKey?, text: String) -> Bool {
+            ComposerDrafts.settlement(sent: "hi", to: key("a"), startedEpoch: 1, currentEpoch: 2, target: target, text: text, accepted: false).adoptResult
+        }
+        #expect(adopt(target: key("a"), text: "hi"))
+        #expect(!adopt(target: key("b"), text: "hi"))
+        #expect(!adopt(target: key("a"), text: "other"))
+    }
+
     @Test func aNotificationResponseOpensItsChatUnlessDismissedOrMalformed() {
         let raw = key("a").stringValue
         #expect(NotificationRouting.sessionToOpen(dismissed: false, session: raw) == key("a"))

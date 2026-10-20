@@ -67,6 +67,7 @@ final class QuickComposerController {
         state.focus += 1
         panel.makeKeyAndOrderFront(nil)
         installDismissObservers()
+        AppLog.info("quick composer shown")
     }
 
     /// Only hides: the text is kept for its chat, and nothing is sent or cancelled.
@@ -75,6 +76,7 @@ final class QuickComposerController {
         state.stashDraft()
         state.epoch += 1
         panel?.orderOut(nil)
+        AppLog.info("quick composer hidden")
     }
 
     // MARK: Dismissal
@@ -84,6 +86,7 @@ final class QuickComposerController {
     /// and a Space swipe from the workspace. All are removed on every hide and replaced on show.
     private func installDismissObservers() {
         removeDismissObservers()
+        ignoreClicksUntil = .distantPast // a fresh open owes nothing to the last menu's grace
         let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks) { [weak self] event in
             MainActor.assumeIsolated { self?.handleLocalClick(in: event.window) }
@@ -181,10 +184,23 @@ final class QuickState {
         inFlight.remove(key)
         let accepted: Bool = if case .accepted? = r { true } else { false }
         if accepted { drafts.sent(sent, to: key) }
-        guard started == epoch else { return false }
-        result = r
-        if accepted, target == key, text == sent { text = "" }
+        let s = ComposerDrafts.settlement(
+            sent: sent, to: key, startedEpoch: started, currentEpoch: epoch,
+            target: target, text: text, accepted: accepted)
+        if s.adoptResult { result = r }
+        if s.clearText { text = "" }
         return accepted
+    }
+
+    /// The destination menu: a new show as far as in-flight sends are concerned, with each chat's
+    /// draft kept apart and text typed before any chat was chosen carried to the first one picked.
+    func chooseTarget(_ key: SessionKey) {
+        guard key != target else { return }
+        epoch += 1
+        result = nil
+        text = drafts.choose(key, from: target, current: text)
+        target = key
+        focus += 1
     }
 }
 
@@ -339,7 +355,7 @@ struct QuickComposerView: View {
     private var destinationMenu: some View {
         Menu {
             ForEach(model.sendableSessions) { s in
-                Button(destinationName(s)) { state.target = s.key }
+                Button(destinationName(s)) { state.chooseTarget(s.key) }
             }
             Divider()
             Button("New chat in…") {

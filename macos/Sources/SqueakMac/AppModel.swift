@@ -78,7 +78,7 @@ final class AppModel {
     private(set) var pinned: Set<SessionKey>
 
     // MARK: Settings (persisted in UserDefaults; nothing sensitive)
-    var hotKeyID: String? { didSet { defaults.set(hotKeyID, forKey: "hotKey"); HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID)) } }
+    var hotKeyID: String? { didSet { defaults.set(HotKeyPreference.storedValue(for: hotKeyID), forKey: "hotKey"); HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID)) } }
     var notificationsEnabled: Bool { didSet { defaults.set(notificationsEnabled, forKey: "notifications") } }
     var notificationsShowNames: Bool { didSet { defaults.set(notificationsShowNames, forKey: "notificationNames") } }
     var launchOfferPending = false
@@ -107,11 +107,16 @@ final class AppModel {
         broker = Broker(adapters: ConductorSources.adapters(client: client), cache: cache, draftStore: draftStore)
         let d = UserDefaults.standard
         pinned = Set((d.stringArray(forKey: "pinned") ?? []).compactMap(SessionKey.init(stringValue:)))
-        hotKeyID = d.string(forKey: "hotKey")
+        hotKeyID = HotKeyPreference.resolve(stored: d.string(forKey: "hotKey"), alreadyMigrated: d.bool(forKey: HotKeyPreference.migrationKey))
         notificationsEnabled = d.object(forKey: "notifications") as? Bool ?? true
         notificationsShowNames = d.bool(forKey: "notificationNames")
         onboardingDone = d.bool(forKey: "onboardingDone")
         lastUsed = d.string(forKey: "lastUsed").flatMap(SessionKey.init(stringValue:))
+        HotKeyCenter.shared.isDisabled = captureMode || demoMode
+        if !(captureMode || demoMode) {
+            d.set(true, forKey: HotKeyPreference.migrationKey)
+            d.set(HotKeyPreference.storedValue(for: hotKeyID), forKey: "hotKey")
+        }
     }
 
     // MARK: Lifecycle

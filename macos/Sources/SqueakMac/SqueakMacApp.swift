@@ -106,7 +106,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActivationPolicyController.shared.start()
         let model = AppModel.shared
         model.start()
-        if let prefix = ProcessInfo.processInfo.environment["SQUEAK_MAC_CAPTURE"] {
+        let env = ProcessInfo.processInfo.environment
+        if model.demoMode, env["SQUEAK_MAC_QUICK_DEMO"] == "1" {
+            // Demo data only (the model refuses every send): the real composer and panel, left
+            // open so a person or a UI test can click its destination menu. No onboarding.
+            QuickComposerController.shared.show(target: SessionKey(provider: "conductor", hostSessionId: env["SQUEAK_MAC_QUICK_DEMO_TARGET"] == "1" ? "demo-1" : "demo-3"))
+        } else if let prefix = env["SQUEAK_MAC_CAPTURE"] {
             Task { await CaptureRunner.run(prefix: prefix, model: model) }
         } else {
             OnboardingController.shared.showIfNeeded()

@@ -81,7 +81,11 @@ private struct GeneralSettings: View {
                     ForEach(HotKeyPreset.all) { Text($0.title).tag($0.id) }
                 }
             } footer: {
-                SectionFootnote("Works from any app and needs no special permission. It is off until you choose one.")
+                if let error = HotKeyCenter.shared.registrationError {
+                    SectionFootnote(error)
+                } else {
+                    SectionFootnote("⌥ Space is the default: one hand, from any app, no special permission. Pick another if an app already uses it.")
+                }
             }
             Section {
                 Toggle("Notify me when a session needs me or finishes", isOn: $model.notificationsEnabled)
