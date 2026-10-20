@@ -20,6 +20,8 @@ let (queuedId, queuedDocument) = try channel.replyDocument(
     to: session, text: "Then add tests", messageId: "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31", signer: signer, now: madeAt)
 let (promoteId, promoteDocument) = try channel.queueDocument(
     sessionId: "s1", messageId: "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31", action: .promote, signer: signer, now: madeAt)
+let (hotspotId, hotspotDocument) = try channel.hotspotDocument(
+    action: .configure, ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true, signer: signer, now: madeAt)
 let (imageId, imageDocument) = try channel.imageDocument(sessionId: "s1", source: "/w/.context/shot.png", signer: signer, now: madeAt)
 let (diffId, diffDocument) = try channel.diffDocument(sessionId: "s1", file: 0, signer: signer, now: madeAt)
 let (stopId, stopDocument) = try channel.stopDocument(to: session, signer: signer, now: madeAt)
@@ -43,6 +45,9 @@ let fixture: [String: Any] = [
     "queuedCommandId": queuedId,
     "queuedCommand": ["box": queuedDocument.box, "sig": queuedDocument.sig!, "device": queuedDocument.device!],
     // Steer that queued message now.
+    // Hotspot failover set up from the phone.
+    "hotspotCommandId": hotspotId,
+    "hotspotCommand": ["box": hotspotDocument.box, "sig": hotspotDocument.sig!, "device": hotspotDocument.device!],
     // An image chat s1's agent showed.
     "imageCommandId": imageId,
     "imageCommand": ["box": imageDocument.box, "sig": imageDocument.sig!, "device": imageDocument.device!],

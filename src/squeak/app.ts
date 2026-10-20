@@ -18,6 +18,7 @@ import { readPower, type PowerReading } from "../fleet/power-monitor.js";
 import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
+import { HotspotFailover, readHotspotRequest } from "../fleet/hotspot.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
@@ -110,6 +111,8 @@ export class SqueakApp {
   private readonly claudeRefresher: ClaudeLimitsRefresher;
   /** Keeps the Mac awake while an agent works, and while plugged in (SQUEAK_CAFFEINATE). */
   private readonly caffeinator: Caffeinator;
+  /** Joins the iPhone's hotspot when the Mac's internet drops while something needs it. */
+  private readonly hotspot: HotspotFailover;
   /** The user's awake session (menu bar, window, phone); held through the caffeinator. */
   private readonly awake: AwakeSession;
   /** What a closed lid does during a lid session: display off, mute, Low Power Mode, pause chat apps. */
@@ -131,6 +134,14 @@ export class SqueakApp {
       lid: new LidSleepGuard({ journalPath: path.join(config.supportDir, "lid-journal.json") }),
       onChange: () => this.remote?.changed(),
       onEnd: (end) => this.announceAwakeEnd(end),
+    });
+    this.hotspot = new HotspotFailover({
+      settingsPath: path.join(config.supportDir, "hotspot.json"),
+      // An awake session, or an agent at work: the times a lost connection costs something.
+      wanted: () =>
+        this.awake.active || this.runtime?.monitor.snapshot.active.some((s) => s.state === "working") === true,
+      onChange: () => this.remote?.changed(),
+      notify: (text) => this.announce(text),
     });
     this.lidActions = new LidActions({
       settingsPath: path.join(config.supportDir, "awake-settings.json"),
@@ -229,6 +240,15 @@ export class SqueakApp {
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
           // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
           refreshUsage: () => this.claudeRefresher.refresh(),
+          hotspot: {
+            state: () => this.hotspot.state,
+            apply: async (request) => {
+              const parsed = readHotspotRequest(request);
+              return parsed
+                ? this.hotspot.apply(parsed)
+                : { ok: false as const, reason: "Not a hotspot request this Mac understands." };
+            },
+          },
           awake: {
             state: () => this.awake.state,
             lidReady: () => this.awake.lidReady,
@@ -353,6 +373,11 @@ export class SqueakApp {
     // Undoes what a previous run left behind (sleep disabled, muted, apps paused) before anything else.
     await this.lidActions.recover();
     await this.awake.restore();
+    await this.hotspot.start().catch((error: unknown) =>
+      logger.warn("hotspot failover failed to start", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
     this.lidActions.start();
     void this.refreshLidRule();
     this.lidRuleTimer = setInterval(() => void this.refreshLidRule(), 10 * 60_000);
@@ -416,6 +441,7 @@ export class SqueakApp {
     if (this.safetyTimer) clearInterval(this.safetyTimer);
     await this.lidActions.stop().catch(() => undefined);
     await this.awake.stop().catch(() => undefined);
+    this.hotspot.stop();
     this.caffeinator.stop();
     this.remote?.stop();
     this.cliq?.stop();
@@ -481,6 +507,14 @@ export class SqueakApp {
   }
 
   /** A safety rule ended a session: say so wherever the owner hears from Squeak. */
+  /** A one-off note to every allowed Telegram chat and to Cliq. */
+  private announce(text: string): void {
+    for (const chatId of this.config.allowedChatIds ?? []) {
+      void this.telegram?.sendMessage(chatId, text).catch(() => undefined);
+    }
+    void this.cliqWebhook?.post(text).catch(() => null);
+  }
+
   private announceAwakeEnd(end: AwakeEnd): void {
     if (end.reason !== "battery" && end.reason !== "heat") {
       return;

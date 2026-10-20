@@ -91,7 +91,10 @@ switch in the menu bar and iPhone Settings (`keep-awake.json`, command `awake`).
 - [x] **5. Status on the phone.** Lid state, battery %, power draw and the countdown on
       the iPhone; a push when a safety rule ends a session (Telegram and Cliq: there
       is no APNs yet).
-- [ ] Not planned unless asked: hotspot failover (stores Wi-Fi passwords), tmux
+- [x] Hotspot failover (asked for 2026-10-20): `src/fleet/hotspot.ts`, set up and switched from the
+      iPhone's Settings; the password only in the Mac's Keychain. Never tried on a real
+      network switch: that would cut this Mac off mid-session.
+- [ ] Not planned unless asked: tmux
       "continue" nudge (overlaps terminal replies), browser relaunch.
 
 ## From chat ushuaia-f7 (Mac app, service, releases)

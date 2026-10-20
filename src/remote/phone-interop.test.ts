@@ -38,6 +38,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   diffCommand: { box: string; sig: string; device: string };
   imageCommandId: string;
   imageCommand: { box: string; sig: string; device: string };
+  hotspotCommandId: string;
+  hotspotCommand: { box: string; sig: string; device: string };
 };
 
 const QUEUED_ID = "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31";
@@ -56,6 +58,7 @@ function bridge(turn: string) {
   const sent: Array<ReplyOptions | undefined> = [];
   const queueActions: Array<[string, string, QueueAction]> = [];
   const stops: string[] = [];
+  const hotspotRequests: unknown[] = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
   const answers: Array<[string, unknown]> = [];
   const remote = new RemoteBridge({
@@ -82,6 +85,16 @@ function bridge(turn: string) {
       },
     },
     image: async () => ({ ok: true, image: { mime: "image/jpeg", data: "AAAA" } }),
+    hotspot: {
+      state: () => ({ configured: true, ssid: "Sibhi's iPhone", enabled: true, onHotspot: false, last: null }),
+      apply: async (request: unknown) => {
+        hotspotRequests.push(request);
+        return {
+          ok: true,
+          state: { configured: true, ssid: "Sibhi's iPhone", enabled: true, onHotspot: false, last: null },
+        };
+      },
+    },
     diff: {
       readSummary: async () => ({
         baseRef: null,
@@ -117,7 +130,7 @@ function bridge(turn: string) {
     // As of when the phone made it, so the fixture never expires.
     now: () => fixture.madeAt + 1_000,
   });
-  return { remote, config, sends, sent, starts, queueActions, answers, stops };
+  return { remote, config, sends, sent, starts, queueActions, answers, stops, hotspotRequests };
 }
 
 describe("a reply made on the iPhone", () => {
@@ -176,6 +189,15 @@ describe("a reply made on the iPhone", () => {
     expect(verdict.result).toEqual({ id: fixture.stopCommandId, status: "sent" });
     expect(stops).toEqual(["s1"]);
     expect(sends).toEqual([]);
+  });
+
+  it("sets up hotspot failover when the phone signs a hotspot request", async () => {
+    const { remote, config, hotspotRequests } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.hotspotCommandId, fixture.hotspotCommand);
+    expect(verdict.result).toEqual({ id: fixture.hotspotCommandId, status: "sent" });
+    expect(hotspotRequests).toEqual([
+      { action: "configure", ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true },
+    ]);
   });
 
   it("sends an image the chat showed when the phone signs an image request", async () => {

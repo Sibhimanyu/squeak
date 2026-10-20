@@ -1,0 +1,416 @@
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import { promisify } from "node:util";
+
+import { logger } from "../utils/logger.js";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Hotspot failover: when the Mac's internet goes away while you are relying on
+ * it (an awake session, or an agent working), it joins your iPhone's Personal
+ * Hotspot, so the phone channel, Telegram and the agents keep going.
+ *
+ * What macOS allows shaped this. Since macOS 14.4 every command-line view of
+ * Wi-Fi names is redacted (`networksetup -getairportnetwork` says "not
+ * associated", `ipconfig` and `system_profiler` print `<redacted>`), so Squeak
+ * cannot see which network it is on or which are nearby. Two things still
+ * work: joining a named network with its password, and the address an iPhone
+ * hotspot always hands out (172.20.10.0/28), which says "on a hotspot"
+ * without a name. Going back is turning Wi-Fi off and on, after which macOS
+ * joins your usual network itself; it also happens on its own when you turn
+ * the hotspot off. iOS lets no app turn Personal Hotspot on, so that part is
+ * yours.
+ *
+ * The password lives only in the login Keychain (`security`, service
+ * "Squeak hotspot"); `hotspot.json` holds the name and the switch.
+ */
+
+export const HOTSPOT_KEYCHAIN_SERVICE = "Squeak hotspot";
+/** How often the internet is looked at while failover is armed. */
+export const HOTSPOT_CHECK_MS = 10_000;
+/** Consecutive failed looks before switching: about half a minute. */
+export const HOTSPOT_FAILURES_TO_SWITCH = 3;
+/** After an attempt, automatic or not, no automatic retry for this long. */
+export const HOTSPOT_RETRY_GAP_MS = 5 * 60_000;
+const SETTLE_MS = 20_000;
+const SETTLE_POLL_MS = 2_000;
+const IPHONE_HOTSPOT_PREFIX = "172.20.10.";
+
+export interface HotspotSettings {
+  enabled: boolean;
+  ssid: string | null;
+}
+
+export interface HotspotEvent {
+  at: string;
+  to: "hotspot" | "wifi";
+  ok: boolean;
+  /** One line for every surface: what happened, or what to do. */
+  note: string;
+  automatic: boolean;
+}
+
+export interface HotspotState {
+  /** A name and a stored password. */
+  configured: boolean;
+  ssid: string | null;
+  enabled: boolean;
+  onHotspot: boolean;
+  last: HotspotEvent | null;
+}
+
+export type HotspotRequest =
+  | { action: "configure"; ssid: string; password?: string; enabled: boolean }
+  | { action: "join" }
+  | { action: "leave" };
+
+export interface HotspotSystem {
+  /** The Wi-Fi interface (`en0` on most Macs), or null without Wi-Fi. */
+  wifiDevice(): Promise<string | null>;
+  /** The interface's IPv4 address, or null. */
+  address(device: string): Promise<string | null>;
+  /** Whether the internet answers (Apple's captive-portal check). */
+  online(): Promise<boolean>;
+  /** Join a network; null on success, else the tool's complaint. */
+  join(device: string, ssid: string, password: string): Promise<string | null>;
+  /** Wi-Fi off, then on: macOS rejoins its preferred network itself. */
+  cycle(device: string): Promise<void>;
+  readPassword(): Promise<string | null>;
+  storePassword(password: string): Promise<void>;
+}
+
+export interface HotspotOptions {
+  settingsPath: string;
+  system?: HotspotSystem;
+  /** Whether anything relies on the Mac being reachable right now. */
+  wanted: () => boolean;
+  onChange?: () => void;
+  /** A switch made by itself, told to Telegram and Cliq. */
+  notify?: (text: string) => void;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/** A Wi-Fi network name: 1–32 bytes, no control characters. */
+export function validSsid(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    Buffer.byteLength(value, "utf8") <= 32 &&
+    ![...value].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f)
+  );
+}
+
+/** A WPA passphrase: 8–63 printable ASCII characters, which is all a hotspot accepts. */
+export function validPassword(value: unknown): value is string {
+  return typeof value === "string" && /^[\x20-\x7e]{8,63}$/.test(value);
+}
+
+/** Reads the request shape a phone or the Mac app sends; null for anything else. */
+export function readHotspotRequest(value: unknown): HotspotRequest | null {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  if (!record) {
+    return null;
+  }
+  if (record.action === "join" || record.action === "leave") {
+    return { action: record.action };
+  }
+  if (record.action !== "configure" || typeof record.enabled !== "boolean" || !validSsid(record.ssid)) {
+    return null;
+  }
+  if (record.password !== undefined && !validPassword(record.password)) {
+    return null;
+  }
+  return {
+    action: "configure",
+    ssid: record.ssid,
+    enabled: record.enabled,
+    ...(typeof record.password === "string" ? { password: record.password } : {}),
+  };
+}
+
+export class HotspotFailover {
+  private readonly options: HotspotOptions;
+  private readonly system: HotspotSystem;
+  private readonly now: () => number;
+  private readonly sleep: (ms: number) => Promise<void>;
+  private settings: HotspotSettings;
+  private hasPassword = false;
+  private onHotspot = false;
+  private last: HotspotEvent | null = null;
+  private failures = 0;
+  private lastAttemptAt = Number.NEGATIVE_INFINITY;
+  private busy = false;
+  private timer: NodeJS.Timeout | null = null;
+
+  constructor(options: HotspotOptions) {
+    this.options = options;
+    this.system = options.system ?? macHotspotSystem();
+    this.now = options.now ?? Date.now;
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.settings = readSettings(options.settingsPath);
+  }
+
+  get state(): HotspotState {
+    return {
+      configured: Boolean(this.settings.ssid) && this.hasPassword,
+      ssid: this.settings.ssid,
+      enabled: this.settings.enabled,
+      onHotspot: this.onHotspot,
+      last: this.last,
+    };
+  }
+
+  async start(): Promise<void> {
+    this.hasPassword = Boolean(await this.system.readPassword().catch(() => null));
+    await this.refreshOnHotspot();
+    this.timer = setInterval(() => void this.tick(), HOTSPOT_CHECK_MS);
+    this.timer.unref?.();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  async apply(request: HotspotRequest): Promise<{ ok: true; state: HotspotState } | { ok: false; reason: string }> {
+    if (request.action === "configure") {
+      if (request.password !== undefined) {
+        await this.system.storePassword(request.password);
+        this.hasPassword = true;
+      } else if (!this.hasPassword || request.ssid !== this.settings.ssid) {
+        return { ok: false, reason: "Enter the hotspot's password too." };
+      }
+      this.settings = { enabled: request.enabled, ssid: request.ssid };
+      writeSettings(this.options.settingsPath, this.settings);
+      this.failures = 0;
+      this.options.onChange?.();
+      return { ok: true, state: this.state };
+    }
+    if (!this.state.configured) {
+      return { ok: false, reason: "Set up your hotspot's name and password first." };
+    }
+    if (this.busy) {
+      return { ok: false, reason: "Your Mac is already switching networks." };
+    }
+    const event = request.action === "join" ? await this.join(false) : await this.leave();
+    return event.ok ? { ok: true, state: this.state } : { ok: false, reason: event.note };
+  }
+
+  /** One look at the network; switches when it has been gone long enough and something needs the Mac. */
+  async tick(): Promise<void> {
+    if (this.busy) {
+      return;
+    }
+    const was = this.onHotspot;
+    await this.refreshOnHotspot();
+    if (was !== this.onHotspot) {
+      this.options.onChange?.();
+    }
+    if (!this.settings.enabled || !this.state.configured || this.onHotspot) {
+      this.failures = 0;
+      return;
+    }
+    if (await this.system.online().catch(() => false)) {
+      this.failures = 0;
+      return;
+    }
+    this.failures += 1;
+    if (
+      this.failures >= HOTSPOT_FAILURES_TO_SWITCH &&
+      this.options.wanted() &&
+      this.now() - this.lastAttemptAt >= HOTSPOT_RETRY_GAP_MS
+    ) {
+      await this.join(true);
+    }
+  }
+
+  private async join(automatic: boolean): Promise<HotspotEvent> {
+    this.busy = true;
+    this.lastAttemptAt = this.now();
+    this.failures = 0;
+    const ssid = this.settings.ssid!;
+    try {
+      const device = await this.system.wifiDevice();
+      const password = await this.system.readPassword().catch(() => null);
+      if (!device) {
+        return this.record("hotspot", false, "This Mac has no Wi-Fi to join a hotspot with.", automatic);
+      }
+      if (!password) {
+        this.hasPassword = false;
+        return this.record(
+          "hotspot",
+          false,
+          "The hotspot's password isn't in the Keychain any more. Set it up again.",
+          automatic,
+        );
+      }
+      const complaint = await this.system.join(device, ssid, password);
+      if (complaint) {
+        return this.record(
+          "hotspot",
+          false,
+          `Couldn't join ${ssid}: is Personal Hotspot on? (${complaint})`,
+          automatic,
+        );
+      }
+      if (!(await this.settle(true))) {
+        return this.record("hotspot", false, `Couldn't join ${ssid}: is Personal Hotspot on?`, automatic);
+      }
+      return this.record(
+        "hotspot",
+        true,
+        automatic ? `The Mac's Wi-Fi dropped, so it joined ${ssid}.` : `Your Mac is on ${ssid}.`,
+        automatic,
+      );
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async leave(): Promise<HotspotEvent> {
+    this.busy = true;
+    this.lastAttemptAt = this.now();
+    try {
+      const device = await this.system.wifiDevice();
+      if (!device) {
+        return this.record("wifi", false, "This Mac has no Wi-Fi.", false);
+      }
+      await this.system.cycle(device);
+      if (await this.settle(false)) {
+        return this.record("wifi", true, "Your Mac is back on its usual Wi-Fi.", false);
+      }
+      await this.refreshOnHotspot();
+      return this.record(
+        "wifi",
+        false,
+        this.onHotspot
+          ? "Your Mac rejoined the hotspot. Turn Personal Hotspot off and it moves to your Wi-Fi."
+          : "Your Mac isn't online yet. It joins your Wi-Fi when it is in range.",
+        false,
+      );
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Waits for the hotspot address (or its absence) and the internet together. */
+  private async settle(wantHotspot: boolean): Promise<boolean> {
+    for (let waited = 0; waited <= SETTLE_MS; waited += SETTLE_POLL_MS) {
+      await this.refreshOnHotspot();
+      if (this.onHotspot === wantHotspot && (await this.system.online().catch(() => false))) {
+        return true;
+      }
+      await this.sleep(SETTLE_POLL_MS);
+    }
+    return false;
+  }
+
+  private async refreshOnHotspot(): Promise<void> {
+    const device = await this.system.wifiDevice().catch(() => null);
+    const address = device ? await this.system.address(device).catch(() => null) : null;
+    this.onHotspot = Boolean(address?.startsWith(IPHONE_HOTSPOT_PREFIX));
+  }
+
+  private record(to: HotspotEvent["to"], ok: boolean, note: string, automatic: boolean): HotspotEvent {
+    const event: HotspotEvent = { at: new Date(this.now()).toISOString(), to, ok, note, automatic };
+    this.last = event;
+    logger.info("hotspot", { to, ok, automatic, note });
+    if (automatic) {
+      this.options.notify?.(note);
+    }
+    this.options.onChange?.();
+    return event;
+  }
+}
+
+function readSettings(file: string): HotspotSettings {
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<HotspotSettings>;
+    return { enabled: raw.enabled === true, ssid: validSsid(raw.ssid) ? raw.ssid : null };
+  } catch {
+    return { enabled: false, ssid: null };
+  }
+}
+
+function writeSettings(file: string, settings: HotspotSettings): void {
+  fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** The real thing: networksetup, ipconfig, security and Apple's captive-portal page. */
+export function macHotspotSystem(): HotspotSystem {
+  let device: string | null | undefined;
+  const run = async (file: string, args: string[], timeout = 15_000) =>
+    (await execFileAsync(file, args, { timeout })).stdout.toString();
+  return {
+    async wifiDevice() {
+      if (device !== undefined) return device;
+      const ports = await run("/usr/sbin/networksetup", ["-listallhardwareports"]);
+      const match = /Hardware Port: (?:Wi-Fi|AirPort)\s*\nDevice: (\S+)/.exec(ports);
+      device = match?.[1] ?? null;
+      return device;
+    },
+    async address(dev) {
+      try {
+        return (await run("/usr/sbin/ipconfig", ["getifaddr", dev], 5_000)).trim() || null;
+      } catch {
+        return null; // exits 1 when the interface has no address
+      }
+    },
+    async online() {
+      try {
+        const res = await fetch("http://captive.apple.com/hotspot-detect.html", { signal: AbortSignal.timeout(5_000) });
+        return res.ok && (await res.text()).includes("Success");
+      } catch {
+        return false;
+      }
+    },
+    async join(dev, ssid, password) {
+      try {
+        // networksetup prints nothing on success and a reason (exit 0 or not) on failure.
+        const out = (await run("/usr/sbin/networksetup", ["-setairportnetwork", dev, ssid, password], 30_000)).trim();
+        return out ? out.split("\n")[0]!.slice(0, 160) : null;
+      } catch (error) {
+        return error instanceof Error ? error.message.split("\n")[0]!.slice(0, 160) : "networksetup failed";
+      }
+    },
+    async cycle(dev) {
+      await run("/usr/sbin/networksetup", ["-setairportpower", dev, "off"]);
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      await run("/usr/sbin/networksetup", ["-setairportpower", dev, "on"]);
+    },
+    async readPassword() {
+      try {
+        return (
+          (
+            await run("/usr/bin/security", [
+              "find-generic-password",
+              "-a",
+              "squeak",
+              "-s",
+              HOTSPOT_KEYCHAIN_SERVICE,
+              "-w",
+            ])
+          ).replace(/\n$/, "") || null
+        );
+      } catch {
+        return null; // exits 44 when there is no such item
+      }
+    },
+    async storePassword(password) {
+      await run("/usr/bin/security", [
+        "add-generic-password",
+        "-U",
+        "-a",
+        "squeak",
+        "-s",
+        HOTSPOT_KEYCHAIN_SERVICE,
+        "-l",
+        HOTSPOT_KEYCHAIN_SERVICE,
+        "-w",
+        password,
+      ]);
+    },
+  };
+}

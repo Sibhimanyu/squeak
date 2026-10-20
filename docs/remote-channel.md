@@ -299,6 +299,14 @@ answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
   chat the phone is shown, never from the phone. The result carries `diff`
   (the file list, fleet/diff-view.ts) and, when `file` is an index into it,
   `patch: { index, path, text }` (up to 12,000 characters). No Face ID.
+- **Hotspot failover (2026-10-20).** `{ v: 1, kind: "hotspot", action:
+  "configure" | "join" | "leave", ssid?, password?, enabled?, nonce, expiresAt }`.
+  `configure` carries the hotspot's name, its WPA password (8–63 printable
+  ASCII) and whether to switch by itself; the password goes to the Mac's login
+  Keychain and is never written to a file, a result, or the phone's view, which
+  carries `hotspot: { configured, ssid, enabled, onHotspot, last }`. `join`
+  switches the Mac to it now and `leave` back to its usual Wi-Fi. Face ID on
+  the phone first: it changes how the Mac reaches the internet.
 - **Images from a chat (2026-10-19).** `{ v: 1, kind: "image", sessionId,
   source, nonce, expiresAt }` asks for an image the chat's agent showed
   (`![alt](source)` alone in a paragraph). Read-only but signed. After the

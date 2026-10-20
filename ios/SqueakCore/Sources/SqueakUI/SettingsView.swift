@@ -52,6 +52,9 @@ struct SettingsView: View {
                 if model.awakeOffered {
                     AwakeSection(problem: $awakeProblem)
                 }
+                if let hotspot = model.snapshot?.hotspot {
+                    HotspotSection(hotspot: hotspot)
+                }
                 Section {
                     Toggle("Show thinking live", isOn: Bindable(model).verbose)
                         .tint(Theme.primaryFill)
@@ -98,6 +101,68 @@ struct SettingsView: View {
         .foregroundStyle(Theme.ink)
     }
 }
+/// Hotspot failover: the Mac joins this iPhone's Personal Hotspot when its Wi-Fi drops while
+/// something needs it, or now on a tap. iOS lets no app turn the hotspot on, so the footer says so.
+private struct HotspotSection: View {
+    @Environment(AppModel.self) private var model
+    let hotspot: PhoneSnapshot.Hotspot
+    @State private var editing = false
+    @State private var ssid = ""
+    @State private var password = ""
+    @State private var enabled = true
+    @State private var busy = false
+    @State private var problem: String?
+
+    var body: some View {
+        Section {
+            if hotspot.configured, !editing {
+                LabeledContent("Mac is on", value: hotspot.onHotspot ? "Your hotspot" : "Its usual Wi-Fi")
+                LabeledContent("Hotspot", value: hotspot.ssid ?? "")
+                Toggle("Switch if its Wi-Fi drops", isOn: Binding(get: { hotspot.enabled }, set: { on in
+                    run(.configure(ssid: hotspot.ssid ?? "", password: nil, enabled: on))
+                }))
+                .tint(Theme.primaryFill).frame(minHeight: 44).disabled(busy)
+                Button(hotspot.onHotspot ? "Back to Wi-Fi" : "Switch Mac to hotspot now") { run(hotspot.onHotspot ? .leave : .join) }
+                    .frame(minHeight: 44).disabled(busy)
+                Button("Change name or password") {
+                    ssid = hotspot.ssid ?? ""; password = ""; enabled = hotspot.enabled; editing = true
+                }
+                .frame(minHeight: 44)
+            } else {
+                TextField("Hotspot name", text: $ssid).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .frame(minHeight: 44)
+                SecureField("Hotspot password", text: $password).frame(minHeight: 44)
+                Toggle("Switch if its Wi-Fi drops", isOn: $enabled).tint(Theme.primaryFill).frame(minHeight: 44)
+                Button(busy ? "Saving…" : "Save on your Mac") {
+                    run(.configure(ssid: ssid.trimmingCharacters(in: .whitespaces), password: password, enabled: enabled)) { editing = false }
+                }
+                .frame(minHeight: 44)
+                .disabled(busy || ssid.trimmingCharacters(in: .whitespaces).isEmpty || password.count < 8)
+                if editing { Button("Cancel") { editing = false }.frame(minHeight: 44) }
+            }
+        } header: { Text("Hotspot") } footer: {
+            Text(problem ?? hotspot.last?.note ?? footer)
+        }
+    }
+
+    private var footer: String {
+        if hotspot.configured {
+            return "During an awake session or while an agent works, a Mac that loses its internet for half a minute joins this hotspot. Turn Personal Hotspot on before you leave: iOS doesn't let apps turn it on."
+        }
+        return "Your hotspot's name and password are in Settings › Personal Hotspot. The password is kept only in your Mac's Keychain."
+    }
+
+    private func run(_ change: AppModel.HotspotChange, then: @escaping () -> Void = {}) {
+        busy = true
+        problem = nil
+        Task {
+            problem = await model.changeHotspot(change)
+            busy = false
+            if problem == nil { then() }
+        }
+    }
+}
+
 /// The Mac's awake session: start one for a while or until ended, add time, or end it.
 private struct AwakeSection: View {
     @Environment(AppModel.self) private var model

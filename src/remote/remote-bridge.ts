@@ -1,4 +1,5 @@
 import type { AwakeState } from "../fleet/awake-session.js";
+import type { HotspotState } from "../fleet/hotspot.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -286,6 +287,14 @@ export interface RemoteBridgeDependencies {
    * throttled to once a minute). Absent: a phone's Refresh is refused.
    */
   refreshUsage?: (() => Promise<{ refreshed: boolean; throttled: boolean; error?: string }>) | null;
+  /**
+   * Hotspot failover (fleet/hotspot.ts): its state for the phone, and the
+   * way to set it up, switch now, or switch back. Absent: phones hide it.
+   */
+  hotspot?: {
+    state(): HotspotState;
+    apply(request: unknown): Promise<{ ok: true; state: HotspotState } | { ok: false; reason: string }>;
+  } | null;
   /** The awake session. Absent: phones hide it, and a change is refused. */
   awake?: {
     state(): AwakeState | null;
@@ -902,6 +911,9 @@ export class RemoteBridge {
     if (kind === "start") {
       return this.handleStart(device, id, command as unknown as StartCommand, now);
     }
+    if (kind === "hotspot") {
+      return this.handleHotspot(device, id, command as unknown as Record<string, unknown>);
+    }
     if (kind === "awake") {
       return this.handleAwake(device, id, command as unknown as AwakeCommand);
     }
@@ -1287,6 +1299,39 @@ export class RemoteBridge {
     return recent.some((session) => session.conductorSessionId === conductorSessionId);
   }
 
+  /**
+   * Hotspot failover from the phone: set it up (name, password, on/off),
+   * switch the Mac to the hotspot now, or back to its usual Wi-Fi.
+   * Signature, freshness and nonce have already held; the shape is checked
+   * again in fleet/hotspot.ts. The password goes to the Mac's Keychain and
+   * nowhere else, never into a result or the phone's view.
+   */
+  private async handleHotspot(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `hotspot: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const hotspot = this.deps.hotspot;
+    if (!hotspot) {
+      return refuse("This Mac can't use a hotspot from a phone.");
+    }
+    if (command.v !== 1) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const { action, ssid, password, enabled } = command;
+    const outcome = await hotspot.apply({ action, ssid, password, enabled });
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.nudgePublish(0);
+    this.log(device.name, "sent", `hotspot ${String(action)}`);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
   /** A keep-awake flip. Signature, freshness and nonce have already held. */
   private async handleAwake(
     device: PairedDevice,
@@ -1383,6 +1428,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeLidReady) +
       JSON.stringify(view.awakeSafety) +
       JSON.stringify(view.macPower) +
+      JSON.stringify(view.hotspot) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     if (serialized === this.lastPublished) {
       return;
@@ -1410,6 +1456,8 @@ export class RemoteBridge {
       usage: phoneUsage(snapshot.codexUsage, this.deps.claudeLimits?.() ?? null),
       // The "Keep Mac awake" switch; absent when this Mac does not offer it (phones then hide it).
       ...this.phoneAwake(),
+      // Hotspot failover: name, switch, whether the Mac is on it, the last switch. Never the password.
+      ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
       // Where a phone may start a chat; absent when this Mac can't (phones then hide the button).
       ...(this.deps.newChat ? { workspaces: this.phoneWorkspaces() } : {}),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),

@@ -563,6 +563,35 @@ final class AppModel {
         return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
 
+    enum HotspotChange { case configure(ssid: String, password: String?, enabled: Bool), join, leave }
+
+    /// Sets up hotspot failover, or switches the Mac's network now. Face ID first: it changes how the
+    /// Mac reaches the internet, and a setup carries a password. Nil when it worked, else a line to show.
+    func changeHotspot(_ change: HotspotChange) async -> String? {
+        if demo { try? await Task.sleep(for: .milliseconds(500)); return nil }
+        guard await confirmWithBiometrics(reason: "Change your Mac's network") else { return "Face ID was cancelled." }
+        guard let channel else { return "Not connected to your Mac." }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) { () -> (String, ChannelDocument) in
+                switch change {
+                case let .configure(ssid, password, enabled):
+                    return try channel.hotspotDocument(action: .configure, ssid: ssid, password: password, enabled: enabled, signer: signer)
+                case .join: return try channel.hotspotDocument(action: .join, signer: signer)
+                case .leave: return try channel.hotspotDocument(action: .leave, signer: signer)
+                }
+            }.value
+            try await channel.send(document, id: id)
+            // Joining a network takes the Mac up to half a minute; it answers once it has.
+            guard let result = try await awaitResult(id, on: channel) else {
+                return "Your Mac didn't answer. If it switched networks, it reconnects in a moment."
+            }
+            return result.sent ? nil : (result.reason ?? "Your Mac couldn't change that.")
+        } catch {
+            return "Couldn't reach your Mac."
+        }
+    }
+
     /// Starts, extends or ends the Mac's awake session. No Face ID: it reaches no agent.
     /// Returns a line for the screen on failure.
     func changeAwake(_ change: AwakeChange) async -> String? {

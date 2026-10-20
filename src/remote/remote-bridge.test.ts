@@ -21,6 +21,7 @@ import {
   type ChannelStore,
   type RemoteChatStarter,
   type QueueCommand,
+  type RemoteBridgeDependencies,
   type RemoteDiffReader,
   type RemoteCommand,
   type StartCommand,
@@ -110,6 +111,7 @@ function fixture(
     answerer?: Answerer | null;
     diff?: RemoteDiffReader | null;
     image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
+    hotspot?: RemoteBridgeDependencies["hotspot"];
     /** The chat's latest message, as the replier reads it. */
     lastText?: string;
   } = {},
@@ -173,6 +175,7 @@ function fixture(
     answerer: options.answerer ?? null,
     diff: options.diff ?? null,
     image: options.image ?? null,
+    hotspot: options.hotspot ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -292,6 +295,19 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const hotspotCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "hotspot",
+      action: "join",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const result = (id: string) => {
     const doc = store.docs.get(`${channel}/results/${id}`);
     return doc ? open<Record<string, unknown>>(payload.k, doc.box) : null;
@@ -313,6 +329,7 @@ function fixture(
     stopCommand,
     diffCommand,
     imageCommand,
+    hotspotCommand,
     result,
     configPath,
     emit,
@@ -481,6 +498,51 @@ describe("RemoteBridge commands", () => {
     await f.store.set(`${f.channel}/commands/c1`, f.command());
     await f.bridge.tick();
     expect(f.result("c1")).toEqual({ id: "c1", status: "refused", reason: "That chat is still working in Conductor." });
+  });
+});
+
+describe("RemoteBridge hotspot", () => {
+  const state = { configured: true, ssid: "Phone", enabled: true, onHotspot: false, last: null };
+  const hotspot = (outcome: { ok: true } | { ok: false; reason: string } = { ok: true }) => ({
+    state: () => state,
+    apply: vi.fn(async () => (outcome.ok ? { ok: true as const, state } : outcome)),
+  });
+
+  it("hands the phone's request to the Mac's failover, and shows its state without the password", async () => {
+    const h = hotspot();
+    const f = fixture({ hotspot: h });
+    await f.pair();
+    await f.store.set(
+      `${f.channel}/commands/c1`,
+      f.hotspotCommand({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true }),
+    );
+    await f.bridge.tick();
+    expect(h.apply).toHaveBeenCalledWith({
+      action: "configure",
+      ssid: "Phone",
+      password: "secret-pass",
+      enabled: true,
+    });
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent" });
+    expect(JSON.stringify(f.bridge.phoneView())).not.toContain("secret-pass");
+    expect(f.bridge.phoneView()).toMatchObject({ hotspot: state });
+  });
+
+  it("passes the failover's refusal back, and refuses without one", async () => {
+    const f = fixture({ hotspot: hotspot({ ok: false, reason: "Set up your hotspot's name and password first." }) });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.hotspotCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: /Set up/ });
+    const bare = fixture();
+    await bare.pair();
+    await bare.store.set(`${bare.channel}/commands/c1`, bare.hotspotCommand());
+    await bare.bridge.tick();
+    expect(bare.result("c1")).toMatchObject({
+      status: "refused",
+      reason: "This Mac can't use a hotspot from a phone.",
+    });
+    expect(bare.bridge.phoneView()).not.toHaveProperty("hotspot");
   });
 });
 

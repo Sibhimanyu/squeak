@@ -195,6 +195,27 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public let awakeSafety: String?
     /// The Mac's battery, power draw and lid, as last read. Optional: older Macs omit it.
     public let macPower: MacPower?
+    /// Hotspot failover (src/fleet/hotspot.ts). Optional: older Macs omit it, and the phone hides it.
+    public var hotspot: Hotspot? = nil
+
+    public struct Hotspot: Codable, Equatable, Sendable {
+        public struct Event: Codable, Equatable, Sendable {
+            public let at: String
+            /// "hotspot" or "wifi".
+            public let to: String
+            public let ok: Bool
+            public let note: String
+            public let automatic: Bool
+        }
+        public let configured: Bool
+        public let ssid: String?
+        public let enabled: Bool
+        public let onHotspot: Bool
+        public let last: Event?
+        public init(configured: Bool, ssid: String?, enabled: Bool, onHotspot: Bool, last: Event? = nil) {
+            self.configured = configured; self.ssid = ssid; self.enabled = enabled; self.onHotspot = onHotspot; self.last = last
+        }
+    }
 
     public struct MacPower: Codable, Equatable, Sendable {
         public let percent: Int?
@@ -263,6 +284,21 @@ public struct ReplyCommand: Codable, Equatable, Sendable {
     /// Chosen by the phone and used by Conductor as the queued message's id, so a queued
     /// reply's card can be matched to the Mac's queue (LiveTurn.queue). Absent from older phones.
     public var messageId: String? = nil
+}
+
+/// Hotspot failover: set it up, switch the Mac to the hotspot now, or back to its Wi-Fi.
+/// The password goes only to the Mac's Keychain.
+public struct HotspotCommand: Codable, Equatable, Sendable {
+    public enum Action: String, Codable, Sendable { case configure, join, leave }
+    public let v: Int
+    public let kind: String
+    public let action: Action
+    public let ssid: String?
+    public let password: String?
+    public let enabled: Bool?
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
 }
 
 /// Ask for an image a chat's agent showed (`![alt](source)`); `source` exactly as the chat wrote it.
