@@ -61,8 +61,14 @@ export function stateFromHookEvent(event: HookEvent): FleetState | null {
     case "PreToolUse":
       return isQuestionTool(event.toolName) ? "awaiting_input" : "working";
     case "UserPromptSubmit":
-    case "SessionStart":
       return "working";
+    // A process starting is not a turn starting. Conductor starts (or
+    // resumes) a chat's `claude` as soon as you open it or begin typing, and
+    // each start fires SessionStart: read as "working", a chat nobody had
+    // sent anything to showed as running on the phone. A turn begins with
+    // UserPromptSubmit.
+    case "SessionStart":
+      return null;
     case "Interrupt":
     case "SessionEnd":
       return "idle";

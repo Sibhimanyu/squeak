@@ -67,7 +67,8 @@ describe("stateFromHookEvent", () => {
   it("maps lifecycle events onto fleet states", () => {
     expect(stateFromHookEvent(event({ event: "Stop" }))).toBe("finished");
     expect(stateFromHookEvent(event({ event: "UserPromptSubmit" }))).toBe("working");
-    expect(stateFromHookEvent(event({ event: "SessionStart" }))).toBe("working");
+    // Conductor starts a chat's process when you open it or start typing; no turn has begun.
+    expect(stateFromHookEvent(event({ event: "SessionStart" }))).toBeNull();
     expect(stateFromHookEvent(event({ event: "Interrupt" }))).toBe("idle");
     expect(stateFromHookEvent(event({ event: "SessionEnd" }))).toBe("idle");
   });
