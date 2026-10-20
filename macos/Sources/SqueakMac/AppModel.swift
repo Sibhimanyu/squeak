@@ -476,6 +476,9 @@ final class AppModel {
     /// The Mac's awake session as the daemon last said; nil when none runs.
     private(set) var awake: DaemonAwake?
     private(set) var awakeOffered = false
+    /// Lid-closed sessions are set up (the sudoers rule is in).
+    private(set) var awakeLidReady = false
+    private(set) var settingUpLid = false
     private(set) var hotspot: DaemonHotspot?
     /// Why the last change to it did not happen, in plain words.
     private(set) var awakeNote: String?
@@ -494,13 +497,33 @@ final class AppModel {
         guard let state = try? await client.state() else { return }
         if state.awake != awake { awake = state.awake }
         if state.awakeOffered != awakeOffered { awakeOffered = state.awakeOffered }
+        if state.awakeLidReady != awakeLidReady { awakeLidReady = state.awakeLidReady }
         if state.hotspot != hotspot { hotspot = state.hotspot }
     }
 
     /// "start" (minutes nil: until ended), "extend" or "end".
-    func changeAwake(_ action: String, minutes: Int? = nil) async {
-        awakeNote = await client.changeAwake(action: action, minutes: minutes)
+    func changeAwake(_ action: String, minutes: Int? = nil, lid: Bool = false) async {
+        awakeNote = await client.changeAwake(action: action, minutes: minutes, lid: lid)
         await readAwake()
+    }
+
+    /// Installs the lid-closed rule with macOS's admin prompt, once per Mac.
+    func setUpLidClosed() async {
+        guard !settingUpLid, !demoMode else { return }
+        settingUpLid = true
+        defer { settingUpLid = false }
+        guard let rule = await client.lidRule() else {
+            awakeNote = "This version of the Squeak service can't set up lid-closed sessions. Update it first."
+            return
+        }
+        switch await LidRule.install(rule) {
+        case .installed:
+            await client.recheckLidRule()
+            await readAwake()
+            awakeNote = awakeLidReady ? "Lid-closed is set up. Start a session with the lid closed below." : "Installed, but Squeak can't use it yet. Try again in a moment."
+        case .cancelled: awakeNote = nil
+        case .failed(let reason): awakeNote = "Lid-closed wasn't set up. \(reason)"
+        }
     }
 
     // MARK: Usage

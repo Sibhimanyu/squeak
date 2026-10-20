@@ -146,9 +146,11 @@ public struct DaemonState: Decodable, Sendable, Equatable {
     public var awake: DaemonAwake?
     /// Whether this daemon offers awake sessions at all (`keepAwake` present).
     public var awakeOffered = false
+    /// Whether a lid-closed session can start: the sudoers rule is installed.
+    public var awakeLidReady = false
     public var hotspot: DaemonHotspot?
 
-    enum CodingKeys: String, CodingKey { case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, hotspot }
+    enum CodingKeys: String, CodingKey { case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot }
 
     /// Both readings and today's estimated cost, for the usage screens.
     public func usage(now: Date = Date(), calendar: Calendar = .current) -> UsageSnapshot {
@@ -171,6 +173,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
         let keepAwake = c.lenient(Bool.self, .keepAwake)
         awakeOffered = keepAwake != nil
         awake = keepAwake == true ? (c.lenient(DaemonAwake.self, .awake) ?? DaemonAwake(until: nil)) : nil
+        awakeLidReady = c.lenient(Bool.self, .awakeLidReady) ?? false
         hotspot = c.lenient(DaemonHotspot.self, .hotspot)
     }
 

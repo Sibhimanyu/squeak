@@ -221,9 +221,10 @@ public struct DaemonClient: Sendable {
 
     /// Starts (`minutes` nil: until ended), extends or ends the Mac's awake session
     /// (`POST /control/keep-awake`). Nil when it worked, else the daemon's reason.
-    public func changeAwake(action: String, minutes: Int? = nil) async -> String? {
+    public func changeAwake(action: String, minutes: Int? = nil, lid: Bool = false) async -> String? {
         var body: [String: Any] = ["action": action]
         if let minutes { body["minutes"] = minutes }
+        if lid { body["lid"] = true }
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return "Couldn't send that." }
         do {
             let r = try await post("/control/keep-awake", body: data)
@@ -234,6 +235,20 @@ public struct DaemonClient: Sendable {
         } catch {
             return "Squeak isn't running."
         }
+    }
+
+    /// The sudoers text lid-closed sessions need, built by the daemon for its own user
+    /// (`GET /control/keep-awake/lid-rule`). Nil from a daemon without it.
+    public func lidRule() async -> String? {
+        guard let r = try? await get("/control/keep-awake/lid-rule", token: true), (200..<300).contains(r.status),
+              let json = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any],
+              json["path"] as? String == LidRule.path else { return nil }
+        return json["rule"] as? String
+    }
+
+    /// Asks the daemon to look for the rule again, right after it was installed.
+    public func recheckLidRule() async {
+        _ = try? await post("/control/keep-awake", body: Data(#"{"action":"recheck-lid"}"#.utf8))
     }
 
     private func post(_ path: String, body: Data = Data("{}".utf8), timeout: TimeInterval = 8) async throws -> HTTPResponse {

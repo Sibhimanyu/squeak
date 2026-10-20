@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.6
+
+- Keep Mac awake with the lid closed, from the menu bar: "Set up lid-closed…"
+  asks for your Mac password once (macOS's own prompt), then "Lid closed too"
+  sessions start from the popover or your iPhone without asking again. Squeak
+  checks the rule allows only its four sleep and Low Power Mode commands
+  before installing it.
+
 ## 2.1.5
 
 - Notifications say what a session wants: a question ("is asking you

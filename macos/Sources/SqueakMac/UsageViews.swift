@@ -218,18 +218,43 @@ struct AwakeRow: View {
                         .font(Typo.meta).foregroundStyle(Theme.muted).monospacedDigit()
                     Menu {
                         if awake.until != nil { Button("Add 1 hour") { Task { await model.changeAwake("extend", minutes: 60) } } }
+                        if !awake.lid, model.awakeLidReady {
+                            // A lid-closed session must end: keep this one's end, or an hour from now.
+                            Button("Keep awake with the lid closed too") {
+                                Task { await model.changeAwake("start", minutes: Self.minutesLeft(awake.until) ?? 60, lid: true) }
+                            }
+                        }
+                        if !model.awakeLidReady { setUpButton }
                         Button("End awake session", role: .destructive) { Task { await model.changeAwake("end") } }
                     } label: { Text("On").font(Typo.meta.weight(.semibold)) }
                     .menuStyle(.borderlessButton).fixedSize()
                 } else {
                     Menu {
-                        ForEach([(1, 60), (2, 120), (4, 240), (8, 480)], id: \.0) { hours, minutes in
-                            Button("For \(hours) hour\(hours == 1 ? "" : "s")") { Task { await model.changeAwake("start", minutes: minutes) } }
+                        Section("Lid open") {
+                            ForEach(Self.lengths, id: \.0) { hours, minutes in
+                                Button("For \(hours) hour\(hours == 1 ? "" : "s")") { Task { await model.changeAwake("start", minutes: minutes) } }
+                            }
+                            Button("Until I end it") { Task { await model.changeAwake("start") } }
                         }
-                        Button("Until I end it") { Task { await model.changeAwake("start") } }
+                        Section("Lid closed too") {
+                            if model.awakeLidReady {
+                                ForEach(Self.lengths, id: \.0) { hours, minutes in
+                                    Button("For \(hours) hour\(hours == 1 ? "" : "s")") { Task { await model.changeAwake("start", minutes: minutes, lid: true) } }
+                                }
+                            } else {
+                                setUpButton
+                            }
+                        }
                     } label: { Text("Off").font(Typo.meta) }
                     .menuStyle(.borderlessButton).fixedSize()
                 }
+            }
+            if let awake = model.awake, awake.lid {
+                Text("Stays awake with the lid closed. Keep it on a hard, open surface, never in a bag.")
+                    .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            if model.settingUpLid {
+                Text("Waiting for your Mac password…").font(Typo.meta).foregroundStyle(Theme.muted)
             }
             if let hotspot = model.hotspot, hotspot.onHotspot {
                 Text("On your iPhone's hotspot\(hotspot.ssid.map { " (\($0))" } ?? "")").font(Typo.meta).foregroundStyle(Theme.muted)
@@ -241,5 +266,18 @@ struct AwakeRow: View {
         .padding(.horizontal, 20)
         .padding(.vertical, Space.m)
         .accessibilityElement(children: .contain)
+    }
+
+    static let lengths = [(1, 60), (2, 120), (4, 240), (8, 480)]
+
+    /// Asks for the Mac password once; after that, lid-closed sessions start without it.
+    private var setUpButton: some View {
+        Button("Set up lid-closed…") { Task { await model.setUpLidClosed() } }
+            .disabled(model.settingUpLid)
+    }
+
+    static func minutesLeft(_ until: Date?, now: Date = Date()) -> Int? {
+        guard let until else { return nil }
+        return max(5, Int((until.timeIntervalSince(now) / 60).rounded()))
     }
 }
