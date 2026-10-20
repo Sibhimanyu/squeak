@@ -34,6 +34,10 @@ final class AppModel {
     @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
     @ObservationIgnored var openConversationWindow: (() -> Void)?
     @ObservationIgnored var openSettingsWindow: (() -> Void)?
+    /// Closes the menu-bar panel; installed by its controller. Called before focus moves to a window.
+    @ObservationIgnored var dismissMenuBar: (() -> Void)?
+    /// The window that hosts `ConversationView`, registered by the view itself.
+    @ObservationIgnored weak var conversationWindow: NSWindow?
     @ObservationIgnored private var started = false
     @ObservationIgnored private var visibilityTokens: [NSObjectProtocol] = []
 
@@ -65,6 +69,20 @@ final class AppModel {
     @ObservationIgnored private var needsYouFetchedAt: [SessionKey: Date?] = [:]
     @ObservationIgnored private var knownMessages: [SessionKey: [ChatMessage]] = [:]
     @ObservationIgnored private var draftTask: Task<Void, Never>?
+    /// When the open conversation's transcript was last read; what it shows is no newer than this.
+    @ObservationIgnored private var selectedLoadedAt: Date?
+
+    // MARK: Updates the user has not seen, and the menu's reply excerpts
+    /// Event ids and times per chat (no text), kept until content that includes the event is displayed.
+    private(set) var unread: UnreadTracker
+    /// A short excerpt of the newest reply for recent finished and errored sessions, for the menu.
+    private(set) var menuReplyPreviews: [SessionKey: String] = [:]
+    @ObservationIgnored private var anchorLog: NotificationAnchorLog
+    @ObservationIgnored private var previewFetches: [SessionKey: (activity: Date?, tried: Date, ok: Bool)] = [:]
+    @ObservationIgnored private var previewsRefreshing = false
+    /// Replies that notifications were about, kept apart from the conversation cache so a click
+    /// after a relaunch still opens on its own reply. Encrypted like the cache; nil in demo and capture runs.
+    @ObservationIgnored let contextCache: EncryptedCache?
 
     // MARK: Browsing
     var query = ""
@@ -103,6 +121,14 @@ final class AppModel {
             cache = EncryptedCache(keyStore: FileKeyStore(directory: EncryptedCache.defaultDirectory))
         }
         let draftStore = cache.map { DraftStore(cache: $0) }
+        if cache == nil {
+            contextCache = nil
+        } else {
+            let dir = EncryptedCache.defaultDirectory.appending(path: "Notification Context")
+            contextCache = EncryptedCache(
+                configuration: .init(directory: dir, keyAccount: "context-cache-key", sizeCap: 8 * 1024 * 1024),
+                keyStore: FileKeyStore(directory: dir))
+        }
         usesLocalConductor = ConductorDatabase().exists
         broker = Broker(adapters: ConductorSources.adapters(client: client), cache: cache, draftStore: draftStore)
         let d = UserDefaults.standard
@@ -112,6 +138,10 @@ final class AppModel {
         notificationsShowNames = d.bool(forKey: "notificationNames")
         onboardingDone = d.bool(forKey: "onboardingDone")
         lastUsed = d.string(forKey: "lastUsed").flatMap(SessionKey.init(stringValue:))
+        // Demo and capture runs neither read nor write the real unread and anchor state.
+        let real = !(captureMode || demoMode)
+        unread = real ? d.data(forKey: "unreadUpdates").flatMap { try? JSONDecoder().decode(UnreadTracker.self, from: $0) } ?? UnreadTracker() : UnreadTracker()
+        anchorLog = real ? d.data(forKey: "notificationAnchors").flatMap { try? JSONDecoder().decode(NotificationAnchorLog.self, from: $0) } ?? NotificationAnchorLog() : NotificationAnchorLog()
         HotKeyCenter.shared.isDisabled = captureMode || demoMode
         if !(captureMode || demoMode) {
             d.set(true, forKey: HotKeyPreference.migrationKey)
@@ -126,7 +156,7 @@ final class AppModel {
         started = true
         HotKeyCenter.shared.onFire = { QuickComposerController.shared.toggle() }
         if !captureMode { HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID)) }
-        Notifier.shared.onOpen = { key in QuickComposerController.shared.show(target: key) }
+        Notifier.shared.onOpen = { open in QuickComposerController.shared.show(notification: open) }
         observeWindowVisibility()
         AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")
         if demoMode { installDemo(); return }
@@ -162,7 +192,11 @@ final class AppModel {
         case .messagesChanged(let key):
             let all = await broker.messages(for: key)
             knownMessages[key] = all
-            if key == selected { messages = all }
+            if key == selected {
+                messages = all
+                selectedLoadedAt = Date()
+                markSelectedDisplayed()
+            }
         case .connection(let h):
             let summary = await broker.connectionSummary() ?? h
             if health?.status != summary.status {
@@ -180,10 +214,84 @@ final class AppModel {
                 }
             }
         case .notify(let n):
-            guard notificationsEnabled, !captureMode else { return }
-            if windowVisible, n.key == selected { return }
-            Notifier.shared.post(n, showName: notificationsShowNames)
+            guard !captureMode else { return }
+            let displayed = n.key == selected && conversationOnScreen
+            // Unread whether or not a banner is shown: the menu's dot is about the update, not the banner.
+            if !displayed, let id = n.id { noteUnread(n.key, id: id, at: n.at ?? Date()) }
+            guard notificationsEnabled, !displayed else { return }
+            // Off the event loop: a slow transcript read must not hold up the next event.
+            Task { [weak self] in await self?.deliver(n) }
         }
+    }
+
+    // MARK: Notification delivery and unread
+
+    /// Posts at once if the reply is not pinned within a second; the capture goes on and is kept,
+    /// so a click on a notification that left without ids still finds its message.
+    private func deliver(_ n: NotificationEvent) async {
+        let broker = broker
+        let capture = Task { [weak self] in
+            let c = await broker.capture(n)
+            await self?.record(c, for: n.key)
+            return c.anchor
+        }
+        let anchor = await Self.race(within: .seconds(1)) { await capture.value }
+        Notifier.shared.post(n, showName: notificationsShowNames, anchor: anchor ?? NotificationAnchor(event: n))
+    }
+
+    private func record(_ capture: NotificationCapture, for key: SessionKey) async {
+        guard let anchor = capture.anchor else { return }
+        anchorLog.record(anchor)
+        if !(captureMode || demoMode), let data = try? JSONEncoder().encode(anchorLog) { defaults.set(data, forKey: "notificationAnchors") }
+        if !capture.messages.isEmpty { try? await contextCache?.putMessages(capture.messages, for: key) }
+    }
+
+    /// The first of `work` and a timeout; `work` itself is never cancelled by losing.
+    private static func race<T: Sendable>(within limit: Duration, _ work: @escaping @Sendable () async -> T?) async -> T? {
+        await withCheckedContinuation { (c: CheckedContinuation<T?, Never>) in
+            let once = Once(c)
+            Task { once.fire(await work()) }
+            Task { try? await Task.sleep(for: limit); once.fire(nil) }
+        }
+    }
+
+    private func noteUnread(_ key: SessionKey, id: String, at: Date) {
+        if unread.note(key, id: id, at: at) { saveUnread() }
+    }
+
+    private func saveUnread() {
+        if !(captureMode || demoMode), let data = try? JSONEncoder().encode(unread) { defaults.set(data, forKey: "unreadUpdates") }
+    }
+
+    /// True while the conversation window itself is showing: not Settings, the quick composer or the menu.
+    private var conversationOnScreen: Bool {
+        if captureMode { return true }
+        guard let w = conversationWindow else { return false }
+        return w.isVisible && !w.isMiniaturized && w.occlusionState.contains(.visible)
+    }
+
+    func hasUnreadUpdate(for key: SessionKey) -> Bool { unread.hasUnread(key) }
+
+    /// Reads everything pending for a chat. For an explicit "mark as read"; opening the menu is not one.
+    func markUpdateRead(for key: SessionKey) {
+        guard unread.hasUnread(key) else { return }
+        unread.markRead(key)
+        saveUnread()
+    }
+
+    /// The composer showed a chat's reply: reads its events up to `through` (the event's own time,
+    /// or when the transcript was fetched), never a later one.
+    func markContextDisplayed(_ key: SessionKey, eventId: String?, through: Date) {
+        if let eventId { unread.markRead(eventId: eventId) }
+        unread.markRead(key, through: through)
+        saveUnread()
+    }
+
+    /// The conversation window shows `selected` and its transcript has loaded: what it shows is read.
+    private func markSelectedDisplayed() {
+        guard let key = selected, let loaded = selectedLoadedAt, unread.hasUnread(key), conversationOnScreen else { return }
+        unread.markRead(key, through: loaded)
+        saveUnread()
     }
 
     /// Fills the model from DemoData and stops there: no broker, no polling, no network.
@@ -238,6 +346,12 @@ final class AppModel {
         guard visible != windowVisible else { return }
         windowVisible = visible
         Task { await broker.setMode(visible ? .foreground : .background) }
+        if visible { markSelectedDisplayed() }
+    }
+
+    /// The source answered on the last poll, so a transcript read just now is current.
+    private var transcriptIsLive: Bool {
+        isConnected || adapterHealths["conductor-local"]?.status == .connected
     }
 
     // MARK: Derived
@@ -428,6 +542,7 @@ final class AppModel {
         guard key != selected else { return }
         if let old = selected { saveDraftNow(draft, for: old) }
         selected = key
+        selectedLoadedAt = nil
         activity = []
         openURL = nil
         draft = ""
@@ -443,7 +558,13 @@ final class AppModel {
             self.openURL = await broker.openInHostURL(for: key)
             self.draft = await broker.draft(for: key) ?? ""
             self.messages = await broker.messages(for: key)
+            let started = Date()
             await broker.refreshTranscript()
+            // Only a transcript read while the source answers counts as what the window shows.
+            if self.selected == key, self.transcriptIsLive {
+                self.selectedLoadedAt = started
+                self.markSelectedDisplayed()
+            }
         }
     }
 
@@ -616,6 +737,80 @@ final class AppModel {
         setDraft(message.text)
     }
 
+    // MARK: Notification context (the quick composer's reading side; never touches the open conversation)
+
+    /// `anchor` with whatever its event's capture learned after the notification was posted.
+    func resolvedAnchor(_ anchor: NotificationAnchor?) -> NotificationAnchor? { anchor.map(anchorLog.resolve) }
+
+    /// What is on hand without asking anyone: the context cache and any transcript already read.
+    func cachedContextMessages(for key: SessionKey) async -> [ChatMessage] {
+        if demoMode { return DemoData.transcript(for: key) }
+        let saved = (try? await contextCache?.messages(for: key)) ?? []
+        return NotificationContextPolicy.merge(cached: saved, live: knownMessages[key] ?? [])
+    }
+
+    /// Reads the chat's transcript now, outside the conversation window's focus. A click that
+    /// arrives on a cold launch waits (briefly) for the first catalog rather than calling the chat gone.
+    func liveContextMessages(for key: SessionKey) async -> TranscriptRead {
+        if demoMode { return .messages(DemoData.transcript(for: key), fetchedAt: Date()) }
+        var waits = 0
+        while !hasLoaded, waits < 40, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(200))
+            waits += 1
+        }
+        guard hasLoaded else { return .offline }
+        return await broker.readTranscript(for: key)
+    }
+
+    /// Keeps what a displayed context showed, so the same notification opens the same reply later.
+    func rememberContext(_ content: NotificationContextContent, for key: SessionKey) async {
+        guard content.confidence != .unavailable, !content.cacheable.isEmpty else { return }
+        try? await contextCache?.putMessages(content.cacheable, for: key)
+    }
+
+    /// True only when the host app was really handed the chat: no URL, or a refusal, is false and
+    /// callers keep their context. Demo and capture runs never open anything.
+    func openInHost(_ key: SessionKey) async -> Bool {
+        guard !demoMode, !captureMode, let url = await broker.openInHostURL(for: key) else { return false }
+        return NSWorkspace.shared.open(url)
+    }
+
+    // MARK: Menu previews
+
+    /// Excerpts of the newest reply for the few finished or errored sessions the menu lists. At most
+    /// six, recent ones only, each read once per change of the chat (a failed read waits a minute),
+    /// from a short transcript tail that leaves the conversation window's focus alone.
+    func refreshMenuPreviews() async {
+        guard !previewsRefreshing else { return }
+        previewsRefreshing = true
+        defer { previewsRefreshing = false }
+        let now = Date()
+        let eligible = sessions
+            .filter { ($0.state == .finished || $0.state == .error) && now.timeIntervalSince($0.lastActivityAt ?? .distantPast) < 6 * 3600 }
+            .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
+            .prefix(6)
+        var out = menuReplyPreviews.filter { k, _ in eligible.contains { $0.key == k } }
+        previewFetches = previewFetches.filter { k, _ in eligible.contains { $0.key == k } }
+        for s in eligible {
+            if demoMode {
+                if let t = DemoData.transcript(for: s.key).last(where: { $0.role == .assistant })?.text { out[s.key] = NotificationContextPolicy.excerpt(t) }
+                continue
+            }
+            if let last = previewFetches[s.key], last.activity == s.lastActivityAt, last.ok || now.timeIntervalSince(last.tried) < 60 { continue }
+            // A transcript the window already read is current if it is not older than the chat's activity.
+            if let m = knownMessages[s.key]?.last(where: { $0.role == .assistant && !$0.text.isEmpty }),
+               let at = m.at, let activity = s.lastActivityAt, at.addingTimeInterval(5) >= activity {
+                out[s.key] = NotificationContextPolicy.excerpt(m.text)
+                previewFetches[s.key] = (s.lastActivityAt, now, true)
+                continue
+            }
+            let text = await broker.lastAgentText(for: s.key)
+            previewFetches[s.key] = (s.lastActivityAt, now, text != nil)
+            if let text { out[s.key] = NotificationContextPolicy.excerpt(text) }
+        }
+        if out != menuReplyPreviews { menuReplyPreviews = out }
+    }
+
     // MARK: Pins, windows
 
     func togglePin(_ key: SessionKey) {
@@ -624,6 +819,7 @@ final class AppModel {
     }
 
     func showConversationWindow() {
+        dismissMenuBar?()
         ActivationPolicyController.shared.willShowWindow()
         // Create the window only once Squeak is a regular app: a window made while it is still a
         // menu-bar accessory is treated like a panel and can land on top of a full-screen app.
@@ -632,6 +828,7 @@ final class AppModel {
     }
 
     func open(_ key: SessionKey) {
+        dismissMenuBar?()
         select(key)
         showConversationWindow()
     }
@@ -641,6 +838,7 @@ final class AppModel {
     }
 
     func openSettings() {
+        dismissMenuBar?()
         ActivationPolicyController.shared.willShowWindow()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.openSettingsWindow?() }
     }
@@ -658,6 +856,7 @@ final class AppModel {
     func purgeCache() async {
         do {
             try await cache?.purge()
+            try await contextCache?.purge()
             knownMessages = [:]
             cacheNotice = "Cache deleted. Squeak will rebuild it as you open conversations."
         } catch {
@@ -737,5 +936,20 @@ final class AppModel {
     var lastSyncedText: String? {
         guard let d = health?.lastSyncedAt else { return nil }
         return "Last updated " + d.formatted(.relative(presentation: .named))
+    }
+}
+
+/// Resumes a continuation exactly once, from whichever of two tasks gets there first.
+private final class Once<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Never>?
+    init(_ c: CheckedContinuation<T, Never>) { continuation = c }
+
+    func fire(_ value: T) {
+        let c = lock.withLock { () -> CheckedContinuation<T, Never>? in
+            defer { continuation = nil }
+            return continuation
+        }
+        c?.resume(returning: value)
     }
 }

@@ -27,7 +27,23 @@ struct ConversationView: View {
         }
         .searchable(text: $model.query, placement: .sidebar, prompt: "Search sessions")
         .modifier(WindowStyling())
+        .background(ConversationWindowReader())
         .frame(minWidth: 960, minHeight: 600)
+    }
+}
+
+/// Tells the model which NSWindow hosts the conversation, so "on screen" means this window and
+/// not Settings or any other ordinary window.
+private struct ConversationWindowReader: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Reader() }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    private final class Reader: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let w = window
+            Task { @MainActor in AppModel.shared.conversationWindow = w }
+        }
     }
 }
 

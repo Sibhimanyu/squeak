@@ -13,6 +13,22 @@ public enum BrokerEvent: Sendable, Equatable {
     case notify(NotificationEvent)
 }
 
+/// The outcome of reading one chat's transcript outside the focused conversation.
+public enum TranscriptRead: Sendable, Equatable {
+    case messages([ChatMessage], fetchedAt: Date)
+    /// The broker does not know this chat (archived, deleted, or the catalog is not loaded yet).
+    case sessionGone
+    /// Squeak's service or token is not reachable.
+    case offline
+    case failed
+}
+
+/// A notification's event pinned to its reply, plus the messages worth keeping for a later click.
+public struct NotificationCapture: Sendable, Equatable {
+    public var anchor: NotificationAnchor?
+    public var messages: [ChatMessage]
+}
+
 /// Owns the session catalog, per-session messages, in-flight sends and drafts.
 /// Adapters do the talking; the broker decides what the UI sees.
 public actor Broker {
@@ -206,7 +222,7 @@ public actor Broker {
         }
         owner = newOwner
         let changed = merged != catalog
-        let notifications = NotificationPolicy.detect(previous: previousForNotifications, current: merged)
+        let notifications = NotificationPolicy.detect(previous: previousForNotifications, current: merged, at: clock.now())
         previousForNotifications = merged
         catalog = merged
         if changed { continuation.yield(.catalogChanged) }
@@ -237,6 +253,38 @@ public actor Broker {
         guard let session = session(for: key), let adapter = adapter(for: key) else { return nil }
         guard let tail = try? await adapter.transcript(for: session, limit: 8) else { return nil }
         return tail.last { $0.role == .assistant && !$0.text.isEmpty }?.text
+    }
+
+    /// A transcript read for one chat that belongs to nobody's focus: it neither sets the focused
+    /// session nor touches its messages or the cache, so a notification's context can load while
+    /// the conversation window shows another chat. The time is taken before the read, so anything
+    /// that happened after it is not claimed as seen.
+    public func readTranscript(for key: SessionKey, limit: Int = 80) async -> TranscriptRead {
+        guard let session = session(for: key), let adapter = adapter(for: key) else { return .sessionGone }
+        let started = clock.now()
+        do {
+            let fetched = try await adapter.transcript(for: session, limit: limit)
+            if Task.isCancelled { return .failed }
+            return .messages(Self.dedupe(fetched), fetchedAt: started)
+        } catch {
+            switch error as? AdapterError {
+            case .daemonDown?, .tokenMissing?, .timedOut?: return .offline
+            default: return .failed
+            }
+        }
+    }
+
+    /// Pins a notification to the reply it is about, at the moment it happens. Always returns the
+    /// event's own anchor; the message identity is there only if the read worked.
+    public func capture(_ event: NotificationEvent, limit: Int = 40) async -> NotificationCapture {
+        guard case .messages(let list, _) = await readTranscript(for: event.key, limit: limit) else {
+            return NotificationCapture(anchor: NotificationAnchor(event: event), messages: [])
+        }
+        guard let anchor = NotificationContextPolicy.anchorNow(event: event, messages: list) else {
+            return NotificationCapture(anchor: nil, messages: [])
+        }
+        let content = NotificationContextPolicy.resolve(messages: list, anchor: anchor)
+        return NotificationCapture(anchor: anchor, messages: content.cacheable)
     }
 
     public func activity(for key: SessionKey) async throws -> [ActivityStep] {

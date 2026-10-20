@@ -22,7 +22,7 @@ struct SqueakMacApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            PopoverView().environment(model)
+            MenuBarContent().environment(model)
         } label: {
             MenuBarLabel().environment(model)
         }
@@ -115,7 +115,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let model = AppModel.shared
         model.start()
         let env = ProcessInfo.processInfo.environment
-        if model.demoMode, env["SQUEAK_MAC_QUICK_DEMO"] == "1" {
+        if model.demoMode, let refinement = env["SQUEAK_MAC_REFINEMENT_DEMO"] {
+            // Demo data only, left running for a person or a UI test. No onboarding and no ordinary window:
+            // "menu" is the menu-bar status item alone; "context" also opens the composer on demo-6's reply.
+            if refinement == "context" { RefinementDemo.showContext() }
+        } else if model.demoMode, env["SQUEAK_MAC_QUICK_DEMO"] == "1" {
             // Demo data only (the model refuses every send): the real composer and panel, left
             // open so a person or a UI test can click its destination menu. No onboarding.
             QuickComposerController.shared.show(target: SessionKey(provider: "conductor", hostSessionId: env["SQUEAK_MAC_QUICK_DEMO_TARGET"] == "1" ? "demo-1" : "demo-3"))
@@ -132,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (a notification's explicit target retargets it, in whichever order the two arrive).
         // "Open Squeak" in the popover and menus still opens the conversation directly.
         let action = ReopenPolicy.action(hasOrdinaryWindow: NSApp.windows.contains(where: ActivationPolicyController.isAppWindow))
-        if action == .showQuickComposer { QuickComposerController.shared.show() }
+        if action == .showQuickComposer { QuickComposerController.shared.scheduleReopen() }
         return false
     }
 

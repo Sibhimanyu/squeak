@@ -25,10 +25,10 @@ enum LoginItem {
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
     /// Setting the handler hands over any click that arrived before it existed (cold launch).
-    var onOpen: ((SessionKey) -> Void)? {
-        didSet { if onOpen != nil, let key = pendingOpens.drain() { onOpen?(key) } }
+    var onOpen: ((PendingNotificationOpen) -> Void)? {
+        didSet { if onOpen != nil, let open = pendingOpens.drain() { onOpen?(open) } }
     }
-    private var pendingOpens = PendingOpens()
+    private var pendingOpens = PendingNotificationOpens()
     private var configured = false
 
     private var center: UNUserNotificationCenter? { Bundled.isApp ? UNUserNotificationCenter.current() : nil }
@@ -58,7 +58,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    func post(_ event: NotificationEvent, showName: Bool) {
+    /// `anchor` carries only opaque ids and times (never text), so a click opens the composer on
+    /// the reply this very notification was about. Each event is its own notification: an older
+    /// one still in Notification Center keeps its own context.
+    func post(_ event: NotificationEvent, showName: Bool, anchor: NotificationAnchor? = nil) {
         guard let center else { return }
         configure()
         let content = UNMutableNotificationContent()
@@ -66,9 +69,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.body = Self.body(event, showName: showName)
         content.sound = .default
         content.threadIdentifier = event.key.stringValue
-        content.userInfo = ["session": event.key.stringValue]
-        let request = UNNotificationRequest(identifier: "\(event.key.stringValue)-\(event.kind.rawValue)", content: content, trigger: nil)
-        center.add(request)
+        content.userInfo = anchor?.userInfo(session: event.key) ?? ["session": event.key.stringValue]
+        let identifier = anchor.map { "\(event.key.stringValue)-\($0.eventId)" } ?? "\(event.key.stringValue)-\(event.kind.rawValue)"
+        center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
     }
 
     static func body(_ event: NotificationEvent, showName: Bool) -> String {
@@ -91,12 +94,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping @Sendable () -> Void
     ) {
-        let raw = response.notification.request.content.userInfo["session"] as? String
+        let info = response.notification.request.content.userInfo
+        let raw = info["session"] as? String
+        let anchor = NotificationAnchor.parse(info)
         // Any action, including an already-delivered legacy Reply, only opens the composer: its typed text is never read.
         let dismissed = response.actionIdentifier == UNNotificationDismissActionIdentifier
         Task { @MainActor in
-            if let key = NotificationRouting.sessionToOpen(dismissed: dismissed, session: raw),
-               let now = self.pendingOpens.deliver(key, handlerReady: self.onOpen != nil) { self.onOpen?(now) }
+            if let open = NotificationRouting.openRequest(dismissed: dismissed, session: raw, anchor: anchor),
+               let now = self.pendingOpens.deliver(open, handlerReady: self.onOpen != nil) { self.onOpen?(now) }
             completionHandler()
         }
     }

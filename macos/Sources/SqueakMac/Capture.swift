@@ -12,6 +12,12 @@ enum CaptureRunner {
         let env = ProcessInfo.processInfo.environment
         if let a = env["SQUEAK_MAC_APPEARANCE"] { NSApp.appearance = NSAppearance(named: a == "light" ? .aqua : .darkAqua) }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "popover" { await runPopoverOnly(prefix: prefix, model: model); return }
+        if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "refinements" {
+            // Quick composer on demo-6's reply first, then the menu panel; the last one terminates.
+            await runContextPreview(prefix: prefix, model: model)
+            await runPopoverOnly(prefix: prefix, model: model)
+            return
+        }
         if model.demoMode { await runAskDemo(prefix: prefix, model: model) }
         if model.demoMode { await runWindowDemo(prefix: prefix, model: model) }
         if model.demoMode { await runDemo(prefix: prefix, model: model); return }
@@ -66,7 +72,7 @@ enum CaptureRunner {
     /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=popover: just the menu-bar panel, dark and light, from
     /// DemoData with no network. Writes <prefix>-popover-dark.png, -light.png and -short.png (a 440pt-tall screen).
     /// Offscreen capture cannot draw the window material, so the panel sits on a stand-in desktop.
-    private static func runPopoverOnly(prefix: String, model: AppModel) async {
+    static func runPopoverOnly(prefix: String, model: AppModel) async {
         try? await Task.sleep(for: .milliseconds(600))
         for (name, appearance, screen) in [("dark", NSAppearance.Name.darkAqua, CGFloat?.none), ("light", .aqua, nil), ("short", .darkAqua, 440)] {
             let backdrop: Color = name != "light" ? Color(red: 0.10, green: 0.10, blue: 0.12) : Color(red: 0.86, green: 0.87, blue: 0.90)

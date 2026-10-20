@@ -5,12 +5,16 @@ import SwiftUI
 /// softly contrasting grouped bands, separators inset from the edges, and footer actions as plain
 /// menu rows. Used by `PopoverView` and `UsageSection` only; the shared components stay as they are.
 enum PopoverMetrics {
-    static let width: CGFloat = 320
-    static let corner: CGFloat = 18
+    static let width: CGFloat = 360
+    /// The outer radius of the whole panel. The real menu window is clipped to this too (see
+    /// `MenuWindowAccessor`), so the material, the highlight and the shadow share one outline.
+    static let corner: CGFloat = 24
     /// Left/right inset of every row's content, so headings, rows and footer text share one edge.
     static let inset: CGFloat = 16
     /// Room left around the panel on a short screen (menu bar, shadow, a margin).
     static let screenMargin: CGFloat = 48
+    /// The tallest the panel grows; past it the session list scrolls inside the panel.
+    static let maxHeight: CGFloat = 620
 }
 
 /// Section heading: 13pt semibold, muted, like "Listening Mode" in the Sound menu.
@@ -88,6 +92,12 @@ struct PanelSurface: ViewModifier {
             .background(PanelBackground())
             .clipShape(shape)
             .overlay(shape.strokeBorder(Theme.lineStrong, lineWidth: 1))
+            // A hairline inset from the top edge, kept off the curve so it reads as light on glass.
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                    .padding(.horizontal, PopoverMetrics.corner)
+                    .accessibilityHidden(true)
+            }
     }
 }
 

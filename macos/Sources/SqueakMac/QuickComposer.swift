@@ -19,6 +19,8 @@ final class QuickComposerController {
     private var spaceObserver: NSObjectProtocol?
     private var menuObservers: [NSObjectProtocol] = []
     private var menuTracking = false
+    private var reopenTask: Task<Void, Never>?
+    private var lastExplicitOpen = Date.distantPast
     /// A click that ends a menu is still on its way when tracking stops; it is not an outside click.
     private var ignoreClicksUntil = Date.distantPast
 
@@ -26,17 +28,51 @@ final class QuickComposerController {
         if let panel, panel.isVisible { hide() } else { show() }
     }
 
-    /// `target` is explicit (a clicked notification): it wins over the last chat messaged. Without
-    /// one, an open composer keeps its chat and a closed one picks a default.
+    /// `target` is explicit (a chat opened on purpose): it wins over the last chat messaged and
+    /// opens with that chat's latest reply above the field. Without one, an open composer keeps its
+    /// chat and a closed one picks a default, compact, with no context.
     func show(target: SessionKey? = nil) {
+        present(target: target, anchor: nil, fromNotification: false)
+    }
+
+    /// A clicked notification: its chat, and the reply this very event was about. It cancels a
+    /// pending generic reopen and is not undone by one that fires late.
+    func show(notification open: PendingNotificationOpen) {
+        reopenTask?.cancel()
+        lastExplicitOpen = Date()
+        present(target: open.key, anchor: open.anchor, fromNotification: open.fromNotification)
+    }
+
+    /// The activation that follows a Spotlight/Finder reopen, and that a clicked notification also
+    /// causes, arrives either side of the notification response. Waiting a moment lets an explicit
+    /// notification open win; a generic open never touches an explicit target or its context.
+    func scheduleReopen() {
+        reopenTask?.cancel()
+        reopenTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled, let self else { return }
+            guard Date().timeIntervalSince(lastExplicitOpen) > 2, panel?.isVisible != true else { return }
+            // A window opened during the wait (Open Squeak, New Chat, Settings) owns the screen now.
+            guard !NSApp.windows.contains(where: ActivationPolicyController.isAppWindow) else { return }
+            show()
+        }
+    }
+
+    private func present(target: SessionKey?, anchor: NotificationAnchor?, fromNotification: Bool) {
+        // Any explicit open supersedes a generic reopen still waiting: a close right after it must not bring it back.
+        if target != nil { reopenTask?.cancel() }
         let model = AppModel.shared
+        model.dismissMenuBar?()
         if panel?.isVisible == true {
-            if let target, target != state.target {
+            // Same chat and event already showing: nothing to reset. Anything else retargets, with the draft kept.
+            if let target, target != state.target || anchor?.eventId != state.context.anchor?.eventId || !state.context.isVisible {
                 state.stashDraft()
                 state.prepare(model: model, explicit: target)
+                state.context.load(key: target, anchor: anchor, fromNotification: fromNotification, model: model)
             }
         } else {
             state.prepare(model: model, explicit: target)
+            if let target { state.context.load(key: target, anchor: anchor, fromNotification: fromNotification, model: model) }
         }
         if panel == nil {
             let p = QuickPanel(
@@ -63,7 +99,8 @@ final class QuickComposerController {
             panel = p
         }
         guard let panel else { return }
-        if !panel.isVisible { panel.center() }
+        if !panel.isVisible { position(panel) }
+        state.screenHeight = (panel.screen ?? NSScreen.main)?.visibleFrame.height ?? 900
         state.focus += 1
         panel.makeKeyAndOrderFront(nil)
         installDismissObservers()
@@ -75,6 +112,7 @@ final class QuickComposerController {
         removeDismissObservers()
         state.stashDraft()
         state.epoch += 1
+        state.context.clear()
         panel?.orderOut(nil)
         AppLog.info("quick composer hidden")
     }
@@ -137,12 +175,37 @@ final class QuickComposerController {
         hide()
     }
 
-    /// Grows downward: the top edge stays where the user sees it.
-    private func resize(to height: CGFloat) {
-        guard let panel, abs(panel.frame.height - height) > 0.5 else { return }
+    /// On the screen the pointer is on, a little above the middle, as `center()` would but not
+    /// always on the main display.
+    private func position(_ panel: NSPanel) {
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+        guard let v = screen?.visibleFrame else { return panel.center() }
         var f = panel.frame
-        f.origin.y += f.height - height
-        f.size.height = height
+        f.origin.x = v.midX - f.width / 2
+        f.origin.y = v.minY + (v.height - f.height) * 0.62
+        panel.setFrame(f, display: false)
+    }
+
+    /// Grows downward: the top edge stays where the user sees it. Never taller than its screen, and
+    /// moved back inside it, so the field and Send stay reachable however long the context is.
+    private func resize(to height: CGFloat) {
+        guard let panel else { return }
+        let visible = (panel.screen ?? NSScreen.main)?.visibleFrame
+        let h = visible.map { min(height, $0.height - 16) } ?? height
+        var f = panel.frame
+        guard abs(f.height - h) > 0.5 else { return clamp(panel) }
+        f.origin.y += f.height - h
+        f.size.height = h
+        panel.setFrame(f, display: true)
+        clamp(panel)
+    }
+
+    private func clamp(_ panel: NSPanel) {
+        guard let v = (panel.screen ?? NSScreen.main)?.visibleFrame else { return }
+        var f = panel.frame
+        let y = min(max(f.origin.y, v.minY + 8), v.maxY - 8 - f.height)
+        guard abs(y - f.origin.y) > 0.5 else { return }
+        f.origin.y = y
         panel.setFrame(f, display: true)
     }
 }
@@ -157,6 +220,10 @@ final class QuickState {
     private(set) var inFlight: Set<SessionKey> = []
     /// Bumped on every show and hide: a send that finishes under an older one must not touch this composer.
     var epoch = 0
+    /// The reply the pill shows above its field, for an explicit target or a clicked notification.
+    let context = QuickContextModel()
+    /// Height of the screen the pill is on, so long context leaves room for the field.
+    var screenHeight: CGFloat = 900
     private var drafts = ComposerDrafts()
 
     var sending: Bool { target.map(inFlight.contains) ?? false }
@@ -166,6 +233,7 @@ final class QuickState {
     func prepare(model: AppModel, explicit: SessionKey? = nil) {
         epoch += 1
         result = nil
+        context.clear()
         // Only a default: the chip names it, and nothing is sent until ⌘↩.
         target = ComposerRouting.target(
             explicit: explicit, lastUsed: model.lastUsed,
@@ -194,13 +262,19 @@ final class QuickState {
 
     /// The destination menu: a new show as far as in-flight sends are concerned, with each chat's
     /// draft kept apart and text typed before any chat was chosen carried to the first one picked.
-    func chooseTarget(_ key: SessionKey) {
+    func chooseTarget(_ key: SessionKey, model: AppModel = .shared) {
         guard key != target else { return }
         epoch += 1
         result = nil
+        // The reply belongs to the chat it was loaded for, never to the one now chosen. A composer
+        // that was showing context keeps showing it, for the new chat's latest reply and with no
+        // notification anchor; a compact one stays compact.
+        let keepContext = context.isVisible
+        context.clear()
         text = drafts.choose(key, from: target, current: text)
         target = key
         focus += 1
+        if keepContext { context.load(key: key, anchor: nil, fromNotification: false, model: model) }
     }
 }
 
@@ -238,6 +312,8 @@ struct QuickComposerView: View {
         .frame(width: Self.windowWidth)
         .background(GeometryReader { Color.clear.preference(key: QuickHeightKey.self, value: $0.size.height) })
         .onPreferenceChange(QuickHeightKey.self) { resize($0) }
+        // Follows the panel to another display, so the context's room is the screen it is on.
+        .background(ScreenHeightReader { if let h = $0 { state.screenHeight = h } })
         .onChange(of: state.sending) { _, sending in
             guard !reduceMotion else { return }
             if sending {
@@ -252,6 +328,13 @@ struct QuickComposerView: View {
         @Bindable var state = state
         let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
         return VStack(alignment: .leading, spacing: 10) {
+            if state.context.isVisible, let key = state.context.key {
+                QuickContextView(
+                    context: state.context, session: model.session(key), key: key,
+                    maxHeight: QuickLayout.contextLimit(screenHeight: state.screenHeight, fieldHeight: fieldHeight), close: close)
+                // A hairline between reading and writing, not a box around either.
+                Rectangle().fill(Theme.line).frame(height: 1).padding(.top, 2)
+            }
             if model.sendableSessions.isEmpty {
                 Text(model.isConnected ? "None of your sessions can take a reply right now." : "Squeak can't reach its service, so there is no one to message. Open Squeak for the fix.")
                     .font(.system(size: 14)).foregroundStyle(Theme.muted)
@@ -260,12 +343,12 @@ struct QuickComposerView: View {
             } else {
                 ComposerField(
                     text: $state.text, sendKey: .commandReturnSends,
-                    placeholder: target.map { "Message \($0.label)…" } ?? missingTargetPrompt,
+                    placeholder: placeholder,
                     isEnabled: !state.sending, focusToken: state.focus, onSend: { send(.queue) }, onEscape: close,
                     onContentHeight: { fieldHeight = $0 }, fontSize: 16,
                     onOptionReturn: target?.state == .working ? { send(.steer) } : nil
                 )
-                .frame(height: min(max(fieldHeight, 32), 32 + lineHeight * 5))
+                .frame(height: min(max(fieldHeight, QuickLayout.minFieldHeight), QuickLayout.maxFieldHeight))
             }
             HStack(spacing: 10) {
                 destinationMenu
@@ -277,7 +360,7 @@ struct QuickComposerView: View {
                 sendButton
             }
         }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
+        .padding(.horizontal, state.context.isVisible ? 22 : 16).padding(.top, 14).padding(.bottom, 12)
         .frame(width: Self.width)
         .modifier(GlassPanel(radius: 26))
         // A barely-there warm tint along the lower edge, where the light comes from.
@@ -369,7 +452,9 @@ struct QuickComposerView: View {
                 if let target {
                     Circle().fill(Theme.color(for: target.state)).frame(width: 7, height: 7).accessibilityHidden(true)
                 }
-                Text(verbatim: destinationTitle).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                // Capped so a long title shortens with "…" instead of pushing Send off the row.
+                Text(verbatim: destinationTitle).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
+                    .lineLimit(1).truncationMode(.tail).frame(maxWidth: 220, alignment: .leading)
                 Lucide(.chevronDown, size: 14, color: Theme.muted)
             }
             .padding(.horizontal, 12)
@@ -393,6 +478,14 @@ struct QuickComposerView: View {
 
     private var destinationTitle: String {
         target?.label ?? (state.target == nil ? "Choose a session" : "Unavailable chat")
+    }
+
+    private var placeholder: String {
+        guard let target else { return missingTargetPrompt }
+        if state.context.isVisible, let agent = target.agent, !agent.isEmpty {
+            return "Reply to \(agent.prefix(1).uppercased() + agent.dropFirst())…"
+        }
+        return "Message \(target.label)…"
     }
 
     /// A clicked notification's chat that is gone or cannot take a reply is said so, never swapped for another.

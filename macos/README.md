@@ -37,11 +37,19 @@ Only smoke-run (launched, screenshots taken with `SQUEAK_MAC_CAPTURE`):
 
 - The popover, conversation window and a Markdown sample, light and dark.
   Settings (Connections, About) is not in the captures.
+- The menu-bar panel, dark, light and a short screen (`SQUEAK_MAC_CAPTURE_ONLY=popover`).
+- The quick composer on a notification's reply, dark and light, and a layout check
+  at 440, 600 and 900pt screen heights (`SQUEAK_MAC_CAPTURE_ONLY=refinements`, which
+  writes `<prefix>-layout.json`). Both are demo data only and never send.
 
 Untested:
 
 - Interactive keyboard behaviour (including Cmd+Return to send).
-- The global hot key, macOS notifications, and the onboarding flow.
+- The global hot key, macOS notifications (including whether a notification banner
+  is delivered by the OS at all, which nothing here has verified), and the onboarding flow.
+- The menu panel and the notification context in the live app: the 24pt window shape,
+  reopening the panel, focus handoff to the composer, and a real notification click.
+  The captures above draw the panel's own pixels and do not show the window material.
 - A live send from the native app (`DaemonSender` POSTing to the daemon's
   `/reply`). This was deliberately never exercised: no
   message was sent into a real Conductor chat from this app.
@@ -129,8 +137,33 @@ Check for Updates…, Settings…, Hide, Quit; Edit; Sessions; Window; Help) and
 activates it. When the last of those windows closes it goes back to `.accessory`.
 The popover and the quick composer are panels and never trigger it. A reopen
 with no window open (Spotlight, Finder, or the activation a clicked notification
-causes) shows the quick composer, never the conversation; "Open Squeak" in the
+causes) shows the quick composer, never the conversation; the reopen is scheduled,
+not shown at once, so a clicked notification's own open wins over it. "Open Squeak" in the
 popover and menus opens the conversation. Nothing here quits the app.
+
+### Menu-bar panel
+
+The menu-bar panel is a native `MenuBarExtra` window, 360pt wide, with a 24pt
+outer radius. `MenuWindowAccessor` clears the window's backing and clips its
+layers to that radius, so the material, highlight and shadow share one outline.
+That clip is applied to the real window, not only to the offline captures; it is
+not yet verified in the live app.
+
+- The header has the duck, a quiet New chat, and an overflow (…) that opens
+  Settings, Check for Updates and Quit in place.
+- Sessions are grouped Needs you, Errors, Finished (with a "new" count), Working,
+  then Idle. Idle is folded away by default.
+- Rows are compact: a state dot, headline and age, `repo · agent`, and for a finished
+  or errored chat the start of its reply. VoiceOver reads the state in words.
+- Keep Mac awake and Usage details are folded away by default. Usage details names
+  each window and its freshness inside, and is the only poll for usage while open.
+- Opening a band, the overflow or the awake menu keeps the panel open. The
+  destinations close it first: New chat, Settings, Check for Updates, Quick message,
+  Open Squeak, and a session row (which opens its quick composer).
+- Escape closes the panel. Drafts are kept per session when the panel or the
+  composer closes.
+- While the pointer is on the list, sessions keep their section and place, so a row
+  does not move under the pointer; their content still updates.
 
 Cmd-Q (or the app menu's Quit) while a window is open only closes Squeak's windows:
 the duck stays in the menu bar. The menu bar's "Quit Squeak" row (and "Quit Squeak
@@ -243,6 +276,13 @@ Environment variables:
 | `SQUEAK_DAEMON_PORT` | daemon port to talk to instead of 8477 |
 | `SQUEAK_MAC_CAPTURE=<prefix>` | open the conversation window, save screenshots with that prefix, quit; uses no real cache or key file |
 | `SQUEAK_MAC_APPEARANCE=light` | with capture, force light appearance (otherwise dark) |
+| `SQUEAK_MAC_DEMO=1` | demo data only: no network, no reporting, no cache, and no send reaches a chat |
+| `SQUEAK_MAC_CAPTURE_ONLY=popover` | with `SQUEAK_MAC_CAPTURE` and demo, only the menu-bar panel: dark, light, short screen |
+| `SQUEAK_MAC_CAPTURE_ONLY=refinements` | with `SQUEAK_MAC_CAPTURE` and demo, the quick composer on a notification reply (dark, light), a layout check at 440, 600 and 900pt screen heights (`<prefix>-layout.json`, with `allFit`), then the menu panel; it quits when done |
+| `SQUEAK_MAC_REFINEMENT_DEMO=menu` | with demo, leaves the app running with only the menu-bar item (no onboarding, no window), for clicking through by hand |
+| `SQUEAK_MAC_REFINEMENT_DEMO=context` | with demo, as `menu`, and opens the quick composer on a notification reply (demo-6) |
+
+The demo flags never send: the model refuses every send and reads no network.
 
 ## Install (for users)
 
@@ -276,12 +316,19 @@ sessions, need the Squeak daemon running on the same Mac (step 1 above).
 - Messages expire after 14 days and the cache is capped at 50 MB.
   Settings has a "Delete cache" button that purges it; Squeak rebuilds it as you
   open conversations.
+- The context a notification opens (the reply it was about) is kept as an encrypted
+  snapshot, and "Delete cache" removes those snapshots too.
 - Notifications are private by default: they say a session needs you or has
   finished, and show session names only if you turn on "Show session names in
   notifications". They never carry message content. Clicking one opens the quick
   composer on exactly that chat, even on a cold launch (no inline reply; dismissing
   one does nothing); the composer closes on a click outside
   or a Space swipe, keeping unsent text per chat.
+- A clicked notification shows the reply it was about. A notification older than
+  its snapshot is matched by its saved event identity and time; when the reply
+  cannot be found, the composer says so plainly rather than showing a different one.
+- A reply is marked read only once its context has actually been displayed. Clicking
+  a row or opening Settings does not count as viewing the conversation.
 - The app as wired today reads Conductor's database locally and talks to the
   local daemon on loopback. The only other network call is Sparkle's daily
   check of the appcast on `sibhimanyu.github.io` (Sparkle sends the app and OS
