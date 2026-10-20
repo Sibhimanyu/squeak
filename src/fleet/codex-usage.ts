@@ -45,10 +45,10 @@ const DEFAULT_MAX_FILES = 5;
  * Codex logs `rate_limits` on every `token_count` event, and it is a full
  * account snapshot each time — reading the single most recent one is exactly
  * as current as asking the API, at the cost of one file read instead of a
- * network call and without needing any credential of our own. This is the
- * one piece of "how close am I to a provider limit" that this fleet can
- * answer for free: Claude Code never writes the equivalent to disk, only to
- * the live stream of whichever process spawned it.
+ * network call and without needing any credential of our own. Claude Code
+ * never writes the equivalent to disk, only to the live stream of whichever
+ * process spawned it; Claude's limits come from a manual Refresh that reads
+ * its usage endpoint with Claude Code's own sign-in (`claude-usage-api.ts`).
  */
 export class CodexUsageReader {
   private readonly codexHome: string;

@@ -44,8 +44,8 @@ export interface IngressControl {
   /** The phone channel: status, pair, approve, reject, revoke, reset. */
   remote?(action: string, deviceId: string | null): Promise<unknown>;
   /**
-   * Take one fresh Claude limits reading. Runs a real (tiny) Claude call, so
-   * it is only ever reached by the owner pressing Refresh.
+   * Take one fresh Claude limits reading. Fetches usage from Claude's usage
+   * endpoint (no model call), and is only ever reached by the owner pressing Refresh.
    */
   refreshClaudeUsage?(): Promise<unknown>;
   /** The sudoers file lid-closed sessions need, for the Mac app to install with an admin prompt. */

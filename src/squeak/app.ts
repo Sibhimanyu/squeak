@@ -9,7 +9,8 @@ import { CliqWebhook } from "../cliq/client.js";
 import { CliqRelayInbox } from "../cliq/inbox.js";
 import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
-import { CLAUDE_PROBE_SCHEMA, CLAUDE_PROBE_SYSTEM, ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
+import { ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
+import { fetchClaudeUsage } from "../fleet/claude-usage-api.js";
 import { Caffeinator } from "../fleet/caffeinate.js";
 import { applyAwakeAction, type AwakeEnd, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
 import { LidSleepGuard, SUDOERS_PATH, sudoersRule } from "../fleet/lid-sleep.js";
@@ -341,10 +342,9 @@ export class SqueakApp {
       this.claudeLimits.record(limits),
     );
     this.assistant = new FleetAssistant(claudeRunner);
-    // Only the Mac app's Refresh button reaches this: nothing probes on a timer.
-    this.claudeRefresher = new ClaudeLimitsRefresher(this.claudeLimits, async () => {
-      await claudeRunner({ system: CLAUDE_PROBE_SYSTEM, user: "Reply with: ok", schema: CLAUDE_PROBE_SCHEMA });
-    });
+    // Only a Refresh press reaches this: no timer, no model call, and the
+    // Keychain is read only then.
+    this.claudeRefresher = new ClaudeLimitsRefresher(this.claudeLimits, () => fetchClaudeUsage());
     this.cliq = this.createCliq();
 
     this.controller = new FleetController({

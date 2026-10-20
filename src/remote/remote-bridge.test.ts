@@ -1790,6 +1790,32 @@ describe("RemoteBridge usage refresh from the phone", () => {
     const verdict = await t.bridge.handleCommand(t.config, "u1", t.command());
     expect(verdict.result).toMatchObject({ status: "sent", refreshed: false });
     expect(verdict.result.note).toMatch(/last reading/);
+    expect(JSON.stringify(verdict.result)).not.toContain("claude exited 1");
+    t.bridge.stop();
+  });
+
+  it("forwards the specific sign-in sentence as the note", async () => {
+    const t = await usage();
+    const error = "Claude Code's sign-in has expired. Open Claude Code to renew it, then try again.";
+    t.refreshUsage.mockResolvedValueOnce({ refreshed: false, throttled: false, error } as never);
+    const verdict = await t.bridge.handleCommand(t.config, "u1", t.command());
+    expect(verdict.result).toMatchObject({ status: "sent", refreshed: false, throttled: false, note: error });
+    t.bridge.stop();
+  });
+
+  it("forwards a 429 wait as the note while it is throttled", async () => {
+    const t = await usage();
+    const error = "Claude asked Squeak to slow down. It will try again later.";
+    t.refreshUsage.mockResolvedValueOnce({ refreshed: false, throttled: true, error } as never);
+    const verdict = await t.bridge.handleCommand(t.config, "u1", t.command());
+    expect(verdict.result).toMatchObject({ status: "sent", refreshed: false, throttled: true, note: error });
+    t.bridge.stop();
+  });
+
+  it("adds no note to a fresh reading", async () => {
+    const t = await usage();
+    const verdict = await t.bridge.handleCommand(t.config, "u1", t.command());
+    expect(verdict.result).not.toHaveProperty("note");
     t.bridge.stop();
   });
 });

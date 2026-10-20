@@ -69,7 +69,7 @@ private struct ProviderHeader<Trailing: View>: View {
     }
 }
 
-/// Refresh for Claude: one real, tiny call on the daemon, so only ever on this press.
+/// Refresh for Claude: the daemon fetches usage without consuming tokens, and only on this press.
 struct ClaudeRefreshButton: View {
     @Environment(AppModel.self) private var model
     var labelled = true
@@ -82,7 +82,7 @@ struct ClaudeRefreshButton: View {
                 } else {
                     Lucide(.refreshCw, size: 16, color: Theme.muted)
                 }
-                if labelled { Text(model.claudeRefreshing ? "Asking Claude…" : "Refresh").font(Typo.meta.weight(.medium)) }
+                if labelled { Text(model.claudeRefreshing ? "Fetching usage…" : "Refresh").font(Typo.meta.weight(.medium)) }
             }
             .foregroundStyle(Theme.ink)
             .contentShape(Rectangle())
@@ -90,7 +90,7 @@ struct ClaudeRefreshButton: View {
         .buttonStyle(.plain)
         .disabled(model.claudeRefreshing || !model.isConnected)
         .accessibilityLabel("Refresh Claude usage")
-        .help("Ask Claude for its current limits. This makes one small call and counts a little against your usage.")
+        .help("Ask Claude for its current limits. This reads your plan's usage with Claude Code's sign-in. It uses no tokens.")
     }
 }
 
@@ -148,7 +148,7 @@ struct UsageDetailView: View {
                 claude
                 codex
                 cost
-                Text("Claude only reports its limits while it runs, so Refresh makes one small call to read them (a little counts against your usage), at most once a minute. Squeak never does it on its own. Codex is read from its own files and is always current.")
+                Text("Refresh fetches Claude's usage with your existing Claude Code sign-in, without consuming tokens, at most once a minute. Squeak never does it on its own. Codex is read from its own files and is always current.")
                     .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: 560, alignment: .leading)

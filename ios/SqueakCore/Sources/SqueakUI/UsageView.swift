@@ -5,7 +5,7 @@ import SwiftUI
 
 /// Plan usage: what the Mac last saw for Claude and Codex. Bars are ink, not state colours
 /// (DESIGN.md §3.3: a state colour is never a fill). Refresh asks the Mac for a new Claude reading,
-/// signed like a reply; it makes one small real call, at most once a minute.
+/// signed like a reply; it fetches usage without consuming tokens, at most once a minute.
 struct UsageView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -25,7 +25,7 @@ struct UsageView: View {
                             : "Your Mac hasn't sent usage yet. Update Squeak on your Mac to see it here.")
                             .foregroundStyle(Theme.muted)
                     }
-                    Text(refreshNote ?? "Refresh asks your Mac for a new Claude reading. It makes one small real call, so it runs at most once a minute.")
+                    Text(refreshNote ?? "Refresh asks your Mac for a new Claude reading. It fetches usage without consuming tokens, at most once a minute.")
                         .font(.footnote).foregroundStyle(Theme.muted)
                 }
                 .padding(20)

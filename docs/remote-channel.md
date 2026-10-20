@@ -332,7 +332,7 @@ answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
 - **Usage refresh from the phone (2026-10-19).** A third signed command,
   `{ v: 1, kind: "usage", nonce, expiresAt }`, with no text and no target. It
   passes the same signature, freshness and nonce checks, then runs the Mac's
-  own `ClaudeLimitsRefresher`, which spends one small real call at most once
+  own `ClaudeLimitsRefresher`, which fetches usage from Claude's usage endpoint (no tokens spent) at most once
   a minute whoever asks (a second press inside the minute gets the cached
   reading, `throttled: true`). The result says `refreshed`/`throttled`; the
   reading itself arrives in the snapshot, published at once. No Face ID: it

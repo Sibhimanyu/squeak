@@ -181,9 +181,9 @@ export interface StartCommand {
 /**
  * A signed request to take a fresh Claude usage reading (the Mac's Refresh,
  * from the phone). It carries nothing but the envelope: no text, no target.
- * The reading costs one small real call, so the Mac's refresher runs it at
- * most once a minute whoever asks, and the phone gets the cached one inside
- * that minute.
+ * The reading is one usage fetch that spends no tokens; the Mac's refresher
+ * still runs it at most once a minute whoever asks, and the phone gets the
+ * cached one inside that minute.
  */
 export interface UsageCommand {
   v: 1;
@@ -284,7 +284,7 @@ export interface RemoteBridgeDependencies {
   answerer?: Answerer | null;
   /**
    * Take a fresh Claude usage reading (`ClaudeLimitsRefresher.refresh`,
-   * throttled to once a minute). Absent: a phone's Refresh is refused.
+   * a usage fetch, no tokens spent, throttled to once a minute). Absent: a phone's Refresh is refused.
    */
   refreshUsage?: (() => Promise<{ refreshed: boolean; throttled: boolean; error?: string }>) | null;
   /**
@@ -1499,12 +1499,25 @@ export class RemoteBridge {
     let outcome: { refreshed: boolean; throttled: boolean; error?: string };
     try {
       outcome = await refresh();
-    } catch (error) {
-      outcome = { refreshed: false, throttled: false, error: error instanceof Error ? error.message : String(error) };
+    } catch {
+      // Fixed text: a thrown message can quote what it choked on.
+      outcome = {
+        refreshed: false,
+        throttled: false,
+        error: "Claude didn't answer this time; showing the last reading.",
+      };
     }
     // The reading travels in the snapshot; send it now rather than on the next pass.
     this.nudgePublish(0);
-    this.log(device.name, "sent", outcome.throttled ? "usage (read in the last minute)" : "usage refreshed");
+    this.log(
+      device.name,
+      "sent",
+      outcome.error
+        ? "usage refresh failed"
+        : outcome.throttled
+          ? "usage (read in the last minute)"
+          : "usage refreshed",
+    );
     return {
       write: true,
       result: {
@@ -1512,7 +1525,8 @@ export class RemoteBridge {
         status: "sent",
         refreshed: outcome.refreshed,
         throttled: outcome.throttled,
-        ...(outcome.error ? { note: "Claude didn't answer this time; showing the last reading." } : {}),
+        // The refresher's errors are fixed, secret-free sentences.
+        ...(outcome.error ? { note: outcome.error } : {}),
       },
     };
   }

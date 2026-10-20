@@ -112,7 +112,7 @@ public struct DaemonClient: Sendable {
 
     // MARK: Usage
 
-    /// Takes one fresh Claude limits reading. This runs a real, tiny Claude call on the daemon, so it
+    /// Takes one fresh Claude limits reading. The daemon fetches usage from Claude without consuming tokens, so it
     /// is only ever called from the user's own press of Refresh. Nil when the daemon predates the route.
     public func refreshClaudeUsage() async throws -> ClaudeRefreshResult? {
         let r = try await post("/control/usage/claude-refresh", timeout: 100)
