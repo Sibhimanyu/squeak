@@ -125,6 +125,18 @@ final class AppModel {
             self?.select(key)
             self?.showConversationWindow()
         }
+        Notifier.shared.onReply = { [weak self] key, text in
+            Task { @MainActor in
+                guard let self, let result = await self.send(text, to: key) else { return }
+                switch result {
+                case .accepted: break
+                case .refused(let reason), .notSent(let reason):
+                    Notifier.shared.postNote("Your reply to \(self.notificationName(for: key)) wasn't sent. \(reason)", for: key)
+                case .uncertain(let reason):
+                    Notifier.shared.postNote("Your reply to \(self.notificationName(for: key)) may not have arrived. \(reason)", for: key)
+                }
+            }
+        }
         observeWindowVisibility()
         AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")
         if demoMode { installDemo(); return }
@@ -580,6 +592,12 @@ final class AppModel {
         case .notSent: AppLog.info("send not sent")
         }
         return result
+    }
+
+    /// How a follow-up notification names a session: by name only if the user opted in.
+    func notificationName(for key: SessionKey) -> String {
+        guard notificationsShowNames, let s = sessions.first(where: { $0.key == key }) else { return "the session" }
+        return s.label
     }
 
     /// Puts a refused or unsent message back in the composer. Never sends.

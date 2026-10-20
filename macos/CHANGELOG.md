@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.5
+
+- Notifications say what a session wants: a question ("is asking you
+  something", with the question when session names are on), a plan to review,
+  or an approval. A second question in a chat that is still waiting notifies
+  again.
+- Reply to a finished Conductor chat straight from its notification.
+- Settings says when macOS is hiding Squeak's banners (alert style None) and
+  opens the right pane to fix it.
+
 ## 2.1.4
 
 - Quick message (⌘K) is a glass pill: type on top; the chat, its state, repo

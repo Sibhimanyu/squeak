@@ -48,6 +48,7 @@ private struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @State private var loginOn = LoginItem.isEnabled
     @State private var loginError: String?
+    @State private var bannersShown: Bool?
 
     var body: some View {
         @Bindable var model = model
@@ -85,9 +86,30 @@ private struct GeneralSettings: View {
             Section {
                 Toggle("Notify me when a session needs me or finishes", isOn: $model.notificationsEnabled)
                     .disabled(!Bundled.isApp)
+                if model.notificationsEnabled, bannersShown == false {
+                    LabeledContent {
+                        Button("Open Notification Settings") { Self.openNotificationSettings() }
+                    } label: {
+                        Text("macOS isn't showing Squeak's banners")
+                        Text("They only land in Notification Center. Set Squeak's alert style to Banners or Alerts.")
+                    }
+                }
+            } footer: {
+                SectionFootnote("Approvals, questions, plans to review, errors, and finished Conductor chats. Reply to a finished chat from the notification itself.")
             }
         }
         .formStyle(.grouped)
+        .task { bannersShown = await Notifier.shared.bannersShown() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { bannersShown = await Notifier.shared.bannersShown() }
+        }
+    }
+
+    static func openNotificationSettings() {
+        let id = Bundle.main.bundleIdentifier ?? "com.squeak.mac"
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 }
 
@@ -176,7 +198,7 @@ private struct PrivacySettings: View {
             Section {
                 Toggle("Show session names in notifications", isOn: $model.notificationsShowNames)
             } footer: {
-                SectionFootnote("Off by default. Notifications never contain message text; with this off they don't name the session either.")
+                SectionFootnote("Off by default. With this off, notifications don't name the session. With it on, they also show what an agent is asking; never other message text.")
             }
             Section {
                 Button("Purge cache…", role: .destructive) { confirm = true }

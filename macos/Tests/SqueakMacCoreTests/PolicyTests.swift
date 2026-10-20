@@ -105,5 +105,43 @@ struct NotificationTests {
         #expect(n.count == 1)
         #expect(n[0].title == "Squeak")
         #expect(n[0].body == "Fix login finished")
+        #expect(n[0].replyable)
+    }
+
+    @Test func aQuestionSaysItIsAQuestionAndCarriesIt() {
+        let prev = [makeSession("a", state: .working)]
+        var asking = makeSession("a", state: .blocked)
+        asking.pendingQuestion = "Which database? (Postgres / SQLite)"
+        let n = NotificationPolicy.detect(previous: prev, current: [asking])
+        #expect(n.map(\.kind) == [.question])
+        #expect(n[0].body == "Session a is asking you something")
+        #expect(n[0].detail == "Which database? (Postgres / SQLite)")
+        #expect(!n[0].replyable) // answered in the window, where the options are
+    }
+
+    @Test func aPlanAndAnApprovalAreToldApart() {
+        let prev = [makeSession("p", state: .working), makeSession("x", provider: "claude-terminal", state: .working)]
+        var plan = makeSession("p", state: .blocked)
+        plan.pendingQuestion = "has a plan for you to review"
+        var approval = makeSession("x", provider: "claude-terminal", state: .blocked)
+        approval.awaitingApproval = true
+        let n = NotificationPolicy.detect(previous: prev, current: [plan, approval])
+        #expect(n.map(\.kind) == [.plan, .blocked])
+        #expect(n[1].body == "Session x needs your approval")
+    }
+
+    @Test func aSecondQuestionWhileStillWaitingIsNews() {
+        var first = makeSession("a", state: .blocked)
+        first.pendingQuestion = "Ship it?"
+        var second = first
+        second.pendingQuestion = "Which branch?"
+        #expect(NotificationPolicy.detect(previous: [first], current: [first]).isEmpty)
+        #expect(NotificationPolicy.detect(previous: [first], current: [second]).map(\.kind) == [.question])
+    }
+
+    @Test func aFinishedChatSqueakCannotSendToHasNoReply() {
+        let prev = [makeSession("a", state: .working, canSend: false)]
+        let n = NotificationPolicy.detect(previous: prev, current: [makeSession("a", state: .finished, canSend: false)])
+        #expect(n.map(\.replyable) == [false])
     }
 }
