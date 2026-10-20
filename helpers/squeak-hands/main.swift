@@ -1,5 +1,7 @@
 import AppKit
 import ApplicationServices
+import CoreLocation
+import CoreWLAN
 import CryptoKit
 import Foundation
 
@@ -422,15 +424,99 @@ func runTerminal(mode: String, requestPath: String, resultPath: String) {
     }
 }
 
+// MARK: - Wi-Fi (hotspot failover)
+
+// Since macOS 14.4 every command-line Wi-Fi tool scans with names redacted,
+// so `networksetup -setairportnetwork` answers "Could not find network" for
+// a hotspot that is right there. CoreWLAN in an app with Location Services
+// permission can still find it: a scan filtered to the one name, then
+// associate with the network that scan returned (its `ssid` may read nil,
+// but association works). The same approach as Insomnia's HotspotJoiner.
+
+func locationStatusName(_ status: CLAuthorizationStatus) -> String {
+    switch status {
+    case .authorizedAlways: return "allowed"
+    case .denied: return "denied"
+    case .restricted: return "restricted"
+    case .notDetermined: return "not-asked"
+    @unknown default: return "unknown"
+    }
+}
+
+/// Asks for Location Services when nobody has answered yet, and waits up to
+/// `wait` seconds for the answer. A granted request settles on
+/// `.authorizedAlways` on macOS.
+func ensureLocation(wait: TimeInterval) -> CLAuthorizationStatus {
+    let manager = CLLocationManager()
+    if manager.authorizationStatus == .notDetermined {
+        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        manager.requestWhenInUseAuthorization()
+        let deadline = Date().addingTimeInterval(wait)
+        while manager.authorizationStatus == .notDetermined, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+        }
+    }
+    return manager.authorizationStatus
+}
+
+func runWifi(mode: String, requestPath: String, resultPath: String) {
+    if mode == "wifi-location" {
+        let status = ensureLocation(wait: 120)
+        write(["ok": status == .authorizedAlways, "location": locationStatusName(status)], to: resultPath)
+        return
+    }
+    struct JoinRequest: Decodable { let device: String; let ssid: String; let password: String }
+    guard let data = FileManager.default.contents(atPath: requestPath),
+          let request = try? JSONDecoder().decode(JoinRequest.self, from: data),
+          request.device.range(of: "^en[0-9]{1,2}$", options: .regularExpression) != nil,
+          let ssid = request.ssid.data(using: .utf8), !ssid.isEmpty, ssid.count <= 32
+    else {
+        write(["ok": false, "error": "bad-request"], to: resultPath)
+        exit(65)
+    }
+    // Only waits when nobody has answered; a lid-closed Mac must not hang here.
+    let location = locationStatusName(ensureLocation(wait: 20))
+    guard let interface = CWWiFiClient.shared().interface(withName: request.device) else {
+        write(["ok": false, "error": "no-interface", "location": location], to: resultPath)
+        exit(3)
+    }
+    if !interface.powerOn() {
+        try? interface.setPower(true)
+        Thread.sleep(forTimeInterval: 2)
+    }
+    do {
+        // A phone's hotspot can take a few seconds to start advertising after
+        // the Mac first looks, so one quick second scan before giving up.
+        var networks = try interface.scanForNetworks(withSSID: ssid)
+        if networks.isEmpty {
+            Thread.sleep(forTimeInterval: 3)
+            networks = try interface.scanForNetworks(withSSID: ssid)
+        }
+        guard let network = networks.first else {
+            write(["ok": false, "error": "not-found", "location": location], to: resultPath)
+            exit(3)
+        }
+        try interface.associate(to: network, password: request.password)
+        write(["ok": true, "location": location], to: resultPath)
+    } catch {
+        let detail = String((error as NSError).localizedDescription.prefix(160))
+        write(["ok": false, "error": "join-failed", "detail": detail, "location": location], to: resultPath)
+        exit(3)
+    }
+}
+
 let args = CommandLine.arguments
 let mode = args.count > 1 ? args[1] : "probe"
 let outPath = args.count > 2 ? args[2] : "/tmp/squeak-hands.json"
 // Where errors go: the probe writes to its only path, send to its second.
 let errorPath = (mode == "send" || mode == "press" || mode == "choose-file") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
 let terminalModes: Set<String> = ["terminal-read", "terminal-type"]
+let wifiModes: Set<String> = ["wifi-join", "wifi-location"]
 
-// Terminal is driven by Apple Events, which need Automation, not Accessibility.
-if !terminalModes.contains(mode),
+// Terminal is driven by Apple Events, which need Automation, not Accessibility;
+// Wi-Fi needs Location Services.
+if !terminalModes.contains(mode), !wifiModes.contains(mode),
    !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
     write(["ok": false, "error": "not-trusted"], to: errorPath)
     exit(2)
@@ -571,6 +657,9 @@ case "send":
 case "terminal-read", "terminal-type":
     // terminal-read|terminal-type <request.json> <result.json>
     runTerminal(mode: mode, requestPath: outPath, resultPath: args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json")
+case "wifi-join", "wifi-location":
+    // wifi-join|wifi-location <request.json> <result.json>
+    runWifi(mode: mode, requestPath: outPath, resultPath: args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json")
 default:
     write(["ok": false, "error": "unknown-mode"], to: outPath)
     exit(64)

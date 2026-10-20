@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { promisify } from "node:util";
 
 import { logger } from "../utils/logger.js";
+import { runHands } from "./conductor-ui.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -14,10 +15,14 @@ const execFileAsync = promisify(execFile);
  * What macOS allows shaped this. Since macOS 14.4 every command-line view of
  * Wi-Fi names is redacted (`networksetup -getairportnetwork` says "not
  * associated", `ipconfig` and `system_profiler` print `<redacted>`), so Squeak
- * cannot see which network it is on or which are nearby. Two things still
- * work: joining a named network with its password, and the address an iPhone
- * hotspot always hands out (172.20.10.0/28), which says "on a hotspot"
- * without a name. Going back is turning Wi-Fi off and on, after which macOS
+ * cannot see which network it is on or which are nearby. That includes
+ * `networksetup -setairportnetwork`'s own scan: on macOS 26 it answered
+ * "Could not find network" for a hotspot that was on, every time. So the join
+ * goes through Squeak Hands (CoreWLAN, with Location Services permission): a
+ * scan filtered to the one name, then associate with what it returned — how
+ * Insomnia does it. `networksetup` is only the fallback for a Hands too old
+ * to know the mode. The address an iPhone hotspot always hands out
+ * (172.20.10.0/28) still says "on a hotspot" without a name. Going back is turning Wi-Fi off and on, after which macOS
  * joins your usual network itself; it also happens on its own when you turn
  * the hotspot off. iOS lets no app turn Personal Hotspot on, so that part is
  * yours.
@@ -29,10 +34,16 @@ const execFileAsync = promisify(execFile);
 export const HOTSPOT_KEYCHAIN_SERVICE = "Squeak hotspot";
 /** How often the internet is looked at while failover is armed. */
 export const HOTSPOT_CHECK_MS = 10_000;
-/** Consecutive failed looks before switching: about half a minute. */
-export const HOTSPOT_FAILURES_TO_SWITCH = 3;
-/** After an attempt, automatic or not, no automatic retry for this long. */
-export const HOTSPOT_RETRY_GAP_MS = 5 * 60_000;
+/** Consecutive failed looks before switching: 10–20 seconds offline. */
+export const HOTSPOT_FAILURES_TO_SWITCH = 2;
+/**
+ * Waits between automatic tries within one outage, then the last one
+ * forever: a phone whose hotspot starts a moment late is caught in seconds,
+ * not minutes (Insomnia's 5/10/20/30 s, at Squeak's 10 s look).
+ */
+export const HOTSPOT_RETRY_BACKOFF_MS = [10_000, 20_000, 30_000];
+/** After you switch by hand, no automatic switch for this long. */
+export const HOTSPOT_MANUAL_QUIET_MS = 5 * 60_000;
 const SETTLE_MS = 20_000;
 const SETTLE_POLL_MS = 2_000;
 const IPHONE_HOTSPOT_PREFIX = "172.20.10.";
@@ -72,8 +83,10 @@ export interface HotspotSystem {
   address(device: string): Promise<string | null>;
   /** Whether the internet answers (Apple's captive-portal check). */
   online(): Promise<boolean>;
-  /** Join a network; null on success, else the tool's complaint. */
+  /** Join a network; null on success, else why not, in words for the user. */
   join(device: string, ssid: string, password: string): Promise<string | null>;
+  /** Asks for Location Services once, so a later join can find the hotspot. Never throws. */
+  prepare?(): Promise<void>;
   /** Wi-Fi off, then on: macOS rejoins its preferred network itself. */
   cycle(device: string): Promise<void>;
   readPassword(): Promise<string | null>;
@@ -140,7 +153,10 @@ export class HotspotFailover {
   private onHotspot = false;
   private last: HotspotEvent | null = null;
   private failures = 0;
-  private lastAttemptAt = Number.NEGATIVE_INFINITY;
+  /** Automatic tries in the current outage; 0 when online. */
+  private tries = 0;
+  private nextTryAt = Number.NEGATIVE_INFINITY;
+  private quietUntil = Number.NEGATIVE_INFINITY;
   private busy = false;
   private timer: NodeJS.Timeout | null = null;
 
@@ -185,6 +201,10 @@ export class HotspotFailover {
       this.settings = { enabled: request.enabled, ssid: request.ssid };
       writeSettings(this.options.settingsPath, this.settings);
       this.failures = 0;
+      this.tries = 0;
+      // Now, while someone is at the Mac to answer macOS's prompt; not at
+      // the moment the Wi-Fi drops, perhaps with the lid shut.
+      if (request.enabled) void this.system.prepare?.();
       this.options.onChange?.();
       return { ok: true, state: this.state };
     }
@@ -209,27 +229,36 @@ export class HotspotFailover {
       this.options.onChange?.();
     }
     if (!this.settings.enabled || !this.state.configured || this.onHotspot) {
-      this.failures = 0;
+      this.endOutage();
       return;
     }
     if (await this.system.online().catch(() => false)) {
-      this.failures = 0;
+      this.endOutage();
       return;
     }
     this.failures += 1;
     if (
       this.failures >= HOTSPOT_FAILURES_TO_SWITCH &&
       this.options.wanted() &&
-      this.now() - this.lastAttemptAt >= HOTSPOT_RETRY_GAP_MS
+      this.now() >= this.nextTryAt &&
+      this.now() >= this.quietUntil
     ) {
+      const wait = HOTSPOT_RETRY_BACKOFF_MS[Math.min(this.tries, HOTSPOT_RETRY_BACKOFF_MS.length - 1)]!;
+      this.tries += 1;
+      this.nextTryAt = this.now() + wait;
       await this.join(true);
     }
   }
 
+  private endOutage(): void {
+    this.failures = 0;
+    this.tries = 0;
+    this.nextTryAt = Number.NEGATIVE_INFINITY;
+  }
+
   private async join(automatic: boolean): Promise<HotspotEvent> {
     this.busy = true;
-    this.lastAttemptAt = this.now();
-    this.failures = 0;
+    if (!automatic) this.quietUntil = this.now() + HOTSPOT_MANUAL_QUIET_MS;
     const ssid = this.settings.ssid!;
     try {
       const device = await this.system.wifiDevice();
@@ -248,12 +277,7 @@ export class HotspotFailover {
       }
       const complaint = await this.system.join(device, ssid, password);
       if (complaint) {
-        return this.record(
-          "hotspot",
-          false,
-          `Couldn't join ${ssid}: is Personal Hotspot on? (${complaint})`,
-          automatic,
-        );
+        return this.record("hotspot", false, `Couldn't join ${ssid}: ${complaint}`, automatic);
       }
       if (!(await this.settle(true))) {
         return this.record("hotspot", false, `Couldn't join ${ssid}: is Personal Hotspot on?`, automatic);
@@ -271,7 +295,7 @@ export class HotspotFailover {
 
   private async leave(): Promise<HotspotEvent> {
     this.busy = true;
-    this.lastAttemptAt = this.now();
+    this.quietUntil = this.now() + HOTSPOT_MANUAL_QUIET_MS;
     try {
       const device = await this.system.wifiDevice();
       if (!device) {
@@ -316,9 +340,11 @@ export class HotspotFailover {
   private record(to: HotspotEvent["to"], ok: boolean, note: string, automatic: boolean): HotspotEvent {
     const event: HotspotEvent = { at: new Date(this.now()).toISOString(), to, ok, note, automatic };
     this.last = event;
-    logger.info("hotspot", { to, ok, automatic, note });
-    if (automatic) {
-      this.options.notify?.(note);
+    logger.info("hotspot", { to, ok, automatic, note, ...(automatic ? { attempt: this.tries } : {}) });
+    // Once per outage: the first failed try says what to do, the rest only
+    // log, and a success always says so.
+    if (automatic && (ok || this.tries <= 1)) {
+      this.options.notify?.(ok || this.tries > 1 ? note : `${note} Squeak keeps trying while the Mac is offline.`);
     }
     this.options.onChange?.();
     return event;
@@ -338,8 +364,37 @@ function writeSettings(file: string, settings: HotspotSettings): void {
   fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
 }
 
-/** The real thing: networksetup, ipconfig, security and Apple's captive-portal page. */
-export function macHotspotSystem(): HotspotSystem {
+const JOIN_ADVICE =
+  "is Personal Hotspot on? Open Personal Hotspot on the iPhone, or set System Settings › Wi-Fi › Ask to join hotspots to Automatic.";
+
+/** What Squeak Hands' `wifi-join` said, in words; null when it joined. */
+export function describeHandsJoin(result: Record<string, unknown>): string | null {
+  if (result.ok === true) return null;
+  const location = result.location;
+  if (location === "denied" || location === "restricted") {
+    return "Squeak Hands needs Location Services to find a hotspot by name (System Settings › Privacy & Security › Location Services).";
+  }
+  switch (result.error) {
+    case "not-found":
+      return location === "allowed"
+        ? JOIN_ADVICE
+        : "Squeak Hands has not been allowed Location Services yet, which macOS needs to find a hotspot by name. Turn the hotspot off and on in Squeak on the Mac to be asked again.";
+    case "no-interface":
+      return "this Mac's Wi-Fi could not be opened.";
+    case "join-failed":
+      return `the hotspot refused the join (${String(result.detail ?? "wrong password?")}).`;
+    default:
+      return `Squeak Hands could not join (${String(result.error ?? "no answer")}).`;
+  }
+}
+
+/** For `security -i`, which reads commands from stdin: a double-quoted word. */
+function securityQuote(value: string): string {
+  return `"${value.replace(/[\\"]/g, (ch) => `\\${ch}`)}"`;
+}
+
+/** The real thing: Squeak Hands (CoreWLAN), networksetup, ipconfig, security and Apple's captive-portal page. */
+export function macHotspotSystem(handsAppPath: string | null = null): HotspotSystem {
   let device: string | null | undefined;
   const run = async (file: string, args: string[], timeout = 15_000) =>
     (await execFileAsync(file, args, { timeout })).stdout.toString();
@@ -366,13 +421,30 @@ export function macHotspotSystem(): HotspotSystem {
         return false;
       }
     },
+    async prepare() {
+      if (!handsAppPath) return;
+      const outcome = await runHands(handsAppPath, "wifi-location", {}).catch(() => null);
+      logger.info("hotspot location permission", {
+        location: outcome?.status === "result" ? outcome.result.location : (outcome?.status ?? "failed"),
+      });
+    },
     async join(dev, ssid, password) {
+      if (handsAppPath) {
+        // The password goes over as a 0600 file, never in a process's arguments.
+        const outcome = await runHands(handsAppPath, "wifi-join", { device: dev, ssid, password });
+        if (outcome.status === "result" && outcome.result.error !== "unknown-mode") {
+          return describeHandsJoin(outcome.result);
+        }
+        logger.warn("squeak hands cannot join Wi-Fi; rebuild it with helpers/squeak-hands/build.sh", {
+          status: outcome.status,
+        });
+      }
       try {
         // networksetup prints nothing on success and a reason (exit 0 or not) on failure.
         const out = (await run("/usr/sbin/networksetup", ["-setairportnetwork", dev, ssid, password], 30_000)).trim();
-        return out ? out.split("\n")[0]!.slice(0, 160) : null;
+        return out ? `${JOIN_ADVICE} (${out.split("\n")[0]!.slice(0, 160)})` : null;
       } catch (error) {
-        return error instanceof Error ? error.message.split("\n")[0]!.slice(0, 160) : "networksetup failed";
+        return `${JOIN_ADVICE} (${error instanceof Error ? error.message.split("\n")[0]!.slice(0, 160) : "networksetup failed"})`;
       }
     },
     async cycle(dev) {
@@ -399,18 +471,18 @@ export function macHotspotSystem(): HotspotSystem {
       }
     },
     async storePassword(password) {
-      await run("/usr/bin/security", [
-        "add-generic-password",
-        "-U",
-        "-a",
-        "squeak",
-        "-s",
-        HOTSPOT_KEYCHAIN_SERVICE,
-        "-l",
-        HOTSPOT_KEYCHAIN_SERVICE,
-        "-w",
-        password,
-      ]);
+      // Through stdin (`security -i`), not argv, where `ps` would show it.
+      const service = securityQuote(HOTSPOT_KEYCHAIN_SERVICE);
+      const command = `add-generic-password -U -a squeak -s ${service} -l ${service} -w ${securityQuote(password)}\n`;
+      await new Promise<void>((resolve, reject) => {
+        const child = execFile("/usr/bin/security", ["-i"], { timeout: 15_000 }, (error) =>
+          error ? reject(error) : resolve(),
+        );
+        child.stdin?.end(command);
+      });
+      if ((await this.readPassword()) !== password) {
+        throw new Error("the Keychain did not keep the hotspot password");
+      }
     },
   };
 }

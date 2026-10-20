@@ -4,8 +4,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  describeHandsJoin,
   HOTSPOT_FAILURES_TO_SWITCH,
-  HOTSPOT_RETRY_GAP_MS,
+  HOTSPOT_MANUAL_QUIET_MS,
+  HOTSPOT_RETRY_BACKOFF_MS,
   HotspotFailover,
   type HotspotSystem,
   readHotspotRequest,
@@ -22,6 +24,7 @@ afterEach(() => {
 function fakeMac(options: { joinWorks?: boolean; online?: boolean } = {}) {
   let address = "192.168.1.20";
   let online = options.online ?? true;
+  let joinWorks = options.joinWorks !== false;
   let password: string | null = null;
   const calls: string[] = [];
   const system: HotspotSystem = {
@@ -30,10 +33,13 @@ function fakeMac(options: { joinWorks?: boolean; online?: boolean } = {}) {
     online: async () => online,
     join: async (_device, ssid, pw) => {
       calls.push(`join ${ssid} ${pw}`);
-      if (options.joinWorks === false) return "Could not find network Sibhi's iPhone.";
+      if (!joinWorks) return "is Personal Hotspot on? Open Personal Hotspot on the iPhone.";
       address = "172.20.10.3";
       online = true;
       return null;
+    },
+    prepare: async () => {
+      calls.push("prepare");
     },
     cycle: async () => {
       calls.push("cycle");
@@ -49,6 +55,9 @@ function fakeMac(options: { joinWorks?: boolean; online?: boolean } = {}) {
     calls,
     setOnline: (value: boolean) => {
       online = value;
+    },
+    setJoinWorks: (value: boolean) => {
+      joinWorks = value;
     },
   };
 }
@@ -87,12 +96,15 @@ describe("HotspotFailover", () => {
     const file = fs.readFileSync(path.join(dir, "hotspot.json"), "utf8");
     expect(file).not.toContain("secret-pass");
     expect(JSON.parse(file)).toEqual({ enabled: true, ssid: "Sibhi's iPhone" });
+    // Location Services is asked for now, while someone is at the Mac.
+    expect(mac.calls).toEqual(["prepare"]);
   });
 
   it("joins the hotspot after half a minute without internet, when something needs the Mac", async () => {
     const mac = fakeMac();
     const { hotspot, notify } = failover(mac);
     await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
+    mac.calls.length = 0;
     mac.setOnline(false);
     for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH - 1; i += 1) await hotspot.tick();
     expect(mac.calls).toEqual([]);
@@ -111,22 +123,65 @@ describe("HotspotFailover", () => {
     const b = failover(idle, false);
     await b.hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
     for (let i = 0; i < 5; i += 1) await b.hotspot.tick();
-    expect([...off.calls, ...idle.calls]).toEqual([]);
+    expect([...off.calls, ...idle.calls.filter((call) => call !== "prepare")]).toEqual([]);
   });
 
-  it("says what to do when the hotspot isn't there, and waits before trying again", async () => {
+  it("keeps trying on a short backoff through an outage, and says so once", async () => {
+    let now = 1_000_000;
+    const mac = fakeMac({ joinWorks: false, online: false });
+    const { hotspot, notify } = failover(mac, true, () => now);
+    await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
+    mac.calls.length = 0;
+    const joins = () => mac.calls.filter((call) => call.startsWith("join")).length;
+    for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
+    expect(joins()).toBe(1);
+    expect(hotspot.state.last).toMatchObject({ ok: false, note: expect.stringContaining("is Personal Hotspot on?") });
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]![0]).toContain("keeps trying");
+    // Not before the wait, then once per wait: 10, 20, 30, 30 s.
+    await hotspot.tick();
+    expect(joins()).toBe(1);
+    for (const wait of [...HOTSPOT_RETRY_BACKOFF_MS, HOTSPOT_RETRY_BACKOFF_MS.at(-1)!]) {
+      now += wait;
+      await hotspot.tick();
+    }
+    expect(joins()).toBe(5);
+    expect(notify).toHaveBeenCalledTimes(1);
+    // The phone's hotspot comes up: joined, and that is said.
+    mac.setJoinWorks(true);
+    now += 60_000;
+    await hotspot.tick();
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts each outage's backoff afresh", async () => {
     let now = 1_000_000;
     const mac = fakeMac({ joinWorks: false, online: false });
     const { hotspot, notify } = failover(mac, true, () => now);
     await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
     for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
-    expect(hotspot.state.last).toMatchObject({ ok: false, note: expect.stringContaining("is Personal Hotspot on?") });
-    expect(notify).toHaveBeenCalledTimes(1);
-    for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH * 2; i += 1) await hotspot.tick();
-    expect(mac.calls).toHaveLength(1);
-    now += HOTSPOT_RETRY_GAP_MS;
+    mac.setOnline(true);
+    await hotspot.tick();
+    mac.setOnline(false);
+    now += 1_000;
     for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
-    expect(mac.calls).toHaveLength(2);
+    expect(mac.calls.filter((call) => call.startsWith("join"))).toHaveLength(2);
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves the network alone for a while after you switch by hand", async () => {
+    let now = 1_000_000;
+    const mac = fakeMac();
+    const { hotspot } = failover(mac, true, () => now);
+    await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
+    await hotspot.apply({ action: "join" });
+    await hotspot.apply({ action: "leave" });
+    mac.setOnline(false);
+    for (let i = 0; i < 4; i += 1) await hotspot.tick();
+    expect(mac.calls.filter((call) => call.startsWith("join"))).toHaveLength(1);
+    now += HOTSPOT_MANUAL_QUIET_MS;
+    await hotspot.tick();
+    expect(mac.calls.filter((call) => call.startsWith("join"))).toHaveLength(2);
   });
 
   it("switches on request, and back to the usual Wi-Fi by turning Wi-Fi off and on", async () => {
@@ -167,5 +222,17 @@ describe("hotspot requests", () => {
     expect(validSsid("bad\nname")).toBe(false);
     expect(validPassword("a".repeat(64))).toBe(false);
     expect(validPassword("ünicode!")).toBe(false);
+  });
+});
+
+describe("Squeak Hands' Wi-Fi join", () => {
+  it("turns each answer into what to do", () => {
+    expect(describeHandsJoin({ ok: true, location: "allowed" })).toBeNull();
+    expect(describeHandsJoin({ ok: false, error: "not-found", location: "allowed" })).toMatch(/Ask to join hotspots/);
+    expect(describeHandsJoin({ ok: false, error: "not-found", location: "not-asked" })).toMatch(/Location Services/);
+    expect(describeHandsJoin({ ok: false, error: "not-found", location: "denied" })).toMatch(/Privacy & Security/);
+    expect(describeHandsJoin({ ok: false, error: "join-failed", detail: "bad key", location: "allowed" })).toMatch(
+      /refused the join \(bad key\)/,
+    );
   });
 });

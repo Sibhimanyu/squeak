@@ -18,7 +18,7 @@ import { readPower, type PowerReading } from "../fleet/power-monitor.js";
 import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
-import { HotspotFailover, readHotspotRequest } from "../fleet/hotspot.js";
+import { HotspotFailover, macHotspotSystem, readHotspotRequest } from "../fleet/hotspot.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
@@ -137,6 +137,7 @@ export class SqueakApp {
     });
     this.hotspot = new HotspotFailover({
       settingsPath: path.join(config.supportDir, "hotspot.json"),
+      system: macHotspotSystem(config.handsAppPath),
       // An awake session, or an agent at work: the times a lost connection costs something.
       wanted: () =>
         this.awake.active || this.runtime?.monitor.snapshot.active.some((s) => s.state === "working") === true,
