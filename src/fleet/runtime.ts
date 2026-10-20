@@ -8,6 +8,8 @@ export interface AwakeView {
   lastEnd: AwakeEnd | null;
   lidActions: LidActionSettings;
   lidClosedNow: boolean;
+  /** Sleep left disabled outside any session (a restore owed, or not Squeak's); null when none. */
+  sleepProblem?: string | null;
 }
 import os from "node:os";
 import path from "node:path";
@@ -226,6 +228,8 @@ export function serializeState(
           // What a closed lid does, and whether it is doing it now.
           awakeLidActions: awake.lidActions,
           awakeLidClosedNow: awake.lidClosedNow,
+          // Sleep disabled with no session to show it, and what to do about it.
+          awakeSleepProblem: awake.sleepProblem ?? null,
         }
       : {}),
     active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),

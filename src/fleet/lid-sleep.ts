@@ -58,6 +58,46 @@ export function readSleepDisabled(output: string): boolean | null {
   return null;
 }
 
+/**
+ * Low Power Mode as configured for battery, from `pmset -g custom`: the
+ * `lowpowermode` line of the `Battery Power:` section (what `pmset -b`
+ * writes), else its `powermode` line (macOS 27 prints only that: 0
+ * automatic, 1 Low Power, 2 High Power). A `lowpowermode` line wins even
+ * with no value. Null for anything but an explicit 0 or 1 (no section on a
+ * desktop, High Power): not knowing is not proof it is off, and Squeak
+ * turning off a mode it did not set would take over the user's own
+ * preference (after Insomnia's SleepGuard.parseLowPowerMode).
+ */
+export function readLowPowerSetting(output: string): boolean | null {
+  let inBattery = false;
+  let lowPower: string | undefined;
+  let powerMode: string | undefined;
+  for (const raw of output.split("\n")) {
+    const line = raw.trim();
+    if (line.endsWith(":")) {
+      inBattery = line === "Battery Power:";
+      continue;
+    }
+    if (!inBattery) continue;
+    const [key, value = ""] = line.split(/\s+/);
+    if (key === "lowpowermode" && lowPower === undefined) lowPower = value;
+    if (key === "powermode" && powerMode === undefined) powerMode = value;
+  }
+  const value = lowPower ?? powerMode;
+  return value === "1" ? true : value === "0" ? false : null;
+}
+
+/**
+ * Writes a journal so a crash mid-write cannot leave half a file: a torn
+ * journal would read as "nothing to undo" and strand a sleep disable.
+ * Owner-only, since it says what the Mac is doing.
+ */
+export function writeFileAtomic(file: string, text: string): void {
+  const temp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, text, { mode: 0o600 });
+  fs.renameSync(temp, file);
+}
+
 /** `AppleClamshellState` from ioreg: true when the lid is closed, null when there is no lid. */
 export function readClamshell(output: string): boolean | null {
   const match = /"AppleClamshellState"\s*=\s*(Yes|No)/.exec(output);
@@ -119,9 +159,12 @@ export class LidSleepGuard {
     this.updateJournal({ sleepDisabled: true, until });
     const result = await this.run(SUDO, ["-n", PMSET, "-a", "disablesleep", "1"]);
     if (!result.ok) {
-      this.updateJournal({ sleepDisabled: false });
+      const refused = /password/i.test(result.stderr);
+      // sudo refusing means pmset never ran. Any other failure (a timeout
+      // included) may have applied it, so the entry stays for restoreSleep.
+      if (refused) this.updateJournal({ sleepDisabled: false });
       throw new Error(
-        /password/i.test(result.stderr)
+        refused
           ? "Lid-closed needs setting up on the Mac first (one admin password)."
           : `pmset could not disable sleep: ${result.stderr.trim() || "unknown error"}`,
       );
@@ -152,15 +195,22 @@ export class LidSleepGuard {
    * user's own setting, and Squeak must not turn it off later.
    */
   async lowPowerOn(until: number | null = null): Promise<boolean> {
-    const current = await this.lowPowerMode();
-    if (current !== false) {
+    // The configured setting, not notifyutil's current state: the system can
+    // show Low Power Mode on by itself (a low battery), and that reading
+    // would make Squeak think the user's setting was off and later "restore"
+    // it to off. Unreadable counts as theirs.
+    if ((await this.lowPowerSetting()) !== false) {
       return false;
     }
     this.updateJournal({ lowPower: true, until });
     const result = await this.run(SUDO, ["-n", PMSET, "-b", "lowpowermode", "1"]);
     if (!result.ok) {
-      this.updateJournal({ lowPower: false });
       logger.warn("could not turn on Low Power Mode", { stderr: result.stderr.trim() });
+      // A failed or timed-out enable may still have applied: turn it off
+      // again, and keep the entry (the backstop and the next start retry)
+      // unless that worked.
+      const off = await this.run(SUDO, ["-n", PMSET, "-b", "lowpowermode", "0"]);
+      if (off.ok) this.updateJournal({ lowPower: false });
       return false;
     }
     logger.info("Low Power Mode on for an awake session");
@@ -181,11 +231,10 @@ export class LidSleepGuard {
     logger.info("Low Power Mode off again");
   }
 
-  /** Low Power Mode as the system reports it; null when unread. */
-  async lowPowerMode(): Promise<boolean | null> {
-    const result = await this.run("/usr/bin/notifyutil", ["-g", "com.apple.system.lowpowermode"]);
-    const value = result.ok ? /lowpowermode\s+(\d)/.exec(result.stdout)?.[1] : undefined;
-    return value === undefined ? null : value === "1";
+  /** Low Power Mode as configured for battery (`pmset -g custom`); null when unread. */
+  async lowPowerSetting(): Promise<boolean | null> {
+    const result = await this.run(PMSET, ["-g", "custom"]);
+    return result.ok ? readLowPowerSetting(result.stdout) : null;
   }
 
   /** A session's new end, so the backstop does not undo an extended session. */
@@ -200,20 +249,35 @@ export class LidSleepGuard {
     return fs.existsSync(this.options.journalPath);
   }
 
-  /** At start: undo whatever a previous run left that no running session owns. */
-  async recover(sessionOwnsIt: boolean): Promise<void> {
-    if (!this.journalled || sessionOwnsIt) {
-      return;
+  /**
+   * At start: undo whatever a previous run left that no running session owns.
+   * With no journal, a SleepDisabled bit that reads 1 is not Squeak's: it is
+   * left alone (another tool, or the user, set it) and reported as
+   * `foreignDisable` so the owner hears about it once.
+   */
+  async recover(sessionOwnsIt: boolean): Promise<{ foreignDisable: boolean }> {
+    if (sessionOwnsIt) {
+      return { foreignDisable: false };
+    }
+    if (!this.journalled) {
+      return { foreignDisable: (await this.sleepDisabled()) === true };
     }
     const journal = this.readJournal();
     logger.warn("undoing what a previous run left", { ...journal });
     if (journal.lowPower) await this.lowPowerOff();
     if (journal.sleepDisabled) await this.restoreSleep();
+    return { foreignDisable: false };
   }
 
   private readJournal(): Journal {
+    let text: string;
     try {
-      const raw = JSON.parse(fs.readFileSync(this.options.journalPath, "utf8")) as Record<string, unknown>;
+      text = fs.readFileSync(this.options.journalPath, "utf8");
+    } catch {
+      return { sleepDisabled: false, lowPower: false, until: null };
+    }
+    try {
+      const raw = JSON.parse(text) as Record<string, unknown>;
       return {
         // The first journal held only { disabledSleepAt }.
         sleepDisabled: raw.sleepDisabled === true || typeof raw.disabledSleepAt === "number",
@@ -221,7 +285,10 @@ export class LidSleepGuard {
         until: typeof raw.until === "number" ? raw.until : null,
       };
     } catch {
-      return { sleepDisabled: false, lowPower: false, until: null };
+      // A journal exists but cannot be read: something was journalled, so
+      // assume the worst for sleep and keep the file until a restore works.
+      // Low Power Mode is left alone: without the entry it may be the user's.
+      return { sleepDisabled: true, lowPower: false, until: null };
     }
   }
 
@@ -236,7 +303,7 @@ export class LidSleepGuard {
       }
       return;
     }
-    fs.writeFileSync(this.options.journalPath, JSON.stringify({ ...next, at: this.now() }) + "\n");
+    writeFileAtomic(this.options.journalPath, JSON.stringify({ ...next, at: this.now() }) + "\n");
   }
 }
 

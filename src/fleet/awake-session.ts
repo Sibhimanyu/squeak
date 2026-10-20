@@ -1,7 +1,7 @@
 import fs from "node:fs";
 
 import { logger } from "../utils/logger.js";
-import { decideSafety, type PowerReading, type SafetyThresholds } from "./power-monitor.js";
+import { batteryUnreadable, decideSafety, type PowerReading, type SafetyThresholds } from "./power-monitor.js";
 
 /**
  * An awake session: the user asked for the Mac to stay awake, for a while or
@@ -19,7 +19,20 @@ import { decideSafety, type PowerReading, type SafetyThresholds } from "./power-
  * end, and needs the sudoers rule. Sleep is restored when the session ends,
  * is replaced by one without the lid, or Squeak stops (and disabled again if
  * it resumes) — a Mac left with sleep disabled never sleeps, even in a bag.
+ * A restore that fails is retried every RESTORE_RETRY_MS and said in
+ * `sleepProblem`, since the session it belonged to is gone from `state`.
  */
+
+/** How soon a failed sleep restore is tried again. */
+export const RESTORE_RETRY_MS = 30_000;
+
+export const RESTORE_PROBLEM =
+  "Squeak could not turn sleep back on, so a closed lid will not sleep this Mac. It is trying again every 30 seconds; to do it yourself: sudo pmset -a disablesleep 0";
+
+export const FOREIGN_DISABLE_PROBLEM =
+  "Sleep is disabled on this Mac, and not by Squeak, so a closed lid will not sleep it. If nothing should be doing that: sudo pmset -a disablesleep 0";
+
+export const LID_LOST_PROBLEM = "Something on this Mac turned sleep back on, so a closed lid would sleep it now.";
 
 /** A week: longer than any real need, short enough that a typo cannot mean forever. */
 export const MAX_AWAKE_MINUTES = 7 * 24 * 60;
@@ -51,16 +64,22 @@ export interface AwakeEnd {
 /** What lid-sleep.ts's LidSleepGuard does for a session. */
 export interface LidControl {
   ruleInstalled(): Promise<boolean>;
+  /** The SleepDisabled bit; null when unread. */
+  sleepDisabled(): Promise<boolean | null>;
   disableSleep(until: number | null): Promise<void>;
   restoreSleep(): Promise<boolean>;
   /** False when it was already on (the user's) or could not be turned on. */
   lowPowerOn(until: number | null): Promise<boolean>;
   lowPowerOff(): Promise<void>;
   updateUntil(until: number | null): void;
-  recover(sessionOwnsIt: boolean): Promise<void>;
+  /** `foreignDisable`: no journal, yet sleep reads disabled — someone else's, left alone. */
+  recover(sessionOwnsIt: boolean): Promise<{ foreignDisable: boolean } | void>;
 }
 
 export type AwakeEndReason = "ended" | "expired" | "replaced" | "battery" | "heat";
+
+/** Two unreadable battery reads in a row on battery end the session (after Insomnia's FloorRules). */
+const UNREADABLE_BATTERY_END = 2;
 
 interface Saved {
   startedAt: number;
@@ -78,6 +97,8 @@ export interface AwakeSessionOptions {
   onChange?: () => void;
   /** Told when a session ends, and why. */
   onEnd?: (end: AwakeEnd) => void;
+  /** Told once of something about sleep the owner must hear (it cannot wait for them to look). */
+  onWarning?: (text: string) => void;
 }
 
 /** Whole minutes in 1..MAX_AWAKE_MINUTES, or null for anything else. */
@@ -109,6 +130,15 @@ export class AwakeSession {
   /** Whether Squeak turned Low Power Mode on and has not turned it off. */
   private lowPowerActual = false;
   private ended: AwakeEnd | null = null;
+  /** A sleep restore failed and is owed; retried on `restoreTimer`. */
+  private restoreOwed = false;
+  private restoreTimer: NodeJS.Timeout | null = null;
+  /** At start, sleep read disabled with no journal: someone else's. */
+  private foreignDisable = false;
+  /** This Mac has shown a battery (a percent, or AppleSmartBattery). */
+  private hasBattery = false;
+  /** Consecutive safety checks on battery (or on an unknown source) whose percent could not be read. */
+  private batteryMisses = 0;
 
   constructor(private readonly options: AwakeSessionOptions) {
     this.now = options.now ?? Date.now;
@@ -138,6 +168,16 @@ export class AwakeSession {
     return this.syncLid();
   }
 
+  /**
+   * Something wrong with sleep that outlives a session, for /state: a
+   * restore Squeak owes, or a disable that is not Squeak's. Null when none.
+   */
+  get sleepProblem(): string | null {
+    if (this.restoreOwed) return RESTORE_PROBLEM;
+    if (this.foreignDisable) return FOREIGN_DISABLE_PROBLEM;
+    return null;
+  }
+
   /** How the last session ended; null until one has. */
   get lastEnd(): AwakeEnd | null {
     return this.ended;
@@ -153,7 +193,16 @@ export class AwakeSession {
     if (!this.saved) {
       return this.lidChain;
     }
-    const decision = decideSafety(reading, thresholds);
+    this.hasBattery ||= reading.hasBattery === true || reading.percent !== null;
+    this.batteryMisses = batteryUnreadable(reading, this.hasBattery) ? this.batteryMisses + 1 : 0;
+    const decision =
+      this.batteryMisses >= UNREADABLE_BATTERY_END
+        ? {
+            end: "battery" as const,
+            lowPower: false,
+            why: "The battery level could not be read twice in a row",
+          }
+        : decideSafety(reading, thresholds);
     if (decision.end) {
       this.end(decision.end, decision.why ?? undefined);
       return this.lidChain;
@@ -164,7 +213,33 @@ export class AwakeSession {
     if (before[0] !== this.safetyWhy || before[1] !== this.wantLowPower) {
       this.options.onChange?.();
     }
-    return this.syncLid();
+    void this.syncLid();
+    return this.verifyLid();
+  }
+
+  /**
+   * Reads the SleepDisabled bit back during a lid session (once a minute,
+   * with the safety check). Another keep-awake tool's daemon can put it back
+   * at any time — Insomnia measured one doing it every 2 s — and then a
+   * closed lid sleeps the Mac mid-session while every surface says "on".
+   */
+  verifyLid(): Promise<void> {
+    this.lidChain = this.lidChain.then(async () => {
+      const lid = this.options.lid;
+      if (!lid || !this.lidActual || this.lidStatus !== "on" || this.stopping) {
+        return;
+      }
+      if ((await lid.sleepDisabled().catch(() => null)) !== false) {
+        return;
+      }
+      // lidActual stays true, so the end still restores and clears the journal.
+      this.lidStatus = "failed";
+      this.lidProblem = LID_LOST_PROBLEM;
+      logger.warn("sleep was turned back on during a lid session");
+      this.options.onWarning?.(`${LID_LOST_PROBLEM} The awake session still runs with the lid open.`);
+      this.options.onChange?.();
+    });
+    return this.lidChain;
   }
 
   /** Whether a lid-closed session can start here: the sudoers rule is installed. */
@@ -200,7 +275,14 @@ export class AwakeSession {
     if (saved) {
       this.begin(saved);
     }
-    await this.options.lid?.recover(Boolean(saved?.lid)).catch(() => undefined);
+    const outcome = await this.options.lid?.recover(Boolean(saved?.lid)).catch(() => undefined);
+    if (outcome?.foreignDisable) {
+      // Not Squeak's to clear: it may be a setting the owner made on purpose.
+      this.foreignDisable = true;
+      logger.warn("sleep is disabled on this Mac with no journal: leaving it");
+      this.options.onWarning?.(FOREIGN_DISABLE_PROBLEM);
+      this.options.onChange?.();
+    }
     await this.lidChain;
   }
 
@@ -260,7 +342,12 @@ export class AwakeSession {
     if (!this.saved) {
       return;
     }
+    // The backstop leaves a live daemon's session alone until two minutes
+    // past its `until`; an early end that then fails to restore must not
+    // wait out the original end while every surface says "off".
+    if (this.saved.lid) this.options.lid?.updateUntil(this.now());
     this.saved = null;
+    this.batteryMisses = 0;
     this.safetyWhy = null;
     this.wantLowPower = false;
     this.lidLowPower = false;
@@ -281,6 +368,10 @@ export class AwakeSession {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
+    }
+    if (this.restoreTimer) {
+      clearTimeout(this.restoreTimer);
+      this.restoreTimer = null;
     }
     this.stopping = true;
     await this.syncLid();
@@ -316,10 +407,10 @@ export class AwakeSession {
     await this.reconcileLowPower();
     const lid = this.options.lid;
     const want = Boolean(this.saved?.lid) && !this.stopping;
-    if (!lid || want === this.lidActual) {
+    if (!lid) {
       return;
     }
-    if (want) {
+    if (want && !this.lidActual) {
       this.lidStatus = "starting";
       this.lidProblem = undefined;
       this.options.onChange?.();
@@ -327,19 +418,48 @@ export class AwakeSession {
         await lid.disableSleep(this.saved?.until ?? null);
         this.lidActual = true;
         this.lidStatus = "on";
+        this.restoreOwed = false;
+        this.foreignDisable = false;
       } catch (error) {
         this.lidStatus = "failed";
         this.lidProblem = error instanceof Error ? error.message : String(error);
         logger.warn("lid-closed could not start", { error: this.lidProblem });
-        await lid.restoreSleep().catch(() => false);
+        // A failed disable may still have applied (lid-sleep.ts keeps the entry).
+        await this.restoreLidSleep(lid);
+      }
+    } else if (!want && (this.lidActual || this.restoreOwed)) {
+      this.lidActual = false;
+      if (await this.restoreLidSleep(lid)) {
+        this.lidStatus = "off";
+        this.lidProblem = undefined;
+      } else {
+        this.lidStatus = "failed";
+        this.lidProblem = RESTORE_PROBLEM;
       }
     } else {
-      await lid.restoreSleep().catch(() => false);
-      this.lidActual = false;
-      this.lidStatus = "off";
-      this.lidProblem = undefined;
+      return;
     }
     this.options.onChange?.();
+  }
+
+  /** Restores sleep; on failure owes it, and tries again in RESTORE_RETRY_MS (not while stopping: the backstop has it). */
+  private async restoreLidSleep(lid: LidControl): Promise<boolean> {
+    const ok = await lid.restoreSleep().catch(() => false);
+    const wasOwed = this.restoreOwed;
+    this.restoreOwed = !ok;
+    if (ok) {
+      if (wasOwed) logger.info("sleep restored on a retry");
+      return true;
+    }
+    if (!wasOwed) this.options.onWarning?.(RESTORE_PROBLEM);
+    if (!this.stopping && !this.restoreTimer) {
+      this.restoreTimer = setTimeout(() => {
+        this.restoreTimer = null;
+        void this.syncLid();
+      }, RESTORE_RETRY_MS);
+      this.restoreTimer.unref?.();
+    }
+    return false;
   }
 
   private begin(saved: Saved): void {
@@ -347,6 +467,9 @@ export class AwakeSession {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    // Replacing a lid session with one without: as at an end, its sleep
+    // disable is over now, whatever end the journal still names.
+    if (this.saved?.lid && !saved.lid) this.options.lid?.updateUntil(this.now());
     this.saved = saved;
     if (!saved.lid) {
       this.lidStatus = "off";

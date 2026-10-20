@@ -27,6 +27,8 @@ export interface PowerReading {
   watts?: number | null;
   /** Whether the lid is closed; null on a Mac without one. */
   lidClosed?: boolean | null;
+  /** ioreg shows an AppleSmartBattery: a laptop, whatever pmset managed to say. Null when unread. */
+  hasBattery?: boolean | null;
 }
 
 export const THERMAL_SERIOUS = 2;
@@ -89,7 +91,19 @@ export async function readPower(run: Run = defaultRun): Promise<PowerReading> {
     lowPower: lowPowerLevel === null ? null : lowPowerLevel === 1,
     watts: battery.onBattery && smartBattery !== null ? readWatts(smartBattery) : null,
     lidClosed: clamshell === null ? null : readClamshell(clamshell),
+    hasBattery: smartBattery === null ? null : /"Voltage" = \d+/.test(smartBattery),
   };
+}
+
+/**
+ * A reading that cannot say how much battery is left, on a Mac that has one,
+ * while on battery or with the source unreadable too (assume battery: the
+ * rules exist for the case where it is). An awake session that cannot see
+ * its battery cannot keep its 10% promise, so two of these in a row end it
+ * (after Insomnia's FloorRules). A desktop never counts.
+ */
+export function batteryUnreadable(reading: PowerReading, hasBattery: boolean): boolean {
+  return hasBattery && reading.percent === null && reading.onBattery !== false;
 }
 
 export interface SafetyThresholds {
@@ -101,6 +115,16 @@ export interface SafetyThresholds {
 
 export const DEFAULT_THRESHOLDS: SafetyThresholds = { lowPowerPercent: 40, endPercent: 10 };
 
+/**
+ * Keeps the end floor below the Low Power Mode floor: settings the other
+ * way round would end the session without Low Power Mode ever having had a
+ * chance. The end floor is the safety promise, so Low Power Mode moves up.
+ */
+export function normalizeThresholds(thresholds: SafetyThresholds): SafetyThresholds {
+  const endPercent = Math.max(0, Math.min(99, thresholds.endPercent));
+  return { endPercent, lowPowerPercent: Math.max(thresholds.lowPowerPercent, endPercent + 1) };
+}
+
 export type SafetyEnd = "battery" | "heat";
 
 /** What the rules want for a running awake session, given one reading. */
@@ -108,6 +132,7 @@ export function decideSafety(
   reading: PowerReading,
   thresholds: SafetyThresholds = DEFAULT_THRESHOLDS,
 ): { end: SafetyEnd | null; lowPower: boolean; why: string | null } {
+  thresholds = normalizeThresholds(thresholds);
   const draining = reading.onBattery === true && reading.percent !== null;
   if (draining && reading.percent! <= thresholds.endPercent) {
     return { end: "battery", lowPower: false, why: `Battery at ${reading.percent}%` };

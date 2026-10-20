@@ -5,7 +5,14 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PowerReading } from "./power-monitor.js";
-import { applyAwakeAction, AwakeSession, MAX_AWAKE_MINUTES, readAwakeAction, validMinutes } from "./awake-session.js";
+import {
+  applyAwakeAction,
+  AwakeSession,
+  MAX_AWAKE_MINUTES,
+  readAwakeAction,
+  RESTORE_RETRY_MS,
+  validMinutes,
+} from "./awake-session.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -143,21 +150,26 @@ describe("readAwakeAction", () => {
 });
 
 describe("AwakeSession with the lid closed", () => {
-  function lidSetup(options: { failDisable?: string; rule?: boolean; userLowPower?: boolean } = {}) {
+  function lidSetup(options: { failDisable?: string; rule?: boolean; userLowPower?: boolean; foreign?: boolean } = {}) {
     const t = setup();
     const calls: string[] = [];
+    let restoreWorks = true;
+    let bit: boolean | null = true;
+    const warnings: string[] = [];
     const lid = {
       ruleInstalled: vi.fn(async () => options.rule ?? true),
+      sleepDisabled: vi.fn(async () => bit),
       disableSleep: vi.fn(async () => {
         calls.push("disable");
         if (options.failDisable) throw new Error(options.failDisable);
       }),
       restoreSleep: vi.fn(async () => {
-        calls.push("restore");
-        return true;
+        calls.push(restoreWorks ? "restore" : "restore-failed");
+        return restoreWorks;
       }),
       recover: vi.fn(async (owns: boolean) => {
         calls.push(`recover:${owns}`);
+        return { foreignDisable: Boolean(options.foreign) };
       }),
       lowPowerOn: vi.fn(async () => {
         calls.push("lowPowerOn");
@@ -170,8 +182,24 @@ describe("AwakeSession with the lid closed", () => {
         calls.push(`until:${until}`);
       }),
     };
-    const make = () => new AwakeSession({ path: t.sessionPath, hold: () => undefined, lid, onChange: t.changes });
-    return { ...t, lid, calls, session: make(), make };
+    const make = () =>
+      new AwakeSession({
+        path: t.sessionPath,
+        hold: () => undefined,
+        lid,
+        onChange: t.changes,
+        onWarning: (text) => warnings.push(text),
+      });
+    return {
+      ...t,
+      lid,
+      calls,
+      warnings,
+      session: make(),
+      make,
+      restoreWorks: (value: boolean) => (restoreWorks = value),
+      bit: (value: boolean | null) => (bit = value),
+    };
   }
 
   it("disables sleep for a lid session and restores it at the end", async () => {
@@ -183,7 +211,71 @@ describe("AwakeSession with the lid closed", () => {
     expect(t.session.state).toMatchObject({ lid: true, lidStatus: "on" });
     vi.advanceTimersByTime(60 * 60_000);
     await t.session.lidSettled();
-    expect(t.calls).toEqual(["disable", "restore"]);
+    expect(t.calls).toEqual(["disable", `until:${Date.now()}`, "restore"]);
+  });
+
+  it("an early end moves the journal's end to now before restoring", async () => {
+    const t = lidSetup();
+    await t.session.refreshLidRule();
+    t.session.start(60, { lid: true });
+    await t.session.lidSettled();
+    vi.advanceTimersByTime(5 * 60_000);
+    t.session.end();
+    await t.session.lidSettled();
+    expect(t.calls).toEqual(["disable", `until:${Date.now()}`, "restore"]);
+  });
+
+  it("a restore that fails is said, warned once, and retried until it works", async () => {
+    const t = lidSetup();
+    await t.session.refreshLidRule();
+    t.session.start(60, { lid: true });
+    await t.session.lidSettled();
+    t.restoreWorks(false);
+    t.session.end();
+    await t.session.lidSettled();
+    expect(t.session.state).toBeNull();
+    expect(t.session.sleepProblem).toMatch(/could not turn sleep back on.*sudo pmset -a disablesleep 0/);
+    await vi.advanceTimersByTimeAsync(RESTORE_RETRY_MS);
+    await t.session.lidSettled();
+    expect(t.calls.filter((call) => call.startsWith("restore"))).toEqual(["restore-failed", "restore-failed"]);
+    expect(t.warnings).toHaveLength(1);
+    t.restoreWorks(true);
+    await vi.advanceTimersByTimeAsync(RESTORE_RETRY_MS);
+    await t.session.lidSettled();
+    expect(t.session.sleepProblem).toBeNull();
+    await vi.advanceTimersByTimeAsync(RESTORE_RETRY_MS * 3);
+    expect(t.calls.filter((call) => call.startsWith("restore"))).toHaveLength(3);
+  });
+
+  it("sleep turned back on mid-session marks the lid failed and says so", async () => {
+    const t = lidSetup();
+    await t.session.refreshLidRule();
+    t.session.start(60, { lid: true });
+    await t.session.lidSettled();
+    await t.session.verifyLid();
+    expect(t.session.state?.lidStatus).toBe("on");
+    t.bit(null);
+    await t.session.verifyLid();
+    expect(t.session.state?.lidStatus).toBe("on");
+    t.bit(false);
+    await t.session.verifyLid();
+    expect(t.session.state).toMatchObject({
+      lidStatus: "failed",
+      lidProblem: expect.stringMatching(/turned sleep back on/),
+    });
+    expect(t.warnings).toEqual([expect.stringMatching(/turned sleep back on/)]);
+    // Still restored (and the journal cleared) at the end.
+    t.session.end();
+    await t.session.lidSettled();
+    expect(t.calls.at(-1)).toBe("restore");
+  });
+
+  it("sleep disabled by someone else at start is reported once and left alone", async () => {
+    const t = lidSetup({ foreign: true });
+    await t.session.restore();
+    expect(t.session.sleepProblem).toMatch(/not by Squeak.*sudo pmset -a disablesleep 0/);
+    expect(t.warnings).toHaveLength(1);
+    expect(t.calls).toEqual(["recover:false"]);
   });
 
   it("refuses a lid session with no end, or before the rule is installed", async () => {
@@ -221,7 +313,7 @@ describe("AwakeSession with the lid closed", () => {
     await t.session.lidSettled();
     t.session.start(30);
     await t.session.lidSettled();
-    expect(t.calls).toEqual(["disable", "restore"]);
+    expect(t.calls).toEqual(["disable", `until:${Date.now()}`, "restore"]);
     expect(t.session.state).toMatchObject({ lid: false, lidStatus: "off" });
   });
 
@@ -231,7 +323,7 @@ describe("AwakeSession with the lid closed", () => {
     t.session.start(60, { lid: true });
     t.session.start(30);
     await t.session.lidSettled();
-    expect(t.calls).toEqual([]);
+    expect(t.calls).toEqual([`until:${Date.now()}`]);
   });
 
   it("adding time keeps the lid", async () => {
@@ -297,6 +389,7 @@ describe("AwakeSession safety rules", () => {
     const calls: string[] = [];
     const lid = {
       ruleInstalled: vi.fn(async () => options.rule ?? true),
+      sleepDisabled: vi.fn(async () => true),
       disableSleep: vi.fn(async () => undefined),
       restoreSleep: vi.fn(async () => true),
       recover: vi.fn(async () => undefined),
@@ -383,6 +476,34 @@ describe("AwakeSession safety rules", () => {
     session.start(60);
     session.end();
     expect(ends).toMatchObject([{ reason: "battery", why: "Battery at 8%" }, { reason: "ended" }]);
+  });
+
+  it("a battery that cannot be read twice in a row on battery ends the session", async () => {
+    const t = safetySetup();
+    t.session.start(120);
+    await t.session.checkSafety(reading({ percent: 70 }));
+    await t.session.checkSafety(reading({ percent: null }));
+    expect(t.session.active).toBe(true);
+    await t.session.checkSafety(reading({ percent: 69 }));
+    await t.session.checkSafety(reading({ percent: null, onBattery: null }));
+    expect(t.session.active).toBe(true);
+    await t.session.checkSafety(reading({ percent: null, onBattery: null }));
+    expect(t.session.active).toBe(false);
+    expect(t.session.lastEnd).toMatchObject({ reason: "battery", why: expect.stringMatching(/could not be read/) });
+  });
+
+  it("an unreadable battery is no reason on AC or on a Mac without one", async () => {
+    const plugged = safetySetup();
+    plugged.session.start(120);
+    await plugged.session.checkSafety(reading({ percent: 70 }));
+    for (let i = 0; i < 3; i++) await plugged.session.checkSafety(reading({ percent: null, onBattery: false }));
+    expect(plugged.session.active).toBe(true);
+    const desktop = safetySetup();
+    desktop.session.start(120);
+    for (let i = 0; i < 3; i++) {
+      await desktop.session.checkSafety(reading({ percent: null, onBattery: null, hasBattery: false }));
+    }
+    expect(desktop.session.active).toBe(true);
   });
 
   it("plugged in, a low battery is not a reason", async () => {

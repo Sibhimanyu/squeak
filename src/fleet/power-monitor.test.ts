@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { decideSafety, readBattery, readNotifyValue, readPower, readWatts } from "./power-monitor.js";
+import {
+  batteryUnreadable,
+  decideSafety,
+  normalizeThresholds,
+  readBattery,
+  readNotifyValue,
+  readPower,
+  readWatts,
+} from "./power-monitor.js";
 
 describe("readBattery", () => {
   it("reads a laptop on battery and on AC", () => {
@@ -40,7 +48,25 @@ describe("readPower", () => {
       if (args[1] === "com.apple.system.thermalpressurelevel") return "com.apple.system.thermalpressurelevel 1\n";
       return null;
     });
-    expect(reading).toEqual({ onBattery: true, percent: 41, thermal: 1, lowPower: null, watts: null, lidClosed: null });
+    expect(reading).toEqual({
+      onBattery: true,
+      percent: 41,
+      thermal: 1,
+      lowPower: null,
+      watts: null,
+      lidClosed: null,
+      hasBattery: null,
+    });
+  });
+
+  it("knows a laptop by its AppleSmartBattery even when pmset says nothing", async () => {
+    const reading = await readPower(async (command, args) =>
+      command === "/usr/sbin/ioreg" && args[1] === "AppleSmartBattery" ? '"Voltage" = 12000\n' : null,
+    );
+    expect(reading).toMatchObject({ onBattery: null, percent: null, hasBattery: true });
+    expect(batteryUnreadable(reading, true)).toBe(true);
+    expect(batteryUnreadable({ ...reading, onBattery: false }, true)).toBe(false);
+    expect(batteryUnreadable(reading, false)).toBe(false);
   });
 });
 
@@ -60,6 +86,22 @@ describe("decideSafety", () => {
     expect(decideSafety({ ...base, onBattery: false, thermal: 2 })).toMatchObject({ end: null, lowPower: true });
     expect(decideSafety({ ...base, onBattery: false, thermal: 3 })).toMatchObject({ end: "heat" });
     expect(decideSafety({ ...base, onBattery: false, thermal: 4 })).toMatchObject({ end: "heat" });
+  });
+
+  it("keeps the end floor below the Low Power Mode floor", () => {
+    expect(normalizeThresholds({ lowPowerPercent: 10, endPercent: 20 })).toEqual({
+      lowPowerPercent: 21,
+      endPercent: 20,
+    });
+    expect(normalizeThresholds({ lowPowerPercent: 40, endPercent: 10 })).toEqual({
+      lowPowerPercent: 40,
+      endPercent: 10,
+    });
+    // Misordered settings still get Low Power Mode before the end.
+    expect(decideSafety({ ...base, percent: 21 }, { lowPowerPercent: 15, endPercent: 20 })).toMatchObject({
+      end: null,
+      lowPower: true,
+    });
   });
 
   it("an unreadable reading decides nothing", () => {

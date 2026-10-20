@@ -33,8 +33,9 @@ export function backstopScript(journalPath: string, actionsPath: string): string
   return `#!/bin/bash
 # Squeak's awake backstop (src/fleet/awake-backstop.ts). Undoes what Squeak
 # journalled but did not undo: a sleep disable or Low Power Mode when the
-# daemon is not running or the session's end passed two minutes ago; paused
-# apps and muted sound when the daemon is not running. No journal: nothing.
+# daemon is not running or the session's end passed two minutes ago (an
+# unreadable journal: sleep, at once); paused apps and muted sound when the
+# daemon is not running. No journal: nothing.
 JOURNAL=${shellQuote(journalPath)}
 ACTIONS=${shellQuote(actionsPath)}
 SUDO="\${SQUEAK_BACKSTOP_SUDO:-/usr/bin/sudo}"
@@ -44,20 +45,46 @@ OSASCRIPT="\${SQUEAK_BACKSTOP_OSASCRIPT:-/usr/bin/osascript}"
 running=0
 "$LAUNCHCTL" print "gui/$(/usr/bin/id -u)/${DAEMON_LABEL}" 2>/dev/null | /usr/bin/grep -q "state = running" && running=1
 if [ "$running" = 0 ] && [ -f "$ACTIONS" ]; then
-  for pid in $(/usr/bin/plutil -extract frozen json -o - "$ACTIONS" 2>/dev/null | /usr/bin/tr -c '0-9' ' '); do
-    kill -CONT "$pid" 2>/dev/null
-  done
-  if [ "$(/usr/bin/plutil -extract muted raw -o - "$ACTIONS" 2>/dev/null)" = "true" ]; then
-    "$OSASCRIPT" -e "set volume without output muted"
+  act() { /usr/bin/plutil -extract "$1" raw -o - "$ACTIONS" 2>/dev/null; }
+  # A paused app is resumed only in the boot it was paused in, and only
+  # while its start time still matches: a reused pid is someone else's.
+  boot="$(act boot)"
+  if [ -z "$boot" ] || [ "$boot" = "$(/usr/sbin/sysctl -n kern.bootsessionuuid 2>/dev/null)" ]; then
+    i=0
+    while [ "$i" -lt 1000 ]; do
+      pid="$(act "frozen.$i.pid")"
+      started="$(act "frozen.$i.startedAt")"
+      # The first journal held bare pids, with nothing to check them against.
+      [ -n "$pid" ] || { pid="$(act "frozen.$i")" && started=""; } || break
+      case "$pid" in
+        ''|*[!0-9]*) ;;
+        *)
+          if [ -z "$started" ] || [ "$(TZ=UTC /bin/ps -o lstart= -p "$pid" 2>/dev/null | /usr/bin/xargs)" = "$started" ]; then
+            kill -CONT "$pid" 2>/dev/null
+          fi
+          ;;
+      esac
+      i=$((i + 1))
+    done
   fi
-  echo "$(/bin/date -u +%FT%TZ) squeak backstop undid $(/bin/cat "$ACTIONS")" >&2
-  /bin/rm -f "$ACTIONS"
+  undone=1
+  if [ "$(act muted)" = "true" ]; then
+    "$OSASCRIPT" -e "set volume without output muted" || undone=0
+  fi
+  echo "$(/bin/date -u +%FT%TZ) squeak backstop undid $(/bin/cat "$ACTIONS") (ok=$undone)" >&2
+  [ "$undone" = 1 ] && /bin/rm -f "$ACTIONS"
 fi
 [ -f "$JOURNAL" ] || exit 0
 field() { /usr/bin/plutil -extract "$1" raw -o - "$JOURNAL" 2>/dev/null; }
+# lid-sleep.ts writes every field it knows; none readable means a journal
+# that cannot be read, and that must still end in sleep being restored.
+readable=0
+for key in sleepDisabled lowPower disabledSleepAt; do
+  field "$key" >/dev/null && readable=1
+done
 until_ms="$(field until)"
 now_ms="$(( $(/bin/date +%s) * 1000 ))"
-if [ "$running" = 1 ]; then
+if [ "$running" = 1 ] && [ "$readable" = 1 ]; then
   case "$until_ms" in
     ''|*[!0-9]*) exit 0 ;;
   esac
@@ -67,7 +94,7 @@ ok=1
 if [ "$(field lowPower)" = "true" ]; then
   "$SUDO" -n /usr/bin/pmset -b lowpowermode 0 || ok=0
 fi
-if [ "$(field sleepDisabled)" = "true" ] || [ -n "$(field disabledSleepAt)" ]; then
+if [ "$readable" = 0 ] || [ "$(field sleepDisabled)" = "true" ] || [ -n "$(field disabledSleepAt)" ]; then
   "$SUDO" -n /usr/bin/pmset -a disablesleep 0 || ok=0
 fi
 echo "$(/bin/date -u +%FT%TZ) squeak backstop undid $(/bin/cat "$JOURNAL") (ok=$ok)" >&2

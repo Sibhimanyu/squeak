@@ -14,22 +14,29 @@ afterEach(() => {
 
 /** Runs the real script with a fake sudo (records its arguments) and a fake launchctl. */
 function runScript(
-  journal: Record<string, unknown> | null,
+  journal: Record<string, unknown> | string | null,
   daemonRunning: boolean,
   actions: Record<string, unknown> | null = null,
+  fakes: { sudoFails?: boolean; osascriptFails?: boolean } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak backstop '"));
   dirs.push(dir);
   const journalPath = path.join(dir, "lid-journal.json");
-  if (journal) fs.writeFileSync(journalPath, JSON.stringify(journal));
+  if (journal) fs.writeFileSync(journalPath, typeof journal === "string" ? journal : JSON.stringify(journal));
   const actionsPath = path.join(dir, "lid-actions.json");
   if (actions) fs.writeFileSync(actionsPath, JSON.stringify(actions));
   const osascriptLog = path.join(dir, "osascript.log");
   const osascript = path.join(dir, "osascript");
-  fs.writeFileSync(osascript, `#!/bin/bash\necho "$*" >> ${JSON.stringify(osascriptLog)}\n`, { mode: 0o755 });
+  fs.writeFileSync(
+    osascript,
+    `#!/bin/bash\necho "$*" >> ${JSON.stringify(osascriptLog)}\n${fakes.osascriptFails ? "exit 1\n" : ""}`,
+    { mode: 0o755 },
+  );
   const log = path.join(dir, "sudo.log");
   const sudo = path.join(dir, "sudo");
-  fs.writeFileSync(sudo, `#!/bin/bash\necho "$*" >> ${JSON.stringify(log)}\n`, { mode: 0o755 });
+  fs.writeFileSync(sudo, `#!/bin/bash\necho "$*" >> ${JSON.stringify(log)}\n${fakes.sudoFails ? "exit 1\n" : ""}`, {
+    mode: 0o755,
+  });
   const launchctl = path.join(dir, "launchctl");
   fs.writeFileSync(launchctl, `#!/bin/bash\n${daemonRunning ? 'echo "state = running"' : "exit 113"}\n`, {
     mode: 0o755,
@@ -77,6 +84,17 @@ describe("the awake backstop script", { timeout: 30_000 }, () => {
   it("reads the first journal's shape", () => {
     expect(runScript({ disabledSleepAt: 1 }, false).sudo).toEqual(["-n /usr/bin/pmset -a disablesleep 0"]);
   });
+
+  it("an unreadable journal still restores sleep, even beside a running daemon, and stays until that works", () => {
+    for (const running of [true, false]) {
+      const undone = runScript('{"sleepDisab', running);
+      expect(undone.sudo).toEqual(["-n /usr/bin/pmset -a disablesleep 0"]);
+      expect(undone.journalLeft).toBe(false);
+    }
+    const failed = runScript("garbage", false, null, { sudoFails: true });
+    expect(failed.sudo).toEqual(["-n /usr/bin/pmset -a disablesleep 0"]);
+    expect(failed.journalLeft).toBe(true);
+  });
 });
 
 describe("the awake backstop and paused apps", { timeout: 30_000 }, () => {
@@ -93,6 +111,43 @@ describe("the awake backstop and paused apps", { timeout: 30_000 }, () => {
     } finally {
       sleeper.kill("SIGKILL");
     }
+  });
+});
+
+describe("the awake backstop and paused apps' identities", { timeout: 30_000 }, () => {
+  const startedAt = (pid: number) =>
+    execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], { env: { ...process.env, TZ: "UTC" } })
+      .toString()
+      .trim()
+      .split(/\s+/)
+      .join(" ");
+  const boot = () => execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"]).toString().trim();
+
+  it("resumes a paused app only while its start time and boot still match", () => {
+    const sleeper = spawn("/bin/sleep", ["30"]);
+    try {
+      const pid = sleeper.pid!;
+      const entry = { pid, startedAt: startedAt(pid), path: "/bin/sleep" };
+      process.kill(pid, "SIGSTOP");
+      runScript(null, false, { muted: false, boot: "another-boot", frozen: [entry] });
+      expect(processState(pid)).toMatch(/^T/);
+      runScript(null, false, {
+        muted: false,
+        boot: boot(),
+        frozen: [{ ...entry, startedAt: "Thu Jan 1 00:00:00 1970" }],
+      });
+      expect(processState(pid)).toMatch(/^T/);
+      const undone = runScript(null, false, { muted: false, boot: boot(), frozen: [entry] });
+      expect(undone.actionsLeft).toBe(false);
+      expect(processState(pid)).not.toMatch(/^T/);
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+  });
+
+  it("keeps the journal when the unmute fails", () => {
+    const left = runScript(null, false, { muted: true, frozen: [] }, { osascriptFails: true });
+    expect(left).toMatchObject({ actionsLeft: true, osascript: "-e set volume without output muted" });
   });
 });
 

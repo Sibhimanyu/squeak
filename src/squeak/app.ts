@@ -134,6 +134,8 @@ export class SqueakApp {
       lid: new LidSleepGuard({ journalPath: path.join(config.supportDir, "lid-journal.json") }),
       onChange: () => this.remote?.changed(),
       onEnd: (end) => this.announceAwakeEnd(end),
+      // Sleep left disabled (a failed restore, another tool's disable, a bit put back mid-session).
+      onWarning: (text) => this.announce(text),
     });
     this.hotspot = new HotspotFailover({
       settingsPath: path.join(config.supportDir, "hotspot.json"),
@@ -333,6 +335,7 @@ export class SqueakApp {
       lastEnd: this.awake.lastEnd,
       lidActions: this.lidActions.settings,
       lidClosedNow: this.lidActions.active,
+      sleepProblem: this.awake.sleepProblem,
     }));
     const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
       this.claudeLimits.record(limits),
@@ -372,8 +375,10 @@ export class SqueakApp {
     }
     // The user's own switch is honoured even with SQUEAK_CAFFEINATE=off: they asked.
     // Undoes what a previous run left behind (sleep disabled, muted, apps paused) before anything else.
-    await this.lidActions.recover();
+    // The session first, so the lid actions can tell a resumed lid session
+    // with the lid still shut, and keep what they did rather than undo and redo it.
     await this.awake.restore();
+    await this.lidActions.recover();
     await this.hotspot.start().catch((error: unknown) =>
       logger.warn("hotspot failover failed to start", {
         error: error instanceof Error ? error.message : String(error),
