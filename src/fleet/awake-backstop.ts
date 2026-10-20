@@ -45,7 +45,9 @@ OSASCRIPT="\${SQUEAK_BACKSTOP_OSASCRIPT:-/usr/bin/osascript}"
 running=0
 "$LAUNCHCTL" print "gui/$(/usr/bin/id -u)/${DAEMON_LABEL}" 2>/dev/null | /usr/bin/grep -q "state = running" && running=1
 if [ "$running" = 0 ] && [ -f "$ACTIONS" ]; then
-  act() { /usr/bin/plutil -extract "$1" raw -o - "$ACTIONS" 2>/dev/null; }
+  # plutil's "Could not extract value" goes to stdout on some macOS releases
+  # (15), so output counts only when the command succeeded.
+  act() { local out; out="$(/usr/bin/plutil -extract "$1" raw -o - "$ACTIONS" 2>/dev/null)" || return 1; printf '%s\n' "$out"; }
   # A paused app is resumed only in the boot it was paused in, and only
   # while its start time still matches: a reused pid is someone else's.
   boot="$(act boot)"
@@ -75,7 +77,7 @@ if [ "$running" = 0 ] && [ -f "$ACTIONS" ]; then
   [ "$undone" = 1 ] && /bin/rm -f "$ACTIONS"
 fi
 [ -f "$JOURNAL" ] || exit 0
-field() { /usr/bin/plutil -extract "$1" raw -o - "$JOURNAL" 2>/dev/null; }
+field() { local out; out="$(/usr/bin/plutil -extract "$1" raw -o - "$JOURNAL" 2>/dev/null)" || return 1; printf '%s\n' "$out"; }
 # lid-sleep.ts writes every field it knows; none readable means a journal
 # that cannot be read, and that must still end in sleep being restored.
 readable=0

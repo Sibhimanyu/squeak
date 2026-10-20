@@ -17,7 +17,7 @@ function runScript(
   journal: Record<string, unknown> | string | null,
   daemonRunning: boolean,
   actions: Record<string, unknown> | null = null,
-  fakes: { sudoFails?: boolean; osascriptFails?: boolean } = {},
+  fakes: { sudoFails?: boolean; osascriptFails?: boolean; plutilDiagnosticsOnStdout?: boolean } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak backstop '"));
   dirs.push(dir);
@@ -42,7 +42,22 @@ function runScript(
     mode: 0o755,
   });
   const script = path.join(dir, "backstop.sh");
-  fs.writeFileSync(script, backstopScript(journalPath, actionsPath));
+  let text = backstopScript(journalPath, actionsPath);
+  if (fakes.plutilDiagnosticsOnStdout) {
+    // The macOS 15 runner's plutil reported "Could not extract value" on
+    // stdout, not stderr. Same real plutil, with its stderr folded into stdout.
+    const plutil = path.join(dir, "plutil");
+    fs.writeFileSync(
+      plutil,
+      `#!/bin/bash\nout="$(/usr/bin/plutil "$@" 2>&1)"\nrc=$?\nprintf '%s\\n' "$out"\nexit $rc\n`,
+      {
+        mode: 0o755,
+      },
+    );
+    expect(text).toContain("/usr/bin/plutil");
+    text = text.split("/usr/bin/plutil").join(`'${plutil.replace(/'/g, `'\\''`)}'`);
+  }
+  fs.writeFileSync(script, text);
   execFileSync("/bin/bash", [script], {
     env: {
       ...process.env,
@@ -138,6 +153,29 @@ describe("the awake backstop and paused apps' identities", { timeout: 30_000 }, 
       });
       expect(processState(pid)).toMatch(/^T/);
       const undone = runScript(null, false, { muted: false, boot: boot(), frozen: [entry] });
+      expect(undone.actionsLeft).toBe(false);
+      expect(processState(pid)).not.toMatch(/^T/);
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+  });
+
+  it("resumes by identity even when plutil prints its missing-key diagnostics on stdout", () => {
+    const sleeper = spawn("/bin/sleep", ["30"]);
+    try {
+      const pid = sleeper.pid!;
+      const entry = { pid, startedAt: startedAt(pid), path: "/bin/sleep" };
+      process.kill(pid, "SIGSTOP");
+      const fakes = { plutilDiagnosticsOnStdout: true };
+      // A journal with no boot is a legacy one: resumed on the start time alone.
+      runScript(null, false, { muted: false, frozen: [entry] }, fakes);
+      expect(processState(pid)).not.toMatch(/^T/);
+      process.kill(pid, "SIGSTOP");
+      runScript(null, false, { muted: false, boot: "another-boot", frozen: [entry] }, fakes);
+      expect(processState(pid)).toMatch(/^T/);
+      const started = Date.now();
+      const undone = runScript(null, false, { muted: false, boot: boot(), frozen: [entry] }, fakes);
+      expect(Date.now() - started).toBeLessThan(10_000);
       expect(undone.actionsLeft).toBe(false);
       expect(processState(pid)).not.toMatch(/^T/);
     } finally {
