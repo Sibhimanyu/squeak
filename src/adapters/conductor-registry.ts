@@ -557,9 +557,13 @@ export class ConductorRegistryAdapter {
             w.workspace_path as workspacePath,
             r.default_branch as defaultBranch,
             r.name as repositoryName,
-            -- One row per turn end, newest first. Covered by the session_id
-            -- index, so this stays in the tens of milliseconds for the list.
-            (
+            -- The newest turn end. Ordered by sent_at so SQLite walks
+            -- Conductor's (session_id, sent_at) index backwards and stops at
+            -- the first match; ORDER BY rowid sorted every message of every
+            -- chat, 1.4s on a 2.3GB database and past the Mac app's 5s
+            -- timeout in Low Power Mode. Closed chats are retired, so they
+            -- skip it: on a real machine 202 of 233 chats were closed.
+            CASE WHEN IFNULL(s.is_hidden, 0) != 0 THEN NULL ELSE (
               SELECT m.sent_at || '|' || CASE
                 WHEN m.content LIKE '{"type":"error","content":"aborted by user"%' THEN 'aborted'
                 WHEN m.content LIKE '{"type":"error"%' THEN 'failed'
@@ -570,9 +574,9 @@ export class ConductorRegistryAdapter {
               WHERE m.session_id = s.id
                 AND m.role = 'assistant'
                 AND (m.content LIKE '{"type":"result"%' OR m.content LIKE '{"type":"error"%')
-              ORDER BY m.rowid DESC
+              ORDER BY m.sent_at DESC, m.rowid DESC
               LIMIT 1
-            ) as lastTurnEnd,
+            ) END as lastTurnEnd,
             -- Closed chats are returned, flagged, rather than left out: left
             -- out, their transcripts still exist, and the fleet rediscovers
             -- them as anonymous non-Conductor sessions.

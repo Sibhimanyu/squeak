@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConductorRegistryAdapter, conductorTimestampToIso } from "./conductor-registry.js";
 
@@ -853,6 +853,62 @@ describe("ConductorRegistryAdapter", () => {
     const byId = new Map(adapter.listFleetSessions(10).map((session) => [session.id, session]));
     expect(byId.get("open")?.isHidden).toBe(false);
     expect(byId.get("closed")?.isHidden).toBe(true);
+  });
+
+  it("finds a chat's last turn end by walking Conductor's index, not by sorting every message", () => {
+    const { adapter, db } = createRegistryFixture();
+    // Conductor's own index. Sorting by rowid instead sorted every message of
+    // every chat: 1.4s a refresh on a real 2.3GB database, which blocked the
+    // daemon past the Mac app's timeout.
+    db.exec(`CREATE INDEX idx_session_messages_sent_at ON session_messages(session_id, sent_at);`);
+    db.prepare(
+      `INSERT INTO repos (id, name, root_path, default_branch, updated_at, remote, hidden) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("repo-1", "repo", "/repos/repo", "main", "2026-09-22T04:00:00.000Z", "origin", 0);
+    db.prepare(
+      `INSERT INTO workspaces (id, repository_id, directory_name, branch, updated_at, state, derived_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("ws", "repo-1", "ws", "ws", "2026-09-22T04:00:00.000Z", "ready", "in-progress");
+    const insert = db.prepare(
+      `INSERT INTO sessions (id, workspace_id, status, agent_type, updated_at, last_user_message_at, is_hidden) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    );
+    const at = "2026-09-22T04:10:00.000Z";
+    insert.run("open", "ws", "idle", "claude", at, at, 0);
+    insert.run("closed", "ws", "idle", "claude", at, at, 1);
+    const message = db.prepare(
+      `INSERT INTO session_messages (id, session_id, role, content, sent_at) VALUES (?, ?, ?, ?, ?);`,
+    );
+    for (const id of ["open", "closed"]) {
+      message.run(
+        `${id}-0`,
+        id,
+        "assistant",
+        '{"type":"error","content":"API Error: 500"}',
+        "2026-09-22T04:00:00.000Z",
+      );
+      message.run(`${id}-1`, id, "assistant", '{"type":"result","subtype":"success"}', at);
+      message.run(`${id}-2`, id, "assistant", '{"type":"assistant","message":{"content":[]}}', at);
+    }
+
+    const own = (adapter as unknown as { db: InstanceType<typeof Database> }).db;
+    const sqls: string[] = [];
+    const spy = vi.spyOn(own, "prepare").mockImplementation(function (this: unknown, sql: string) {
+      sqls.push(sql);
+      return Database.prototype.prepare.call(own, sql);
+    } as never);
+    const byId = new Map(adapter.listFleetSessions(10).map((session) => [session.id, session]));
+    spy.mockRestore();
+
+    expect(byId.get("open")?.lastTurnEndedAt).toBe(at);
+    expect(byId.get("open")?.lastTurnOutcome).toBe("success");
+    // A closed chat is retired; its turn end is never read.
+    expect(byId.get("closed")?.lastTurnEndedAt).toBeNull();
+
+    const sql = sqls.find((text) => text.includes("lastTurnEnd"));
+    expect(sql).toBeDefined();
+    const plan = (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(10) as Array<{ detail: string }>).map((r) => r.detail);
+    expect(plan).toContain("SEARCH m USING INDEX idx_session_messages_sent_at (session_id=?)");
+    // The one sort left is the outer ORDER BY over chats, not one per chat.
+    expect(plan.filter((detail) => detail.includes("TEMP B-TREE"))).toHaveLength(1);
   });
 
   it("finds the question a working chat is stuck on from its newest rows", () => {
