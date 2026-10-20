@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.10
+
+- Quitting Squeak from the Dock, or with ⌘Tab then Q, while its window is open
+  now closes the window like ⌘Q does, and Squeak keeps running in the menu
+  bar. "Quit Squeak" in the menu-bar panel, ⌥⌘Q, and logging out or shutting
+  down still quit it completely.
+
 ## 2.1.9
 
 - Clicking a notification opens the quick message on exactly that chat, also
