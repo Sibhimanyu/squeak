@@ -121,22 +121,7 @@ final class AppModel {
         started = true
         HotKeyCenter.shared.onFire = { QuickComposerController.shared.toggle() }
         if !captureMode { HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID)) }
-        Notifier.shared.onOpen = { [weak self] key in
-            self?.select(key)
-            self?.showConversationWindow()
-        }
-        Notifier.shared.onReply = { [weak self] key, text in
-            Task { @MainActor in
-                guard let self, let result = await self.send(text, to: key) else { return }
-                switch result {
-                case .accepted: break
-                case .refused(let reason), .notSent(let reason):
-                    Notifier.shared.postNote("Your reply to \(self.notificationName(for: key)) wasn't sent. \(reason)", for: key)
-                case .uncertain(let reason):
-                    Notifier.shared.postNote("Your reply to \(self.notificationName(for: key)) may not have arrived. \(reason)", for: key)
-                }
-            }
-        }
+        Notifier.shared.onOpen = { key in QuickComposerController.shared.show(target: key) }
         observeWindowVisibility()
         AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")
         if demoMode { installDemo(); return }
@@ -551,8 +536,9 @@ final class AppModel {
         }
     }
 
-    /// Takes one fresh Claude reading. Only ever called from the user pressing Refresh: it makes a
-    /// real, tiny Claude call, so it never runs on a timer.
+    /// Takes one fresh Claude reading. Only ever called from the user pressing Refresh: it reads the
+    /// plan's usage from Claude without using any tokens, and may prompt for Keychain access, so it
+    /// never runs on a timer.
     func refreshClaude() async {
         guard !claudeRefreshing else { return }
         claudeRefreshing = true
@@ -569,13 +555,15 @@ final class AppModel {
                 return
             }
             if var u = usage { u.claude = result.claude ?? u.claude; usage = u } else { await readUsage() }
-            if result.throttled {
-                claudeRefreshNote = "Just refreshed. Squeak asks Claude at most once a minute."
+            if let error = result.error {
+                claudeRefreshNote = error
+            } else if result.throttled {
+                claudeRefreshNote = "Just refreshed. Squeak checks Claude's usage at most once a minute."
             } else if !result.refreshed {
-                claudeRefreshNote = result.error ?? "Claude did not report its limits this time."
+                claudeRefreshNote = "Claude did not report its limits this time."
             }
         } catch AdapterError.timedOut {
-            claudeRefreshNote = "Claude took too long to answer."
+            claudeRefreshNote = "Claude took too long to report its usage."
         } catch {
             claudeRefreshNote = "Couldn't reach Squeak to refresh. Check the connection and try again."
         }
@@ -615,12 +603,6 @@ final class AppModel {
         case .notSent: AppLog.info("send not sent")
         }
         return result
-    }
-
-    /// How a follow-up notification names a session: by name only if the user opted in.
-    func notificationName(for key: SessionKey) -> String {
-        guard notificationsShowNames, let s = sessions.first(where: { $0.key == key }) else { return "the session" }
-        return s.label
     }
 
     /// Puts a refused or unsent message back in the composer. Never sends.

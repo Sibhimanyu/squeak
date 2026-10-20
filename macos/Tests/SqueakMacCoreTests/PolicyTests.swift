@@ -105,7 +105,6 @@ struct NotificationTests {
         #expect(n.count == 1)
         #expect(n[0].title == "Squeak")
         #expect(n[0].body == "Fix login finished")
-        #expect(n[0].replyable)
     }
 
     @Test func aQuestionSaysItIsAQuestionAndCarriesIt() {
@@ -116,7 +115,6 @@ struct NotificationTests {
         #expect(n.map(\.kind) == [.question])
         #expect(n[0].body == "Session a is asking you something")
         #expect(n[0].detail == "Which database? (Postgres / SQLite)")
-        #expect(!n[0].replyable) // answered in the window, where the options are
     }
 
     @Test func aPlanAndAnApprovalAreToldApart() {
@@ -139,9 +137,56 @@ struct NotificationTests {
         #expect(NotificationPolicy.detect(previous: [first], current: [second]).map(\.kind) == [.question])
     }
 
-    @Test func aFinishedChatSqueakCannotSendToHasNoReply() {
+    @Test func aFinishedChatSqueakCannotSendToStillNotifies() {
         let prev = [makeSession("a", state: .working, canSend: false)]
         let n = NotificationPolicy.detect(previous: prev, current: [makeSession("a", state: .finished, canSend: false)])
-        #expect(n.map(\.replyable) == [false])
+        #expect(n.map(\.kind) == [.finished]) // the composer it opens says it cannot take a reply
+    }
+
+    private func key(_ id: String) -> SessionKey { makeSession(id, state: .working).key }
+
+    @Test func aClickedNotificationsChatBeatsLastUsedAndNeedsYou() {
+        let target = ComposerRouting.target(explicit: key("n"), lastUsed: key("l"), needsYou: [key("y")], canSend: { _ in true })
+        #expect(target == key("n"))
+    }
+
+    @Test func aStaleNotificationTargetIsKeptNotReplaced() {
+        let target = ComposerRouting.target(explicit: key("gone"), lastUsed: key("l"), needsYou: [key("y")], canSend: { $0 != key("gone") })
+        #expect(target == key("gone"))
+    }
+
+    @Test func withoutAnExplicitTargetLastUsedThenNeedsYou() {
+        #expect(ComposerRouting.target(explicit: nil, lastUsed: key("l"), needsYou: [key("y")], canSend: { _ in true }) == key("l"))
+        let skip = ComposerRouting.target(explicit: nil, lastUsed: key("l"), needsYou: [key("x"), key("y")], canSend: { $0 == key("y") })
+        #expect(skip == key("y"))
+        #expect(ComposerRouting.target(explicit: nil, lastUsed: nil, needsYou: [], canSend: { _ in true }) == nil)
+    }
+
+    @Test func draftsStayWithTheirChat() {
+        var drafts = ComposerDrafts()
+        drafts.stash("for a", for: key("a"))
+        #expect(drafts.text(for: key("a")) == "for a")
+        #expect(drafts.text(for: key("b")).isEmpty)
+        #expect(drafts.text(for: nil).isEmpty)
+        drafts.stash("  \n", for: key("a"))
+        #expect(drafts.text(for: key("a")).isEmpty)
+    }
+
+    @Test func aSentDraftIsForgottenButANewerOneSurvives() {
+        var drafts = ComposerDrafts()
+        drafts.stash("hello", for: key("a"))
+        drafts.sent("hello", to: key("a"))
+        #expect(drafts.text(for: key("a")).isEmpty)
+        drafts.stash("hello again", for: key("a"))
+        drafts.sent("hello", to: key("a"))
+        #expect(drafts.text(for: key("a")) == "hello again")
+    }
+
+    @Test func aNotificationResponseOpensItsChatUnlessDismissedOrMalformed() {
+        let raw = key("a").stringValue
+        #expect(NotificationRouting.sessionToOpen(dismissed: false, session: raw) == key("a"))
+        #expect(NotificationRouting.sessionToOpen(dismissed: true, session: raw) == nil)
+        #expect(NotificationRouting.sessionToOpen(dismissed: false, session: "not a key") == nil)
+        #expect(NotificationRouting.sessionToOpen(dismissed: false, session: nil) == nil)
     }
 }

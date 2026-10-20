@@ -19,11 +19,9 @@ public struct NotificationEvent: Sendable, Hashable {
     public var body: String
     /// The agent's question, for a `.question`. Session content: shown only by opt-in.
     public var detail: String?
-    /// Whether a typed reply can go straight from the notification (a finished chat Squeak can send to).
-    public var replyable: Bool
 
-    public init(key: SessionKey, kind: NotificationKind, title: String, body: String, detail: String? = nil, replyable: Bool = false) {
-        self.key = key; self.kind = kind; self.title = title; self.body = body; self.detail = detail; self.replyable = replyable
+    public init(key: SessionKey, kind: NotificationKind, title: String, body: String, detail: String? = nil) {
+        self.key = key; self.kind = kind; self.title = title; self.body = body; self.detail = detail
     }
 }
 
@@ -48,7 +46,7 @@ public enum NotificationPolicy {
             guard old.state != s.state else { continue }
             switch s.state {
             case .finished where s.key.provider == "conductor":
-                out.append(event(s, .finished, "finished", replyable: s.capabilities.send.isSupported))
+                out.append(event(s, .finished, "finished"))
             case .error:
                 out.append(event(s, .error, "hit an error"))
             default:
@@ -68,8 +66,8 @@ public enum NotificationPolicy {
     }
 
     private static func event(
-        _ s: HostSession, _ kind: NotificationKind, _ phrase: String, detail: String? = nil, replyable: Bool = false
+        _ s: HostSession, _ kind: NotificationKind, _ phrase: String, detail: String? = nil
     ) -> NotificationEvent {
-        NotificationEvent(key: s.key, kind: kind, title: "Squeak", body: "\(s.label) \(phrase)", detail: detail, replyable: replyable)
+        NotificationEvent(key: s.key, kind: kind, title: "Squeak", body: "\(s.label) \(phrase)", detail: detail)
     }
 }

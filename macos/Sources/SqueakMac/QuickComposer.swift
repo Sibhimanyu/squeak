@@ -14,14 +14,30 @@ final class QuickComposerController {
     static let shared = QuickComposerController()
     private var panel: QuickPanel?
     let state = QuickState()
+    private var localMonitor: Any?
+    private var globalMonitor: Any?
+    private var spaceObserver: NSObjectProtocol?
+    private var menuObservers: [NSObjectProtocol] = []
+    private var menuTracking = false
+    /// A click that ends a menu is still on its way when tracking stops; it is not an outside click.
+    private var ignoreClicksUntil = Date.distantPast
 
     func toggle() {
         if let panel, panel.isVisible { hide() } else { show() }
     }
 
-    func show() {
+    /// `target` is explicit (a clicked notification): it wins over the last chat messaged. Without
+    /// one, an open composer keeps its chat and a closed one picks a default.
+    func show(target: SessionKey? = nil) {
         let model = AppModel.shared
-        state.prepare(model: model)
+        if panel?.isVisible == true {
+            if let target, target != state.target {
+                state.stashDraft()
+                state.prepare(model: model, explicit: target)
+            }
+        } else {
+            state.prepare(model: model, explicit: target)
+        }
         if panel == nil {
             let p = QuickPanel(
                 contentRect: NSRect(x: 0, y: 0, width: QuickComposerView.windowWidth, height: 200),
@@ -36,7 +52,9 @@ final class QuickComposerController {
             p.level = .floating
             p.hidesOnDeactivate = false
             p.isReleasedWhenClosed = false
-            p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            // Opens on the desktop you are on (or beside a full-screen app) and stays there: a Space
+            // swipe closes it rather than carrying it along.
+            p.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             p.onEscape = { [weak self] in self?.hide() }
             let host = NSHostingView(rootView: QuickComposerView(close: { [weak self] in self?.hide() }, resize: { [weak self] h in self?.resize(to: h) })
                 .environment(model).environment(state))
@@ -48,9 +66,73 @@ final class QuickComposerController {
         if !panel.isVisible { panel.center() }
         state.focus += 1
         panel.makeKeyAndOrderFront(nil)
+        installDismissObservers()
     }
 
-    func hide() { panel?.orderOut(nil) }
+    /// Only hides: the text is kept for its chat, and nothing is sent or cancelled.
+    func hide() {
+        removeDismissObservers()
+        state.stashDraft()
+        state.epoch += 1
+        panel?.orderOut(nil)
+    }
+
+    // MARK: Dismissal
+
+    /// A nonactivating panel gets no reliable resign-key when you click elsewhere, so a click
+    /// outside is read from mouse monitors (global for other apps, local for this app's own windows)
+    /// and a Space swipe from the workspace. All are removed on every hide and replaced on show.
+    private func installDismissObservers() {
+        removeDismissObservers()
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks) { [weak self] event in
+            MainActor.assumeIsolated { self?.handleLocalClick(in: event.window) }
+            return event // never swallowed: the click still reaches what was clicked
+        }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] _ in
+            MainActor.assumeIsolated { self?.dismissForOutsideClick() }
+        }
+        spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hide() }
+        }
+        // The destination menu is native: while it tracks, clicks belong to it.
+        let nc = NotificationCenter.default
+        menuObservers = [
+            nc.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.menuTracking = true }
+            },
+            nc.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.menuTracking = false
+                    self?.ignoreClicksUntil = Date().addingTimeInterval(0.3)
+                }
+            },
+        ]
+    }
+
+    private func removeDismissObservers() {
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
+        menuObservers.forEach(NotificationCenter.default.removeObserver)
+        localMonitor = nil; globalMonitor = nil; spaceObserver = nil; menuObservers = []
+        menuTracking = false
+    }
+
+    private func handleLocalClick(in window: NSWindow?) {
+        if let window {
+            // The pill, its sheets, and menu windows (which float above everything) are not outside.
+            if window === panel || window.parent === panel || window.level.rawValue >= NSWindow.Level.popUpMenu.rawValue { return }
+        }
+        dismissForOutsideClick()
+    }
+
+    private func dismissForOutsideClick() {
+        guard panel?.isVisible == true, !menuTracking, Date() >= ignoreClicksUntil else { return }
+        hide()
+    }
 
     /// Grows downward: the top edge stays where the user sees it.
     private func resize(to height: CGFloat) {
@@ -68,18 +150,41 @@ final class QuickState {
     var text = ""
     var focus = 0
     var result: SendResult?
-    var sending = false
+    /// Chats with a send still in flight. Outlives a hide, so a reopened composer cannot send the same text twice.
+    private(set) var inFlight: Set<SessionKey> = []
+    /// Bumped on every show and hide: a send that finishes under an older one must not touch this composer.
+    var epoch = 0
+    private var drafts = ComposerDrafts()
 
-    func prepare(model: AppModel) {
-        text = ""
+    var sending: Bool { target.map(inFlight.contains) ?? false }
+
+    /// Opens on `explicit` (a clicked notification) if given, even when that chat can no longer be
+    /// sent to: Send is then disabled rather than aimed at another chat. Each chat has its own draft.
+    func prepare(model: AppModel, explicit: SessionKey? = nil) {
+        epoch += 1
         result = nil
-        sending = false
-        if let last = model.lastUsed, let s = model.session(last), model.canSend(s) {
-            target = last
-        } else {
-            // Only a default: the chip names it, and nothing is sent until ⌘↩.
-            target = model.grouped.first { $0.kind == .needsYou }?.sessions.first { model.canSend($0) }?.key
-        }
+        // Only a default: the chip names it, and nothing is sent until ⌘↩.
+        target = ComposerRouting.target(
+            explicit: explicit, lastUsed: model.lastUsed,
+            needsYou: model.grouped.first { $0.kind == .needsYou }?.sessions.map(\.key) ?? [],
+            canSend: { key in model.session(key).map(model.canSend) ?? false })
+        text = drafts.text(for: target)
+    }
+
+    func stashDraft() { drafts.stash(text, for: target) }
+
+    func beginSend(to key: SessionKey) { inFlight.insert(key); result = nil }
+
+    /// Settles a send. Only a composer still on the same show (`epoch`) and chat takes the outcome;
+    /// a hidden or reopened one is left as it is, and an accepted draft is just forgotten.
+    func endSend(of sent: String, to key: SessionKey, epoch started: Int, result r: SendResult?) -> Bool {
+        inFlight.remove(key)
+        let accepted: Bool = if case .accepted? = r { true } else { false }
+        if accepted { drafts.sent(sent, to: key) }
+        guard started == epoch else { return false }
+        result = r
+        if accepted, target == key, text == sent { text = "" }
+        return accepted
     }
 }
 
@@ -139,7 +244,7 @@ struct QuickComposerView: View {
             } else {
                 ComposerField(
                     text: $state.text, sendKey: .commandReturnSends,
-                    placeholder: target.map { "Message \($0.label)…" } ?? "Choose who to message, then type",
+                    placeholder: target.map { "Message \($0.label)…" } ?? missingTargetPrompt,
                     isEnabled: !state.sending, focusToken: state.focus, onSend: { send(.queue) }, onEscape: close,
                     onContentHeight: { fieldHeight = $0 }, fontSize: 16,
                     onOptionReturn: target?.state == .working ? { send(.steer) } : nil
@@ -271,7 +376,13 @@ struct QuickComposerView: View {
     }
 
     private var destinationTitle: String {
-        target?.label ?? "Choose a session"
+        target?.label ?? (state.target == nil ? "Choose a session" : "Unavailable chat")
+    }
+
+    /// A clicked notification's chat that is gone or cannot take a reply is said so, never swapped for another.
+    private var missingTargetPrompt: String {
+        guard state.target != nil else { return "Choose who to message, then type" }
+        return model.hasLoaded ? "That chat can't take a reply. Choose another to message." : "Loading your sessions…"
     }
 
     @ViewBuilder private var status: some View {
@@ -290,16 +401,15 @@ struct QuickComposerView: View {
     private func send(_ mode: SendMode) {
         guard canSend, let key = state.target else { return }
         let text = state.text
-        state.sending = true
-        state.result = nil
+        let epoch = state.epoch
+        let mode: SendMode = target?.state == .working ? mode : .queue
+        state.beginSend(to: key)
         Task {
-            let r = await model.send(text, to: key, mode: target?.state == .working ? mode : .queue)
-            state.sending = false
-            state.result = r
-            if case .accepted = r {
-                state.text = ""
+            let r = await model.send(text, to: key, mode: mode)
+            if state.endSend(of: text, to: key, epoch: epoch, result: r) {
                 try? await Task.sleep(for: .milliseconds(900))
-                close()
+                // Closes only the composer this send was made from, not one reopened since.
+                if state.epoch == epoch { close() }
             }
             // refused, not sent or unconfirmed: keep the text so nothing is lost
         }
