@@ -102,7 +102,7 @@ struct UsageSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            SectionLabel("Usage")
+            MenuHeading("Usage")
             provider("Claude", reading: model.usage?.claude, long: "7 days", notSeen: "Not seen yet. Press Refresh to read it.") {
                 ClaudeRefreshButton()
             }
@@ -113,7 +113,7 @@ struct UsageSection: View {
                 EmptyView()
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, PopoverMetrics.inset)
         .padding(.vertical, Space.m)
         .task { await model.pollUsage() }
     }
@@ -263,7 +263,7 @@ struct AwakeRow: View {
                 Text(note).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, PopoverMetrics.inset)
         .padding(.vertical, Space.m)
         .accessibilityElement(children: .contain)
     }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.7
+
+- A compact menu-bar panel in the style of macOS system menus, with grouped
+  sections, inset dividers, and full-width actions for messages, chats and settings.
+- The panel fits the display it opens on and keeps its actions reachable on
+  smaller screens. New chat is available with ⌘N from the panel.
+
 ## 2.1.6
 
 - Keep Mac awake with the lid closed, from the menu bar: "Set up lid-closed…"

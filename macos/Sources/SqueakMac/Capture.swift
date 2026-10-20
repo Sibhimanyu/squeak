@@ -11,6 +11,7 @@ enum CaptureRunner {
     static func run(prefix: String, model: AppModel) async {
         let env = ProcessInfo.processInfo.environment
         if let a = env["SQUEAK_MAC_APPEARANCE"] { NSApp.appearance = NSAppearance(named: a == "light" ? .aqua : .darkAqua) }
+        if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "popover" { await runPopoverOnly(prefix: prefix, model: model); return }
         if model.demoMode { await runAskDemo(prefix: prefix, model: model) }
         if model.demoMode { await runWindowDemo(prefix: prefix, model: model) }
         if model.demoMode { await runDemo(prefix: prefix, model: model); return }
@@ -33,8 +34,8 @@ enum CaptureRunner {
         try? await Task.sleep(for: .seconds(1))
         write(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window.png")
 
-        let pop = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 360, height: 520), styleMask: [.borderless], backing: .buffered, defer: false)
-        pop.contentView = NSHostingView(rootView: PopoverView().environment(model))
+        let pop = NSWindow(contentRect: NSRect(x: 200, y: 200, width: PopoverView.width, height: 520), styleMask: [.borderless], backing: .buffered, defer: false)
+        pop.contentView = NSHostingView(rootView: PopoverView(drawsOwnSurface: true).environment(model))
         pop.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(700))
         write(pop.contentView, to: "\(prefix)-popover.png")
@@ -62,22 +63,44 @@ enum CaptureRunner {
         NSApp.terminate(nil)
     }
 
+    /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=popover: just the menu-bar panel, dark and light, from
+    /// DemoData with no network. Writes <prefix>-popover-dark.png, -light.png and -short.png (a 440pt-tall screen).
+    /// Offscreen capture cannot draw the window material, so the panel sits on a stand-in desktop.
+    private static func runPopoverOnly(prefix: String, model: AppModel) async {
+        try? await Task.sleep(for: .milliseconds(600))
+        for (name, appearance, screen) in [("dark", NSAppearance.Name.darkAqua, CGFloat?.none), ("light", .aqua, nil), ("short", .darkAqua, 440)] {
+            let backdrop: Color = name != "light" ? Color(red: 0.10, green: 0.10, blue: 0.12) : Color(red: 0.86, green: 0.87, blue: 0.90)
+            let host = NSHostingView(rootView: PopoverView(drawsOwnSurface: true, screenHeightOverride: screen).environment(model).padding(16).background(backdrop))
+            host.appearance = NSAppearance(named: appearance)
+            let win = NSWindow(contentRect: NSRect(x: 200, y: 200, width: PopoverView.width + 32, height: 700), styleMask: [.borderless], backing: .buffered, defer: false)
+            win.contentView = host
+            win.makeKeyAndOrderFront(nil)
+            for _ in 0..<3 {
+                try? await Task.sleep(for: .milliseconds(500))
+                win.setContentSize(NSSize(width: PopoverView.width + 32, height: host.fittingSize.height))
+            }
+            write(host, to: "\(prefix)-popover-\(name).png")
+            win.orderOut(nil)
+        }
+        NSApp.terminate(nil)
+    }
+
     /// SQUEAK_MAC_DEMO=1: popover, quick composer and Settings › Connections from DemoData, no network.
     /// Writes <prefix>-popover.png, <prefix>-composer.png, <prefix>-settings-connections.png.
     private static func runDemo(prefix: String, model: AppModel) async {
         try? await Task.sleep(for: .milliseconds(600))
         let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
 
-        let pop = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 360, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
-        let popHost = NSHostingView(rootView: PopoverView().environment(model))
+        let pop = NSWindow(contentRect: NSRect(x: 200, y: 200, width: PopoverView.width, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        let popHost = NSHostingView(rootView: PopoverView(drawsOwnSurface: true).environment(model))
         pop.contentView = popHost
         pop.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(700))
         var h = popHost.fittingSize.height
-        pop.setContentSize(NSSize(width: 360, height: h))
+        pop.setContentSize(NSSize(width: PopoverView.width, height: h))
         try? await Task.sleep(for: .milliseconds(500))
         h = popHost.fittingSize.height
-        pop.setContentSize(NSSize(width: 360, height: h))
+        pop.setContentSize(NSSize(width: PopoverView.width, height: h))
         try? await Task.sleep(for: .milliseconds(500))
         write(pop.contentView, to: "\(prefix)-popover.png")
         pop.orderOut(nil)
