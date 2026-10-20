@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.4
+
+- Quick message (⌘K) is a glass pill: type on top; the chat, its state, repo
+  and agent under it, with a round Send. A soft warm light glows from under it
+  and breathes while your message sends. ⌥↩ steers a working agent.
+
 ## 2.1.3
 
 - The awake session shows on the Mac: what is left beside the duck in the menu
