@@ -74,6 +74,10 @@ final class AppModel {
     /// Bumped by every view applied from the stream, so a slower full read
     /// that started before it cannot put an older view back on screen.
     @ObservationIgnored private var snapshotEpoch = 0
+    /// The Mac's view as written, and the recent document a split one leaves out. `snapshot` is these
+    /// merged, with the open chat's state from its live turn when that is newer (`rebuild`).
+    @ObservationIgnored private var baseSnapshot: PhoneSnapshot?
+    @ObservationIgnored private var recentDoc: PhoneRecent?
     @ObservationIgnored private let pathMonitor = NWPathMonitor()
     @ObservationIgnored private var lastPath: (satisfied: Bool, interfaces: [NWInterface.InterfaceType])?
     /// How many recent chats Home has asked for; "Show more" adds 20, up to the Mac's 50.
@@ -190,6 +194,8 @@ final class AppModel {
         KeyStore.delete(account: "approved")
         channel = nil
         snapshot = nil
+        baseSnapshot = nil
+        recentDoc = nil
         macAliveAt = nil
         phase = .unpaired
         loop?.cancel()
@@ -253,6 +259,10 @@ final class AppModel {
             if streamDownSince == nil { streamDownSince = Date() }
         case .snapshot(let next):
             apply(next)
+        case .recent(let recent):
+            guard !PhoneSnapshot.isStale(recent?.seq, than: recentDoc?.seq) else { return }
+            recentDoc = recent
+            rebuild()
         case .alive(let alive):
             if let alive { heard(alive) }
         case .needsRead:
@@ -291,6 +301,7 @@ final class AppModel {
         // A turn kept from an earlier visit is out of date by the time the chat is opened again.
         if let previous = watching { liveTurns[previous] = nil }
         watching = key
+        rebuild()
         restartLive()
     }
 
@@ -311,7 +322,12 @@ final class AppModel {
             self?.liveAvailable = true
             for await turn in turns {
                 if Task.isCancelled { break }
-                if self?.liveTurns[key] != turn { self?.liveTurns[key] = turn; self?.noteQueue(turn, for: key) }
+                guard let self, !PhoneSnapshot.isStale(turn?.seq, than: self.liveTurns[key]?.seq) else { continue }
+                if self.liveTurns[key] != turn {
+                    self.liveTurns[key] = turn
+                    self.noteQueue(turn, for: key)
+                    self.rebuild()
+                }
             }
         }
     }
@@ -341,11 +357,20 @@ final class AppModel {
     private func apply(_ next: PhoneSnapshot?) {
         guard phase == .paired else { return }
         snapshotEpoch += 1
-        // An unchanged view must not redraw every screen.
-        if let next, next != snapshot { snapshot = next }
+        if let next, !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) {
+            baseSnapshot = next
+            rebuild()
+        }
         lastFetch = Date()
         streamDownSince = nil
         problem = nil
+    }
+
+    /// The view on screen from its parts. An unchanged view must not redraw every screen.
+    private func rebuild() {
+        guard let base = baseSnapshot else { return }
+        let view = base.merged(with: recentDoc).reconciled(with: watching.flatMap { liveTurns[$0] })
+        if view != snapshot { snapshot = view }
     }
 
     /// Streamed: keep presence inside the Mac's window. No re-read: a quiet
@@ -396,8 +421,10 @@ final class AppModel {
                 lastPresence = Date()
             }
             let epoch = snapshotEpoch
-            if let next = try await channel.snapshot(), next != snapshot, epoch == snapshotEpoch {
-                snapshot = next
+            if let next = try await channel.snapshot(), epoch == snapshotEpoch {
+                if next.split == true, let recent = try await channel.recent() { recentDoc = recent }
+                if !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) { baseSnapshot = next }
+                rebuild()
             }
             // Best effort: an older Mac never answers, and that must not read as a broken channel.
             if let alive = try? await channel.alive() { heard(alive) }

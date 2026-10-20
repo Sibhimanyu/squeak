@@ -114,11 +114,13 @@ function fixture(
     hotspot?: RemoteBridgeDependencies["hotspot"];
     /** The chat's latest message, as the replier reads it. */
     lastText?: string;
+    /** A store that streams, like the Realtime Database. */
+    streaming?: boolean;
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
   dirs.push(dir);
-  const store = new MemoryStore();
+  const store = options.streaming ? new WatchingStore() : new MemoryStore();
   const sends: Array<{ sessionId: string; text: string }> = [];
   let now = NOW;
   const replier = {
@@ -1382,8 +1384,10 @@ describe("RemoteBridge verbose view (live turn)", () => {
     const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
     const channel = `channels/${payload.c}`;
     const phone = device();
-    const presence = (watching?: string) =>
-      store.set(`${channel}/state/presence`, { box: seal(payload.k, { at: now, ...(watching ? { watching } : {}) }) });
+    const presence = (watching?: string, caps?: string[]) =>
+      store.set(`${channel}/state/presence`, {
+        box: seal(payload.k, { at: now, ...(watching ? { watching } : {}), ...(caps ? { caps } : {}) }),
+      });
     const liveDocs = () => [...store.docs.keys()].filter((key) => key.startsWith(`${channel}/live/`));
     const pair = async () => {
       await store.set(`${channel}/pairing/iphone-1`, {
@@ -1484,6 +1488,55 @@ describe("RemoteBridge verbose view (live turn)", () => {
     await t.bridge.tick();
     await settle();
     expect(t.liveDocs()).toEqual([]);
+    t.bridge.stop();
+  });
+
+  it("for a phone that reads it apart: history in its own document, the turn with its state, turn and seq", async () => {
+    const transcript = vi.fn(() => ({
+      messages: [{ id: "a", role: "user" as const, text: "Fix it", at: null, turnId: "t1" }],
+    }));
+    const t = verbose({ transcript });
+    await t.pair();
+    await t.presence("claude-transcript:s1", ["z", "split"]);
+    await t.bridge.tick();
+    await settle();
+    const docs = t.liveDocs();
+    expect(docs).toHaveLength(2);
+    const turnPath = docs.find((d) => !d.endsWith("-h"))!;
+    const turn = open<Record<string, unknown>>(t.payload.k, t.store.docs.get(turnPath)!.box);
+    expect(turn).toMatchObject({ split: true, state: "working", key: "claude-transcript:s1" });
+    expect(turn).not.toHaveProperty("history");
+    expect(typeof turn.seq).toBe("number");
+    const history = open<Record<string, unknown>>(t.payload.k, t.store.docs.get(`${turnPath}-h`)!.box);
+    expect(history).toMatchObject({ key: "claude-transcript:s1", history: [{ role: "user", text: "Fix it" }] });
+
+    // A new step rewrites the turn, not the unchanged history.
+    const sets = vi.spyOn(t.store, "set");
+    t.liveActivity.mockReturnValueOnce({ total: 2, steps: [{ kind: "thinking", text: "more", at: null }] });
+    await new Promise((resolve) => setTimeout(resolve, 1_050));
+    expect(sets.mock.calls.map(([p]) => p.endsWith("-h"))).not.toContain(true);
+    expect(sets.mock.calls.some(([p]) => p === turnPath)).toBe(true);
+
+    // Leaving deletes both.
+    await t.presence(undefined, ["z", "split"]);
+    await t.bridge.tick();
+    await settle();
+    expect(t.liveDocs()).toEqual([]);
+    t.bridge.stop();
+  });
+
+  it("keeps history inline for a phone that does not say it reads it apart", async () => {
+    const transcript = vi.fn(() => ({
+      messages: [{ id: "a", role: "user" as const, text: "Hi", at: null, turnId: "t" }],
+    }));
+    const t = verbose({ transcript });
+    await t.pair();
+    await t.presence("claude-transcript:s1");
+    await t.bridge.tick();
+    await settle();
+    const [doc] = t.liveDocs();
+    expect(t.liveDocs()).toHaveLength(1);
+    expect(open<Record<string, unknown>>(t.payload.k, t.store.docs.get(doc!)!.box)).toHaveProperty("history");
     t.bridge.stop();
   });
 
@@ -1977,5 +2030,93 @@ describe("RemoteBridge channel upkeep", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("RemoteBridge formats for the phone in front of it", () => {
+  const presence = (f: ReturnType<typeof fixture>, caps?: string[]) =>
+    f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, ...(caps ? { caps } : {}) }) });
+  const read = (f: ReturnType<typeof fixture>, doc: string) =>
+    open<Record<string, unknown>>(f.payload.k, f.store.docs.get(`${f.channel}/state/${doc}`)!.box);
+
+  it("writes one whole view, with a seq, for a phone that names no capabilities", async () => {
+    const f = fixture({ streaming: true });
+    await f.pair();
+    await presence(f);
+    await f.bridge.tick();
+    const view = read(f, "snapshot");
+    expect(view).toHaveProperty("recent");
+    expect(view).not.toHaveProperty("split");
+    expect(typeof view.seq).toBe("number");
+    expect(f.store.docs.has(`${f.channel}/state/recent`)).toBe(false);
+  });
+
+  it("splits the recent list off and compresses both for a phone that reads them", async () => {
+    const f = fixture({ streaming: true });
+    await f.pair();
+    f.emit([session()]);
+    await presence(f, ["z", "split"]);
+    await f.bridge.tick();
+    const view = read(f, "snapshot");
+    expect(view.split).toBe(true);
+    expect(view).not.toHaveProperty("recent");
+    expect(view).not.toHaveProperty("workspaces");
+    const recent = read(f, "recent");
+    expect(recent).toHaveProperty("recent");
+    expect((recent.seq as number) <= (view.seq as number)).toBe(true);
+    // Compressed: the plaintext starts with the zero byte, which no JSON does.
+    const raw = Buffer.from(f.store.docs.get(`${f.channel}/state/snapshot`)!.box, "base64");
+    const key = Buffer.from(f.payload.k, "base64");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, raw.subarray(0, 12));
+    decipher.setAuthTag(raw.subarray(raw.length - 16));
+    const plain = Buffer.concat([decipher.update(raw.subarray(12, raw.length - 16)), decipher.final()]);
+    expect(plain[0]).toBe(0);
+  });
+
+  it("rewrites the recent document only when the list changes", async () => {
+    const f = fixture({ streaming: true });
+    await f.pair();
+    await presence(f, ["z", "split"]);
+    await f.bridge.tick();
+    const before = f.store.docs.get(`${f.channel}/state/recent`)!.box;
+    f.emit([session({ state: "working", detail: "Run tests" })]);
+    f.advance(5_000);
+    await f.bridge.tick();
+    expect(read(f, "snapshot").sessions).toMatchObject([{ state: "working" }]);
+    expect(f.store.docs.get(`${f.channel}/state/recent`)!.box).toBe(before);
+  });
+
+  it("goes back to the whole view when an older phone is in front", async () => {
+    const f = fixture({ streaming: true });
+    await f.pair();
+    await presence(f, ["z", "split"]);
+    await f.bridge.tick();
+    f.advance(5_000);
+    await f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW + 5_000 }) });
+    await f.bridge.tick();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(read(f, "snapshot")).toHaveProperty("recent");
+    expect(read(f, "snapshot")).not.toHaveProperty("split");
+  });
+
+  it("ignores capabilities on Firestore, whose rules have no recent document", async () => {
+    const f = fixture();
+    await f.pair();
+    await presence(f, ["z", "split"]);
+    await f.bridge.tick();
+    expect(read(f, "snapshot")).toHaveProperty("recent");
+    expect(f.store.docs.has(`${f.channel}/state/recent`)).toBe(false);
+  });
+
+  it("numbers every write higher than the last", async () => {
+    const f = fixture({ streaming: true });
+    await f.pair();
+    await f.bridge.tick();
+    const first = read(f, "snapshot").seq as number;
+    f.emit([session({ state: "working" })]);
+    f.advance(61_000); // past the idle publish interval
+    await f.bridge.tick();
+    expect(read(f, "snapshot").sessions).toMatchObject([{ state: "working" }]);
+    expect(read(f, "snapshot").seq as number).toBeGreaterThan(first);
   });
 });

@@ -385,3 +385,27 @@ documents spanning 22 hours because nothing deleted them.
   republish the view within 3 s instead of waiting for the next ping.
 - Settings › Connection details shows each stream: up or not, last heard,
   drops, bytes.
+
+## Smaller and in order (2026-10-20)
+
+- **The phone says what it reads.** Its sealed presence carries `caps`
+  (`["z", "split"]` from 1.7.17). The Mac writes the new formats only for the
+  phone in front of it, only on the Realtime Database, and goes back to the
+  original whole, uncompressed documents the moment a presence without them
+  arrives, so an older phone keeps working.
+- **`z`: compressed.** The box's plaintext is a zero byte then raw DEFLATE of
+  the JSON (`seal(key, value, { compress: true })`; Swift inflates with
+  `NSData.decompressed(using: .zlib)`). JSON never starts with a zero byte.
+- **`split`: the rarely-changing parts apart.** `state/snapshot` leaves out
+  `recent`, `recentMore` and `workspaces` and says `split: true`; they are in
+  `state/recent` (`{ v, seq, recent, recentMore, workspaces? }`), written first
+  and only when they change. A live turn's `history` moves to
+  `live/<handle>-h` (`{ v, key, seq, history }`), written only when it
+  changes; the turn says `split: true`. Both are deleted when the phone
+  leaves. On the live channel this took a view update from 19 KB to 2.4 KB.
+- **`seq` on every write** (snapshot, recent, live turn, history): one
+  counter, never below the Mac's clock. The phone drops a document numbered
+  below the one it shows, unless the gap is over 10 s (a Mac restarted with
+  its clock behind). The live turn also carries the session's `state` and
+  `turnId`; for the chat on screen, the newer of the view and the live turn
+  says what it is doing.

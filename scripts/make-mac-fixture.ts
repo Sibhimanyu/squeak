@@ -129,6 +129,8 @@ const bridge = new RemoteBridge({
 const pairingURL = bridge.startPairing().url;
 const key = JSON.parse(Buffer.from(new URL(pairingURL).searchParams.get("d")!, "base64url").toString()).k as string;
 const view = bridge.phoneView();
+const parts = bridge.phoneViewParts();
+const z = { compress: true };
 // Pairing starts the bridge's poll; a fixture has nothing to poll.
 bridge.stop();
 
@@ -151,6 +153,34 @@ fs.writeFileSync(
       startedBox: seal(key, { id: "c6", status: "sent", sessionId: "new-1" }),
       refusedBox: seal(key, { id: "c2", status: "refused", reason: "That chat has moved on." }),
       pairAnswerBox: seal(key, { approved: true, mac: "Test Mac" }),
+      // For a phone whose presence says caps ["z", "split"]: compressed, the recent list apart.
+      splitSnapshotBox: seal(key, { ...parts.snapshot, seq: 1790305200002 }, z),
+      recentBox: seal(key, { ...parts.recent, seq: 1790305200001 }, z),
+      liveBox: seal(
+        key,
+        {
+          v: 1,
+          key: "claude-transcript:s2",
+          working: true,
+          state: "working",
+          turnId: "turn-2",
+          total: 2,
+          steps: [{ kind: "note", text: "Clearing the old tick first.", at: null }],
+          split: true,
+          seq: 1790305200003,
+        },
+        z,
+      ),
+      liveHistoryBox: seal(
+        key,
+        {
+          v: 1,
+          key: "claude-transcript:s2",
+          seq: 1790305200004,
+          history: [{ role: "user", text: "Fix the timer", at: null }],
+        },
+        z,
+      ),
     },
     null,
     2,

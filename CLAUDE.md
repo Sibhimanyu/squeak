@@ -367,7 +367,11 @@ test for anything you fix is expected; the suite is fast.
   fixture with `npx tsx scripts/make-mac-fixture.ts`, from a real
   `RemoteBridge.phoneView()`), then run both test suites and
   `npx tsx scripts/e2e-remote.ts`. New fields are optional on the phone, so a
-  phone updated before its Mac keeps decoding.
+  phone updated before its Mac keeps decoding. The e2e runs the prebuilt
+  `.build/release/squeak-e2e`: run `swift build -c release --product
+  squeak-e2e` first, or it tests yesterday's phone. A format an older phone
+  cannot read (compression, the split recent list) is written only for a
+  phone whose presence `caps` names it.
 - **The phone gets less of a working turn than the Mac window**: the newest
   six steps, each clipped to 200 characters, no timestamps, and only while
   the session works — what leaves the Mac is only what the phone renders.

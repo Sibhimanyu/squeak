@@ -59,7 +59,7 @@ public struct Channel: Sendable {
     /// ignored), with the stream's health. Nil when the channel can only be
     /// polled (Firestore).
     public func stateEvents() async -> AsyncStream<StateEvent>? {
-        guard let events = await store.events(in: "channels/\(pairing.c)/state", documents: ["snapshot", "alive"]) else { return nil }
+        guard let events = await store.events(in: "channels/\(pairing.c)/state", documents: ["snapshot", "alive", "recent"]) else { return nil }
         let key = pairing.k
         return AsyncStream { continuation in
             let task = Task {
@@ -72,6 +72,12 @@ public struct Channel: Sendable {
                         // Undecodable is never the end of the stream: the full read says why, and the next view still arrives.
                         if let view = try? document.map({ try ChannelCrypto.open(PhoneSnapshot.self, box: $0.box, key: key) }) {
                             continuation.yield(.snapshot(view))
+                        } else {
+                            continuation.yield(.needsRead)
+                        }
+                    case .document("recent", .value(let document)):
+                        if let recent = try? document.map({ try ChannelCrypto.open(PhoneRecent.self, box: $0.box, key: key) }) {
+                            continuation.yield(.recent(recent))
                         } else {
                             continuation.yield(.needsRead)
                         }
@@ -135,26 +141,56 @@ public struct Channel: Sendable {
         }
     }
 
-    /// A session's live turn as it is written, decoded from the stream; nil on Firestore.
+    /// A session's live turn as it is written, decoded from the stream; nil on Firestore. A Mac
+    /// that writes its history apart (`split`) has it folded back in, so the caller sees one turn.
+    /// Both documents come over one stream on the `live` collection.
     public func liveTurns(for sessionKey: String) async -> AsyncStream<LiveTurn?>? {
-        guard let documents = await store.documents(path("live", LiveTurn.handle(for: sessionKey))) else { return nil }
+        let handle = LiveTurn.handle(for: sessionKey), historyHandle = LiveTurn.handle(for: sessionKey) + "-h"
+        guard let events = await store.events(in: "channels/\(pairing.c)/live", documents: [handle, historyHandle]) else { return nil }
         let key = pairing.k
         return AsyncStream { continuation in
             let task = Task {
-                for await change in documents {
-                    let turn: LiveTurn?
-                    switch change {
-                    case .value(let document):
-                        turn = document.flatMap { try? ChannelCrypto.open(LiveTurn.self, box: $0.box, key: key) }
-                    case .refetch:
-                        turn = try? await self.liveTurn(for: sessionKey)
+                var turn: LiveTurn?
+                var history: LiveHistory?
+                for await event in events {
+                    guard case .document(let name, let change) = event else { continue }
+                    if name == handle {
+                        switch change {
+                        case .value(let document): turn = document.flatMap { try? ChannelCrypto.open(LiveTurn.self, box: $0.box, key: key) }
+                        case .refetch: turn = try? await self.liveTurnOnly(handle)
+                        }
+                        turn = turn?.key == sessionKey ? turn : nil
+                    } else {
+                        switch change {
+                        case .value(let document): history = document.flatMap { try? ChannelCrypto.open(LiveHistory.self, box: $0.box, key: key) }
+                        case .refetch: history = try? await self.liveHistory(historyHandle)
+                        }
+                        history = history?.key == sessionKey ? history : nil
                     }
-                    continuation.yield(turn?.key == sessionKey ? turn : nil)
+                    var shown = turn
+                    if shown?.split == true { shown?.history = history?.history }
+                    continuation.yield(shown)
                 }
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    private func liveTurnOnly(_ handle: String) async throws -> LiveTurn? {
+        guard let document = try await store.get(path("live", handle)) else { return nil }
+        return try ChannelCrypto.open(LiveTurn.self, box: document.box, key: pairing.k)
+    }
+
+    private func liveHistory(_ handle: String) async throws -> LiveHistory? {
+        guard let document = try await store.get(path("live", handle)) else { return nil }
+        return try ChannelCrypto.open(LiveHistory.self, box: document.box, key: pairing.k)
+    }
+
+    /// The recent document a split view leaves out (`PhoneSnapshot.split`).
+    public func recent() async throws -> PhoneRecent? {
+        guard let document = try await store.get(path("state", "recent")) else { return nil }
+        return try ChannelCrypto.open(PhoneRecent.self, box: document.box, key: pairing.k)
     }
 
     public func snapshot() async throws -> PhoneSnapshot? {
@@ -166,7 +202,8 @@ public struct Channel: Sendable {
     /// `watching` names the session open on screen, only in verbose mode;
     /// the Mac then publishes its whole turn (`liveTurn`) until it is nil.
     public func touchPresence(watching: String? = nil, recent: Int? = nil, now: Date = Date()) async throws {
-        let presence = Presence(at: Int64(now.timeIntervalSince1970 * 1000), watching: watching, recent: recent)
+        let presence = Presence(at: Int64(now.timeIntervalSince1970 * 1000), watching: watching, recent: recent,
+                                caps: ChannelCrypto.capabilities)
         let box = try ChannelCrypto.seal(presence, key: pairing.k)
         try await store.set(path("state", "presence"), ChannelDocument(box: box))
     }
@@ -441,6 +478,8 @@ public enum StateEvent: Equatable, Sendable {
     /// The server was heard from: any event, keep-alives included.
     case heard
     case snapshot(PhoneSnapshot?)
+    /// The recent list and workspaces a split view leaves out.
+    case recent(PhoneRecent?)
     case alive(MacAlive?)
     /// A change the event did not carry whole, or could not be opened: read it.
     case needsRead

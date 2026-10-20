@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import zlib from "node:zlib";
 
 /**
  * The remote channel's cryptography. See docs/remote-channel.md.
@@ -33,12 +34,21 @@ export function generateChannel(): ChannelSecret {
   };
 }
 
-/** Encrypt a JSON value into a CryptoKit-compatible combined box. */
-export function seal(keyBase64: string, value: unknown): string {
+/**
+ * A compressed box's plaintext starts with this byte, then raw DEFLATE of the
+ * JSON. JSON never starts with a zero byte, so the two cannot be confused.
+ * Only for a phone that said it reads them (its presence `caps` has "z").
+ */
+const COMPRESSED = 0x00;
+
+/** Encrypt a JSON value into a CryptoKit-compatible combined box, compressed first when asked. */
+export function seal(keyBase64: string, value: unknown, options: { compress?: boolean } = {}): string {
   const key = Buffer.from(keyBase64, "base64");
   const nonce = crypto.randomBytes(NONCE_BYTES);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, nonce);
-  const body = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
+  const json = Buffer.from(JSON.stringify(value), "utf8");
+  const plain = options.compress ? Buffer.concat([Buffer.from([COMPRESSED]), zlib.deflateRawSync(json)]) : json;
+  const body = Buffer.concat([cipher.update(plain), cipher.final()]);
   return Buffer.concat([nonce, body, cipher.getAuthTag()]).toString("base64");
 }
 
@@ -55,7 +65,8 @@ export function open<T = unknown>(keyBase64: string, box: string): T {
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, nonce);
   decipher.setAuthTag(tag);
   const plain = Buffer.concat([decipher.update(body), decipher.final()]);
-  return JSON.parse(plain.toString("utf8")) as T;
+  const json = plain[0] === COMPRESSED ? zlib.inflateRawSync(plain.subarray(1)) : plain;
+  return JSON.parse(json.toString("utf8")) as T;
 }
 
 /**

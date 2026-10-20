@@ -16,6 +16,13 @@ public struct LiveTurn: Codable, Equatable, Sendable {
     public let v: Int
     public let key: String
     public let working: Bool
+    /// The session's state and current turn as the Mac saw them, and `seq` from the snapshot's
+    /// counter: whichever of the two is newer says what the open chat is doing. Older Macs omit them.
+    public var state: String? = nil
+    public var turnId: String? = nil
+    public var seq: Int64? = nil
+    /// True when the history is in its own document (`LiveHistory`) rather than here.
+    public var split: Bool? = nil
     /// How many steps the turn has had; `steps` holds the newest of them.
     public let total: Int
     public let steps: [Step]
@@ -63,6 +70,14 @@ public struct LiveTurn: Codable, Equatable, Sendable {
     }
 }
 
+/// A live turn's history on its own (`live/<handle>-h`), written only when it changes.
+public struct LiveHistory: Codable, Equatable, Sendable {
+    public let v: Int
+    public let key: String
+    public var seq: Int64? = nil
+    public let history: [LiveTurn.HistoryEntry]
+}
+
 /// What the phone's presence ping says, sealed: when it was last on screen
 /// and, in verbose mode, which session it is watching.
 public struct Presence: Codable, Equatable, Sendable {
@@ -71,9 +86,11 @@ public struct Presence: Codable, Equatable, Sendable {
     public let watching: String?
     /// How many recent chats to send, after "Show more"; absent means the Mac's default (10).
     public let recent: Int?
+    /// What this phone can read (`ChannelCrypto.capabilities`); an older Mac ignores it.
+    public var caps: [String]? = nil
 
-    public init(at: Int64, watching: String? = nil, recent: Int? = nil) {
-        self.at = at; self.watching = watching; self.recent = recent
+    public init(at: Int64, watching: String? = nil, recent: Int? = nil, caps: [String]? = nil) {
+        self.at = at; self.watching = watching; self.recent = recent; self.caps = caps
     }
 }
 

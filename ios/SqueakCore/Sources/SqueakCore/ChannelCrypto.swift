@@ -24,7 +24,21 @@ public enum ChannelCrypto {
         guard let raw = Data(base64Encoded: box) else { throw Failure.badBox }
         let sealed = try AES.GCM.SealedBox(combined: raw)
         let plain = try AES.GCM.open(sealed, using: SymmetricKey(data: keyData))
-        return try JSONDecoder().decode(type, from: plain)
+        return try JSONDecoder().decode(type, from: try json(plain))
+    }
+
+    /// What this phone tells the Mac it can read (its presence `caps`): compressed boxes ("z"), and the
+    /// recent list and a live turn's history in documents of their own ("split").
+    public static let capabilities = ["z", "split"]
+
+    /// A box's plaintext: JSON, or a zero byte and raw DEFLATE of the JSON (remote-crypto.ts `seal`).
+    static func json(_ plain: Data) throws -> Data {
+        guard plain.first == 0 else { return plain }
+        do {
+            return try (plain.dropFirst() as NSData).decompressed(using: .zlib) as Data
+        } catch {
+            throw Failure.badBox
+        }
     }
 
     /// Mirrors `pairingCode` on the Mac: six digits from SHA-256 of the key.

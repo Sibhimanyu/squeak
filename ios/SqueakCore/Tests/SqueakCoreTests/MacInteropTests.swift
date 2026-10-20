@@ -16,6 +16,69 @@ final class MacInteropTests: XCTestCase {
         let startedBox: String
         let refusedBox: String
         let pairAnswerBox: String
+        let splitSnapshotBox: String
+        let recentBox: String
+        let liveBox: String
+        let liveHistoryBox: String
+    }
+
+    /// What a Mac writes for a phone that says it reads compressed, split documents.
+    func testDecodesTheMacsCompressedSplitViewAndFoldsTheRecentListBackIn() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let split = try ChannelCrypto.open(PhoneSnapshot.self, box: f.splitSnapshotBox, key: key)
+        XCTAssertEqual(split.split, true)
+        XCTAssertNil(split.workspaces)
+        XCTAssertEqual(split.seq, 1790305200002)
+        XCTAssertEqual(split.sessions.first?.choices?.recommended, "A")
+        let recent = try ChannelCrypto.open(PhoneRecent.self, box: f.recentBox, key: key)
+        let whole = try ChannelCrypto.open(PhoneSnapshot.self, box: f.snapshotBox, key: key)
+        let merged = split.merged(with: recent)
+        XCTAssertEqual(merged.workspaces, whole.workspaces)
+        XCTAssertEqual(merged.recent, whole.recent)
+        XCTAssertEqual(merged.recentMore, whole.recentMore)
+        // Before its recent document arrives, a split view simply has none.
+        XCTAssertNil(split.merged(with: nil).workspaces)
+    }
+
+    func testDecodesTheMacsLiveTurnAndItsHistoryApart() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let turn = try ChannelCrypto.open(LiveTurn.self, box: f.liveBox, key: key)
+        XCTAssertEqual(turn.split, true)
+        XCTAssertNil(turn.history)
+        XCTAssertEqual(turn.state, "working")
+        XCTAssertEqual(turn.turnId, "turn-2")
+        let history = try ChannelCrypto.open(LiveHistory.self, box: f.liveHistoryBox, key: key)
+        XCTAssertEqual(history.history.first?.text, "Fix the timer")
+    }
+
+    func testTheNewerOfTheViewAndTheLiveTurnSaysWhatTheOpenChatIsDoing() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let view = try ChannelCrypto.open(PhoneSnapshot.self, box: f.splitSnapshotBox, key: key)
+        var turn = LiveTurn(key: "claude-transcript:s2", working: false, total: 0, steps: [])
+        turn.state = "finished"; turn.turnId = "turn-3"
+        turn.seq = (view.seq ?? 0) + 1
+        let newer = view.reconciled(with: turn)
+        XCTAssertEqual(newer.session("claude-transcript:s2")?.state, "finished")
+        XCTAssertEqual(newer.session("claude-transcript:s2")?.turnId, "turn-3")
+        turn.seq = (view.seq ?? 0) - 1
+        XCTAssertEqual(view.reconciled(with: turn), view)
+    }
+
+    func testOnlyARecentReorderingIsStale() {
+        XCTAssertTrue(PhoneSnapshot.isStale(1_000, than: 1_500))
+        XCTAssertFalse(PhoneSnapshot.isStale(1_500, than: 1_000))
+        XCTAssertFalse(PhoneSnapshot.isStale(1_000, than: 1_000))
+        XCTAssertFalse(PhoneSnapshot.isStale(nil, than: 1_000)) // an older Mac numbers nothing
+        XCTAssertFalse(PhoneSnapshot.isStale(1_000, than: 60_000)) // a Mac restarted with its clock behind
+    }
+
+    func testPresenceSaysWhatThisPhoneReads() throws {
+        let key = Data(repeating: 7, count: 32).base64EncodedString()
+        let box = try ChannelCrypto.seal(Presence(at: 1, caps: ChannelCrypto.capabilities), key: key)
+        XCTAssertEqual(try ChannelCrypto.open(Presence.self, box: box, key: key).caps, ["z", "split"])
     }
 
     func fixture() throws -> Fixture {

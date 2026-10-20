@@ -29,7 +29,7 @@ import type { QuestionPrompt } from "../fleet/pending-question.js";
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
 import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
 import type { ChannelDoc } from "./firestore-rest.js";
-import { condenseHistory, LIVE_STEP_CHARS, LIVE_STEPS, LiveTurnPublisher } from "./live-turn.js";
+import { condenseHistory, LIVE_STEP_CHARS, LIVE_STEPS, liveHistoryHandle, LiveTurnPublisher } from "./live-turn.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
 
 /**
@@ -456,6 +456,13 @@ export class RemoteBridge {
   private readonly live: LiveTurnPublisher | null;
   private lastSignature: string | null = null;
   private lastStepsSignature: string | null = null;
+  /** What the phone in front of this Mac said it can read (its presence `caps`). */
+  private phoneCaps: string[] = [];
+  /** The counter every published document carries as `seq`, so a phone keeps only the newest. */
+  private seq = 0;
+  private lastRecentPublished = "";
+  /** A history document may exist, so clearing the live turn deletes it too. */
+  private historyWritten = false;
   private changeTimer: NodeJS.Timeout | null = null;
   private changeDueAt = 0;
 
@@ -470,9 +477,28 @@ export class RemoteBridge {
       ? new LiveTurnPublisher({
           read: (key) => {
             const session = this.deps.snapshot().active.find((candidate) => candidate.key === key);
-            return session
-              ? { activity: liveActivity(session, LIVE_STEPS, LIVE_STEP_CHARS), working: session.state === "working" }
-              : null;
+            if (!session) {
+              return null;
+            }
+            const conductorSessionId = session.conductorSessionId;
+            return {
+              activity: liveActivity(session, LIVE_STEPS, LIVE_STEP_CHARS),
+              working: session.state === "working",
+              state: session.state,
+              turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
+            };
+          },
+          split: () => this.format().split,
+          seq: () => this.nextSeq(),
+          writeHistory: async (handle, history) => {
+            const config = this.config;
+            if (config) {
+              this.historyWritten = true;
+              await this.deps.store.set(this.channel(config, "live", liveHistoryHandle(handle)), {
+                box: this.sealForPhone(config, history),
+                at: this.now(),
+              });
+            }
           },
           history: deps.replier.transcript
             ? (key) => {
@@ -493,7 +519,7 @@ export class RemoteBridge {
             const config = this.config;
             if (config) {
               await this.deps.store.set(this.channel(config, "live", handle), {
-                box: seal(config.key, turn),
+                box: this.sealForPhone(config, turn),
                 at: this.now(),
               });
             }
@@ -502,6 +528,9 @@ export class RemoteBridge {
             const config = this.config;
             if (config) {
               await this.deps.store.delete(this.channel(config, "live", handle));
+              if (this.historyWritten) {
+                await this.deps.store.delete(this.channel(config, "live", liveHistoryHandle(handle)));
+              }
             }
           },
         })
@@ -836,7 +865,7 @@ export class RemoteBridge {
       return;
     }
     try {
-      const presence = open<{ at: number; watching?: unknown; recent?: unknown }>(config.key, doc.box);
+      const presence = open<{ at: number; watching?: unknown; recent?: unknown; caps?: unknown }>(config.key, doc.box);
       // Timed by when this Mac saw a new ping, not by the phone's clock: a
       // phone a minute behind would otherwise never count as open. The first
       // read after a start may be an old ping, so that one keeps the phone's
@@ -854,6 +883,15 @@ export class RemoteBridge {
           : PHONE_RECENT_LIMIT;
       if (wanted !== this.recentWanted) {
         this.recentWanted = wanted;
+        this.nudgePublish(0);
+      }
+      const caps = Array.isArray(presence.caps)
+        ? presence.caps.filter((cap): cap is string => typeof cap === "string" && cap.length <= 20).slice(0, 10)
+        : [];
+      if (caps.join(",") !== this.phoneCaps.join(",")) {
+        // A phone that reads more (or an older one that reads less) is in front now: write everything again in its format.
+        this.phoneCaps = caps;
+        this.live?.invalidate();
         this.nudgePublish(0);
       }
       await this.answerPresence(config, presence.at);
@@ -1503,13 +1541,12 @@ export class RemoteBridge {
 
   private async publishView(config: RemoteConfig): Promise<void> {
     const view = this.phoneView();
+    const format = this.format();
     // Readings' ages are drawn on the phone from observedAt, so an unchanged
     // reading must not republish the snapshot just because it was re-read.
-    const serialized =
+    const core =
       JSON.stringify(view.sessions) +
-      JSON.stringify(view.recent) +
       JSON.stringify(view.duck) +
-      JSON.stringify(view.workspaces) +
       JSON.stringify(view.keepAwake) +
       JSON.stringify(view.awakeUntil) +
       JSON.stringify(view.awakeLid) +
@@ -1518,18 +1555,73 @@ export class RemoteBridge {
       JSON.stringify(view.macPower) +
       JSON.stringify(view.hotspot) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
+    const { recent, recentMore, workspaces, ...rest } = view;
+    const lists = JSON.stringify([recent, recentMore, workspaces ?? null]);
+    const kind = `${format.split ? "split" : "whole"}|${format.compress ? "z" : "plain"}|`;
+    const serialized = kind + core + (format.split ? "" : lists);
+    if (format.split) {
+      // The recent list and the workspaces change rarely and are most of the
+      // view's size, so a phone that reads them apart gets them only when
+      // they change. Written first, so the view never names a list not there.
+      if (kind + lists !== this.lastRecentPublished) {
+        const doc = { v: 1, recent, recentMore, ...(workspaces ? { workspaces } : {}), seq: this.nextSeq() };
+        const box = this.sealForPhone(config, doc);
+        await this.deps.store.set(this.channel(config, "state", "recent"), { box, at: this.now() });
+        logger.debug("remote recent published", { bytes: box.length });
+        this.lastRecentPublished = kind + lists;
+      }
+    } else {
+      this.lastRecentPublished = "";
+    }
     if (serialized === this.lastPublished) {
       return;
     }
-    const box = seal(config.key, view);
+    const doc = format.split ? { ...rest, split: true, seq: this.nextSeq() } : { ...view, seq: this.nextSeq() };
+    const box = this.sealForPhone(config, doc);
     await this.deps.store.set(this.channel(config, "state", "snapshot"), { box, at: this.now() });
     logger.debug("remote snapshot published", {
       bytes: box.length,
+      split: format.split,
+      compressed: format.compress,
       sinceLastMs: this.lastPublishedAt ? this.now() - this.lastPublishedAt : null,
       phoneOpen: this.phoneOpen(),
     });
     this.lastPublished = serialized;
     this.lastPublishedAt = this.now();
+  }
+
+  /**
+   * How to write for the phone in front of this Mac: compressed ("z") and
+   * with the recent list and the live turn's history apart ("split"), each
+   * only when its presence says it reads them, and only on the Realtime
+   * Database (Firestore's rules have no `recent`). Anything else, or an older
+   * phone, gets the original format.
+   */
+  private format(): { compress: boolean; split: boolean } {
+    const streaming = Boolean(this.deps.store.watch);
+    return {
+      compress: streaming && this.phoneCaps.includes("z"),
+      split: streaming && this.phoneCaps.includes("split"),
+    };
+  }
+
+  private sealForPhone(config: RemoteConfig, value: unknown): string {
+    return seal(config.key, value, { compress: this.format().compress });
+  }
+
+  /** Increasing across restarts too: never below the clock. */
+  private nextSeq(): number {
+    this.seq = Math.max(this.seq + 1, this.now());
+    return this.seq;
+  }
+
+  /** The phone's view in the split format: the snapshot and the recent document, each as published. */
+  phoneViewParts() {
+    const { recent, recentMore, workspaces, ...rest } = this.phoneView();
+    return {
+      snapshot: { ...rest, split: true as const },
+      recent: { v: 1 as const, recent, recentMore, ...(workspaces ? { workspaces } : {}) },
+    };
   }
 
   phoneView() {

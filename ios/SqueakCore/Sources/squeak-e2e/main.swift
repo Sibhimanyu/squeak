@@ -74,6 +74,16 @@ print("phone: steer round trip \(Int(Date().timeIntervalSince(steerAt) * 1000)) 
 print("phone: mac says \(steered.status) delivery=\(steered.delivery ?? "-")")
 
 // A new chat: the Mac lists workspaces in the snapshot, the phone signs a start, the Mac's (fake) relay answers.
+// This phone's presence says it reads compressed, split documents; a streaming Mac then writes them.
+if await channel.streams {
+    let split = try await poll("split view") { try await channel.snapshot().flatMap { $0.split == true ? $0 : nil } }
+    let recent = try await poll("recent document") { try await channel.recent() }
+    let merged = split.merged(with: recent)
+    guard merged.workspaces == snapshot.workspaces, merged.sessions.count == snapshot.sessions.count else {
+        print("phone: split view does not match the whole one"); exit(1)
+    }
+    print("phone: split view seq=\(split.seq ?? 0), recent seq=\(recent.seq ?? 0), merged matches the whole view")
+}
 guard let workspace = snapshot.workspaces?.first else { print("phone: no workspaces in the snapshot"); exit(1) }
 print("phone: workspaces \(snapshot.workspaces!.map(\.label))")
 let (startId, startDocument) = try channel.startDocument(workspaceId: workspace.id, agent: workspace.agent, text: "Add a timer", signer: signer)

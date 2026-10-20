@@ -43,6 +43,17 @@ export interface LiveTurn {
   v: 1;
   key: string;
   working: boolean;
+  /**
+   * The session's state and current turn as the Mac saw them when this was
+   * written, and `seq` from the same counter as the snapshot's: the phone
+   * lets whichever of the two is newer say what the open chat is doing.
+   * Optional: older phones ignore them.
+   */
+  state?: string;
+  turnId?: string | null;
+  seq?: number;
+  /** History is in its own document (`<handle>-h`), written only when it changes. */
+  split?: boolean;
   /** How many steps the turn has had; `steps` is the newest LIVE_STEPS of them. */
   total: number;
   steps: Array<{ kind: string; text: string; at: string | null }>;
@@ -60,6 +71,14 @@ export interface LiveTurn {
    * list. `[]` means the queue is empty.
    */
   queue?: QueueItem[];
+}
+
+/** The live turn's history on its own, for a phone that reads it apart (`split`). */
+export interface LiveHistory {
+  v: 1;
+  key: string;
+  seq?: number;
+  history: HistoryEntry[];
 }
 
 export interface HistoryEntry {
@@ -97,13 +116,27 @@ export function condenseHistory(
 
 export interface LiveTurnDependencies {
   /** The session's current turn, read with whole steps; null when it is gone. */
-  read: (sessionKey: string) => { activity: Activity | null; working: boolean } | null;
+  read: (
+    sessionKey: string,
+  ) => { activity: Activity | null; working: boolean; state?: string; turnId?: string | null } | null;
   /** The chat's condensed history; null when it cannot be read. */
   history?: ((sessionKey: string) => HistoryEntry[] | null) | null;
   write: (handle: string, turn: LiveTurn) => Promise<void>;
+  /** Writes the history document (`liveHistoryHandle`); needed for `split`. */
+  writeHistory?: ((handle: string, history: LiveHistory) => Promise<void>) | null;
+  /** Clears whatever was written for this handle: the turn and, if any, its history. */
   clear: (handle: string) => Promise<void>;
+  /** Whether the phone reads history apart (split). Absent: inline, as before. */
+  split?: (() => boolean) | null;
+  /** The next number from the counter the snapshot uses. */
+  seq?: (() => number) | null;
   /** The chat's Conductor queue; null when it cannot be read. */
   queue?: ((sessionKey: string) => Promise<QueueItem[] | null>) | null;
+}
+
+/** The history document's id beside the turn's. */
+export function liveHistoryHandle(handle: string): string {
+  return `${handle}-h`;
 }
 
 /** A session key as a document id: fixed length, no `:` or `/`, and not the key itself. */
@@ -116,6 +149,7 @@ export class LiveTurnPublisher {
   private watched: string | null = null;
   private timer: NodeJS.Timeout | null = null;
   private last = "";
+  private lastHistory = "";
   private running = false;
 
   constructor(deps: LiveTurnDependencies) {
@@ -129,7 +163,7 @@ export class LiveTurnPublisher {
     }
     const previous = this.watched;
     this.watched = sessionKey;
-    this.last = "";
+    this.invalidate();
     if (previous) {
       void this.deps.clear(liveHandle(previous)).catch((error: unknown) => {
         logger.warn("live turn clear failed", { error: error instanceof Error ? error.message : String(error) });
@@ -148,6 +182,12 @@ export class LiveTurnPublisher {
 
   stop(): void {
     this.watch(null);
+  }
+
+  /** Write the next look in full: the phone's format changed. */
+  invalidate(): void {
+    this.last = "";
+    this.lastHistory = "";
   }
 
   /** One look at the watched session; writes only what changed. Never throws. */
@@ -173,6 +213,8 @@ export class LiveTurnPublisher {
         v: 1,
         key,
         working: read?.working ?? false,
+        ...(read?.state ? { state: read.state } : {}),
+        ...(read?.turnId !== undefined ? { turnId: read.turnId } : {}),
         total: activity?.total ?? 0,
         steps: (activity?.steps ?? []).slice(-LIVE_STEPS).map((step) => ({
           kind: step.kind,
@@ -181,8 +223,21 @@ export class LiveTurnPublisher {
         })),
       };
       const history = this.readHistory(key);
-      if (history) {
+      const split = Boolean(this.deps.split?.() && this.deps.writeHistory);
+      if (history && !split) {
         turn.history = history;
+      }
+      if (split) {
+        turn.split = true;
+        // History changes once a turn; the turn every second. Apart, a step does not resend it.
+        const serializedHistory = JSON.stringify(history ?? []);
+        if (history && serializedHistory !== this.lastHistory) {
+          const doc: LiveHistory = { v: 1, key, history };
+          const seq = this.deps.seq?.();
+          if (seq !== undefined) doc.seq = seq;
+          await this.deps.writeHistory!(liveHandle(key), doc);
+          this.lastHistory = serializedHistory;
+        }
       }
       const queue = await this.readQueue(key);
       if (queue) {
@@ -197,7 +252,8 @@ export class LiveTurnPublisher {
       if (serialized === this.last) {
         return;
       }
-      await this.deps.write(liveHandle(key), turn);
+      const seq = this.deps.seq?.();
+      await this.deps.write(liveHandle(key), seq === undefined ? turn : { ...turn, seq });
       // A watch that moved on while this was writing must not leave this behind.
       if (this.watched === key) {
         this.last = serialized;

@@ -74,12 +74,12 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// The chat's own title, when the Mac sends it (optional: an older Mac does not).
         public let title: String?
         public let agent: String
-        public let state: String
+        public var state: String
         public let lastActivityAt: String
         public let detail: String?
         public let git: String?
         public let contextPercent: Double?
-        public let turnId: String?
+        public var turnId: String?
         public let message: String?
         public let choices: Choices?
         /// Only while working, and only from a Mac new enough to send it.
@@ -174,13 +174,13 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// Optional: a Mac older than the usage view does not send it.
     public let usage: Usage?
     /// Optional: a Mac older than new chats does not send it, and the phone then hides "New chat".
-    public let workspaces: [Workspace]?
-    public let sessions: [Session]
+    public var workspaces: [Workspace]?
+    public var sessions: [Session]
     /// Conductor chats that are no longer active, newest first, to pick up
     /// again. Optional: a Mac older than this does not send it.
-    public let recent: [Session]?
+    public var recent: [Session]?
     /// Whether the Mac has more recent chats than it sent ("Show more"). Optional: older Macs omit it.
-    public let recentMore: Bool?
+    public var recentMore: Bool?
     /// Whether the Mac's awake session runs. Optional: a Mac without sessions omits it, and the phone hides them.
     public let keepAwake: Bool?
     /// When a timed awake session ends (ISO); absent for one that runs until ended, and from older Macs.
@@ -197,6 +197,11 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public let macPower: MacPower?
     /// Hotspot failover (src/fleet/hotspot.ts). Optional: older Macs omit it, and the phone hides it.
     public var hotspot: Hotspot? = nil
+    /// The Mac's write counter (shared with the live turn): a view older than the one on screen is
+    /// dropped. Optional: older Macs omit it.
+    public var seq: Int64? = nil
+    /// True when `recent`, `recentMore` and `workspaces` are in the recent document (`PhoneRecent`).
+    public var split: Bool? = nil
 
     public struct Hotspot: Codable, Equatable, Sendable {
         public struct Event: Codable, Equatable, Sendable {
@@ -263,6 +268,47 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         ("Error", ["error"]),
         ("Idle", ["idle"]),
     ]
+}
+
+/// The parts of the view that change rarely, in their own document for a phone that reads it
+/// apart: the recent chats and the workspaces a new chat can start in.
+public struct PhoneRecent: Codable, Equatable, Sendable {
+    public let v: Int
+    public var seq: Int64? = nil
+    public let recent: [PhoneSnapshot.Session]?
+    public let recentMore: Bool?
+    /// Absent when the Mac cannot start chats.
+    public let workspaces: [PhoneSnapshot.Workspace]?
+}
+
+extension PhoneSnapshot {
+    /// The view as the phone shows it: a split view with its recent document folded in.
+    public func merged(with recent: PhoneRecent?) -> PhoneSnapshot {
+        guard split == true else { return self }
+        var view = self
+        view.recent = recent?.recent
+        view.recentMore = recent?.recentMore
+        view.workspaces = recent?.workspaces
+        return view
+    }
+
+    /// The open chat as its live turn says, when that was written after this view.
+    public func reconciled(with live: LiveTurn?) -> PhoneSnapshot {
+        guard let live, let state = live.state, let liveSeq = live.seq, let seq, liveSeq > seq else { return self }
+        var view = self
+        if let i = view.sessions.firstIndex(where: { $0.key == live.key }) {
+            view.sessions[i].state = state
+            view.sessions[i].turnId = live.turnId ?? view.sessions[i].turnId
+        }
+        return view
+    }
+
+    /// Whether a write numbered `new` is older than `current` and should be dropped. A gap of more
+    /// than ten seconds is a Mac that restarted with its clock behind, not a reordering: taken.
+    public static func isStale(_ new: Int64?, than current: Int64?) -> Bool {
+        guard let new, let current else { return false }
+        return new < current && current - new < 10_000
+    }
 }
 
 /// How a message meets an agent that is mid-turn. Queue waits for the turn to end; steer goes into it.

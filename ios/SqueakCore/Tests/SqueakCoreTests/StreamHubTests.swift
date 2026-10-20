@@ -104,4 +104,30 @@ final class StreamHubTests: XCTestCase {
         XCTAssertFalse(Channel.streamSession === URLSession.shared)
         XCTAssertGreaterThanOrEqual(Channel.streamSession.configuration.httpMaximumConnectionsPerHost, 6)
     }
+
+    func testALiveTurnGetsItsHistoryFromItsOwnDocument() async throws {
+        let sessionKey = "claude-transcript:s2"
+        let handle = LiveTurn.handle(for: sessionKey)
+        var turn = LiveTurn(key: sessionKey, working: true, total: 1, steps: [.init(kind: "note", text: "n")])
+        turn.split = true
+        let turnBox = try ChannelCrypto.seal(turn, key: key)
+        let historyBox = try ChannelCrypto.seal(
+            LiveHistory(v: 1, key: sessionKey, history: [.init(role: "user", text: "Fix it")]), key: key)
+        let lines = HeldLines([
+            "event: put", line("/", [handle: ["box": turnBox]]),
+            "event: put", line("/\(handle)-h", ["box": historyBox]),
+        ])
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: key, n: "Mac", r: db)
+        let channel = Channel(pairing: pairing, deviceId: "d", transport: FakeTransport(), streams: lines)
+        var seen: [LiveTurn?] = []
+        let turns = await channel.liveTurns(for: sessionKey)
+        for await next in try XCTUnwrap(turns) {
+            seen.append(next)
+            if next?.history != nil { break }
+        }
+        XCTAssertNil(seen.first??.history) // the turn shows before its history arrives
+        XCTAssertEqual(seen.last??.history?.first?.text, "Fix it")
+        XCTAssertEqual(seen.last??.steps.first?.text, "n")
+        XCTAssertEqual(lines.requests, 1) // both documents over one stream
+    }
 }

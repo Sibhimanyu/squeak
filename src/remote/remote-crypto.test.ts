@@ -55,6 +55,15 @@ describe("remote crypto, round trip", () => {
     expect(() => open(generateChannel().key, box)).toThrow();
   });
 
+  it("compresses when asked, and opens both kinds", () => {
+    const { key } = generateChannel();
+    const value = { text: "x".repeat(5_000), n: 1 };
+    const small = seal(key, value, { compress: true });
+    expect(small.length).toBeLessThan(seal(key, value).length / 10);
+    expect(open(key, small)).toEqual(value);
+    expect(open(key, seal(key, value))).toEqual(value);
+  });
+
   it("uses a fresh nonce every time", () => {
     const { key } = generateChannel();
     expect(seal(key, { a: 1 })).not.toBe(seal(key, { a: 1 }));
