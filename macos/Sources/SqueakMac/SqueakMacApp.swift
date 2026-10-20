@@ -59,6 +59,8 @@ struct MenuBarLabel: View {
             model.openConversationWindow = { openWindow(id: "conversation") }
             model.openSettingsWindow = { openSettings() }
         }
+        // The awake countdown beside the duck, kept current from launch.
+        .task { await model.pollAwake() }
     }
 }
 

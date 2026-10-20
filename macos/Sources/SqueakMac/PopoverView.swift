@@ -24,6 +24,10 @@ struct PopoverView: View {
             Hairline()
             content
             Hairline()
+            if model.awakeOffered {
+                AwakeRow()
+                Hairline()
+            }
             UsageSection()
             Hairline()
             footer

@@ -459,6 +459,38 @@ final class AppModel {
 
     func recheck() { Task { await broker.refresh() } }
 
+    // MARK: Awake
+
+    /// The Mac's awake session as the daemon last said; nil when none runs.
+    private(set) var awake: DaemonAwake?
+    private(set) var awakeOffered = false
+    private(set) var hotspot: DaemonHotspot?
+    /// Why the last change to it did not happen, in plain words.
+    private(set) var awakeNote: String?
+
+    /// Reads the awake session (and the hotspot) for the menu bar, every 20 seconds for as long as
+    /// the app runs: the countdown beside the duck must not wait for the popover to open.
+    func pollAwake() async {
+        while !Task.isCancelled {
+            await readAwake()
+            try? await Task.sleep(for: .seconds(20))
+        }
+    }
+
+    func readAwake() async {
+        if demoMode { awakeOffered = true; return }
+        guard let state = try? await client.state() else { return }
+        if state.awake != awake { awake = state.awake }
+        if state.awakeOffered != awakeOffered { awakeOffered = state.awakeOffered }
+        if state.hotspot != hotspot { hotspot = state.hotspot }
+    }
+
+    /// "start" (minutes nil: until ended), "extend" or "end".
+    func changeAwake(_ action: String, minutes: Int? = nil) async {
+        awakeNote = await client.changeAwake(action: action, minutes: minutes)
+        await readAwake()
+    }
+
     // MARK: Usage
 
     /// Both readings, from /state; the cost is the sum of today's sessions. Nil until first read.

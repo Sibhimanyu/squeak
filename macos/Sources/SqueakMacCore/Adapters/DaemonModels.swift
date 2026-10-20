@@ -113,13 +113,42 @@ struct DaemonCodexUsage: Decodable, Equatable {
     }
 }
 
+/// The Mac's awake session as `/state` reports it (`awake`): absent when none runs.
+public struct DaemonAwake: Decodable, Sendable, Equatable {
+    public var until: Date?
+    public var lid: Bool
+    enum CodingKeys: String, CodingKey { case until, lid }
+    public init(until: Date?, lid: Bool = false) { self.until = until; self.lid = lid }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        until = c.lenient(String.self, .until).flatMap(DaemonDate.parse)
+        lid = c.lenient(Bool.self, .lid) ?? false
+    }
+}
+
+/// Hotspot failover as `/state` reports it (`hotspot`); never the password.
+public struct DaemonHotspot: Decodable, Sendable, Equatable {
+    public var configured: Bool
+    public var ssid: String?
+    public var enabled: Bool
+    public var onHotspot: Bool
+    public init(configured: Bool, ssid: String?, enabled: Bool, onHotspot: Bool) {
+        self.configured = configured; self.ssid = ssid; self.enabled = enabled; self.onHotspot = onHotspot
+    }
+}
+
 public struct DaemonState: Decodable, Sendable, Equatable {
     public var generatedAt: Date?
     public var sessions: [DaemonSession]
     public var claudeUsage: ProviderUsage?
     public var codexUsage: ProviderUsage?
+    /// The awake session, when one runs; nil from a daemon without them too.
+    public var awake: DaemonAwake?
+    /// Whether this daemon offers awake sessions at all (`keepAwake` present).
+    public var awakeOffered = false
+    public var hotspot: DaemonHotspot?
 
-    enum CodingKeys: String, CodingKey { case generatedAt, active, others, claudeLimits, codexUsage }
+    enum CodingKeys: String, CodingKey { case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, hotspot }
 
     /// Both readings and today's estimated cost, for the usage screens.
     public func usage(now: Date = Date(), calendar: Calendar = .current) -> UsageSnapshot {
@@ -139,6 +168,10 @@ public struct DaemonState: Decodable, Sendable, Equatable {
         sessions = (active + others).filter { !$0.key.isEmpty && seen.insert($0.key).inserted }
         claudeUsage = c.lenient(DaemonClaudeLimits.self, .claudeLimits)?.usage
         codexUsage = c.lenient(DaemonCodexUsage.self, .codexUsage)?.usage
+        let keepAwake = c.lenient(Bool.self, .keepAwake)
+        awakeOffered = keepAwake != nil
+        awake = keepAwake == true ? (c.lenient(DaemonAwake.self, .awake) ?? DaemonAwake(until: nil)) : nil
+        hotspot = c.lenient(DaemonHotspot.self, .hotspot)
     }
 
     public init(generatedAt: Date? = nil, sessions: [DaemonSession], claudeUsage: ProviderUsage? = nil, codexUsage: ProviderUsage? = nil) {

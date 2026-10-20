@@ -201,3 +201,45 @@ struct UsageDetailView: View {
         }
     }
 }
+
+/// The Mac's awake session in the popover (the one place on the Mac to see it, with the countdown
+/// beside the duck): what is left and a way to add time or end it; or a way to start one. And, when the
+/// hotspot has taken over, that it has.
+struct AwakeRow: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Keep Mac awake").font(Typo.body).foregroundStyle(Theme.ink)
+                Spacer(minLength: 6)
+                if let awake = model.awake {
+                    Text(awake.until.map { "until \($0.formatted(date: .omitted, time: .shortened))" } ?? "until you end it")
+                        .font(Typo.meta).foregroundStyle(Theme.muted).monospacedDigit()
+                    Menu {
+                        if awake.until != nil { Button("Add 1 hour") { Task { await model.changeAwake("extend", minutes: 60) } } }
+                        Button("End awake session", role: .destructive) { Task { await model.changeAwake("end") } }
+                    } label: { Text("On").font(Typo.meta.weight(.semibold)) }
+                    .menuStyle(.borderlessButton).fixedSize()
+                } else {
+                    Menu {
+                        ForEach([(1, 60), (2, 120), (4, 240), (8, 480)], id: \.0) { hours, minutes in
+                            Button("For \(hours) hour\(hours == 1 ? "" : "s")") { Task { await model.changeAwake("start", minutes: minutes) } }
+                        }
+                        Button("Until I end it") { Task { await model.changeAwake("start") } }
+                    } label: { Text("Off").font(Typo.meta) }
+                    .menuStyle(.borderlessButton).fixedSize()
+                }
+            }
+            if let hotspot = model.hotspot, hotspot.onHotspot {
+                Text("On your iPhone's hotspot\(hotspot.ssid.map { " (\($0))" } ?? "")").font(Typo.meta).foregroundStyle(Theme.muted)
+            }
+            if let note = model.awakeNote {
+                Text(note).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, Space.m)
+        .accessibilityElement(children: .contain)
+    }
+}

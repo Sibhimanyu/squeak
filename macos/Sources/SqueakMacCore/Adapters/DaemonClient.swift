@@ -219,12 +219,29 @@ public struct DaemonClient: Sendable {
         }
     }
 
-    private func post(_ path: String, timeout: TimeInterval = 8) async throws -> HTTPResponse {
+    /// Starts (`minutes` nil: until ended), extends or ends the Mac's awake session
+    /// (`POST /control/keep-awake`). Nil when it worked, else the daemon's reason.
+    public func changeAwake(action: String, minutes: Int? = nil) async -> String? {
+        var body: [String: Any] = ["action": action]
+        if let minutes { body["minutes"] = minutes }
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return "Couldn't send that." }
+        do {
+            let r = try await post("/control/keep-awake", body: data)
+            if (200..<300).contains(r.status) { return nil }
+            if r.status == 401 || r.status == 403 { return "Squeak rejected the access token" }
+            let reason = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any]
+            return (reason?["error"] as? String) ?? "Squeak couldn't change that."
+        } catch {
+            return "Squeak isn't running."
+        }
+    }
+
+    private func post(_ path: String, body: Data = Data("{}".utf8), timeout: TimeInterval = 8) async throws -> HTTPResponse {
         guard let t = tokenProvider() else { throw AdapterError.tokenMissing }
         do {
             return try await transport.send(HTTPRequest(
                 method: "POST", url: url(path), headers: ["x-squeak-token": t, "content-type": "application/json"],
-                body: Data("{}".utf8), timeout: timeout))
+                body: body, timeout: timeout))
         } catch let e as TransportError {
             switch e {
             case .connectionRefused: throw AdapterError.daemonDown

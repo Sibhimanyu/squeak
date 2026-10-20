@@ -10,6 +10,8 @@ enum MenuBarIcon {
         case normal
         case needsYou(Int)
         case offline
+        /// An awake session runs: what is left ("1:52", "∞" until ended), drawn after the mark.
+        case awake(String)
     }
 
     /// The mark's size in points (the 18 px file at 1x, 36 px at 2x).
@@ -38,6 +40,12 @@ enum MenuBarIcon {
                 attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12.5, weight: .semibold), .foregroundColor: NSColor.black])
             text = t
             width += 2 + ceil(t.size().width) + 2
+        case .awake(let left):
+            let t = NSAttributedString(
+                string: left,
+                attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular), .foregroundColor: NSColor.black])
+            text = t
+            width += 3 + ceil(t.size().width) + 2
         }
         let image = NSImage(size: NSSize(width: width, height: markSize.height), flipped: false) { rect in
             mark?.draw(in: NSRect(origin: .zero, size: markSize), from: .zero, operation: .sourceOver, fraction: alpha)
@@ -56,6 +64,14 @@ extension MenuBarIcon.State {
     @MainActor init(model: AppModel) {
         if !model.isConnected { self = .offline }
         else if model.attentionCount > 0 { self = .needsYou(model.attentionCount) }
+        else if let awake = model.awake { self = .awake(Self.left(awake.until)) }
         else { self = .normal }
+    }
+
+    /// "1:52" left (hours:minutes), "12m" under an hour, "∞" for a session that runs until ended.
+    static func left(_ until: Date?, now: Date = Date()) -> String {
+        guard let until else { return "∞" }
+        let minutes = max(0, Int((until.timeIntervalSince(now) / 60).rounded(.up)))
+        return minutes < 60 ? "\(minutes)m" : "\(minutes / 60):\(String(format: "%02d", minutes % 60))"
     }
 }
