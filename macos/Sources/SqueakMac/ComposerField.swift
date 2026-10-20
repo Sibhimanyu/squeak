@@ -15,6 +15,9 @@ struct ComposerField: NSViewRepresentable {
     var onEscape: (() -> Void)?
     /// Reports the height the text wants (inset included), so a container can grow with it.
     var onContentHeight: ((CGFloat) -> Void)?
+    var fontSize: CGFloat = 14
+    /// ⌥↩: the quick composer's "steer into the running turn". Nil: ⌥↩ is a plain Return.
+    var onOptionReturn: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -29,7 +32,7 @@ struct ComposerField: NSViewRepresentable {
         tv.isRichText = false
         tv.allowsUndo = true
         tv.drawsBackground = false
-        tv.font = .systemFont(ofSize: 14)
+        tv.font = .systemFont(ofSize: fontSize)
         tv.textColor = .labelColor
         tv.textContainerInset = NSSize(width: 4, height: 6)
         tv.isAutomaticQuoteSubstitutionEnabled = false
@@ -41,6 +44,11 @@ struct ComposerField: NSViewRepresentable {
         tv.placeholder = placeholder
         tv.setAccessibilityLabel("Message")
         tv.onCommandReturn = { [weak coordinator = context.coordinator] in coordinator?.parent.commandReturn() }
+        tv.onOptionReturn = { [weak coordinator = context.coordinator] in
+            guard let steer = coordinator?.parent.onOptionReturn else { return false }
+            steer()
+            return true
+        }
         scroll.documentView = tv
         return scroll
     }
@@ -113,10 +121,15 @@ struct ComposerField: NSViewRepresentable {
 final class PlaceholderTextView: NSTextView {
     var placeholder = ""
     var onCommandReturn: (() -> Void)?
+    /// True when it took the key; false lets ⌥↩ be an ordinary Return.
+    var onOptionReturn: (() -> Bool)?
 
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command), event.keyCode == 36 || event.keyCode == 76 {
             onCommandReturn?()
+            return
+        }
+        if event.modifierFlags.contains(.option), event.keyCode == 36 || event.keyCode == 76, onOptionReturn?() == true {
             return
         }
         super.keyDown(with: event)

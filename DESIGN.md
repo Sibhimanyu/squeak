@@ -129,6 +129,13 @@ Balance in a brand composition: Paper and White 45%, Ink 30%, Duck Yellow
 them: next to a yellow duck, a yellow "error" reads as brand decoration, not
 as a problem.
 
+**One exception: the duck's light** (owner's decision, 2026-10-20). The Mac's
+Quick message pill has a soft warm glow spilling from under its bottom edge,
+`duck` at the centre shading to `beak` at the sides, heavily blurred and gone
+within ~120pt (about 40% strength at rest). It is brand light, never a state:
+it brightens and breathes only while a message sends, is still under Reduce
+Motion, and absent under Reduce Transparency.
+
 ### 3.2 Neutrals
 
 Zinc, as today. Dark is the primary theme — the panel floats over arbitrary

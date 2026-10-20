@@ -86,13 +86,18 @@ enum CaptureRunner {
         let qs = QuickComposerController.shared.state
         qs.prepare(model: model)
         let backdrop = LinearGradient(
-            colors: dark ? [Color(red: 0.13, green: 0.16, blue: 0.24), Color(red: 0.04, green: 0.04, blue: 0.06)] : [Color(red: 0.74, green: 0.80, blue: 0.90), Color(red: 0.92, green: 0.92, blue: 0.94)],
+            colors: dark ? [Color(red: 0.18, green: 0.16, blue: 0.62), Color(red: 0.05, green: 0.09, blue: 0.42)] : [Color(red: 0.74, green: 0.80, blue: 0.90), Color(red: 0.92, green: 0.92, blue: 0.94)],
             startPoint: .top, endPoint: .bottom)
         let cw = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 800, height: 330), styleMask: [.borderless], backing: .buffered, defer: false)
         cw.contentView = NSHostingView(rootView: ZStack { backdrop; QuickComposerView(close: {}).environment(model).environment(qs) }.frame(width: 800, height: 330))
         cw.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(900))
         write(cw.contentView, to: "\(prefix)-composer.png")
+        // And with a message typed, so Send is lit.
+        qs.text = "Ship it once the tests pass."
+        try? await Task.sleep(for: .milliseconds(500))
+        write(cw.contentView, to: "\(prefix)-composer-typed.png")
+        qs.text = ""
         cw.orderOut(nil)
 
         // New chat sheet (demo workspaces; Start never sends in demo mode).
