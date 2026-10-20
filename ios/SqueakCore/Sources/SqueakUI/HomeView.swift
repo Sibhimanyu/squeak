@@ -399,7 +399,8 @@ struct ConnectionBar: View {
 extension AppModel {
     /// The connection as the header, the bar and Settings show it.
     func connection(now: Date = Date()) -> Connection.State {
-        Connection.read(snapshot: snapshot, problem: problem, demo: demo, lastFetch: lastFetch, mac: macLiveness(now: now), now: now)
+        Connection.read(snapshot: snapshot, problem: problem, demo: demo, lastFetch: lastFetch, mac: macLiveness(now: now),
+                        streamDownSince: streamDownSince, now: now)
     }
 }
 
@@ -412,7 +413,7 @@ enum Connection {
     }
 
     static func read(snapshot: PhoneSnapshot?, problem: String?, demo: Bool, lastFetch: Date? = nil,
-                     mac: MacLiveness = .unknown, now: Date = Date()) -> State {
+                     mac: MacLiveness = .unknown, streamDownSince: Date? = nil, now: Date = Date()) -> State {
         if demo { return State(text: "Mac connected", color: Theme.working, healthy: true) }
         guard let snapshot else {
             return problem == nil
@@ -420,6 +421,10 @@ enum Connection {
                 : State(text: "Can't reach Squeak's server", color: Theme.offline)
         }
         if problem != nil { return State(text: "Can't reach Squeak's server. Showing the last view.", color: Theme.offline) }
+        // A blip is reconnected within a second or two; longer, the view on screen may be out of date, so say so.
+        if let down = streamDownSince, now.timeIntervalSince(down) > 5 {
+            return State(text: "Reconnecting… showing the view from \(Age.sync(lastFetch ?? down, now: now))", color: Theme.offline)
+        }
         // The server answering says nothing about the Mac: asleep, it leaves its last view standing.
         if case .silent(let since) = mac {
             return State(text: "Mac not answering, maybe asleep · last heard \(Age.sync(since, now: now))", color: Theme.offline)

@@ -2,6 +2,62 @@
 import SqueakCore
 import SwiftUI
 
+/// Each stream this phone holds open, refreshed every second: whether it is
+/// up, when it last heard anything, how often it dropped and roughly how much
+/// it downloaded. What to look at when the phone seems behind the Mac.
+struct ConnectionDetailsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var streams: [StreamHealth] = []
+
+    static func name(_ path: String) -> String {
+        let parts = path.split(separator: "/")
+        switch parts.dropFirst(2).first {
+        case "state": return "Your Mac's view"
+        case "results": return "Answers to commands"
+        case "live": return "This chat's turn"
+        default: return String(parts.last ?? "")
+        }
+    }
+
+    static func size(_ bytes: Int) -> String {
+        bytes < 1_000 ? "\(bytes) B" : bytes < 1_000_000 ? "\(bytes / 1_000) KB" : String(format: "%.1f MB", Double(bytes) / 1_000_000)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                let state = model.connection()
+                LabeledContent("Status") { HStack(spacing: 7) { StatusDot(color: state.color); Text(state.text) } }
+                if let since = model.streamDownSince {
+                    LabeledContent("Down since", value: Age.sync(since))
+                }
+            }
+            if streams.isEmpty {
+                Text("No streams open. Your Mac's channel may be the older one, which this phone polls every 2 seconds.")
+                    .font(.subheadline).foregroundStyle(Theme.muted)
+            }
+            ForEach(streams, id: \.path) { stream in
+                Section(Self.name(stream.path)) {
+                    LabeledContent("Connected", value: stream.connected ? stream.connectedAt.map { "Yes, since \(Age.sync($0))" } ?? "Yes" : "No, retrying")
+                    LabeledContent("Last heard", value: stream.lastEventAt.map { Age.sync($0) } ?? "Not yet")
+                    LabeledContent("Dropped", value: "\(stream.drops)×")
+                    LabeledContent("Downloaded", value: Self.size(stream.bytes))
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg.ignoresSafeArea())
+        .navigationTitle("Connection")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            while !Task.isCancelled {
+                streams = await model.connectionDetails()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+}
+
 /// The gear: which Mac this phone is paired with, how it is doing, and unpairing.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
@@ -56,6 +112,8 @@ struct SettingsView: View {
                         }
                         LabeledContent("Last change", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")
                     }
+                    NavigationLink("Connection details") { ConnectionDetailsView() }
+                        .frame(minHeight: 44)
                 }
                 if model.awakeOffered {
                     AwakeSection(problem: $awakeProblem)

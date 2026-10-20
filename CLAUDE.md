@@ -357,6 +357,10 @@ test for anything you fix is expected; the suite is fast.
   the bridge, `tickAgain` on the phone), or it is silently dropped until the
   60s safety poll. The database URL is accepted only for an https
   `*.firebasedatabase.app` / `*.firebaseio.com` host on both sides.
+- **The Realtime Database speaks HTTP/1.1, and iOS allows four connections
+  per host.** A held stream takes one for good, so the phone shares one
+  stream per path (`StreamHub`) on its own `Channel.streamSession`; never open
+  a stream per listener or per command, or requests queue behind them.
 - **Swift and Node must agree byte-for-byte.** Change a shape on one side and
   regenerate the fixtures (`swift run -c release squeak-fixtures
   ../../src/remote/fixtures/swift-command.json` in `ios/SqueakCore`; the Mac

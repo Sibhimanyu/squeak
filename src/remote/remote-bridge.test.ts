@@ -1911,3 +1911,71 @@ describe("RemoteBridge alive answer", () => {
     t.bridge.stop();
   });
 });
+
+describe("RemoteBridge channel upkeep", () => {
+  const presence = (f: ReturnType<typeof fixture>, at: number) =>
+    f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at }) });
+
+  it("counts a phone whose clock runs behind as open, timed by when its new ping arrived", async () => {
+    const f = fixture();
+    await f.pair();
+    const behind = NOW - 5 * 60_000;
+    await presence(f, behind);
+    await f.bridge.tick(); // the first read keeps the phone's stamp: it may be an old ping
+    expect(f.store.docs.has(`${f.channel}/state/alive`)).toBe(false);
+    f.advance(20_000);
+    await presence(f, behind + 20_000);
+    await f.bridge.tick();
+    expect(f.store.docs.has(`${f.channel}/state/alive`)).toBe(true);
+    // The same ping read again is not a sign of life: it lapses after the window.
+    f.advance(61_000);
+    f.store.docs.delete(`${f.channel}/state/alive`);
+    f.advance(20_000);
+    await f.bridge.tick();
+    expect(f.store.docs.has(`${f.channel}/state/alive`)).toBe(false);
+  });
+
+  it("sweeps results older than fifteen minutes and keeps recent ones", async () => {
+    const f = fixture();
+    await f.pair();
+    await f.store.set(`${f.channel}/results/old`, { box: seal(f.payload.k, { id: "old" }), at: NOW - 16 * 60_000 });
+    await f.store.set(`${f.channel}/results/unstamped`, { box: seal(f.payload.k, { id: "u" }) });
+    await f.store.set(`${f.channel}/results/new`, { box: seal(f.payload.k, { id: "new" }), at: NOW - 60_000 });
+    await f.bridge.tick();
+    expect(f.result("old")).toBeNull();
+    expect(f.result("unstamped")).toBeNull();
+    expect(f.result("new")).not.toBeNull();
+  });
+
+  it("publishes a working chat's new steps while a phone looks, and not while none does", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture();
+      await f.pair();
+      f.bridge.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const working = (at: string) => session({ state: "working", lastActivityAt: at });
+      f.emit([working("2026-09-25T03:00:00.000Z")]);
+      f.advance(2_000);
+      f.emit([working("2026-09-25T03:00:00.000Z")]);
+      await vi.advanceTimersByTimeAsync(500);
+      const sets = vi.spyOn(f.store, "set");
+
+      // No phone open: a step alone writes nothing.
+      f.emit([working("2026-09-25T03:00:01.000Z")]);
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(sets.mock.calls.filter(([p]) => p.endsWith("/state/snapshot"))).toHaveLength(0);
+
+      await presence(f, NOW);
+      await f.bridge.tick();
+      sets.mockClear();
+      f.advance(5_000);
+      f.emit([working("2026-09-25T03:00:02.000Z")]);
+      await vi.advanceTimersByTimeAsync(3_100);
+      expect(sets.mock.calls.filter(([p]) => p.endsWith("/state/snapshot"))).toHaveLength(1);
+      f.bridge.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

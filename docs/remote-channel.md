@@ -352,3 +352,36 @@ carries the pending question's `toolUseId` so the phone can name exactly the que
 more, since the answer is something the agent reads. It cannot approve a permission prompt. While
 Conductor's API can't take answers (501 in 0.91.1), the Mac stops the waiting turn first, so a stolen
 paired phone could also interrupt a question. Revoking the device removes all of this.
+
+## Keeping the phone current (2026-10-20)
+
+Measured on the live channel: the database speaks HTTP/1.1 only, the view is
+29 KB sealed and rewritten whole on any change, and `results` had 43
+documents spanning 22 hours because nothing deleted them.
+
+- **One stream per path, on its own session.** iOS allows four connections
+  per host over HTTP/1.1, and the phone held four streams (view, results, the
+  Mac's answer, the open chat's turn) with every command opening a fifth, so
+  presence pings and commands queued behind streams that never end. Now the
+  view and `alive` share one stream on `state` (the phone's own presence echo
+  is ignored), every listener on a path shares one connection (`StreamHub`;
+  a listener joining an open stream is told to re-read once), and streams run
+  on `Channel.streamSession`, a pool apart from requests.
+- **Supervised, never silently dead.** A view that cannot be opened no longer
+  ends the stream; it asks for a full read and the stream carries on. If any
+  stream ends, all restart. A new network (NWPathMonitor) reconnects at once,
+  retries back off only to 5 s, and 45 s of silence (keep-alives come every
+  30 s) counts as dead.
+- **"Synced" means heard.** It is the last stream event or full read, never a
+  presence write. Five seconds without the stream, the phone says
+  "Reconnecting… showing the view from …". A full read that started before a
+  streamed view arrived is dropped rather than put back over it.
+- **Results are cleaned up.** The phone deletes a result once read; the Mac
+  sweeps any older than 15 minutes every 5 minutes.
+- **Presence is timed by the Mac.** A new ping counts from when the Mac saw
+  it, not the phone's stamp, so a phone clock running behind still counts as
+  open (the first read after a start keeps the stamp: it may be old).
+- **Working rows keep up.** While a phone looks, a working chat's new steps
+  republish the view within 3 s instead of waiting for the next ping.
+- Settings › Connection details shows each stream: up or not, last heard,
+  drops, bytes.

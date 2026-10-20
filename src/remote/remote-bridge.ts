@@ -380,6 +380,13 @@ const CHANGE_PUBLISH_MIN_GAP_MS = 1_000;
 const STREAM_FALLBACK_MS = 60_000;
 /** A burst of changes (a command, then its deletion) becomes one pass. */
 const WATCH_DEBOUNCE_MS = 50;
+/**
+ * Results are read by the phone within seconds; older ones are swept. Without
+ * this they piled up forever, and every phone that connected a stream to
+ * `results` downloaded all of them (an image result is up to 700 KB).
+ */
+export const RESULT_RETENTION_MS = 15 * 60_000;
+const RESULT_SWEEP_EVERY_MS = 5 * 60_000;
 /** Pairing is only listened for while the Mac app's pairing sheet is open. */
 const PAIRING_WINDOW_MS = 10 * 60_000;
 const MESSAGE_MAX_CHARS = 8_000;
@@ -425,6 +432,9 @@ export class RemoteBridge {
   private readonly answerLimit = new AnswerRateLimit();
   private pairingOpenUntil = 0;
   private phoneSeenAt = 0;
+  /** The phone's own stamp on the last presence read, so a new ping is told apart from a re-read. */
+  private lastPresenceStamp: number | null = null;
+  private resultsSweptAt = 0;
   /** The last presence answered with `state/alive`, by the phone's own stamp, and when. */
   private answeredPresence = 0;
   private aliveWrittenAt = 0;
@@ -445,7 +455,9 @@ export class RemoteBridge {
   private recentWanted = PHONE_RECENT_LIMIT;
   private readonly live: LiveTurnPublisher | null;
   private lastSignature: string | null = null;
+  private lastStepsSignature: string | null = null;
   private changeTimer: NodeJS.Timeout | null = null;
+  private changeDueAt = 0;
 
   constructor(deps: RemoteBridgeDependencies) {
     this.deps = deps;
@@ -506,8 +518,16 @@ export class RemoteBridge {
         const signature = snapshotSignature(snapshot);
         const changed = this.lastSignature !== null && signature !== this.lastSignature;
         this.lastSignature = signature;
+        // A working chat's newest steps are on the phone's Home row too. They
+        // change constantly, so while a phone looks they publish on the
+        // active cadence rather than waiting for its next presence ping.
+        const steps = stepsSignature(snapshot);
+        const stepped = this.lastStepsSignature !== null && steps !== this.lastStepsSignature;
+        this.lastStepsSignature = steps;
         if (changed) {
           this.nudgePublish(CHANGE_PUBLISH_DELAY_MS);
+        } else if (stepped && this.phoneOpen()) {
+          this.nudgePublish(ACTIVE_PUBLISH_MS);
         }
       }) ?? null;
   }
@@ -519,9 +539,18 @@ export class RemoteBridge {
   }
 
   private nudgePublish(delayMs: number): void {
-    if (this.stopped || this.changeTimer || !this.config?.devices.some((device) => !device.revokedAt)) {
+    if (this.stopped || !this.config?.devices.some((device) => !device.revokedAt)) {
       return;
     }
+    const due = this.now() + delayMs;
+    // One pending publish; a sooner reason (a state change behind a step) moves it up.
+    if (this.changeTimer) {
+      if (due >= this.changeDueAt) {
+        return;
+      }
+      clearTimeout(this.changeTimer);
+    }
+    this.changeDueAt = due;
     this.changeTimer = setTimeout(() => {
       this.changeTimer = null;
       void this.publishForChange();
@@ -693,6 +722,7 @@ export class RemoteBridge {
         if (config.devices.some((device) => !device.revokedAt)) {
           await this.readCommands(config);
           await this.publish(config);
+          await this.sweepResults(config);
         }
       }
     } catch (error) {
@@ -807,8 +837,15 @@ export class RemoteBridge {
     }
     try {
       const presence = open<{ at: number; watching?: unknown; recent?: unknown }>(config.key, doc.box);
-      // A phone's clock is not ours; only trust it not to be in the future.
-      this.phoneSeenAt = Math.max(this.phoneSeenAt, Math.min(presence.at, this.now()));
+      // Timed by when this Mac saw a new ping, not by the phone's clock: a
+      // phone a minute behind would otherwise never count as open. The first
+      // read after a start may be an old ping, so that one keeps the phone's
+      // stamp (never in the future).
+      if (presence.at !== this.lastPresenceStamp) {
+        const seen = this.lastPresenceStamp === null ? Math.min(presence.at, this.now()) : this.now();
+        this.lastPresenceStamp = presence.at;
+        this.phoneSeenAt = Math.max(this.phoneSeenAt, seen);
+      }
       this.presenceWatching =
         typeof presence.watching === "string" && presence.watching.length <= 300 ? presence.watching : null;
       const wanted =
@@ -893,6 +930,24 @@ export class RemoteBridge {
           .set(this.channel(config, "results", id), { box: seal(config.key, verdict.result), at: this.now() })
           .catch(() => undefined);
       }
+    }
+  }
+
+  /** Deletes results older than RESULT_RETENTION_MS, every few minutes. Best effort. */
+  private async sweepResults(config: RemoteConfig): Promise<void> {
+    const now = this.now();
+    if (now - this.resultsSweptAt < RESULT_SWEEP_EVERY_MS) {
+      return;
+    }
+    this.resultsSweptAt = now;
+    try {
+      for (const { id, doc } of await this.deps.store.list(this.channel(config, "results"))) {
+        if (doc.at === undefined || now - doc.at > RESULT_RETENTION_MS) {
+          await this.deps.store.delete(this.channel(config, "results", id)).catch(() => undefined);
+        }
+      }
+    } catch (error) {
+      logger.debug("remote results sweep failed", { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -1466,9 +1521,12 @@ export class RemoteBridge {
     if (serialized === this.lastPublished) {
       return;
     }
-    await this.deps.store.set(this.channel(config, "state", "snapshot"), {
-      box: seal(config.key, view),
-      at: this.now(),
+    const box = seal(config.key, view);
+    await this.deps.store.set(this.channel(config, "state", "snapshot"), { box, at: this.now() });
+    logger.debug("remote snapshot published", {
+      bytes: box.length,
+      sinceLastMs: this.lastPublishedAt ? this.now() - this.lastPublishedAt : null,
+      phoneOpen: this.phoneOpen(),
     });
     this.lastPublished = serialized;
     this.lastPublishedAt = this.now();
@@ -1785,5 +1843,14 @@ export function snapshotSignature(snapshot: FleetSnapshot): string {
       session.detail,
       session.conductorSessionId,
     ]),
+  );
+}
+
+/** When each working chat last moved: its steps on the phone's row follow it. */
+export function stepsSignature(snapshot: FleetSnapshot): string {
+  return JSON.stringify(
+    snapshot.active
+      .filter((session) => session.state === "working")
+      .map((session) => [session.key, session.lastActivityAt]),
   );
 }

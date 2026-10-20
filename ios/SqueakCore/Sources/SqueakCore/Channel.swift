@@ -17,8 +17,20 @@ public struct Channel: Sendable {
         self.pairing = pairing
         self.deviceId = deviceId
         firestore = FirestoreClient(projectId: pairing.p, transport: transport)
-        router = BackendRouter(pairing: pairing, firestore: firestore, transport: transport, streams: URLSession.shared)
+        router = BackendRouter(pairing: pairing, firestore: firestore, transport: transport, streams: Self.streamSession)
     }
+
+    /// Streams get a session of their own, so a held stream can never take
+    /// the connection a presence ping or a command needs (requests use
+    /// `URLSession.shared`, a separate pool).
+    public static let streamSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.httpMaximumConnectionsPerHost = 6
+        configuration.timeoutIntervalForRequest = RealtimeDatabaseClient.stallSeconds
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        return URLSession(configuration: configuration)
+    }()
 
     public init(pairing: PairingPayload, deviceId: String, transport: HTTPTransport = URLSession.shared, streams: LineStreamTransport) {
         self.pairing = pairing
@@ -40,6 +52,49 @@ public struct Channel: Sendable {
     /// Yields when the Mac writes any result: a reply's outcome or a pairing answer.
     public func resultChanges() async -> AsyncStream<Void>? {
         await store.changes("channels/\(pairing.c)/results")
+    }
+
+    /// What the Mac writes for the phone, over one stream on `state`: the view
+    /// and the Mac's answer to presence (the phone's own presence echo is
+    /// ignored), with the stream's health. Nil when the channel can only be
+    /// polled (Firestore).
+    public func stateEvents() async -> AsyncStream<StateEvent>? {
+        guard let events = await store.events(in: "channels/\(pairing.c)/state", documents: ["snapshot", "alive"]) else { return nil }
+        let key = pairing.k
+        return AsyncStream { continuation in
+            let task = Task {
+                for await event in events {
+                    switch event {
+                    case .connected: continuation.yield(.connected)
+                    case .dropped: continuation.yield(.dropped)
+                    case .heard: continuation.yield(.heard)
+                    case .document("snapshot", .value(let document)):
+                        // Undecodable is never the end of the stream: the full read says why, and the next view still arrives.
+                        if let view = try? document.map({ try ChannelCrypto.open(PhoneSnapshot.self, box: $0.box, key: key) }) {
+                            continuation.yield(.snapshot(view))
+                        } else {
+                            continuation.yield(.needsRead)
+                        }
+                    case .document("alive", .value(let document)):
+                        continuation.yield(.alive(document.flatMap { try? ChannelCrypto.open(MacAlive.self, box: $0.box, key: key) }))
+                    case .document(_, .refetch):
+                        continuation.yield(.needsRead)
+                    case .document:
+                        break
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Each open stream's health, for Settings › Connection details.
+    public func streamHealth() async -> [StreamHealth] { await store.streamHealth() }
+
+    /// Removes a command's result once read, so it does not wait for the Mac's sweep. Best effort.
+    public func deleteResult(_ id: String) async {
+        try? await store.delete(path("results", id))
     }
 
     /// Whether replies and the view travel through the Realtime Database.
@@ -377,6 +432,18 @@ public struct Channel: Sendable {
         guard let document = try await store.get(path("results", id)) else { return nil }
         return try ChannelCrypto.open(CommandResult.self, box: document.box, key: pairing.k)
     }
+}
+
+/// One thing the state stream says (`Channel.stateEvents`).
+public enum StateEvent: Equatable, Sendable {
+    case connected
+    case dropped
+    /// The server was heard from: any event, keep-alives included.
+    case heard
+    case snapshot(PhoneSnapshot?)
+    case alive(MacAlive?)
+    /// A change the event did not carry whole, or could not be opened: read it.
+    case needsRead
 }
 
 /// Picks where this channel's documents are: the Realtime Database named in

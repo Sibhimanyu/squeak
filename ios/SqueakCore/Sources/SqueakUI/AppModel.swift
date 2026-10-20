@@ -1,6 +1,7 @@
 #if os(iOS)
 import Foundation
 import LocalAuthentication
+import Network
 import SqueakCore
 import SwiftUI
 import UIKit
@@ -28,7 +29,12 @@ final class AppModel {
 
     struct StartingChat: Equatable { let sessionId: String; let label: String }
     enum StartResult: Equatable { case started, cancelled, refused(String) }
+    /// When this phone last heard from the server: a stream event (keep-alives
+    /// included) or a full read. Never a presence write: that one only proves
+    /// the server took a write, not that the view on screen is current.
     private(set) var lastFetch: Date?
+    /// Since when the view's stream has been down, nil while it is up.
+    private(set) var streamDownSince: Date?
     /// When the Mac last answered a presence ping (its clock), nil from a Mac that never does.
     private(set) var macAliveAt: Date?
     /// When the app last came on screen: the answer on record then is from the visit before.
@@ -65,6 +71,11 @@ final class AppModel {
     /// The session open on screen.
     @ObservationIgnored private var watching: String?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
+    /// Bumped by every view applied from the stream, so a slower full read
+    /// that started before it cannot put an older view back on screen.
+    @ObservationIgnored private var snapshotEpoch = 0
+    @ObservationIgnored private let pathMonitor = NWPathMonitor()
+    @ObservationIgnored private var lastPath: (satisfied: Bool, interfaces: [NWInterface.InterfaceType])?
     /// How many recent chats Home has asked for; "Show more" adds 20, up to the Mac's 50.
     private(set) var recentWanted = 10
     /// Sent only once more is asked for, so a phone at the default writes the same presence as before.
@@ -105,6 +116,29 @@ final class AppModel {
             phase = KeyStore.load(account: "approved") != nil ? .paired : .awaitingApproval(
                 code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: pairing.n)
         }
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            let interfaces = path.availableInterfaces.map(\.type)
+            Task { @MainActor [weak self] in self?.networkChanged(satisfied: satisfied, interfaces: interfaces) }
+        }
+        pathMonitor.start(queue: .main)
+    }
+
+    /// A new network (Wi-Fi to cellular, back online): the old connections
+    /// are dead but would take their stall timeout to say so. Start again now.
+    private func networkChanged(satisfied: Bool, interfaces: [NWInterface.InterfaceType]) {
+        let previous = lastPath
+        lastPath = (satisfied, interfaces)
+        guard let previous, satisfied, !previous.satisfied || previous.interfaces != interfaces, loop != nil else { return }
+        reconnect()
+    }
+
+    private func reconnect() {
+        loop?.cancel()
+        loop = nil
+        liveTask?.cancel()
+        liveTask = nil
+        startLoop()
     }
 
     /// Demo only: a step every 700 ms and a snapshot every 1.5 s, like a busy turn on the real channel.
@@ -168,43 +202,68 @@ final class AppModel {
 
     func resume() {
         unlock.foregrounded()
-        guard !demo, loop == nil, let channel else { return }
+        guard !demo, loop == nil, channel != nil else { return }
         lookingSince = Date()
+        startLoop()
+    }
+
+    private func startLoop() {
+        guard !demo, loop == nil, let channel else { return }
         loop = Task { [weak self] in
             await self?.tick()
             self?.restartLive()
-            guard let snapshots = await channel.snapshots(), let results = await channel.resultChanges() else {
-                // Firestore: look again every couple of seconds.
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(Self.pollSeconds))
-                    await self?.tick()
-                }
-                return
-            }
-            // Realtime Database: a new view (or the Mac's pairing answer)
-            // arrives as it is written, carried in the event itself so it is
-            // downloaded once. The slow tick only keeps presence fresh, and
-            // re-reads only if the view has gone quiet for a minute.
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    do {
-                        for try await next in snapshots { await self?.apply(next) }
-                    } catch {
-                        await self?.tick() // undecryptable: let the full read say why
-                    }
-                }
-                group.addTask { for await _ in results { await self?.tickIfAwaitingApproval() } }
-                if let alives = await channel.alives() {
-                    group.addTask { for await alive in alives { if let alive { await self?.heard(alive) } } }
-                }
-                group.addTask {
+            // Supervised: if any stream ends, all of them start again, so the
+            // view can never sit frozen behind a stream that quietly died.
+            while !Task.isCancelled {
+                guard let states = await channel.stateEvents(), let results = await channel.resultChanges() else {
+                    // Firestore: look again every couple of seconds.
                     while !Task.isCancelled {
-                        try? await Task.sleep(for: .seconds(Self.streamedTickSeconds))
-                        await self?.keepAlive()
+                        try? await Task.sleep(for: .seconds(Self.pollSeconds))
+                        await self?.tick()
                     }
+                    return
                 }
+                // Realtime Database: a new view (or the Mac's answer) arrives
+                // as it is written, carried in the event itself so it is
+                // downloaded once. The slow tick only keeps presence fresh.
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask { for await event in states { await self?.handle(event) } }
+                    group.addTask { for await _ in results { await self?.tickIfAwaitingApproval() } }
+                    group.addTask {
+                        while !Task.isCancelled {
+                            try? await Task.sleep(for: .seconds(Self.streamedTickSeconds))
+                            await self?.keepAlive()
+                        }
+                    }
+                    await group.next()
+                    group.cancelAll()
+                }
+                try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    /// One event off the state stream.
+    private func handle(_ event: StateEvent) async {
+        switch event {
+        case .connected, .heard:
+            lastFetch = Date()
+            streamDownSince = nil
+        case .dropped:
+            if streamDownSince == nil { streamDownSince = Date() }
+        case .snapshot(let next):
+            apply(next)
+        case .alive(let alive):
+            if let alive { heard(alive) }
+        case .needsRead:
+            await tick()
+        }
+    }
+
+    /// Settings › Connection details: each open stream, as the phone sees it.
+    func connectionDetails() async -> [StreamHealth] {
+        guard !demo, let channel else { return [] }
+        return await channel.streamHealth()
     }
 
     /// How often the phone looks for a new view while it is on screen, when
@@ -218,6 +277,7 @@ final class AppModel {
         unlock.backgrounded()
         loop?.cancel()
         loop = nil
+        streamDownSince = nil
         let wasStreaming = presenceWatching != nil
         liveTask?.cancel()
         liveTask = nil
@@ -228,6 +288,8 @@ final class AppModel {
     /// The session on screen, or nil when none is. In verbose mode the Mac streams its turn.
     func watch(_ key: String?) {
         guard watching != key else { return }
+        // A turn kept from an earlier visit is out of date by the time the chat is opened again.
+        if let previous = watching { liveTurns[previous] = nil }
         watching = key
         restartLive()
     }
@@ -278,9 +340,11 @@ final class AppModel {
     /// A view straight from the stream.
     private func apply(_ next: PhoneSnapshot?) {
         guard phase == .paired else { return }
+        snapshotEpoch += 1
         // An unchanged view must not redraw every screen.
         if let next, next != snapshot { snapshot = next }
         lastFetch = Date()
+        streamDownSince = nil
         problem = nil
     }
 
@@ -294,7 +358,6 @@ final class AppModel {
         do {
             try await channel.touchPresence(watching: presenceWatching, recent: recentAsk)
             lastPresence = Date()
-            lastFetch = Date()
             problem = nil
         } catch {
             problem = "Can't reach Squeak's server right now."
@@ -332,7 +395,8 @@ final class AppModel {
                 try await channel.touchPresence(watching: presenceWatching, recent: recentAsk)
                 lastPresence = Date()
             }
-            if let next = try await channel.snapshot(), next != snapshot {
+            let epoch = snapshotEpoch
+            if let next = try await channel.snapshot(), next != snapshot, epoch == snapshotEpoch {
                 snapshot = next
             }
             // Best effort: an older Mac never answers, and that must not read as a broken channel.
@@ -397,6 +461,13 @@ final class AppModel {
     /// The Mac's answer to command `id`, or nil after 30 seconds. Streamed, it
     /// is read the moment the Mac writes it; otherwise every 750 ms.
     private func awaitResult(_ id: String, on channel: Channel) async throws -> CommandResult? {
+        let result = try await readResult(id, on: channel)
+        // Read: it has nothing more to say, and every stream on `results` would download it again.
+        if result != nil { Task { await channel.deleteResult(id) } }
+        return result
+    }
+
+    private func readResult(_ id: String, on channel: Channel) async throws -> CommandResult? {
         let deadline = Date().addingTimeInterval(30)
         guard let changes = await channel.resultChanges() else {
             while Date() < deadline {
