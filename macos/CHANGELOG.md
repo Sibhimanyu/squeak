@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.11
+
+- A redesigned menu-bar panel: chats are grouped into Needs you, Errors,
+  Finished, Working and Idle (Idle folded away), each row shows its state, age,
+  repo and agent, and a finished chat shows the start of its reply. New chat
+  sits in the header; Settings, Check for Updates and Quit are under "…".
+- Rows stay in place while the pointer is over the list, and Escape closes the panel.
+- Clicking a notification shows the reply that notification was about, even
+  if the chat has moved on since. If that reply can't be found, it says so
+  instead of showing a different one.
+- A reply only counts as read once you have actually seen it.
+
 ## 2.1.10
 
 - Quitting Squeak from the Dock, or with ⌘Tab then Q, while its window is open
