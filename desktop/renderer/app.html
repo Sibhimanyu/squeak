@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self' https://heresay-sibhi-42b1.web.app; connect-src https://heresay-sibhi-42b1.web.app; img-src 'self' data:"
+    />
+    <title>Squeak</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body data-mood="asleep">
+    <header id="titlebar">
+      <div class="brand">
+        <img id="mood-duck" src="duck-asleep.png" alt="" aria-hidden="true" />
+        <div>
+          <h1>Squeak</h1>
+          <p id="summary" aria-live="polite">Starting up…</p>
+        </div>
+      </div>
+      <div class="service">
+        <span id="service-status" class="pill"><span class="pip"></span><span id="service-text">Checking…</span></span>
+        <button id="service-restart" class="secondary" type="button">Restart</button>
+        <button id="open-awake" class="secondary" type="button">Stay awake</button>
+        <button id="open-phone" class="secondary" type="button">iPhone</button>
+        <button id="show-duck" class="quiet" type="button">Show duck</button>
+      </div>
+    </header>
+
+    <main>
+      <nav id="list" aria-label="Sessions"></nav>
+      <section id="detail" aria-live="polite"></section>
+    </main>
+
+    <template id="empty-detail">
+      <div class="placeholder">
+        <p>Pick a session to see what it said and answer it.</p>
+      </div>
+    </template>
+
+    <script src="app.js"></script>
+    <script
+      src="https://heresay-sibhi-42b1.web.app/sdk.js"
+      data-key="pk_SBtaP3xDs3fa2b9BRe62tEnq"
+      data-version="0.1.0"
+      data-position="left"
+      data-nudge="on"
+    ></script>
+  </body>
+</html>

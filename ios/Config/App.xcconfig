@@ -1,0 +1,3 @@
+// SideStore renames the bundle id with the signing team, so this is only the base.
+SQUEAK_BUNDLE_ID = com.squeak.phone
+SQUEAK_SOURCE_URL = https:/$()/squeak-5c9gvo.web.app/source.json

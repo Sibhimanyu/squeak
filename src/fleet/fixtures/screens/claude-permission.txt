@@ -1,0 +1,31 @@
+ ▘▘   ▝▝   ~/conductor
+
+⚠ Your login expires in 2 days · run /login to renew
+ 
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+
+❯ Run the shell command: ls /tmp/squeak-term-probe                                                                      
+  
+  Listed 1 directory 
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Cogitated for 2s · done 6:47 PM
+
+❯ Run the shell command: ls /tmp/squeak-term-probe                                                                      
+
+⏺ Listing contents of /tmp/squeak-term-probe
+  ⎿  $ ls /tmp/squeak-term-probe
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ 
+   ls /tmp/squeak-term-probe
+   List contents of /tmp/squeak-term-probe
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, allow reading from /private/tmp/squeak-term-probe from this project
+   3. No
+
+ Esc to cancel · Tab to amend
+

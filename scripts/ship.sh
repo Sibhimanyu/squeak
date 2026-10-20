@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 #
-# Ship the current worktree's branch to the live bridge.
+# Ship the current worktree to the live checkout and restart Squeak.
 #
-# The bridge runs from the main checkout. Conductor workspaces are git worktrees
-# on their own branches, so an agent can edit and test freely without touching
-# the process that is serving the conversation. This script is the deliberate
-# step that closes that gap.
+#   ./scripts/ship.sh
 #
-# It must never leave the user without a working bridge: CI has to pass, the new
-# build has to import cleanly before it is swapped in, and if the bridge fails to
-# come back up the previous dist is restored automatically.
+# Runs CI, merges this branch into the live branch, builds beside the live
+# dist rather than over it, smoke-tests that the build loads, swaps it in,
+# refreshes the desktop app's dependencies if they changed, then restarts the
+# Squeak service and the duck. If Squeak does not answer on its local port
+# afterwards, the previous dist is restored and restarted, and the bad build
+# is left at dist.failed.
 #
-# The restart is detached and delayed so the reply explaining what happened is
-# delivered before the process handling it is killed.
+# Squeak.app and the launch agents run from the live checkout, so this is all
+# it takes for a change to reach every Mac surface. The iPhone app ships
+# separately (ios/scripts/release.sh).
 
 set -euo pipefail
 
-RESTART_DELAY="${RESTART_DELAY:-8}"
 HEALTH_WAIT="${HEALTH_WAIT:-20}"
-LABEL="com.conductor-tg.bridge"
-LOG="$HOME/Library/Logs/conductor-tg/bridge.log"
-CONFIG_DIR="$HOME/Library/Application Support/conductor-tg"
+PORT="${FLEET_HOOK_PORT:-8477}"
+DAEMON="com.squeak.daemon"
+DUCK="com.squeak.duck"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'ship: %s\n' "$*" >&2; exit 1; }
@@ -49,20 +49,22 @@ say ""
 say "running CI in the worktree..."
 ( cd "$WORKTREE" && npm run ci ) || die "CI failed -- nothing was shipped"
 
-# 2. Merge into the branch the bridge runs from.
+# 2. Merge into the branch Squeak runs from.
+BEFORE="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 say ""
 say "merging $BRANCH into $LIVE_BRANCH..."
 git -C "$REPO_ROOT" merge --no-edit "$BRANCH" || die "merge failed -- nothing was shipped"
 
-# 3. Build beside the live dist, never over it.
+# 3. Build beside the live dist, never over it: a failed compile must not
+#    leave Squeak with nothing to restart into.
 say "building..."
 rm -rf "$REPO_ROOT/dist.new"
 ( cd "$REPO_ROOT" && npx tsc -p tsconfig.build.json --outDir dist.new ) || die "build failed -- live dist untouched"
 
-# 4. Prove the new build at least loads before it goes anywhere near the bridge.
+# 4. Prove the new build at least loads before it goes live.
 say "smoke-testing the new build..."
 ( cd "$REPO_ROOT" && node -e "
-  Promise.all([import('./dist.new/index.js'), import('./dist.new/cli.js')])
+  Promise.all([import('./dist.new/squeak/app.js'), import('./dist.new/squeak/config.js')])
     .then(() => process.exit(0))
     .catch((error) => { console.error(error.message); process.exit(1); });
 " ) || { rm -rf "$REPO_ROOT/dist.new"; die "new build does not import -- live dist untouched"; }
@@ -73,57 +75,46 @@ rm -rf "$REPO_ROOT/dist.prev"
 mv "$REPO_ROOT/dist.new" "$REPO_ROOT/dist"
 say "swapped dist (previous kept at dist.prev)"
 
-# 6. Restart out of band, after this turn's reply has had time to go out, then
-#    verify and roll back if the bridge did not come up.
-cat > "$REPO_ROOT/.ship-restart.sh" <<RESTART
-#!/usr/bin/env bash
-set -uo pipefail
-sleep $RESTART_DELAY
+# 6. The desktop app loads its code straight from the checkout; its
+#    dependencies only need refreshing when the lockfile moved.
+if ! git -C "$REPO_ROOT" diff --quiet "$BEFORE" HEAD -- desktop/package-lock.json; then
+  say "desktop dependencies changed, installing..."
+  ( cd "$REPO_ROOT/desktop" && npm install --no-audit --no-fund >/dev/null ) || say "WARNING: desktop npm install failed"
+fi
 
-restart_bridge() {
-  if launchctl list 2>/dev/null | grep -q "$LABEL"; then
-    launchctl kickstart -k "gui/\$(id -u)/$LABEL" >/dev/null 2>&1
-  else
-    pkill -f "conductor-tg/dist/cli.js" >/dev/null 2>&1
-    sleep 3
-    cd "$CONFIG_DIR" || exit 1
-    nohup node "$REPO_ROOT/dist/cli.js" start >> "$LOG" 2>&1 &
-  fi
+# 7. Restart and verify. Squeak is not in the path of anything this script's
+#    caller is waiting on, so it can restart right away.
+restart() {
+  local label="$1"
+  launchctl kickstart -k "gui/$(id -u)/$label" >/dev/null 2>&1 \
+    || say "note: $label is not loaded (run scripts/install-squeak-agents.sh once)"
 }
 
 healthy() {
-  pgrep -f "conductor-tg/dist/cli.js" >/dev/null 2>&1
+  local i
+  for i in $(seq 1 "$HEALTH_WAIT"); do
+    curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/state" && return 0
+    sleep 1
+  done
+  return 1
 }
 
-echo "===== ship: restarting \$(date) =====" >> "$LOG"
-restart_bridge
-sleep $HEALTH_WAIT
+say "restarting Squeak..."
+restart "$DAEMON"
+restart "$DUCK"
 
 if healthy; then
-  echo "===== ship: bridge healthy =====" >> "$LOG"
-else
-  echo "===== ship: bridge did not come up, rolling back =====" >> "$LOG"
-  if [ -d "$REPO_ROOT/dist.prev" ]; then
-    rm -rf "$REPO_ROOT/dist.failed"
-    mv "$REPO_ROOT/dist" "$REPO_ROOT/dist.failed"
-    mv "$REPO_ROOT/dist.prev" "$REPO_ROOT/dist"
-    restart_bridge
-    sleep $HEALTH_WAIT
-    if healthy; then
-      echo "===== ship: rolled back, bridge healthy (bad build at dist.failed) =====" >> "$LOG"
-    else
-      echo "===== ship: ROLLBACK FAILED -- bridge is down =====" >> "$LOG"
-    fi
-  fi
+  say ""
+  say "shipped $BRANCH -> $LIVE_BRANCH; Squeak is up on 127.0.0.1:$PORT"
+  exit 0
 fi
-rm -f "$REPO_ROOT/.ship-restart.sh"
-RESTART
 
-chmod +x "$REPO_ROOT/.ship-restart.sh"
-nohup "$REPO_ROOT/.ship-restart.sh" >/dev/null 2>&1 &
-disown 2>/dev/null || true
-
-say ""
-say "shipped $BRANCH -> $LIVE_BRANCH"
-say "the bridge restarts in ${RESTART_DELAY}s; if it fails to come up, dist.prev is restored automatically"
-say "watch: tail -f \"$LOG\""
+say "Squeak did not come up -- rolling back"
+if [ -d "$REPO_ROOT/dist.prev" ]; then
+  rm -rf "$REPO_ROOT/dist.failed"
+  mv "$REPO_ROOT/dist" "$REPO_ROOT/dist.failed"
+  mv "$REPO_ROOT/dist.prev" "$REPO_ROOT/dist"
+  restart "$DAEMON"
+  healthy && die "rolled back to the previous build; the bad one is at dist.failed (logs: ~/Library/Logs/squeak)"
+fi
+die "Squeak is down and no previous build could be restored (logs: ~/Library/Logs/squeak)"

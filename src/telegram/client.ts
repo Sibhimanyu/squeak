@@ -43,7 +43,9 @@ interface TelegramApiResponse {
   parameters?: TelegramApiParameters;
 }
 
-type TelegramRequestLane = "callback" | "control" | "poll" | "write";
+// "typing" is deliberately its own lane: chat actions are cosmetic and sent on a
+// timer, so a 429 on one must never defer the lane that carries real messages.
+type TelegramRequestLane = "callback" | "control" | "poll" | "typing" | "write";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -356,6 +358,50 @@ export class TelegramClient {
     }
   }
 
+  /**
+   * Send a prompt that opens the reply box on the user's side, already quoting
+   * this message — so what they type next comes back with `reply_to_message`
+   * pointing at it, and the bot knows who it is for.
+   */
+  async sendForceReply(
+    chatId: number,
+    text: string,
+    options: { placeholder?: string; messageThreadId?: number | null } = {},
+  ): Promise<number | null> {
+    const response = await this.callApi<{ ok: boolean; result?: { message_id: number } }>(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        message_thread_id: options.messageThreadId ?? undefined,
+        text: markdownToTelegramHtml(text),
+        parse_mode: "HTML",
+        reply_markup: {
+          force_reply: true,
+          ...(options.placeholder ? { input_field_placeholder: options.placeholder.slice(0, 64) } : {}),
+        },
+      },
+      { lane: "write" },
+    );
+    return response.result?.message_id ?? null;
+  }
+
+  /** Swap a message's buttons without touching its text, which may have been sent as HTML. */
+  async editMessageReplyMarkup(
+    chatId: number,
+    messageId: number,
+    inlineKeyboard: TelegramInlineKeyboard,
+  ): Promise<void> {
+    await this.callApi(
+      "editMessageReplyMarkup",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: inlineKeyboard },
+      },
+      { lane: "write" },
+    );
+  }
+
   async deleteMessage(chatId: number, messageId: number): Promise<void> {
     await this.callApi(
       "deleteMessage",
@@ -365,6 +411,33 @@ export class TelegramClient {
       },
       { lane: "write" },
     );
+  }
+
+  /**
+   * Show the "typing..." indicator. Telegram clears it after ~5 seconds or as
+   * soon as the bot posts a message, so callers refresh it on a timer for as
+   * long as the turn runs.
+   */
+  async sendChatAction(chatId: number, messageThreadId: number | null, action = "typing"): Promise<void> {
+    await this.callApi(
+      "sendChatAction",
+      {
+        chat_id: chatId,
+        message_thread_id: messageThreadId ?? undefined,
+        action,
+      },
+      { lane: "typing" },
+    );
+  }
+
+  /** The bot's own identity; also proves the token works. */
+  async getMe(): Promise<{ id: number; username: string | null }> {
+    const response = await this.callApi<{ ok: boolean; result?: { id: number; username?: string } }>(
+      "getMe",
+      {},
+      { lane: "control", timeoutMs: 10_000 },
+    );
+    return { id: response.result?.id ?? 0, username: response.result?.username ?? null };
   }
 
   async setMyCommands(commands: TelegramBotCommand[]): Promise<void> {

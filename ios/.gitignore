@@ -1,0 +1,4 @@
+SqueakCore/.build/
+build/
+dist/
+*.xcodeproj

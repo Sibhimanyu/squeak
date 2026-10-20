@@ -1,0 +1,57 @@
+# Generates Squeak.xcodeproj — run `xcodegen` in this directory. The project
+# is not committed; this file is the source of truth for it.
+name: Squeak
+options:
+  bundleIdPrefix: com.squeak
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.7.21"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    TARGETED_DEVICE_FAMILY: "1"
+packages:
+  SqueakCore:
+    path: SqueakCore
+  Heresay:
+    url: https://github.com/Sibhimanyu/heresay-swift
+    from: 0.2.0
+targets:
+  Squeak:
+    type: application
+    platform: iOS
+    configFiles:
+      Debug: Config/App.xcconfig
+      Release: Config/App.xcconfig
+    sources:
+      - path: Squeak
+    dependencies:
+      - package: SqueakCore
+        product: SqueakUI
+      - package: Heresay
+        product: Heresay
+    info:
+      path: Squeak/Info.plist
+      properties:
+        CFBundleDisplayName: Squeak
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSCameraUsageDescription: Squeak uses the camera once, to scan the pairing code on your Mac.
+        NSFaceIDUsageDescription: Squeak asks for Face ID before it sends anything to your agents.
+        SqueakSourceURL: $(SQUEAK_SOURCE_URL)
+        CFBundleURLTypes:
+          - CFBundleURLName: com.squeak.open
+            CFBundleURLSchemes:
+              - squeak
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(SQUEAK_BUNDLE_ID)
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_UIUserInterfaceStyle: ""

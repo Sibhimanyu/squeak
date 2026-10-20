@@ -14,8 +14,43 @@ import type {
   SupportedAgentType,
   WorkspaceRef,
 } from "../types.js";
+import { questionCallIn } from "../fleet/pending-question.js";
 import { branchLookupCandidates, matchesRemoteBranchName } from "../utils/branch-name.js";
 import { sortRepositoryWorkspaces, type RepositoryWorkspacePriorityRef } from "../utils/workspace-priority.js";
+
+/** A Conductor session plus the workspace and repo it belongs to. */
+export interface FleetRegistrySessionRef extends ConductorSessionRef {
+  directoryName: string | null;
+  branch: string | null;
+  repositoryName: string | null;
+  /** How much of the model's context window the session has burned, 0-100. */
+  contextUsedPercent: number | null;
+  isCompacting: number | null;
+  /** Conductor's own view of whether the workspace is still live work. */
+  derivedStatus: string | null;
+  manualStatus: string | null;
+  workspaceState: string | null;
+  /** Absolute path of the worktree, which is where git has to be run. */
+  workspacePath: string | null;
+  /** The repo's default branch, used to count unpushed work on a fresh branch. */
+  defaultBranch: string | null;
+  /**
+   * When the chat's latest turn ended, from the `result` or `error` row the
+   * agent writes at the end of every turn — the only record of a turn
+   * actually finishing. Null when no turn ever ended.
+   */
+  lastTurnEndedAt?: string | null;
+  /** How that turn ended. */
+  lastTurnOutcome?: "success" | "failed" | "aborted" | null;
+  /** The chat was closed in Conductor, or its repo hidden. */
+  isHidden?: boolean;
+  /**
+   * What the agent is waiting to be told, when its newest unanswered tool call
+   * is a question tool (`AskUserQuestion`, `ExitPlanMode`). Conductor's own
+   * `status` stays `working` while its question modal is open.
+   */
+  pendingQuestion?: string | null;
+}
 
 interface DbSessionRow {
   id: string;
@@ -45,6 +80,27 @@ interface DbRepositoryRow extends RepositoryRef {
 
 const MERGED_BRANCH_CACHE_TTL_MS = 3_000;
 
+/**
+ * Conductor writes timestamps two ways: the app writes ISO-8601 with an
+ * offset (`2026-09-22T03:01:12.257Z`), but its `update_sessions_updated_at`
+ * trigger rewrites `updated_at` with `datetime('now')` — a UTC wall time with
+ * no offset (`2026-09-22 04:11:37`). `Date.parse` reads a string like that in
+ * the *local* zone, so on a UTC+5:30 machine every trigger-touched row parses
+ * five and a half hours stale: finished sessions permanently miss the
+ * 15-minute active window and the fleet never pushes them. Normalize naive
+ * Conductor datetimes to UTC on the way out; anything else passes through.
+ */
+export function conductorTimestampToIso(value: string | null): string | null {
+  if (!value) {
+    return value;
+  }
+  const naive = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/.exec(value.trim());
+  if (!naive) {
+    return value;
+  }
+  return `${naive[1]}T${naive[2]}Z`;
+}
+
 export class ConductorRegistryAdapter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly db: any;
@@ -52,6 +108,7 @@ export class ConductorRegistryAdapter {
   private readonly defaultFallbackModel: string;
   private readonly defaultPermissionMode: string;
   private readonly mergedBranchNamesCache = new Map<string, { expiresAt: number; names: Set<string> }>();
+  private readonly tableColumnsCache = new Map<string, Set<string>>();
 
   constructor(
     conductorDbPath: string,
@@ -469,6 +526,152 @@ export class ConductorRegistryAdapter {
       .all(limit) as ConductorSessionRef[];
   }
 
+  /**
+   * Every non-hidden session across every repo, with the workspace and repo
+   * context the fleet radar needs, in one query. Iterating workspaces and
+   * calling `listSessions` per workspace turned the radar poll into dozens of
+   * round trips against Conductor's database.
+   */
+  listFleetSessions(limit: number): FleetRegistrySessionRef[] {
+    const rows = this.db
+      .prepare(
+        `
+          SELECT
+            s.id,
+            s.workspace_id as workspaceId,
+            s.status,
+            s.agent_type as agentType,
+            s.model,
+            s.permission_mode as permissionMode,
+            s.title,
+            s.claude_session_id as claudeSessionId,
+            s.updated_at as updatedAt,
+            s.last_user_message_at as lastUserMessageAt,
+            s.context_used_percent as contextUsedPercent,
+            s.is_compacting as isCompacting,
+            w.directory_name as directoryName,
+            w.branch as branch,
+            w.derived_status as derivedStatus,
+            w.manual_status as manualStatus,
+            w.state as workspaceState,
+            w.workspace_path as workspacePath,
+            r.default_branch as defaultBranch,
+            r.name as repositoryName,
+            -- The newest turn end. Ordered by sent_at so SQLite walks
+            -- Conductor's (session_id, sent_at) index backwards and stops at
+            -- the first match; ORDER BY rowid sorted every message of every
+            -- chat, 1.4s on a 2.3GB database and past the Mac app's 5s
+            -- timeout in Low Power Mode. Closed chats are retired, so they
+            -- skip it: on a real machine 202 of 233 chats were closed.
+            CASE WHEN IFNULL(s.is_hidden, 0) != 0 THEN NULL ELSE (
+              SELECT m.sent_at || '|' || CASE
+                WHEN m.content LIKE '{"type":"error","content":"aborted by user"%' THEN 'aborted'
+                WHEN m.content LIKE '{"type":"error"%' THEN 'failed'
+                WHEN json_valid(m.content) AND json_extract(m.content, '$.is_error') = 1 THEN 'failed'
+                ELSE 'success'
+              END
+              FROM session_messages m
+              WHERE m.session_id = s.id
+                AND m.role = 'assistant'
+                AND (m.content LIKE '{"type":"result"%' OR m.content LIKE '{"type":"error"%')
+              ORDER BY m.sent_at DESC, m.rowid DESC
+              LIMIT 1
+            ) END as lastTurnEnd,
+            -- Closed chats are returned, flagged, rather than left out: left
+            -- out, their transcripts still exist, and the fleet rediscovers
+            -- them as anonymous non-Conductor sessions.
+            (IFNULL(s.is_hidden, 0) != 0 OR IFNULL(r.hidden, 0) != 0) as hidden
+          FROM sessions s
+          JOIN workspaces w ON w.id = s.workspace_id
+          JOIN repos r ON r.id = w.repository_id
+          -- datetime() understands both of Conductor's timestamp spellings,
+          -- so recency order does not depend on which one a row carries.
+          ORDER BY datetime(s.updated_at) DESC
+          LIMIT ?
+        `,
+      )
+      .all(limit) as Array<FleetRegistrySessionRef & { lastTurnEnd: string | null; hidden: number }>;
+    return rows.map(({ lastTurnEnd, hidden, ...row }) => {
+      const [endedAt, outcome] = lastTurnEnd ? lastTurnEnd.split("|") : [null, null];
+      return {
+        ...row,
+        pendingQuestion:
+          hidden === 0 && (row.status === "working" || row.status === "waiting" || row.status === "needs_user_input")
+            ? this.pendingQuestionFor(row.id)
+            : null,
+        updatedAt: conductorTimestampToIso(row.updatedAt) ?? row.updatedAt,
+        lastUserMessageAt: conductorTimestampToIso(row.lastUserMessageAt),
+        lastTurnEndedAt: conductorTimestampToIso(endedAt ?? null),
+        lastTurnOutcome: outcome === "success" || outcome === "failed" || outcome === "aborted" ? outcome : null,
+        isHidden: hidden === 1,
+      };
+    });
+  }
+
+  /**
+   * The question a chat is stuck on, from its newest few rows: a question-tool
+   * call with no tool_result after it and no turn end after it. Only the
+   * newest rows are read (session_id index), and only rows that could matter
+   * carry their body: a tool result's id sits in its first few hundred bytes.
+   */
+  private pendingQuestionFor(sessionId: string): string | null {
+    let rows: Array<{ rowid: number; body: string | null }>;
+    try {
+      rows = this.db
+        .prepare(
+          `
+            SELECT rowid, CASE
+              WHEN content LIKE '{"type":"assistant"%' AND (
+                   content LIKE '%"name":"mcp__conductor__AskUserQuestion"%'
+                OR content LIKE '%"name":"AskUserQuestion"%'
+                OR content LIKE '%"name":"ExitPlanMode"%') THEN content
+              WHEN content LIKE '{"type":"user"%' THEN substr(content, 1, 600)
+              WHEN content LIKE '{"type":"result"%' OR content LIKE '{"type":"error"%' THEN '{"type":"result"}'
+              ELSE NULL
+            END AS body
+            FROM (
+              SELECT rowid, content FROM session_messages
+              WHERE session_id = ? ORDER BY rowid DESC LIMIT 12
+            )
+            ORDER BY rowid DESC
+          `,
+        )
+        .all(sessionId) as Array<{ rowid: number; body: string | null }>;
+    } catch {
+      return null;
+    }
+    const answered = new Set<string>();
+    for (const row of rows) {
+      if (!row.body) {
+        continue;
+      }
+      if (row.body.startsWith('{"type":"result"') || row.body.startsWith('{"type":"error"')) {
+        return null;
+      }
+      if (row.body.startsWith('{"type":"user"')) {
+        // A human message after the question: the turn moved on without it.
+        if (!row.body.includes('"type":"tool_result"') && !row.body.includes("<task-notification>")) {
+          return null;
+        }
+        for (const match of row.body.matchAll(/"tool_use_id":"([^"]+)"/g)) {
+          answered.add(match[1] as string);
+        }
+        continue;
+      }
+      let entry: unknown;
+      try {
+        entry = JSON.parse(row.body);
+      } catch {
+        continue;
+      }
+      const call = questionCallIn((entry as { message?: { content?: unknown } } | null)?.message?.content);
+      if (call && !answered.has(call.id)) {
+        return call.detail;
+      }
+    }
+    return null;
+  }
+
   getSessionDefaults(workspaceId: string): SessionDefaults {
     const active = this.db
       .prepare(
@@ -540,12 +743,13 @@ export class ConductorRegistryAdapter {
       return null;
     }
 
+    const thinkingEnabledColumn = this.thinkingEnabledColumn();
     const active = this.db
       .prepare(
         `
           SELECT
             s.codex_thinking_level as codexThinkingLevel,
-            s.thinking_enabled as thinkingEnabled
+            ${thinkingEnabledColumn ? `s.${thinkingEnabledColumn}` : "NULL"} as thinkingEnabled
           FROM workspaces w
           LEFT JOIN sessions s
             ON s.id = w.active_session_id
@@ -677,12 +881,43 @@ export class ConductorRegistryAdapter {
       .run(sentAtIso, sessionId);
   }
 
+  private tableColumns(table: string): Set<string> {
+    const cached = this.tableColumnsCache.get(table);
+    if (cached) {
+      return cached;
+    }
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    const names = new Set(rows.map((row) => row.name));
+    this.tableColumnsCache.set(table, names);
+    return names;
+  }
+
+  /**
+   * Conductor renamed `thinking_enabled` to `DEPRECATED_thinking_enabled`, and an
+   * INSERT naming a column this database does not have fails outright -- new chats
+   * stopped being creatable the moment Conductor shipped that migration. Resolve
+   * the column at runtime so either spelling works, and so the column simply drops
+   * out of the statement once Conductor removes it for good.
+   */
+  private thinkingEnabledColumn(): string | null {
+    const columns = this.tableColumns("sessions");
+    if (columns.has("thinking_enabled")) {
+      return "thinking_enabled";
+    }
+    if (columns.has("DEPRECATED_thinking_enabled")) {
+      return "DEPRECATED_thinking_enabled";
+    }
+    return null;
+  }
+
   createSession(workspaceId: string, threadId: string, seed: SessionSeed): ConductorSessionRef {
     const sessionId = randomUUID();
     const normalizedThinkingLevel = seed.codexThinkingLevel?.trim() || "xhigh";
     const thinkingEnabled = normalizedThinkingLevel === "none" ? 0 : 1;
     const storedThinkingLevel = thinkingEnabled === 0 ? null : normalizedThinkingLevel;
     const agentPersonality = seed.agentPersonality?.trim() || "none";
+
+    const thinkingEnabledColumn = this.thinkingEnabledColumn();
 
     const tx = this.db.transaction(() => {
       this.db
@@ -699,12 +934,12 @@ export class ConductorRegistryAdapter {
               title,
               last_user_message_at,
               codex_thinking_level,
-              thinking_enabled,
+              ${thinkingEnabledColumn ? `${thinkingEnabledColumn},` : ""}
               agent_personality,
               created_at,
               updated_at
             )
-            VALUES (?, 'idle', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, datetime('now'), datetime('now'))
+            VALUES (?, 'idle', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ${thinkingEnabledColumn ? "?," : ""} ?, datetime('now'), datetime('now'))
           `,
         )
         .run(
@@ -716,7 +951,7 @@ export class ConductorRegistryAdapter {
           seed.permissionMode,
           seed.title,
           storedThinkingLevel,
-          thinkingEnabled,
+          ...(thinkingEnabledColumn ? [thinkingEnabled] : []),
           agentPersonality,
         );
 
@@ -986,11 +1221,55 @@ export class ConductorRegistryAdapter {
     return messageId;
   }
 
+  /** The highest session_messages rowid for a session, or 0 if it has none. */
+  maxSessionMessageRowId(sessionId: string): number {
+    const row = this.db
+      .prepare(
+        `
+          SELECT COALESCE(MAX(rowid), 0) as maxRowId
+          FROM session_messages
+          WHERE session_id = ?
+        `,
+      )
+      .get(sessionId) as { maxRowId: number } | undefined;
+    return row?.maxRowId ?? 0;
+  }
+
+  /**
+   * Assistant rows written after `afterRowId`, oldest first. Used to forward
+   * replies from turns the Conductor app ran itself, which the bridge never saw
+   * as a turn because it did not start them.
+   */
+  listAssistantMessagesAfterRowId(
+    sessionId: string,
+    afterRowId: number,
+    limit: number,
+  ): Array<{ content: string; rowId: number; turnId: string | null }> {
+    return this.db
+      .prepare(
+        `
+          SELECT
+            rowid as rowId,
+            content,
+            turn_id as turnId
+          FROM session_messages
+          WHERE session_id = ?
+            AND rowid > ?
+            AND role = 'assistant'
+            AND cancelled_at IS NULL
+          ORDER BY rowid ASC
+          LIMIT ?
+        `,
+      )
+      .all(sessionId, afterRowId, limit) as Array<{ content: string; rowId: number; turnId: string | null }>;
+  }
+
   listSessionMessages(sessionId: string, limit: number): SessionMessageRecord[] {
     return this.db
       .prepare(
         `
           SELECT
+            id,
             role,
             content,
             sent_at as sentAt,

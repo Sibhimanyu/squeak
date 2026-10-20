@@ -1,0 +1,38 @@
+{
+  "edition": "Edition 01, October 2026",
+  "colorSpace": "sRGB",
+  "color": {
+    "duckYellow": { "hex": "#FFDA1A", "rgb": [255, 218, 26], "cmykApprox": [0, 15, 90, 0], "role": "Identity signature: the duck, highlights, key accents. A fill, never text on light grounds." },
+    "billOrange": { "hex": "#FF972E", "rgb": [255, 151, 46], "cmykApprox": [0, 41, 82, 0], "role": "The bill and rare warm accents. Never text." },
+    "ink": { "hex": "#18191B", "rgb": [24, 25, 27], "cmykApprox": [11, 7, 0, 89], "role": "Text, dark grounds, the duck's contour lines." },
+    "paper": { "hex": "#F8F7F3", "rgb": [248, 247, 243], "cmykApprox": [0, 0, 2, 3], "role": "Default warm ground for pages and documents." },
+    "white": { "hex": "#FFFFFF", "rgb": [255, 255, 255], "cmykApprox": [0, 0, 0, 0], "role": "Cards on Paper." },
+    "slate": { "hex": "#62656D", "rgb": [98, 101, 109], "cmykApprox": [10, 7, 0, 57], "role": "Secondary text on light." },
+    "line": { "hex": "#DCDDD8", "rgb": [220, 221, 216], "cmykApprox": [0, 0, 2, 13], "role": "Dividers on light." },
+    "darkSurface": { "hex": "#242629", "rgb": [36, 38, 41], "cmykApprox": [12, 7, 0, 84], "role": "Raised ground on dark." },
+    "darkMuted": { "hex": "#ACAFB5", "rgb": [172, 175, 181], "cmykApprox": [5, 3, 0, 29], "role": "Secondary text on dark." },
+    "darkLine": { "hex": "#3A3D42", "rgb": [58, 61, 66], "role": "Dividers on dark only, never text." }
+  },
+  "cmykNote": "Uncalibrated conversion for orientation only, not print-certified.",
+  "balance": { "paperAndWhite": 45, "ink": 30, "duckYellow": 12, "slateAndLine": 10, "billOrange": 3 },
+  "font": {
+    "display": { "family": "Figtree", "weights": [400, 500, 600, 700], "role": "Wordmark, headings, editorial display" },
+    "body": { "family": "Inter", "weights": [400, 500, 600, 700], "role": "Body copy" },
+    "mono": { "family": "JetBrains Mono", "weights": [400, 500], "role": "Labels, names and figures" }
+  },
+  "typeScale": {
+    "display": { "family": "Figtree", "weight": 700, "size": 96, "lineHeight": 100, "tracking": -0.02 },
+    "headline": { "family": "Figtree", "weight": 700, "size": 56, "lineHeight": 60, "tracking": -0.01 },
+    "title": { "family": "Figtree", "weight": 600, "size": 32, "lineHeight": 40, "tracking": 0 },
+    "body": { "family": "Inter", "weight": 400, "size": 22, "lineHeight": 32, "tracking": 0 },
+    "label": { "family": "JetBrains Mono", "weight": 500, "size": 16, "lineHeight": 20, "tracking": 0.08, "case": "upper" }
+  },
+  "logo": {
+    "aspectRatio": 1.16056,
+    "clearSpace": "x = 1/4 of the mark's total height, all sides",
+    "minimumPx": { "full": 48, "compact": 24, "silhouette": 16 },
+    "minimumPrintMm": { "full": 12, "compact": 8, "silhouette": 5 },
+    "lockupHorizontal": { "gap": 0.18, "wordmarkSize": 0.6, "baseline": 0.74, "unit": "symbol height" },
+    "lockupStacked": { "gap": 0.14, "unitGap": "symbol height", "wordmarkSize": 0.62, "unitWordmark": "symbol width" }
+  }
+}

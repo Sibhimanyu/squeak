@@ -1,7 +1,13 @@
 node_modules
 dist
+# ship.sh keeps the outgoing build for rollback and stages the new one
+# beside it; `dist` alone does not match these.
+dist.prev/
+dist.new/
+dist.failed/
 .context/
 .env*
 !.env.example
 .envrc
 .DS_Store
+.impeccable/

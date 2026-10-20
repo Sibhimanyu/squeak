@@ -1,0 +1,24 @@
+{
+  "originHash" : "886054452933fe4470ceae0142edeaa10a33fac749983a16857a5d5cf28db6f4",
+  "pins" : [
+    {
+      "identity" : "heresay-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Sibhimanyu/heresay-swift",
+      "state" : {
+        "revision" : "8d741994e15342b47ca8e343a50c4623fcf7960b",
+        "version" : "0.2.34"
+      }
+    },
+    {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "eef1a539a373c1f1a320624b1130fc5de7b2e100",
+        "version" : "2.10.0"
+      }
+    }
+  ],
+  "version" : 3
+}

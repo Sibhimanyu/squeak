@@ -1,0 +1,241 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  PUSH_KINDS,
+  classifyAttentions,
+  isActionable,
+  isStalled,
+  scoreAttention,
+  shouldPush,
+  sortAttention,
+} from "./attention.js";
+import type { AttentionItem, FleetSession, FleetState } from "./types.js";
+
+function session(overrides: Partial<FleetSession> = {}): FleetSession {
+  return {
+    key: "k",
+    source: "claude-transcript",
+    agent: "claude",
+    origin: "terminal",
+    sourceId: "s",
+    agentSessionId: "s",
+    conductorSessionId: null,
+    cwd: null,
+    repoName: null,
+    branch: null,
+    title: null,
+    state: "working",
+    detail: null,
+    lastActivityAt: "2026-09-20T12:00:00.000Z",
+    transcriptPath: null,
+    pid: null,
+    alive: true,
+    stateSource: "transcript",
+    contextPercent: null,
+    retired: false,
+    baseRef: null,
+    costUsd: null,
+    git: null,
+    ...overrides,
+  };
+}
+
+describe("classifyAttentions", () => {
+  it("maps blocked and finished states onto attention kinds", () => {
+    const cases: [FleetState, string[]][] = [
+      ["awaiting_approval", ["blocked_approval"]],
+      ["awaiting_input", ["blocked_question"]],
+      ["error", ["errored"]],
+      ["finished", ["finished_unreviewed"]],
+      ["working", []],
+      ["idle", []],
+    ];
+
+    for (const [state, expected] of cases) {
+      expect(classifyAttentions(session({ state }))).toEqual(expected);
+    }
+  });
+
+  it("flags a session that is close to compacting", () => {
+    expect(classifyAttentions(session({ state: "working", contextPercent: 90 }))).toEqual(["context_pressure"]);
+  });
+
+  it("reports both reasons when a finished session is also nearly full", () => {
+    // A session can want attention for more than one reason at once.
+    expect(classifyAttentions(session({ state: "finished", contextPercent: 90 }))).toEqual([
+      "finished_unreviewed",
+      "context_pressure",
+    ]);
+  });
+
+  it("leaves a comfortable context alone", () => {
+    expect(classifyAttentions(session({ state: "working", contextPercent: 40 }))).toEqual([]);
+  });
+
+  it("respects a custom threshold", () => {
+    expect(classifyAttentions(session({ state: "working", contextPercent: 70 }), 60)).toEqual(["context_pressure"]);
+  });
+
+  it("does not raise context pressure on a session that has gone quiet", () => {
+    // Compacting only costs you on a session you are still going to use.
+    expect(classifyAttentions(session({ state: "idle", contextPercent: 95 }))).toEqual([]);
+  });
+
+  it("stops nagging about a workspace the user already marked done", () => {
+    expect(classifyAttentions(session({ state: "finished", contextPercent: 95, retired: true }))).toEqual([]);
+  });
+});
+
+describe("scoreAttention", () => {
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+
+  it("ranks a blocked session above a finished one no matter how long the finished one waited", () => {
+    const blocked = scoreAttention({
+      kind: "blocked_approval",
+      since: "2026-09-20T11:59:00.000Z",
+      session: session(),
+      now,
+    });
+    const finished = scoreAttention({
+      kind: "finished_unreviewed",
+      // Two days stale, still must not outrank something actually blocking.
+      since: "2026-09-18T12:00:00.000Z",
+      session: session(),
+      now,
+    });
+
+    expect(blocked).toBeGreaterThan(finished);
+  });
+
+  it("breaks ties toward the session that has waited longer", () => {
+    const older = scoreAttention({
+      kind: "blocked_question",
+      since: "2026-09-20T11:00:00.000Z",
+      session: session(),
+      now,
+    });
+    const newer = scoreAttention({
+      kind: "blocked_question",
+      since: "2026-09-20T11:55:00.000Z",
+      session: session(),
+      now,
+    });
+
+    expect(older).toBeGreaterThan(newer);
+  });
+
+  it("prefers a session you can actually act on", () => {
+    const actionable = scoreAttention({
+      kind: "blocked_question",
+      since: "2026-09-20T11:59:00.000Z",
+      session: session({ conductorSessionId: "c1" }),
+      now,
+    });
+    const watchOnly = scoreAttention({
+      kind: "blocked_question",
+      since: "2026-09-20T11:59:00.000Z",
+      session: session(),
+      now,
+    });
+
+    expect(actionable).toBeGreaterThan(watchOnly);
+  });
+});
+
+describe("sortAttention", () => {
+  it("orders by score and stays stable for equal scores", () => {
+    const items: AttentionItem[] = [
+      { session: session({ key: "b" }), kind: "finished_unreviewed", score: 300, since: "2026-09-20T12:00:00.000Z" },
+      { session: session({ key: "a" }), kind: "blocked_approval", score: 1000, since: "2026-09-20T12:00:00.000Z" },
+      { session: session({ key: "c" }), kind: "finished_unreviewed", score: 300, since: "2026-09-20T12:00:00.000Z" },
+    ];
+
+    expect(sortAttention(items).map((item) => item.session.key)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("push policy", () => {
+  it("interrupts when a session is blocked on you or has finished", () => {
+    expect(PUSH_KINDS.has("blocked_approval")).toBe(true);
+    expect(PUSH_KINDS.has("blocked_question")).toBe(true);
+    // "Tell me when it is done" is the main thing wanted from a phone.
+    expect(PUSH_KINDS.has("finished_unreviewed")).toBe(true);
+  });
+
+  it("does not interrupt for things that are merely worth knowing", () => {
+    // These sit on the radar; a notification for them would be noise.
+    expect(PUSH_KINDS.has("errored")).toBe(false);
+    expect(PUSH_KINDS.has("context_pressure")).toBe(false);
+  });
+
+  it("only announces a finish for a Conductor chat", () => {
+    const conductor = session({ state: "finished", conductorSessionId: "c1" });
+    const terminal = session({ state: "finished" });
+
+    expect(shouldPush("finished_unreviewed", conductor)).toBe(true);
+    // A terminal session ending a turn is not work the user handed off.
+    expect(shouldPush("finished_unreviewed", terminal)).toBe(false);
+  });
+
+  it("still announces a blocked session wherever it runs", () => {
+    expect(shouldPush("blocked_approval", session({ state: "awaiting_approval" }))).toBe(true);
+    expect(shouldPush("blocked_question", session({ state: "awaiting_input" }))).toBe(true);
+  });
+
+  it("never announces a radar-only kind, Conductor or not", () => {
+    expect(shouldPush("errored", session({ conductorSessionId: "c1" }))).toBe(false);
+    expect(shouldPush("context_pressure", session({ conductorSessionId: "c1" }))).toBe(false);
+  });
+});
+
+describe("isActionable", () => {
+  it("is true only when the bridge has a Conductor session to drive", () => {
+    expect(isActionable(session({ conductorSessionId: "c1" }))).toBe(true);
+    expect(isActionable(session())).toBe(false);
+  });
+});
+
+describe("isStalled", () => {
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+  const minutesAgo = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
+
+  it("flags a turn waiting on the model for over ten minutes", () => {
+    expect(isStalled(session({ waitingOn: "model", waitingSince: minutesAgo(11) }), now)).toBe(true);
+    // Thinking alone ran up to ten minutes on a real machine.
+    expect(isStalled(session({ waitingOn: "model", waitingSince: minutesAgo(9) }), now)).toBe(false);
+  });
+
+  it("flags API retries sooner, at five minutes", () => {
+    expect(isStalled(session({ waitingOn: "api", waitingSince: minutesAgo(6) }), now)).toBe(true);
+    expect(isStalled(session({ waitingOn: "api", waitingSince: minutesAgo(4) }), now)).toBe(false);
+  });
+
+  it("never flags a running tool, however long: builds and test suites take time", () => {
+    expect(isStalled(session({ waitingOn: "tool", waitingSince: minutesAgo(90) }), now)).toBe(false);
+  });
+
+  it("only flags a session that is working, by Squeak's word or Conductor's", () => {
+    const quiet = { waitingOn: "model" as const, waitingSince: minutesAgo(30) };
+    expect(isStalled(session({ ...quiet, state: "idle" }), now)).toBe(false);
+    expect(isStalled(session({ ...quiet, state: "error", conductorState: "working" }), now)).toBe(true);
+    expect(isStalled(session({ ...quiet, retired: true }), now)).toBe(false);
+  });
+
+  it("takes a hook heard since the last entry as a sign of life", () => {
+    const quiet = session({
+      waitingOn: "model",
+      waitingSince: minutesAgo(30),
+      stateSource: "hook",
+      lastActivityAt: minutesAgo(1),
+    });
+    expect(isStalled(quiet, now)).toBe(false);
+  });
+
+  it("is pushed, and outranks a finish", () => {
+    expect(PUSH_KINDS.has("stalled")).toBe(true);
+    const stalled = session({ waitingOn: "model", waitingSince: minutesAgo(12) });
+    expect(classifyAttentions(stalled, 80, now)).toEqual(["stalled"]);
+    // Without a clock, nothing is timed.
+    expect(classifyAttentions(stalled)).toEqual([]);
+  });
+});

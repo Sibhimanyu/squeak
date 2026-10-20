@@ -1,4 +1,3 @@
-import type { BridgeStateStore } from "../bridge/state-store.js";
 import type { ConductorRegistryAdapter } from "./conductor-registry.js";
 import type { SessionStatus, SupportedAgentType } from "../types.js";
 import { toClaudeCliModel } from "./claude-code.js";
@@ -12,10 +11,20 @@ function toConductorDisplayModel(model: string | null): string | null {
   return cli ? cli.replace(/\[1m\]$/, "") : model;
 }
 
+/**
+ * What the mirror needs to avoid writing a row twice. Squeak only mirrors the
+ * turns it starts itself, so it keeps these in memory.
+ */
+export interface MirrorFingerprints {
+  buildFingerprint(sessionId: string, turnId: string, role: string, content: string): string;
+  hasFingerprint(fingerprint: string): boolean;
+  addFingerprint(fingerprint: string, sessionId: string, turnId: string, role: string): void;
+}
+
 export class ConductorMirrorWriter {
   constructor(
     private readonly registry: ConductorRegistryAdapter,
-    private readonly stateStore: BridgeStateStore,
+    private readonly stateStore: MirrorFingerprints,
   ) {}
 
   appendUserMessage(params: { sessionId: string; turnId: string; text: string; sentAt: string }): "ok" | "duplicate" {

@@ -1,18 +1,22 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## [2.0.0] - 2026-09-25
 
-## [1.1.0] - 2026-04-07
+The project is now **Squeak**: a pager for coding agents, not a Telegram
+chat bridge. The earlier bridge has been removed; its history remains in git.
 
 ### Added
 
-- Added chat model and thinking-effort pickers so Telegram users can choose how new chats start.
-- Added model registry coverage and integration tests around model-aware chat startup.
-
-### Fixed
-
-- Fixed desktop Codex chat resume compatibility so resumed chats do not stall when restoring state.
+- Squeak for Mac: a main window with every session, full messages, lettered
+  decisions, replies and service control; packaged as `Squeak.app`.
+- Replies typed into Conductor's own window (Squeak Hands), shown live.
+- Squeak for iPhone, over an end-to-end encrypted Firebase channel with
+  Secure Enclave–signed replies and on-Mac pairing approval.
+- `DESIGN.md`: the design system every surface follows.
 
 ### Changed
 
-- Refined Telegram chat startup flow and bridge state handling to support the new model-selection path.
+- Agent hooks report with `X-Squeak-*` headers; `install-hooks` upgrades
+  hooks written by earlier installs in place.
+- `ship.sh` restarts Squeak and the duck and rolls back if Squeak does not
+  come up.

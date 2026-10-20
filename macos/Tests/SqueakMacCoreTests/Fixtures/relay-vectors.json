@@ -1,0 +1,71 @@
+{
+  "hchacha20": {
+    "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "nonce16": "090a0b0c0d0e0f101112131415161718",
+    "output": "897b05b46d3389ed02fd83f92d6a78866d8204a7b616386d85072510db8ba7be"
+  },
+  "recordNonce": [
+    {
+      "direction": 1,
+      "counter": 0,
+      "nonce": "010000000000000000000000000000000000000000000000"
+    },
+    {
+      "direction": 1,
+      "counter": 1,
+      "nonce": "010000000000000000000000000000000000000000000001"
+    },
+    {
+      "direction": 1,
+      "counter": 4294967301,
+      "nonce": "010000000000000000000000000000000000000100000005"
+    }
+  ],
+  "xchachaSeal": {
+    "key": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+    "nonce24": "202122232425262728292a2b2c2d2e2f3031323334353637",
+    "aad": "666978747572652d616164",
+    "plaintext": "7b2268656c6c6f223a2277c3b6726c64205c2271756f7465645c225c6e227d",
+    "box": "f74cf7d483fd123c5bfae8df13cd11f24f2f37be789051bdb3b5666241fcd67ab4b260e9cbee0c5865693bd618f1ca"
+  },
+  "handshake": {
+    "clientEphemeralPrivate": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+    "hostStaticPrivate": "303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f",
+    "hostEphemeralPrivate": "505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f",
+    "clientNonce": "707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f",
+    "hostNonce": "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+    "clientEphemeralPublic": "d89e3bad79437dbed9f843418304f460ff05c7fe81fe4a9577a804cb9367ff66",
+    "hostStaticPublic": "34e42d4af5ef94a07a3a84201b889d4cd1a743cb27b11b6a10438a8feb8e5847",
+    "hostEphemeralPublic": "392d174a38b3b1beafaf1fe824870841c5fa531bc6eafdb6402c124664488c1c",
+    "hostId": "TwlTxeX3plUupkH6Z2RbnD",
+    "transcriptHash": "1804b5e08a4a5d4bef42aef4d233d6ebff5e9b0eab93e6f47836d5e39340b3f6",
+    "dhStatic": "6e3c33b4c96fcb38dfa7862eae5bb902fe66cc2a41ca553280ded9dc363c852f",
+    "dhEphemeral": "ce233c595ad997651e18a03dddcfd6d6d65ac4bccdeaa1bb7a2f0067b5356342",
+    "hkdfSalt": "717f54fa9037c66f0313e290f8147b2ae80bad7dfd82ea4d8b4909bd20eeea24",
+    "hkdfInfo": "636f6e647563746f722d6465736b746f702d72656c61792d76312f6b6579731804b5e08a4a5d4bef42aef4d233d6ebff5e9b0eab93e6f47836d5e39340b3f6",
+    "clientToHostKey": "d007ac8adf5718a054a285732de966563087bc60c200aaf46d8a9ec2a9ee67fb",
+    "hostToClientKey": "44e8fe3b395f715e2489541fb9e47620d6cd85e21cbccf808a3d9930835589df",
+    "helloJson": "{\"t\":\"hello\",\"v\":2,\"clientEphemeralPublicKey\":\"2J47rXlDfb7Z-ENBgwT0YP8Fx_6B_kqVd6gEy5Nn_2Y\",\"clientNonce\":\"cHFyc3R1dnd4eXp7fH1-f4CBgoOEhYaHiImKi4yNjo8\"}",
+    "readyJson": "{\"t\":\"ready\",\"v\":2,\"hostStaticPublicKey\":\"NOQtSvXvlKB6OoQgG4idTNGnQ8snsRtqEEOKj-uOWEc\",\"hostEphemeralPublicKey\":\"OS0XSjizsb6vrx_oJIcIQcX6UxvG6v22QCwSRmRIjBw\",\"hostNonce\":\"kJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq8\"}"
+  },
+  "framedRequest": {
+    "messageJson": "{\"type\":\"request\",\"id\":\"11111111-2222-3333-4444-555555555555\",\"method\":\"POST\",\"target\":\"/workspaces/ws%201/sessions/s-1/pending-messages/send\",\"headers\":{\"content-type\":\"application/json\"},\"body\":{\"encoding\":\"utf8\",\"data\":\"{\\\"message\\\":\\\"hi \\\\\\\"there\\\\\\\"\\\"}\"}}",
+    "frameJson": "{\"t\":\"e\",\"n\":0,\"c\":\"tAT1zzml0u31hJ257vslSqlqyRqVs1QbaE3_ubOCrimvL6nn1PFSeHt7SZl0P3j3JiUZCHxq0ZvEfRVljk44YXgyd1X4VyodoiOqv9jFuoTlX8gTVMHmoJRCqAe46QTmUhlN7Z6lOSRsEtUNkmFA-COmgZirNgQlFR2uZFDMqi2W0S6HfajSsXtrBmhrvVZIin4gGlXbwTSLj8bJadlZvfNTBBR54dhDyMntN_guW4jvJCOvKpnzGgWhYusY7PGrG4FxOem35owushA2DSJb4crcZrhoZlPjAF-5eJn9et_YYKELe6NBQQZQBgYAd58HaPis5K46WQhgIFjmFUDwtGNE-1Re32r_LVayR8AxjBubGEnB\"}",
+    "secondFrameJson": "{\"t\":\"e\",\"n\":1,\"c\":\"q9AYwbXe3jZvnnPsmhp9I52gGP2DwCB-K7lbumjr4hw_hwWhI98C6w\"}"
+  },
+  "hostFrames": {
+    "responseHeadMessageJson": "{\"type\":\"responseHead\",\"id\":\"11111111-2222-3333-4444-555555555555\",\"status\":200,\"headers\":{\"x-a\":\"b\"}}",
+    "responseHeadFrameJson": "{\"t\":\"e\",\"n\":0,\"c\":\"FxewSJOkQ0MtjJv59rOrDEYBMm24v56Jm9z-83zGyllm-3P8SDVCBy28opU1WR-v3mXcm_20EBNmWOwb55-HSkgHSIsCuA1P_aUrKuwmCBK2fnN-P7xesfVKvvrVCTI8CMLCPZgzHWdIRa1SLe0DE-as9J9z_g\"}"
+  },
+  "pairing": {
+    "defaultLink": "CONDUCTOR://P/ALAMDQWDYTC4NR6IZHFMXTGNZ3H5BUOS2PKNLVWX3DM5VW643XPN7YHB4LR6JZPG47UOT2XL5TW6533LJHJAACKTNFRGQ2JNJVQWGAI",
+    "customLink": "CONDUCTOR://P/ALAMDQWDYTC4NR6IZHFMXTGNZ3H5BUOS2PKNLVWX3DM5VW643XPN7YHB4LR6JZPG47UOT2XL5TW6533LJHJAACKTNFRGQ2JNJVQWGAAVNB2HI4B2F4XTCMRXFYYC4MBOGE5DQNJZHE",
+    "hostStaticPublicKey": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+    "pairingToken": "e0e1e2e3e4e5e6e7e8e9eaebecedeeef",
+    "expiresAtSeconds": 1800000000,
+    "hostName": "Sibhi-Mac",
+    "defaultRelayUrl": "https://api.conductor.build",
+    "customRelayUrl": "http://127.0.0.1:8599",
+    "hostId": "7AceCgE2yDfAUc7mp3E-26"
+  }
+}

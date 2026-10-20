@@ -7,7 +7,9 @@ on:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    # The suite needs macOS: awake-backstop.test.ts runs the real backstop shell
+    # and reads sysctl kern.bootsessionuuid, neither of which exists on Linux.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

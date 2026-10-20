@@ -1,0 +1,31 @@
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.149.1)                         │
+│                                                    │
+│ model:     gpt-5.6-terra medium   /model to change │
+│ directory: ~                                       │
+╰────────────────────────────────────────────────────╯
+
+  Tip: Try the Desktop app. Run 'codex app' or visit https://chatgpt.com/codex?app-landing-page=true
+
+⚠ clamping SessionEnd hook timeout to 3s in /Users/sibhi-zstch1643/.codex/hooks.json
+
+• You have 3 usage limit resets available. Run /usage to use one.
+
+
+› Reply with a two line answer: first line 'First line here.' second line 'All done with **the test** now.' Do not run
+  commands.
+
+
+⚠ Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some
+  descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.
+
+• First line here.
+  All done with the test now.
+ 
+ 
+› Ask Codex to do anything
+ 
+  gpt-5.6-terra medium fast · ~
+

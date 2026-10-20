@@ -2,7 +2,18 @@ export type ComposeMode = "none" | "new_session" | "new_workspace" | "plan_feedb
 
 export type QueueKind = "normal" | "new_session";
 
-export type SessionStatus = "idle" | "working" | "needs_user_input" | "needs_plan_response" | "error" | "cancelling";
+/**
+ * `waiting`: the turn ended but background work it started is still running
+ * (seen with a background shell alive); Conductor shows the chat as not done.
+ */
+export type SessionStatus =
+  | "idle"
+  | "working"
+  | "waiting"
+  | "needs_user_input"
+  | "needs_plan_response"
+  | "error"
+  | "cancelling";
 
 export type SupportedAgentType = "codex" | "claude";
 
@@ -42,6 +53,8 @@ export interface ConductorSessionRef {
 }
 
 export interface SessionMessageRecord {
+  /** Conductor's row id; absent on records built by hand. */
+  id?: string;
   role: "user" | "assistant";
   content: string;
   sentAt: string | null;
@@ -137,6 +150,10 @@ export interface TelegramChat {
   type: string;
   is_forum?: boolean;
   has_topics_enabled?: boolean;
+  title?: string;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
 }
 
 export interface TelegramMessage {
@@ -147,6 +164,8 @@ export interface TelegramMessage {
   text?: string;
   is_topic_message?: boolean;
   message_thread_id?: number;
+  /** Set when the user swiped to reply to one of the bot's messages. */
+  reply_to_message?: TelegramMessage;
 }
 
 export interface TelegramCallbackQuery {
@@ -156,10 +175,8 @@ export interface TelegramCallbackQuery {
   data?: string;
 }
 
-export interface TelegramInlineKeyboardButton {
-  text: string;
-  callback_data: string;
-}
+/** A button that calls back into the bot, or one that opens a link (https only, per Telegram). */
+export type TelegramInlineKeyboardButton = { text: string; callback_data: string } | { text: string; url: string };
 
 export type TelegramInlineKeyboard = TelegramInlineKeyboardButton[][];
 
