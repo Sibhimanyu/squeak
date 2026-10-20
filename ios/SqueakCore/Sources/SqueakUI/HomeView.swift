@@ -139,7 +139,7 @@ struct HomeView: View {
                 if model.snapshot != nil {
                     // The connection lives here while it is fine: a dot, not a bar (ConnectionBar says when it is not).
                     TimelineView(.periodic(from: .now, by: 5)) { _ in
-                        let connection = Connection.read(snapshot: model.snapshot, problem: model.problem, demo: model.demo, lastFetch: model.lastFetch)
+                        let connection = model.connection()
                         HStack(spacing: 5) {
                             StatusDot(color: connection.color).accessibilityHidden(true)
                             Text(subtitle).font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
@@ -184,6 +184,8 @@ struct HomeView: View {
         let count = sessions.count
         let active = count == 0 ? "Nothing active" : "\(count) active"
         // While an awake session runs its countdown takes the line: the list shows the count anyway.
+        // A Mac that stopped answering is not awake, whatever it said last.
+        if case .silent = model.macLiveness() { return "Mac not answering" }
         guard let awake = model.awake else { return active }
         return awake.until.map { "Mac awake · \(AppModel.awakeLeft($0))" } ?? "Mac kept awake"
     }
@@ -379,7 +381,7 @@ struct ConnectionBar: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2)) { _ in
-            let state = Connection.read(snapshot: model.snapshot, problem: model.problem, demo: model.demo, lastFetch: model.lastFetch)
+            let state = model.connection()
             if !state.healthy {
             HStack(spacing: 8) {
                 StatusDot(color: state.color)
@@ -394,6 +396,13 @@ struct ConnectionBar: View {
     }
 }
 
+extension AppModel {
+    /// The connection as the header, the bar and Settings show it.
+    func connection(now: Date = Date()) -> Connection.State {
+        Connection.read(snapshot: snapshot, problem: problem, demo: demo, lastFetch: lastFetch, mac: macLiveness(now: now), now: now)
+    }
+}
+
 enum Connection {
     struct State {
         let text: String
@@ -402,7 +411,8 @@ enum Connection {
         var healthy = false
     }
 
-    static func read(snapshot: PhoneSnapshot?, problem: String?, demo: Bool, lastFetch: Date? = nil, now: Date = Date()) -> State {
+    static func read(snapshot: PhoneSnapshot?, problem: String?, demo: Bool, lastFetch: Date? = nil,
+                     mac: MacLiveness = .unknown, now: Date = Date()) -> State {
         if demo { return State(text: "Mac connected", color: Theme.working, healthy: true) }
         guard let snapshot else {
             return problem == nil
@@ -410,6 +420,10 @@ enum Connection {
                 : State(text: "Can't reach Squeak's server", color: Theme.offline)
         }
         if problem != nil { return State(text: "Can't reach Squeak's server. Showing the last view.", color: Theme.offline) }
+        // The server answering says nothing about the Mac: asleep, it leaves its last view standing.
+        if case .silent(let since) = mac {
+            return State(text: "Mac not answering, maybe asleep · last heard \(Age.sync(since, now: now))", color: Theme.offline)
+        }
         // "Synced" is when this phone last heard from the server, which is what
         // it can honestly say. The Mac only writes a new view when something
         // changed, so the view's own age is "last change", not staleness.

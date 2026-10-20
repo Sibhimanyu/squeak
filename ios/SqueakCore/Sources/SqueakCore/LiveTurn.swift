@@ -76,3 +76,38 @@ public struct Presence: Codable, Equatable, Sendable {
         self.at = at; self.watching = watching; self.recent = recent
     }
 }
+
+/// The Mac's answer to a presence ping, sealed: its own clock when it last
+/// heard this phone. The view is only rewritten when something changes, so
+/// this is what tells a quiet Mac from one that is asleep or off.
+public struct MacAlive: Codable, Equatable, Sendable {
+    public let at: Int64
+
+    public init(at: Int64) { self.at = at }
+
+    public var date: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
+}
+
+/// Whether the Mac is answering this phone's presence pings.
+public enum MacLiveness: Equatable, Sendable {
+    /// No answer has ever been seen: an older Mac. Say nothing either way.
+    case unknown
+    case answering
+    /// Just opened: the first ping's answer is on its way.
+    case checking
+    /// Asleep, off, or offline since this time.
+    case silent(since: Date)
+
+    /// The phone pings every 20 s and the Mac answers within a few; a minute
+    /// with no answer is a Mac that is not there. `lookingSince` is when the
+    /// app came on screen: the answer on record then is from the last visit.
+    public static let answerWindow: TimeInterval = 60
+    public static let openGrace: TimeInterval = 30
+
+    public static func read(aliveAt: Date?, lookingSince: Date?, now: Date = Date()) -> MacLiveness {
+        guard let aliveAt else { return .unknown }
+        if now.timeIntervalSince(aliveAt) < answerWindow { return .answering }
+        if let lookingSince, now.timeIntervalSince(lookingSince) < openGrace { return .checking }
+        return .silent(since: aliveAt)
+    }
+}

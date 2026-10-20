@@ -362,6 +362,12 @@ type PhoneQuestion = { toolUseId: string; questions: QuestionPrompt[]; plan?: st
 export const MAX_COMMAND_LIFETIME_MS = 10 * 60_000;
 /** How long a phone counts as "open" after its last presence ping. */
 const PRESENCE_WINDOW_MS = 60_000;
+/**
+ * The Mac answers a phone's presence with `state/alive`, at most this often,
+ * so the phone can tell a quiet Mac from one that is asleep or off: the view
+ * itself is only rewritten when something changes.
+ */
+const ALIVE_MIN_GAP_MS = 10_000;
 const ACTIVE_POLL_MS = 2_000;
 const IDLE_POLL_MS = 15_000;
 const ACTIVE_PUBLISH_MS = 3_000;
@@ -419,6 +425,9 @@ export class RemoteBridge {
   private readonly answerLimit = new AnswerRateLimit();
   private pairingOpenUntil = 0;
   private phoneSeenAt = 0;
+  /** The last presence answered with `state/alive`, by the phone's own stamp, and when. */
+  private answeredPresence = 0;
+  private aliveWrittenAt = 0;
   private lastPublishedAt = 0;
   private lastPublished = "";
   private timer: NodeJS.Timeout | null = null;
@@ -810,8 +819,32 @@ export class RemoteBridge {
         this.recentWanted = wanted;
         this.nudgePublish(0);
       }
+      await this.answerPresence(config, presence.at);
     } catch {
       // Not ours — ignore it.
+    }
+  }
+
+  /**
+   * Say this Mac is awake, to a phone that is looking: a new presence ping
+   * inside the window gets a sealed `{ at }` back. A Mac that wakes to a ping
+   * from an hour ago says nothing; the phone's next ping gets the answer.
+   */
+  private async answerPresence(config: RemoteConfig, phoneAt: number): Promise<void> {
+    const now = this.now();
+    if (phoneAt <= this.answeredPresence || !this.phoneOpen() || now - this.aliveWrittenAt < ALIVE_MIN_GAP_MS) {
+      return;
+    }
+    try {
+      await this.deps.store.set(this.channel(config, "state", "alive"), {
+        box: seal(config.key, { at: now }),
+        at: now,
+      });
+      this.answeredPresence = phoneAt;
+      this.aliveWrittenAt = now;
+    } catch (error) {
+      // Best effort: the phone only says the Mac is not answering; retried on the next ping.
+      logger.warn("remote alive answer failed", { error: error instanceof Error ? error.message : String(error) });
     }
   }
 

@@ -11,6 +11,12 @@ struct SettingsView: View {
     @State private var awakeProblem: String?
 
     /// "64% · on battery · 35 W", "100% · plugged in".
+    /// " · 37m ago" on a reading from a Mac that is not answering, nothing otherwise.
+    static func lastKnown(_ mac: MacLiveness, now: Date = Date()) -> String {
+        guard case .silent(let since) = mac else { return "" }
+        return " · \(Age.sync(since, now: now))"
+    }
+
     static func battery(percent: Int, power: PhoneSnapshot.MacPower) -> String {
         var parts = ["\(percent)%"]
         if let onBattery = power.onBattery { parts.append(onBattery ? "on battery" : "plugged in") }
@@ -28,7 +34,7 @@ struct SettingsView: View {
                 Section("Your Mac") {
                     LabeledContent("Name", value: model.snapshot?.mac ?? "Not seen yet")
                     TimelineView(.periodic(from: .now, by: 20)) { _ in
-                        let state = Connection.read(snapshot: model.snapshot, problem: model.problem, demo: model.demo, lastFetch: model.lastFetch)
+                        let state = model.connection()
                         LabeledContent("Status") {
                             HStack(spacing: 7) { StatusDot(color: state.color); Text(state.text) }
                         }
@@ -39,11 +45,13 @@ struct SettingsView: View {
                                 .font(.subheadline).foregroundStyle(Theme.muted)
                         }
                         if let power = snapshot.macPower {
+                            // A Mac that stopped answering left these behind: say they are its last word.
+                            let stale = Self.lastKnown(model.macLiveness())
                             if let percent = power.percent {
-                                LabeledContent("Battery", value: Self.battery(percent: percent, power: power))
+                                LabeledContent("Battery", value: Self.battery(percent: percent, power: power) + stale)
                             }
                             if let closed = power.lidClosed {
-                                LabeledContent("Lid", value: closed ? "Closed" : "Open")
+                                LabeledContent("Lid", value: (closed ? "Closed" : "Open") + stale)
                             }
                         }
                         LabeledContent("Last change", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")

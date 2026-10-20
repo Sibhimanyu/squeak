@@ -116,6 +116,32 @@ public struct Channel: Sendable {
         try await store.set(path("state", "presence"), ChannelDocument(box: box))
     }
 
+    /// The Mac's last answer to a presence ping, or nil from a Mac that never answers (older).
+    public func alive() async throws -> MacAlive? {
+        guard let document = try await store.get(path("state", "alive")) else { return nil }
+        return try ChannelCrypto.open(MacAlive.self, box: document.box, key: pairing.k)
+    }
+
+    /// The Mac's answers as they are written; nil on Firestore (poll `alive`).
+    public func alives() async -> AsyncStream<MacAlive?>? {
+        guard let documents = await store.documents(path("state", "alive")) else { return nil }
+        let key = pairing.k
+        return AsyncStream { continuation in
+            let task = Task {
+                for await change in documents {
+                    switch change {
+                    case .value(let document):
+                        continuation.yield(document.flatMap { try? ChannelCrypto.open(MacAlive.self, box: $0.box, key: key) })
+                    case .refetch:
+                        continuation.yield(try? await self.alive())
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     /// The verbose view of a session, while this phone's presence names it.
     public func liveTurn(for sessionKey: String) async throws -> LiveTurn? {
         guard let document = try await store.get(path("live", LiveTurn.handle(for: sessionKey))) else { return nil }

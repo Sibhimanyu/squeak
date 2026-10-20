@@ -29,6 +29,10 @@ final class AppModel {
     struct StartingChat: Equatable { let sessionId: String; let label: String }
     enum StartResult: Equatable { case started, cancelled, refused(String) }
     private(set) var lastFetch: Date?
+    /// When the Mac last answered a presence ping (its clock), nil from a Mac that never does.
+    private(set) var macAliveAt: Date?
+    /// When the app last came on screen: the answer on record then is from the visit before.
+    private(set) var lookingSince: Date?
     private(set) var problem: String?
     /// What this phone sent since the app opened, per session. Local only:
     /// the channel carries no conversation history back, so the phone shows
@@ -152,6 +156,7 @@ final class AppModel {
         KeyStore.delete(account: "approved")
         channel = nil
         snapshot = nil
+        macAliveAt = nil
         phase = .unpaired
         loop?.cancel()
         liveTask?.cancel()
@@ -164,6 +169,7 @@ final class AppModel {
     func resume() {
         unlock.foregrounded()
         guard !demo, loop == nil, let channel else { return }
+        lookingSince = Date()
         loop = Task { [weak self] in
             await self?.tick()
             self?.restartLive()
@@ -188,6 +194,9 @@ final class AppModel {
                     }
                 }
                 group.addTask { for await _ in results { await self?.tickIfAwaitingApproval() } }
+                if let alives = await channel.alives() {
+                    group.addTask { for await alive in alives { if let alive { await self?.heard(alive) } } }
+                }
                 group.addTask {
                     while !Task.isCancelled {
                         try? await Task.sleep(for: .seconds(Self.streamedTickSeconds))
@@ -257,6 +266,15 @@ final class AppModel {
         if case .awaitingApproval = phase { await tick() }
     }
 
+    /// Whether the Mac is answering, for the header, the bar and Settings.
+    func macLiveness(now: Date = Date()) -> MacLiveness {
+        demo ? .answering : MacLiveness.read(aliveAt: macAliveAt, lookingSince: lookingSince, now: now)
+    }
+
+    private func heard(_ alive: MacAlive) {
+        if macAliveAt.map({ alive.date > $0 }) ?? true { macAliveAt = alive.date }
+    }
+
     /// A view straight from the stream.
     private func apply(_ next: PhoneSnapshot?) {
         guard phase == .paired else { return }
@@ -317,6 +335,8 @@ final class AppModel {
             if let next = try await channel.snapshot(), next != snapshot {
                 snapshot = next
             }
+            // Best effort: an older Mac never answers, and that must not read as a broken channel.
+            if let alive = try? await channel.alive() { heard(alive) }
             lastFetch = Date()
             problem = nil
         } catch ChannelCrypto.Failure.badBox, ChannelCrypto.Failure.badKey {

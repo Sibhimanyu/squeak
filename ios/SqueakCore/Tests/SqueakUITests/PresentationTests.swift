@@ -27,6 +27,20 @@ final class PresentationTests: XCTestCase {
         XCTAssertFalse(Connection.read(snapshot: snapshot, problem: "down", demo: false, lastFetch: now, now: now).healthy)
         XCTAssertFalse(Connection.read(snapshot: nil, problem: nil, demo: false, now: now).healthy)
     }
+
+    func testAnAsleepMacIsNotShownAsConnectedThoughTheServerAnswers() {
+        // Heresay r_iGq-9fy2nmPGmsfv: the lid shut, the Mac slept, and the phone kept saying "Synced just now".
+        let now = Date()
+        let json = #"{"v":1,"mac":"Mac","generatedAt":"2026-10-19T08:00:00Z","duck":{"blockedCount":0,"workingCount":0},"sessions":[]}"#
+        let snapshot = try! JSONDecoder().decode(PhoneSnapshot.self, from: Data(json.utf8))
+        let asleep = Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now,
+                                     mac: .silent(since: now.addingTimeInterval(-37 * 60)), now: now)
+        XCTAssertFalse(asleep.healthy)
+        XCTAssertEqual(asleep.text, "Mac not answering, maybe asleep · last heard 37m ago")
+        XCTAssertTrue(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now, mac: .answering, now: now).healthy)
+        XCTAssertTrue(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now, mac: .checking, now: now).healthy)
+        XCTAssertTrue(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now, mac: .unknown, now: now).healthy)
+    }
     #endif
 
     func testHeaderLinesNeverRepeat() {

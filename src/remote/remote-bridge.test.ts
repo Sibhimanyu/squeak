@@ -1848,3 +1848,66 @@ describe("RemoteBridge recent chats, Show more", () => {
     expect((await more(many, undefined)).recent).toHaveLength(10);
   });
 });
+
+describe("RemoteBridge alive answer", () => {
+  async function alive() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-alive-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    let now = NOW;
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      now: () => now,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const channel = `channels/${payload.c}`;
+    return {
+      bridge,
+      ping: (at: number) => store.set(`${channel}/state/presence`, { box: seal(payload.k, { at }) }),
+      answer: async () => {
+        const doc = await store.get(`${channel}/state/alive`);
+        return doc ? open<{ at: number }>(payload.k, doc.box).at : null;
+      },
+      advance: (ms: number) => (now += ms),
+      now: () => now,
+    };
+  }
+
+  it("answers a phone's presence with a sealed stamp of the Mac's own time", async () => {
+    const t = await alive();
+    await t.ping(t.now());
+    await t.bridge.tick();
+    expect(await t.answer()).toBe(NOW);
+    t.bridge.stop();
+  });
+
+  it("answers each new ping, but not the same ping twice nor faster than every ten seconds", async () => {
+    const t = await alive();
+    await t.ping(t.now());
+    await t.bridge.tick();
+    t.advance(20_000);
+    await t.bridge.tick(); // same ping again: no new answer
+    expect(await t.answer()).toBe(NOW);
+    await t.ping(t.now());
+    await t.bridge.tick();
+    expect(await t.answer()).toBe(NOW + 20_000);
+    t.advance(3_000);
+    await t.ping(t.now());
+    await t.bridge.tick();
+    expect(await t.answer()).toBe(NOW + 20_000);
+    t.bridge.stop();
+  });
+
+  it("a Mac waking to an hour-old ping says nothing: no phone is looking", async () => {
+    const t = await alive();
+    await t.ping(t.now() - 60 * 60_000);
+    await t.bridge.tick();
+    expect(await t.answer()).toBeNull();
+    t.bridge.stop();
+  });
+});
