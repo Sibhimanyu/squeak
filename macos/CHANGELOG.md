@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.3
+
+- The awake session shows on the Mac: what is left beside the duck in the menu
+  bar ("1:52", "∞" until you end it), and a Keep Mac awake row in the popover
+  to start one, add an hour, or end it.
+- When the Mac has switched to your iPhone's hotspot, the popover says so.
+
 ## 2.1.2
 
 - Usage bars show what is left, like a battery: "58% left", full once a
