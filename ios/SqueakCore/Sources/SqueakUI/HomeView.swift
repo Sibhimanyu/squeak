@@ -119,7 +119,7 @@ struct HomeView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .listSectionSpacing(12)
+            .listSectionSpacing(8)
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             // Inline, two lines in the bar (like a chat's header): the list is what this screen is for.
@@ -149,23 +149,36 @@ struct HomeView: View {
         .foregroundStyle(Theme.ink)
     }
 
-    /// The status tiles (DESIGN.md §3.3): a count per state, each a filter. Tapping the one that is
-    /// on goes back to everything.
+    /// The status filter (DESIGN.md §3.3): one compact chip per state with its count. Tapping the
+    /// one that is on goes back to everything. A state with nothing in it stays (the strip keeps its
+    /// shape) but recedes, and scrolls sideways when the words do not fit.
     /// A section header, not a row: an inset-grouped section clips its rows to its own large
-    /// rounded shape, which cut the outer tiles' corners like a mask.
+    /// rounded shape, which cut the outer chips' corners like a mask.
     private var tiles: some View {
         Section {
         } header: {
-            HStack(spacing: 8) {
-                ForEach(Presentation.tiles(sessions), id: \.filter) { tile in
-                    StatusTile(filter: tile.filter, count: tile.count, selected: filter == tile.filter) {
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(.easeOut(duration: 0.15)) { filter = filter == tile.filter ? .all : tile.filter }
+            ScrollViewReader { strip in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(Presentation.tiles(sessions), id: \.filter) { tile in
+                            StatusTile(filter: tile.filter, count: tile.count, selected: filter == tile.filter) {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                withAnimation(.easeOut(duration: 0.15)) { filter = filter == tile.filter ? .all : tile.filter }
+                            }
+                            .id(tile.filter)
+                        }
                     }
+                    .padding(.horizontal, 16)
+                }
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                // The chip that is on is never left half off the edge.
+                .onChange(of: filter, initial: true) { _, now in
+                    guard now != .all else { return }
+                    withAnimation(.easeOut(duration: 0.15)) { strip.scrollTo(now) }
                 }
             }
             .textCase(nil)
-            .padding(.horizontal, -16)
+            .padding(.horizontal, -32)
         }
     }
 
@@ -225,8 +238,7 @@ struct HomeView: View {
     }
 
     private var subtitle: String {
-        let count = sessions.count
-        let active = count == 0 ? "Nothing active" : "\(count) active"
+        let active = Presentation.headerCount(sessions)
         // While an awake session runs its countdown takes the line: the list shows the count anyway.
         // A Mac that stopped answering is not awake, whatever it said last.
         if case .silent = model.macLiveness() { return "Mac not answering" }
@@ -263,8 +275,9 @@ struct HomeView: View {
     /// A state colour lives on the dot or the left edge (§3.3), never as a fill.
     @ViewBuilder
     private func edge(_ session: PhoneSnapshot.Session) -> some View {
-        if session.needsYou {
-            Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 6).offset(x: -14)
+        // An error carries its colour on the edge too, so it is not just one more dot in the list.
+        if session.needsYou || session.state == "error" {
+            Capsule().fill(session.needsYou ? Theme.needsYou : Theme.error).frame(width: 3).padding(.vertical, 6).offset(x: -14)
                 .accessibilityHidden(true)
         }
     }
@@ -329,33 +342,36 @@ extension Presentation.Filter {
     }
 }
 
-/// One status tile: its dot, the count, the state's word. A filter: selected, it has an ink edge.
+/// One status chip: its dot, the count, the state's word. A filter: selected, it has an ink edge.
+/// A zero recedes (muted, no dot colour) so the states with something in them stand out.
 struct StatusTile: View {
     let filter: Presentation.Filter
     let count: Int
     let selected: Bool
     let action: () -> Void
 
+    private var empty: Bool { count == 0 && !selected }
+
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    StatusDot(color: toneColor(filter.tone))
-                    Text("\(count)").font(.title3.weight(.semibold)).monospacedDigit().foregroundStyle(Theme.ink)
-                }
-                Text(filter.word).font(.caption).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+            HStack(spacing: 4) {
+                StatusDot(color: empty ? Theme.lineStrong : toneColor(filter.tone))
+                Text("\(count)").font(.footnote.weight(.semibold)).monospacedDigit()
+                    .foregroundStyle(empty ? Theme.subtle : Theme.ink)
+                Text(filter.word).font(.footnote).foregroundStyle(empty ? Theme.subtle : Theme.muted).lineLimit(1)
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .background(selected ? Theme.surfaceRaised : Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? Theme.ink : Theme.line, lineWidth: selected ? 1.5 : 1))
+            .padding(.horizontal, 9)
+            .frame(minHeight: 30)
+            .background(selected ? Theme.surfaceRaised : Theme.surface, in: Capsule())
+            .overlay(Capsule().stroke(selected ? Theme.ink : Theme.line, lineWidth: selected ? 1.5 : 1))
             .overlay(alignment: .leading) {
-                // Something needs you: the tile carries the state's edge, like its rows.
+                // Something needs you: the chip carries the state's edge, like its rows.
                 if filter == .needsYou, count > 0 {
-                    Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 12).padding(.leading, 4).accessibilityHidden(true)
+                    Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 8).padding(.leading, 3).accessibilityHidden(true)
                 }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(count) \(filter.word)")
@@ -364,26 +380,21 @@ struct StatusTile: View {
     }
 }
 
-/// A project card's heading: the repository, one dot per chat (up to six), and how many chats.
+/// A project card's heading: the repository, and what its chats are doing in words
+/// ("1 working · 1 error"). The rows carry the dots; the heading only sums them up.
 struct ProjectHeader: View {
     let project: Presentation.Project
 
     var body: some View {
-        HStack(spacing: 8) {
+        let summary = Presentation.projectSummary(project.sessions)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(project.name).font(.headline).foregroundStyle(Theme.ink).lineLimit(1)
             Spacer(minLength: 8)
-            HStack(spacing: 4) {
-                ForEach(Array(project.sessions.prefix(6).enumerated()), id: \.offset) { _, session in
-                    StatusDot(color: toneColor(Presentation.status(session).tone))
-                }
-            }
-            Text(project.sessions.count == 1 ? "1 chat" : "\(project.sessions.count) chats")
-                .font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+            Text(summary).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit().lineLimit(1)
         }
         .textCase(nil)
-        .padding(.top, 4)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(project.name), \(project.sessions.count) chats")
+        .accessibilityLabel("\(project.name), \(project.sessions.count == 1 ? "1 chat" : "\(project.sessions.count) chats"), \(summary)")
         .accessibilityAddTraits(.isHeader)
     }
 }
@@ -538,18 +549,25 @@ struct SessionRow: View {
                 .padding(.top, 7)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(Presentation.displayTitle(session)).font(.headline).lineLimit(1)
+                    Text(Presentation.displayTitle(session)).font(.headline).lineLimit(2)
                     Spacer(minLength: 4)
                     Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
                 }
                 secondLine.font(.subheadline).lineLimit(1)
+                // An error says why, in the agent's words, so it can be told apart from a quiet chat.
+                if !recent, let reason = failure {
+                    Text(reason).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
+                }
             }
         }
         .padding(.vertical, 4)
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text), \(Presentation.subtitle(session)), \(Age.spoken(session.lastActivityAt))")
+        .accessibilityLabel("\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text)\(failure.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), \(Age.spoken(session.lastActivityAt))")
+        .accessibilityHint(failure != nil || status.tone == .error ? "Opens the chat to see what failed" : "")
     }
+
+    private var failure: String? { Presentation.failureReason(session) }
 
     private var lastWords: String? { Presentation.firstLine(session.message ?? session.detail) }
 
@@ -557,9 +575,11 @@ struct SessionRow: View {
         if recent, let lastWords {
             return Text(lastWords).foregroundStyle(Theme.muted)
         }
+        // Needs you and error are the two a glance must catch: their word is in ink, not grey.
+        let loud = status.tone == .needsYou || status.tone == .error
         let word = Text(status.text)
-            .fontWeight(status.tone == .needsYou ? .semibold : .regular)
-            .foregroundStyle(status.tone == .needsYou ? Theme.ink : Theme.muted)
+            .fontWeight(loud ? .semibold : .regular)
+            .foregroundStyle(loud ? Theme.ink : Theme.muted)
         let rest = inProject ? Presentation.agentName(session.agent) : Presentation.subtitle(session)
         return Text("\(word)\(Text(" · \(rest)").foregroundStyle(Theme.muted))")
     }

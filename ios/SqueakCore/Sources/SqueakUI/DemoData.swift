@@ -55,7 +55,7 @@ enum DemoData {
     private static let titles = [
         "pay": "Payment retry logic", "search": "Search index migration", "tg": "Telegram message formatting",
         "link": "Fix onboarding deep link", "cache": "API response caching", "iso": "Session isolation checks",
-        "copy": "Checkout copy review",
+        "copy": "Checkout copy review", "quota": "Nightly dependency upgrade across every workspace",
     ]
 
     private static func titled(_ s: PhoneSnapshot.Session) -> PhoneSnapshot.Session {
@@ -64,7 +64,8 @@ enum DemoData {
             lastActivityAt: s.lastActivityAt, detail: s.detail, git: s.git, contextPercent: s.contextPercent,
             turnId: s.turnId, message: s.message, choices: s.choices, activity: s.activity, title: titles[s.key],
             question: s.key == "pay" && s.state == "awaiting_input"
-                ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-plan") ? plan : question) : nil)
+                ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-plan") ? plan : question) : nil,
+            failure: s.failure)
     }
 
     /// `-squeak-demo-plan`: the payment chat waits on a plan instead (ExitPlanMode).
@@ -183,7 +184,13 @@ enum DemoData {
                 .init(key: "idle", conductorSessionId: id(8), label: "compass · release-notes", agent: "claude", state: "idle",
                       lastActivityAt: now(-10800), detail: nil, git: nil, contextPercent: nil,
                       turnId: nil, message: nil, choices: nil),
-            ])
+            ] + (ProcessInfo.processInfo.arguments.contains("-squeak-demo-error") ? [
+                // `-squeak-demo-error`: a chat whose turn failed, with the reason the Mac sends.
+                .init(key: "quota", conductorSessionId: id(9), label: "squeak · deps-upgrade", agent: "claude", state: "error",
+                      lastActivityAt: now(-540), detail: nil, git: nil, contextPercent: nil,
+                      turnId: "t7", message: "Upgrading the lockfile first.", choices: nil,
+                      failure: "You've hit your session limit · resets 7:20pm (Asia/Calcutta)"),
+            ] : []))
     }
 
     /// A reply already sent from this phone, so the demo shows a "You" bubble.

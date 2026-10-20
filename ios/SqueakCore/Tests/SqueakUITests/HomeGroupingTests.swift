@@ -19,6 +19,20 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertFalse(Presentation.inFilter(chat("f", "error"), .idle))
     }
 
+    func testHeaderCountsSessionsAndWhatIsWorking() {
+        XCTAssertEqual(Presentation.headerCount([]), "Nothing active")
+        XCTAssertEqual(Presentation.headerCount([chat("a", "idle")]), "1 session")
+        let six = [chat("a", "working"), chat("b", "working"), chat("c", "working"), chat("d", "idle"), chat("e", "idle"), chat("f", "error")]
+        XCTAssertEqual(Presentation.headerCount(six), "6 sessions · 3 working")
+    }
+
+    func testProjectSummaryNamesWhatIsGoingOnInAttentionOrder() {
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "error"), chat("b", "working"), chat("c", "idle")]), "1 working · 1 error")
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "awaiting_approval")]), "2 need you")
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "finished")]), "1 needs you · 1 done")
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "idle"), chat("b", "idle")]), "2 idle")
+    }
+
     func testTheUrgentChatIsTheNewestThatNeedsYou() {
         let chats = [chat("old", "awaiting_input", at: "2026-10-19T09:00:00Z"), chat("new", "awaiting_approval", at: "2026-10-19T10:00:00Z"),
                      chat("busy", "working", at: "2026-10-19T11:00:00Z")]

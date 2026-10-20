@@ -114,6 +114,8 @@ function fixture(
     hotspot?: RemoteBridgeDependencies["hotspot"];
     /** The chat's latest message, as the replier reads it. */
     lastText?: string;
+    /** Why the chat's newest turn failed, as the replier reads it. */
+    failure?: string | null;
     /** A store that streams, like the Realtime Database. */
     streaming?: boolean;
   } = {},
@@ -125,6 +127,7 @@ function fixture(
   let now = NOW;
   const replier = {
     lastTurnText: () => options.lastText ?? "Pick one?\nA) Arm now\nB) Later",
+    lastTurnError: vi.fn(() => options.failure ?? null),
     lastTurnId: vi.fn(() => options.turn ?? "turn-1"),
     send: vi.fn(async (sessionId: string, text: string) => {
       sends.push({ sessionId, text });
@@ -2144,5 +2147,23 @@ describe("RemoteBridge formats for the phone in front of it", () => {
     await f.bridge.tick();
     expect(read(f, "snapshot").sessions).toMatchObject([{ state: "working" }]);
     expect(read(f, "snapshot").seq as number).toBeGreaterThan(first);
+  });
+});
+
+describe("RemoteBridge phone view: an errored chat", () => {
+  it("says why it failed, clipped, and only for an errored chat", () => {
+    const f = fixture({ failure: `You've hit your session limit · resets 7:20pm ${"x".repeat(300)}` });
+    f.emit([session({ state: "error" })]);
+    const failure = (f.bridge.phoneView().sessions[0] as { failure?: string | null }).failure;
+    expect(failure?.startsWith("You've hit your session limit")).toBe(true);
+    expect(failure?.length).toBe(201);
+    f.emit([session({ state: "finished" })]);
+    expect(f.bridge.phoneView().sessions[0]).not.toHaveProperty("failure");
+  });
+
+  it("sends null when the Mac has no reason", () => {
+    const f = fixture({ failure: null });
+    f.emit([session({ state: "error" })]);
+    expect(f.bridge.phoneView().sessions[0]).toMatchObject({ failure: null });
   });
 });

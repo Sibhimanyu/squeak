@@ -4,7 +4,7 @@ import type { EventEmitter } from "node:events";
 import { ConductorMirrorWriter, type MirrorFingerprints } from "../adapters/conductor-mirror.js";
 import type { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import type { CodexNotification, SupportedAgentType } from "../types.js";
-import { extractAssistantEnvelopeText } from "../utils/conductor-envelope.js";
+import { extractAssistantEnvelopeText, extractTurnError } from "../utils/conductor-envelope.js";
 import { buildTranscript, TRANSCRIPT_SCAN_ROWS, type TranscriptResult } from "./transcript.js";
 import { describeUiFailure, mayHaveSent, type ConductorUiSender } from "./conductor-ui.js";
 import { logger } from "../utils/logger.js";
@@ -209,6 +209,24 @@ export class ConductorReplier {
     // The last text block is the one written to the reader; earlier ones in
     // the same turn are running commentary between tool calls.
     return parts[0] ?? null;
+  }
+
+  /**
+   * Why the chat's newest turn failed, in the agent's words ("You've hit your
+   * session limit · resets 7:20pm"), or null. Only rows after your last
+   * message count: an error from an earlier turn is not this turn's reason.
+   */
+  lastTurnError(sessionId: string): string | null {
+    for (const row of this.deps.registry.listSessionMessages(sessionId, LAST_TURN_SCAN_ROWS)) {
+      if (row.role === "user") {
+        return null;
+      }
+      const error = extractTurnError(row.content);
+      if (error) {
+        return error;
+      }
+    }
+    return null;
   }
 
   /** The chat's readable history, oldest first: user text and assistant prose only. */

@@ -154,6 +154,9 @@ struct SessionView: View {
         .background(Theme.bg.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
+                if session.state == "error" {
+                    FailureNotice(reason: Presentation.failureReason(session), canReply: Presentation.replyBlock(session) == nil)
+                }
                 if !cards.isEmpty {
                     QueueStack(
                         cards: cards, agentName: Presentation.agentName(session.agent), problems: model.queueProblem,
@@ -186,6 +189,34 @@ struct SessionView: View {
     private func stepCount(_ rows: [ChatTimeline.Row]) -> Int {
         guard case .working(_, let steps)? = rows.last else { return 0 }
         return steps.count * 1_000 + (steps.last?.text.count ?? 0) % 1_000
+    }
+}
+
+/// An errored chat says so above the composer, with the agent's own reason when the Mac sent it,
+/// and what to do next: the composer under it is the recovery.
+private struct FailureNotice: View {
+    let reason: String?
+    let canReply: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            StatusDot(color: Theme.error).padding(.top, 6)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("The last turn failed").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                if let reason { Text(reason).font(.footnote).foregroundStyle(Theme.muted).lineLimit(3) }
+                Text(canReply ? "Reply below to try again." : "Open it on your Mac to try again.")
+                    .font(.footnote).foregroundStyle(Theme.muted)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(alignment: .leading) {
+            Capsule().fill(Theme.error).frame(width: 3).padding(.vertical, 10).padding(.leading, 4).accessibilityHidden(true)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+        .padding(.horizontal, 16).padding(.bottom, 8)
+        .accessibilityElement(children: .combine)
     }
 }
 

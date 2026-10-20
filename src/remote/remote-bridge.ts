@@ -240,6 +240,8 @@ export interface ChannelStore {
 export interface RemoteReplier {
   lastTurnText(sessionId: string): string | null;
   lastTurnId(sessionId: string): string | null;
+  /** Why the newest turn failed, in the agent's words; absent or null when unknown. */
+  lastTurnError?(sessionId: string): string | null;
   send(
     sessionId: string,
     text: string,
@@ -390,6 +392,8 @@ const RESULT_SWEEP_EVERY_MS = 5 * 60_000;
 /** Pairing is only listened for while the Mac app's pairing sheet is open. */
 const PAIRING_WINDOW_MS = 10 * 60_000;
 const MESSAGE_MAX_CHARS = 8_000;
+/** An errored row's reason: one or two lines on the phone. */
+const FAILURE_MAX_CHARS = 200;
 /**
  * Recent chats: Conductor chats that are no longer active, so a phone can
  * pick one up again. A short list, each with a shorter message: they change
@@ -427,6 +431,7 @@ export class RemoteBridge {
   private readonly lastStartAt = new Map<string, number>();
   private readonly activity: RemoteActivity[] = [];
   private readonly messageCache = new Map<string, { text: string | null; choices: ParsedChoices | null }>();
+  private readonly failureCache = new Map<string, string | null>();
   private readonly activityCache = new Map<string, PhoneActivity | null>();
   private readonly questionCache = new Map<string, PhoneQuestion | null>();
   private readonly answerLimit = new AnswerRateLimit();
@@ -1749,6 +1754,10 @@ export class RemoteBridge {
       activity: session.state === "working" ? this.activityFor(session) : null,
       // Only while it waits for an answer; older phones ignore it.
       ...(session.state === "awaiting_input" ? { question: this.questionFor(session) } : {}),
+      // Why an errored chat failed, so its row can say so; older phones ignore it.
+      ...(session.state === "error" && conductorSessionId
+        ? { failure: this.failure(conductorSessionId, session.lastActivityAt) }
+        : {}),
     };
   }
 
@@ -1830,6 +1839,20 @@ export class RemoteBridge {
       this.activityCache.clear();
     }
     this.activityCache.set(key, value);
+    return value;
+  }
+
+  private failure(sessionId: string, activity: string): string | null {
+    const key = `${sessionId}|${activity}`;
+    if (this.failureCache.has(key)) {
+      return this.failureCache.get(key) ?? null;
+    }
+    const full = this.deps.replier.lastTurnError?.(sessionId) ?? null;
+    const value = full && full.length > FAILURE_MAX_CHARS ? `${full.slice(0, FAILURE_MAX_CHARS)}…` : full;
+    if (this.failureCache.size > 200) {
+      this.failureCache.clear();
+    }
+    this.failureCache.set(key, value);
     return value;
   }
 

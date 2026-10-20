@@ -43,3 +43,32 @@ export function extractAssistantEnvelopeText(content: string): string | null {
 
   return text || null;
 }
+
+/**
+ * What went wrong, from a row that ended a turn badly: an agent's
+ * `{"type":"error","content":…}` or a `result` row with `is_error`. Null for
+ * anything else, for "aborted by user" (that is you pressing stop, not a
+ * failure) and for an error the agent is about to retry ("Reconnecting… 2/5").
+ */
+export function extractTurnError(content: string): string | null {
+  let parsed: Record<string, unknown> | null;
+  try {
+    parsed = asRecord(JSON.parse(content));
+  } catch {
+    return null;
+  }
+  if (!parsed) {
+    return null;
+  }
+  let text: string | null = null;
+  if (parsed.type === "error") {
+    if (parsed.willRetry === true) {
+      return null;
+    }
+    text = asString(parsed.content);
+  } else if (parsed.type === "result" && (parsed.is_error === true || parsed.is_error === 1)) {
+    text = asString(parsed.result);
+  }
+  const trimmed = text?.trim() ?? "";
+  return trimmed && trimmed.toLowerCase() !== "aborted by user" ? trimmed : null;
+}

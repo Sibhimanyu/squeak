@@ -10,6 +10,24 @@ final class PresentationTests: XCTestCase {
               title: title)
     }
 
+    func testAnUnphrasedStepReadsAsItsOwnLabel() {
+        XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Use heresay claim_brief"])).text, "use heresay claim_brief")
+        XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Check the simulator logs"])).text, "check the simulator logs")
+        XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Use a tool with a much longer label than fits on one row"])).text,
+                       "use a tool with a much longer label…")
+    }
+
+    func testAFailureReasonIsOnlyForAnErroredChat() {
+        func with(_ state: String, _ failure: String?) -> PhoneSnapshot.Session {
+            .init(key: "k", conductorSessionId: "id", label: "squeak · deps", agent: "claude", state: state, lastActivityAt: "2026-10-19T10:00:00Z",
+                  detail: nil, git: nil, contextPercent: nil, turnId: "t", message: nil, choices: nil, failure: failure)
+        }
+        XCTAssertEqual(Presentation.failureReason(with("error", "API Error: SSL certificate hostname mismatch\nmore")),
+                       "API Error: SSL certificate hostname mismatch")
+        XCTAssertNil(Presentation.failureReason(with("error", nil)))
+        XCTAssertNil(Presentation.failureReason(with("idle", "stale")))
+    }
+
     func testFirstLineIsThePreviewOfAMessage() {
         XCTAssertEqual(Presentation.firstLine("\n## **Done.** Tests pass\nMore"), "Done. Tests pass")
         XCTAssertEqual(Presentation.firstLine("- `npm test` is green"), "npm test is green")
@@ -75,7 +93,7 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(Presentation.status(session(state: "working")).text, "working")
         XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Read a.ts", "Run npm test -- x"])).text, "running tests")
         XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Edit a.ts", "Edit b.ts"])).text, "editing 2 files")
-        XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Mystery tool"])).text, "working")
+        XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Mystery tool"])).text, "mystery tool")
         XCTAssertEqual(Presentation.status(session(state: "finished")).text, "done")
     }
 

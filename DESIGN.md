@@ -485,7 +485,11 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   instead the agent's newest step, shortened ("running tests", "editing 2
   files"), from the same activity feed as the detail; never invented.
 - Three lines maximum. The git line (`+2017/−1824 · 39 files`) moves to the
-  detail header.
+  detail header. On the phone the title may wrap to a second line (a one-line
+  cut lost the part that told chats apart), and an errored row adds the
+  agent's own failure reason ("You've hit your session limit · resets 7:20pm")
+  in muted footnote type, two lines at most, with the error colour on its left
+  edge as well as its dot.
 - Rows are grouped and ordered by attention: needs you, then done, then
   working, then error, then idle.
 - A row is a button: it opens the session's detail (app) or offers its actions

@@ -50,7 +50,9 @@ final class ChatTimelineTests: XCTestCase {
                               .working(label: "Running tests…", steps: steps.map { TurnStep(kind: $0.kind, text: $0.text) })])
         XCTAssertEqual(ChatTimeline.workingLabel([tool("Read src/a.ts")]), "Reading code…")
         XCTAssertEqual(ChatTimeline.workingLabel([.init(kind: "thinking", text: "hm")]), "Thinking…")
-        XCTAssertEqual(ChatTimeline.workingLabel([tool("Frobnicate")]), "Working…")
+        // A step Squeak does not phrase reads as its own label, not a bare "Working…".
+        XCTAssertEqual(ChatTimeline.workingLabel([tool("Frobnicate")]), "Frobnicate…")
+        XCTAssertEqual(ChatTimeline.workingLabel([]), "Starting…")
     }
 
     func testReplyReplacesTheWorkingRowAndTheBubbleStaysOnce() {

@@ -86,15 +86,17 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public let activity: Activity?
         /// Only while it waits on an answer, and only from a Mac new enough to send it.
         public let question: Question?
+        /// Why an errored chat failed, in the agent's words; only from a Mac new enough to send it.
+        public let failure: String?
         public var id: String { key }
 
         public init(
             key: String, conductorSessionId: String?, label: String, agent: String, state: String,
             lastActivityAt: String, detail: String?, git: String?, contextPercent: Double?,
             turnId: String?, message: String?, choices: Choices?, activity: Activity? = nil,
-            title: String? = nil, question: Question? = nil
+            title: String? = nil, question: Question? = nil, failure: String? = nil
         ) {
-            self.title = title; self.question = question
+            self.title = title; self.question = question; self.failure = failure
             self.key = key; self.conductorSessionId = conductorSessionId; self.label = label
             self.agent = agent; self.state = state; self.lastActivityAt = lastActivityAt
             self.detail = detail; self.git = git; self.contextPercent = contextPercent

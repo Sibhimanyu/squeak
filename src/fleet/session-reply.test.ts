@@ -451,3 +451,48 @@ describe("ConductorReplier stop", () => {
     });
   });
 });
+
+describe("ConductorReplier.lastTurnError", () => {
+  const row = (content: object) =>
+    ({
+      role: "assistant",
+      content: JSON.stringify(content),
+      sentAt: null,
+      turnId: "t2",
+      model: null,
+    }) as unknown as SessionMessageRecord;
+  const user = {
+    role: "user",
+    content: "go",
+    sentAt: null,
+    turnId: "t2",
+    model: null,
+  } as unknown as SessionMessageRecord;
+
+  it("reads the agent's error row, skipping ones it retried", () => {
+    const { replier } = fixture(session(), [
+      row({ type: "error", content: "Your workspace is out of credits.", willRetry: false }),
+      row({ type: "error", content: "Reconnecting... 5/5", willRetry: true }),
+      user,
+    ]);
+    expect(replier.lastTurnError("s1")).toBe("Your workspace is out of credits.");
+  });
+
+  it("reads a result row that is an error", () => {
+    const { replier } = fixture(session(), [
+      row({ type: "result", is_error: true, result: "You've hit your session limit · resets 7:20pm" }),
+      user,
+    ]);
+    expect(replier.lastTurnError("s1")).toBe("You've hit your session limit · resets 7:20pm");
+  });
+
+  it("ignores stop, success, and an earlier turn's error", () => {
+    const { replier } = fixture(session(), [
+      row({ type: "error", content: "aborted by user" }),
+      row({ type: "result", is_error: false, result: "fine" }),
+      user,
+      row({ type: "error", content: "Old failure" }),
+    ]);
+    expect(replier.lastTurnError("s1")).toBeNull();
+  });
+});

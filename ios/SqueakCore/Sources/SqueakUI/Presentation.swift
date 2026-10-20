@@ -149,7 +149,9 @@ enum Presentation {
             } else if lower.hasPrefix("update the plan") {
                 phrase = "planning"
             } else {
-                return nil
+                // Not one we phrase: the step's own label (already plain, never raw input), shortened.
+                guard let own = self.phrase(from: last.text) else { return nil }
+                phrase = own.prefix(1).lowercased() + own.dropFirst()
             }
         }
         return phrase
@@ -326,6 +328,33 @@ enum Presentation {
             let count = sessions.filter { inFilter($0, filter) }.count
             return filter == .error && count == 0 ? nil : (filter, count)
         }
+    }
+
+    /// The Sessions header's line: how many chats are on screen and how many work right now
+    /// ("6 sessions · 3 working"). "6 active" read as six busy agents when three were idle.
+    static func headerCount(_ sessions: [PhoneSnapshot.Session]) -> String {
+        guard !sessions.isEmpty else { return "Nothing active" }
+        let total = sessions.count == 1 ? "1 session" : "\(sessions.count) sessions"
+        let working = sessions.filter { $0.state == "working" }.count
+        return working > 0 ? "\(total) · \(working) working" : total
+    }
+
+    /// A project's heading, in words rather than a dot per chat: the states that want a look, in
+    /// attention order ("1 working · 1 error"); idle only when nothing else is going on.
+    static func projectSummary(_ sessions: [PhoneSnapshot.Session]) -> String {
+        let parts: [String] = [Filter.needsYou, .working, .done, .error].compactMap { filter in
+            let count = sessions.filter { inFilter($0, filter) }.count
+            guard count > 0 else { return nil }
+            return "\(count) \(filter == .needsYou && count > 1 ? "need you" : filter.word)"
+        }
+        return parts.isEmpty ? "\(sessions.count) idle" : parts.joined(separator: " · ")
+    }
+
+    /// Why an errored chat failed, one line of the agent's own words; nil when the Mac did not say
+    /// (an older Mac, or a turn that left no error row).
+    static func failureReason(_ session: PhoneSnapshot.Session) -> String? {
+        guard session.state == "error" else { return nil }
+        return firstLine(session.failure)
     }
 
     /// Attention rank (DESIGN.md §8.2): needs you, done, working, error, idle.

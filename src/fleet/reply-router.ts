@@ -26,6 +26,7 @@ function isFleetKey(target: string): boolean {
 
 interface ConductorSide {
   lastTurnText(conductorSessionId: string): string | null;
+  lastTurnError?(conductorSessionId: string): string | null;
   transcript(conductorSessionId: string, limit: number): TranscriptResult;
   send(
     conductorSessionId: string,
@@ -64,6 +65,11 @@ export class FleetReplyRouter implements FleetReplier {
     }
     const session = this.resolve(target);
     return session && this.deps.terminal?.canReply(session) ? this.deps.terminal.lastTurnText(session) : null;
+  }
+
+  /** Why a Conductor chat's newest turn failed. Terminal agents have no such record. */
+  lastTurnError(target: string): string | null {
+    return isFleetKey(target) ? null : (this.deps.conductor.lastTurnError?.(target) ?? null);
   }
 
   /** Readable history. Terminal agents have no cheap reader yet, so they get none. */
