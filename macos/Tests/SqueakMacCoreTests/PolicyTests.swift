@@ -234,3 +234,22 @@ struct NotificationTests {
         #expect(NotificationRouting.sessionToOpen(dismissed: false, session: nil) == nil)
     }
 }
+
+@Suite struct NotificationActivationTests {
+    private func key(_ id: String) -> SessionKey { SessionKey(provider: "conductor", hostSessionId: id) }
+
+    @Test func reopenWithoutAnOrdinaryWindowShowsTheComposerNeverTheConversation() {
+        #expect(ReopenPolicy.action(hasOrdinaryWindow: false) == .showQuickComposer)
+        #expect(ReopenPolicy.action(hasOrdinaryWindow: true) == .none)
+    }
+
+    @Test func anEarlyClickIsKeptUntilTheHandlerExists() {
+        var p = PendingOpens()
+        #expect(p.deliver(key("a"), handlerReady: false) == nil)
+        #expect(p.deliver(key("b"), handlerReady: false) == nil)
+        #expect(p.drain() == key("b"))
+        #expect(p.drain() == nil)
+        #expect(p.deliver(key("c"), handlerReady: true) == key("c"))
+        #expect(p.drain() == nil)
+    }
+}

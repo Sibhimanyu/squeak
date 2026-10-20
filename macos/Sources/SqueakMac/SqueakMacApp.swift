@@ -35,6 +35,7 @@ struct SqueakMacApp: App {
                 .onAppear { if Self.reportsEnabled { Heresay.introduce() } }
         }
         .defaultSize(width: 1000, height: 680)
+        .suppressedAtLaunch()
         .commands {
             SqueakCommands(model: model)
             HeresayCommands()
@@ -100,6 +101,13 @@ struct SqueakCommands: Commands {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // The delegate must exist before launch ends, or the response that launched us is dropped.
+        Notifier.shared.configure()
+    }
+
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // No Dock icon, even from a bare `swift run` (the bundle also sets LSUIElement).
         NSApp.setActivationPolicy(.accessory)
@@ -119,12 +127,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows _: Bool) -> Bool {
-        // A Dock click with no window open brings the conversation back.
         // AppKit counts the popover and hidden panels in `flag`, so look for a real window ourselves.
-        if !NSApp.windows.contains(where: ActivationPolicyController.isAppWindow) {
-            AppModel.shared.showConversationWindow()
-        }
-        return true
+        // With none, a reopen is usually a clicked notification's activation: show the composer
+        // (a notification's explicit target retargets it, in whichever order the two arrive).
+        // "Open Squeak" in the popover and menus still opens the conversation directly.
+        let action = ReopenPolicy.action(hasOrdinaryWindow: NSApp.windows.contains(where: ActivationPolicyController.isAppWindow))
+        if action == .showQuickComposer { QuickComposerController.shared.show() }
+        return false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -163,5 +172,13 @@ final class QuitIntent {
     /// Close every app window; `ActivationPolicyController` then drops back to the menu bar only.
     func closeWindows() {
         for w in NSApp.windows where ActivationPolicyController.isAppWindow(w) { w.performClose(nil) }
+    }
+}
+
+extension Scene {
+    /// macOS 15 and later would open the first window at launch; Squeak is a menu-bar app.
+    func suppressedAtLaunch() -> some Scene {
+        if #available(macOS 15, *) { return self.defaultLaunchBehavior(.suppressed) }
+        return self
     }
 }

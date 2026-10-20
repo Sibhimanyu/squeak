@@ -85,3 +85,34 @@ public enum NotificationRouting {
         return SessionKey(stringValue: session)
     }
 }
+
+/// What an app reopen (Spotlight, Finder, `open`, and the activation a clicked notification causes)
+/// does. The notification response and the reopen arrive in either order, so a reopen with no
+/// ordinary window never opens the conversation: it shows the quick composer, which an explicit
+/// notification target then retargets. An explicit "Open Squeak" never goes through here.
+public enum ReopenPolicy {
+    public enum Action: Equatable { case none, showQuickComposer }
+
+    public static func action(hasOrdinaryWindow: Bool) -> Action {
+        hasOrdinaryWindow ? .none : .showQuickComposer
+    }
+}
+
+/// Holds notification clicks that arrive before anything can open the composer (a cold launch
+/// delivers the response before the model has set its handler). Only the latest click matters.
+public struct PendingOpens: Sendable {
+    private var pending: SessionKey?
+    public init() {}
+
+    /// Returns the key to open now, or nil when it was kept for `drain`.
+    public mutating func deliver(_ key: SessionKey, handlerReady: Bool) -> SessionKey? {
+        if handlerReady { return key }
+        pending = key
+        return nil
+    }
+
+    public mutating func drain() -> SessionKey? {
+        defer { pending = nil }
+        return pending
+    }
+}

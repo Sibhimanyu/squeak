@@ -24,7 +24,11 @@ enum LoginItem {
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
-    var onOpen: ((SessionKey) -> Void)?
+    /// Setting the handler hands over any click that arrived before it existed (cold launch).
+    var onOpen: ((SessionKey) -> Void)? {
+        didSet { if onOpen != nil, let key = pendingOpens.drain() { onOpen?(key) } }
+    }
+    private var pendingOpens = PendingOpens()
     private var configured = false
 
     private var center: UNUserNotificationCenter? { Bundled.isApp ? UNUserNotificationCenter.current() : nil }
@@ -91,7 +95,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // Any action, including an already-delivered legacy Reply, only opens the composer: its typed text is never read.
         let dismissed = response.actionIdentifier == UNNotificationDismissActionIdentifier
         Task { @MainActor in
-            if let key = NotificationRouting.sessionToOpen(dismissed: dismissed, session: raw) { self.onOpen?(key) }
+            if let key = NotificationRouting.sessionToOpen(dismissed: dismissed, session: raw),
+               let now = self.pendingOpens.deliver(key, handlerReady: self.onOpen != nil) { self.onOpen?(now) }
             completionHandler()
         }
     }

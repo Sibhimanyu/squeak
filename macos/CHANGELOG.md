@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.9
+
+- Clicking a notification opens the quick message on exactly that chat, also
+  when Squeak was not running: the click is kept until the app is ready
+  instead of being dropped at launch.
+- Opening Squeak from Spotlight or Finder, or the activation a clicked
+  notification causes, shows the quick message instead of the conversation
+  window, and Squeak no longer opens a window by itself at launch.
+- ⌥ Space is the default quick message shortcut. Anyone still on the old
+  ⌥⌘M default is moved to it once; it stays selectable in Settings.
+- Notifications have no inline reply. Clicking one, or dismissing it, never
+  sends anything; unsent text stays as a draft per chat.
+
 ## 2.1.8
 
 - ⌘Q in Squeak's window now closes the window and keeps Squeak in the menu

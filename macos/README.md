@@ -127,8 +127,10 @@ window, Settings or Welcome is open, `ActivationPolicyController` switches the
 app to `.regular` (Dock icon, Cmd-Tab, its own menu bar: app menu with About,
 Check for Updates…, Settings…, Hide, Quit; Edit; Sessions; Window; Help) and
 activates it. When the last of those windows closes it goes back to `.accessory`.
-The popover and the quick composer are panels and never trigger it. Clicking the
-Dock icon with no window open reopens the conversation. Nothing here quits the app.
+The popover and the quick composer are panels and never trigger it. A reopen
+with no window open (Spotlight, Finder, or the activation a clicked notification
+causes) shows the quick composer, never the conversation; "Open Squeak" in the
+popover and menus opens the conversation. Nothing here quits the app.
 
 Cmd-Q (or the app menu's Quit) while a window is open only closes Squeak's windows:
 the duck stays in the menu bar. The menu bar's "Quit Squeak" row (and "Quit Squeak
@@ -277,7 +279,8 @@ sessions, need the Squeak daemon running on the same Mac (step 1 above).
 - Notifications are private by default: they say a session needs you or has
   finished, and show session names only if you turn on "Show session names in
   notifications". They never carry message content. Clicking one opens the quick
-  composer on that chat (no inline reply); the composer closes on a click outside
+  composer on exactly that chat, even on a cold launch (no inline reply; dismissing
+  one does nothing); the composer closes on a click outside
   or a Space swipe, keeping unsent text per chat.
 - The app as wired today reads Conductor's database locally and talks to the
   local daemon on loopback. The only other network call is Sparkle's daily
