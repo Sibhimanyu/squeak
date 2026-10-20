@@ -72,6 +72,12 @@ struct SqueakCommands: Commands {
             Button("New chat…") { NewChatController.shared.show() }
                 .keyboardShortcut("n", modifiers: .command)
         }
+        CommandGroup(replacing: .appTermination) {
+            Button("Close Squeak Window") { QuitIntent.shared.closeWindows() }
+                .keyboardShortcut("q", modifiers: .command)
+            Button("Quit Squeak Completely") { QuitIntent.shared.quitCompletely() }
+                .keyboardShortcut("q", modifiers: [.command, .option])
+        }
         CommandGroup(after: .appInfo) {
             Button("Check for updates…") { model.updater.checkForUpdates() }
                 .disabled(!model.updater.canCheck)
@@ -116,5 +122,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let intent = QuitIntent.shared
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        let external = event?.eventClass == AEEventClass(kCoreEventClass) && event?.eventID == AEEventID(kAEQuitApplication)
+        let decision = QuitPolicy.decide(
+            explicitQuit: intent.explicitQuit, externalQuitEvent: external,
+            updating: intent.updating, hasAppWindows: NSApp.windows.contains(where: ActivationPolicyController.isAppWindow))
+        switch decision {
+        case .quit:
+            return .terminateNow
+        case .closeWindows:
+            intent.closeWindows()
+            return .terminateCancel
+        }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+}
+
+/// Why the app is terminating, as far as code inside the app can say. `QuitPolicy` decides.
+@MainActor
+final class QuitIntent {
+    static let shared = QuitIntent()
+    /// Set by the popover's Quit row and "Quit Squeak Completely"; never reset, the app is going.
+    var explicitQuit = false
+    /// Set by Sparkle just before it terminates the app to install an update.
+    var updating = false
+
+    func quitCompletely() {
+        explicitQuit = true
+        NSApp.terminate(nil)
+    }
+
+    /// Close every app window; `ActivationPolicyController` then drops back to the menu bar only.
+    func closeWindows() {
+        for w in NSApp.windows where ActivationPolicyController.isAppWindow(w) { w.performClose(nil) }
+    }
 }

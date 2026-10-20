@@ -279,7 +279,7 @@ struct PopoverView: View {
             MenuRow(title: "Settings…", hint: "⌘,") { model.openSettings() }
                 .keyboardShortcut(",")
             MenuRow(title: "Check for Updates…", disabled: !model.updater.canCheck) { model.updater.checkForUpdates() }
-            MenuRow(title: "Quit Squeak", hint: "⌘Q") { NSApp.terminate(nil) }
+            MenuRow(title: "Quit Squeak", hint: "⌘Q") { QuitIntent.shared.quitCompletely() }
                 .keyboardShortcut("q")
         }
         .padding(.top, 4)

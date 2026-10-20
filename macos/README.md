@@ -130,6 +130,22 @@ activates it. When the last of those windows closes it goes back to `.accessory`
 The popover and the quick composer are panels and never trigger it. Clicking the
 Dock icon with no window open reopens the conversation. Nothing here quits the app.
 
+Cmd-Q (or the app menu's Quit) while a window is open only closes Squeak's windows:
+the duck stays in the menu bar. The menu bar's "Quit Squeak" row (and "Quit Squeak
+Completely", Option-Cmd-Q) really quits, as do logout, shutdown, the Dock's Quit,
+AppleScript's `quit` and a Sparkle update. The decision is `QuitPolicy`.
+
+### Claude usage
+
+Claude Code never writes its plan limits to disk, so the Usage view's Refresh
+asks the daemon (`POST /control/usage/claude-refresh`), which makes one GET to
+Claude's usage endpoint with the sign-in Claude Code already holds. That is not
+a model call: no tokens are used and no `claude` process is spawned. It runs
+only when you press Refresh (never on a timer), at most once a minute, and it
+waits out a rate limit's Retry-After. If it fails, the last reading and its age
+stay as they were and the real reason is shown. A window Claude reports without
+a reset time is shown as not reported.
+
 ## Updates
 
 Squeak uses Sparkle 2 (`Sparkle.framework` in `Contents/Frameworks`, started by
@@ -260,7 +276,9 @@ sessions, need the Squeak daemon running on the same Mac (step 1 above).
   open conversations.
 - Notifications are private by default: they say a session needs you or has
   finished, and show session names only if you turn on "Show session names in
-  notifications". They never carry message content.
+  notifications". They never carry message content. Clicking one opens the quick
+  composer on that chat (no inline reply); the composer closes on a click outside
+  or a Space swipe, keeping unsent text per chat.
 - The app as wired today reads Conductor's database locally and talks to the
   local daemon on loopback. The only other network call is Sparkle's daily
   check of the appcast on `sibhimanyu.github.io` (Sparkle sends the app and OS
