@@ -40,12 +40,18 @@ final class AppUpdater {
 
 /// Sparkle ends an install by terminating the app without a `quit` Apple event, so it says so
 /// first: that termination must be a real one (see `QuitPolicy`), or Sparkle could not relaunch us.
+/// Set synchronously: Sparkle calls these on the main thread and may terminate right after, so a
+/// `Task` would run too late, and its own update window would count as an open window to close.
 final class UpdateQuitDelegate: NSObject, SPUUpdaterDelegate {
-    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
-        Task { @MainActor in QuitIntent.shared.updating = true }
-    }
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) { markUpdating() }
 
-    func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
-        Task { @MainActor in QuitIntent.shared.updating = true }
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) { markUpdating() }
+
+    private func markUpdating() {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { QuitIntent.shared.updating = true }
+        } else {
+            DispatchQueue.main.sync { MainActor.assumeIsolated { QuitIntent.shared.updating = true } }
+        }
     }
 }

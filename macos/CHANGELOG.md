@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.8
+
+- ⌘Q in Squeak's window now closes the window and keeps Squeak in the menu
+  bar. "Quit Squeak" in the menu-bar panel, or ⌥⌘Q, quits it completely.
+- Clicking a notification opens the quick message on that chat. Unsent text
+  is kept per chat, and the composer closes when you click elsewhere or
+  switch Spaces.
+- Refreshing Claude usage reads it with Claude Code's own sign-in and spends
+  no tokens.
+
 ## 2.1.7
 
 - A compact menu-bar panel in the style of macOS system menus, with grouped
