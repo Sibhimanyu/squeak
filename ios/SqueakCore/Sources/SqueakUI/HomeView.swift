@@ -151,8 +151,11 @@ struct HomeView: View {
 
     /// The status tiles (DESIGN.md §3.3): a count per state, each a filter. Tapping the one that is
     /// on goes back to everything.
+    /// A section header, not a row: an inset-grouped section clips its rows to its own large
+    /// rounded shape, which cut the outer tiles' corners like a mask.
     private var tiles: some View {
         Section {
+        } header: {
             HStack(spacing: 8) {
                 ForEach(Presentation.tiles(sessions), id: \.filter) { tile in
                     StatusTile(filter: tile.filter, count: tile.count, selected: filter == tile.filter) {
@@ -161,8 +164,8 @@ struct HomeView: View {
                     }
                 }
             }
-            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-            .listRowBackground(Color.clear)
+            .textCase(nil)
+            .padding(.horizontal, -16)
         }
     }
 
