@@ -9,6 +9,7 @@ import {
   HOTSPOT_MANUAL_QUIET_MS,
   HOTSPOT_RETRY_BACKOFF_MS,
   HotspotFailover,
+  probeInternet,
   type HotspotSystem,
   readHotspotRequest,
   validPassword,
@@ -154,6 +155,20 @@ describe("HotspotFailover", () => {
     expect(notify).toHaveBeenCalledTimes(2);
   });
 
+  it("says when the Mac is back online after a failed outage, once", async () => {
+    const now = 1_000_000;
+    const mac = fakeMac({ joinWorks: false, online: false });
+    const { hotspot, notify } = failover(mac, true, () => now);
+    await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
+    for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
+    expect(notify).toHaveBeenCalledTimes(1);
+    mac.setOnline(true);
+    await hotspot.tick();
+    await hotspot.tick();
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify.mock.calls[1]![0]).toBe("The Mac is back online.");
+  });
+
   it("starts each outage's backoff afresh", async () => {
     let now = 1_000_000;
     const mac = fakeMac({ joinWorks: false, online: false });
@@ -166,7 +181,8 @@ describe("HotspotFailover", () => {
     now += 1_000;
     for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
     expect(mac.calls.filter((call) => call.startsWith("join"))).toHaveLength(2);
-    expect(notify).toHaveBeenCalledTimes(2);
+    // failure, back online, failure
+    expect(notify).toHaveBeenCalledTimes(3);
   });
 
   it("leaves the network alone for a while after you switch by hand", async () => {
@@ -234,5 +250,27 @@ describe("Squeak Hands' Wi-Fi join", () => {
     expect(describeHandsJoin({ ok: false, error: "join-failed", detail: "bad key", location: "allowed" })).toMatch(
       /refused the join \(bad key\)/,
     );
+  });
+});
+
+describe("probeInternet", () => {
+  const answer = (status: number, body: string | null = null) => Promise.resolve(new Response(body, { status }));
+
+  it("is online when only Apple's captive page is blocked, as on a managed network", async () => {
+    const fetchImpl = (async (url: string | URL | Request) =>
+      String(url).includes("captive.apple.com") ? Promise.reject(new Error("timeout")) : answer(204)) as typeof fetch;
+    expect(await probeInternet(fetchImpl)).toBe(true);
+  });
+
+  it("is online on Apple's page alone", async () => {
+    const fetchImpl = (async (url: string | URL | Request) =>
+      String(url).includes("captive.apple.com")
+        ? answer(200, "<HTML>Success</HTML>")
+        : Promise.reject(new Error("x"))) as typeof fetch;
+    expect(await probeInternet(fetchImpl)).toBe(true);
+  });
+
+  it("is offline only when every look fails", async () => {
+    expect(await probeInternet((async () => Promise.reject(new Error("offline"))) as typeof fetch)).toBe(false);
   });
 });

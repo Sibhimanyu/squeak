@@ -157,6 +157,8 @@ export class HotspotFailover {
   private tries = 0;
   private nextTryAt = Number.NEGATIVE_INFINITY;
   private quietUntil = Number.NEGATIVE_INFINITY;
+  /** An outage's failure has been told, so its end is too. */
+  private toldOutage = false;
   private busy = false;
   private timer: NodeJS.Timeout | null = null;
 
@@ -251,6 +253,12 @@ export class HotspotFailover {
   }
 
   private endOutage(): void {
+    if (this.toldOutage) {
+      this.toldOutage = false;
+      this.options.notify?.(
+        this.onHotspot ? `The Mac is back online, on ${this.settings.ssid}.` : "The Mac is back online.",
+      );
+    }
     this.failures = 0;
     this.tries = 0;
     this.nextTryAt = Number.NEGATIVE_INFINITY;
@@ -344,6 +352,7 @@ export class HotspotFailover {
     // Once per outage: the first failed try says what to do, the rest only
     // log, and a success always says so.
     if (automatic && (ok || this.tries <= 1)) {
+      this.toldOutage = !ok;
       this.options.notify?.(ok || this.tries > 1 ? note : `${note} Squeak keeps trying while the Mac is offline.`);
     }
     this.options.onChange?.();
@@ -388,6 +397,37 @@ export function describeHandsJoin(result: Record<string, unknown>): string | nul
   }
 }
 
+/**
+ * Whether the internet answers. Apple's captive-portal page is only one of the
+ * looks: a managed network can drop it while everything else works (measured
+ * on this Mac, 2026-10-20: captive.apple.com timed out every time, direct and
+ * through the system proxy, while HTTPS to Google answered in 0.2 s, and
+ * Squeak "lost" its internet 429 times on working Wi-Fi). So any one answer
+ * counts, and only all of them failing is an outage.
+ */
+export async function probeInternet(fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  const looks: Array<() => Promise<boolean>> = [
+    async () => {
+      const res = await fetchImpl("http://captive.apple.com/hotspot-detect.html", {
+        signal: AbortSignal.timeout(5_000),
+      });
+      return res.ok && (await res.text()).includes("Success");
+    },
+    // Any HTTP answer over TLS proves a route out; a captive portal cannot fake a certificate.
+    async () =>
+      (await fetchImpl("https://www.google.com/generate_204", { signal: AbortSignal.timeout(5_000) })).status < 500,
+    async () =>
+      (await fetchImpl("https://www.cloudflare.com/cdn-cgi/trace", { signal: AbortSignal.timeout(5_000) })).status <
+      500,
+  ];
+  try {
+    await Promise.any(looks.map(async (look) => (await look()) || Promise.reject(new Error("no"))));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** For `security -i`, which reads commands from stdin: a double-quoted word. */
 function securityQuote(value: string): string {
   return `"${value.replace(/[\\"]/g, (ch) => `\\${ch}`)}"`;
@@ -413,14 +453,7 @@ export function macHotspotSystem(handsAppPath: string | null = null): HotspotSys
         return null; // exits 1 when the interface has no address
       }
     },
-    async online() {
-      try {
-        const res = await fetch("http://captive.apple.com/hotspot-detect.html", { signal: AbortSignal.timeout(5_000) });
-        return res.ok && (await res.text()).includes("Success");
-      } catch {
-        return false;
-      }
-    },
+    online: () => probeInternet(),
     async prepare() {
       if (!handsAppPath) return;
       const outcome = await runHands(handsAppPath, "wifi-location", {}).catch(() => null);
