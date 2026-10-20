@@ -288,8 +288,20 @@ enum Presentation {
     /* ---------- search & filter ---------- */
 
     enum Filter: String, CaseIterable, Identifiable {
-        case all, needsYou, working
+        case all, needsYou, working, done, error, idle
         var id: String { rawValue }
+
+        /// The status tile's word (DESIGN.md §9).
+        var word: String {
+            switch self {
+            case .all: return "all"
+            case .needsYou: return "needs you"
+            case .working: return "working"
+            case .done: return "done"
+            case .error: return "error"
+            case .idle: return "idle"
+            }
+        }
     }
 
     /// Which filter a session belongs to ("All" holds everything).
@@ -298,7 +310,114 @@ enum Presentation {
         case .all: return true
         case .needsYou: return session.needsYou
         case .working: return session.state == "working"
+        case .done: return session.state == "finished"
+        case .error: return session.state == "error"
+        case .idle: return !session.needsYou && !["working", "finished", "error"].contains(session.state)
         }
+    }
+
+    /* ---------- home: status tiles, the most urgent chat, projects ---------- */
+
+    /// The status tiles across the top of Home, in attention order: needs you, working, done, idle,
+    /// and error only when something errored (it is rare, and not urgent).
+    static func tiles(_ sessions: [PhoneSnapshot.Session]) -> [(filter: Filter, count: Int)] {
+        let order: [Filter] = [.needsYou, .working, .done, .idle, .error]
+        return order.compactMap { filter in
+            let count = sessions.filter { inFilter($0, filter) }.count
+            return filter == .error && count == 0 ? nil : (filter, count)
+        }
+    }
+
+    /// Attention rank (DESIGN.md §8.2): needs you, done, working, error, idle.
+    static func rank(_ session: PhoneSnapshot.Session) -> Int {
+        if session.needsYou { return 0 }
+        switch session.state {
+        case "finished": return 1
+        case "working": return 2
+        case "error": return 3
+        default: return 4
+        }
+    }
+
+    /// Newest first among equals; an unparseable time sorts last.
+    private static func newer(_ a: PhoneSnapshot.Session, _ b: PhoneSnapshot.Session) -> Bool {
+        (Age.date(a.lastActivityAt) ?? .distantPast) > (Age.date(b.lastActivityAt) ?? .distantPast)
+    }
+
+    static func byAttention(_ sessions: [PhoneSnapshot.Session]) -> [PhoneSnapshot.Session] {
+        sessions.sorted { rank($0) != rank($1) ? rank($0) < rank($1) : newer($0, $1) }
+    }
+
+    /// The chat Home puts first: the newest one that needs you.
+    static func urgent(_ sessions: [PhoneSnapshot.Session]) -> PhoneSnapshot.Session? {
+        sessions.filter(\.needsYou).sorted(by: newer).first
+    }
+
+    struct Project: Equatable, Identifiable {
+        let name: String
+        let sessions: [PhoneSnapshot.Session]
+        var id: String { name }
+    }
+
+    /// The repository a session belongs to, from its `repo · branch` label; a session without one
+    /// (a terminal agent in a plain folder) is its own project under its label.
+    static func projectName(_ session: PhoneSnapshot.Session) -> String {
+        split(label: repoBranch(session)).repo ?? repoBranch(session)
+    }
+
+    /// Sessions by repository. Projects in attention order (the most urgent chat in each decides,
+    /// then the most recent), and each project's chats the same way.
+    static func projects(_ sessions: [PhoneSnapshot.Session]) -> [Project] {
+        var groups: [String: [PhoneSnapshot.Session]] = [:]
+        var order: [String] = []
+        for session in sessions {
+            let name = projectName(session)
+            if groups[name] == nil { order.append(name) }
+            groups[name, default: []].append(session)
+        }
+        let projects = order.map { Project(name: $0, sessions: byAttention(groups[$0] ?? [])) }
+        return projects.sorted { a, b in
+            guard let x = a.sessions.first, let y = b.sessions.first else { return a.name < b.name }
+            return rank(x) != rank(y) ? rank(x) < rank(y) : newer(x, y)
+        }
+    }
+
+    /// Up to three one-tap answers for the urgent card: a single, single-select question's options
+    /// (answered through the `answer` command), else the agent's lettered options (sent as a reply).
+    /// Empty when the phone can only open the chat (an approval, a plan, several questions).
+    enum QuickAnswer: Equatable {
+        case option(label: String)
+        case letter(String, title: String)
+
+        var title: String {
+            switch self {
+            case .option(let label): return label
+            case .letter(let letter, let title): return "\(letter)  \(title)"
+            }
+        }
+    }
+
+    static func quickAnswers(_ session: PhoneSnapshot.Session) -> [QuickAnswer] {
+        if let question = session.question {
+            guard question.toolUseId != nil, question.plan == nil, question.questions.count == 1,
+                  let prompt = question.questions.first, !prompt.multiSelect, (1...3).contains(prompt.options.count)
+            else { return [] }
+            return prompt.options.map { .option(label: $0.label) }
+        }
+        guard replyBlock(session) == nil, session.state != "working", let choices = session.choices,
+              (1...3).contains(choices.options.count) else { return [] }
+        return choices.options.map { .letter($0.letter, title: $0.title) }
+    }
+
+    /// The urgent card's one line of what the agent wants: its question, else the state in words.
+    static func ask(_ session: PhoneSnapshot.Session) -> String {
+        if let question = session.question {
+            if question.plan != nil { return "Wants you to approve a plan." }
+            if let prompt = question.questions.first { return prompt.question }
+        }
+        if let asked = session.choices?.question { return asked }
+        if session.state == "awaiting_approval" { return "Wants approval for a tool call. Answer it on your Mac." }
+        return firstLine(session.message ?? session.detail) ?? status(session).text
     }
 
     static func matches(_ session: PhoneSnapshot.Session, query: String) -> Bool {

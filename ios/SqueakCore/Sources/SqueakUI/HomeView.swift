@@ -32,36 +32,58 @@ struct HomeView: View {
         return (snapshot.recent ?? []).filter { !active.contains($0.key) && Presentation.matches($0, query: query) }
     }
     private var needsCount: Int { sessions.filter(\.needsYou).count }
-
-    /// Sections in attention order (DESIGN.md §8.2), filtered and searched.
-    private var groups: [(title: String, members: [PhoneSnapshot.Session])] {
-        PhoneSnapshot.groups.compactMap { group in
-            let members = sessions.filter {
-                group.states.contains($0.state) && Presentation.inFilter($0, filter) && Presentation.matches($0, query: query)
-            }
-            return members.isEmpty ? nil : (group.title, members)
-        }
+    /// Projects whose chats pass the filter and the search ("Projects", DESIGN.md §8.2's rows by repository).
+    private var projects: [Presentation.Project] {
+        Presentation.projects(sessions.filter { Presentation.inFilter($0, filter) && Presentation.matches($0, query: query) })
     }
+    /// Projects showing all their chats, not just the first three.
+    @State private var expanded: Set<String> = []
+    private static let projectRows = 3
 
     var body: some View {
         NavigationStack(path: $path) {
             List {
                 if model.snapshot != nil {
-                    controls
-                    if let starting = model.startingChat { StartingRow(label: starting.label) }
-                    let visible = groups
-                    ForEach(visible, id: \.title) { group in
-                        let rows = group.members
+                    tiles
+                    if let starting = model.startingChat { Section { StartingRow(label: starting.label) } }
+                    if filter == .all, query.isEmpty, let urgent = Presentation.urgent(sessions) {
                         Section {
-                            ForEach(rows) { session in
-                                NavigationLink(value: session.key) { SessionRow(session: session) }
-                                    .listRowBackground(Color.clear)
-                                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                            UrgentCard(session: urgent, onReply: { quickReply = urgent }, onOpen: { path = [urgent.key] })
+                                .listRowInsets(EdgeInsets())
+                                .listRowBackground(Theme.surface)
+                        } footer: {
+                            if needsCount > 1 {
+                                Text("\(needsCount - 1) more \(needsCount - 1 == 1 ? "needs" : "need") you").font(.footnote).foregroundStyle(Theme.muted)
+                            }
+                        }
+                    }
+                    let visible = projects
+                    ForEach(Array(visible.enumerated()), id: \.element.id) { index, project in
+                        Section {
+                            let open = expanded.contains(project.id) || !query.isEmpty
+                            let shown = open ? project.sessions : Array(project.sessions.prefix(Self.projectRows))
+                            ForEach(shown) { session in
+                                NavigationLink(value: session.key) { SessionRow(session: session, inProject: true) }
+                                    .listRowBackground(Theme.surface)
+                                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                                     .overlay(alignment: .leading) { edge(session) }
                                     .swipeActions(edge: .trailing, allowsFullSwipe: false) { swipeActions(session) }
                             }
+                            if project.sessions.count > shown.count {
+                                Button { withAnimation { _ = expanded.insert(project.id) } } label: {
+                                    Text("\(project.sessions.count - shown.count) more").font(.subheadline.weight(.medium))
+                                        .foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                }
+                                .listRowBackground(Theme.surface)
+                            }
                         } header: {
-                            SectionHeader(title: group.title, count: rows.count)
+                            VStack(alignment: .leading, spacing: 10) {
+                                if index == 0 {
+                                    Text(filter == .all ? "Projects" : "\(filter.word.prefix(1).uppercased())\(filter.word.dropFirst())")
+                                        .font(.headline).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                                }
+                                ProjectHeader(project: project)
+                            }
                         }
                     }
                     let older = recent
@@ -69,8 +91,8 @@ struct HomeView: View {
                         Section {
                             ForEach(older) { session in
                                 NavigationLink(value: session.key) { SessionRow(session: session, recent: true) }
-                                    .listRowBackground(Color.clear)
-                                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                                    .listRowBackground(Theme.surface)
+                                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                                     .swipeActions(edge: .trailing, allowsFullSwipe: false) { swipeActions(session) }
                             }
                             if query.isEmpty, model.snapshot?.recentMore == true {
@@ -84,8 +106,7 @@ struct HomeView: View {
                                     .frame(maxWidth: .infinity, minHeight: 44)
                                 }
                                 .disabled(waiting && model.recentWanted > 10)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
+                                .listRowBackground(Theme.surface)
                                 .accessibilityHint("Loads older chats from your Mac")
                             }
                         } header: {
@@ -97,7 +118,8 @@ struct HomeView: View {
                     waiting
                 }
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(12)
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             // Inline, two lines in the bar (like a chat's header): the list is what this screen is for.
@@ -114,6 +136,8 @@ struct HomeView: View {
                 // `-squeak-quick <key>`: the swipe's Reply sheet, for screenshots of the demo.
                 let args = ProcessInfo.processInfo.arguments
                 if let i = args.firstIndex(of: "-squeak-quick"), i + 1 < args.count { quickReply = model.snapshot?.session(args[i + 1]) }
+                // `-squeak-filter <working|needsYou|…>`: a tile already tapped, for screenshots.
+                if let i = args.firstIndex(of: "-squeak-filter"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) { filter = f }
             }
             .sheet(isPresented: $showingUsage) { UsageView() }
             .sheet(isPresented: $showingNewChat) { NewChatView(workspaces: model.snapshot?.workspaces ?? []) }
@@ -123,6 +147,23 @@ struct HomeView: View {
             .onChange(of: model.snapshot) { _, _ in openPending() }
         }
         .foregroundStyle(Theme.ink)
+    }
+
+    /// The status tiles (DESIGN.md §3.3): a count per state, each a filter. Tapping the one that is
+    /// on goes back to everything.
+    private var tiles: some View {
+        Section {
+            HStack(spacing: 8) {
+                ForEach(Presentation.tiles(sessions), id: \.filter) { tile in
+                    StatusTile(filter: tile.filter, count: tile.count, selected: filter == tile.filter) {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.easeOut(duration: 0.15)) { filter = filter == tile.filter ? .all : tile.filter }
+                    }
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+            .listRowBackground(Color.clear)
+        }
     }
 
     @ToolbarContentBuilder
@@ -220,28 +261,12 @@ struct HomeView: View {
     @ViewBuilder
     private func edge(_ session: PhoneSnapshot.Session) -> some View {
         if session.needsYou {
-            Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 6).offset(x: -12)
+            Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 6).offset(x: -14)
                 .accessibilityHidden(true)
         }
     }
 
     /* ---------- pieces ---------- */
-
-    @ViewBuilder
-    private var controls: some View {
-        Section {
-            Picker("Show", selection: $filter) {
-                Text("All").tag(Presentation.Filter.all)
-                Text(needsCount > 0 ? "Needs you \(needsCount)" : "Needs you").tag(Presentation.Filter.needsYou)
-                Text("Working").tag(Presentation.Filter.working)
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 2, leading: 20, bottom: 4, trailing: 20))
-        }
-    }
 
     private var noResults: some View {
         Group {
@@ -256,7 +281,7 @@ struct HomeView: View {
             } else {
                 ContentUnavailableView {
                     Label {
-                        Text(filter == .needsYou ? "Nothing needs you" : "Nothing is working")
+                        Text(filter == .needsYou ? "Nothing needs you" : "Nothing is \(filter.word)")
                     } icon: {
                         Lucide(filter == .needsYou ? .circleCheck : .moon, size: 28, color: Theme.muted)
                     }
@@ -275,6 +300,176 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
         .listRowBackground(Color.clear).listRowSeparator(.hidden)
+    }
+}
+
+/// The colour for a tone (§3.3): on a dot or an edge only.
+func toneColor(_ tone: Presentation.Tone) -> Color {
+    switch tone {
+    case .needsYou: return Theme.needsYou
+    case .working: return Theme.working
+    case .done: return Theme.done
+    case .error: return Theme.error
+    case .idle: return Theme.idle
+    }
+}
+
+extension Presentation.Filter {
+    var tone: Presentation.Tone {
+        switch self {
+        case .needsYou: return .needsYou
+        case .working: return .working
+        case .done: return .done
+        case .error: return .error
+        case .all, .idle: return .idle
+        }
+    }
+}
+
+/// One status tile: its dot, the count, the state's word. A filter: selected, it has an ink edge.
+struct StatusTile: View {
+    let filter: Presentation.Filter
+    let count: Int
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    StatusDot(color: toneColor(filter.tone))
+                    Text("\(count)").font(.title3.weight(.semibold)).monospacedDigit().foregroundStyle(Theme.ink)
+                }
+                Text(filter.word).font(.caption).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .background(selected ? Theme.surfaceRaised : Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? Theme.ink : Theme.line, lineWidth: selected ? 1.5 : 1))
+            .overlay(alignment: .leading) {
+                // Something needs you: the tile carries the state's edge, like its rows.
+                if filter == .needsYou, count > 0 {
+                    Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 12).padding(.leading, 4).accessibilityHidden(true)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(count) \(filter.word)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(selected ? "Shows everything again" : "Shows only these")
+    }
+}
+
+/// A project card's heading: the repository, one dot per chat (up to six), and how many chats.
+struct ProjectHeader: View {
+    let project: Presentation.Project
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(project.name).font(.headline).foregroundStyle(Theme.ink).lineLimit(1)
+            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                ForEach(Array(project.sessions.prefix(6).enumerated()), id: \.offset) { _, session in
+                    StatusDot(color: toneColor(Presentation.status(session).tone))
+                }
+            }
+            Text(project.sessions.count == 1 ? "1 chat" : "\(project.sessions.count) chats")
+                .font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+        }
+        .textCase(nil)
+        .padding(.top, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(project.name), \(project.sessions.count) chats")
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// The newest chat that needs you, first on Home: its question and, when the phone can answer
+/// it in one tap, the answers (§8.4). Reply opens the small field; anything else opens the chat.
+struct UrgentCard: View {
+    @Environment(AppModel.self) private var model
+    let session: PhoneSnapshot.Session
+    let onReply: () -> Void
+    let onOpen: () -> Void
+    @State private var sending: Presentation.QuickAnswer?
+    @State private var outcome: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button(action: onOpen) {
+                HStack(alignment: .top, spacing: 10) {
+                    StatusDot(color: Theme.needsYou, pulses: true).padding(.top, 7)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Presentation.displayTitle(session)).font(.headline).lineLimit(1)
+                        Text("\(Presentation.subtitle(session)) · \(Age.describe(session.lastActivityAt))")
+                            .font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.subtle)
+                        .padding(.top, 6).accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the chat")
+            Text(Presentation.ask(session)).font(.body).foregroundStyle(Theme.ink).lineLimit(3)
+            let answers = Presentation.quickAnswers(session)
+            if !answers.isEmpty {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { answerButtons(answers) }
+                    VStack(alignment: .leading, spacing: 8) { answerButtons(answers) }
+                }
+            }
+            HStack(spacing: 16) {
+                if Presentation.replyBlock(session) == nil {
+                    Button("Reply", action: onReply).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                        .frame(minHeight: 44)
+                } else if answers.isEmpty {
+                    Button("Open chat", action: onOpen).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                        .frame(minHeight: 44)
+                }
+                if let outcome { Text(outcome).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2) }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .overlay(alignment: .leading) {
+            Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 12).padding(.leading, 6).accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder
+    private func answerButtons(_ answers: [Presentation.QuickAnswer]) -> some View {
+        ForEach(answers, id: \.title) { answer in
+            Button {
+                Task { await send(answer) }
+            } label: {
+                HStack(spacing: 6) {
+                    if sending == answer { ProgressView().controlSize(.small) }
+                    Text(answer.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                }
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 40)
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lineStrong))
+                .contentShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+            .disabled(sending != nil)
+        }
+    }
+
+    private func send(_ answer: Presentation.QuickAnswer) async {
+        sending = answer
+        defer { sending = nil }
+        switch answer {
+        case .option(let label):
+            let result = await model.answer([AnswerCommand.Answer(question: 0, picked: [label])], to: session)
+            outcome = result.line.isEmpty ? nil : result.line
+        case .letter(let letter, _):
+            outcome = await model.send(letter, to: session) ? "Sent \(letter)" : nil
+        }
     }
 }
 
@@ -321,6 +516,8 @@ struct SessionRow: View {
     let session: PhoneSnapshot.Session
     /// A chat from Recent: its second line is what the agent last said, not a state word.
     var recent = false
+    /// Inside its project's card: the repo is the card's heading, so the row says only the agent.
+    var inProject = false
 
     /// The Mac's state, except while this phone's own message is about to start a turn: then
     /// "starting", the same rule the chat uses (ChatTimeline.isStarting), so the two agree.
@@ -360,7 +557,8 @@ struct SessionRow: View {
         let word = Text(status.text)
             .fontWeight(status.tone == .needsYou ? .semibold : .regular)
             .foregroundStyle(status.tone == .needsYou ? Theme.ink : Theme.muted)
-        return Text("\(word)\(Text(" · \(Presentation.subtitle(session))").foregroundStyle(Theme.muted))")
+        let rest = inProject ? Presentation.agentName(session.agent) : Presentation.subtitle(session)
+        return Text("\(word)\(Text(" · \(rest)").foregroundStyle(Theme.muted))")
     }
 
     private var dotColor: Color {
