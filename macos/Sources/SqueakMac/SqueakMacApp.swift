@@ -40,17 +40,12 @@ struct SqueakMacApp: App {
             SqueakCommands(model: model)
             HeresayCommands()
         }
-
-        Settings {
-            SettingsView().environment(model)
-        }
     }
 }
 
 struct MenuBarLabel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Image(nsImage: MenuBarIcon.image(for: MenuBarIcon.State(model: model)))
@@ -58,7 +53,6 @@ struct MenuBarLabel: View {
         .task {
             // The label is alive from launch, so it is where the window actions are captured.
             model.openConversationWindow = { openWindow(id: "conversation") }
-            model.openSettingsWindow = { openSettings() }
         }
         // The awake countdown beside the duck, kept current from launch.
         .task { await model.pollAwake() }
@@ -78,6 +72,10 @@ struct SqueakCommands: Commands {
                 .keyboardShortcut("q", modifiers: .command)
             Button("Quit Squeak Completely") { QuitIntent.shared.quitCompletely() }
                 .keyboardShortcut("q", modifiers: [.command, .option])
+        }
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { model.openSettings() }
+                .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(after: .appInfo) {
             Button("Check for updates…") { model.updater.checkForUpdates() }

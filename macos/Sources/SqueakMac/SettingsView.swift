@@ -4,30 +4,107 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-struct SettingsView: View {
-    enum Tab: Hashable { case general, connections, channels, iphone, privacy, about }
-    /// SQUEAK_MAC_SETTINGS_TAB lets a capture land on a tab; otherwise General.
-    @State private var tab: Tab = {
-        switch ProcessInfo.processInfo.environment["SQUEAK_MAC_SETTINGS_TAB"] {
-        case "connections": .connections
-        case "channels": .channels
-        case "iphone": .iphone
-        case "privacy": .privacy
-        case "about": .about
-        default: .general
-        }
-    }()
+/// Settings, inside the main window: the sidebar swaps to a back row and the settings pages, and the
+/// content area shows the chosen page as a grouped form. Escape or Back returns to sessions with the
+/// previous filter and chat untouched.
+struct SettingsShell: View {
+    @Environment(AppModel.self) private var model
+    @State private var visibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        TabView(selection: $tab) {
-            GeneralSettings().tabItem { Label { Text("General") } icon: { LucideImage.template(.settings) } }.tag(Tab.general)
-            ConnectionsSettings().tabItem { Label { Text("Connections") } icon: { LucideImage.template(.link) } }.tag(Tab.connections)
-            ChannelsSettings().tabItem { Label { Text("Channels") } icon: { LucideImage.template(.messageSquare) } }.tag(Tab.channels)
-            IPhoneSettings().tabItem { Label { Text("iPhone") } icon: { LucideImage.template(.smartphone) } }.tag(Tab.iphone)
-            PrivacySettings().tabItem { Label { Text("Privacy") } icon: { LucideImage.template(.hand) } }.tag(Tab.privacy)
-            AboutSettings().tabItem { Label { Text("About") } icon: { LucideImage.template(.info) } }.tag(Tab.about)
+        NavigationSplitView(columnVisibility: $visibility) {
+            SettingsSidebar()
+                .navigationSplitViewColumnWidth(min: 200, ideal: 216, max: 280)
+        } detail: {
+            SettingsPage(section: model.settingsSection ?? .general)
         }
-        .frame(width: 560, height: 520)
+        .modifier(HiddenTitle())
+        .background {
+            Button("Back to sessions") { model.closeSettings() }
+                .keyboardShortcut(.cancelAction)
+                .opacity(0).accessibilityHidden(true)
+        }
+    }
+}
+
+private struct HiddenTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) { content.toolbar(removing: .title) } else { content }
+    }
+}
+
+private extension SettingsSection {
+    var symbol: LucideName {
+        switch self {
+        case .general: .settings
+        case .connections: .link
+        case .telegram: .send
+        case .cliq: .messageSquare
+        case .iphone: .smartphone
+        case .privacy: .hand
+        case .about: .info
+        }
+    }
+}
+
+struct SettingsSidebar: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        List(selection: Binding(get: { model.settingsSection }, set: { if let s = $0 { model.settingsSection = s } })) {
+            ForEach(Array(SettingsSection.groups.enumerated()), id: \.offset) { _, group in
+                Section {
+                    ForEach(group) { section in
+                        LucideLabel(section.title, section.symbol).tag(section)
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .top, spacing: 0) { back }
+    }
+
+    private var back: some View {
+        Button { model.closeSettings() } label: {
+            HStack(spacing: 6) {
+                Lucide(.chevronLeft, size: 16, color: Theme.muted)
+                Text("Back to sessions").font(Typo.body)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).foregroundStyle(Theme.muted)
+        .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 10)
+        .help("Back to sessions (Esc)")
+        .accessibilityLabel("Back to sessions")
+    }
+}
+
+/// One page: its title, then the form. Capped in width so rows stay readable in a wide window.
+private struct SettingsPage: View {
+    let section: SettingsSection
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(section.title).font(Typo.title).accessibilityAddTraits(.isHeader)
+                .frame(maxWidth: 680, alignment: .leading)
+                .padding(.leading, 48).padding(.trailing, 28).padding(.top, 8).padding(.bottom, 4)
+            page.frame(maxWidth: 680)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .id(section)
+    }
+
+    @ViewBuilder private var page: some View {
+        switch section {
+        case .general: GeneralSettings()
+        case .connections: ConnectionsSettings()
+        case .telegram: TelegramSettings()
+        case .cliq: CliqSettings()
+        case .iphone: IPhoneSettings()
+        case .privacy: PrivacySettings()
+        case .about: AboutSettings()
+        }
     }
 }
 
@@ -133,7 +210,7 @@ private struct ConnectionsSettings: View {
             Section {
                 ForEach(model.channels.summary) { channelRow($0) }
             } header: { Text("Channels") } footer: {
-                SectionFootnote("Set these up in the Channels and iPhone tabs.")
+                SectionFootnote("Set these up under Telegram, Zoho Cliq and iPhone in Settings.")
             }
             Section {
                 LabeledContent("Address") { Text(verbatim: model.client.baseURL.absoluteString).textSelection(.enabled) }
@@ -227,16 +304,17 @@ private struct AboutSettings: View {
 
     var body: some View {
         @Bindable var model = model
-        VStack(spacing: 0) {
-            VStack(spacing: 6) {
-                DuckMark(width: 56)
-                Text("Squeak").font(.title2.bold())
-                Text("Version \(AppModel.appVersion)").foregroundStyle(.secondary)
-                Text("A pager for your coding agents. Reads your sessions and lets you answer them.")
-                    .multilineTextAlignment(.center).font(.callout).foregroundStyle(.secondary).frame(maxWidth: 320)
+        Form {
+            Section {
+                VStack(spacing: 6) {
+                    DuckMark(width: 56)
+                    Text("Squeak").font(.title2.bold())
+                    Text("Version \(AppModel.appVersion)").foregroundStyle(.secondary)
+                    Text("A pager for your coding agents. Reads your sessions and lets you answer them.")
+                        .multilineTextAlignment(.center).font(.callout).foregroundStyle(.secondary).frame(maxWidth: 320)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 8)
             }
-            .padding(.top, 24)
-            Form {
                 Section {
                     Toggle("Automatically check for updates", isOn: Binding(get: { model.updater.automaticallyChecks }, set: { model.updater.automaticallyChecks = $0 }))
                         .disabled(!model.updater.isActive)
@@ -261,8 +339,7 @@ private struct AboutSettings: View {
                         SectionFootnote("Tell us what's broken, confusing or could be better. A person reads every report. Also in Help › Report a problem (⌥⌘R).")
                     }
                 }
-            }
-            .formStyle(.grouped)
         }
+        .formStyle(.grouped)
     }
 }

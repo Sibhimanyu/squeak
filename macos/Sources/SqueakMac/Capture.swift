@@ -91,7 +91,7 @@ enum CaptureRunner {
         NSApp.terminate(nil)
     }
 
-    /// SQUEAK_MAC_DEMO=1: popover, quick composer and Settings › Connections from DemoData, no network.
+    /// SQUEAK_MAC_DEMO=1: popover, quick composer and every Settings page from DemoData, no network.
     /// Writes <prefix>-popover.png, <prefix>-composer.png, <prefix>-settings-connections.png.
     private static func runDemo(prefix: String, model: AppModel) async {
         try? await Task.sleep(for: .milliseconds(600))
@@ -150,47 +150,31 @@ enum CaptureRunner {
         write(nw.contentView, to: "\(prefix)-newchat-error.png")
         nw.orderOut(nil)
 
-        // The real Settings window, so the native tab toolbar is in the picture.
-        setenv("SQUEAK_MAC_SETTINGS_TAB", "connections", 1)
-        model.openSettings()
-        try? await Task.sleep(for: .seconds(1.5))
-        if let w = NSApp.windows.first(where: { $0.isVisible && ($0.title == "Settings" || $0.title == "General" || $0.title == "Connections") }),
-           let frame = w.contentView?.superview {
-            w.setFrameOrigin(NSPoint(x: 120, y: 120))
-            try? await Task.sleep(for: .milliseconds(500))
-            write(frame, to: "\(prefix)-settings-connections.png")
-        } else {
-            AppLog.info("capture: no Settings window, using the bare view")
-            let sw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 520, height: 440), styleMask: [.titled], backing: .buffered, defer: false)
-            sw.contentView = NSHostingView(rootView: SettingsView().environment(model))
-            sw.makeKeyAndOrderFront(nil)
-            try? await Task.sleep(for: .seconds(1))
-            write(sw.contentView, to: "\(prefix)-settings-connections.png")
+        // Settings lives in the main window: photograph it page by page, in a real window.
+        let sw = NSWindow(
+            contentRect: NSRect(x: 80, y: 80, width: 1100, height: 720),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
+        sw.titlebarAppearsTransparent = true
+        sw.titleVisibility = .hidden
+        sw.contentView = NSHostingView(rootView: ConversationView().environment(model))
+        sw.setContentSize(NSSize(width: 1100, height: 720))
+        sw.makeKeyAndOrderFront(nil)
+        let only = ProcessInfo.processInfo.environment["SQUEAK_MAC_SETTINGS_TAB"].flatMap { SettingsSection(link: $0) }
+        for section in SettingsSection.allCases where only == nil || only == section {
+            model.openSettingsInPlace(section)
+            try? await Task.sleep(for: .milliseconds(1400))
+            write(sw.contentView?.superview ?? sw.contentView, to: "\(prefix)-settings-\(section.rawValue).png")
         }
-
-        // Other tabs: click the real toolbar items so the native tab strip is in the picture.
-        if let w = NSApp.windows.first(where: { $0.isVisible && $0.toolbar != nil && ($0.title == "Settings" || ["General", "Connections", "Channels", "iPhone", "Privacy", "About"].contains($0.title)) }),
-           let frame = w.contentView?.superview {
-            for tab in ["General", "Channels", "iPhone", "Privacy", "About"] {
-                if let item = w.toolbar?.items.first(where: { $0.label == tab }), let target = item.target, let action = item.action {
-                    _ = target.perform(action, with: item)
-                }
-                try? await Task.sleep(for: .seconds(1))
-                write(frame, to: "\(prefix)-settings-\(tab.lowercased()).png")
-            }
-        } else {
-            AppLog.info("capture: no Settings toolbar for the other tabs")
-        }
-        // Channels: the full-height tabs and both sheets, from demo data (the model is in demo mode).
-        for (name, view) in [("channels-full", AnyView(ChannelsSettings())), ("iphone-full", AnyView(IPhoneSettings())),
-                             ("link-sheet", AnyView(LinkChatSheet())), ("pair-sheet", AnyView(PairSheet()))] {
-            let full = name.hasSuffix("full")
-            let host = NSHostingView(rootView: view.environment(model).frame(width: full ? 560 : nil, height: full ? 1000 : nil).background(Theme.bg))
-            let fw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: full ? 560 : 500, height: full ? 1000 : 420), styleMask: [.titled], backing: .buffered, defer: false)
+        model.closeSettings()
+        sw.orderOut(nil)
+        // The two sheets, from demo data (the model is in demo mode).
+        for (name, view) in [("link-sheet", AnyView(LinkChatSheet())), ("pair-sheet", AnyView(PairSheet()))] {
+            let host = NSHostingView(rootView: view.environment(model))
+            let fw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 500, height: 420), styleMask: [.titled], backing: .buffered, defer: false)
             fw.contentView = host
             fw.makeKeyAndOrderFront(nil)
             try? await Task.sleep(for: .seconds(1.2))
-            if !full { fw.setContentSize(host.fittingSize); try? await Task.sleep(for: .milliseconds(400)) }
+            fw.setContentSize(host.fittingSize); try? await Task.sleep(for: .milliseconds(400))
             write(fw.contentView, to: "\(prefix)-\(name).png")
             fw.orderOut(nil)
         }

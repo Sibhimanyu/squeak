@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.14
+
+- Settings now opens inside the main window, System Settings style: a sidebar of
+  pages (General, Connections, Telegram, Zoho Cliq, iPhone, Privacy, About)
+  and one page at a time. Esc or Back to sessions returns to your chats.
+
 ## 2.1.13
 
 - Squeak for Web moved to its own address, squeak-mac.web.app.

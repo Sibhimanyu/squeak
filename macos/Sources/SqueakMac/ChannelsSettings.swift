@@ -48,9 +48,9 @@ private struct StatusLine: View {
     }
 }
 
-// MARK: - Channels tab
+// MARK: - Telegram
 
-struct ChannelsSettings: View {
+struct TelegramSettings: View {
     @Environment(AppModel.self) private var app
     @State private var linking = false
     @State private var confirmOff = false
@@ -65,7 +65,6 @@ struct ChannelsSettings: View {
             telegramToken(m: $m)
             allowedChats
             telegramActions
-            cliqSection(m: $m)
         }
         .formStyle(.grouped)
         .task { await m.refresh() }
@@ -99,17 +98,17 @@ struct ChannelsSettings: View {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Restarting the Squeak service…").foregroundStyle(.secondary) }
             }
             if let n = m.notice { Footnote(n) }
-        } header: { Text("Telegram") }
+        } header: { Text("Status") }
     }
 
     private func telegramToken(m: Bindable<ChannelsModel>) -> some View {
         Section {
             if self.m.tokenSet && !self.m.changingToken {
-                LabeledContent("Bot token") {
-                    HStack(spacing: 8) {
-                        Text("Set").foregroundStyle(.secondary)
-                        Button("Change") { self.m.changingToken = true }.buttonStyle(SecondaryButtonStyle())
-                    }
+                HStack(spacing: 8) {
+                    Text("Bot token")
+                    Spacer(minLength: 8)
+                    Text("Set").foregroundStyle(.secondary)
+                    Button("Change") { self.m.changingToken = true }.buttonStyle(SecondaryButtonStyle())
                 }
             } else {
                 HStack(spacing: 8) {
@@ -179,20 +178,37 @@ struct ChannelsSettings: View {
             if let r = m.testResult { Footnote(r) } else if m.telegramDirty { Footnote("Saving restarts the Squeak service for a few seconds.") }
         }
     }
+}
 
-    // MARK: Cliq
+// MARK: - Zoho Cliq
 
-    private func cliqSection(m: Bindable<ChannelsModel>) -> some View {
+struct CliqSettings: View {
+    @Environment(AppModel.self) private var app
+    @State private var copied = false
+    private var m: ChannelsModel { app.channels }
+
+    var body: some View {
+        @Bindable var m = app.channels
+        Form {
+            cliqConnection(m: $m)
+            cliqOwner(m: $m)
+            twoWaySection
+        }
+        .formStyle(.grouped)
+        .task { await m.refresh() }
+    }
+
+    private func cliqConnection(m: Bindable<ChannelsModel>) -> some View {
         Section {
             if let c = self.m.channels?.cliq {
                 StatusLine(dot: nil, text: c.twoWay ? "Two-way: cards go out and replies come back" : c.oneWay ? "One-way: cards go out to Cliq" : "Zoho Cliq is not set up")
             }
             if self.m.webhookSet && !self.m.changingWebhook {
-                LabeledContent("Webhook URL") {
-                    HStack(spacing: 8) {
-                        Text("Set").foregroundStyle(.secondary)
-                        Button("Change") { self.m.changingWebhook = true }.buttonStyle(SecondaryButtonStyle())
-                    }
+                HStack(spacing: 8) {
+                    Text("Webhook URL")
+                    Spacer(minLength: 8)
+                    Text("Set").foregroundStyle(.secondary)
+                    Button("Change") { self.m.changingWebhook = true }.buttonStyle(SecondaryButtonStyle())
                 }
             } else {
                 HStack(spacing: 8) {
@@ -207,21 +223,35 @@ struct ChannelsSettings: View {
                     Button("Cancel") { self.m.webhookDraft = ""; self.m.changingWebhook = false }.buttonStyle(QuietButtonStyle())
                 }
             }
+            if self.m.restarting {
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Restarting the Squeak service…").foregroundStyle(.secondary) }
+            }
+            if let n = self.m.notice { Footnote(n) }
+        } header: { Text("Webhook") } footer: {
+            Footnote("The webhook sends cards to Cliq. Find it in the bot's webhook settings.")
+        }
+    }
+
+    private func cliqOwner(m: Bindable<ChannelsModel>) -> some View {
+        Section {
             TextField("Owner email", text: m.ownerEmail, prompt: Text("you@company.com")).multilineTextAlignment(.trailing)
             TextField("Owner ID", text: m.ownerId, prompt: Text("Cliq user ID")).multilineTextAlignment(.trailing)
             HStack(spacing: 8) {
                 Button("Save") { Task { await self.m.saveCliq() } }
-                    .buttonStyle(SecondaryButtonStyle())
+                    .buttonStyle(PrimaryButtonStyle())
                     .disabled(!self.m.cliqDirty || self.m.restarting || (!self.m.webhookDraft.trimmed.isEmpty && !self.m.webhookLooksValid))
                 Spacer()
                 if self.m.webhookSet {
                     Button("Remove webhook") { Task { await self.m.removeWebhook() } }.buttonStyle(DestructiveButtonStyle()).disabled(self.m.restarting)
                 }
             }
-            twoWay
-        } header: { Text("Zoho Cliq") } footer: {
-            Footnote("The webhook sends cards to Cliq. The owner email and ID say whose messages Squeak accepts. Saving restarts the Squeak service.")
+        } header: { Text("Owner") } footer: {
+            Footnote(self.m.cliqDirty ? "The owner email and ID say whose messages Squeak accepts. Saving restarts the Squeak service for a few seconds." : "The owner email and ID say whose messages Squeak accepts.")
         }
+    }
+
+    private var twoWaySection: some View {
+        Section { twoWay } header: { Text("Replies") }
     }
 
     @ViewBuilder private var twoWay: some View {

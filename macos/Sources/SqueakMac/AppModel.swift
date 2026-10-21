@@ -33,7 +33,6 @@ final class AppModel {
     /// Settings › Channels and › iPhone. Demo and capture runs never touch the real `.env` or daemon.
     @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
     @ObservationIgnored var openConversationWindow: (() -> Void)?
-    @ObservationIgnored var openSettingsWindow: (() -> Void)?
     /// Closes the menu-bar panel; installed by its controller. Called before focus moves to a window.
     @ObservationIgnored var dismissMenuBar: (() -> Void)?
     /// The window that hosts `ConversationView`, registered by the view itself.
@@ -539,6 +538,8 @@ final class AppModel {
 
     func select(_ key: SessionKey?) {
         if key != nil, navFilter == .usage { navFilter = .all }
+        // Opening a chat from anywhere (a notification, ⌘1…9) leaves Settings.
+        if key != nil { closeSettings() }
         guard key != selected else { return }
         if let old = selected { saveDraftNow(draft, for: old) }
         selected = key
@@ -837,10 +838,24 @@ final class AppModel {
         if let openURL { NSWorkspace.shared.open(openURL) }
     }
 
-    func openSettings() {
-        dismissMenuBar?()
-        ActivationPolicyController.shared.willShowWindow()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.openSettingsWindow?() }
+    /// Settings is a mode of the main window: the page on screen, or nil while it shows sessions.
+    /// Leaving and coming back keeps the sidebar filter and the open chat, which Settings never touches.
+    var settingsSection: SettingsSection?
+    /// The page the next visit starts on, so reopening Settings lands where it was left.
+    @ObservationIgnored private var lastSettingsSection: SettingsSection = .general
+
+    /// Opens the main window on a Settings page (⌘, , the menu-bar panel, the sidebar's Settings row).
+    func openSettings(_ section: SettingsSection? = nil) {
+        settingsSection = section ?? lastSettingsSection
+        showConversationWindow()
+    }
+
+    /// Switches the page without opening a window (captures, which host the window themselves).
+    func openSettingsInPlace(_ section: SettingsSection) { settingsSection = section }
+
+    func closeSettings() {
+        if let s = settingsSection { lastSettingsSection = s }
+        settingsSection = nil
     }
 
     // MARK: Launch at login

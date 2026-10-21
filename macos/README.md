@@ -58,7 +58,7 @@ Untested:
   owner, along with the other owner steps in section 7 (relaunch, restart,
   sleep/wake, disconnect).
 
-Settings has Channels and iPhone tabs: Telegram bot token and allowed chats, Zoho Cliq
+Settings is a mode of the main window (sidebar: General, Connections, Telegram, Zoho Cliq, iPhone, Privacy, About; ⌘, and the menu-bar panel open it; Esc or Back returns to sessions). Telegram bot token and allowed chats, Zoho Cliq
 webhook and owner, and iPhone pairing (QR, approve, disconnect). They write the daemon's
 `.env` (0600, `EnvFile`), restart the service with `launchctl kickstart`, and need the
 daemon's `/control/channels` and `/control/telegram/*` routes (older daemons read as "update

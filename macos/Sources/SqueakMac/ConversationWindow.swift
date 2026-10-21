@@ -16,17 +16,23 @@ struct ConversationView: View {
 
     var body: some View {
         @Bindable var model = model
-        NavigationSplitView(columnVisibility: $visibility) {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 216, max: 280)
-        } content: {
-            SessionListView()
-                .navigationSplitViewColumnWidth(min: 280, ideal: 312, max: 460)
-        } detail: {
-            DetailView()
+        Group {
+            if model.settingsSection != nil {
+                SettingsShell()
+            } else {
+                NavigationSplitView(columnVisibility: $visibility) {
+                    SidebarView()
+                        .navigationSplitViewColumnWidth(min: 200, ideal: 216, max: 280)
+                } content: {
+                    SessionListView()
+                        .navigationSplitViewColumnWidth(min: 280, ideal: 312, max: 460)
+                } detail: {
+                    DetailView()
+                }
+                .searchable(text: $model.query, placement: .sidebar, prompt: "Search sessions")
+                .modifier(WindowStyling())
+            }
         }
-        .searchable(text: $model.query, placement: .sidebar, prompt: "Search sessions")
-        .modifier(WindowStyling())
         .background(ConversationWindowReader())
         .frame(minWidth: 960, minHeight: 600)
     }
