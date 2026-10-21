@@ -1,6 +1,6 @@
 # celebrating → `duck-celebrating.png`
 
-**Save as:** `desktop/renderer/duck-celebrating.png`
+**Save as:** `brand/mood-sprites/duck-celebrating.png`
 
 Shown for 45 seconds after a session finishes. The one state that is allowed
 to be loud — it is a small reward, and it is on screen briefly.
@@ -30,7 +30,7 @@ to be loud — it is a small reward, and it is on screen briefly.
 
 ## Where it goes
 
-Save the image as `duck-celebrating.png` in **`desktop/renderer/`** — the same
+Save the image as `duck-celebrating.png` in **`brand/mood-sprites/`** — the same
 folder as the duck you uploaded. Then restart the duck:
 
 ```bash

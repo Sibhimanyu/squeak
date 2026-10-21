@@ -1,6 +1,6 @@
 # idle → `duck.png` *(already exists)*
 
-**Lives at:** `desktop/renderer/duck.png`
+**Lives at:** `brand/mood-sprites/duck.png`
 
 The base duck, and the one every other state is a variation of. Shown when
 sessions are open but nothing is happening.
@@ -23,7 +23,7 @@ situation, because the duck will appear to change species when it wakes up.
 
 ## Where it goes
 
-It already sits at `desktop/renderer/duck.png`. That is the file to upload to
+It already sits at `brand/mood-sprites/duck.png`. That is the file to upload to
 ChatGPT, and the file to overwrite if you redraw the base. After any change:
 
 ```bash

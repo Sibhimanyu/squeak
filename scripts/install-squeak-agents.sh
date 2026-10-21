@@ -2,8 +2,7 @@
 #
 # Install the launchd agent for the Squeak daemon, so it starts at login and
 # comes back if it dies. (Squeak for Mac is the native app in macos/: install it
-# from its DMG; it manages its own login item. The Electron duck agent below is
-# legacy and only written if that retired app is still on this Mac.)
+# from its DMG; it manages its own login item.)
 #
 # Deliberately points at the MAIN CHECKOUT, never a Conductor worktree: those
 # are archived when a workspace is done, and a login item that depends on one
@@ -99,30 +98,12 @@ load_plist() {
 
 write_plist com.squeak.daemon squeak always "$NODE" "$REPO_ROOT/dist/squeak/cli.js" start
 
-# LEGACY, retired Electron duck. Prefer Squeak.app (scripts/build-squeak-app.sh): same code, but it is a real
-# app with a name and an icon, so the login item, Activity Monitor and the
-# menu bar all say "Squeak". --background: at login, duck and menu bar only,
-# no window.
-SQUEAK_APP="$HOME/Applications/Squeak.app/Contents/MacOS/Electron"
-ELECTRON="$REPO_ROOT/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
-if [ -x "$SQUEAK_APP" ]; then
-  ELECTRON="$SQUEAK_APP"
-  write_plist com.squeak.duck duck unless-quit "$SQUEAK_APP" --background
-elif [ -x "$ELECTRON" ]; then
-  write_plist com.squeak.duck duck unless-quit "$ELECTRON" "$REPO_ROOT/desktop" --background
-else
-  say "skipping the duck: no electron at $ELECTRON (run: cd $REPO_ROOT/desktop && npm install)"
-fi
-
 # Every plist is on disk before anything is unloaded.
 failed=0
 load_plist com.squeak.daemon || failed=1
-[ -x "$ELECTRON" ] && { load_plist com.squeak.duck || failed=1; }
 
 say ""
 say "logs: $LOGDIR"
 say "stop:  launchctl bootout gui/\$(id -u)/com.squeak.daemon"
-[ -x "$ELECTRON" ] \
-  && say "duck:  (legacy Electron) quit it from the menu bar; it returns at next login"
 
 [ "$failed" -eq 0 ] || die "one or more agents did not load (see above)"

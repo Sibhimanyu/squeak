@@ -1,6 +1,6 @@
 # needs you → `duck-needs_you.png`
 
-**Save as:** `desktop/renderer/duck-needs_you.png`
+**Save as:** `brand/mood-sprites/duck-needs_you.png`
 
 **Note the underscore in the filename.** It matches the internal state name.
 
@@ -35,7 +35,7 @@ also draws a red ring and a count badge around it.
 
 ## Where it goes
 
-Save the image as `duck-needs_you.png` in **`desktop/renderer/`** — the same
+Save the image as `duck-needs_you.png` in **`brand/mood-sprites/`** — the same
 folder as the duck you uploaded. Then restart the duck:
 
 ```bash

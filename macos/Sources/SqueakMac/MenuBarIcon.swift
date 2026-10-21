@@ -1,7 +1,7 @@
 import AppKit
 
 /// The menu-bar mark (DESIGN.md §6.3): the template generated from the approved logo by
-/// `desktop/build/make-tray-icon.py` (`desktop/assets/duckTemplate.png`, `@2x`), never redrawn here.
+/// `brand/logo/make-tray-icon.py` (`brand/logo/png/duckTemplate.png`, `@2x`), never redrawn here.
 ///
 /// A template image is black with alpha and macOS tints it for light or dark menu bars, so the needs-you
 /// count is drawn into the same template. Offline draws the same mark at reduced opacity.

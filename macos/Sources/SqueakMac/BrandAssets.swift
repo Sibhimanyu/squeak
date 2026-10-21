@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The brand kit's own files (DESIGN.md §6.1): the duck is never redrawn, recoloured or traced.
 /// The packaged app carries them in `Contents/Resources/brand` (scripts/build-app.sh); from a
-/// checkout (`swift run`, tests, captures) they are found in the repo's `brand/` and `desktop/assets/`.
+/// checkout (`swift run`, tests, captures) they are found in the repo's `brand/logo/png/`.
 enum BrandAssets {
     /// width : height of the symbol (§6.1).
     static let duckAspect: CGFloat = 1.16056
@@ -17,7 +17,7 @@ enum BrandAssets {
         for case let start? in roots {
             var dir = start
             for _ in 0..<8 {
-                for rel in ["brand/logo/png/\(name)", "desktop/assets/\(name)"] {
+                for rel in ["brand/logo/png/\(name)"] {
                     let u = dir.appendingPathComponent(rel)
                     if FileManager.default.fileExists(atPath: u.path) { return u }
                 }

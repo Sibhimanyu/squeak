@@ -16,11 +16,10 @@
     "dev": "tsx watch src/squeak/cli.ts start",
     "start": "tsx src/squeak/cli.ts start",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src/ web/ && npm run lint:desktop",
+    "lint": "eslint src/ web/",
     "format:check": "prettier --check src/ web/",
     "format": "prettier --write src/ web/",
-    "ci": "npm run typecheck && npm run lint && npm run format:check && npm run test",
-    "lint:desktop": "eslint --config desktop/eslint.config.mjs desktop/*.js desktop/renderer"
+    "ci": "npm run typecheck && npm run lint && npm run format:check && npm run test"
   },
   "keywords": [
     "coding-agents",

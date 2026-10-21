@@ -3,7 +3,7 @@
 Squeak 2.0 is a native SwiftUI/AppKit menu-bar app (`LSUIElement`, bundle id
 `com.squeak.mac`, macOS 14+, Swift 6, one dependency: Sparkle 2 for updates). It is a
 separate Swift package and the live Squeak for Mac, which replaced the retired
-Electron app in `desktop/`. The Node daemon is still its backend.
+Electron app (since removed). The Node daemon is still its backend.
 
 ## What it is
 
@@ -253,7 +253,7 @@ swift run SqueakMac            # needs the daemon running for real data
 
 `scripts/build-app.sh` writes only inside `macos/build/`: `Squeak.app`
 (Sparkle embedded, ad-hoc signed inside out, icon taken from
-`desktop/build/squeak.icns` if present), `Squeak-<version>.zip` and its `.sha256`.
+`macos/assets/squeak.icns`), `Squeak-<version>.zip` and its `.sha256`.
 It installs nothing and makes no DMG.
 
 `scripts/release.sh <version>` (add the `## <version>` CHANGELOG section first) bumps
@@ -341,10 +341,10 @@ sessions, need the Squeak daemon running on the same Mac (step 1 above).
 ## Migration from Electron
 
 Done: Squeak for Mac is this app. The Electron duck and window (`desktop/`) were
-retired and their launch agent (`com.squeak.duck`) removed on 2026-10-18; they are
-no longer run or shipped. The app still depends on `desktop/build/squeak.icns`
-and `desktop/assets/duckTemplate*.png` at build time (`scripts/build-app.sh`),
-so `desktop/` stays until those move.
+retired on 2026-10-18 (launch agent removed) and deleted from the repo on
+2026-10-21; they remain in git history. The icon, menu-bar template and mood
+sprites that lived there are now in `macos/assets/`, `brand/logo/` and
+`brand/mood-sprites/`.
 
 It does not replace the daemon. Staying in Node for now:
 
@@ -361,5 +361,3 @@ Next steps:
 2. Exercise the untested UI: keyboard, hot key, notifications, onboarding.
 3. Cut over to the Swift relay (plan above) and add `RelayAdapter`.
 4. Sign with a Developer ID and notarize, if wider distribution is wanted.
-5. Move the icon and menu-bar template out of `desktop/`, then delete `desktop/`
-   and `scripts/build-squeak-app.sh`.

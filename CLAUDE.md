@@ -47,15 +47,13 @@ deployment section before changing anything under `src/`.
 | `src/cliq/` | Zoho Cliq: cards out through the bot's `/message` endpoint (not `/incoming`, which answers 200 and shows nothing); taps and replies back through HMAC-signed records the bot's Deluge handlers post to a Firestore relay, because a managed Zoho org blocks the Mac's own OAuth (`oauth_app_blocked`). Read `docs/cliq.md` first |
 | `src/utils/tg-format.ts` | markdown to Telegram HTML, message splitting |
 | `macos/` | **Squeak for Mac**, the live Mac app: native SwiftUI menu-bar app (SwiftPM; `swift test`, `macos/scripts/build-app.sh`, `release.sh`, Sparkle updates, bundle id `com.squeak.mac`, installed at `/Applications/Squeak.app`). Reads Conductor's database itself, talks to the daemon's control routes, owns the menu-bar panel, conversation window, quick composer, Settings. Read `macos/README.md` |
-| `desktop/` | **Retired.** The old Electron duck and window (plain JS). Not run, not shipped, no launch agent (`com.squeak.duck` was removed 2026-10-18). Kept only because `macos/scripts/build-app.sh` still copies the icon and menu-bar template from `desktop/build` and `desktop/assets`; delete once those move |
 | `helpers/squeak-hands/` | the signed Swift helper that alone holds the Accessibility grant |
 | `ios/` | Squeak for iPhone (SwiftUI, xcodegen) and `SqueakCore` (`swift test`) |
 | `src/fleet/conductor-relay/` | the local relay: Conductor's Remote Control host connects to Squeak on loopback, and a reply goes into the chat through Conductor's own composer — the first route `ConductorReplier.send` tries. Spec and evidence: `docs/conductor-local-feasibility.md` |
 | `docs/current-state-audit.md` | the pre-2.0 map of every process, route, file and secret |
 | `firebase/` | project `squeak-5c9gvo`: Firestore rules, and Hosting for the SideStore source |
 | `scripts/ship.sh` | put a worktree's branch live and restart the daemon (not the Mac app, which ships by `macos/scripts/release.sh`) |
-| `scripts/build-squeak-app.sh` | legacy: packaged the Electron `~/Applications/Squeak.app`; the native app is built by `macos/scripts/build-app.sh` |
-| `scripts/install-squeak-agents.sh` | the daemon's launch agent (and the retired Electron duck's, only if that app is still installed) |
+| `scripts/install-squeak-agents.sh` | the daemon's launch agent |
 | `scripts/move-checkout.sh`, `scripts/rename-in-conductor.py` | move the checkout; rename the repo in Conductor's records (Conductor quit) keeping every chat |
 | `DESIGN.md` | the brand and design system every surface follows; tokens in §11 |
 | `brand/` | the brand kit: logo SVG/PNG and the approved source, the guidelines (PDF and Illustrator master), Figtree/Inter/JetBrains Mono with licences, brand tokens. Rules are in `DESIGN.md` |
@@ -95,7 +93,7 @@ Rules:
 
 ```bash
 npm install
-npm run ci      # typecheck + lint (src/, web/ and the retired desktop/) + format:check + test
+npm run ci      # typecheck + lint (src/ and web/) + format:check + test
 npm run build   # safe in a worktree, never in the live checkout
 (cd ios/SqueakCore && swift test)
 (cd macos && swift test)
@@ -234,7 +232,7 @@ test for anything you fix is expected; the suite is fast.
   as Telegram. Any web page can reach 127.0.0.1, so unlike `/state` these must
   never be readable or callable from a browser. Note `/state` itself still
   sends `access-control-allow-origin: *`, which lets any web page read session
-  titles, paths and summaries — only the retired Electron duck's `file://` page
+  titles, paths and summaries — only the old Electron duck's `file://` page
   needed it, so it can probably go.
 - **Capturing the native app:** `SQUEAK_MAC_CAPTURE=<prefix>` opens the window,
   saves screenshots and quits, with its own temp cache and key. Add
@@ -487,13 +485,10 @@ transcripts, and ranks them by what is blocked on the human.
   discipline `formatWorkspaceLabel` already uses for repo names, applied here
   because most rows never collide and don't need the extra text. Conductor's
   own "Untitled" placeholder counts as no title.
-- **`desktop/` is the retired Electron app** (duck, always-on-top panel, window),
-  replaced by `macos/`. It is not deployed and no launch agent runs it. It stays a
-  separate package (the daemon must not carry Electron) only until the icon and
-  menu-bar template that `macos/scripts/build-app.sh` copies from it move out;
-  then delete it, along with `scripts/build-squeak-app.sh` and the `lint:desktop`
-  script. Its design notes (NSPanel level, the glass second window, Electron
-  >= 35.1.3 for transparent small windows) are in git history, not needed now.
+- **The Electron app (`desktop/`) is gone** — retired 2026-10-18, deleted 2026-10-21;
+  it is in git history. Anything that still says duck window, NSPanel, Electron or
+  `desktop/renderer` is stale. Its icon, menu-bar template and mood sprites now live
+  in `macos/assets/`, `brand/logo/` and `brand/mood-sprites/`.
 - The ingress serves `GET /state` unauthenticated on loopback for local UIs.
   It is read-only and exposes nothing a local process could not already read
   from the same files; hook posts still require the token.

@@ -1,6 +1,6 @@
 # asleep → `duck-asleep.png`
 
-**Save as:** `desktop/renderer/duck-asleep.png`
+**Save as:** `brand/mood-sprites/duck-asleep.png`
 
 Shown when nothing is running. The calmest state — this is the duck you see
 most of the day, so it should be restful, not comatose.
@@ -33,7 +33,7 @@ style survives here the rest will be easy.
 
 ## Where it goes
 
-Save the image as `duck-asleep.png` in **`desktop/renderer/`** — the same
+Save the image as `duck-asleep.png` in **`brand/mood-sprites/`** — the same
 folder as the duck you uploaded. Then restart the duck:
 
 ```bash

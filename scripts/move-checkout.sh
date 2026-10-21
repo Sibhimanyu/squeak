@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Move the main checkout to a new folder and re-point everything that runs
-# from it: the launch agents, Squeak.app's loader, and git's links to every
+# from it: the launch agent and git's links to every
 # worktree.
 #
 #   scripts/move-checkout.sh [new-path]      # default: ~/conductor/repos/squeak
@@ -32,12 +32,12 @@ say "moving $OLD"
 say "    to $NEW"
 
 uid="$(id -u)"
-for label in com.squeak.duck com.squeak.daemon; do
+for label in com.squeak.daemon; do
   launchctl bootout "gui/$uid/$label" 2>/dev/null || true
 done
 # bootout is asynchronous; wait for both to be gone before moving their code.
 for _ in $(seq 1 40); do
-  launchctl print "gui/$uid/com.squeak.daemon" >/dev/null 2>&1 || launchctl print "gui/$uid/com.squeak.duck" >/dev/null 2>&1 || break
+  launchctl print "gui/$uid/com.squeak.daemon" >/dev/null 2>&1 || break
   sleep 0.25
 done
 
@@ -53,14 +53,6 @@ mv "$OLD" "$NEW"
 
 # Every linked worktree records the main checkout's path; repair rewrites them.
 git -C "$NEW" worktree repair ${WORKTREES[@]+"${WORKTREES[@]}"}
-
-# The app first: its loader names the checkout's path, and the launch agent
-# starts it the moment it is loaded.
-if [ -d "$HOME/Applications/Squeak.app" ]; then
-  say ""
-  say "rebuilding Squeak.app's loader..."
-  ( cd "$NEW" && ./scripts/build-squeak-app.sh )
-fi
 
 say ""
 say "re-pointing the launch agents..."

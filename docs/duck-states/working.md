@@ -1,6 +1,6 @@
 # working → `duck-working.png`
 
-**Save as:** `desktop/renderer/duck-working.png`
+**Save as:** `brand/mood-sprites/duck-working.png`
 
 Shown while an agent is mid-turn. The duck is busy and focused. This state
 also gets a faster bob from the app, so the drawing only needs to carry
@@ -31,7 +31,7 @@ also gets a faster bob from the app, so the drawing only needs to carry
 
 ## Where it goes
 
-Save the image as `duck-working.png` in **`desktop/renderer/`** — the same
+Save the image as `duck-working.png` in **`brand/mood-sprites/`** — the same
 folder as the duck you uploaded. Then restart the duck:
 
 ```bash

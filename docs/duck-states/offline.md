@@ -1,6 +1,6 @@
 # offline → `duck-offline.png` *(optional)*
 
-**Save as:** `desktop/renderer/duck-offline.png`
+**Save as:** `brand/mood-sprites/duck-offline.png`
 
 Shown when the duck cannot reach Squeak — the daemon is not running, or the
 port is wrong. Without this file the app just desaturates whichever sprite is
@@ -31,7 +31,7 @@ showing, which works fine. Generate it only if you want the nicer version.
 
 ## Where it goes
 
-Save the image as `duck-offline.png` in **`desktop/renderer/`** — the same
+Save the image as `duck-offline.png` in **`brand/mood-sprites/`** — the same
 folder as the duck you uploaded. Then restart the duck:
 
 ```bash

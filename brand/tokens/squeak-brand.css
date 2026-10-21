@@ -2,7 +2,7 @@
  * Squeak brand tokens, Edition 01 (October 2026).
  * Brand materials only: logo grounds, documents, site, slides, social.
  * Product UI tokens (state colours, surfaces, radii, motion) live in
- * desktop/renderer/tokens.css; see DESIGN.md §11.
+ * the old Electron tokens.css (deleted); see DESIGN.md §11.
  */
 :root {
   /* colour, RGB first */

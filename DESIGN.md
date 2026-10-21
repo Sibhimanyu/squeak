@@ -5,7 +5,7 @@
 > This is the single reference for how every Squeak surface looks, moves and
 > speaks: Squeak for Mac (the native menu-bar app), the mobile app, and the
 > Telegram cards. It was written from what existed then — the duck's artwork,
-> the retired Electron panel (`desktop/renderer/duck.css`), the card rules in
+> the old Electron panel (`desktop/renderer/duck.css`, since deleted), the card rules in
 > `CLAUDE.md` — so it codifies rather than reinvents. Where it changes
 > something that ships today, §12 lists the change.
 >
@@ -421,9 +421,8 @@ Rules:
   colours (§3.3); the duck shows *mood*.
 - The app icon is the logo (§6.1) on Ink. No text, no gradients.
 - The menu-bar mark is the monochrome outline in
-  `desktop/assets/duckTemplate.png` (a template image, so macOS tints it; the
-  file lives in the retired `desktop/` until it moves),
-  generated from the duck artwork by `desktop/build/make-tray-icon.py` — its
+  `brand/logo/png/duckTemplate.png` (a template image, so macOS tints it),
+  generated from the duck artwork by `brand/logo/make-tray-icon.py` — its
   silhouette with the eye, wing and beak lines cut out — so it is always the
   same duck. Never hand-draw it.
 
@@ -837,11 +836,11 @@ are written into §3.1 and §11 but **not yet applied in code**:
 
 | Where | Today | Now | Why |
 | --- | --- | --- | --- |
-| `--sq-duck` (`desktop/renderer/tokens.css`, `Theme.swift` in `ios/` and `macos/`, `macos/scripts/dmg-background.swift`) | `#FCD02C` | `#FFDA1A` | The approved logo's yellow |
+| `--sq-duck` (the old Electron `tokens.css`, `Theme.swift` in `ios/` and `macos/`, `macos/scripts/dmg-background.swift`) | `#FCD02C` | `#FFDA1A` | The approved logo's yellow |
 | `--sq-duck-wing` | `#FCC010` | `#FFC812` | The logo's wing shade |
 | `--sq-beak` | `#FC8830` | `#FF972E` | Bill Orange |
 | `--sq-duck-outline` | `#3C1804` brown | `#18191B` Ink | The logo's contour is Ink |
-| Mood sprites (`desktop/renderer/duck-*.png`, the iPhone's `Media.xcassets`) | The older round-eyed duck, brown outline | Redraw from the approved duck, in Ink | One duck everywhere; the sleepy eye is the logo's own expression |
+| Mood sprites (`brand/mood-sprites/duck-*.png`, the iPhone's `Media.xcassets`) | The older round-eyed duck, brown outline | Redraw from the approved duck, in Ink | One duck everywhere; the sleepy eye is the logo's own expression |
 | Menu-bar mark | Generated from the old sprite | Regenerate from the new artwork | `make-tray-icon.py` follows the sprite |
 
 ---

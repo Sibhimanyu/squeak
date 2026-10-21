@@ -1,6 +1,6 @@
 # Duck states
 
-Squeak's duck shows one of six states. (Written for the retired Electron duck; the native Mac app's menu-bar duck uses the brand template, and the artwork below is still the reference for the phone.) Right now only one drawing
+Squeak's duck shows one of six states. (Written for the old Electron duck; the sprites now live in `brand/mood-sprites/`, the native Mac app's menu-bar duck uses the brand template, and this is still the reference for new artwork.) Right now only one drawing
 exists (`duck.png`), so every state reuses it and the duck is wide awake while
 it is supposedly asleep. Animation can convey tempo; it cannot close an eye.
 
@@ -9,7 +9,7 @@ ChatGPT.
 
 ## Read this before generating anything
 
-**Upload `desktop/renderer/duck.png` first and ask for variations of *that*
+**Upload `brand/mood-sprites/duck.png` first and ask for variations of *that*
 duck.** Describing the duck again from scratch produces six ducks that do not
 look related. Do the whole set in **one conversation**, each time saying "same
 duck, same style, same colours, only change X".
@@ -20,7 +20,7 @@ more.
 
 ## What to save, and where
 
-**Every image goes in `desktop/renderer/`.** The app picks them up on restart.
+**Every image goes in `brand/mood-sprites/`.** The app picks them up on restart.
 Filenames are exact — note the underscore in `needs_you`.
 
 | file | state | when it shows |
@@ -32,7 +32,7 @@ Filenames are exact — note the underscore in `needs_you`.
 | `duck-needs_you.png` | needs you | an agent is blocked waiting on you |
 | `duck-offline.png` | offline | *optional* — Squeak is not running |
 
-Save them into **`desktop/renderer/`**, then restart the duck:
+Save them into **`brand/mood-sprites/`**, then rebuild whatever uses them:
 
 ```bash
 cd desktop && npm start

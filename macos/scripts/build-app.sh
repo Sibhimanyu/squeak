@@ -39,10 +39,10 @@ BRAND="$APP/Contents/Resources/brand"
 mkdir -p "$BRAND"
 cp "$REPO"/brand/logo/png/squeak-duck-full-color-*.png "$REPO"/brand/logo/png/squeak-duck-compact-*.png \
    "$REPO"/brand/logo/png/squeak-lockup-horizontal-*.png "$BRAND/"
-cp "$REPO/desktop/assets/duckTemplate.png" "$REPO/desktop/assets/duckTemplate@2x.png" "$BRAND/"
+cp "$REPO/brand/logo/png/duckTemplate.png" "$REPO/brand/logo/png/duckTemplate@2x.png" "$BRAND/"
 
 ICON=""
-for c in "$REPO/desktop/build/squeak.icns"; do [ -f "$c" ] && ICON="$c"; done
+for c in "$REPO/macos/assets/squeak.icns"; do [ -f "$c" ] && ICON="$c"; done
 ICON_KEY=""
 if [ -n "$ICON" ]; then
   cp "$ICON" "$APP/Contents/Resources/Squeak.icns"

@@ -113,7 +113,7 @@ Not built yet:
 - [ ] **Turn on the iPhone channel from Settings** (`SQUEAK_REMOTE_PROJECT`) — the
       iPhone tab only explains it.
 - [ ] **Remember linked Telegram chat names** across restarts (memory only now).
-- [ ] **Retire the Electron app** (`desktop/`): `install-squeak-agents.sh` would
+- [x] **Retire the Electron app** (done 2026-10-21) (`desktop/`): `install-squeak-agents.sh` would
       recreate `com.squeak.duck` for the deleted `~/Applications/Squeak.app`.
 - [ ] **New duck artwork** (DESIGN.md §12): mood sprites and the iPhone tab-bar duck
       are still the old round-eyed art; §8.7 empty/offline states want moods.
