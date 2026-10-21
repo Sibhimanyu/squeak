@@ -2,8 +2,8 @@
 
 Squeak 2.0 is a native SwiftUI/AppKit menu-bar app (`LSUIElement`, bundle id
 `com.squeak.mac`, macOS 14+, Swift 6, one dependency: Sparkle 2 for updates). It is a
-separate Swift package; the Node daemon and the Electron app in `desktop/` are
-untouched by it.
+separate Swift package and the live Squeak for Mac, which replaced the retired
+Electron app in `desktop/`. The Node daemon is still its backend.
 
 ## What it is
 
@@ -340,8 +340,13 @@ sessions, need the Squeak daemon running on the same Mac (step 1 above).
 
 ## Migration from Electron
 
-Squeak 2.0 replaces the Electron window and duck for the Conductor use case. It
-does not yet replace the daemon. Staying in Node for now:
+Done: Squeak for Mac is this app. The Electron duck and window (`desktop/`) were
+retired and their launch agent (`com.squeak.duck`) removed on 2026-10-18; they are
+no longer run or shipped. The app still depends on `desktop/build/squeak.icns`
+and `desktop/assets/duckTemplate*.png` at build time (`scripts/build-app.sh`),
+so `desktop/` stays until those move.
+
+It does not replace the daemon. Staying in Node for now:
 
 - Telegram bot and Cliq bridge
 - the phone (iPhone) channel and its Firestore relay
@@ -351,11 +356,10 @@ does not yet replace the daemon. Staying in Node for now:
 
 Next steps:
 
-1. Ship the daemon so `/transcript` exists for terminal sessions.
-2. Owner runs the feasibility doc section 7 tests, starting with 7.1
+1. Owner runs the feasibility doc section 7 tests, starting with 7.1
    two-session isolation, and a first supervised live send from the native app.
-3. Exercise the untested UI: keyboard, hot key, notifications, onboarding.
-4. Cut over to the Swift relay (plan above) and add `RelayAdapter`.
-5. Sign with a Developer ID and notarize, if wider distribution is wanted.
-6. Decide the fate of `desktop/` once the native app covers its use, and move
-   the remaining channels out of Node only if there is a reason to.
+2. Exercise the untested UI: keyboard, hot key, notifications, onboarding.
+3. Cut over to the Swift relay (plan above) and add `RelayAdapter`.
+4. Sign with a Developer ID and notarize, if wider distribution is wanted.
+5. Move the icon and menu-bar template out of `desktop/`, then delete `desktop/`
+   and `scripts/build-squeak-app.sh`.

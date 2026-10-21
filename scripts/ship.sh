@@ -6,21 +6,19 @@
 #
 # Runs CI, merges this branch into the live branch, builds beside the live
 # dist rather than over it, smoke-tests that the build loads, swaps it in,
-# refreshes the desktop app's dependencies if they changed, then restarts the
-# Squeak service and the duck. If Squeak does not answer on its local port
+# then restarts the Squeak service. If Squeak does not answer on its local port
 # afterwards, the previous dist is restored and restarted, and the bad build
 # is left at dist.failed.
 #
-# Squeak.app and the launch agents run from the live checkout, so this is all
-# it takes for a change to reach every Mac surface. The iPhone app ships
-# separately (ios/scripts/release.sh).
+# The daemon and its launch agent run from the live checkout. Squeak for Mac
+# (macos/) is a native app that ships separately (macos/scripts/release.sh),
+# as does the iPhone app (ios/scripts/release.sh).
 
 set -euo pipefail
 
 HEALTH_WAIT="${HEALTH_WAIT:-20}"
 PORT="${FLEET_HOOK_PORT:-8477}"
 DAEMON="com.squeak.daemon"
-DUCK="com.squeak.duck"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'ship: %s\n' "$*" >&2; exit 1; }
@@ -50,7 +48,6 @@ say "running CI in the worktree..."
 ( cd "$WORKTREE" && npm run ci ) || die "CI failed -- nothing was shipped"
 
 # 2. Merge into the branch Squeak runs from.
-BEFORE="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 say ""
 say "merging $BRANCH into $LIVE_BRANCH..."
 git -C "$REPO_ROOT" merge --no-edit "$BRANCH" || die "merge failed -- nothing was shipped"
@@ -75,14 +72,7 @@ rm -rf "$REPO_ROOT/dist.prev"
 mv "$REPO_ROOT/dist.new" "$REPO_ROOT/dist"
 say "swapped dist (previous kept at dist.prev)"
 
-# 6. The desktop app loads its code straight from the checkout; its
-#    dependencies only need refreshing when the lockfile moved.
-if ! git -C "$REPO_ROOT" diff --quiet "$BEFORE" HEAD -- desktop/package-lock.json; then
-  say "desktop dependencies changed, installing..."
-  ( cd "$REPO_ROOT/desktop" && npm install --no-audit --no-fund >/dev/null ) || say "WARNING: desktop npm install failed"
-fi
-
-# 7. Restart and verify. Squeak is not in the path of anything this script's
+# 6. Restart and verify. Squeak is not in the path of anything this script's
 #    caller is waiting on, so it can restart right away.
 restart() {
   local label="$1"
@@ -101,7 +91,6 @@ healthy() {
 
 say "restarting Squeak..."
 restart "$DAEMON"
-restart "$DUCK"
 
 if healthy; then
   say ""

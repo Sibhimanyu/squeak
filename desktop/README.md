@@ -1,3 +1,7 @@
+> **Retired.** This Electron app was replaced by the native Squeak for Mac in
+> `../macos/` and is no longer run or shipped. It stays only because the native
+> build still copies its icon and menu-bar template from here. See `../CLAUDE.md`.
+
 # The duck
 
 A rubber duck that floats on your screen and tells you what your coding agents

@@ -3,9 +3,9 @@
 > Version 2 · 2026-10-19 · brand Edition 01 adopted (see §12).
 >
 > This is the single reference for how every Squeak surface looks, moves and
-> speaks: the menu-bar duck that ships today, the desktop app, the mobile app,
-> and the Telegram cards. It is written from what already exists — the duck's
-> artwork, the panel in `desktop/renderer/duck.css`, the card rules in
+> speaks: Squeak for Mac (the native menu-bar app), the mobile app, and the
+> Telegram cards. It was written from what existed then — the duck's artwork,
+> the retired Electron panel (`desktop/renderer/duck.css`), the card rules in
 > `CLAUDE.md` — so it codifies rather than reinvents. Where it changes
 > something that ships today, §12 lists the change.
 >
@@ -82,12 +82,12 @@ The list under it never does.
 
 | Surface | Role | Density | Theme |
 | --- | --- | --- | --- |
-| **Menu-bar duck** (ships today) | Ambient status. Mood at a glance; panel on click. | Very low | Dark panel over any wallpaper |
-| **Squeak for Mac** (next) | The home of Squeak: start/stop the duck, see all work, review and reply. Replaces every Terminal command. | Medium | Follows system, dark first |
+| **Squeak for Mac, menu bar** (native, ships today) | Ambient status. The duck mark in the menu bar; a glass panel on click. | Very low | System glass over any wallpaper |
+| **Squeak for Mac, window** (native, ships today) | The home of Squeak: see all work, read the full message, reply and decide, Settings. | Medium | Follows system, dark first |
 | **Squeak for iPhone / Android** (later) | Guide agents away from the desk: answer decisions, reply, review diffs. | Low per screen, deep by navigation | Follows system |
 | **Telegram cards** (ships today) | Push notifications with one-tap answers. | Three lines | Telegram's own |
 
-The desktop app is the full picture; the duck is its ambient face; the phone
+The Mac window is the full picture; the menu-bar duck is its ambient face; the phone
 and Telegram are remote hands. They share one visual language so that
 "working", "needs you" and "done" look the same everywhere.
 
@@ -421,7 +421,8 @@ Rules:
   colours (§3.3); the duck shows *mood*.
 - The app icon is the logo (§6.1) on Ink. No text, no gradients.
 - The menu-bar mark is the monochrome outline in
-  `desktop/assets/duckTemplate.png` (a template image, so macOS tints it),
+  `desktop/assets/duckTemplate.png` (a template image, so macOS tints it; the
+  file lives in the retired `desktop/` until it moves),
   generated from the duck artwork by `desktop/build/make-tray-icon.py` — its
   silhouette with the eye, wing and beak lines cut out — so it is always the
   same duck. Never hand-draw it.
@@ -850,14 +851,13 @@ are written into §3.1 and §11 but **not yet applied in code**:
 Step by step, each step shippable on its own:
 
 1. **Brand & design guidelines** — this document. ✅
-2. **Squeak for Mac.** ✅ A real `.app` (in `~/Applications`) with a Dock/menu-bar
-   presence that starts and stops the daemon and the duck (no more
-   `launchctl`), and a main window: every session grouped by state, session
-   detail with the agent's last message, diff review, reply and decisions. It
-   reads the same `/state` the duck does. Built on the existing Electron duck
-   so there is one desktop codebase.
+2. **Squeak for Mac.** ✅ A native SwiftUI `.app` (`macos/`, `/Applications`) with a
+   menu-bar presence, a main window (every session grouped by state, the agent's
+   last message, reply and decisions), a quick composer and Settings. It began as
+   an Electron app on the same `/state`; the native app replaced it and the
+   Electron one is retired.
 3. **Tokens as code.** ✅ Extract §11 into a shared package consumed by the Mac
-   app and the duck; apply the §12 changes.
+   app; apply the §12 changes.
 4. **Remote channel.** ✅ Built on Firebase — see `docs/remote-channel.md`. A way for a phone to see state and send replies
    without the Mac being reachable directly. Firebase (Firestore + FCM push +
    Auth) is the default candidate; the key design constraint is that this

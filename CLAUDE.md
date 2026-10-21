@@ -2,13 +2,13 @@
 
 A pager for your coding agents: a daemon that watches every Claude Code and
 Codex session on the Mac (Conductor's and the terminal's), plus the surfaces
-that show it and let you answer — Squeak for Mac (`desktop/`), the menu-bar
-duck, Squeak for iPhone (`ios/`) and Telegram cards. It reads Conductor's
+that show it and let you answer — Squeak for Mac (`macos/`, native SwiftUI), the menu-bar
+mark, Squeak for iPhone (`ios/`) and Telegram cards. It reads Conductor's
 SQLite database and agent transcripts, and answers Conductor chats by typing
 into Conductor's own window. The design system is `DESIGN.md`.
 
 **You are very likely running inside something this repo deploys.** Read the
-deployment section before changing anything under `src/` or `desktop/`.
+deployment section before changing anything under `src/`.
 
 ## Layout
 
@@ -25,9 +25,9 @@ deployment section before changing anything under `src/` or `desktop/`.
 | `src/fleet/reply-router.ts` | one replier for every Mac-side surface: Conductor chats one way, terminal agents the other |
 | `src/fleet/terminal-reply.ts` | answers a `claude`/`codex` running in Terminal by typing into its tab |
 | `src/fleet/terminal-process.ts`, `terminal-screen.ts` | proves which process and tty a session is; reads its screen for an empty prompt |
-| `src/fleet/activity.ts` | a working session's current turn, step by step, for the window's "What it's doing" |
+| `src/fleet/activity.ts` | a working session's current turn, step by step, for the Mac app's "What it's doing" |
 | `src/fleet/choices.ts` | reads lettered options out of an agent's last message, for one-tap answers |
-| `src/fleet/caffeinate.ts` | keeps the Mac awake (`caffeinate -i -w <pid>`) while an agent works, 2 min grace, and (`-s`) always while plugged in so the phone can reach it; `SQUEAK_CAFFEINATE=working` / `off`. an awake session (`awake-session.ts`: tray submenu, the window's "Stay awake" pane, iPhone Settings; `POST /control/keep-awake`, phone command kind `awake`) holds `-i` on battery too, for a while or until ended, saved in `keep-awake.json` |
+| `src/fleet/caffeinate.ts` | keeps the Mac awake (`caffeinate -i -w <pid>`) while an agent works, 2 min grace, and (`-s`) always while plugged in so the phone can reach it; `SQUEAK_CAFFEINATE=working` / `off`. an awake session (`awake-session.ts`: the Mac app's menu-bar panel, iPhone Settings; `POST /control/keep-awake`, phone command kind `awake`) holds `-i` on battery too, for a while or until ended, saved in `keep-awake.json` |
 | `src/fleet/lid-sleep.ts` | lid-closed awake sessions: `sudo -n pmset -a disablesleep 1` through a sudoers rule (`/etc/sudoers.d/squeak`, exactly four pmset commands) the Mac app installs with macOS's admin prompt; journalled in `lid-journal.json` and undone at start |
 | `src/fleet/power-monitor.ts`, `awake-backstop.ts` | an awake session's safety rules, and the Mac's battery, draw (`ioreg -rn AppleSmartBattery`; a discharge prints as an unsigned 64-bit amperage) and lid for the phone's `macPower` (battery via `pmset -g batt`, heat via `notifyutil -g com.apple.system.thermalpressurelevel`, no root): Low Power Mode at 40% or when hot, end at 10% or critically hot (`SQUEAK_AWAKE_LOW_POWER_PERCENT` / `_END_PERCENT`); and `com.squeak.awake-backstop`, a launchd agent the daemon installs once the sudoers rule is in, which undoes a journalled change when the daemon is gone or the session's end passed 2 min ago |
 | `src/fleet/lid-actions.ts` | when the lid shuts during a lid session (ioreg every 5 s): display off (`pmset displaysleepnow`), mute (only if not muted already), Low Power Mode (through the session), and optionally SIGSTOP to Slack/WhatsApp/Discord/Telegram; journalled in `lid-actions.json`, undone on open, at start, and by the backstop when the daemon is gone; settings in `awake-settings.json` |
@@ -46,18 +46,16 @@ deployment section before changing anything under `src/` or `desktop/`.
 | `src/telegram/client.ts` | Telegram API calls, HTML rendering, retry/fallback |
 | `src/cliq/` | Zoho Cliq: cards out through the bot's `/message` endpoint (not `/incoming`, which answers 200 and shows nothing); taps and replies back through HMAC-signed records the bot's Deluge handlers post to a Firestore relay, because a managed Zoho org blocks the Mac's own OAuth (`oauth_app_blocked`). Read `docs/cliq.md` first |
 | `src/utils/tg-format.ts` | markdown to Telegram HTML, message splitting |
-| `desktop/` | Squeak for Mac: the duck plus the main window; a separate package, plain JS, no build step |
-| `desktop/app-window.js`, `desktop/renderer/app.*` | the Squeak window: sessions, full messages, decisions, replies, iPhone pairing |
-| `desktop/squeak-service.js` | the window's only way out: /state, token-gated control routes, launchctl, Squeak Hands |
+| `macos/` | **Squeak for Mac**, the live Mac app: native SwiftUI menu-bar app (SwiftPM; `swift test`, `macos/scripts/build-app.sh`, `release.sh`, Sparkle updates, bundle id `com.squeak.mac`, installed at `/Applications/Squeak.app`). Reads Conductor's database itself, talks to the daemon's control routes, owns the menu-bar panel, conversation window, quick composer, Settings. Read `macos/README.md` |
+| `desktop/` | **Retired.** The old Electron duck and window (plain JS). Not run, not shipped, no launch agent (`com.squeak.duck` was removed 2026-10-18). Kept only because `macos/scripts/build-app.sh` still copies the icon and menu-bar template from `desktop/build` and `desktop/assets`; delete once those move |
 | `helpers/squeak-hands/` | the signed Swift helper that alone holds the Accessibility grant |
 | `ios/` | Squeak for iPhone (SwiftUI, xcodegen) and `SqueakCore` (`swift test`) |
 | `src/fleet/conductor-relay/` | the local relay: Conductor's Remote Control host connects to Squeak on loopback, and a reply goes into the chat through Conductor's own composer — the first route `ConductorReplier.send` tries. Spec and evidence: `docs/conductor-local-feasibility.md` |
-| `macos/` | Squeak 2.0, the native SwiftUI menu-bar app (SwiftPM; `swift test`, `scripts/build-app.sh`). Talks to the daemon's control routes today; its Swift relay port (`Relay/`) is tested but not wired in, since the daemon owns port 8788. Read `macos/README.md` |
 | `docs/current-state-audit.md` | the pre-2.0 map of every process, route, file and secret |
 | `firebase/` | project `squeak-5c9gvo`: Firestore rules, and Hosting for the SideStore source |
-| `scripts/ship.sh` | put a worktree's branch live and restart Squeak |
-| `scripts/build-squeak-app.sh` | packages `~/Applications/Squeak.app` (icon, bundle id, signing) |
-| `scripts/install-squeak-agents.sh` | the launch agents for the daemon and the app |
+| `scripts/ship.sh` | put a worktree's branch live and restart the daemon (not the Mac app, which ships by `macos/scripts/release.sh`) |
+| `scripts/build-squeak-app.sh` | legacy: packaged the Electron `~/Applications/Squeak.app`; the native app is built by `macos/scripts/build-app.sh` |
+| `scripts/install-squeak-agents.sh` | the daemon's launch agent (and the retired Electron duck's, only if that app is still installed) |
 | `scripts/move-checkout.sh`, `scripts/rename-in-conductor.py` | move the checkout; rename the repo in Conductor's records (Conductor quit) keeping every chat |
 | `DESIGN.md` | the brand and design system every surface follows; tokens in §11 |
 | `brand/` | the brand kit: logo SVG/PNG and the approved source, the guidelines (PDF and Illustrator master), Figtree/Inter/JetBrains Mono with licences, brand tokens. Rules are in `DESIGN.md` |
@@ -66,8 +64,11 @@ deployment section before changing anything under `src/` or `desktop/`.
 ## Deployment
 
 Everything on the Mac runs from the **main checkout** (`~/conductor/repos/squeak`):
-the daemon (`com.squeak.daemon`, `dist/squeak/cli.js`), and Squeak.app, whose
-loader `require`s the checkout's `desktop/main.js` (`com.squeak.duck`).
+the daemon (`com.squeak.daemon`, `dist/squeak/cli.js`). Squeak for Mac is a
+separate, self-contained native app (`/Applications/Squeak.app`) that is *not*
+run from the checkout: it is built and released from `macos/`
+(`macos/scripts/release.sh <version>`: tests, DMG, Sparkle appcast; it prints
+the publish steps and never runs them) and updates itself through Sparkle.
 Conductor workspaces are **git worktrees** on their own branches, so your edits
 are isolated from the live processes. Nothing you do reaches them until it is
 shipped:
@@ -78,8 +79,7 @@ shipped:
 
 It runs CI, merges your branch into the live branch, builds beside the live
 `dist` rather than over it, smoke-tests that the build imports, swaps it in,
-refreshes `desktop/` dependencies if the lockfile moved, then restarts the
-daemon and the app. If Squeak does not answer on `127.0.0.1:8477` it restores
+then restarts the daemon. It does not touch the Mac app. If Squeak does not answer on `127.0.0.1:8477` it restores
 the previous `dist` and leaves the bad build at `dist.failed`. The iPhone app
 ships separately with `ios/scripts/release.sh`.
 
@@ -95,9 +95,10 @@ Rules:
 
 ```bash
 npm install
-npm run ci      # typecheck + lint (src/ and desktop/) + format:check + test
+npm run ci      # typecheck + lint (src/, web/ and the retired desktop/) + format:check + test
 npm run build   # safe in a worktree, never in the live checkout
 (cd ios/SqueakCore && swift test)
+(cd macos && swift test)
 ```
 
 Tests are vitest and live beside the code as `*.test.ts`. Adding a regression
@@ -215,38 +216,31 @@ test for anything you fix is expected; the suite is fast.
   and commands. It is served on the token-gated
   `/control/session/<key>/activity`, since thinking is session content, and
   the window refreshes only the feed each poll so drafts and scroll survive.
-- The duck and the window read `127.0.0.1:8477/state` from the daemon.
-- **Squeak for Mac is the duck's Electron app with a window.** One process,
-  one instance (`requestSingleInstanceLock`): opening Squeak from Spotlight or
-  Finder while it runs shows the window. launchd starts it with
-  `--background` (duck and menu bar only). `Squeak.app` is Electron plus a
-  two-line loader that `require`s the **main checkout's** `desktop/main.js`,
-  so `ship.sh` updates the app without rebuilding it; rebuild only for icon,
-  metadata or Electron changes. It lives in `~/Applications` because
-  `/Applications` needs admin. `SQUEAK_DESKTOP_MAIN` points the bundle at a
-  worktree for testing.
-- The app pins its userData folder to `Application Support/squeak/desktop`
-  (`app.setPath` before ready), whether it runs from Squeak.app or from the
-  checkout, so the duck's position and the single-instance lock are shared.
-  Not a sibling `Squeak`: macOS paths are case-insensitive, and that *is* the
-  daemon's `squeak` folder.
+- Squeak for Mac, the iPhone app and the daemon's other surfaces all read the same
+  daemon: `127.0.0.1:8477/state` and the token-gated `/control/*` routes.
+- **Squeak for Mac is native** (`macos/`, SwiftUI/AppKit, `LSUIElement` menu-bar
+  accessory, macOS 14+, Swift 6, Sparkle 2). It reads `conductor.db` read-only
+  itself, so the session list, history and activity work with the daemon down;
+  sending, terminal sessions and every channel need the daemon. The Dock icon
+  appears only while the conversation window, Settings or Welcome is open.
+  Cmd-Q closes its windows, "Quit Squeak" in the menu really quits. Its cache is
+  one encrypted file in `Application Support/Squeak Mac/`, key in a 0600 file
+  beside it, not the Keychain (ad-hoc signing would re-prompt every update).
+  The release is ad-hoc signed, not notarized. Full detail, status and what is
+  still untested: `macos/README.md`.
 - **Control routes are token-gated and carry no CORS header.**
-  `/control/session/<id>/message` and `/reply` on the ingress let the window
+  `/control/session/<id>/message` and `/reply` on the ingress let the Mac app
   read a chat's full message and answer it through the same `ConductorReplier`
   as Telegram. Any web page can reach 127.0.0.1, so unlike `/state` these must
   never be readable or callable from a browser. Note `/state` itself still
   sends `access-control-allow-origin: *`, which lets any web page read session
-  titles, paths and summaries — the duck's `file://` page needs *some* CORS;
-  moving its fetch into the main process would let that header go.
-- The window's renderer never gets the token, a shell, or a URL: everything
-  goes through `app-preload.js` to `squeak-service.js` in the main process.
-  Agent messages are rendered with `textContent` only — they are untrusted.
-- `SQUEAK_CAPTURE=<prefix>` photographs the window (loaded, each row, the
-  iPhone view before pairing) and quits. The decision tap **sends a reply**, so
-  it runs only with `SQUEAK_CAPTURE_TAP=1` and never on the live port 8477 —
-  point `FLEET_HOOK_PORT` at a test endpoint. A capture uses its own temp
-  userData so it cannot collide with the running app. Capture turns off background throttling and floats
-  the window, or shots of a covered window come out as empty files.
+  titles, paths and summaries — only the retired Electron duck's `file://` page
+  needed it, so it can probably go.
+- **Capturing the native app:** `SQUEAK_MAC_CAPTURE=<prefix>` opens the window,
+  saves screenshots and quits, with its own temp cache and key. Add
+  `SQUEAK_MAC_DEMO=1` for fake data: no network, and no send ever reaches a chat.
+  Never exercise a real send against a live chat without the owner. See the
+  table of flags in `macos/README.md`.
 
 - **Native modules must match the running Node.** `better-sqlite3` is built
   for one ABI; `node` here is v22 (`NODE_MODULE_VERSION` 127) but Homebrew
@@ -337,19 +331,12 @@ test for anything you fix is expected; the suite is fast.
   call it would describe — and must never say the user has no limit: an
   earlier prompt said "there is no Claude limit to report" and Haiku told
   the user "you don't have a Claude limit".
-- The tray dropdown shows **usage, not the session list** — that already
-  lives in the duck's own panel one click away. `tray.on("click", peek)` was
-  removed: Electron already opens the context menu on a tray click by
-  itself, so the handler was firing the agents panel open *at the same time*
-  as the menu.
-- The duck has **two independent global shortcuts**: peek-at-panel and
-  show/hide. They must stay separate — a single shortcut that both reveals
-  and can hide the duck would eventually hide it when you meant to peek.
-- **`desktop/` has its own eslint config**, run by `npm run lint`. It is
-  invisible to tsc and to `eslint src/`, and two real bugs reached the user
-  through that gap. Note that flat-config `files` patterns resolve against the
-  directory eslint runs from, so they must be repo-relative — a config whose
-  patterns match nothing passes everything, which is worse than no linter.
+- The menu-bar panel's Usage section is folded away by default and is the only
+  poll for usage while it is open; Refresh is the only thing that calls Claude's
+  usage endpoint, and only on a press.
+- **Lint configs resolve `files` patterns against the directory eslint runs
+  from**, so they must be repo-relative — a config whose patterns match nothing
+  passes everything, which is worse than no linter.
 
 ## The phone channel (docs/remote-channel.md)
 
@@ -483,14 +470,13 @@ transcripts, and ranks them by what is blocked on the human.
   `/radar`. Only per-session actions stay.
 - `src/fleet/active.ts` owns the active rule. The monitor, the radar and the
   local state endpoint all read it; do not reimplement the predicate.
-- **The duck decides nothing.** Mood, the active set and every rendered field
-  come from `/state`; the renderer only draws. Putting logic in
-  `desktop/renderer/` means it escapes CI and can start disagreeing with
-  Telegram about what is happening. Formatting an existing field (agent name,
-  a context-percent warning glyph) is fine and duplicated on both sides on
-  purpose; a real computation across sessions (the title-collision check
-  below) is not, and belongs server-side in `radar.ts` so both surfaces stay
-  in sync instead of drifting.
+- **The surfaces decide nothing.** Mood, the active set and every rendered field
+  come from `/state`; the Mac app, the phone and Telegram only draw. Logic put in
+  a client escapes the daemon's CI and can start disagreeing with Telegram about
+  what is happening. Formatting an existing field (agent name, a context-percent
+  warning glyph) is fine and duplicated on purpose; a real computation across
+  sessions (the title-collision check below) is not, and belongs server-side in
+  `radar.ts` so every surface stays in sync instead of drifting.
 - **Two sessions can share repo, branch, *and* agent** — Conductor allows a
   second chat on the same workspace, and this is not hypothetical: this
   session and an earlier one in it were, on this machine, simultaneously
@@ -501,59 +487,13 @@ transcripts, and ranks them by what is blocked on the human.
   discipline `formatWorkspaceLabel` already uses for repo names, applied here
   because most rows never collide and don't need the extra text. Conductor's
   own "Untitled" placeholder counts as no title.
-- `desktop/` is a **separate package on purpose**: the daemon must not carry
-  Electron as a dependency. It is excluded from
-  `package.json` `files`, from `tsconfig`, and from `eslint src/`.
-- Expansion state lives in the Electron **main** process, which also owns the
-  window size; the renderer only reacts to `duck:expanded`. Tracking it in
-  both was a desync waiting to happen.
-- The duck window is an **NSPanel** (`type: "panel"`) at **`"floating"`**
-  always-on-top level, not `"screen-saver"`. `"screen-saver"` is the level real
-  screensavers use; WindowServer plausibly special-cases it during the Mission
-  Control Space-swipe animation, which is why the duck still vanished and
-  reappeared on swipe after becoming a panel. `"floating"` sits above ordinary
-  windows, which is all the duck needs, without that apparent special-casing.
-  `applyFloatingBehavior` also re-applies both settings on `ready-to-show`,
-  since several Electron issues report the collection-behavior flags not
-  reliably sticking when set immediately after construction, before the
-  window has a backing NSWindow.
-- `skipTransformProcessType: true` on `setVisibleOnAllWorkspaces`: without it
-  Electron flips the process between UIElementApplication and
-  ForegroundApplication, which by its own documentation "will hide the window
-  and dock for a short time". The dock is hidden before the window is built,
-  so the app is already a UIElementApplication and the transform buys nothing.
-- A panel can still take focus, which click-away-to-close needs — checked with
-  a standalone probe before *and after* changing the always-on-top level,
-  since both are easy to break silently and not obvious from reading the code.
-- **Focus alone does not make click-away work.** The panel is
-  non-activating, so opening it leaves the app you were in active, and
-  clicking back into that app never takes focus from the panel — no `blur`,
-  and it stayed open (probed with Conductor frontmost). So an open panel
-  also makes Squeak the active app (`app.focus({ steal: true })`), and a
-  collapse that was not a click elsewhere hands activation back with
-  `app.hide()` + `showInactive()` (the duck is gone for ~8ms). Not while the
-  Squeak window is showing: activating an app raises all its windows, and
-  the window would jump over your work.
-- **The panel's glass is a second window.** CSS `backdrop-filter` cannot
-  blur what is behind an Electron window (it only blurs the page), so the
-  old "20px blur" was a flat fill with other apps' text showing through.
-  macOS's material (`vibrancy: "popover"`) covers a whole window, and the
-  duck's window is mostly empty space, so `createGlass` keeps a focus-less,
-  click-through panel window sized to the panel's measured rect
-  (`duck:panel-rect`) one level below the duck (`floating` vs `floating`+1).
-  Anything that moves or resizes the duck window calls `syncGlass`.
-  `DUCK_CAPTURE` photographs the page only, so it runs without the glass;
-  `DUCK_CAPTURE_GLASS=1` keeps it for a `screencapture` of the real thing.
-- To see the duck without Screen Recording permission, use
-  `DUCK_CAPTURE=<prefix>` — the window photographs itself. Note it photographs
-  the *page*, not the composited window: it shows transparency correctly even
-  when the native window has lost it, so it cannot verify a white-background
-  report. Only eyes on the menubar can.
-- **Keep the duck on Electron >= 35.1.3.** On 34 and earlier a transparent
-  window at or below ~128-160px renders as an opaque white rounded square
-  (upstream #38630 / #44884, fixed by #46353) — which is exactly the collapsed
-  duck at 132x132. It reads as "a white card behind the duck" and is easy to
-  misdiagnose as CSS or a bad sprite, both of which photograph fine.
+- **`desktop/` is the retired Electron app** (duck, always-on-top panel, window),
+  replaced by `macos/`. It is not deployed and no launch agent runs it. It stays a
+  separate package (the daemon must not carry Electron) only until the icon and
+  menu-bar template that `macos/scripts/build-app.sh` copies from it move out;
+  then delete it, along with `scripts/build-squeak-app.sh` and the `lint:desktop`
+  script. Its design notes (NSPanel level, the glass second window, Electron
+  >= 35.1.3 for transparent small windows) are in git history, not needed now.
 - The ingress serves `GET /state` unauthenticated on loopback for local UIs.
   It is read-only and exposes nothing a local process could not already read
   from the same files; hook posts still require the token.

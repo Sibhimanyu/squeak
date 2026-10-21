@@ -2,7 +2,7 @@
   "name": "squeak",
   "version": "2.0.0",
   "private": true,
-  "description": "A pager for your coding agents: a Mac app, a menu-bar duck, an iPhone app and Telegram cards that tell you what needs you and let you answer.",
+  "description": "A pager for your coding agents: a native Mac app, an iPhone app and Telegram cards that tell you what needs you and let you answer.",
   "type": "module",
   "bin": {
     "squeak": "dist/squeak/cli.js"

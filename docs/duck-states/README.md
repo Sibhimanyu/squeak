@@ -1,6 +1,6 @@
 # Duck states
 
-Squeak's desktop duck shows one of six states. Right now only one drawing
+Squeak's duck shows one of six states. (Written for the retired Electron duck; the native Mac app's menu-bar duck uses the brand template, and the artwork below is still the reference for the phone.) Right now only one drawing
 exists (`duck.png`), so every state reuses it and the duck is wide awake while
 it is supposedly asleep. Animation can convey tempo; it cannot close an eye.
 

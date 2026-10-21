@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
-# Install launchd agents for Squeak and the desktop duck, so both start at
-# login and come back if they die.
+# Install the launchd agent for the Squeak daemon, so it starts at login and
+# comes back if it dies. (Squeak for Mac is the native app in macos/: install it
+# from its DMG; it manages its own login item. The Electron duck agent below is
+# legacy and only written if that retired app is still on this Mac.)
 #
 # Deliberately points at the MAIN CHECKOUT, never a Conductor worktree: those
 # are archived when a workspace is done, and a login item that depends on one
@@ -97,7 +99,7 @@ load_plist() {
 
 write_plist com.squeak.daemon squeak always "$NODE" "$REPO_ROOT/dist/squeak/cli.js" start
 
-# Prefer Squeak.app (scripts/build-squeak-app.sh): same code, but it is a real
+# LEGACY, retired Electron duck. Prefer Squeak.app (scripts/build-squeak-app.sh): same code, but it is a real
 # app with a name and an icon, so the login item, Activity Monitor and the
 # menu bar all say "Squeak". --background: at login, duck and menu bar only,
 # no window.
@@ -120,7 +122,7 @@ load_plist com.squeak.daemon || failed=1
 say ""
 say "logs: $LOGDIR"
 say "stop:  launchctl bootout gui/\$(id -u)/com.squeak.daemon"
-say "duck:  quit it from the menu bar; it returns at next login, or open"
-say "       Squeak from Spotlight or ~/Applications to bring it back"
+[ -x "$ELECTRON" ] \
+  && say "duck:  (legacy Electron) quit it from the menu bar; it returns at next login"
 
 [ "$failed" -eq 0 ] || die "one or more agents did not load (see above)"

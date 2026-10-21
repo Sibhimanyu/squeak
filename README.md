@@ -10,8 +10,7 @@ iPhone, or Telegram.
 
 | Surface                                          | What it does                                                                                                                                           |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Squeak for Mac** (`~/Applications/Squeak.app`) | Every session grouped by what needs you; the agent's full last message; one-tap answers to lettered questions; replies; start and restart the service. |
-| **The duck**                                     | A floating rubber duck and menu-bar icon: its mood says whether anything is working, finished, or waiting on you.                                      |
+| **Squeak for Mac** (`/Applications/Squeak.app`)  | A native menu-bar app: every session grouped by what needs you; the agent's full last message; one-tap answers to lettered questions; replies; a quick composer; Settings for Telegram, Zoho Cliq and iPhone pairing. Updates itself (Sparkle). |
 | **Squeak for iPhone**                            | The same list and answers, from anywhere. Installed through SideStore.                                                                                 |
 | **Telegram**                                     | Push cards when an agent is blocked or a Conductor chat finishes, with buttons to answer.                                                              |
 
@@ -51,10 +50,14 @@ npm install
 npm run build
 node dist/squeak/cli.js setup          # writes ~/Library/Application Support/squeak/.env
 node dist/squeak/cli.js install-hooks  # agent hooks: live state and approval prompts
-./scripts/install-squeak-agents.sh     # start Squeak and the duck at login
-./scripts/build-squeak-app.sh          # ~/Applications/Squeak.app
+./scripts/install-squeak-agents.sh     # start the Squeak service at login
 helpers/squeak-hands/build.sh ~/Library/Application\ Support/squeak   # live replies
 ```
+
+Install **Squeak for Mac** from the DMG on the project's GitHub releases
+(`Sibhimanyu/squeak`; see [`macos/README.md`](macos/README.md)). It is a native
+menu-bar app, not run from this checkout, and updates itself. It builds from
+`macos/` with `macos/scripts/release.sh`.
 
 Then grant **Squeak Hands** Accessibility in System Settings → Privacy &
 Security. The first reply to a Terminal agent asks to let Squeak Hands
@@ -80,8 +83,9 @@ action passes are in [docs/cliq.md](docs/cliq.md).
 ## Development
 
 ```bash
-npm run ci                      # typecheck, lint (incl. desktop/), format, tests
+npm run ci                      # typecheck, lint, format, tests
 (cd ios/SqueakCore && swift test)
+(cd macos && swift test)       # Squeak for Mac; macos/scripts/release.sh ships it
 npx tsx scripts/e2e-remote.ts   # phone channel end to end, over real Firebase
 ./scripts/ship.sh               # from a worktree: CI, merge, build, restart
 ```

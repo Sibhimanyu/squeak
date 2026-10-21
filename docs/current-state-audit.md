@@ -1,5 +1,12 @@
 # Squeak: current-state audit (Phase 0 of "Squeak 2.0")
 
+> **Historical (pre-2.0).** This audit describes the Electron app in `desktop/`, which
+> has since been replaced by the native Squeak for Mac in `macos/` and retired
+> (no `com.squeak.duck` agent, no Electron process). The daemon, routes, files and
+> secrets sections still hold; every statement about Electron, `Squeak.app` as an
+> Electron loader, or the duck window is out of date. See `CLAUDE.md` and
+> `macos/README.md` for the current state.
+
 Purpose: a factual map of what Squeak is today, so a native SwiftUI/AppKit
 menu-bar rebuild can preserve the hard-won logic and replace only what should
 be replaced. Everything here was read from the code in this worktree

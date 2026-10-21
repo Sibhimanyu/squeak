@@ -3,7 +3,7 @@ import Foundation
 /// The sudoers rule lid-closed awake sessions need (`src/fleet/lid-sleep.ts`): it lets
 /// the daemon run exactly four `pmset` commands without a password. The daemon writes
 /// the text (`GET /control/keep-awake/lid-rule`); this checks it, has visudo check it,
-/// and installs it with macOS's own admin prompt. Port of `desktop/squeak-service.js`.
+/// and installs it with macOS's own admin prompt. Port of the retired `desktop/squeak-service.js`.
 public enum LidRule {
     public static let path = "/etc/sudoers.d/squeak"
 
