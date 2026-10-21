@@ -52,12 +52,13 @@ export class RtdbRest {
     return toDoc(await response.json());
   }
 
-  async set(path: string, doc: ChannelDoc): Promise<void> {
+  /** `timeoutMs` for a big write (a film's chunk), which a slow uplink needs far longer for. */
+  async set(path: string, doc: ChannelDoc, options: { timeoutMs?: number } = {}): Promise<void> {
     const response = await this.fetchImpl(this.url(path, "print=silent"), {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(fromDoc(doc)),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
     });
     await ensureOk(response, "set");
   }

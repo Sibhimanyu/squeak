@@ -16,6 +16,8 @@ final class MacInteropTests: XCTestCase {
         let startedBox: String
         let refusedBox: String
         let pairAnswerBox: String
+        let mediaResultBox: String?
+        let mediaChunkBox: String?
         let splitSnapshotBox: String
         let recentBox: String
         let liveBox: String
@@ -125,6 +127,36 @@ final class MacInteropTests: XCTestCase {
         XCTAssertEqual(workflow.options?.last?.image, ".rasanai/run-1/design/Wild/specimen.png")
         XCTAssertEqual(workflow.options?.last?.frames?.first?.id, "peak")
         XCTAssertNil(snapshot.sessions.first?.workflow)
+    }
+
+    func testDecodesWhereTheMacLeftAPhoneCopyAndItsChunk() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let result = try ChannelCrypto.open(CommandResult.self, box: try XCTUnwrap(f.mediaResultBox), key: key)
+        XCTAssertEqual(result.media?.chunks, 1)
+        XCTAssertEqual(result.media?.mime, "audio/mp4")
+        let chunk = try ChannelCrypto.open(MediaChunk.self, box: try XCTUnwrap(f.mediaChunkBox), key: key)
+        XCTAssertEqual(chunk.i, 0)
+        XCTAssertEqual(Data(base64Encoded: chunk.data), Data("hello".utf8))
+    }
+
+    func testDecodesAFilmsAnimaticReviewWithItsScenesSoundtrackAndNotes() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let snapshot = try ChannelCrypto.open(PhoneSnapshot.self, box: f.snapshotBox, key: key)
+        let film = try XCTUnwrap(snapshot.sessions.first { $0.workflow?.call == "animatic" })
+        let review = try XCTUnwrap(film.workflow?.review)
+        XCTAssertEqual(review.kind, "animatic")
+        XCTAssertEqual(review.media?.kind, "audio")
+        XCTAssertEqual(review.media?.source, ".rasanai/run-1/animatic-mix.wav")
+        XCTAssertEqual(review.scenes.map(\.id), ["b1", "b2"])
+        XCTAssertEqual(review.scenes[1].start, 6.12, accuracy: 0.001)
+        XCTAssertEqual(review.scene(at: 7)?.id, "b2")
+        XCTAssertEqual(review.notes.first?.text, "Hold the title longer")
+        XCTAssertEqual(review.notes.first?.x, 0.25)
+        XCTAssertEqual(review.finish, ["approve"])
+        XCTAssertEqual(review.quick.first, "Slower")
+        XCTAssertNil(film.workflow?.macOnly)
     }
 
     func testDecodesAWorkingSessionsActivityAndNoneForAFinishedOne() throws {

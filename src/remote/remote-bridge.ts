@@ -22,6 +22,7 @@ import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
 import type { DiffFile, WorkspaceDiff } from "../fleet/diff-view.js";
 import type { PhoneImageResult } from "./phone-image.js";
+import type { PhoneMediaResult } from "./phone-media.js";
 import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import type { FleetSession } from "../fleet/types.js";
@@ -169,10 +170,33 @@ export interface WorkflowCommand {
   expiresAt: number;
 }
 
+/**
+ * Fetch what a workflow's card plays (a RasanAI animatic's soundtrack, its
+ * film): the Mac makes a phone copy and leaves it in the channel as sealed
+ * chunks (`media/<id>-<i>`), named in the result.
+ */
+export interface MediaCommand {
+  v: 1;
+  kind: "media";
+  sessionKey: string;
+  source: string;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/** Raw bytes per sealed chunk: base64 twice over stays under the rules' 900,000-character box. */
+export const MEDIA_CHUNK_BYTES = 384 * 1024;
+/** One chunk's write: ~700 KB, which a slow uplink (measured 28 KB/s behind a proxy) needs ~25 s for. */
+export const MEDIA_CHUNK_TIMEOUT_MS = 90_000;
+/** How long chunks stay in the channel before the Mac deletes them. */
+export const MEDIA_TTL_MS = 30 * 60_000;
+
 /** What shows a workflow's card and takes its answers (workflows/rasanai/provider.ts). */
 export interface RemoteWorkflows {
   view(status: WorkflowStatus): WorkflowView | null;
   allowsImage(status: WorkflowStatus, source: string): boolean;
+  allowsMedia?(status: WorkflowStatus, source: string): boolean;
   act(projectDir: string, action: WorkflowAction): WorkflowResult;
 }
 
@@ -253,7 +277,8 @@ export interface RemoteActivity {
 
 export interface ChannelStore {
   get(path: string): Promise<ChannelDoc | null>;
-  set(path: string, doc: ChannelDoc): Promise<void>;
+  /** `timeoutMs`: a big write's own limit (a film's chunk); stores without one ignore it. */
+  set(path: string, doc: ChannelDoc, options?: { timeoutMs?: number }): Promise<void>;
   list(collection: string): Promise<Array<{ id: string; doc: ChannelDoc }>>;
   delete(path: string): Promise<void>;
   /**
@@ -387,6 +412,8 @@ export interface RemoteBridgeDependencies {
   image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
   /** A workflow's cards and answers (RasanAI). Absent: phones see plain sessions, and answers are refused. */
   workflow?: RemoteWorkflows | null;
+  /** Makes a phone copy of a film or soundtrack a card plays (phone-media.ts). Absent: refused. */
+  media?: ((source: string, cwd: string) => Promise<PhoneMediaResult>) | null;
   now?: () => number;
   macName?: string;
 }
@@ -469,6 +496,12 @@ export class RemoteBridge {
   private readonly activityCache = new Map<string, PhoneActivity | null>();
   private readonly questionCache = new Map<string, PhoneQuestion | null>();
   private readonly answerLimit = new AnswerRateLimit();
+  /** Media in the channel now, by phone copy, so watching again reuses the upload. */
+  private readonly mediaUploads = new Map<string, { media: Record<string, unknown>; expiresAt: number }>();
+  /** Devices with an upload under way: one at a time each. */
+  private readonly mediaBusy = new Set<string>();
+  /** The first pass deletes every chunk an earlier run left; later ones only expired ones. */
+  private mediaSwept = false;
   private pairingOpenUntil = 0;
   private phoneSeenAt = 0;
   /** The phone's own stamp on the last presence read, so a new ping is told apart from a re-read. */
@@ -792,6 +825,8 @@ export class RemoteBridge {
           await this.publish(config);
           await this.sweepResults(config);
         }
+        await this.sweepMedia(!this.mediaSwept);
+        this.mediaSwept = true;
       }
     } catch (error) {
       logger.warn("remote channel pass failed", { error: error instanceof Error ? error.message : String(error) });
@@ -1099,6 +1134,9 @@ export class RemoteBridge {
     }
     if (kind === "workflow") {
       return this.handleWorkflow(device, id, command as unknown as WorkflowCommand);
+    }
+    if (kind === "media") {
+      return this.handleMedia(config, device, id, command as unknown as MediaCommand);
     }
     if (kind === "answer") {
       const result = await runAnswerCommand(command as unknown as AnswerCommand, {
@@ -1529,6 +1567,169 @@ export class RemoteBridge {
     }
     this.log(device.name, "sent", `${result.said} (${session.workflow.title ?? "a film"})`);
     return { write: true, result: { id, status: "sent", said: result.said } };
+  }
+
+  /**
+   * A film or soundtrack on a workflow's card: only what the card waiting now
+   * plays, read inside its project, sent as a phone copy in sealed chunks.
+   * Only on the Realtime Database: Firestore's rules have no `media`, and its
+   * per-document billing is wrong for megabytes.
+   */
+  private async handleMedia(
+    config: RemoteConfig,
+    device: PairedDevice,
+    id: string,
+    command: MediaCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `media: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (
+      command.v !== 1 ||
+      typeof command.sessionKey !== "string" ||
+      typeof command.source !== "string" ||
+      !command.source.trim() ||
+      command.source.length > 2_000
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const prepare = this.deps.media;
+    const workflows = this.deps.workflow;
+    if (!prepare || !workflows?.allowsMedia || !this.deps.store.watch) {
+      return refuse("This Mac can't send films to a phone.");
+    }
+    const session = this.workflowSession(command.sessionKey);
+    if (!session?.workflow) {
+      return refuse("That isn't waiting on you any more.");
+    }
+    if (!workflows.allowsMedia(session.workflow, command.source)) {
+      return refuse("That isn't on this card.");
+    }
+    if (this.mediaBusy.has(device.id)) {
+      return refuse("Your Mac is still sending the last one.");
+    }
+    this.mediaBusy.add(device.id);
+    try {
+      let prepared: PhoneMediaResult;
+      try {
+        prepared = await prepare(command.source, session.workflow.projectDir);
+      } catch {
+        prepared = { ok: false, reason: "Your Mac couldn't read that." };
+      }
+      if (!prepared.ok) {
+        return refuse(prepared.reason);
+      }
+      const file = prepared.file;
+      const cacheKey = `${file.path}|${file.bytes}`;
+      const held = this.mediaUploads.get(cacheKey);
+      const now = this.now();
+      if (held && held.expiresAt - now > 5 * 60_000) {
+        return { write: true, result: { id, status: "sent", media: held.media } };
+      }
+      const bytes = await fs.promises.readFile(file.path);
+      const mediaId = crypto.randomBytes(12).toString("hex");
+      const chunks = Math.max(1, Math.ceil(bytes.length / MEDIA_CHUNK_BYTES));
+      const docs = Array.from({ length: chunks }, (_, index) => this.channel(config, "media", `${mediaId}-${index}`));
+      // Recorded before the first write, so a restart mid-upload still cleans up.
+      this.rememberMedia(docs, now + MEDIA_TTL_MS);
+      const upload = async (index: number) => {
+        const data = bytes.subarray(index * MEDIA_CHUNK_BYTES, (index + 1) * MEDIA_CHUNK_BYTES).toString("base64");
+        await this.deps.store.set(
+          docs[index]!,
+          { box: seal(config.key, { i: index, n: chunks, data }), at: now },
+          { timeoutMs: MEDIA_CHUNK_TIMEOUT_MS },
+        );
+      };
+      // Two at a time: on a thin uplink more in parallel only splits the same bandwidth and
+      // pushes each write toward its timeout.
+      for (let start = 0; start < chunks; start += 2) {
+        await Promise.all(Array.from({ length: Math.min(2, chunks - start) }, (_, offset) => upload(start + offset)));
+      }
+      const media = {
+        id: mediaId,
+        chunks,
+        bytes: bytes.length,
+        sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+        mime: file.mime,
+      };
+      this.mediaUploads.set(cacheKey, { media, expiresAt: now + MEDIA_TTL_MS });
+      this.log(
+        device.name,
+        "sent",
+        `${file.mime.startsWith("video") ? "a film" : "a soundtrack"} (${Math.round(bytes.length / 1024)} KB)`,
+      );
+      return { write: true, result: { id, status: "sent", media } };
+    } catch (error) {
+      logger.warn("remote media upload failed", { error: error instanceof Error ? error.message : String(error) });
+      return refuse("Your Mac couldn't send that. Try again.");
+    } finally {
+      this.mediaBusy.delete(device.id);
+    }
+  }
+
+  /** Every media chunk written, with when it goes, kept on disk so a restart still deletes it. */
+  private rememberMedia(docs: string[], expiresAt: number): void {
+    const list = this.readMediaLedger();
+    list.push(...docs.map((doc) => ({ doc, expiresAt })));
+    this.writeMediaLedger(list);
+  }
+
+  /** Delete the chunks whose time is up (every pass) or all of them (`everything`, at start). */
+  private async sweepMedia(everything = false): Promise<void> {
+    const list = this.readMediaLedger();
+    if (list.length === 0) {
+      return;
+    }
+    const now = this.now();
+    const keep: { doc: string; expiresAt: number }[] = [];
+    for (const entry of list) {
+      if (!everything && entry.expiresAt > now) {
+        keep.push(entry);
+        continue;
+      }
+      try {
+        await this.deps.store.delete(entry.doc);
+      } catch {
+        keep.push(entry);
+      }
+    }
+    for (const [key, held] of this.mediaUploads) {
+      if (everything || held.expiresAt <= now) {
+        this.mediaUploads.delete(key);
+      }
+    }
+    if (keep.length !== list.length) {
+      this.writeMediaLedger(keep);
+    }
+  }
+
+  private mediaLedgerPath(): string {
+    return path.join(path.dirname(this.deps.configPath), "remote-media.json");
+  }
+
+  private readMediaLedger(): { doc: string; expiresAt: number }[] {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.mediaLedgerPath(), "utf8")) as unknown;
+      return Array.isArray(parsed)
+        ? parsed.filter(
+            (entry): entry is { doc: string; expiresAt: number } =>
+              typeof entry?.doc === "string" && entry.doc.includes("/media/") && typeof entry.expiresAt === "number",
+          )
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private writeMediaLedger(list: { doc: string; expiresAt: number }[]): void {
+    try {
+      fs.writeFileSync(this.mediaLedgerPath(), JSON.stringify(list), { mode: 0o600 });
+    } catch (error) {
+      logger.debug("could not write the media ledger", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** An active session, by fleet key, that a workflow has marked as waiting. */

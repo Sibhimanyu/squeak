@@ -42,6 +42,19 @@ let (askId, askDocument) = try channel.workflowDocument(
     signer: signer, now: madeAt)
 let (posterId, posterDocument) = try channel.imageDocument(
     sessionId: "", sessionKey: "claude-transcript:d1", source: ".rasanai/run-1/design/Wild/specimen.png", signer: signer, now: madeAt)
+// RasanAI, the same film at its animatic: a note at 3.5 s pinned to a spot, applying the notes,
+// and the animatic's soundtrack.
+let animatic = Workflow(provider: "rasanai", call: "animatic", step: "animatic", revision: "animatic@1",
+                        title: "Quotidian", prompt: "Give notes on the animatic")
+let (noteId, noteDocument) = try channel.workflowDocument(
+    sessionKey: "claude-transcript:d1", workflow: animatic, type: "comment",
+    value: .note(t: 3.5, scene: "b1", x: 0.25, y: 0.5, quick: "Slower"), note: "Hold the title longer",
+    signer: signer, now: madeAt)
+let (applyId, applyDocument) = try channel.workflowDocument(
+    sessionKey: "claude-transcript:d1", workflow: animatic, type: "apply", value: WorkflowCommand.Value.none,
+    signer: signer, now: madeAt)
+let (mediaId, mediaDocument) = try channel.mediaDocument(
+    sessionKey: "claude-transcript:d1", source: ".rasanai/run-1/animatic-mix.wav", signer: signer, now: madeAt)
 let fixture: [String: Any] = [
     "madeAt": Int64(madeAt.timeIntervalSince1970 * 1000),
     "key": key,
@@ -85,6 +98,12 @@ let fixture: [String: Any] = [
     "workflowMoreCommand": ["box": moreDocument.box, "sig": moreDocument.sig!, "device": moreDocument.device!],
     "workflowAnswerCommandId": askId,
     "workflowAnswerCommand": ["box": askDocument.box, "sig": askDocument.sig!, "device": askDocument.device!],
+    "workflowNoteCommandId": noteId,
+    "workflowNoteCommand": ["box": noteDocument.box, "sig": noteDocument.sig!, "device": noteDocument.device!],
+    "workflowApplyCommandId": applyId,
+    "workflowApplyCommand": ["box": applyDocument.box, "sig": applyDocument.sig!, "device": applyDocument.device!],
+    "mediaCommandId": mediaId,
+    "mediaCommand": ["box": mediaDocument.box, "sig": mediaDocument.sig!, "device": mediaDocument.device!],
     "workflowImageCommandId": posterId,
     "workflowImageCommand": ["box": posterDocument.box, "sig": posterDocument.sig!, "device": posterDocument.device!],
 ]

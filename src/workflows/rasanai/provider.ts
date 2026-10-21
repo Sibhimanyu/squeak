@@ -1,20 +1,25 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { FleetSession } from "../../fleet/types.js";
-import type { WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../types.js";
+import type { WorkflowAction, WorkflowResult, WorkflowReview, WorkflowStatus, WorkflowView } from "../types.js";
 import { appendAction, newActionId, pendingActions } from "./actions.js";
 import type { LockDeps } from "./actions.js";
 import {
   acceptsExternalActions,
   choosableIds,
+  QUICK_NOTES,
   readRasanaiRun,
+  reviewOf,
   viewImages,
+  viewMedia,
   waitingStatus,
   workflowView,
 } from "./run.js";
 import type { RasanaiRun } from "./run.js";
 
 const NOTE_MAX = 4_000;
+/** Notes on their way to the director at once; more is a stuck director, not a busy reviewer. */
+const PENDING_NOTES_MAX = 20;
 /** "Three more" sends the crew back to work, so one per film per this long. */
 const MORE_MIN_GAP_MS = 30_000;
 
@@ -121,8 +126,16 @@ export class RasanaiProvider {
     if (action.step !== status.step || action.revision !== status.revision) {
       return { ok: false, reason: "The film has moved on since your phone last looked. Check it and answer again." };
     }
-    if (pendingActions(run.runDir, status.step).length > 0) {
-      return { ok: false, reason: "An answer is already on its way. RasanAI hasn't read it yet." };
+    // Notes pile up while you watch; anything else closes the call, so one at a time,
+    // and never while notes it should include are still on their way.
+    const pending = pendingActions(run.runDir, status.step);
+    if (action.type === "comment" ? pending.length >= PENDING_NOTES_MAX : pending.length > 0) {
+      return {
+        ok: false,
+        reason: pending.every((line) => line.type === "comment")
+          ? "Your notes are still on their way to RasanAI. Try again in a moment."
+          : "An answer is already on its way. RasanAI hasn't read it yet.",
+      };
     }
     const note = typeof action.note === "string" ? action.note.trim().slice(0, NOTE_MAX) : "";
     const built = this.build(run, status, action, note);
@@ -183,6 +196,10 @@ export class RasanaiProvider {
         said: option ? `Answered: ${option.label ?? option.id}` : "Answered",
       };
     }
+    const review = reviewOf(run, status.step, run.session.steps?.[status.step] ?? {});
+    if (review) {
+      return buildReview(review, action, note);
+    }
     const ids = choosableIds(run.session.steps?.[status.step], status.step);
     if (!ids) {
       return { ok: false, reason: "Answer this one on your Mac, in RasanAI Studio." };
@@ -219,6 +236,12 @@ export class RasanaiProvider {
       };
     }
     return { ok: false, reason: "Not something this card can send." };
+  }
+
+  /** Whether a file is what the card waiting now plays, the only media a phone may fetch for it. */
+  allowsMedia(status: WorkflowStatus, source: string): boolean {
+    const view = this.view(status);
+    return view !== null && viewMedia(view).includes(source);
   }
 
   private read(projectDir: string): RasanaiRun | null {
@@ -263,4 +286,94 @@ export class RasanaiProvider {
     }
     return `${current.mtimeMs}|${runName}|${session}`;
   }
+}
+
+/** A note on the animatic or the film, applying the open notes, or closing the call. */
+function buildReview(
+  review: WorkflowReview,
+  action: WorkflowAction,
+  note: string,
+): { ok: true; type: string; value: unknown; note: string; said: string } | { ok: false; reason: string } {
+  if (action.type === "comment") {
+    const value = (action.value ?? {}) as Record<string, unknown>;
+    const t = value.t;
+    const limit = (review.duration ?? Number.POSITIVE_INFINITY) + 1;
+    if (typeof t !== "number" || !Number.isFinite(t) || t < 0 || t > limit) {
+      return { ok: false, reason: "That moment isn't in the film." };
+    }
+    const scene = value.scene ?? null;
+    if (scene !== null && (typeof scene !== "string" || !review.scenes.some((candidate) => candidate.id === scene))) {
+      return { ok: false, reason: "That scene isn't in the film." };
+    }
+    const point = (key: "x" | "y"): number | null | undefined => {
+      const v = value[key];
+      return v === undefined || v === null ? null : typeof v === "number" && v >= 0 && v <= 1 ? v : undefined;
+    };
+    const x = point("x");
+    const y = point("y");
+    if (x === undefined || y === undefined) {
+      return { ok: false, reason: "That spot isn't on the frame." };
+    }
+    const quick = value.quick ?? null;
+    if (quick !== null && (typeof quick !== "string" || !QUICK_NOTES.includes(quick))) {
+      return { ok: false, reason: "Not a note this card offers." };
+    }
+    if (!note && !quick) {
+      return { ok: false, reason: "Write a note first." };
+    }
+    return {
+      ok: true,
+      type: "comment",
+      value: {
+        scene,
+        t: Math.round(t * 100) / 100,
+        ...(x !== null && y !== null ? { x, y } : {}),
+        scope: scene === null ? "film" : "scene",
+        quick,
+      },
+      note,
+      said: `Note at ${clock(t)}`,
+    };
+  }
+  if (action.type === "apply") {
+    const open = review.notes.filter((candidate) => candidate.state === "open").map((candidate) => candidate.id);
+    if (open.length === 0) {
+      return { ok: false, reason: "There are no open notes to apply." };
+    }
+    return {
+      ok: true,
+      type: "apply",
+      value: { ids: open },
+      note: "",
+      said: `Applied ${open.length} note${open.length === 1 ? "" : "s"}`,
+    };
+  }
+  if (action.type === "approve" && review.finish.includes("approve")) {
+    return {
+      ok: true,
+      type: "approve",
+      value: null,
+      note,
+      said: review.kind === "animatic" ? "Approved the animatic" : "Approved the film",
+    };
+  }
+  if (
+    action.type === "choose" &&
+    (action.value === "render" || action.value === "preview") &&
+    review.finish.includes(action.value)
+  ) {
+    return {
+      ok: true,
+      type: "choose",
+      value: action.value,
+      note: "",
+      said: action.value === "render" ? "Asked for the final render" : "Asked for a preview first",
+    };
+  }
+  return { ok: false, reason: "Not something this card can send." };
+}
+
+function clock(seconds: number): string {
+  const whole = Math.floor(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }

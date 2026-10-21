@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// A paired phone's side of the channel: read the Mac's view, say it is
@@ -316,6 +317,58 @@ public struct Channel: Sendable {
         let box = try ChannelCrypto.seal(command, key: pairing.k)
         let id = UUID().uuidString.lowercased()
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// The signed document asking for what a film's card plays.
+    public func mediaDocument(sessionKey: String, source: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = MediaCommand(
+            v: 1, kind: "media", sessionKey: sessionKey, source: source,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// A phone copy the Mac left in the channel: every chunk, opened, in order, checked against its hash.
+    /// Two at a time, so the stream and a result read still have connections of their own.
+    public func media(_ ref: MediaRef) async throws -> Data {
+        guard ref.chunks > 0, ref.chunks <= 400, ref.id.range(of: "^[A-Za-z0-9]{8,64}$", options: .regularExpression) != nil else {
+            throw ChannelCrypto.Failure.badBox
+        }
+        var parts = [Data?](repeating: nil, count: ref.chunks)
+        var next = 0
+        while next < ref.chunks {
+            let batch = Array(next..<min(next + 2, ref.chunks))
+            next += batch.count
+            try await withThrowingTaskGroup(of: (Int, Data).self) { group in
+                for index in batch {
+                    group.addTask { [self] in
+                        guard let document = try await store.get(path("media", "\(ref.id)-\(index)")) else {
+                            throw ChannelCrypto.Failure.badBox
+                        }
+                        let chunk = try ChannelCrypto.open(MediaChunk.self, box: document.box, key: pairing.k)
+                        guard chunk.i == index, chunk.n == ref.chunks, let data = Data(base64Encoded: chunk.data) else {
+                            throw ChannelCrypto.Failure.badBox
+                        }
+                        return (index, data)
+                    }
+                }
+                for try await (index, data) in group { parts[index] = data }
+            }
+        }
+        var joined = Data(capacity: ref.bytes)
+        for part in parts {
+            guard let part else { throw ChannelCrypto.Failure.badBox }
+            joined.append(part)
+        }
+        guard joined.count == ref.bytes, SHA256.hash(data: joined).map({ String(format: "%02x", $0) }).joined() == ref.sha256 else {
+            throw ChannelCrypto.Failure.badBox
+        }
+        return joined
     }
 
     /// The signed document asking what a chat changed (and one file's patch).

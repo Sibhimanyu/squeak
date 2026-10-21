@@ -42,6 +42,7 @@ expect() {
 expect allowed "write a snapshot" PUT "channels/$CH/state/snapshot" '{"box":"x","at":1}'
 expect allowed "write a signed command" PUT "channels/$CH/commands/c-1" '{"box":"x","sig":"s","device":"phone","at":2}'
 expect allowed "write a live turn" PUT "channels/$CH/live/s12" '{"box":"x"}'
+expect allowed "write a media chunk" PUT "channels/$CH/media/0a1b2c3d4e5f60718293a4b5-3" '{"box":"x","at":1}'
 expect allowed "read a collection" GET "channels/$CH/commands"
 expect allowed "delete a command" DELETE "channels/$CH/commands/c-1"
 expect refused "read the channel root (would list kinds)" GET "channels/$CH"
@@ -67,7 +68,7 @@ expect refused "short relay id" PUT "cliq/short/inbox/r-4" "{\"box\":\"x\",\"sig
 expect refused "read every relay" GET "cliq"
 
 # Leave nothing behind (the rules allow deleting each document).
-for doc in state/snapshot live/s12 commands/c-1; do
+for doc in state/snapshot live/s12 media/0a1b2c3d4e5f60718293a4b5-3 commands/c-1; do
   curl -s -o /dev/null -X DELETE "$DB/channels/$CH/$doc.json?$NS"
 done
 

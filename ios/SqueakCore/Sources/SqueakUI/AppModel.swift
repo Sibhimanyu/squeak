@@ -487,15 +487,15 @@ final class AppModel {
 
     /// The Mac's answer to command `id`, or nil after 30 seconds. Streamed, it
     /// is read the moment the Mac writes it; otherwise every 750 ms.
-    private func awaitResult(_ id: String, on channel: Channel) async throws -> CommandResult? {
-        let result = try await readResult(id, on: channel)
+    private func awaitResult(_ id: String, on channel: Channel, within seconds: TimeInterval = 30) async throws -> CommandResult? {
+        let result = try await readResult(id, on: channel, within: seconds)
         // Read: it has nothing more to say, and every stream on `results` would download it again.
         if result != nil { Task { await channel.deleteResult(id) } }
         return result
     }
 
-    private func readResult(_ id: String, on channel: Channel) async throws -> CommandResult? {
-        let deadline = Date().addingTimeInterval(30)
+    private func readResult(_ id: String, on channel: Channel, within seconds: TimeInterval = 30) async throws -> CommandResult? {
+        let deadline = Date().addingTimeInterval(seconds)
         guard let changes = await channel.resultChanges() else {
             while Date() < deadline {
                 try await Task.sleep(for: .milliseconds(750))
@@ -616,9 +616,13 @@ final class AppModel {
 
     /// Make a film's call (RasanAI): pick an option, ask for more, or answer its question. Face ID
     /// first, like any answer; the Mac checks it against the film as it is on disk.
+    /// A note on the animatic or the film doesn't close the call, so it skips Face ID; applying the
+    /// notes, approving and rendering do not.
     func act(on session: PhoneSnapshot.Session, type: String, value: WorkflowCommand.Value?, note: String? = nil) async -> (delivered: Bool, line: String) {
         guard let workflow = session.workflow else { return (false, "That isn't waiting on you any more.") }
-        guard await confirmWithBiometrics(reason: "Answer \(workflow.title ?? "your film")") else { return (false, "") }
+        if type != "comment" {
+            guard await confirmWithBiometrics(reason: "Answer \(workflow.title ?? "your film")") else { return (false, "") }
+        }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if demo {
             try? await Task.sleep(for: .seconds(1))
@@ -824,6 +828,38 @@ final class AppModel {
             return .image(decoded)
         } catch {
             return .refused("Couldn't reach your Mac.")
+        }
+    }
+
+    /* ---------- a film's media ---------- */
+
+    enum MediaAnswer { case file(URL), refused(String) }
+
+    /// What a film's card plays, as a phone copy: the Mac converts it and leaves it in the channel in
+    /// sealed chunks; this fetches them, checks the hash, and keeps the file in Caches by its hash.
+    /// Read-only, so no Face ID. Converting and uploading take a while on a slow link (5 MB took ~110 s at 50 KB/s), so this waits up to 5 minutes.
+    func loadMedia(_ session: PhoneSnapshot.Session, source: String) async -> MediaAnswer {
+        if demo { return .refused("Films play from your Mac, not in the demo.") }
+        guard let channel else { return .refused("Not connected to your Mac.") }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.mediaDocument(sessionKey: session.key, source: source, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel, within: 300) else {
+                return .refused("Your Mac didn't answer. Is Squeak running?")
+            }
+            guard result.sent, let ref = result.media else { return .refused(result.reason ?? "Your Mac couldn't send that.") }
+            let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("squeak-media", isDirectory: true)
+            let file = folder.appendingPathComponent(String(ref.sha256.prefix(32)) + (ref.mime.hasPrefix("video") ? ".m4v" : ".m4a"))
+            if FileManager.default.fileExists(atPath: file.path) { return .file(file) }
+            let data = try await channel.media(ref)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try data.write(to: file, options: [.atomic, .completeFileProtection])
+            return .file(file)
+        } catch {
+            return .refused("Couldn't bring it over from your Mac. Try again.")
         }
     }
 

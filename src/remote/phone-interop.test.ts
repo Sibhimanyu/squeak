@@ -46,6 +46,12 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   workflowMoreCommand: { box: string; sig: string; device: string };
   workflowAnswerCommandId: string;
   workflowAnswerCommand: { box: string; sig: string; device: string };
+  workflowNoteCommandId: string;
+  workflowNoteCommand: { box: string; sig: string; device: string };
+  workflowApplyCommandId: string;
+  workflowApplyCommand: { box: string; sig: string; device: string };
+  mediaCommandId: string;
+  mediaCommand: { box: string; sig: string; device: string };
   workflowImageCommandId: string;
   workflowImageCommand: { box: string; sig: string; device: string };
 };
@@ -70,11 +76,23 @@ function bridge(turn: string) {
   const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
   const answers: Array<[string, unknown]> = [];
   const acts: Array<[string, unknown]> = [];
+  const written: string[] = [];
+  const mediaFile = path.join(dir, "copy.m4a");
+  fs.writeFileSync(mediaFile, Buffer.alloc(1000, 7));
   const pictures: Array<[string, string]> = [];
   const remote = new RemoteBridge({
     configPath,
     projectId: "squeak-test",
-    store: { get: async () => null, set: async () => {}, list: async () => [], delete: async () => {} },
+    // A streaming store, as the Realtime Database is: films go only that way.
+    store: {
+      get: async () => null,
+      set: async (doc: string) => {
+        written.push(doc);
+      },
+      list: async () => [],
+      delete: async () => {},
+      watch: () => () => {},
+    },
     replier: {
       // The chat's latest answer, which names the image the phone asks for.
       lastTurnText: () => "![Shot](/w/.context/shot.png)",
@@ -98,10 +116,15 @@ function bridge(turn: string) {
       pictures.push([source, cwd]);
       return { ok: true, image: { mime: "image/jpeg", data: "AAAA" } };
     },
+    media: async (source, cwd) => {
+      pictures.push([source, cwd]);
+      return { ok: true, file: { path: mediaFile, mime: "audio/mp4", bytes: 1000 } };
+    },
     // A RasanAI film; the provider's own checks are tested in workflows/rasanai.
     workflow: {
       view: () => null,
       allowsImage: (_status, source) => source === ".rasanai/run-1/design/Wild/specimen.png",
+      allowsMedia: (_status, source) => source === ".rasanai/run-1/animatic-mix.wav",
       act: (projectDir, action) => {
         acts.push([projectDir, action]);
         return { ok: true, actionId: "sq1", said: "Sent" };
@@ -161,7 +184,20 @@ function bridge(turn: string) {
     // As of when the phone made it, so the fixture never expires.
     now: () => fixture.madeAt + 1_000,
   });
-  return { remote, config, sends, sent, starts, queueActions, answers, stops, hotspotRequests, acts, pictures };
+  return {
+    remote,
+    config,
+    sends,
+    sent,
+    starts,
+    queueActions,
+    answers,
+    stops,
+    hotspotRequests,
+    acts,
+    pictures,
+    written,
+  };
 }
 
 describe("a reply made on the iPhone", () => {
@@ -288,5 +324,39 @@ describe("a RasanAI call made on the iPhone", () => {
     const verdict = await remote.handleCommand(config, fixture.workflowImageCommandId, fixture.workflowImageCommand);
     expect(verdict.result).toMatchObject({ status: "sent", image: { mime: "image/jpeg" } });
     expect(pictures).toEqual([[".rasanai/run-1/design/Wild/specimen.png", "/films/q"]]);
+  });
+});
+
+describe("a RasanAI review made on the iPhone", () => {
+  it("pins a note to a moment and a spot, and applies the notes, as the phone signed them", async () => {
+    const { remote, config, acts } = bridge("turn-1");
+    for (const [id, doc] of [
+      [fixture.workflowNoteCommandId, fixture.workflowNoteCommand],
+      [fixture.workflowApplyCommandId, fixture.workflowApplyCommand],
+    ] as const) {
+      expect((await remote.handleCommand(config, id, doc)).result).toMatchObject({ status: "sent" });
+    }
+    expect(acts).toEqual([
+      [
+        "/films/q",
+        {
+          step: "animatic",
+          revision: "animatic@1",
+          type: "comment",
+          value: { t: 3.5, scene: "b1", x: 0.25, y: 0.5, quick: "Slower" },
+          note: "Hold the title longer",
+        },
+      ],
+      ["/films/q", { step: "animatic", revision: "animatic@1", type: "apply", value: null }],
+    ]);
+  });
+
+  it("sends the animatic's soundtrack in sealed chunks the phone is told how to find", async () => {
+    const { remote, config, pictures, written } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.mediaCommandId, fixture.mediaCommand);
+    expect(verdict.result).toMatchObject({ status: "sent", media: { chunks: 1, bytes: 1000, mime: "audio/mp4" } });
+    expect(pictures).toEqual([[".rasanai/run-1/animatic-mix.wav", "/films/q"]]);
+    const media = (verdict.result as { media: { id: string } }).media;
+    expect(written).toEqual([`channels/${fixture.channelId}/media/${media.id}-0`]);
   });
 });

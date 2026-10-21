@@ -16,6 +16,8 @@ import type { ChannelDoc } from "./firestore-rest.js";
 import type { NewChatWorkspace, StartChatOutcome } from "../fleet/new-chat.js";
 import {
   phoneUsage,
+  MEDIA_CHUNK_BYTES,
+  MEDIA_TTL_MS,
   RemoteBridge,
   START_MIN_GAP_MS,
   type ChannelStore,
@@ -114,6 +116,7 @@ function fixture(
     image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
     hotspot?: RemoteBridgeDependencies["hotspot"];
     workflow?: RemoteWorkflows | null;
+    media?: RemoteBridgeDependencies["media"];
     /** The chat's latest message, as the replier reads it. */
     lastText?: string;
     /** Why the chat's newest turn failed, as the replier reads it. */
@@ -184,6 +187,7 @@ function fixture(
     image: options.image ?? null,
     hotspot: options.hotspot ?? null,
     workflow: options.workflow ?? null,
+    media: options.media ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -333,6 +337,20 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const mediaCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "media",
+      sessionKey: "claude-transcript:d1",
+      source: "exports/film.mp4",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const result = (id: string) => {
     const doc = store.docs.get(`${channel}/results/${id}`);
     return doc ? open<Record<string, unknown>>(payload.k, doc.box) : null;
@@ -356,6 +374,8 @@ function fixture(
     imageCommand,
     hotspotCommand,
     workflowCommand,
+    mediaCommand,
+    dir,
     result,
     configPath,
     emit,
@@ -2295,5 +2315,103 @@ describe("RemoteBridge workflow", () => {
     expect(image).toHaveBeenCalledWith(".rasanai/run-1/w.png", "/films/quotidian");
     expect(f.result("c1")).toMatchObject({ status: "sent" });
     expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That picture isn't on this card." });
+  });
+});
+
+describe("RemoteBridge media", () => {
+  const film = session({
+    key: "claude-transcript:d1",
+    conductorSessionId: null,
+    origin: "sdk",
+    cwd: "/films/q",
+    state: "awaiting_input",
+    workflow: {
+      provider: "rasanai",
+      projectDir: "/films/q",
+      runDir: "/films/q/.rasanai/run-1",
+      title: "Q",
+      call: "final",
+      step: "render",
+      revision: "render@1",
+      since: "2026-09-25T02:58:00.000Z",
+      prompt: "Review the film",
+    },
+  });
+  const workflows = () => ({
+    view: () => null,
+    allowsImage: () => false,
+    allowsMedia: vi.fn((_: unknown, source: string) => source === "exports/film.mp4"),
+    act: () => ({ ok: false as const, reason: "no" }),
+  });
+
+  function withFile(bytes: Buffer) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-media-"));
+    dirs.push(dir);
+    const file = path.join(dir, "copy.m4v");
+    fs.writeFileSync(file, bytes);
+    return vi.fn(async () => ({
+      ok: true as const,
+      file: { path: file, mime: "video/mp4" as const, bytes: bytes.length },
+    }));
+  }
+
+  it("leaves the phone copy in sealed chunks that put back together into the same bytes", async () => {
+    const bytes = crypto.randomBytes(MEDIA_CHUNK_BYTES * 2 + 1234);
+    const media = withFile(bytes);
+    const f = fixture({ streaming: true, workflow: workflows(), media });
+    await f.pair();
+    f.emit([film]);
+    await f.store.set(`${f.channel}/commands/c1`, f.mediaCommand());
+    await f.bridge.tick();
+    expect(media).toHaveBeenCalledWith("exports/film.mp4", "/films/q");
+    const answer = f.result("c1") as {
+      status: string;
+      media: { id: string; chunks: number; bytes: number; sha256: string };
+    };
+    expect(answer).toMatchObject({ status: "sent", media: { chunks: 3, bytes: bytes.length, mime: "video/mp4" } });
+    const parts = Array.from({ length: answer.media.chunks }, (_, index) => {
+      const doc = f.store.docs.get(`${f.channel}/media/${answer.media.id}-${index}`)!;
+      expect(doc.box.length).toBeLessThan(900_000);
+      return open<{ i: number; n: number; data: string }>(f.payload.k, doc.box);
+    });
+    const joined = Buffer.concat(parts.map((part) => Buffer.from(part.data, "base64")));
+    expect(joined.equals(bytes)).toBe(true);
+    expect(crypto.createHash("sha256").update(joined).digest("hex")).toBe(answer.media.sha256);
+  });
+
+  it("reuses an upload still in the channel, and deletes the chunks when their time is up", async () => {
+    const media = withFile(crypto.randomBytes(1000));
+    const f = fixture({ streaming: true, workflow: workflows(), media });
+    await f.pair();
+    f.emit([film]);
+    await f.store.set(`${f.channel}/commands/c1`, f.mediaCommand());
+    await f.bridge.tick();
+    await f.store.set(`${f.channel}/commands/c2`, f.mediaCommand());
+    await f.bridge.tick();
+    const first = f.result("c1") as { media: { id: string } };
+    expect((f.result("c2") as { media: { id: string } }).media.id).toBe(first.media.id);
+    expect(f.store.docs.has(`${f.channel}/media/${first.media.id}-0`)).toBe(true);
+    f.advance(MEDIA_TTL_MS + 1);
+    await f.bridge.tick();
+    expect(f.store.docs.has(`${f.channel}/media/${first.media.id}-0`)).toBe(false);
+  });
+
+  it("refuses what the card doesn't play, a session not waiting, and a Mac on Firestore", async () => {
+    const media = withFile(Buffer.from("x"));
+    const f = fixture({ streaming: true, workflow: workflows(), media });
+    await f.pair();
+    f.emit([film, session()]);
+    await f.store.set(`${f.channel}/commands/c1`, f.mediaCommand({ source: "../../etc/hosts.mp4" }));
+    await f.store.set(`${f.channel}/commands/c2`, f.mediaCommand({ sessionKey: "claude-transcript:s1" }));
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That isn't on this card." });
+    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That isn't waiting on you any more." });
+    expect(media).not.toHaveBeenCalled();
+    const polled = fixture({ workflow: workflows(), media });
+    await polled.pair();
+    polled.emit([film]);
+    await polled.store.set(`${polled.channel}/commands/c1`, polled.mediaCommand());
+    await polled.bridge.tick();
+    expect(polled.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't send films to a phone." });
   });
 });

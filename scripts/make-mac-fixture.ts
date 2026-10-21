@@ -55,8 +55,18 @@ film.current = "look";
 fs.mkdirSync(path.join(filmDir, ".rasanai", "run-1"), { recursive: true });
 fs.writeFileSync(path.join(filmDir, ".rasanai", "current"), "run-1");
 fs.writeFileSync(path.join(filmDir, ".rasanai", "run-1", "session.json"), JSON.stringify(film));
+// The same film again at its animatic, with a note on it, for the phone's review card.
+const animaticDir = fs.mkdtempSync(path.join(os.tmpdir(), "mac-fixture-animatic-"));
+const atAnimatic = { ...film, current: "animatic", steps: { ...film.steps } };
+atAnimatic.steps.animatic = { ...film.steps.animatic, music: { file: ".rasanai/run-1/animatic-mix.wav" } };
+atAnimatic.comments = [
+  { id: "n1", step: "animatic", t: 3.5, scene: "b1", x: 0.25, y: 0.5, text: "Hold the title longer", state: "open" },
+];
+fs.mkdirSync(path.join(animaticDir, ".rasanai", "run-1"), { recursive: true });
+fs.writeFileSync(path.join(animaticDir, ".rasanai", "current"), "run-1");
+fs.writeFileSync(path.join(animaticDir, ".rasanai", "run-1", "session.json"), JSON.stringify(atAnimatic));
 const rasanai = new RasanaiProvider({ now: () => Date.parse("2026-10-14T17:00:00.000Z") });
-const [director] = rasanai.annotate([
+const [director, animaticDirector] = rasanai.annotate([
   session({
     key: "claude-transcript:d1",
     sourceId: "d1",
@@ -64,6 +74,17 @@ const [director] = rasanai.annotate([
     conductorSessionId: null,
     origin: "sdk",
     cwd: filmDir,
+    repoName: null,
+    branch: null,
+    title: null,
+  }),
+  session({
+    key: "claude-transcript:d2",
+    sourceId: "d2",
+    agentSessionId: "d2",
+    conductorSessionId: null,
+    origin: "sdk",
+    cwd: animaticDir,
     repoName: null,
     branch: null,
     title: null,
@@ -83,6 +104,7 @@ const sessions = [
     detail: "Run tests",
   }),
   director!,
+  animaticDirector!,
 ];
 const codexUsage = {
   planType: "pro",
@@ -179,6 +201,13 @@ fs.writeFileSync(
       startedBox: seal(key, { id: "c6", status: "sent", sessionId: "new-1" }),
       refusedBox: seal(key, { id: "c2", status: "refused", reason: "That chat has moved on." }),
       pairAnswerBox: seal(key, { approved: true, mac: "Test Mac" }),
+      // A film's phone copy is sent as chunks like this one, named by a media result.
+      mediaResultBox: seal(key, {
+        id: "c7",
+        status: "sent",
+        media: { id: "abcdef0123456789", chunks: 1, bytes: 5, sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", mime: "audio/mp4" },
+      }),
+      mediaChunkBox: seal(key, { i: 0, n: 1, data: Buffer.from("hello").toString("base64") }),
       // For a phone whose presence says caps ["z", "split"]: compressed, the recent list apart.
       splitSnapshotBox: seal(key, { ...parts.snapshot, seq: 1790305200002 }, z),
       recentBox: seal(key, { ...parts.recent, seq: 1790305200001 }, z),
@@ -214,6 +243,7 @@ fs.writeFileSync(
 );
 fs.rmSync(dir, { recursive: true, force: true });
 fs.rmSync(filmDir, { recursive: true, force: true });
+fs.rmSync(animaticDir, { recursive: true, force: true });
 console.log(`wrote ${out}`);
 console.log(
   JSON.stringify(

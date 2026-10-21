@@ -1,6 +1,6 @@
 # RasanAI in Squeak: directing a film from the phone
 
-Status: phase 1 built 2026-10-21 (Mac `src/workflows/rasanai/`, iPhone `WorkflowCard.swift`): pages, story and look picks with posters, "three more", and the director's questions. RasanAI's side (branch `Sibhimanyu/squeak-interface`: `schema: 1`, `external_actions: 1`, the `squeak-phone` source, phone video proxies) is the contract in its `references/remote.md`; until it is released, Squeak answers headless Studio runs only.
+Status: phases 1 and 2 built 2026-10-21. Phase 1: pages, story and look picks with posters, "three more", the director's questions. Phase 2: the animatic (stills over an AAC copy of its soundtrack) and the film (a phone copy) play on the iPhone, with notes pinned to a moment and a spot, "Apply N notes", approve, render and preview. Video goes through the Realtime Database in sealed chunks, not Firebase Storage: the same key-not-server model, no new service. RasanAI 1.24.0 publishes the contract (`references/remote.md`, `external_actions: 1`, `source: "squeak-phone"`, `proxy`).
 
 ## The pitch
 

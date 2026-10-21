@@ -29,6 +29,9 @@ struct WorkflowCard: View {
             } else if let options = workflow.options, !options.isEmpty {
                 ForEach(options) { option in optionCard(option) }
                 pickFooter(options)
+            } else if let review = workflow.review {
+                ReviewCard(review: review, session: session)
+                    .id(workflow.revision)
             } else if let macOnly = workflow.macOnly {
                 note(macOnly)
             }
