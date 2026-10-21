@@ -10,6 +10,7 @@
  */
 
 import type { GitState } from "./git-state.js";
+import type { WorkflowStatus } from "../workflows/types.js";
 
 export type AgentKind = "claude" | "codex";
 
@@ -116,6 +117,12 @@ export interface FleetSession extends ObservedSession {
    * While it says working, nothing else may call the turn finished.
    */
   conductorState?: FleetState | null;
+  /**
+   * Set when the session is directing a product that is waiting on the
+   * human for one of its own calls (src/workflows/: RasanAI's pick a
+   * story, pick a look…). The state is then `awaiting_input`.
+   */
+  workflow?: WorkflowStatus | null;
 }
 
 export type AttentionKind =

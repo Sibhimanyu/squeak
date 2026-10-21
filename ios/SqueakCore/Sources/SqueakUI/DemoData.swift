@@ -59,13 +59,75 @@ enum DemoData {
     ]
 
     private static func titled(_ s: PhoneSnapshot.Session) -> PhoneSnapshot.Session {
-        PhoneSnapshot.Session(
+        var titled = PhoneSnapshot.Session(
             key: s.key, conductorSessionId: s.conductorSessionId, label: s.label, agent: s.agent, state: s.state,
             lastActivityAt: s.lastActivityAt, detail: s.detail, git: s.git, contextPercent: s.contextPercent,
             turnId: s.turnId, message: s.message, choices: s.choices, activity: s.activity, title: titles[s.key],
             question: s.key == "pay" && s.state == "awaiting_input"
                 ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-plan") ? plan : question) : nil,
             failure: s.failure)
+        titled.workflow = s.workflow
+        return titled
+    }
+
+    /// `-squeak-demo-film`: a RasanAI film waiting on its look call; `-squeak-demo-film-story` on its
+    /// story call; `-squeak-demo-film-ask` on a question from the director.
+    private static var film: [PhoneSnapshot.Session] {
+        let args = ProcessInfo.processInfo.arguments
+        guard args.contains(where: { $0.hasPrefix("-squeak-demo-film") }) else { return [] }
+        let workflow: Workflow
+        if args.contains("-squeak-demo-film-story") {
+            workflow = Workflow(
+                provider: "rasanai", call: "story", step: "story", revision: "story@1", title: "Quotidian",
+                prompt: "Pick a story",
+                context: "Every word of the talk is kept in all three; only the worlds around him change.",
+                options: [
+                    .init(id: "sure", label: "Sure", title: "Lunchbox to glass dome",
+                          summary: "Each idea becomes the warm daylight place he stands.",
+                          why: "The literal floor: every idea pictured plainly.", image: nil,
+                          beats: [.init(name: "b1", seconds: 6, onScreen: "Everyone on the Moon Is Essential Personnel",
+                                        line: "I came across an interesting title…")],
+                          note: "a world per idea"),
+                    .init(id: "bold", label: "Bold", title: "The book he walks through",
+                          summary: "He stands inside the pages; each idea is the next spread.",
+                          why: "One place that changes, instead of ten.", image: nil, note: "one world, many pages"),
+                    .init(id: "wild", label: "Wild", title: "Wheat to bread",
+                          summary: "Raw material becomes the finished thing across one cut.",
+                          why: "The talk's own image, made the whole film.", image: nil, note: "a single transformation"),
+                ],
+                recommended: "wild", canAskMore: true)
+        } else if args.contains("-squeak-demo-film-ask") {
+            workflow = Workflow(
+                provider: "rasanai", call: "ask", step: "brief", revision: "ask:1", title: "Quotidian",
+                prompt: "Please move the clip into this project's assets/sources folder",
+                ask: .init(id: "1", question: "Please move the clip into this project's assets/sources folder",
+                           context: "I can only read files inside the project folder.",
+                           options: [.init(id: "added", label: "Done, it's in assets/sources", detail: nil)],
+                           recommended: "added", placeholder: "Or type your answer"))
+        } else {
+            workflow = Workflow(
+                provider: "rasanai", call: "look", step: "look", revision: "look@1", title: "Quotidian",
+                prompt: "Pick a look",
+                options: [
+                    .init(id: "sure", label: "Sure", title: "Pop-Up Folio",
+                          summary: "A Kelmscott page with one red rubric, papercraft layers and multiplane parallax.",
+                          why: "Every title is one of its printed pages rising off a fold above his head.",
+                          image: "sure.png"),
+                    .init(id: "bold", label: "Bold", title: "Die Line",
+                          summary: "Cut lines and fold marks: the film is the template for building it.", why: nil,
+                          image: "bold.png"),
+                    .init(id: "wild", label: "Wild", title: "Tab A, Slot B",
+                          summary: "Flat-pack instructions, numbered parts, one hand assembling.", why: nil,
+                          image: "wild.png"),
+                ],
+                recommended: "wild", canAskMore: true)
+        }
+        var session = PhoneSnapshot.Session(
+            key: "film", conductorSessionId: nil, label: "RasanAI · Quotidian", agent: "claude", state: "awaiting_input",
+            lastActivityAt: now(-60), detail: "RasanAI · \(workflow.prompt)", git: nil, contextPercent: nil,
+            turnId: nil, message: nil, choices: nil, title: "Quotidian")
+        session.workflow = workflow
+        return [session]
     }
 
     /// `-squeak-demo-plan`: the payment chat waits on a plan instead (ExitPlanMode).
@@ -144,7 +206,7 @@ enum DemoData {
         PhoneSnapshot(
             v: 1, mac: "Sibhi's MacBook", generatedAt: now(-4),
             duck: .init(blockedCount: 2, workingCount: 3),
-            sessions: [
+            sessions: film + [
                 .init(key: "pay", conductorSessionId: id(1), label: "storefront · payment-retries", agent: "claude",
                       state: replyable ? "finished" : "awaiting_input",
                       lastActivityAt: now(-120), detail: "How should temporary failures be retried?", git: "+84/−12 · 3 files", contextPercent: 41,

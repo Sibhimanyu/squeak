@@ -691,3 +691,72 @@ describe("event-driven refresh", () => {
     }
   });
 });
+
+describe("workflows", () => {
+  it("pages once per call a film waits on, even when no refresh saw the director work in between", async () => {
+    const store = makeStore();
+    let call: { call: "story" | "look"; since: string } | null = { call: "story", since: "2026-09-20T11:58:00.000Z" };
+    const pushes: AttentionItem[][] = [];
+    const monitor = new FleetMonitor(
+      {
+        store,
+        conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
+        claude: { observe: () => [observed({ state: "finished" })] } as unknown as FleetMonitorDependencies["claude"],
+        codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
+        liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
+        workflows: {
+          annotate: (sessions) =>
+            sessions.map((session) =>
+              call
+                ? {
+                    ...session,
+                    state: "awaiting_input" as const,
+                    detail: `RasanAI · ${call.call}`,
+                    workflow: {
+                      provider: "rasanai" as const,
+                      projectDir: "/f",
+                      runDir: "/f/.rasanai/r",
+                      title: "Film",
+                      call: call.call,
+                      step: call.call,
+                      revision: `${call.call}@${call.since}`,
+                      since: call.since,
+                      prompt: call.call,
+                    },
+                  }
+                : session,
+            ),
+        },
+      },
+      { now: () => Date.parse("2026-09-20T12:00:00.000Z") },
+    );
+    monitor.onPush((items) => pushes.push(items));
+
+    await monitor.refresh();
+    await monitor.refresh();
+    call = { call: "look", since: "2026-09-20T11:59:30.000Z" };
+    await monitor.refresh();
+
+    expect(pushes.flat().map((item) => [item.kind, item.session.workflow?.call])).toEqual([
+      ["blocked_question", "story"],
+      ["blocked_question", "look"],
+    ]);
+  });
+
+  it("carries on without workflows when reading them throws", async () => {
+    const store = makeStore();
+    const monitor = new FleetMonitor({
+      store,
+      conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
+      claude: { observe: () => [observed()] } as unknown as FleetMonitorDependencies["claude"],
+      codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
+      liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
+      workflows: {
+        annotate: () => {
+          throw new Error("disk gone");
+        },
+      },
+    });
+    expect((await monitor.refresh()).sessions.map((session) => session.state)).toEqual(["working"]);
+  });
+});

@@ -172,12 +172,15 @@ struct SessionView: View {
                     )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                Composer(
-                    session: session, agentName: Presentation.agentName(session.agent),
-                    working: session.state == "working" && Presentation.replyBlock(session) == nil,
-                    block: Presentation.replyBlock(session), stopping: model.isStopping(session.key),
-                    draft: $draft, composing: $composing
-                )
+                // A film's call is answered on its card; a chat box under it would only say it can't send.
+                if session.workflow == nil {
+                    Composer(
+                        session: session, agentName: Presentation.agentName(session.agent),
+                        working: session.state == "working" && Presentation.replyBlock(session) == nil,
+                        block: Presentation.replyBlock(session), stopping: model.isStopping(session.key),
+                        draft: $draft, composing: $composing
+                    )
+                }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: cards.map(\.id))
         }
@@ -270,7 +273,7 @@ private struct ChatRows: View {
 
     var body: some View {
         // A pending question has its own card; letters read from the message would repeat it.
-        let choices = session.state == "working" || session.question != nil ? nil : session.choices
+        let choices = session.state == "working" || session.question != nil || session.workflow != nil ? nil : session.choices
         let agentName = Presentation.agentName(session.agent)
         let blocked = Presentation.replyBlock(session) != nil
         let parted = rows.contains { if case .steer = $0 { true } else { false } }
@@ -281,6 +284,9 @@ private struct ChatRows: View {
                     SentBubble(text: message.text, date: message.date, line: message.status.line)
                 case .steer(_, let text, let line):
                     SentBubble(text: text, date: nil, line: line)
+                case .agent(_, _, _) where session.workflow != nil && session.message == nil:
+                    // A film's director has no chat message, only the one-line summary its card already says.
+                    EmptyView()
                 case .agent(let text, let atISO, let muted):
                     AgentMessage(
                         agentName: agentName, text: text, atISO: atISO, muted: muted,
@@ -324,7 +330,10 @@ private struct ChatRows: View {
                     Text(text).foregroundStyle(Theme.muted)
                 }
             }
-            if session.state == "awaiting_input", let question = session.question {
+            if let workflow = session.workflow {
+                // A film's call has its own card; a question read from the director's transcript would repeat it.
+                WorkflowCard(workflow: workflow, session: session)
+            } else if session.state == "awaiting_input", let question = session.question {
                 if let plan = question.plan {
                     PlanCard(plan: plan, agentName: agentName, session: session)
                 } else {

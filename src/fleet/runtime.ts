@@ -49,6 +49,8 @@ export interface FleetRuntimeOptions {
   idleAfterMs: number;
   contextPressurePercent: number;
   codexQuotaWarnPercent: number;
+  /** Marks sessions directing a workflow that waits on the human (src/workflows/). */
+  workflows?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
 }
 
 export interface FleetRuntime {
@@ -97,6 +99,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       git: new GitStateReader(),
       codexUsage: new CodexUsageReader(),
       claudeCost: new ClaudeCostReader(),
+      workflows: options.workflows ?? null,
     },
     {
       pollIntervalMs: options.pollIntervalMs,

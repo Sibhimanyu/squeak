@@ -1,0 +1,249 @@
+{
+  "title": "Quotidian Test 1",
+  "current": "story",
+  "updated": "2026-10-14T16:40:16.000Z",
+  "working": null,
+  "ask": null,
+  "steps": {
+    "brief": {
+      "status": "done",
+      "updated": "2026-10-14T16:33:57.217Z"
+    },
+    "story": {
+      "stories": [
+        {
+          "id": "sure",
+          "angle": "Sure",
+          "title": "Lunchbox to glass dome",
+          "logline": "Each idea becomes the warm daylight place he stands",
+          "device": "a world per idea",
+          "why": "The literal floor: every idea pictured plainly, and wheat turns to bread across one cut on the same table. 9 ChatGPT pictures.",
+          "approach": "Each idea he names becomes the place he stands, one warm daylight world after another, until the raw wheat on the table turns to bread across a single cut and the talk turns from a book to building things together",
+          "aim": {
+            "takeaway": "Give people the raw material and build with them, not a finished thing",
+            "feel": "clear, warm, grounded",
+            "action": "think about who you co-create with",
+            "audience": "founders and product people on short-form video"
+          },
+          "tempo": {
+            "ideas": 10,
+            "change_every_s": 6,
+            "source": "the speech's own beats"
+          },
+          "beats": [
+            {
+              "name": "b1",
+              "duration_s": 6.12,
+              "on_screen": "Everyone on the Moon Is Essential Personnel / Julian Jarboe",
+              "vo": "I came across an interesting title called 'Everyone on the Moon is Essential Personnel' by Julian Jarboe.",
+              "visual": "speaker right: A dented steel lunchbox and a scuffed work helmet resting on grey lunar dust beside a short row of boot prints (push-in). The title as a place: a worker's lunch left on the moon reads as 'essential personnel' before a word of the book is explained Enters on cut."
+            },
+            {
+              "name": "b2",
+              "duration_s": 8.84,
+              "on_screen": "01 Body horror fairytale / 02 Mid-apocalyptic Catholic cyberpunk",
+              "vo": "I haven't read this book yet, but it's categorized under 'Body horror fairytale' and 'Mid-apocalyptic Catholic cyberpunk'.",
+              "visual": "speaker left: A small stone chapel nave where briar roses and thorny vines grow out of tangled copper cables and old circuit boards along the pews (drift). Both genres in one room: the fairytale briar and the Catholic nave fused with cyberpunk wiring, so the odd labels have a picture instead of a puzzle Enters on push."
+            },
+            {
+              "name": "b3",
+              "duration_s": 5.92,
+              "on_screen": "(captions only)",
+              "vo": "I don't even know what that means. But so what? Look at this gem I found inside.",
+              "visual": "speaker full: An old hardback lying open on a linen-covered reading table (tilt-down). The gem he found inside the book is literally a stalk of wheat pressed between the pages, sitting just above his raised hands so he seems to present it; it also plants the next beat Enters on blur-dissolve."
+            }
+          ],
+          "last_line": "just one kind of finished product."
+        },
+        {
+          "id": "bold",
+          "angle": "Bold",
+          "title": "Wheat, not bread",
+          "logline": "The talk walks from a moonlit wheat field to a shared loaf",
+          "device": "running world with a dare",
+          "why": "One road, raw to made, through eight worlds; he stands at the table as wheat becomes bread, and the film ends back in the field. 9 ChatGPT pictures.",
+          "approach": "The whole talk walks the road from a moonlit wheat field to a shared table: every idea is the next world in the making of bread, and the film ends back in the field, handing people the wheat.",
+          "aim": {
+            "takeaway": "Give people the raw material and build with them, not a finished thing",
+            "feel": "warm, cinematic, earned",
+            "action": "think about who you co-create with",
+            "audience": "founders and product people on short-form video"
+          },
+          "tempo": {
+            "ideas": 10,
+            "change_every_s": 6,
+            "source": "the speech's own beats"
+          },
+          "beats": [
+            {
+              "name": "b1",
+              "duration_s": 6.12,
+              "on_screen": "Everyone on the Moon Is Essential Personnel / by Julian Jarboe",
+              "vo": "I came across an interesting title called 'Everyone on the Moon is Essential Personnel' by Julian Jarboe.",
+              "visual": "speaker full: A field of ripe wheat at night under an enormous low full moon resting on the horizon (push-in). The book's moon and the talk's wheat in one frame: the raw material is already under the title before he reaches the quote, so the moon story and the bread lesson are one world from the first second. Enters on cut."
+            },
+            {
+              "name": "b2",
+              "duration_s": 8.84,
+              "on_screen": "01 Body horror fairytale / 02 Mid-apocalyptic Catholic cyberpunk",
+              "vo": "I haven't read this book yet, but it's categorized under 'Body horror fairytale' and 'Mid-apocalyptic Catholic cyberpunk'.",
+              "visual": "speaker left: Inside a vaulted stone chapel turned into a grain store at night (tilt-down). Mid-apocalyptic Catholic cyberpunk made physical inside the grain world: a chapel full of wheat with a neon vein. The genre mash is not explained, it is a room he stands in. Enters on push."
+            },
+            {
+              "name": "b3",
+              "duration_s": 5.92,
+              "on_screen": "So what? / a gem inside",
+              "vo": "I don't even know what that means. But so what? Look at this gem I found inside.",
+              "visual": "speaker corner: A small worn leather box lying open on a dark walnut desk (parallax). The gem found inside is not a page of a book: it is the seed the rest of the film grows from. He shrinks to a corner panel and gestures up at it, presenting the thing he found. Enters on iris."
+            }
+          ],
+          "last_line": "rather than just one kind of finished product."
+        },
+        {
+          "id": "wild",
+          "angle": "Wild",
+          "title": "Some Assembly Required",
+          "logline": "He talks from inside a paper pop-up book that unfolds per idea",
+          "device": "running world with a dare",
+          "why": "Each idea is a new spread opening around him; the camera pushes through the loaf-shaped hole into co-creation, and the book ends as a flat punch-out kit: components, not a finished product. 8 ChatGPT pictures.",
+          "approach": "He talks from inside a paper pop-up book: every idea is a new spread that unfolds around him, the moon colony comes back finished by its early adopters, and the last page arrives flat as a punch-out kit for us to build.",
+          "aim": {
+            "takeaway": "Give people the raw material and build with them, not a finished thing",
+            "feel": "playful, crafted, surprising",
+            "action": "think about who you co-create with",
+            "audience": "founders and product people on short-form video"
+          },
+          "tempo": {
+            "ideas": 8,
+            "change_every_s": 7.5,
+            "source": "the speech's own beats"
+          },
+          "beats": [
+            {
+              "name": "b1",
+              "duration_s": 6.12,
+              "on_screen": "Everyone on the Moon Is Essential Personnel / by Julian Jarboe",
+              "vo": "I came across an interesting title called 'Everyone on the Moon is Essential Personnel' by Julian Jarboe.",
+              "visual": "speaker full: An open pop-up book on a dark walnut desk (push-in). The title becomes a place he stands in: a moon where every tiny worker is on the job. Anchor plate for the whole paper world; it returns changed in b7. Enters on cut.",
+              "turn": false
+            },
+            {
+              "name": "b2",
+              "duration_s": 8.84,
+              "on_screen": "01 · Body horror fairytale / 02 · Mid-apocalyptic Catholic cyberpunk",
+              "vo": "I haven't read this book yet, but it's categorized under 'Body horror fairytale' and 'Mid-apocalyptic Catholic cyberpunk'.",
+              "visual": "speaker left: One pop-up book spread where two worlds are glued together at the fold: on the left page a fairytale briar forest whose trees are cut-paper ribcages and spines curling around a tiny castle; on the right page a ruined paper cathedral under an ash-grey sky (pan-right). The genres are not two labels but two pages crudely glued into one spread: the camera pans from the fairytale into the cyberpunk exactly as he names them, so the joke is that they do not fit. Enters on wipe.",
+              "turn": false
+            },
+            {
+              "name": "b3",
+              "duration_s": 5.92,
+              "on_screen": "So what? / A gem inside",
+              "vo": "I don't even know what that means. But so what? Look at this gem I found inside.",
+              "visual": "speaker full: Looking down into the gutter of an enormous open book (parallax). He is now inside the book, framed by its pages on both sides, and the gem hangs right above his head in the free top zone: the one beat where he plainly stands in the world. Enters on shape-mask.",
+              "turn": false
+            }
+          ],
+          "last_line": "Another lesson I learned? It's always better to give them customizable components rather than just one kind of finished product."
+        }
+      ],
+      "recommended": "wild",
+      "note": "Every word of the talk is kept in all three; only the worlds around him change. Titles and numbers sit above his head; captions run on a band at the bottom that hides the 845 badge.",
+      "status": "awaiting",
+      "updated": "2026-10-14T16:40:15.958Z"
+    },
+    "look": {
+      "styles": [
+        {
+          "id": "sure",
+          "preset": "sure",
+          "label": "Sure",
+          "name": "Pop-Up Folio",
+          "blend": "A Kelmscott page with one red rubric, papercraft layers and multiplane parallax: the book's printed pages stand up above him.",
+          "why": "He talks from inside a pop-up book about a book, so every title is one of its printed pages rising off a fold above his head, and the loaf-shaped hole in the quote page becomes the door into co-creation.",
+          "poster": ".rasanai/run-1/design/Sure/specimen.png",
+          "frames": [
+            {
+              "id": "peak",
+              "image": ".rasanai/run-1/design/Sure/peak.png"
+            }
+          ]
+        },
+        {
+          "id": "bold",
+          "preset": "bold",
+          "label": "Bold",
+          "name": "Die Line",
+          "blend": "The closing punch-out kit as type: slab wood-type letters fold up off graphite card and leave their holes, one wine die line per beat.",
+          "why": "The story ends on components, not a finished product, so every title is already a punch-out part that folds up off the page and leaves its hole; the word CREATION is cut from the scripture and finished as CO-CREATION by another hand.",
+          "poster": ".rasanai/run-1/design/Bold/specimen.png",
+          "frames": [
+            {
+              "id": "peak",
+              "image": ".rasanai/run-1/design/Bold/peak.png"
+            }
+          ]
+        },
+        {
+          "id": "wild",
+          "preset": "wild",
+          "label": "Wild",
+          "name": "Tab A, Slot B",
+          "blend": "A model-kit sheet come alive: stencil titles as die-cut parts that fold up off the page and punch out.",
+          "why": "The film ends on a flat punch-out kit and argues for components over a finished product, so every title is a kit part, the quote's punched-out hole is the door into co-creation, and the last beat returns every title as flat parts on one sheet.",
+          "poster": ".rasanai/run-1/design/Wild/specimen.png",
+          "frames": [
+            {
+              "id": "peak",
+              "image": ".rasanai/run-1/design/Wild/peak.png"
+            }
+          ]
+        }
+      ],
+      "recommended": "wild",
+      "hook": "Everyone on the Moon Is Essential Personnel",
+      "sub": "",
+      "status": "awaiting",
+      "updated": "2026-10-14T16:56:23.780Z"
+    },
+    "animatic": {
+      "status": "awaiting",
+      "updated": "2026-10-14T17:01:28.881Z",
+      "note": "These stills are layout previews: the real pictures with his keyed cut-out and rough boxes where the titles go. The titles, numbers and captions are built in the next step in the Tab A, Slot B look.",
+      "scenes": [
+        {
+          "id": "b1",
+          "title": "The moon colony",
+          "line": "I came across an interesting title called 'Everyone on the Moon Is Essential Personnel' by Julian Jarboe.",
+          "visual": "He stands in a paper moon colony; ESSENTIAL PERSONNEL folds up above his head, 'by Julian Jarboe' tab slides under",
+          "duration": 6.12,
+          "thumb": ".rasanai/run-710F887E-2F94-497C-96D3-1261B6995043/presenter/stills/b1.png"
+        },
+        {
+          "id": "b2",
+          "title": "Two genres glued together",
+          "line": "I haven't read this book yet, but it's categorized under 'Body horror fairytale' and 'Mid-apocalyptic Catholic cyberpunk'.",
+          "visual": "Fairytale ribcage forest glued to a cyber cathedral; step circles 01 and 02, the 02 card taped on crooked because it doesn't fit",
+          "duration": 8.84,
+          "thumb": ".rasanai/run-710F887E-2F94-497C-96D3-1261B6995043/presenter/stills/b2.png"
+        }
+      ]
+    }
+  },
+  "_askWhenOpen": {
+    "id": "8658b936",
+    "step": "brief",
+    "question": "Please move the clip into this project's assets/sources folder",
+    "context": "Thanks. I tried to copy quotidian_bg_removed.mp4 from your Downloads folder, but this session can only read files inside the project folder (Documents/RasanAI/Quotidian Test 1), so the copy was blocked. Drag the clip into Quotidian Test 1/assets/sources in Finder, then choose 'Done'. I won't touch anything outside the project.",
+    "options": [
+      {
+        "id": "added",
+        "label": "Done, it's in assets/sources",
+        "detail": "The clip is now in the project's assets/sources folder"
+      }
+    ],
+    "recommended": "added",
+    "placeholder": "Or type your answer, paste text, or a link",
+    "t": "2026-10-14T16:27:56.591Z"
+  }
+}

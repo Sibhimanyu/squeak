@@ -108,6 +108,25 @@ final class MacInteropTests: XCTestCase {
         XCTAssertEqual(session.choices?.recommended, "A")
     }
 
+    func testDecodesAFilmWaitingOnItsLookCall() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let snapshot = try ChannelCrypto.open(PhoneSnapshot.self, box: f.snapshotBox, key: key)
+        let film = try XCTUnwrap(snapshot.sessions.first { $0.workflow != nil })
+        XCTAssertEqual(film.state, "awaiting_input")
+        XCTAssertFalse(film.canReply)
+        let workflow = try XCTUnwrap(film.workflow)
+        XCTAssertEqual(workflow.provider, "rasanai")
+        XCTAssertEqual(workflow.call, "look")
+        XCTAssertEqual(workflow.title, "Quotidian Test 1")
+        XCTAssertEqual(workflow.recommended, "wild")
+        XCTAssertEqual(workflow.canAskMore, true)
+        XCTAssertEqual(workflow.options?.map(\.id), ["sure", "bold", "wild"])
+        XCTAssertEqual(workflow.options?.last?.image, ".rasanai/run-1/design/Wild/specimen.png")
+        XCTAssertEqual(workflow.options?.last?.frames?.first?.id, "peak")
+        XCTAssertNil(snapshot.sessions.first?.workflow)
+    }
+
     func testDecodesAWorkingSessionsActivityAndNoneForAFinishedOne() throws {
         let f = try fixture()
         let key = try PairingPayload.parse(f.pairingURL).k

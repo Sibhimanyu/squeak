@@ -35,6 +35,7 @@ import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
+import { RasanaiProvider } from "../workflows/rasanai/provider.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
@@ -95,6 +96,8 @@ export class SqueakApp {
   private readonly telegram: TelegramClient | null;
   private readonly telegramStatus: TelegramStatus;
   private readonly runtime: FleetRuntime;
+  /** RasanAI films waiting on a call, answered the way RasanAI Studio does (src/workflows/rasanai/). */
+  private readonly rasanai = new RasanaiProvider();
   private readonly controller: FleetController;
   private readonly replier: ConductorReplier;
   /** The loopback relay into Conductor's composer; inert until set up. */
@@ -161,6 +164,7 @@ export class SqueakApp {
       redact: config.botToken ? [config.botToken] : [],
     });
     this.runtime = createFleetRuntime({
+      workflows: this.rasanai,
       conductorDbPath: config.conductorDbPath,
       workspacesRoot: config.workspacesRoot,
       defaultFallbackModel: config.defaultFallbackModel,
@@ -241,6 +245,8 @@ export class SqueakApp {
           diff: this.runtime.diff,
           // An image a chat's agent showed, for the phone: only inside that chat's workspace.
           image: (source, cwd) => readPhoneImage(source, cwd),
+          // A film waiting on a call (RasanAI): its card, and the answer.
+          workflow: this.rasanai,
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
           // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
           refreshUsage: () => this.claudeRefresher.refresh(),

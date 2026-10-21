@@ -614,6 +614,37 @@ final class AppModel {
         }
     }
 
+    /// Make a film's call (RasanAI): pick an option, ask for more, or answer its question. Face ID
+    /// first, like any answer; the Mac checks it against the film as it is on disk.
+    func act(on session: PhoneSnapshot.Session, type: String, value: WorkflowCommand.Value?, note: String? = nil) async -> (delivered: Bool, line: String) {
+        guard let workflow = session.workflow else { return (false, "That isn't waiting on you any more.") }
+        guard await confirmWithBiometrics(reason: "Answer \(workflow.title ?? "your film")") else { return (false, "") }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if demo {
+            try? await Task.sleep(for: .seconds(1))
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            return (true, "Sent to RasanAI")
+        }
+        guard let channel else { return (false, "Not connected to your Mac.") }
+        do {
+            let (id, document) = try channel.workflowDocument(
+                sessionKey: session.key, workflow: workflow, type: type, value: value, note: note, signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else {
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                return (false, "Your Mac didn't confirm it. Check the film before answering again.")
+            }
+            guard result.sent else {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                return (false, result.reason ?? "Your Mac couldn't send that to RasanAI.")
+            }
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            return (true, (result.said ?? "Sent") + " · RasanAI picks it up from here")
+        } catch {
+            return (false, "Couldn't reach your Mac.")
+        }
+    }
+
     func refreshUsage() async -> String {
         if demo { try? await Task.sleep(for: .seconds(1)); return "Updated just now." }
         guard let channel else { return "Not connected to your Mac." }
@@ -774,11 +805,13 @@ final class AppModel {
             try? await Task.sleep(for: .milliseconds(400))
             return UIImage(named: "duck-asleep", in: .module, with: nil).map(ImageAnswer.image) ?? .refused("No demo image.")
         }
-        guard let channel, let sessionId = session.conductorSessionId else { return .refused("Not connected to your Mac.") }
+        // A picture on a film's card is named by the session's key; a chat's, by its Conductor id.
+        let cardKey = session.workflow != nil ? session.key : nil
+        guard let channel, let sessionId = session.conductorSessionId ?? cardKey.map({ _ in "" }) else { return .refused("Not connected to your Mac.") }
         do {
             let signer = signer
             let (id, document) = try await Task.detached(priority: .userInitiated) {
-                try channel.imageDocument(sessionId: sessionId, source: source, signer: signer)
+                try channel.imageDocument(sessionId: sessionId, sessionKey: cardKey, source: source, signer: signer)
             }.value
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else { return .refused("Your Mac didn't answer. Is Squeak running?") }
