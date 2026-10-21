@@ -413,6 +413,7 @@ private struct PendingRow: View {
 struct PairSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @State private var copiedCode = false
     private var m: ChannelsModel { app.channels }
 
     var body: some View {
@@ -424,6 +425,18 @@ struct PairSheet: View {
                     Text("1. Open Squeak on your iPhone.")
                     Text("2. Choose Pair with a Mac, then scan this code.")
                     Text("3. Check the code on the phone matches the one here, then approve.")
+                    if m.pairingURL != nil {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button(copiedCode ? "Copied" : "Copy pairing code") {
+                                guard m.copyPairingCode() else { return }
+                                copiedCode = true
+                                Task { try? await Task.sleep(for: .seconds(2)); copiedCode = false }
+                            }.buttonStyle(SecondaryButtonStyle())
+                            Text("For Squeak for Web, paste it at \(RemotePairing.webAppAddress)")
+                                .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.top, 6)
+                    }
                 }
                 .font(Typo.body).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)

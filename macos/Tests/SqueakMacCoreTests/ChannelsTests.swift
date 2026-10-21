@@ -180,6 +180,14 @@ struct ChannelRouteTests {
         #expect(try await client(t).remoteStatus() == nil)
     }
 
+    @Test func pairingCodeKeepsTheExactQRTextAndNamesTheWebApp() async throws {
+        let code = "squeak://pair?d=eyJhIjoxLCJiIjoiPT0rLy8ifQ%3D%3D&x=1"
+        let t = FakeTransport()
+        await t.json("POST", "/control/remote/pair", #"{"url":"\#(code)"}"#)
+        #expect(try await client(t).remotePair()?.url == code)
+        #expect(RemotePairing.webAppAddress == "squeak-5c9gvo.web.app/app")
+    }
+
     @Test func pairingAndActionsUseTheDaemonsPaths() async throws {
         let t = FakeTransport()
         await t.json("POST", "/control/remote/pair", #"{"url":"squeak://pair?d=abc"}"#)

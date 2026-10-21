@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.12
+
+- Pairing now has a Copy pairing code button, for Squeak for Web
+  (squeak-5c9gvo.web.app/app): paste the code there, then approve here.
+
 ## 2.1.11
 
 - A redesigned menu-bar panel: chats are grouped into Needs you, Errors,

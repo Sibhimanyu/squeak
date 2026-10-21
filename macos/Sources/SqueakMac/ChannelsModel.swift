@@ -248,6 +248,13 @@ final class ChannelsModel {
         await refreshRemote()
     }
 
+    /// Puts the pairing code (exactly the QR's text) on the clipboard, for Squeak for Web.
+    @discardableResult func copyPairingCode() -> Bool {
+        guard let url = pairingURL, !url.isEmpty else { return false }
+        NSPasteboard.general.clearContents()
+        return NSPasteboard.general.setString(url, forType: .string)
+    }
+
     func endPairing() { pairingURL = nil; pairingError = nil }
 
     func pollRemote() async {
