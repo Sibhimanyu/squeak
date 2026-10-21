@@ -59,8 +59,8 @@ let awakeProblem = null;
 let awakeWithLid = false;
 /** The admin prompt is up. */
 let lidRuleBusy = false;
-/** Squeak for Web, the Hosting site's /app/ page (project squeak-5c9gvo). */
-const WEB_APP_URL = "https://squeak-5c9gvo.web.app/app/";
+/** Squeak for Web: its own Hosting site in project squeak-5c9gvo. */
+const WEB_APP_URL = "https://squeak-mac.web.app";
 
 /** The pairing QR, as an image the main process drew. Cleared once paired. */
 let pairingImage = null;

@@ -48,13 +48,23 @@ describe("the served code", () => {
   });
 });
 
-describe("firebase.json for /app", () => {
+describe("firebase.json for squeak-mac.web.app", () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, "..", "firebase", "firebase.json"), "utf8"));
-  const rules = config.hosting.headers.filter((rule) => rule.source.startsWith("/app"));
+  const site = config.hosting.find((entry) => entry.site === "squeak-mac");
+  const rules = site.headers;
   const header = (rule, key) => rule.headers.find((h) => h.key === key)?.value;
 
-  it("covers /app and everything under it", () => {
-    expect(rules.map((rule) => rule.source).sort()).toEqual(["/app", "/app/**"]);
+  it("covers every path on the site", () => {
+    expect(site.public).toBe("web-public");
+    expect(rules.map((rule) => rule.source)).toEqual(["**"]);
+  });
+
+  it("sends the old /app address to the new site", () => {
+    const main = config.hosting.find((entry) => entry.site === "squeak-5c9gvo");
+    expect(main.redirects.map((r) => [r.source, r.destination])).toEqual([
+      ["/app", "https://squeak-mac.web.app/"],
+      ["/app/**", "https://squeak-mac.web.app/"],
+    ]);
   });
 
   it("sends the strict policy", () => {
@@ -81,9 +91,11 @@ describe("firebase.json for /app", () => {
   });
 
   it("leaves the existing rule for JSON alone", () => {
-    expect(config.hosting.headers[0]).toEqual({
-      source: "**/*.json",
-      headers: [{ key: "Cache-Control", value: "no-cache" }],
-    });
+    expect(config.hosting.find((entry) => entry.site === "squeak-5c9gvo").headers).toEqual([
+      {
+        source: "**/*.json",
+        headers: [{ key: "Cache-Control", value: "no-cache" }],
+      },
+    ]);
   });
 });

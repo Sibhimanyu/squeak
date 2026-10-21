@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Copy Squeak for Web (web/) into the Hosting folder as /app/. Only what the
-# browser loads: never the tests. Run by deploy-pages.sh and the iPhone
-# release, both of which publish the whole of public/.
+# Copy Squeak for Web (web/) into its own Hosting site's folder, web-public/,
+# served at the root of squeak-mac.web.app. Only what the browser loads: never
+# the tests. Run by deploy-pages.sh and the iPhone release, both of which
+# deploy every Hosting site.
 set -euo pipefail
 cd "$(dirname "$0")"
-rm -rf public/app
-mkdir -p public/app
-cp ../web/index.html public/app/
-cp -R ../web/js ../web/css ../web/assets public/app/
+rm -rf web-public
+mkdir -p web-public
+cp ../web/index.html web-public/
+cp -R ../web/js ../web/css ../web/assets web-public/

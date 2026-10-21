@@ -185,7 +185,7 @@ struct ChannelRouteTests {
         let t = FakeTransport()
         await t.json("POST", "/control/remote/pair", #"{"url":"\#(code)"}"#)
         #expect(try await client(t).remotePair()?.url == code)
-        #expect(RemotePairing.webAppAddress == "squeak-5c9gvo.web.app/app")
+        #expect(RemotePairing.webAppAddress == "squeak-mac.web.app")
     }
 
     @Test func pairingAndActionsUseTheDaemonsPaths() async throws {

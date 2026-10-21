@@ -1,9 +1,13 @@
 # Changelog
 
+## 2.1.13
+
+- Squeak for Web moved to its own address, squeak-mac.web.app.
+
 ## 2.1.12
 
 - Pairing now has a Copy pairing code button, for Squeak for Web
-  (squeak-5c9gvo.web.app/app): paste the code there, then approve here.
+  (squeak-mac.web.app): paste the code there, then approve here.
 
 ## 2.1.11
 

@@ -182,5 +182,5 @@ public struct RemoteStatus: Decodable, Sendable, Equatable {
 public struct RemotePairing: Decodable, Sendable, Equatable {
     public var url: String
     /// Where Squeak for Web takes the same code, pasted as text.
-    public static let webAppAddress = "squeak-5c9gvo.web.app/app"
+    public static let webAppAddress = "squeak-mac.web.app"
 }
