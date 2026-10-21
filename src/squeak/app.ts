@@ -19,6 +19,7 @@ import { readPower, type PowerReading } from "../fleet/power-monitor.js";
 import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
+import { preparePhoneMedia } from "../remote/phone-media.js";
 import { HotspotFailover, macHotspotSystem, readHotspotRequest } from "../fleet/hotspot.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
@@ -247,6 +248,9 @@ export class SqueakApp {
           image: (source, cwd) => readPhoneImage(source, cwd),
           // A film waiting on a call (RasanAI): its card, and the answer.
           workflow: this.rasanai,
+          // Its film or soundtrack as a phone copy (avconvert / afconvert), cached beside Squeak's state.
+          media: (source, cwd) =>
+            preparePhoneMedia(source, cwd, { cacheDir: path.join(config.supportDir, "media-cache") }),
           claudeLimits: () => this.claudeLimits?.latest() ?? null,
           // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
           refreshUsage: () => this.claudeRefresher.refresh(),

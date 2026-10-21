@@ -36,6 +36,7 @@ public enum LucideName: String, CaseIterable, Sendable {
     case x = "x"
     case bell = "bell"
     case play = "play"
+    case pause = "pause"
     case clock = "clock"
     case terminal = "terminal"
     case monitor = "monitor"
@@ -225,6 +226,10 @@ extension LucideName {
         ]
         case .play: return [
             .path("M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"),
+        ]
+        case .pause: return [
+            .rect(x: 14, y: 3, width: 5, height: 18, rx: 1, ry: 1),
+            .rect(x: 5, y: 3, width: 5, height: 18, rx: 1, ry: 1),
         ]
         case .clock: return [
             .circle(cx: 12, cy: 12, r: 10),

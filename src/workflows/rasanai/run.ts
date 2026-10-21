@@ -1,6 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { WorkflowCall, WorkflowOption, WorkflowStatus, WorkflowView } from "../types.js";
+import type {
+  WorkflowCall,
+  WorkflowNote,
+  WorkflowOption,
+  WorkflowReview,
+  WorkflowScene,
+  WorkflowStatus,
+  WorkflowView,
+} from "../types.js";
 
 /**
  * Reading a RasanAI run from its files, the way RasanAI Studio does.
@@ -15,6 +23,7 @@ import type { WorkflowCall, WorkflowOption, WorkflowStatus, WorkflowView } from 
 /** The parts of `session.json` this reads. Everything is optional: it is another product's file. */
 export interface RasanaiSession {
   title?: string;
+  comments?: Record<string, unknown>[];
   current?: string;
   updated?: string;
   working?: { msg?: string; t?: string } | null;
@@ -244,14 +253,108 @@ export function workflowView(run: RasanaiRun, status: WorkflowStatus): WorkflowV
       canAskMore: true,
     };
   }
+  const review = reviewOf(run, status.step, step);
+  if (review) {
+    return { ...base, prompt: clip(text(step.question) ?? status.prompt, TEXT_MAX), context, review };
+  }
   return {
     ...base,
     context,
     macOnly:
       status.call === "animatic" || status.call === "final"
-        ? "Watch it and leave notes on your Mac. Video on the phone is coming."
+        ? "Watch it and leave notes on your Mac, in RasanAI Studio."
         : "Answer this one on your Mac, in RasanAI Studio.",
   };
+}
+
+/** RasanAI's quick notes (the console's chips). */
+export const QUICK_NOTES = ["Slower", "Faster", "Bigger", "Simpler", "Cut it"];
+
+/** The steps whose review the phone can do: the animatic, and the film itself. */
+const REVIEW_STEPS: Record<string, WorkflowReview["kind"]> = { animatic: "animatic", render: "final", final: "final" };
+
+/** The animatic's or the film's review: scenes, what plays, and the notes so far. Null for any other step. */
+export function reviewOf(run: RasanaiRun, stepId: string, step: RasanaiStep): WorkflowReview | null {
+  const kind = REVIEW_STEPS[stepId];
+  if (!kind) {
+    return null;
+  }
+  const raw = Array.isArray(step.scenes) ? (step.scenes as Record<string, unknown>[]) : [];
+  let clock = 0;
+  const scenes: WorkflowScene[] = raw.slice(0, 60).flatMap((scene) => {
+    const id = text(scene.id);
+    if (!id) {
+      return [];
+    }
+    const seconds = finite(scene.duration);
+    const start = finite(scene.start) ?? clock;
+    clock = start + (seconds ?? 0);
+    return [
+      {
+        id,
+        title: clip(text(scene.title) ?? id, 120),
+        line: clipOrNull(text(scene.line), BEAT_TEXT_MAX),
+        start,
+        seconds,
+        thumb: imagePath(scene.thumb),
+      },
+    ];
+  });
+  const video = mediaPath(step.proxy, "video") ?? mediaPath(step.video, "video");
+  const music = step.music && typeof step.music === "object" ? (step.music as Record<string, unknown>) : null;
+  const audio = video ? null : mediaPath(music?.file, "audio");
+  const media = video
+    ? { kind: "video" as const, source: video, poster: imagePath(step.poster) }
+    : audio
+      ? { kind: "audio" as const, source: audio, poster: null }
+      : null;
+  if (scenes.length === 0 && !media) {
+    return null;
+  }
+  const notes: WorkflowNote[] = (Array.isArray(run.session.comments) ? run.session.comments : [])
+    .filter((comment) => comment && comment.step === stepId && typeof comment.id === "string")
+    .slice(-40)
+    .map((comment) => ({
+      id: String(comment.id),
+      t: finite(comment.t),
+      scene: text(comment.scene),
+      x: fraction(comment.x),
+      y: fraction(comment.y),
+      text: clip(text(comment.text) ?? "", 1_000),
+      state: comment.state === "resolved" ? "resolved" : "open",
+      resolution: clipOrNull(text(comment.resolution), 400),
+    }));
+  const lastScene = scenes[scenes.length - 1];
+  const duration =
+    finite(step.duration) ?? (lastScene && lastScene.seconds !== null ? lastScene.start + lastScene.seconds : null);
+  return {
+    kind,
+    scenes,
+    media,
+    duration,
+    notes,
+    finish: stepId === "render" ? ["render", "preview"] : ["approve"],
+    quick: QUICK_NOTES,
+  };
+}
+
+/** Every file the review names that a phone may play. */
+export function viewMedia(view: WorkflowView): string[] {
+  return view.review?.media ? [view.review.media.source] : [];
+}
+
+function mediaPath(value: unknown, kind: "video" | "audio"): string | null {
+  const raw = text(value);
+  const pattern = kind === "video" ? /\.(mp4|mov|m4v)$/i : /\.(wav|m4a|mp3|aiff?|caf)$/i;
+  return raw && pattern.test(raw) && raw.length <= 1_000 ? raw : null;
+}
+
+function finite(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function fraction(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
 }
 
 /** The ids the human may choose at this step, or null when the step is not a pick. */
@@ -262,10 +365,14 @@ export function choosableIds(step: RasanaiStep | undefined, stepId: string): str
 
 /** Every picture the current card names, the only images a phone may fetch for it. */
 export function viewImages(view: WorkflowView): string[] {
-  return (view.options ?? []).flatMap((option) => [
-    ...(option.image ? [option.image] : []),
-    ...(option.frames ?? []).map((frame) => frame.image),
-  ]);
+  return [
+    ...(view.options ?? []).flatMap((option) => [
+      ...(option.image ? [option.image] : []),
+      ...(option.frames ?? []).map((frame) => frame.image),
+    ]),
+    ...(view.review?.scenes ?? []).flatMap((scene) => (scene.thumb ? [scene.thumb] : [])),
+    ...(view.review?.media?.poster ? [view.review.media.poster] : []),
+  ];
 }
 
 /** A story pick or a look pick; null for anything else. */

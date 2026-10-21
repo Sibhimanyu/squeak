@@ -96,6 +96,27 @@ enum DemoData {
                           why: "The talk's own image, made the whole film.", image: nil, note: "a single transformation"),
                 ],
                 recommended: "wild", canAskMore: true)
+        } else if args.contains("-squeak-demo-film-animatic") || args.contains("-squeak-demo-film-final") {
+            let final = args.contains("-squeak-demo-film-final")
+            let scenes: [Workflow.Review.Scene] = [
+                .init(id: "b1", title: "The moon colony", line: "I came across an interesting title…", start: 0, seconds: 6.1, thumb: "b1.png"),
+                .init(id: "b2", title: "Chapel of cables", line: "Body horror fairytale…", start: 6.1, seconds: 8.8, thumb: "b2.png"),
+                .init(id: "b3", title: "The gem inside", line: "Look at this gem I found inside.", start: 14.9, seconds: 5.9, thumb: "b3.png"),
+                .init(id: "b4", title: "Wheat, not bread", line: "God made wheat but not bread…", start: 20.8, seconds: 4.6, thumb: "b4.png"),
+            ]
+            workflow = Workflow(
+                provider: "rasanai", call: final ? "final" : "animatic", step: final ? "render" : "animatic",
+                revision: "review@1", title: "Quotidian",
+                prompt: final ? "Your film. Leave a note on any moment, or render the final." : "Give notes on the animatic",
+                review: .init(
+                    kind: final ? "final" : "animatic", scenes: scenes,
+                    media: .init(kind: final ? "video" : "audio", source: final ? "exports/film.mp4" : "mix.wav", poster: nil),
+                    duration: 25.4,
+                    notes: [
+                        .init(id: "n1", t: 3.5, scene: "b1", x: 0.3, y: 0.2, text: "Hold the title a beat longer", state: "open", resolution: nil),
+                        .init(id: "n2", t: 9, scene: "b2", x: nil, y: nil, text: "Warmer light in the chapel", state: "resolved", resolution: "Graded the chapel warmer"),
+                    ],
+                    finish: final ? ["render", "preview"] : ["approve"], quick: ["Slower", "Faster", "Bigger", "Simpler", "Cut it"]))
         } else if args.contains("-squeak-demo-film-ask") {
             workflow = Workflow(
                 provider: "rasanai", call: "ask", step: "brief", revision: "ask:1", title: "Quotidian",

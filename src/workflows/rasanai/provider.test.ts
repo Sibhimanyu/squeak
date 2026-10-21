@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FleetSession } from "../../fleet/types.js";
 import { appendAction, pendingActions } from "./actions.js";
 import { RasanaiProvider } from "./provider.js";
-import { readRasanaiRun, STALE_WAIT_MS, waitingStatus, workflowView } from "./run.js";
+import { readRasanaiRun, STALE_WAIT_MS, viewImages, waitingStatus, workflowView } from "./run.js";
 import type { RasanaiSession } from "./run.js";
 
 /** A trimmed copy of a real Studio run's session.json (Quotidian Test 1), parked at the story call. */
@@ -152,13 +152,76 @@ describe("reading a RasanAI run", () => {
     expect(waitingStatus(readRasanaiRun(projectDir)!, NOW)?.call).toBe("story");
   });
 
-  it("leaves the animatic to the Mac for now", () => {
-    const { projectDir } = project((s) => (s.current = "animatic"));
+  it("reviews the animatic: its stills timed one after another, its soundtrack, and the notes so far", () => {
+    const { projectDir } = project((s) => {
+      s.current = "animatic";
+      (s.steps!.animatic as Record<string, unknown>).music = {
+        title: "Currents",
+        file: ".rasanai/run-1/animatic-mix.wav",
+      };
+      s.comments = [
+        { id: "n1", step: "animatic", t: 3.5, scene: "b1", x: 0.2, y: 0.4, text: "Slower", state: "open" },
+        { id: "n0", step: "story", t: 1, text: "elsewhere", state: "open" },
+        {
+          id: "n2",
+          step: "animatic",
+          t: 7,
+          scene: "b2",
+          text: "warmer",
+          state: "resolved",
+          resolution: "Graded warmer",
+        },
+      ];
+    });
     const run = readRasanaiRun(projectDir)!;
     const view = workflowView(run, waitingStatus(run, NOW)!);
-    expect(view.call).toBe("animatic");
-    expect(view.options).toBeUndefined();
-    expect(view.macOnly).toMatch(/on your Mac/);
+    expect(view.macOnly).toBeUndefined();
+    const review = view.review!;
+    expect(review.kind).toBe("animatic");
+    expect(review.scenes.map((scene) => [scene.id, scene.start, scene.seconds])).toEqual([
+      ["b1", 0, 6.12],
+      ["b2", 6.12, expect.any(Number)],
+    ]);
+    expect(review.media).toEqual({ kind: "audio", source: ".rasanai/run-1/animatic-mix.wav", poster: null });
+    expect(review.notes.map((note) => [note.id, note.state, note.resolution])).toEqual([
+      ["n1", "open", null],
+      ["n2", "resolved", "Graded warmer"],
+    ]);
+    expect(review.finish).toEqual(["approve"]);
+    expect(viewImages(view)).toContain(review.scenes[0]!.thumb);
+  });
+
+  it("reviews the film: RasanAI's phone copy when there is one, else the film, with render and preview", () => {
+    const render = (extra: Record<string, unknown>) =>
+      project((s) => {
+        s.current = "render";
+        s.steps!.render = {
+          status: "awaiting",
+          updated: "2026-10-14T16:44:00.000Z",
+          video: "exports/film.mp4",
+          poster: "videos/film/renders/poster.jpg",
+          scenes: [
+            { id: "b1", title: "Moon", start: 0 },
+            { id: "b2", title: "Chapel", start: 6.1 },
+          ],
+          ...extra,
+        };
+      });
+    const plain = render({});
+    const plainRun = readRasanaiRun(plain.projectDir)!;
+    const view = workflowView(plainRun, waitingStatus(plainRun, NOW)!);
+    expect(view.review?.media).toEqual({
+      kind: "video",
+      source: "exports/film.mp4",
+      poster: "videos/film/renders/poster.jpg",
+    });
+    expect(view.review?.finish).toEqual(["render", "preview"]);
+    expect(view.review?.scenes.map((scene) => scene.start)).toEqual([0, 6.1]);
+    const proxied = render({ proxy: ".rasanai/run-1/phone/film.mp4" });
+    const proxiedRun = readRasanaiRun(proxied.projectDir)!;
+    expect(workflowView(proxiedRun, waitingStatus(proxiedRun, NOW)!).review?.media?.source).toBe(
+      ".rasanai/run-1/phone/film.mp4",
+    );
   });
 
   it("is not a project without .rasanai/current, or when current climbs out of it", () => {
@@ -353,6 +416,107 @@ describe("RasanaiProvider.act", () => {
       type: "answer",
       value: { ask: "8658b936", choice: "added", text: "done" },
       note: "done",
+    });
+  });
+
+  describe("on the animatic", () => {
+    const animatic = () =>
+      project((s) => {
+        s.current = "animatic";
+        (s.steps!.animatic as Record<string, unknown>).music = { file: ".rasanai/run-1/animatic-mix.wav" };
+      });
+
+    it("pins a note to a moment and a spot, many at once, as RasanAI's comment", () => {
+      const { projectDir, actions } = animatic();
+      const provider = new RasanaiProvider({ now: () => NOW });
+      const revision = revisionOf(projectDir);
+      const first = provider.act(projectDir, {
+        step: "animatic",
+        revision,
+        type: "comment",
+        value: { t: 3.456, scene: "b1", x: 0.25, y: 0.5 },
+        note: "Hold this longer",
+      });
+      expect(first).toMatchObject({ ok: true, said: "Note at 0:03" });
+      expect(
+        provider.act(projectDir, {
+          step: "animatic",
+          revision,
+          type: "comment",
+          value: { t: 7, scene: null, quick: "Faster" },
+        }).ok,
+      ).toBe(true);
+      expect(actions().map((action) => [action.type, action.value, action.note])).toEqual([
+        ["comment", { scene: "b1", t: 3.46, x: 0.25, y: 0.5, scope: "scene", quick: null }, "Hold this longer"],
+        ["comment", { scene: null, t: 7, scope: "film", quick: "Faster" }, ""],
+      ]);
+    });
+
+    it("refuses a note off the film, off the frame, on a scene that isn't there, or with nothing in it", () => {
+      const { projectDir, actions } = animatic();
+      const provider = new RasanaiProvider({ now: () => NOW });
+      const revision = revisionOf(projectDir);
+      const note = (value: Record<string, unknown>, text = "x") =>
+        provider.act(projectDir, { step: "animatic", revision, type: "comment", value, note: text });
+      expect(note({ t: 999 })).toMatchObject({ ok: false, reason: "That moment isn't in the film." });
+      expect(note({ t: -1 })).toMatchObject({ ok: false });
+      expect(note({ t: 1, x: 2, y: 0 })).toMatchObject({ ok: false, reason: "That spot isn't on the frame." });
+      expect(note({ t: 1, scene: "zz" })).toMatchObject({ ok: false, reason: "That scene isn't in the film." });
+      expect(note({ t: 1, quick: "Delete everything" })).toMatchObject({ ok: false });
+      expect(note({ t: 1 }, "")).toMatchObject({ ok: false, reason: "Write a note first." });
+      expect(actions()).toEqual([]);
+    });
+
+    it("applies exactly the open notes RasanAI has, and only once they have all arrived", () => {
+      const { projectDir, actions, consume, rewrite } = animatic();
+      const provider = new RasanaiProvider({ now: () => NOW });
+      const revision = revisionOf(projectDir);
+      expect(provider.act(projectDir, { step: "animatic", revision, type: "apply", value: null })).toMatchObject({
+        ok: false,
+        reason: "There are no open notes to apply.",
+      });
+      provider.act(projectDir, { step: "animatic", revision, type: "comment", value: { t: 1 }, note: "a" });
+      expect(provider.act(projectDir, { step: "animatic", revision, type: "apply", value: null })).toMatchObject({
+        ok: false,
+        reason: expect.stringMatching(/notes are still on their way/),
+      });
+      const noteId = actions()[0]!.id as string;
+      consume();
+      rewrite((s) => {
+        s.comments = [
+          { id: noteId, step: "animatic", t: 1, text: "a", state: "open" },
+          { id: "old", step: "animatic", t: 2, text: "b", state: "resolved" },
+        ];
+      });
+      expect(
+        provider.act(projectDir, { step: "animatic", revision, type: "apply", value: { ids: ["forged"] } }),
+      ).toMatchObject({
+        ok: true,
+        said: "Applied 1 note",
+      });
+      expect(actions()[1]).toMatchObject({ type: "apply", value: { ids: [noteId] } });
+    });
+
+    it("approves the animatic, and offers render only on the film", () => {
+      const { projectDir, actions } = animatic();
+      const provider = new RasanaiProvider({ now: () => NOW });
+      const revision = revisionOf(projectDir);
+      expect(provider.act(projectDir, { step: "animatic", revision, type: "choose", value: "render" })).toMatchObject({
+        ok: false,
+      });
+      expect(provider.act(projectDir, { step: "animatic", revision, type: "approve", value: null })).toMatchObject({
+        ok: true,
+        said: "Approved the animatic",
+      });
+      expect(actions()[0]).toMatchObject({ type: "approve", value: null });
+    });
+
+    it("lets a phone fetch only what the card plays", () => {
+      const { projectDir } = animatic();
+      const provider = new RasanaiProvider({ now: () => NOW });
+      const status = waitingStatus(readRasanaiRun(projectDir)!, NOW)!;
+      expect(provider.allowsMedia(status, ".rasanai/run-1/animatic-mix.wav")).toBe(true);
+      expect(provider.allowsMedia(status, ".rasanai/run-1/music/other.wav")).toBe(false);
     });
   });
 

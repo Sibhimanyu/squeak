@@ -432,15 +432,75 @@ public struct Workflow: Codable, Equatable, Sendable {
     public var recommended: String? = nil
     public var canAskMore: Bool? = nil
     public var ask: Ask? = nil
+    /// For the animatic or the film: what plays, its scenes, the notes on it.
+    public var review: Review? = nil
     /// Set when this call can only be made on the Mac for now; says why.
     public var macOnly: String? = nil
 
+    /// The animatic or the film, to watch and leave notes on.
+    public struct Review: Codable, Equatable, Sendable {
+        public struct Scene: Codable, Equatable, Sendable, Identifiable {
+            public let id: String
+            public let title: String
+            public let line: String?
+            /// Seconds from the start.
+            public let start: Double
+            public let seconds: Double?
+            /// A still of it on the Mac, fetched with an image command.
+            public let thumb: String?
+            public init(id: String, title: String, line: String?, start: Double, seconds: Double?, thumb: String?) {
+                self.id = id; self.title = title; self.line = line; self.start = start; self.seconds = seconds; self.thumb = thumb
+            }
+        }
+        public struct Media: Codable, Equatable, Sendable {
+            /// "video" or "audio" (the animatic's soundtrack, under its stills).
+            public let kind: String
+            /// Named in a media command; the Mac sends a phone copy.
+            public let source: String
+            public let poster: String?
+            public init(kind: String, source: String, poster: String?) { self.kind = kind; self.source = source; self.poster = poster }
+        }
+        public struct Note: Codable, Equatable, Sendable, Identifiable {
+            public let id: String
+            public let t: Double?
+            public let scene: String?
+            public let x: Double?
+            public let y: Double?
+            public let text: String
+            /// "open" or "resolved".
+            public let state: String
+            public let resolution: String?
+            public init(id: String, t: Double?, scene: String?, x: Double?, y: Double?, text: String, state: String, resolution: String?) {
+                self.id = id; self.t = t; self.scene = scene; self.x = x; self.y = y; self.text = text
+                self.state = state; self.resolution = resolution
+            }
+        }
+        /// "animatic" or "final".
+        public let kind: String
+        public let scenes: [Scene]
+        public let media: Media?
+        public let duration: Double?
+        public let notes: [Note]
+        /// "approve", "render", "preview".
+        public let finish: [String]
+        public let quick: [String]
+        public init(kind: String, scenes: [Scene], media: Media?, duration: Double?, notes: [Note], finish: [String], quick: [String]) {
+            self.kind = kind; self.scenes = scenes; self.media = media; self.duration = duration
+            self.notes = notes; self.finish = finish; self.quick = quick
+        }
+
+        /// The scene playing at `t` seconds.
+        public func scene(at t: Double) -> Scene? {
+            scenes.last { $0.start <= t + 0.001 } ?? scenes.first
+        }
+    }
+
     public init(provider: String, call: String, step: String, revision: String, title: String?, prompt: String,
                 context: String? = nil, options: [Option]? = nil, recommended: String? = nil,
-                canAskMore: Bool? = nil, ask: Ask? = nil, macOnly: String? = nil) {
+                canAskMore: Bool? = nil, ask: Ask? = nil, review: Review? = nil, macOnly: String? = nil) {
         self.provider = provider; self.call = call; self.step = step; self.revision = revision
         self.title = title; self.prompt = prompt; self.context = context; self.options = options
-        self.recommended = recommended; self.canAskMore = canAskMore; self.ask = ask; self.macOnly = macOnly
+        self.recommended = recommended; self.canAskMore = canAskMore; self.ask = ask; self.review = review; self.macOnly = macOnly
     }
 }
 
@@ -451,8 +511,11 @@ public struct WorkflowCommand: Codable, Equatable, Sendable {
         case id(String)
         case more(near: String?)
         case answer(choice: String?, text: String)
+        /// A note pinned to a moment (and a spot on the frame, as fractions) of the animatic or the film.
+        case note(t: Double, scene: String?, x: Double?, y: Double?, quick: String?)
+        case none
 
-        private enum Keys: String, CodingKey { case near, choice, text }
+        private enum Keys: String, CodingKey { case near, choice, text, t, scene, x, y, quick }
 
         public func encode(to encoder: Encoder) throws {
             switch self {
@@ -466,15 +529,36 @@ public struct WorkflowCommand: Codable, Equatable, Sendable {
                 var container = encoder.container(keyedBy: Keys.self)
                 try container.encode(choice, forKey: .choice)
                 try container.encode(text, forKey: .text)
+            case let .note(t, scene, x, y, quick):
+                var container = encoder.container(keyedBy: Keys.self)
+                try container.encode(t, forKey: .t)
+                try container.encode(scene, forKey: .scene)
+                try container.encodeIfPresent(x, forKey: .x)
+                try container.encodeIfPresent(y, forKey: .y)
+                try container.encode(quick, forKey: .quick)
+            case .none:
+                var container = encoder.singleValueContainer()
+                try container.encodeNil()
             }
         }
 
         public init(from decoder: Decoder) throws {
+            if let single = try? decoder.singleValueContainer(), single.decodeNil() {
+                self = .none
+                return
+            }
             if let id = try? decoder.singleValueContainer().decode(String.self) {
                 self = .id(id)
                 return
             }
             let container = try decoder.container(keyedBy: Keys.self)
+            if let t = try container.decodeIfPresent(Double.self, forKey: .t) {
+                self = .note(t: t, scene: try container.decodeIfPresent(String.self, forKey: .scene),
+                             x: try container.decodeIfPresent(Double.self, forKey: .x),
+                             y: try container.decodeIfPresent(Double.self, forKey: .y),
+                             quick: try container.decodeIfPresent(String.self, forKey: .quick))
+                return
+            }
             if container.contains(.text) || container.contains(.choice) {
                 self = .answer(choice: try container.decodeIfPresent(String.self, forKey: .choice),
                                text: try container.decodeIfPresent(String.self, forKey: .text) ?? "")
@@ -496,6 +580,38 @@ public struct WorkflowCommand: Codable, Equatable, Sendable {
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
+}
+
+/// Ask for what a film's card plays: the Mac leaves a phone copy in the channel as sealed chunks.
+public struct MediaCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let sessionKey: String
+    public let source: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// Where the Mac left a phone copy: `media/<id>-<i>` for i in 0..<chunks, sealed; the joined bytes hash to `sha256`.
+public struct MediaRef: Codable, Equatable, Sendable {
+    public let id: String
+    public let chunks: Int
+    public let bytes: Int
+    public let sha256: String
+    /// "video/mp4" or "audio/mp4".
+    public let mime: String
+    public init(id: String, chunks: Int, bytes: Int, sha256: String, mime: String) {
+        self.id = id; self.chunks = chunks; self.bytes = bytes; self.sha256 = sha256; self.mime = mime
+    }
+}
+
+/// One sealed piece of a phone copy.
+public struct MediaChunk: Codable, Equatable, Sendable {
+    public let i: Int
+    public let n: Int
+    /// Base64 of the bytes.
+    public let data: String
 }
 
 /// An image as the Mac sends it: shrunk to a JPEG, base64.
@@ -671,6 +787,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var image: PhoneImage? = nil
     /// For a workflow answer: what was sent, in a few words ("Picked Wild: Foil").
     public var said: String? = nil
+    /// For a media request: where the phone copy waits.
+    public var media: MediaRef? = nil
 
     public var sent: Bool { status == "sent" }
     /// For an answer: the Mac delivered it (`via` says how: "conductor", "stopped-and-sent").

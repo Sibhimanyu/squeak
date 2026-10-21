@@ -78,11 +78,54 @@ export interface WorkflowView {
     recommended: string | null;
     placeholder: string | null;
   };
-  /**
-   * Set when the phone can only look: this call needs the Mac for now
-   * (the animatic and the final film, until video reaches the phone).
-   */
+  /** For the animatic or the film: what to watch, its scenes, and the notes on it. */
+  review?: WorkflowReview;
+  /** Set when the phone can only look: this call needs the Mac for now. Says why. */
   macOnly?: string | null;
+}
+
+/** A moment of the animatic or the film, to jump to and to pin a note on. */
+export interface WorkflowScene {
+  id: string;
+  title: string;
+  /** What is said over it, shortened. */
+  line: string | null;
+  /** Seconds from the start. */
+  start: number;
+  /** Seconds long, when known. */
+  seconds: number | null;
+  /** A still of it, as a path inside the project (fetched with an image command). */
+  thumb: string | null;
+}
+
+/** A note left on the animatic or the film, from any surface; the director resolves it. */
+export interface WorkflowNote {
+  id: string;
+  t: number | null;
+  scene: string | null;
+  x: number | null;
+  y: number | null;
+  text: string;
+  state: "open" | "resolved";
+  /** What the director did about it. */
+  resolution: string | null;
+}
+
+export interface WorkflowReview {
+  kind: "animatic" | "final";
+  scenes: WorkflowScene[];
+  /**
+   * What plays: the film (a phone copy of it), or the animatic's soundtrack
+   * under its stills. Fetched with a media command naming `source`.
+   */
+  media: { kind: "video" | "audio"; source: string; poster: string | null } | null;
+  /** Seconds, when known. */
+  duration: number | null;
+  notes: WorkflowNote[];
+  /** What closes the call besides notes: approve ("Looks right, build it"), render, preview. */
+  finish: ("approve" | "render" | "preview")[];
+  /** Quick notes the product offers (Slower, Faster…). */
+  quick: string[];
 }
 
 /** An answer from a surface, before the provider checks it against the product's state. */

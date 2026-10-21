@@ -47,6 +47,7 @@ export const CURATED = [
   "x",
   "bell",
   "play",
+  "pause",
   "clock",
   "terminal",
   "monitor",

@@ -188,6 +188,21 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
   `handleCommand` runs unchanged, so a forged write to the stream runs nothing.
   On the emulator (`SQUEAK_E2E_DATABASE_URL=… scripts/e2e-remote.ts`) a reply's
   round trip was 74 ms and a steer's 16 ms.
+- **A workflow's film, in sealed chunks (2026-10-21).** A RasanAI animatic or
+  film plays on the phone. A signed `media` command names what the card
+  waiting now plays (checked against the provider's own view, never the
+  phone's copy); the Mac makes a phone copy (`src/remote/phone-media.ts`:
+  inside the project only, `avconvert`/`afconvert`, cached) and writes it as
+  `media/<id>-<i>` documents, each `{ box }` sealed with the channel key over
+  `{ i, n, data }` (384 KB of bytes, under the rules' 900,000-character box).
+  The result names `{ id, chunks, bytes, sha256, mime }`; the phone fetches the
+  chunks two at a time, checks order, count and hash, and plays the file from
+  Caches. Chunks are deleted after 30 minutes, and every chunk is in
+  `remote-media.json` before it is written, so a restart still deletes it.
+  Only on the Realtime Database. Not Firebase Storage: that would be a second
+  service with its own rules for the same untrusted pipe. Measured on this
+  Mac behind its proxy: a 5 MB film copy up in 106 s, down in 21 s,
+  byte-identical.
   - **Finding the database.** New pairing codes carry it as `r`. A phone paired
     before the move reads the sealed `state/transport` document the Mac writes
     in Firestore (`{ r }`, sealed with the channel key) and follows it,
