@@ -946,9 +946,22 @@ main {
   image-rendering: pixelated;
 }
 
+.pairing-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
 .pairing ol {
   padding-left: 18px;
   color: var(--sq-ink);
+}
+
+.copy-hint {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .pairing li {

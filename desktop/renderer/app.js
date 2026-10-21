@@ -59,6 +59,9 @@ let awakeProblem = null;
 let awakeWithLid = false;
 /** The admin prompt is up. */
 let lidRuleBusy = false;
+/** Squeak for Web, the Hosting site's /app/ page (project squeak-5c9gvo). */
+const WEB_APP_URL = "https://squeak-5c9gvo.web.app/app/";
+
 /** The pairing QR, as an image the main process drew. Cleared once paired. */
 let pairingImage = null;
 
@@ -860,7 +863,24 @@ async function renderPhone() {
     ]) {
       steps.append(el("li", null, step));
     }
-    pair.append(img, steps);
+    const side = el("div", "pairing-side");
+    const copy = button("Copy pairing code", "secondary copy-pairing", async () => {
+      const result = await window.squeak.copyPairingCode();
+      if (!result.ok) {
+        showToast(result.message);
+        return;
+      }
+      copy.textContent = "Copied";
+      setTimeout(() => {
+        copy.textContent = "Copy pairing code";
+      }, 1500);
+    });
+    side.append(
+      steps,
+      copy,
+      el("p", "muted-note copy-hint", `For Squeak for Web: paste this at ${WEB_APP_URL}`),
+    );
+    pair.append(img, side);
     nodes.push(pair);
     nodes.push(
       el(
