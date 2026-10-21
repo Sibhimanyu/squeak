@@ -7,6 +7,7 @@ const { execFile } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { clipboard } = require("electron");
 
 const PORT = process.env.FLEET_HOOK_PORT || "8477";
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -197,10 +198,17 @@ async function openInConductor(target) {
 const REMOTE_ACTIONS = new Set(["status", "approve", "reject", "revoke", "reset"]);
 
 /** Pairing and device management for the phone channel (docs/remote-channel.md). */
+/**
+ * The `squeak://pair?d=...` text the last pairing QR encoded. Held here, never
+ * sent to the window: the window can only ask for it to be copied.
+ */
+let lastPairingUrl = null;
+
 async function remote(action, deviceId) {
   if (!REMOTE_ACTIONS.has(action) || (deviceId != null && !/^[A-Za-z0-9_-]{1,64}$/.test(deviceId))) {
     return { ok: false };
   }
+  if (action === "reset") lastPairingUrl = null;
   try {
     return await control(`remote/${action}${deviceId ? `/${deviceId}` : ""}`, {
       method: action === "status" ? "GET" : "POST",
@@ -218,11 +226,24 @@ async function remote(action, deviceId) {
 async function pairingQr() {
   try {
     const { url } = await control("remote/pair", { method: "POST" });
+    lastPairingUrl = url;
     const QRCode = require("qrcode");
     return { ok: true, image: await QRCode.toDataURL(url, { margin: 1, width: 360, errorCorrectionLevel: "M" }) };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * Puts the pairing text the QR was drawn from on the clipboard. Takes no
+ * argument: the window cannot choose what gets written.
+ */
+function copyPairingCode() {
+  if (!lastPairingUrl) {
+    return { ok: false, message: "There is no pairing code to copy yet. Pair an iPhone first." };
+  }
+  clipboard.writeText(lastPairingUrl);
+  return { ok: true };
 }
 
 const AWAKE_ACTIONS = new Set(["start", "extend", "end", "recheck-lid", "lid-actions"]);
@@ -338,6 +359,7 @@ async function lidRule(action) {
 module.exports = {
   openInConductor,
   pairingQr,
+  copyPairingCode,
   readState,
   remote,
   reply,

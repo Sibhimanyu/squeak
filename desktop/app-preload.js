@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("squeak", {
   showDuck: () => ipcRenderer.send("squeak:show-duck"),
   remote: (action, deviceId) => ipcRenderer.invoke("squeak:remote", action, deviceId ?? null),
   pairingQr: () => ipcRenderer.invoke("squeak:pairing-qr"),
+  copyPairingCode: () => ipcRenderer.invoke("squeak:copy-pairing-code"),
   awake: (request) => ipcRenderer.invoke("squeak:awake", request),
   lidRule: (action) => ipcRenderer.invoke("squeak:lid-rule", action),
 });

@@ -5,4 +5,5 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p public
 cp -R pages/. public/
+./stage-web.sh
 firebase deploy --only hosting -m "pages"
