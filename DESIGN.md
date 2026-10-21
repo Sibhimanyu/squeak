@@ -387,7 +387,10 @@ PNG on a baked-in square.
   White, Ink or Dark Surface.
 - No new emotions, props or costumes on the logo; no off-model redesigns or
   alternate poses. The in-app moods below are the one sanctioned set.
-- Never use the duck as a pattern, bullet or decoration.
+- Never use the duck as a pattern, bullet or decoration. One exception: the
+  website hero's interactive duck pile (`website/ducks.js`), a heap of the
+  unaltered logo duck you can push around. It stays inside the hero stage and
+  appears nowhere else.
 - Imagery is flat colour, the duck and plenty of space. Honest work over
   staged scenes; no stock photos of people at laptops.
 

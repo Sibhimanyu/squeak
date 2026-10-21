@@ -1,0 +1,15 @@
+{
+  "version": "2.1.11",
+  "build": "20111",
+  "fileName": "Squeak-2.1.11.dmg",
+  "downloadUrl": "https://sibhimanyu.github.io/squeak/download/Squeak-2.1.11.dmg",
+  "downloadPath": "download/Squeak-2.1.11.dmg",
+  "length": 5347630,
+  "sha256": "d2736fbed089d84e264da11e8375cdcd4a45f40c6e2a7aceb3cad56f9df38855",
+  "edSignature": "pF2vkNXD0cdcPcbCmFRR48sYFeSI56n/1kN6Nwp6a9d7CyefAL3Fq2QDtwAsc1BkZlMex9JeHLvaykMrwBZsAQ==",
+  "publishedAt": "Tue, 20 Oct 2026 16:44:20 +0000",
+  "minimumSystemVersion": "14.0",
+  "releaseNotesUrl": "https://github.com/Sibhimanyu/squeak/releases/tag/v2.1.11",
+  "appcastUrl": "https://sibhimanyu.github.io/squeak/appcast.xml",
+  "checkedAt": "2026-10-21T04:44:41.928Z"
+}
