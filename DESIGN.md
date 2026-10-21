@@ -498,6 +498,16 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
 - A row is a button: it opens the session's detail (app) or offers its actions
   (phone). Hover: `surface-raised`.
 
+- **The phone's Home is groups, not rows** (owner's decision, 2026-10-21). A
+  segmented switch picks **Projects** (one row per repository: its name, what
+  its chats are doing in words, a count) or **Status** (one row per state that
+  has chats in it: Needs you, Working, Done, Error, Idle). A tap opens that
+  group's chats; **Earlier** holds the ones that went quiet. Searching skips
+  the groups and lists every match. Nothing else is on Home: no status chips,
+  no urgent card. On the phone's lists the row has **no dot** and the only
+  colour is the needs-you left edge; the state is in words. Needs you opens as
+  decision cards (§8.4) with their one-tap answers.
+
 ### 8.3 Badge
 
 Red pill with a white count for things that need you; blue for unreviewed

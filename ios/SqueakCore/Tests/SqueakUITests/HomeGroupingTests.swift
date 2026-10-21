@@ -2,7 +2,7 @@ import SqueakCore
 import XCTest
 @testable import SqueakUI
 
-/// Home (option A): status tiles, the most urgent chat first, then chats by project.
+/// Home: chats grouped by project or by state.
 final class HomeGroupingTests: XCTestCase {
     private func chat(_ key: String, _ state: String, repo: String = "storefront", at: String = "2026-10-19T10:00:00Z",
                       choices: PhoneSnapshot.Choices? = nil, question: PhoneSnapshot.Question? = nil) -> PhoneSnapshot.Session {
@@ -10,11 +10,12 @@ final class HomeGroupingTests: XCTestCase {
               detail: nil, git: nil, contextPercent: nil, turnId: "t", message: nil, choices: choices, title: key, question: question)
     }
 
-    func testTilesCountEachStateAndShowErrorOnlyWhenThereIsOne() {
+    func testStatusListsOnlyStatesWithChatsInAttentionOrder() {
         let chats = [chat("a", "awaiting_input"), chat("b", "awaiting_approval"), chat("c", "working"), chat("d", "finished"), chat("e", "idle")]
-        XCTAssertEqual(Presentation.tiles(chats).map(\.filter), [.needsYou, .working, .done, .idle])
-        XCTAssertEqual(Presentation.tiles(chats).map(\.count), [2, 1, 1, 1])
-        XCTAssertEqual(Presentation.tiles(chats + [chat("f", "error")]).last?.filter, .error)
+        XCTAssertEqual(Presentation.statusGroups(chats).map(\.filter), [.needsYou, .working, .done, .idle])
+        XCTAssertEqual(Presentation.statusGroups(chats).map(\.count), [2, 1, 1, 1])
+        XCTAssertEqual(Presentation.statusGroups(chats + [chat("f", "error")]).map(\.filter), [.needsYou, .working, .done, .error, .idle])
+        XCTAssertEqual(Presentation.statusGroups([chat("c", "working")]).map(\.filter), [.working])
         XCTAssertTrue(Presentation.inFilter(chat("e", "idle"), .idle))
         XCTAssertFalse(Presentation.inFilter(chat("f", "error"), .idle))
     }
@@ -31,13 +32,6 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "awaiting_approval")]), "2 need you")
         XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "finished")]), "1 needs you · 1 done")
         XCTAssertEqual(Presentation.projectSummary([chat("a", "idle"), chat("b", "idle")]), "2 idle")
-    }
-
-    func testTheUrgentChatIsTheNewestThatNeedsYou() {
-        let chats = [chat("old", "awaiting_input", at: "2026-10-19T09:00:00Z"), chat("new", "awaiting_approval", at: "2026-10-19T10:00:00Z"),
-                     chat("busy", "working", at: "2026-10-19T11:00:00Z")]
-        XCTAssertEqual(Presentation.urgent(chats)?.key, "new")
-        XCTAssertNil(Presentation.urgent([chat("busy", "working")]))
     }
 
     func testProjectsGroupByRepoInAttentionOrder() {

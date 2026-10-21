@@ -293,7 +293,7 @@ enum Presentation {
         case all, needsYou, working, done, error, idle
         var id: String { rawValue }
 
-        /// The status tile's word (DESIGN.md §9).
+        /// The state's word (DESIGN.md §9).
         var word: String {
             switch self {
             case .all: return "all"
@@ -318,15 +318,22 @@ enum Presentation {
         }
     }
 
-    /* ---------- home: status tiles, the most urgent chat, projects ---------- */
+    /* ---------- home: by project or by status ---------- */
 
-    /// The status tiles across the top of Home, in attention order: needs you, working, done, idle,
-    /// and error only when something errored (it is rare, and not urgent).
-    static func tiles(_ sessions: [PhoneSnapshot.Session]) -> [(filter: Filter, count: Int)] {
-        let order: [Filter] = [.needsYou, .working, .done, .idle, .error]
+    /// Home's two ways to group the active chats. Each is one short list of groups; a tap opens
+    /// the group's chats. Nothing else is on Home.
+    enum Grouping: String, CaseIterable, Identifiable {
+        case projects, status
+        var id: String { rawValue }
+        var title: String { self == .projects ? "Projects" : "Status" }
+    }
+
+    /// The states Home lists under Status, in attention order, only those with something in them.
+    static func statusGroups(_ sessions: [PhoneSnapshot.Session]) -> [(filter: Filter, count: Int)] {
+        let order: [Filter] = [.needsYou, .working, .done, .error, .idle]
         return order.compactMap { filter in
             let count = sessions.filter { inFilter($0, filter) }.count
-            return filter == .error && count == 0 ? nil : (filter, count)
+            return count == 0 ? nil : (filter, count)
         }
     }
 
@@ -377,11 +384,6 @@ enum Presentation {
         sessions.sorted { rank($0) != rank($1) ? rank($0) < rank($1) : newer($0, $1) }
     }
 
-    /// The chat Home puts first: the newest one that needs you.
-    static func urgent(_ sessions: [PhoneSnapshot.Session]) -> PhoneSnapshot.Session? {
-        sessions.filter(\.needsYou).sorted(by: newer).first
-    }
-
     struct Project: Equatable, Identifiable {
         let name: String
         let sessions: [PhoneSnapshot.Session]
@@ -411,7 +413,7 @@ enum Presentation {
         }
     }
 
-    /// Up to three one-tap answers for the urgent card: a single, single-select question's options
+    /// Up to three one-tap answers for a chat in Needs you: a single, single-select question's options
     /// (answered through the `answer` command), else the agent's lettered options (sent as a reply).
     /// Empty when the phone can only open the chat (an approval, a plan, several questions).
     enum QuickAnswer: Equatable {
@@ -438,7 +440,7 @@ enum Presentation {
         return choices.options.map { .letter($0.letter, title: $0.title) }
     }
 
-    /// The urgent card's one line of what the agent wants: its question, else the state in words.
+    /// A Needs you card's one line of what the agent wants: its question, else the state in words.
     static func ask(_ session: PhoneSnapshot.Session) -> String {
         if let question = session.question {
             if question.plan != nil { return "Wants you to approve a plan." }
