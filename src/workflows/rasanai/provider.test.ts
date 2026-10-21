@@ -20,7 +20,10 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function project(edit: (session: RasanaiSession) => void = () => {}, options: { headless?: boolean } = {}) {
+function project(
+  edit: (session: RasanaiSession) => void = () => {},
+  options: { headless?: boolean; console?: Record<string, unknown> } = {},
+) {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "rasanai-"));
   dirs.push(projectDir);
   const runDir = path.join(projectDir, ".rasanai", "run-1");
@@ -30,7 +33,9 @@ function project(edit: (session: RasanaiSession) => void = () => {}, options: { 
   void _askWhenOpen;
   edit(session);
   fs.writeFileSync(path.join(runDir, "session.json"), JSON.stringify(session));
-  if (options.headless !== false) {
+  if (options.console) {
+    fs.writeFileSync(path.join(runDir, "console.json"), JSON.stringify(options.console));
+  } else if (options.headless !== false) {
     fs.writeFileSync(path.join(runDir, "console.json"), JSON.stringify({ headless: true }));
   }
   const rewrite = (change: (session: RasanaiSession) => void) => {
@@ -106,6 +111,25 @@ describe("reading a RasanAI run", () => {
       ".rasanai/run-1/design/Wild/specimen.png",
     ]);
     expect(view.options?.[2]?.frames).toEqual([{ id: "peak", image: ".rasanai/run-1/design/Wild/peak.png" }]);
+  });
+
+  it("shows a story's picture, and the older films flow's frames given as plain paths", () => {
+    const storied = project((s) => (s.steps!.story!.stories![1]!.image = "story/bold.png"));
+    const run = readRasanaiRun(storied.projectDir)!;
+    expect(workflowView(run, waitingStatus(run, NOW)!).options?.[1]?.image).toBe("story/bold.png");
+    const films = project((s) => {
+      s.current = "films";
+      s.steps!.films = {
+        status: "awaiting",
+        updated: "2026-10-14T16:44:00.000Z",
+        films: [{ id: "a", title: "Paper", frames: ["films/a/1.png", "films/a/2.png", "notes.txt"] }],
+      };
+    });
+    const filmsRun = readRasanaiRun(films.projectDir)!;
+    expect(workflowView(filmsRun, waitingStatus(filmsRun, NOW)!).options?.[0]?.frames).toEqual([
+      { id: "1", image: "films/a/1.png" },
+      { id: "2", image: "films/a/2.png" },
+    ]);
   });
 
   it("is not waiting once the call is answered, while the director works, or on a film left for a day", () => {
@@ -212,7 +236,7 @@ describe("RasanaiProvider.act", () => {
         type: "choose",
         value: "wild",
         note: "",
-        source: "squeak",
+        source: "squeak-phone",
       },
     ]);
     expect(fs.existsSync(path.join(runDir, "actions.lock"))).toBe(false);
@@ -269,6 +293,29 @@ describe("RasanaiProvider.act", () => {
       reason: expect.stringMatching(/console is open/),
     });
     expect(actions()).toEqual([]);
+  });
+
+  it("answers a browser-console run once RasanAI says its wait applies other apps' answers", () => {
+    const served = project(() => {}, { console: { pid: 1, external_actions: 1 } });
+    const provider = new RasanaiProvider({ now: () => NOW });
+    expect(
+      provider.act(served.projectDir, {
+        step: "story",
+        revision: revisionOf(served.projectDir),
+        type: "choose",
+        value: "wild",
+      }).ok,
+    ).toBe(true);
+    const newer = project(() => {}, { console: { headless: true, external_actions: 2 } });
+    expect(
+      provider.act(newer.projectDir, {
+        step: "story",
+        revision: revisionOf(newer.projectDir),
+        type: "choose",
+        value: "wild",
+      }),
+    ).toMatchObject({ ok: false, reason: expect.stringMatching(/newer than Squeak/) });
+    expect(newer.actions()).toEqual([]);
   });
 
   it("asks for three more excluding what is shown, at most once per half minute", () => {

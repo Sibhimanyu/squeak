@@ -51,9 +51,27 @@ export interface RasanaiStep {
 export interface RasanaiRun {
   projectDir: string;
   runDir: string;
-  /** Studio runs are headless (no console server): the only kind Squeak answers. */
+  /** Studio runs are headless (no console server): `wait` applies every line it reads. */
   headless: boolean;
+  /**
+   * RasanAI's `console.json` `external_actions` (references/remote.md): 1 means its
+   * `wait` applies a line another app appended in either mode. Null from a RasanAI
+   * older than the contract.
+   */
+  externalActions: number | null;
   session: RasanaiSession;
+}
+
+/** The contract version Squeak speaks (RasanAI's references/remote.md). */
+export const EXTERNAL_ACTIONS_VERSION = 1;
+
+/**
+ * Whether an answer appended by Squeak will be applied: a run that says it
+ * takes other apps' answers in the version Squeak knows, or (before the
+ * contract) a headless Studio run, whose `wait` always applied every line.
+ */
+export function acceptsExternalActions(run: RasanaiRun): boolean {
+  return run.externalActions === null ? run.headless : run.externalActions === EXTERNAL_ACTIONS_VERSION;
 }
 
 /**
@@ -121,8 +139,15 @@ export function readRasanaiRun(projectDir: string): RasanaiRun | null {
   if (!session || typeof session !== "object") {
     return null;
   }
-  const consoleInfo = readJson<{ headless?: unknown }>(path.join(runDir, "console.json"));
-  return { projectDir, runDir, headless: consoleInfo?.headless === true, session };
+  const consoleInfo = readJson<{ headless?: unknown; external_actions?: unknown }>(path.join(runDir, "console.json"));
+  const external = consoleInfo?.external_actions;
+  return {
+    projectDir,
+    runDir,
+    headless: consoleInfo?.headless === true,
+    externalActions: typeof external === "number" && Number.isInteger(external) ? external : null,
+    session,
+  };
 }
 
 /**
@@ -260,7 +285,7 @@ function pickOptions(stepId: string, step: RasanaiStep): WorkflowOption[] | null
           title: clip(text(story.title) ?? capitalise(id), 160),
           summary: clipOrNull(text(story.logline), TEXT_MAX),
           why: clipOrNull(text(story.why), TEXT_MAX),
-          image: null,
+          image: imagePath(story.image),
           note: clipOrNull(text(story.device), 160),
           beats: beats.slice(0, BEATS_MAX).map((beat) => ({
             name: clip(text(beat.name) ?? "", 40),
@@ -279,7 +304,7 @@ function pickOptions(stepId: string, step: RasanaiStep): WorkflowOption[] | null
       if (!id) {
         return [];
       }
-      const frames = Array.isArray(look.frames) ? (look.frames as Record<string, unknown>[]) : [];
+      const frames = Array.isArray(look.frames) ? (look.frames as (Record<string, unknown> | string)[]) : [];
       return [
         {
           id,
@@ -288,9 +313,12 @@ function pickOptions(stepId: string, step: RasanaiStep): WorkflowOption[] | null
           summary: clipOrNull(text(look.blend) ?? text(look.logline), TEXT_MAX),
           why: clipOrNull(text(look.why), TEXT_MAX),
           image: imagePath(look.poster),
-          frames: frames.flatMap((frame) => {
-            const image = imagePath(frame.image);
-            return image ? [{ id: text(frame.id) ?? "", image }] : [];
+          // `films` (the older flow) lists frames as plain paths; looks as {id, image}.
+          frames: frames.flatMap((frame, index) => {
+            const image = imagePath(typeof frame === "string" ? frame : frame?.image);
+            return image
+              ? [{ id: (typeof frame === "string" ? null : text(frame.id)) ?? String(index + 1), image }]
+              : [];
           }),
         },
       ];

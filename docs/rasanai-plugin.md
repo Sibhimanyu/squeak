@@ -1,6 +1,6 @@
 # RasanAI in Squeak: directing a film from the phone
 
-Status: phase 1 built 2026-10-21 (Mac `src/workflows/rasanai/`, iPhone `WorkflowCard.swift`): pages, story and look picks with posters, "three more", and the director's questions. Studio (headless) runs only until RasanAI advertises external actions in its console mode.
+Status: phase 1 built 2026-10-21 (Mac `src/workflows/rasanai/`, iPhone `WorkflowCard.swift`): pages, story and look picks with posters, "three more", and the director's questions. RasanAI's side (branch `Sibhimanyu/squeak-interface`: `schema: 1`, `external_actions: 1`, the `squeak-phone` source, phone video proxies) is the contract in its `references/remote.md`; until it is released, Squeak answers headless Studio runs only.
 
 ## The pitch
 

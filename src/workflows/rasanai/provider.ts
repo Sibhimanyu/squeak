@@ -4,7 +4,14 @@ import type { FleetSession } from "../../fleet/types.js";
 import type { WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../types.js";
 import { appendAction, newActionId, pendingActions } from "./actions.js";
 import type { LockDeps } from "./actions.js";
-import { choosableIds, readRasanaiRun, viewImages, waitingStatus, workflowView } from "./run.js";
+import {
+  acceptsExternalActions,
+  choosableIds,
+  readRasanaiRun,
+  viewImages,
+  waitingStatus,
+  workflowView,
+} from "./run.js";
 import type { RasanaiRun } from "./run.js";
 
 const NOTE_MAX = 4_000;
@@ -99,8 +106,13 @@ export class RasanaiProvider {
     if (!run) {
       return { ok: false, reason: "That film isn't on this Mac any more." };
     }
-    if (!run.headless) {
-      return { ok: false, reason: "This film's console is open in a browser. Answer it there." };
+    if (!acceptsExternalActions(run)) {
+      return {
+        ok: false,
+        reason: run.headless
+          ? "This film's RasanAI is newer than Squeak. Update Squeak on your Mac."
+          : "This film's console is open in a browser. Answer it there, or update RasanAI.",
+      };
     }
     const status = waitingStatus(run, this.now());
     if (!status) {
@@ -127,7 +139,8 @@ export class RasanaiProvider {
         type: built.type,
         value: built.value,
         note: built.note,
-        source: "squeak",
+        // RasanAI shows it as "You (iPhone)" in its feed and decisions drawer.
+        source: "squeak-phone",
       },
       this.lockDeps,
     );
