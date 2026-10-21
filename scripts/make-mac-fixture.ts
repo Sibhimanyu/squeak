@@ -14,6 +14,7 @@ import type { FleetSnapshot } from "../src/fleet/fleet-monitor.js";
 import type { FleetSession } from "../src/fleet/types.js";
 import { RemoteBridge, type ChannelStore } from "../src/remote/remote-bridge.js";
 import { seal } from "../src/remote/remote-crypto.js";
+import { RasanaiProvider } from "../src/workflows/rasanai/provider.js";
 
 const out = path.resolve("ios/SqueakCore/Tests/SqueakCoreTests/Fixtures/mac-made.json");
 
@@ -46,6 +47,29 @@ function session(overrides: Partial<FleetSession>): FleetSession {
   } as FleetSession;
 }
 
+// A RasanAI film waiting at its look call, from a trimmed real run, through the real provider.
+const filmDir = fs.mkdtempSync(path.join(os.tmpdir(), "mac-fixture-film-"));
+const film = JSON.parse(fs.readFileSync("src/workflows/rasanai/fixtures/quotidian-session.json", "utf8"));
+delete film._askWhenOpen;
+film.current = "look";
+fs.mkdirSync(path.join(filmDir, ".rasanai", "run-1"), { recursive: true });
+fs.writeFileSync(path.join(filmDir, ".rasanai", "current"), "run-1");
+fs.writeFileSync(path.join(filmDir, ".rasanai", "run-1", "session.json"), JSON.stringify(film));
+const rasanai = new RasanaiProvider({ now: () => Date.parse("2026-10-14T17:00:00.000Z") });
+const [director] = rasanai.annotate([
+  session({
+    key: "claude-transcript:d1",
+    sourceId: "d1",
+    agentSessionId: "d1",
+    conductorSessionId: null,
+    origin: "sdk",
+    cwd: filmDir,
+    repoName: null,
+    branch: null,
+    title: null,
+  }),
+]);
+
 const sessions = [
   session({}),
   session({
@@ -58,6 +82,7 @@ const sessions = [
     state: "working",
     detail: "Run tests",
   }),
+  director!,
 ];
 const codexUsage = {
   planType: "pro",
@@ -122,6 +147,7 @@ const bridge = new RemoteBridge({
           ],
         }
       : null,
+  workflow: rasanai,
   now: () => Date.parse("2026-09-25T03:00:00.000Z"),
   macName: "Test Mac",
 });
@@ -187,6 +213,7 @@ fs.writeFileSync(
   ) + "\n",
 );
 fs.rmSync(dir, { recursive: true, force: true });
+fs.rmSync(filmDir, { recursive: true, force: true });
 console.log(`wrote ${out}`);
 console.log(
   JSON.stringify(

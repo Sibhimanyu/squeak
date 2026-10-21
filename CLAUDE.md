@@ -37,6 +37,7 @@ deployment section before changing anything under `src/` or `desktop/`.
 | `src/fleet/duck-mood.ts` | what the duck is doing, derived where CI can test it |
 | `src/fleet/claude-pricing.ts` | per-token dollar rates; a model missing here returns null, never a guess |
 | `src/fleet/claude-cost.ts` | whole-file, cached, lazy Claude cost estimate — see the note below on why |
+| `src/workflows/` | products an agent runs that wait on the person for their own calls. `rasanai/`: a RasanAI film's director is a Claude session whose cwd has `.rasanai/current`; `session.json` says which call waits (Studio's rule, ignored after 24 h), the newest session in the folder pages as `awaiting_input`, and the phone's `workflow` card answers through RasanAI's headless protocol (`actions.jsonl` under `actions.lock`), checked against the file as it is then. Never the console's HTTP server. Design: `docs/rasanai-plugin.md` |
 | `src/remote/` | the phone channel's Mac side: crypto, Firestore REST, `RemoteBridge` |
 | `src/adapters/claude-code.ts` | spawns `claude`, parses its stream-json output |
 | `src/adapters/codex-app-server.ts` | JSON-RPC client for the codex app-server |

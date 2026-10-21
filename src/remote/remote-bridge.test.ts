@@ -24,6 +24,7 @@ import {
   type RemoteBridgeDependencies,
   type RemoteDiffReader,
   type RemoteCommand,
+  type RemoteWorkflows,
   type StartCommand,
 } from "./remote-bridge.js";
 import { open, pairingCode, seal } from "./remote-crypto.js";
@@ -112,6 +113,7 @@ function fixture(
     diff?: RemoteDiffReader | null;
     image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
     hotspot?: RemoteBridgeDependencies["hotspot"];
+    workflow?: RemoteWorkflows | null;
     /** The chat's latest message, as the replier reads it. */
     lastText?: string;
     /** Why the chat's newest turn failed, as the replier reads it. */
@@ -181,6 +183,7 @@ function fixture(
     diff: options.diff ?? null,
     image: options.image ?? null,
     hotspot: options.hotspot ?? null,
+    workflow: options.workflow ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -313,6 +316,23 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const workflowCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "workflow",
+      sessionKey: "claude-transcript:d1",
+      step: "look",
+      revision: "look@1",
+      type: "choose",
+      value: "wild",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const result = (id: string) => {
     const doc = store.docs.get(`${channel}/results/${id}`);
     return doc ? open<Record<string, unknown>>(payload.k, doc.box) : null;
@@ -335,6 +355,7 @@ function fixture(
     diffCommand,
     imageCommand,
     hotspotCommand,
+    workflowCommand,
     result,
     configPath,
     emit,
@@ -2165,5 +2186,114 @@ describe("RemoteBridge phone view: an errored chat", () => {
     const f = fixture({ failure: null });
     f.emit([session({ state: "error" })]);
     expect(f.bridge.phoneView().sessions[0]).toMatchObject({ failure: null });
+  });
+});
+
+describe("RemoteBridge workflow", () => {
+  const status = {
+    provider: "rasanai" as const,
+    projectDir: "/films/quotidian",
+    runDir: "/films/quotidian/.rasanai/run-1",
+    title: "Quotidian",
+    call: "look" as const,
+    step: "look",
+    revision: "look@1",
+    since: "2026-09-25T02:58:00.000Z",
+    prompt: "Pick a look",
+  };
+  const film = session({
+    key: "claude-transcript:d1",
+    conductorSessionId: null,
+    origin: "sdk",
+    cwd: "/films/quotidian",
+    state: "awaiting_input",
+    detail: "RasanAI · Pick a look",
+    workflow: status,
+  });
+  const card = {
+    provider: "rasanai" as const,
+    call: "look" as const,
+    step: "look",
+    revision: "look@1",
+    title: "Quotidian",
+    prompt: "Pick a look",
+    options: [{ id: "wild", label: "Wild", title: "Foil", summary: null, why: null, image: ".rasanai/run-1/w.png" }],
+    recommended: "wild",
+  };
+  const workflows = () => ({
+    view: vi.fn(() => card),
+    allowsImage: vi.fn((_: unknown, source: string) => source === ".rasanai/run-1/w.png"),
+    act: vi.fn(() => ({ ok: true as const, actionId: "sq1", said: "Picked Wild: Foil" })),
+  });
+
+  it("puts the film's card on the waiting session", async () => {
+    const f = fixture({ workflow: workflows() });
+    f.emit([film]);
+    const shown = f.bridge.phoneView().sessions[0] as Record<string, unknown>;
+    expect(shown.workflow).toEqual(card);
+    expect(shown.detail).toBe("RasanAI · Pick a look");
+  });
+
+  it("hands a pick to the provider with the session's own project folder, never the phone's", async () => {
+    const workflow = workflows();
+    const f = fixture({ workflow });
+    await f.pair();
+    f.emit([film]);
+    await f.store.set(`${f.channel}/commands/c1`, f.workflowCommand({ projectDir: "/etc" }));
+    await f.bridge.tick();
+    expect(workflow.act).toHaveBeenCalledWith("/films/quotidian", {
+      step: "look",
+      revision: "look@1",
+      type: "choose",
+      value: "wild",
+    });
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent", said: "Picked Wild: Foil" });
+  });
+
+  it("refuses a session that isn't waiting on a film, a malformed answer, and a provider's no", async () => {
+    const workflow = workflows();
+    workflow.act.mockReturnValueOnce({ ok: false, reason: "That isn't one of the options." } as never);
+    const f = fixture({ workflow });
+    await f.pair();
+    f.emit([film, session()]);
+    await f.store.set(`${f.channel}/commands/c1`, f.workflowCommand({ sessionKey: "claude-transcript:s1" }));
+    await f.store.set(`${f.channel}/commands/c2`, f.workflowCommand({ type: "Choose; rm" }));
+    await f.store.set(`${f.channel}/commands/c3`, f.workflowCommand({ value: "nope" }));
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That isn't waiting on you any more." });
+    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "Not a request this Mac understands." });
+    expect(f.result("c3")).toMatchObject({ status: "refused", reason: "That isn't one of the options." });
+    expect(workflow.act).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses everything when this Mac has no workflows", async () => {
+    const f = fixture();
+    await f.pair();
+    f.emit([film]);
+    await f.store.set(`${f.channel}/commands/c1`, f.workflowCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't answer that from a phone." });
+  });
+
+  it("sends a picture on the card, read in the film's folder, and nothing else", async () => {
+    const image = vi.fn(
+      async (): Promise<PhoneImageResult> => ({ ok: true, image: { mime: "image/jpeg", data: "AAAA" } }),
+    );
+    const f = fixture({ workflow: workflows(), image });
+    await f.pair();
+    f.emit([film]);
+    await f.store.set(
+      `${f.channel}/commands/c1`,
+      f.imageCommand({ sessionId: "", sessionKey: "claude-transcript:d1", source: ".rasanai/run-1/w.png" }),
+    );
+    await f.store.set(
+      `${f.channel}/commands/c2`,
+      f.imageCommand({ sessionId: "", sessionKey: "claude-transcript:d1", source: ".rasanai/run-1/director.log" }),
+    );
+    await f.bridge.tick();
+    expect(image).toHaveBeenCalledTimes(1);
+    expect(image).toHaveBeenCalledWith(".rasanai/run-1/w.png", "/films/quotidian");
+    expect(f.result("c1")).toMatchObject({ status: "sent" });
+    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That picture isn't on this card." });
   });
 });

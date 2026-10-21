@@ -30,6 +30,18 @@ let (startId, startDocument) = try channel.startDocument(workspaceId: "w1", agen
 let (answerId, answerDocument) = try channel.answerDocument(
     sessionId: "s1", toolUseId: "toolu_fixture",
     answers: [.init(question: 0, picked: ["Red"], other: "and a bit of blue")], signer: signer, now: madeAt)
+// RasanAI: a film waiting at its look call, as the Mac showed it.
+let film = Workflow(provider: "rasanai", call: "look", step: "look", revision: "look@2026-10-14T16:56:23.780Z",
+                    title: "Quotidian", prompt: "Pick a look")
+let (chooseId, chooseDocument) = try channel.workflowDocument(
+    sessionKey: "claude-transcript:d1", workflow: film, type: "choose", value: .id("wild"), signer: signer, now: madeAt)
+let (moreId, moreDocument) = try channel.workflowDocument(
+    sessionKey: "claude-transcript:d1", workflow: film, type: "more", value: .more(near: "bold"), signer: signer, now: madeAt)
+let (askId, askDocument) = try channel.workflowDocument(
+    sessionKey: "claude-transcript:d1", workflow: film, type: "answer", value: .answer(choice: nil, text: "Warmer, please"),
+    signer: signer, now: madeAt)
+let (posterId, posterDocument) = try channel.imageDocument(
+    sessionId: "", sessionKey: "claude-transcript:d1", source: ".rasanai/run-1/design/Wild/specimen.png", signer: signer, now: madeAt)
 let fixture: [String: Any] = [
     "madeAt": Int64(madeAt.timeIntervalSince1970 * 1000),
     "key": key,
@@ -65,6 +77,16 @@ let fixture: [String: Any] = [
     // An answer to question 0 of toolu_fixture in s1: picked "Red", other "and a bit of blue".
     "answerCommandId": answerId,
     "answerCommand": ["box": answerDocument.box, "sig": answerDocument.sig!, "device": answerDocument.device!],
+    // RasanAI, film claude-transcript:d1 at look@2026-10-14T16:56:23.780Z: pick "wild"; three more near "bold";
+    // an answer in words only; and the Wild look's poster.
+    "workflowChooseCommandId": chooseId,
+    "workflowChooseCommand": ["box": chooseDocument.box, "sig": chooseDocument.sig!, "device": chooseDocument.device!],
+    "workflowMoreCommandId": moreId,
+    "workflowMoreCommand": ["box": moreDocument.box, "sig": moreDocument.sig!, "device": moreDocument.device!],
+    "workflowAnswerCommandId": askId,
+    "workflowAnswerCommand": ["box": askDocument.box, "sig": askDocument.sig!, "device": askDocument.device!],
+    "workflowImageCommandId": posterId,
+    "workflowImageCommand": ["box": posterDocument.box, "sig": posterDocument.sig!, "device": posterDocument.device!],
 ]
 let data = try JSONSerialization.data(withJSONObject: fixture, options: [.prettyPrinted, .sortedKeys])
 FileManager.default.createFile(atPath: CommandLine.arguments[1], contents: data)

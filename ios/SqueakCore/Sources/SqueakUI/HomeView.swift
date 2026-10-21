@@ -440,7 +440,7 @@ struct UrgentCard: View {
                     Button("Reply", action: onReply).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                         .frame(minHeight: 44)
                 } else if answers.isEmpty {
-                    Button("Open chat", action: onOpen).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    Button(session.workflow.map { _ in "Open the call" } ?? "Open chat", action: onOpen).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                         .frame(minHeight: 44)
                 }
                 if let outcome { Text(outcome).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2) }

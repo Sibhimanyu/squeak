@@ -88,6 +88,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public let question: Question?
         /// Why an errored chat failed, in the agent's words; only from a Mac new enough to send it.
         public let failure: String?
+        /// A film (RasanAI) waiting on one of its calls: the card to show instead of a chat reply.
+        /// Only from a Mac new enough to send it.
+        public var workflow: Workflow? = nil
         public var id: String { key }
 
         public init(
@@ -354,7 +357,142 @@ public struct ImageCommand: Codable, Equatable, Sendable {
     public let v: Int
     public let kind: String
     public let sessionId: String
+    /// A picture on a workflow's card instead of one a chat named: the session's fleet key.
+    public var sessionKey: String? = nil
     public let source: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// A product an agent is running that waits on the person for its own calls (RasanAI's pick a
+/// story, pick a look, its questions), as the Mac reads it (src/workflows/). Agent text: plain only.
+public struct Workflow: Codable, Equatable, Sendable {
+    public struct Beat: Codable, Equatable, Sendable {
+        public let name: String
+        public let seconds: Double?
+        public let onScreen: String?
+        public let line: String?
+        public init(name: String, seconds: Double?, onScreen: String?, line: String?) {
+            self.name = name; self.seconds = seconds; self.onScreen = onScreen; self.line = line
+        }
+    }
+    public struct Frame: Codable, Equatable, Sendable {
+        public let id: String
+        public let image: String
+        public init(id: String, image: String) { self.id = id; self.image = image }
+    }
+    public struct Option: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        /// "Sure" / "Bold" / "Wild".
+        public let label: String
+        public let title: String
+        public let summary: String?
+        public let why: String?
+        /// A picture of it on the Mac, fetched with an image command naming the session's key.
+        public let image: String?
+        public var frames: [Frame]? = nil
+        public var beats: [Beat]? = nil
+        public var note: String? = nil
+        public init(id: String, label: String, title: String, summary: String?, why: String?, image: String?,
+                    frames: [Frame]? = nil, beats: [Beat]? = nil, note: String? = nil) {
+            self.id = id; self.label = label; self.title = title; self.summary = summary; self.why = why
+            self.image = image; self.frames = frames; self.beats = beats; self.note = note
+        }
+    }
+    public struct Ask: Codable, Equatable, Sendable {
+        public struct Option: Codable, Equatable, Sendable, Identifiable {
+            public let id: String
+            public let label: String
+            public let detail: String?
+            public init(id: String, label: String, detail: String?) { self.id = id; self.label = label; self.detail = detail }
+        }
+        public let id: String
+        public let question: String
+        public let context: String?
+        public let options: [Option]
+        public let recommended: String?
+        public let placeholder: String?
+        public init(id: String, question: String, context: String?, options: [Option], recommended: String?, placeholder: String?) {
+            self.id = id; self.question = question; self.context = context; self.options = options
+            self.recommended = recommended; self.placeholder = placeholder
+        }
+    }
+    public let provider: String
+    /// "brief", "story", "look", "animatic", "final", "ask" or "other".
+    public let call: String
+    public let step: String
+    /// Named by an answer, so the Mac refuses one made for a call that has since changed.
+    public let revision: String
+    public let title: String?
+    /// "Pick a look".
+    public let prompt: String
+    public var context: String? = nil
+    public var options: [Option]? = nil
+    public var recommended: String? = nil
+    public var canAskMore: Bool? = nil
+    public var ask: Ask? = nil
+    /// Set when this call can only be made on the Mac for now; says why.
+    public var macOnly: String? = nil
+
+    public init(provider: String, call: String, step: String, revision: String, title: String?, prompt: String,
+                context: String? = nil, options: [Option]? = nil, recommended: String? = nil,
+                canAskMore: Bool? = nil, ask: Ask? = nil, macOnly: String? = nil) {
+        self.provider = provider; self.call = call; self.step = step; self.revision = revision
+        self.title = title; self.prompt = prompt; self.context = context; self.options = options
+        self.recommended = recommended; self.canAskMore = canAskMore; self.ask = ask; self.macOnly = macOnly
+    }
+}
+
+/// An answer to a workflow's call. The Mac checks it against the product's files as they are then.
+public struct WorkflowCommand: Codable, Equatable, Sendable {
+    /// What the answer carries: an option's id, "more like this one", or an answer to a question.
+    public enum Value: Codable, Equatable, Sendable {
+        case id(String)
+        case more(near: String?)
+        case answer(choice: String?, text: String)
+
+        private enum Keys: String, CodingKey { case near, choice, text }
+
+        public func encode(to encoder: Encoder) throws {
+            switch self {
+            case let .id(id):
+                var container = encoder.singleValueContainer()
+                try container.encode(id)
+            case let .more(near):
+                var container = encoder.container(keyedBy: Keys.self)
+                try container.encodeIfPresent(near, forKey: .near)
+            case let .answer(choice, text):
+                var container = encoder.container(keyedBy: Keys.self)
+                try container.encode(choice, forKey: .choice)
+                try container.encode(text, forKey: .text)
+            }
+        }
+
+        public init(from decoder: Decoder) throws {
+            if let id = try? decoder.singleValueContainer().decode(String.self) {
+                self = .id(id)
+                return
+            }
+            let container = try decoder.container(keyedBy: Keys.self)
+            if container.contains(.text) || container.contains(.choice) {
+                self = .answer(choice: try container.decodeIfPresent(String.self, forKey: .choice),
+                               text: try container.decodeIfPresent(String.self, forKey: .text) ?? "")
+            } else {
+                self = .more(near: try container.decodeIfPresent(String.self, forKey: .near))
+            }
+        }
+    }
+    public let v: Int
+    public let kind: String
+    /// The session's fleet key: a film's director is not a Conductor chat.
+    public let sessionKey: String
+    public let step: String
+    public let revision: String
+    /// "choose", "more" or "answer".
+    public let type: String
+    public let value: Value?
+    public let note: String?
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
@@ -531,6 +669,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var patch: FilePatch? = nil
     /// For an image request: the image.
     public var image: PhoneImage? = nil
+    /// For a workflow answer: what was sent, in a few words ("Picked Wild: Foil").
+    public var said: String? = nil
 
     public var sent: Bool { status == "sent" }
     /// For an answer: the Mac delivered it (`via` says how: "conductor", "stopped-and-sent").

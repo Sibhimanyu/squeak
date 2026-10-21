@@ -47,6 +47,11 @@ export interface FleetMonitorDependencies {
   claudeCost?: ClaudeCostReader | null;
   /** Optional: without it Codex quota is simply never shown or pushed. */
   codexUsage?: CodexUsageReader | null;
+  /**
+   * Optional: marks sessions directing a workflow that waits on the human
+   * (src/workflows/). Without it they read as plain Claude sessions.
+   */
+  workflows?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
 }
 
 export interface FleetMonitorOptions {
@@ -310,7 +315,9 @@ export class FleetMonitor {
     ];
 
     const processes = await this.deps.liveness.observe();
-    const sessions = applyLiveness(applyHookEvents(mergeObservations(observations), this.hookEvents), processes);
+    const sessions = this.annotateWorkflows(
+      applyLiveness(applyHookEvents(mergeObservations(observations), this.hookEvents), processes),
+    );
 
     const attention: AttentionItem[] = [];
     const pushes: AttentionItem[] = [];
@@ -345,7 +352,15 @@ export class FleetMonitor {
       for (const kind of kinds) {
         // A stall is timed from the last thing the agent wrote, so each stall
         // is its own episode (one card each), not the whole working stretch.
-        const since = kind === "stalled" ? (session.waitingSince ?? recorded.stateEnteredAt) : recorded.stateEnteredAt;
+        // A workflow's call is its own episode too: picking a story and then
+        // being asked for a look is two pages, even if no refresh saw the
+        // director working in between.
+        const since =
+          kind === "stalled"
+            ? (session.waitingSince ?? recorded.stateEnteredAt)
+            : kind === "blocked_question" && session.workflow
+              ? session.workflow.since
+              : recorded.stateEnteredAt;
         const item: AttentionItem = {
           session,
           kind,
@@ -398,6 +413,18 @@ export class FleetMonitor {
       generatedAt: observedAt,
       codexUsage,
     };
+  }
+
+  private annotateWorkflows(sessions: FleetSession[]): FleetSession[] {
+    if (!this.deps.workflows) {
+      return sessions;
+    }
+    try {
+      return this.deps.workflows.annotate(sessions);
+    } catch (error) {
+      logger.warn("fleet workflow read failed", { error: error instanceof Error ? error.message : String(error) });
+      return sessions;
+    }
   }
 
   private readCodexUsage(): CodexUsage | null {

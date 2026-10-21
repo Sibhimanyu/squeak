@@ -40,6 +40,14 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   imageCommand: { box: string; sig: string; device: string };
   hotspotCommandId: string;
   hotspotCommand: { box: string; sig: string; device: string };
+  workflowChooseCommandId: string;
+  workflowChooseCommand: { box: string; sig: string; device: string };
+  workflowMoreCommandId: string;
+  workflowMoreCommand: { box: string; sig: string; device: string };
+  workflowAnswerCommandId: string;
+  workflowAnswerCommand: { box: string; sig: string; device: string };
+  workflowImageCommandId: string;
+  workflowImageCommand: { box: string; sig: string; device: string };
 };
 
 const QUEUED_ID = "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31";
@@ -61,6 +69,8 @@ function bridge(turn: string) {
   const hotspotRequests: unknown[] = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
   const answers: Array<[string, unknown]> = [];
+  const acts: Array<[string, unknown]> = [];
+  const pictures: Array<[string, string]> = [];
   const remote = new RemoteBridge({
     configPath,
     projectId: "squeak-test",
@@ -84,7 +94,19 @@ function bridge(turn: string) {
         return { ok: true };
       },
     },
-    image: async () => ({ ok: true, image: { mime: "image/jpeg", data: "AAAA" } }),
+    image: async (source, cwd) => {
+      pictures.push([source, cwd]);
+      return { ok: true, image: { mime: "image/jpeg", data: "AAAA" } };
+    },
+    // A RasanAI film; the provider's own checks are tested in workflows/rasanai.
+    workflow: {
+      view: () => null,
+      allowsImage: (_status, source) => source === ".rasanai/run-1/design/Wild/specimen.png",
+      act: (projectDir, action) => {
+        acts.push([projectDir, action]);
+        return { ok: true, actionId: "sq1", said: "Sent" };
+      },
+    },
     hotspot: {
       state: () => ({ configured: true, ssid: "Sibhi's iPhone", enabled: true, onHotspot: false, last: null }),
       apply: async (request: unknown) => {
@@ -109,7 +131,16 @@ function bridge(turn: string) {
     snapshot: () =>
       ({
         sessions: [],
-        active: [{ key: "claude-transcript:s1", conductorSessionId: "s1", cwd: "/w", baseRef: null } as FleetSession],
+        active: [
+          { key: "claude-transcript:s1", conductorSessionId: "s1", cwd: "/w", baseRef: null } as FleetSession,
+          {
+            key: "claude-transcript:d1",
+            conductorSessionId: null,
+            cwd: "/films/q",
+            baseRef: null,
+            workflow: { projectDir: "/films/q", step: "look", revision: "look@2026-10-14T16:56:23.780Z" },
+          } as FleetSession,
+        ],
       }) as unknown as FleetSnapshot,
     newChat: {
       workspaces: () => [
@@ -130,7 +161,7 @@ function bridge(turn: string) {
     // As of when the phone made it, so the fixture never expires.
     now: () => fixture.madeAt + 1_000,
   });
-  return { remote, config, sends, sent, starts, queueActions, answers, stops, hotspotRequests };
+  return { remote, config, sends, sent, starts, queueActions, answers, stops, hotspotRequests, acts, pictures };
 }
 
 describe("a reply made on the iPhone", () => {
@@ -229,5 +260,33 @@ describe("a reply made on the iPhone", () => {
     raw[20] = raw[20]! ^ 1;
     await remote.handleCommand(config, fixture.commandId, { ...fixture.command, box: raw.toString("base64") });
     expect(sends).toEqual([]);
+  });
+});
+
+describe("a RasanAI call made on the iPhone", () => {
+  const look = { step: "look", revision: "look@2026-10-14T16:56:23.780Z" };
+
+  it("picks, asks for more, and answers in words, exactly as the phone signed them", async () => {
+    const { remote, config, acts } = bridge("turn-1");
+    for (const [id, doc] of [
+      [fixture.workflowChooseCommandId, fixture.workflowChooseCommand],
+      [fixture.workflowMoreCommandId, fixture.workflowMoreCommand],
+      [fixture.workflowAnswerCommandId, fixture.workflowAnswerCommand],
+    ] as const) {
+      const verdict = await remote.handleCommand(config, id, doc);
+      expect(verdict.result).toEqual({ id, status: "sent", said: "Sent" });
+    }
+    expect(acts).toEqual([
+      ["/films/q", { ...look, type: "choose", value: "wild" }],
+      ["/films/q", { ...look, type: "more", value: { near: "bold" } }],
+      ["/films/q", { ...look, type: "answer", value: { choice: null, text: "Warmer, please" } }],
+    ]);
+  });
+
+  it("fetches a look's poster from the film's folder", async () => {
+    const { remote, config, pictures } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.workflowImageCommandId, fixture.workflowImageCommand);
+    expect(verdict.result).toMatchObject({ status: "sent", image: { mime: "image/jpeg" } });
+    expect(pictures).toEqual([[".rasanai/run-1/design/Wild/specimen.png", "/films/q"]]);
   });
 });

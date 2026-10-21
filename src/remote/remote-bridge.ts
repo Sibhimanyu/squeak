@@ -26,6 +26,7 @@ import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
+import type { WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../workflows/types.js";
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
 import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
 import type { ChannelDoc } from "./firestore-rest.js";
@@ -138,10 +139,41 @@ export interface ImageCommand {
   v: 1;
   kind: "image";
   sessionId: string;
+  /**
+   * A picture on a workflow's card (a RasanAI look's poster) instead of one
+   * a chat named: the fleet key of the session, and `sessionId` is ignored.
+   */
+  sessionKey?: string;
   source: string;
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
+}
+
+/**
+ * An answer to a workflow's call (src/workflows/): pick a story, pick a
+ * look, ask for three more, answer the director's question. Names the
+ * session by fleet key and the call by the revision the phone was shown.
+ */
+export interface WorkflowCommand {
+  v: 1;
+  kind: "workflow";
+  sessionKey: string;
+  step: string;
+  revision: string;
+  type: string;
+  value?: unknown;
+  note?: string;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/** What shows a workflow's card and takes its answers (workflows/rasanai/provider.ts). */
+export interface RemoteWorkflows {
+  view(status: WorkflowStatus): WorkflowView | null;
+  allowsImage(status: WorkflowStatus, source: string): boolean;
+  act(projectDir: string, action: WorkflowAction): WorkflowResult;
 }
 
 /** What reads a workspace's diff (fleet/diff-view.ts). */
@@ -353,6 +385,8 @@ export interface RemoteBridgeDependencies {
   diff?: RemoteDiffReader | null;
   /** Reads an image a chat's agent named, for the phone (phone-image.ts). Absent: refused. */
   image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
+  /** A workflow's cards and answers (RasanAI). Absent: phones see plain sessions, and answers are refused. */
+  workflow?: RemoteWorkflows | null;
   now?: () => number;
   macName?: string;
 }
@@ -1063,6 +1097,9 @@ export class RemoteBridge {
     if (kind === "stop") {
       return this.handleStop(device, id, command as unknown as StopCommand);
     }
+    if (kind === "workflow") {
+      return this.handleWorkflow(device, id, command as unknown as WorkflowCommand);
+    }
     if (kind === "answer") {
       const result = await runAnswerCommand(command as unknown as AnswerCommand, {
         answerer: this.deps.answerer ?? null,
@@ -1382,6 +1419,9 @@ export class RemoteBridge {
     if (!read) {
       return refuse("This Mac can't send images to a phone.");
     }
+    if (command.sessionKey !== undefined) {
+      return this.handleWorkflowImage(device, id, command, read);
+    }
     const session = this.shownSession(command.sessionId);
     if (!session) {
       return refuse("That chat isn't on your phone any more.");
@@ -1408,6 +1448,92 @@ export class RemoteBridge {
     }
     this.log(device.name, "sent", `an image from ${command.sessionId.slice(0, 8)}`);
     return { write: true, result: { id, status: "sent", image: outcome.image } };
+  }
+
+  /** A picture on a workflow's card: only one the card waiting now names, read inside its project. */
+  private async handleWorkflowImage(
+    device: PairedDevice,
+    id: string,
+    command: ImageCommand,
+    read: (source: string, cwd: string) => Promise<PhoneImageResult>,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `image: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const session = typeof command.sessionKey === "string" ? this.workflowSession(command.sessionKey) : null;
+    if (!session?.workflow || !this.deps.workflow) {
+      return refuse("That isn't waiting on you any more.");
+    }
+    if (!this.deps.workflow.allowsImage(session.workflow, command.source)) {
+      return refuse("That picture isn't on this card.");
+    }
+    let outcome: PhoneImageResult;
+    try {
+      outcome = await read(command.source, session.workflow.projectDir);
+    } catch {
+      outcome = { ok: false, reason: "Your Mac couldn't read that image." };
+    }
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.log(device.name, "sent", `a picture from ${session.workflow.title ?? "a film"}`);
+    return { write: true, result: { id, status: "sent", image: outcome.image } };
+  }
+
+  /**
+   * An answer to a workflow's call. Signature, freshness and nonce have
+   * already held. The session must be one the phone is shown and still
+   * waiting (the Mac's own snapshot, never the phone's copy); the provider
+   * then checks the call and the answer against the product's files as
+   * they are now.
+   */
+  private handleWorkflow(
+    device: PairedDevice,
+    id: string,
+    command: WorkflowCommand,
+  ): { write: boolean; result: Record<string, unknown> } {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `workflow: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const workflows = this.deps.workflow;
+    if (!workflows) {
+      return refuse("This Mac can't answer that from a phone.");
+    }
+    if (
+      command.v !== 1 ||
+      typeof command.sessionKey !== "string" ||
+      typeof command.step !== "string" ||
+      typeof command.revision !== "string" ||
+      typeof command.type !== "string" ||
+      !/^[a-z-]{2,20}$/.test(command.type) ||
+      (command.note !== undefined && typeof command.note !== "string") ||
+      JSON.stringify(command.value ?? null).length > 8_000
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const session = this.workflowSession(command.sessionKey);
+    if (!session?.workflow) {
+      return refuse("That isn't waiting on you any more.");
+    }
+    const result = workflows.act(session.workflow.projectDir, {
+      step: command.step,
+      revision: command.revision,
+      type: command.type,
+      value: command.value ?? null,
+      ...(command.note !== undefined ? { note: command.note } : {}),
+    });
+    if (!result.ok) {
+      return refuse(result.reason);
+    }
+    this.log(device.name, "sent", `${result.said} (${session.workflow.title ?? "a film"})`);
+    return { write: true, result: { id, status: "sent", said: result.said } };
+  }
+
+  /** An active session, by fleet key, that a workflow has marked as waiting. */
+  private workflowSession(sessionKey: string): FleetSession | null {
+    return this.deps.snapshot().active.find((session) => session.key === sessionKey && session.workflow) ?? null;
   }
 
   /** The Mac's own record of a Conductor chat the phone is shown, or null. */
@@ -1754,11 +1880,24 @@ export class RemoteBridge {
       activity: session.state === "working" ? this.activityFor(session) : null,
       // Only while it waits for an answer; older phones ignore it.
       ...(session.state === "awaiting_input" ? { question: this.questionFor(session) } : {}),
+      // A workflow's own card (RasanAI: pick a story, pick a look); older phones ignore it.
+      ...(session.workflow ? { workflow: this.workflowView(session.workflow) } : {}),
       // Why an errored chat failed, so its row can say so; older phones ignore it.
       ...(session.state === "error" && conductorSessionId
         ? { failure: this.failure(conductorSessionId, session.lastActivityAt) }
         : {}),
     };
+  }
+
+  private workflowView(status: WorkflowStatus): WorkflowView | null {
+    try {
+      return this.deps.workflow?.view(status) ?? null;
+    } catch (error) {
+      logger.debug("could not read a workflow card", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   /** Read once per change: the key moves with the session's activity. */
@@ -1971,6 +2110,7 @@ export function snapshotSignature(snapshot: FleetSnapshot): string {
       session.title,
       session.detail,
       session.conductorSessionId,
+      session.workflow?.revision ?? null,
     ]),
   );
 }
