@@ -23,6 +23,7 @@ import path from "node:path";
 import readline from "node:readline";
 import Database from "better-sqlite3";
 import { ConductorRelayServer } from "../src/fleet/conductor-relay/relay-server.js";
+import { mergePairedDevice, parsePairedDevices } from "../src/fleet/conductor-relay/paired-devices.js";
 import { parsePairingLink } from "../src/fleet/conductor-relay/pairing.js";
 import type { DeviceCredentials, PhoneClient } from "../src/fleet/conductor-relay/phone.js";
 
@@ -35,6 +36,7 @@ const UPSTREAM = "https://api.conductor.build";
 // account under which it keeps the list of paired remote-control devices.
 const KEYCHAIN_SERVICE = "com.conductor.app.production.settings";
 const PAIRED_DEVICES_ACCOUNT = "desktop_relay_paired_devices";
+const CONDUCTOR_APP = "/Applications/Conductor.app";
 
 interface RelayState {
   port: number;
@@ -120,6 +122,22 @@ function cmdReset(): void {
   console.log(`Removed ${OVERRIDE_KEY}; set ${ENABLE_KEY}=false. Restart Conductor to restore normal cloud.`);
 }
 
+/** The stored list, or undefined when the item does not exist yet (`security` exits 44). */
+function readPairedDevices(): string | undefined {
+  try {
+    return execFileSync(
+      "security",
+      ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", PAIRED_DEVICES_ACCOUNT, "-w"],
+      {
+        encoding: "utf8",
+      },
+    ).replace(/\n$/, "");
+  } catch (error) {
+    if ((error as { status?: number }).status === 44) return undefined;
+    throw error;
+  }
+}
+
 /**
  * Register a device directly in Conductor's Keychain, skipping the in-app
  * pairing screen. The host re-reads this list on every auth, so no restart is
@@ -130,14 +148,20 @@ function cmdKeychainPair(): void {
   const deviceToken = crypto.randomBytes(32).toString("base64url");
   const tokenHash = crypto.createHash("sha256").update(deviceToken, "utf8").digest().toString("base64url");
   const now = new Date().toISOString();
-  const record = [{ deviceId, name: "Squeak", tokenHash, createdAt: now, lastSeenAt: now }];
-  const value = JSON.stringify(record);
-  // -U update if present, -A allow all apps (so Conductor can read without a
-  // per-access prompt), -w value. Writes to the default (login) keychain.
+  // Merge into whatever Conductor already holds: replacing the list would
+  // unpair every device Conductor paired itself.
+  const existing = parsePairedDevices(readPairedDevices());
+  const value = JSON.stringify(
+    mergePairedDevice(existing, { deviceId, name: "Squeak", tokenHash, createdAt: now, lastSeenAt: now }),
+  );
+  // -U update if present, -T trust only Conductor (so it reads without a
+  // per-access prompt and no other app can read the token hashes), -w value.
+  // Writes to the default (login) keychain.
   execFileSync("security", [
     "add-generic-password",
     "-U",
-    "-A",
+    "-T",
+    CONDUCTOR_APP,
     "-s",
     KEYCHAIN_SERVICE,
     "-a",
