@@ -395,8 +395,12 @@ final class AppModel {
         }
     }
 
-    /// "8 active across your Mac": everything except idle for more than a day.
-    var activeCount: Int { count(.all) }
+    /// "8 sessions · 3 working": every session not idle for more than a day, and how many of them are mid-turn.
+    var sessionsSummary: String {
+        let all = count(.all), working = count(.working)
+        let base = "\(all) session\(all == 1 ? "" : "s")"
+        return working > 0 ? "\(base) · \(working) working" : base
+    }
     var hasCodexApp: Bool { sessions.contains { $0.source == .codexApp } }
 
     func liveStep(_ key: SessionKey) -> String? { liveSteps[key] }

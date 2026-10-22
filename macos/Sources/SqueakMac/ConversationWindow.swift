@@ -215,7 +215,7 @@ struct SessionListView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Sessions").font(Typo.title).accessibilityAddTraits(.isHeader)
-            Text("\(model.activeCount) active across your Mac").font(Typo.body).foregroundStyle(Theme.muted)
+            Text(model.sessionsSummary).font(Typo.body).foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 12)
