@@ -34,6 +34,12 @@ struct ConversationView: View {
             }
         }
         .background(ConversationWindowReader())
+        .background {
+            // ⌘\ folds the filters column away and back, wherever focus is (search, list, composer).
+            Button("Toggle Sidebar") { visibility = visibility == .all ? .doubleColumn : .all }
+                .keyboardShortcut("\\", modifiers: .command)
+                .opacity(0).accessibilityHidden(true)
+        }
         .frame(minWidth: 960, minHeight: 600)
     }
 }
