@@ -73,6 +73,9 @@ export const CURATED = [
   "inbox",
   "smartphone",
   "gauge",
+  "folder",
+  "house",
+  "layers",
 ];
 
 const num = (s: string | undefined, d = 0) => (s === undefined ? d : Number(s));

@@ -15,13 +15,21 @@ public struct SqueakRootView: View {
     private let onMainScreen: (() -> Void)?
     private let onScreen: ((String) -> Void)?
     private let onReport: (() -> Void)?
+    private let navigation: Navigation
+
+    /// How the paired app is laid out. `embedded`, the default, is one screen with no bar of its own,
+    /// for an app that hosts this view as one of its tabs (a bar inside a bar is never wanted).
+    /// `tabs` is Squeak's own app: Home, Sessions, Needs you and Settings along the bottom.
+    public enum Navigation: Sendable { case embedded, tabs }
 
     /// `onMainScreen` runs when the session list appears (paired, past onboarding).
     /// `onScreen` names the screen in front ("Pairing", "Sessions", "Session"), for the host's
     /// feedback tool. `onReport` opens that tool; Settings shows "Report a problem" when it is set.
     public init(
-        onMainScreen: (() -> Void)? = nil, onScreen: ((String) -> Void)? = nil, onReport: (() -> Void)? = nil
+        onMainScreen: (() -> Void)? = nil, onScreen: ((String) -> Void)? = nil, onReport: (() -> Void)? = nil,
+        navigation: Navigation = .embedded
     ) {
+        self.navigation = navigation
         self.onMainScreen = onMainScreen
         self.onScreen = onScreen
         self.onReport = onReport
@@ -33,7 +41,7 @@ public struct SqueakRootView: View {
     public static var tabIcon: Image { Image("squeak-tab-duck", bundle: .module) }
 
     public var body: some View {
-        RootView(onMainScreen: onMainScreen)
+        RootView(onMainScreen: onMainScreen, tabs: navigation == .tabs)
             .environment(model)
             .environment(\.squeakScreen, ScreenReporter(report: onScreen, openReport: onReport))
             .tint(Theme.done)
@@ -51,12 +59,15 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.squeakScreen) private var screen
     var onMainScreen: (() -> Void)?
+    var tabs = false
 
     var body: some View {
         switch model.phase {
         case .unpaired: PairView().onAppear { screen.report?("Pairing") }
         case let .awaitingApproval(code, mac): AwaitingApprovalView(code: code, mac: mac)
-        case .paired: HomeView().onAppear { screen.report?("Sessions"); onMainScreen?() }
+        case .paired:
+            Group { if tabs { HomeTabs() } else { HomeView() } }
+                .onAppear { screen.report?("Sessions"); onMainScreen?() }
         }
     }
 }

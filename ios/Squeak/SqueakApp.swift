@@ -23,7 +23,8 @@ struct SqueakApp: App {
                     )
                 },
                 onScreen: { Heresay.setScreen($0) },
-                onReport: { Heresay.present() }
+                onReport: { Heresay.present() },
+                navigation: .tabs
             )
             .onOpenURL { SqueakRouter.shared.handle($0) }
             .heresay()

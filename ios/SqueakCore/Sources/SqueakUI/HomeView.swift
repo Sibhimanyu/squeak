@@ -11,11 +11,14 @@ enum HomeRoute: Hashable {
     case recent
 }
 
-/// DESIGN.md §8.2: Home is one short list of groups, by project or by state, and a tap opens a
-/// group's chats. Nothing else competes for the first glance: no per-row dots, one accent colour
-/// (needs you), and everything else in ink and grey.
+/// DESIGN.md §8.2: Home is a stack of group cards, by project or by state; a card's header opens
+/// the group's chats and the few chats it previews open themselves. Nothing else competes for the
+/// first glance: one accent colour (needs you), everything else in ink and grey.
 struct HomeView: View {
+    /// In the app's own tab bar Settings is a tab, so the gear stays out of the toolbar.
+    var inTabs = false
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var router = SqueakRouter.shared
     /// Projects or Status, remembered between launches.
     @AppStorage("homeGrouping") private var grouping = Presentation.Grouping.projects
@@ -41,19 +44,21 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                if model.snapshot != nil {
-                    if query.isEmpty { groups } else { results }
+            Group {
+                if model.snapshot == nil {
+                    ScrollView { waiting }
+                } else if !query.isEmpty {
+                    List { results }
+                        .listStyle(.insetGrouped)
+                        .listSectionSpacing(16)
+                        .scrollContentBackground(.hidden)
                 } else {
-                    waiting
+                    ScrollView { cards }.scrollDismissesKeyboard(.interactively)
                 }
             }
-            .listStyle(.insetGrouped)
-            .listSectionSpacing(16)
-            .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Sessions")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(query.isEmpty && model.snapshot != nil ? grouping.title : "Sessions")
+            .navigationBarTitleDisplayMode(.large)
             .searchable(text: $query, prompt: "Search sessions…")
             .navigationDestination(for: HomeRoute.self) { route in
                 if case .session(let key) = route { SessionView(key: key) } else { GroupView(route: route, path: $path) }
@@ -84,48 +89,44 @@ struct HomeView: View {
 
     /* ---------- the two views ---------- */
 
-    @ViewBuilder
-    private var groups: some View {
-        Section {
-            Picker("Group by", selection: $grouping) {
-                ForEach(Presentation.Grouping.allCases) { Text($0.title).tag($0) }
+    /// The switch, one line of what is on screen in words, then the cards. Both presentations read the
+    /// same snapshot, so the switch changes only how it is laid out and needs no round trip.
+    private var cards: some View {
+        LazyVStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker("Group by", selection: $grouping) {
+                    ForEach(Presentation.Grouping.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: grouping) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
+                if !sessions.isEmpty { summary }
             }
-            .pickerStyle(.segmented)
-            .onChange(of: grouping) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
-        }
-        if let starting = model.startingChat { Section { StartingRow(label: starting.label) } }
-        if sessions.isEmpty {
-            restingDuck
-        } else {
-            Section {
+            .padding(.bottom, 4)
+            if let starting = model.startingChat { StartingRow(label: starting.label) }
+            if sessions.isEmpty {
+                restingDuck
+            } else {
                 switch grouping {
                 case .projects:
-                    ForEach(projects) { project in
-                        NavigationLink(value: HomeRoute.project(project.name)) {
-                            GroupRow(title: project.name, detail: Presentation.projectSummary(project.sessions),
-                                     count: project.sessions.count, needsYou: project.sessions.contains(where: \.needsYou))
-                        }
-                        .homeRow(needsYou: project.sessions.contains(where: \.needsYou))
-                    }
+                    ForEach(projects) { ProjectCard(project: $0) }
                 case .status:
                     ForEach(Presentation.statusGroups(sessions), id: \.filter) { group in
-                        NavigationLink(value: HomeRoute.status(group.filter)) {
-                            GroupRow(title: group.filter.heading, detail: nil, count: group.count, needsYou: group.filter == .needsYou)
-                        }
-                        .homeRow(needsYou: group.filter == .needsYou)
+                        StatusGroupCard(filter: group.filter, sessions: sessions.filter { Presentation.inFilter($0, group.filter) })
                     }
                 }
             }
+            if !recent.isEmpty { EarlierCard() }
         }
-        if !recent.isEmpty {
-            Section {
-                NavigationLink(value: HomeRoute.recent) {
-                    GroupRow(title: "Earlier", detail: "Chats that went quiet, to pick up again", count: nil, needsYou: false)
-                }
-                .homeRow(needsYou: false)
-            }
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: grouping)
+    }
+
+    /// "6 sessions · 3 working", or the Mac awake's countdown, in words only: ConnectionBar speaks up
+    /// when the connection is not fine.
+    private var summary: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { _ in
+            Text(subtitle).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+                .accessibilityLabel("\(subtitle), \(model.connection().text)")
         }
     }
 
@@ -165,20 +166,6 @@ struct HomeView: View {
         } else {
             ToolbarItem(placement: .topBarLeading) { duck }
         }
-        ToolbarItem(placement: .principal) {
-            VStack(spacing: 1) {
-                Text("Sessions").font(.headline)
-                if model.snapshot != nil {
-                    // Words only: ConnectionBar speaks up when the connection is not fine.
-                    TimelineView(.periodic(from: .now, by: 5)) { _ in
-                        Text(subtitle).font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
-                            .accessibilityLabel("\(subtitle), \(model.connection().text)")
-                    }
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
-        }
         // Only a Mac new enough to list workspaces can start a chat; Settings says so otherwise.
         if model.snapshot?.workspaces != nil {
             ToolbarItem(placement: .topBarTrailing) {
@@ -192,9 +179,11 @@ struct HomeView: View {
                 Lucide(.gauge, size: 20, label: "Usage", color: Theme.muted)
             }
         }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button { showingSettings = true } label: {
-                Lucide(.settings, size: 20, label: "Settings", color: Theme.muted)
+        if !inTabs {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showingSettings = true } label: {
+                    Lucide(.settings, size: 20, label: "Settings", color: Theme.muted)
+                }
             }
         }
     }
@@ -233,7 +222,6 @@ struct HomeView: View {
             Text("Nothing's running. The duck is resting.").foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
-        .listRowBackground(Color.clear).listRowSeparator(.hidden)
     }
 
     private var waiting: some View {
@@ -242,7 +230,6 @@ struct HomeView: View {
             Text(model.problem ?? "Waiting for your Mac…").foregroundStyle(Theme.muted).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
-        .listRowBackground(Color.clear).listRowSeparator(.hidden)
     }
 }
 
@@ -406,32 +393,6 @@ struct SessionSwipe: ViewModifier {
     }
 }
 
-/// One group on Home: its name, what is going on in words, and how many chats it holds.
-struct GroupRow: View {
-    let title: String
-    let detail: String?
-    let count: Int?
-    let needsYou: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline).foregroundStyle(Theme.ink).lineLimit(1)
-                if let detail {
-                    Text(detail).font(.subheadline).foregroundStyle(needsYou ? Theme.ink : Theme.muted).lineLimit(1)
-                }
-            }
-            Spacer(minLength: 8)
-            if let count {
-                Text("\(count)").font(.body).foregroundStyle(Theme.muted).monospacedDigit()
-            }
-        }
-        .frame(minHeight: 44)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel([title, detail, count.map { $0 == 1 ? "1 chat" : "\($0) chats" }].compactMap { $0 }.joined(separator: ", "))
-    }
-}
-
 /// A chat that needs you: its question and, when the phone can answer it in one tap, the
 /// answers (§8.4). Reply opens the small field; anything else opens the chat.
 struct AskCard: View {
@@ -531,9 +492,7 @@ struct StartingRow: View {
                 Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
             }
         }
-        .padding(.vertical, 6).frame(minHeight: 44)
-        .listRowBackground(Color.clear)
-        .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+        .padding(.vertical, 6).padding(.horizontal, 4).frame(minHeight: 44)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Starting a chat in \(label)")
     }

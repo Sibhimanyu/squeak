@@ -60,6 +60,8 @@ struct ConnectionDetailsView: View {
 
 /// The gear: which Mac this phone is paired with, how it is doing, and unpairing.
 struct SettingsView: View {
+    /// A tab of the app's own bar, not a sheet: there is nothing to dismiss.
+    var inTab = false
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.squeakScreen) private var screen
@@ -157,7 +159,7 @@ struct SettingsView: View {
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { if !inTab { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } } }
             .confirmationDialog("Unpair this iPhone?", isPresented: $confirmingUnpair, titleVisibility: .visible) {
                 Button("Unpair", role: .destructive) { model.unpair(); dismiss() }
             } message: {

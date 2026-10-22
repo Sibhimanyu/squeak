@@ -357,6 +357,40 @@ enum Presentation {
         return parts.isEmpty ? "\(sessions.count) idle" : parts.joined(separator: " · ")
     }
 
+    /// How many chats a Home card previews: Needs you shows up to three decisions, every other
+    /// card two, so a card stays a glance and never becomes a transcript.
+    static func previewLimit(for filter: Filter?) -> Int { filter == .needsYou ? 3 : 2 }
+
+    /// A card's preview: the first `limit` chats of a group already in attention order, and how many
+    /// more the group holds. Nothing is invented; a group of two shows both and says nothing more.
+    static func preview(_ sessions: [PhoneSnapshot.Session], limit: Int = 2) -> (shown: [PhoneSnapshot.Session], more: Int) {
+        let ordered = byAttention(sessions)
+        let shown = Array(ordered.prefix(max(0, limit)))
+        return (shown, ordered.count - shown.count)
+    }
+
+    /// "1 more session", "3 more sessions"; nil when nothing is hidden.
+    static func moreLine(_ hidden: Int) -> String? {
+        hidden <= 0 ? nil : hidden == 1 ? "1 more session" : "\(hidden) more sessions"
+    }
+
+    /// A preview row's extra line, in the agent's own words and only where the snapshot has them:
+    /// what a chat needs from you, why it failed, and (when `finished` is asked for) what it last said.
+    /// Nil for a working or idle chat: its state word, or its newest step, already says it.
+    static func previewDetail(_ session: PhoneSnapshot.Session, finished: Bool) -> String? {
+        if session.needsYou { return ask(session) }
+        switch session.state {
+        case "error": return failureReason(session)
+        case "finished": return finished ? firstLine(session.message ?? session.detail) : nil
+        default: return nil
+        }
+    }
+
+    /// How many chats wait on you: the Needs you tab's badge. Zero shows no badge.
+    static func needsYouCount(_ sessions: [PhoneSnapshot.Session]) -> Int {
+        sessions.filter(\.needsYou).count
+    }
+
     /// Why an errored chat failed, one line of the agent's own words; nil when the Mac did not say
     /// (an older Mac, or a turn that left no error row).
     static func failureReason(_ session: PhoneSnapshot.Session) -> String? {

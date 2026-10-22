@@ -62,6 +62,9 @@ public enum LucideName: String, CaseIterable, Sendable {
     case inbox = "inbox"
     case smartphone = "smartphone"
     case gauge = "gauge"
+    case folder = "folder"
+    case house = "house"
+    case layers = "layers"
 }
 
 extension LucideName {
@@ -346,6 +349,18 @@ extension LucideName {
         case .gauge: return [
             .path("m12 14 4-4"),
             .path("M3.34 19a10 10 0 1 1 17.32 0"),
+        ]
+        case .folder: return [
+            .path("M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"),
+        ]
+        case .house: return [
+            .path("M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"),
+            .path("M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"),
+        ]
+        case .layers: return [
+            .path("M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"),
+            .path("M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"),
+            .path("M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"),
         ]
         }
     }

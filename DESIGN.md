@@ -498,15 +498,30 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
 - A row is a button: it opens the session's detail (app) or offers its actions
   (phone). Hover: `surface-raised`.
 
-- **The phone's Home is groups, not rows** (owner's decision, 2026-10-21). A
-  segmented switch picks **Projects** (one row per repository: its name, what
-  its chats are doing in words, a count) or **Status** (one row per state that
-  has chats in it: Needs you, Working, Done, Error, Idle). A tap opens that
-  group's chats; **Earlier** holds the ones that went quiet. Searching skips
-  the groups and lists every match. Nothing else is on Home: no status chips,
-  no urgent card. On the phone's lists the row has **no dot** and the only
-  colour is the needs-you left edge; the state is in words. Needs you opens as
-  decision cards (§8.4) with their one-tap answers.
+- **The phone's Home is group cards** (owner's decision, 2026-10-21; evolved
+  2026-10-22 from short group rows). A large title ("Projects" or "Status") and
+  a segmented switch pick **Projects** (one card per repository) or **Status**
+  (one card per state that has chats in it, in attention order: Needs you,
+  Working, Done, Error, Idle), over the same snapshot, so the switch needs no
+  round trip. A card is one neutral surface (12pt, a hairline, no shadow, no
+  state fill): a header that opens the group (a neutral Lucide folder tile and
+  the project's name with `projectSummary` in words, or the state's word with
+  a dot and its count), then up to two of its most urgent chats (three under
+  Needs you) as text-first rows, each its own tap target: title and age, the
+  state in words with `agent` (`repo · agent` under Status), and, for a chat
+  that needs you, failed, or (under Status) finished, the agent's own words.
+  "N more sessions" says the card is a preview. The only colour is the
+  needs-you left edge and its red badge; a dot appears only in a Status card's
+  header. One duck, in the header; never in a card. **Earlier** is a quiet card
+  at the foot. Searching skips the cards and lists every match. A tap on a
+  header opens that group's chats; Needs you opens as decision cards (§8.4)
+  with their one-tap answers. Swipe actions live in those lists, not on Home.
+- **The phone's own bottom bar** (standalone app only): Home, Sessions (every
+  active chat, searchable), Needs you (the decision cards; the one red badge,
+  counting only chats blocked on you) and Settings. Icons are Lucide. A host app
+  that embeds `SqueakRootView` gets the default `.embedded` layout with no bar
+  of its own, so bars never nest; the app opts in with `navigation: .tabs`. A
+  link to a chat opens it from Home, whichever tab is in front.
 
 ### 8.3 Badge
 
