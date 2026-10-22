@@ -516,12 +516,15 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   at the foot. Searching skips the cards and lists every match. A tap on a
   header opens that group's chats; Needs you opens as decision cards (§8.4)
   with their one-tap answers. Swipe actions live in those lists, not on Home.
-- **The phone's own bottom bar** (standalone app only): Home, Sessions (every
-  active chat, searchable), Needs you (the decision cards; the one red badge,
-  counting only chats blocked on you) and Settings. Icons are Lucide. A host app
-  that embeds `SqueakRootView` gets the default `.embedded` layout with no bar
-  of its own, so bars never nest; the app opts in with `navigation: .tabs`. A
-  link to a chat opens it from Home, whichever tab is in front.
+- **The phone's own bottom bar** (standalone app only): **Home** (the cards by
+  project), **Sessions** (the same cards by status) and, as before, **Needs you**
+  (the decision cards; the one red badge, counting only chats blocked on you)
+  and **Settings**. In the bar the Projects/Status switch is gone: the two tabs
+  are the two groupings. Icons are Lucide. A host app that embeds
+  `SqueakRootView` gets the default `.embedded` layout with no bar of its own,
+  so bars never nest, and keeps the switch; the app opts in with
+  `navigation: .tabs`. A link to a chat opens it from Home, whichever tab is in
+  front.
 
 ### 8.3 Badge
 

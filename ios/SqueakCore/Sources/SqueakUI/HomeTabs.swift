@@ -4,8 +4,8 @@ import SqueakIcons
 import SwiftUI
 import UIKit
 
-/// The standalone app's bottom bar: Home (Projects and Status), every active session, what needs you,
-/// and Settings. Every tab is an existing screen over the same snapshot; "Needs you" is the real
+/// The standalone app's bottom bar: Home (by project), Sessions (by status), what needs you, and
+/// Settings. Every tab is an existing screen over the same snapshot; "Needs you" is the real
 /// decision list, and its badge counts only chats that are blocked on you right now.
 struct HomeTabs: View {
     enum Tab: Hashable { case home, sessions, needsYou, settings }
@@ -19,10 +19,10 @@ struct HomeTabs: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            HomeView(inTabs: true)
+            HomeView(inTabs: true, fixedGrouping: .projects)
                 .tabItem { TabLabel("Home", icon: .house) }
                 .tag(Tab.home)
-            SessionsTab()
+            HomeView(inTabs: true, fixedGrouping: .status, opensLinks: false)
                 .tabItem { TabLabel("Sessions", icon: .layers) }
                 .tag(Tab.sessions)
             NeedsYouTab()
@@ -65,59 +65,6 @@ private enum TabGlyph {
         let image = (renderer.uiImage ?? UIImage()).withRenderingMode(.alwaysTemplate)
         cache[name] = image
         return image
-    }
-}
-
-/// Every active chat in attention order, searchable: the flat list under Home's groups.
-private struct SessionsTab: View {
-    @Environment(AppModel.self) private var model
-    @State private var query = ""
-    @State private var path: [HomeRoute] = []
-    @State private var quickReply: PhoneSnapshot.Session?
-
-    private var shown: [PhoneSnapshot.Session] {
-        Presentation.byAttention((model.snapshot?.sessions ?? []).filter { Presentation.matches($0, query: query) })
-    }
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            List {
-                if model.snapshot == nil {
-                    ProgressView().frame(maxWidth: .infinity).listRowBackground(Color.clear)
-                } else if shown.isEmpty {
-                    if query.isEmpty {
-                        ContentUnavailableView {
-                            Label { Text("Nothing is running") } icon: { Lucide(.circleCheck, size: 28, color: Theme.muted) }
-                        } description: { Text("Pull down to refresh.") }
-                        .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                    } else {
-                        ContentUnavailableView.search(text: query).listRowBackground(Color.clear).listRowSeparator(.hidden)
-                    }
-                } else {
-                    Section {
-                        ForEach(shown) { session in
-                            NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session) }
-                                .homeRow(needsYou: session.needsYou)
-                                .modifier(SessionSwipe(session: session) { quickReply = session })
-                        }
-                    }
-                }
-            }
-            .listStyle(.insetGrouped)
-            .listSectionSpacing(16)
-            .scrollContentBackground(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Sessions")
-            .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $query, prompt: "Search sessions…")
-            .navigationDestination(for: HomeRoute.self) { route in
-                if case .session(let key) = route { SessionView(key: key) } else { GroupView(route: route, path: $path) }
-            }
-            .refreshable { await model.refresh() }
-            .safeAreaInset(edge: .bottom) { ConnectionBar() }
-            .sheet(item: $quickReply) { session in QuickReply(session: session) }
-        }
-        .foregroundStyle(Theme.ink)
     }
 }
 

@@ -58,6 +58,7 @@ struct ProjectCard: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(project.name).font(.headline).foregroundStyle(Theme.ink).lineLimit(2)
                         Text(summary).font(.subheadline).foregroundStyle(needs > 0 ? Theme.ink : Theme.muted).lineLimit(2)
+                        AgentStack(sessions: project.sessions).padding(.top, 4)
                     }
                     Spacer(minLength: 8)
                     if needs > 0 { CountBadge(count: needs) }
@@ -166,15 +167,18 @@ struct SessionPreviewRow: View {
 
     var body: some View {
         NavigationLink(value: HomeRoute.session(session.key)) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(Presentation.displayTitle(session)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(Age.describe(session.lastActivityAt)).font(.footnote).foregroundStyle(Theme.muted).monospacedDigit()
-                }
-                second.font(.footnote).lineLimit(1)
-                if let detail {
-                    Text(detail).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
+            HStack(alignment: .top, spacing: 10) {
+                AgentAvatar(session: session).padding(.top, 1)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(Presentation.displayTitle(session)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(Age.describe(session.lastActivityAt)).font(.footnote).foregroundStyle(Theme.muted).monospacedDigit()
+                    }
+                    second.font(.footnote).lineLimit(1)
+                    if let detail {
+                        Text(detail).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
+                    }
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
@@ -186,6 +190,66 @@ struct SessionPreviewRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(Presentation.displayTitle(session)), \(status.text)\(detail.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), \(Age.spoken(session.lastActivityAt))")
         .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "Opens the chat")
+    }
+}
+
+/// The apps' own icons: which agent a chat runs on, with Conductor as a corner badge when Conductor
+/// holds it. Decorative to VoiceOver, since the agent's name is in the row's text. An agent we have no
+/// icon for gets a neutral terminal tile, never another app's icon.
+struct AgentAvatar: View {
+    let session: PhoneSnapshot.Session
+    var size: CGFloat = 28
+
+    static func asset(_ agent: String) -> String? {
+        switch agent.lowercased() {
+        case "claude": "agent-claude"
+        case "codex": "agent-codex"
+        default: nil
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let name = Self.asset(session.agent) {
+                Image(name, bundle: .module).resizable().scaledToFit()
+            } else {
+                Lucide(.squareTerminal, size: size * 0.6, color: Theme.muted)
+                    .frame(width: size, height: size)
+                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: size * 0.25))
+                    .overlay(RoundedRectangle(cornerRadius: size * 0.25).stroke(Theme.line))
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(alignment: .bottomTrailing) {
+            if session.conductorSessionId != nil {
+                Image("agent-conductor", bundle: .module).resizable().scaledToFit()
+                    .frame(width: size * 0.5, height: size * 0.5)
+                    .background(Theme.surface, in: Circle().inset(by: -1.5))
+                    .offset(x: size * 0.12, y: size * 0.12)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The agents a project's chats run on, as a small overlapping stack of their icons.
+struct AgentStack: View {
+    let sessions: [PhoneSnapshot.Session]
+    var size: CGFloat = 18
+
+    private var assets: [String] {
+        var seen = Set<String>()
+        return sessions.compactMap { AgentAvatar.asset($0.agent) }.filter { seen.insert($0).inserted }
+    }
+
+    var body: some View {
+        HStack(spacing: -size * 0.25) {
+            ForEach(Array(assets.enumerated()), id: \.element) { index, name in
+                Image(name, bundle: .module).resizable().scaledToFit().frame(width: size, height: size)
+                    .zIndex(Double(assets.count - index))
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 

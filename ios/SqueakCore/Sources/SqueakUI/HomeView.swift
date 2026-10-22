@@ -17,11 +17,17 @@ enum HomeRoute: Hashable {
 struct HomeView: View {
     /// In the app's own tab bar Settings is a tab, so the gear stays out of the toolbar.
     var inTabs = false
+    /// In the tab bar, Home is always by project and Sessions always by status, so there is no switch;
+    /// nil (an embedded host, which has no bar) keeps the switch and remembers its choice.
+    var fixedGrouping: Presentation.Grouping?
+    /// Only one Home in the tab bar opens a linked chat.
+    var opensLinks = true
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var router = SqueakRouter.shared
     /// Projects or Status, remembered between launches.
-    @AppStorage("homeGrouping") private var grouping = Presentation.Grouping.projects
+    @AppStorage("homeGrouping") private var storedGrouping = Presentation.Grouping.projects
+    private var grouping: Presentation.Grouping { fixedGrouping ?? storedGrouping }
     @State private var query = ""
     @State private var showingSettings = ProcessInfo.processInfo.arguments.contains("-squeak-settings")
     @State private var showingNewChat = ProcessInfo.processInfo.arguments.contains("-squeak-newchat")
@@ -40,6 +46,8 @@ struct HomeView: View {
     private var sessions: [PhoneSnapshot.Session] { model.snapshot?.sessions ?? [] }
     /// Chats that are not active any more, to pick up again.
     private var recent: [PhoneSnapshot.Session] { model.recentChats }
+    /// The large title: the grouping's, except that by status in the tab bar is the Sessions tab.
+    private var title: String { inTabs && grouping == .status ? "Sessions" : grouping.title }
     private var projects: [Presentation.Project] { Presentation.projects(sessions) }
 
     var body: some View {
@@ -57,7 +65,7 @@ struct HomeView: View {
                 }
             }
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle(query.isEmpty && model.snapshot != nil ? grouping.title : "Sessions")
+            .navigationTitle(query.isEmpty && model.snapshot != nil ? title : "Sessions")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $query, prompt: "Search sessions…")
             .navigationDestination(for: HomeRoute.self) { route in
@@ -73,7 +81,7 @@ struct HomeView: View {
                 // `-squeak-quick <key>`: the swipe's Reply sheet, for screenshots of the demo.
                 if let i = args.firstIndex(of: "-squeak-quick"), i + 1 < args.count { quickReply = model.snapshot?.session(args[i + 1]) }
                 // `-squeak-group <projects|status>` and `-squeak-filter <needsYou|…>`: for screenshots.
-                if let i = args.firstIndex(of: "-squeak-group"), i + 1 < args.count, let g = Presentation.Grouping(rawValue: args[i + 1]) { grouping = g }
+                if let i = args.firstIndex(of: "-squeak-group"), i + 1 < args.count, let g = Presentation.Grouping(rawValue: args[i + 1]) { storedGrouping = g }
                 if let i = args.firstIndex(of: "-squeak-filter"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) { path = [.status(f)] }
                 if let i = args.firstIndex(of: "-squeak-project"), i + 1 < args.count { path = [.project(args[i + 1])] }
             }
@@ -81,8 +89,8 @@ struct HomeView: View {
             .sheet(isPresented: $showingNewChat) { NewChatView(workspaces: model.snapshot?.workspaces ?? []) }
             // A link from a Telegram card: open its session as soon as the
             // snapshot has it, on a fresh stack so Back leads to the list.
-            .onChange(of: router.pendingSessionId, initial: true) { _, _ in openPending() }
-            .onChange(of: model.snapshot) { _, _ in openPending() }
+            .onChange(of: router.pendingSessionId, initial: true) { _, _ in if opensLinks { openPending() } }
+            .onChange(of: model.snapshot) { _, _ in if opensLinks { openPending() } }
         }
         .foregroundStyle(Theme.ink)
     }
@@ -94,11 +102,13 @@ struct HomeView: View {
     private var cards: some View {
         LazyVStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 10) {
-                Picker("Group by", selection: $grouping) {
-                    ForEach(Presentation.Grouping.allCases) { Text($0.title).tag($0) }
+                if fixedGrouping == nil {
+                    Picker("Group by", selection: $storedGrouping) {
+                        ForEach(Presentation.Grouping.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: storedGrouping) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
                 }
-                .pickerStyle(.segmented)
-                .onChange(of: grouping) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
                 if !sessions.isEmpty { summary }
             }
             .padding(.bottom, 4)
