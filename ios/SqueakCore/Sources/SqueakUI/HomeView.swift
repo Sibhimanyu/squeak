@@ -29,6 +29,13 @@ struct HomeView: View {
     @AppStorage("homeGrouping") private var storedGrouping = Presentation.Grouping.projects
     private var grouping: Presentation.Grouping { fixedGrouping ?? storedGrouping }
     @State private var query = ""
+    /// The small states opened in place on Home; kept here so a card scrolled away keeps its state.
+    /// `-squeak-expand <working|done|…>` starts with that state open: screenshots of the demo only.
+    @State private var expanded: Set<Presentation.Filter> = {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-squeak-expand"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) else { return [] }
+        return [f]
+    }()
     @State private var showingSettings = ProcessInfo.processInfo.arguments.contains("-squeak-settings")
     @State private var showingNewChat = ProcessInfo.processInfo.arguments.contains("-squeak-newchat")
         || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-filled")
@@ -61,7 +68,14 @@ struct HomeView: View {
                         .listSectionSpacing(16)
                         .scrollContentBackground(.hidden)
                 } else {
-                    ScrollView { cards }.scrollDismissesKeyboard(.interactively)
+                    ScrollViewReader { proxy in
+                        ScrollView { cards }
+                            // `-squeak-scrollend`: scrolls to the last card, for screenshots.
+                            .onAppear { if ProcessInfo.processInfo.arguments.contains("-squeak-scrollend") { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { proxy.scrollTo("end", anchor: .bottom) } } }
+                    }
+                        .scrollDismissesKeyboard(.interactively)
+                        // The last card scrolls clear of the floating tab bar.
+                        .contentMargins(.bottom, 24, for: .scrollContent)
                 }
             }
             .background(Theme.bg.ignoresSafeArea())
@@ -121,11 +135,14 @@ struct HomeView: View {
                     ForEach(projects) { ProjectCard(project: $0) }
                 case .status:
                     ForEach(Presentation.statusGroups(sessions), id: \.filter) { group in
-                        StatusGroupCard(filter: group.filter, sessions: sessions.filter { Presentation.inFilter($0, group.filter) })
+                        StatusGroupCard(filter: group.filter, sessions: sessions.filter { Presentation.inFilter($0, group.filter) },
+                                        expanded: Binding(get: { expanded.contains(group.filter) },
+                                                          set: { if $0 { expanded.insert(group.filter) } else { expanded.remove(group.filter) } }))
                     }
                 }
             }
             if !recent.isEmpty { EarlierCard() }
+            Color.clear.frame(height: 1).id("end")
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: grouping)
@@ -324,7 +341,8 @@ struct GroupView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.large)
+        // A pushed list gets the compact bar and the ordinary back button, not a tall header.
+        .navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.refresh() }
         .safeAreaInset(edge: .bottom) { ConnectionBar() }
         .sheet(item: $quickReply) { session in QuickReply(session: session) }
@@ -527,6 +545,18 @@ struct SessionRow: View {
     }
 
     var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            AgentAvatar(session: session).padding(.top, 2)
+            rowText
+        }
+        .padding(.vertical, 2)
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text)\(third.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
+        .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "")
+    }
+
+    private var rowText: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(Presentation.displayTitle(session)).font(.headline).lineLimit(2)
@@ -538,11 +568,6 @@ struct SessionRow: View {
                 Text(why).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
             }
         }
-        .padding(.vertical, 2)
-        .frame(minHeight: 44)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text)\(third.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), \(Age.spoken(session.lastActivityAt))")
-        .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "")
     }
 
     /// What it asks you, or why it failed, in the agent's own words.

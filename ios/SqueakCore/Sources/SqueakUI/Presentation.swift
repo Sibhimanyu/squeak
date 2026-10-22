@@ -346,15 +346,28 @@ enum Presentation {
         return working > 0 ? "\(total) · \(working) working" : total
     }
 
-    /// A project's heading, in words rather than a dot per chat: the states that want a look, in
-    /// attention order ("1 working · 1 error"); idle only when nothing else is going on.
+    /// A project's subline, in words rather than a dot per chat: how many chats it holds and what each
+    /// state has, in attention order ("3 sessions · 1 needs you · 1 working"). Every chat is counted in
+    /// exactly one state, idle included, so the parts add up to the total; a project whose chats are all
+    /// in one state says the state once ("2 sessions · idle").
     static func projectSummary(_ sessions: [PhoneSnapshot.Session]) -> String {
-        let parts: [String] = [Filter.needsYou, .working, .done, .error].compactMap { filter in
+        let total = sessions.count == 1 ? "1 session" : "\(sessions.count) sessions"
+        let counts: [(Filter, Int)] = [Filter.needsYou, .working, .done, .error, .idle].compactMap { filter in
             let count = sessions.filter { inFilter($0, filter) }.count
-            guard count > 0 else { return nil }
-            return "\(count) \(filter == .needsYou && count > 1 ? "need you" : filter.word)"
+            return count > 0 ? (filter, count) : nil
         }
-        return parts.isEmpty ? "\(sessions.count) idle" : parts.joined(separator: " · ")
+        func word(_ filter: Filter, _ count: Int) -> String { filter == .needsYou && count > 1 ? "need you" : filter.word }
+        if counts.count == 1, let only = counts.first { return "\(total) · \(word(only.0, only.1))" }
+        return ([total] + counts.map { "\($0.1) \(word($0.0, $0.1))" }).joined(separator: " · ")
+    }
+
+    /// Up to this many chats, a state's group opens in place on Home; a longer one opens its own list.
+    static let inlineLimit = 6
+
+    /// Whether tapping a state's header expands it where it is. Needs you always opens its decision
+    /// cards instead: its one-tap answers are the reason to go there.
+    static func expandsInline(_ filter: Filter, count: Int) -> Bool {
+        filter != .needsYou && count <= inlineLimit
     }
 
     /// How many chats a Home card previews: Needs you shows up to three decisions, every other

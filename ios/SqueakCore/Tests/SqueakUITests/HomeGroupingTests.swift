@@ -28,11 +28,25 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertEqual(Presentation.headerCount(six), "6 sessions · 3 working")
     }
 
-    func testProjectSummaryNamesWhatIsGoingOnInAttentionOrder() {
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "error"), chat("b", "working"), chat("c", "idle")]), "1 working · 1 error")
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "awaiting_approval")]), "2 need you")
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "finished")]), "1 needs you · 1 done")
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "idle"), chat("b", "idle")]), "2 idle")
+    func testProjectSummaryCountsEveryChatInOneStateInAttentionOrder() {
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "error"), chat("b", "working"), chat("c", "idle")]),
+                       "3 sessions · 1 working · 1 error · 1 idle")
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "awaiting_approval")]), "2 sessions · need you")
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "finished")]), "2 sessions · 1 needs you · 1 done")
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "idle"), chat("b", "idle")]), "2 sessions · idle")
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "working")]), "1 session · working")
+        // The parts always add up to the whole: no chat is left out of the line.
+        let mixed = [chat("a", "awaiting_input"), chat("b", "working"), chat("c", "working"), chat("d", "finished"), chat("e", "idle")]
+        let counts = Presentation.statusGroups(mixed).map(\.count)
+        XCTAssertEqual(counts.reduce(0, +), mixed.count)
+        XCTAssertEqual(Presentation.projectSummary(mixed), "5 sessions · 1 needs you · 2 working · 1 done · 1 idle")
+    }
+
+    func testSmallStatusGroupsOpenInPlaceButNeedsYouAndLongOnesDoNot() {
+        XCTAssertTrue(Presentation.expandsInline(.working, count: 3))
+        XCTAssertTrue(Presentation.expandsInline(.done, count: Presentation.inlineLimit))
+        XCTAssertFalse(Presentation.expandsInline(.done, count: Presentation.inlineLimit + 1))
+        XCTAssertFalse(Presentation.expandsInline(.needsYou, count: 1))
     }
 
     func testProjectsGroupByRepoInAttentionOrder() {

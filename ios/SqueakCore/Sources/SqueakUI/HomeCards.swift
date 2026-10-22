@@ -37,47 +37,62 @@ struct CountBadge: View {
     }
 }
 
-/// One project on Home: its name and what its chats are doing in words, then its most urgent chats.
+/// A card's last row: an obvious link or button, never a caption. `View all 5 sessions` opens a
+/// project's or a long state's own list; `Show all 3` / `Show less` opens and closes a small state in place.
+private struct CardFooterRow<Wrapper: View>: View {
+    let title: String
+    let symbol: LucideName
+    let wrap: (AnyView) -> Wrapper
+
+    var body: some View {
+        wrap(AnyView(
+            HStack(spacing: 6) {
+                Text(title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                Lucide(symbol, size: 16, color: Theme.subtle)
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+        ))
+        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
+    }
+}
+
+/// One project on Home, kept short: its name and a line of counts, then its one or two most urgent
+/// chats, then a way to the rest. The only needs-you mark is the left edge; the words say the rest.
 struct ProjectCard: View {
     let project: Presentation.Project
-    @ScaledMetric(relativeTo: .body) private var tile = 36
-
-    private var needs: Int { Presentation.needsYouCount(project.sessions) }
+    @ScaledMetric(relativeTo: .body) private var tile = 32
 
     var body: some View {
         let preview = Presentation.preview(project.sessions)
         let summary = Presentation.projectSummary(project.sessions)
-        let total = project.sessions.count
+        let needs = Presentation.needsYouCount(project.sessions)
         HomeGroupCard(needsYou: needs > 0) {
             NavigationLink(value: HomeRoute.project(project.name)) {
                 HStack(spacing: 12) {
-                    Lucide(.folder, size: 18, color: Theme.muted)
+                    Lucide(.folder, size: 16, color: Theme.muted)
                         .frame(width: tile, height: tile)
                         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(project.name).font(.headline).foregroundStyle(Theme.ink).lineLimit(2)
-                        Text(summary).font(.subheadline).foregroundStyle(needs > 0 ? Theme.ink : Theme.muted).lineLimit(2)
-                        AgentStack(sessions: project.sessions).padding(.top, 4)
+                        Text(summary).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
                     }
                     Spacer(minLength: 8)
-                    if needs > 0 { CountBadge(count: needs) }
                     Lucide(.chevronRight, size: 16, color: Theme.subtle)
                 }
-                .padding(14).frame(minHeight: 44).contentShape(Rectangle())
+                .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(project.name), \(total == 1 ? "1 session" : "\(total) sessions"), \(summary)")
+            .accessibilityLabel("\(project.name), \(summary)")
             .accessibilityHint("Opens the project")
             ForEach(preview.shown) { SessionPreviewRow(session: $0, context: .project) }
-            if let more = Presentation.moreLine(preview.more) {
-                NavigationLink(value: HomeRoute.project(project.name)) {
-                    Text(more).font(.footnote).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 14).padding(.top, 2).padding(.bottom, 12)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            if preview.more > 0 {
+                CardFooterRow(title: "View all \(project.sessions.count) sessions", symbol: .chevronRight) { content in
+                    NavigationLink(value: HomeRoute.project(project.name)) { content }.buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
                 .accessibilityHint("Opens the project")
             } else {
                 Color.clear.frame(height: 4)
@@ -86,10 +101,13 @@ struct ProjectCard: View {
     }
 }
 
-/// One state on Home: its word and how many chats are in it, then the chats that are.
+/// One state on Home: its word and how many chats are in it, then the chats that are. A small group
+/// opens in place (its header is a disclosure, the chevron turns); a long one, and Needs you, open
+/// their own list, so a tap never lands on a nearly empty page.
 struct StatusGroupCard: View {
     let filter: Presentation.Filter
     let sessions: [PhoneSnapshot.Session]
+    @Binding var expanded: Bool
 
     private var tone: Color {
         switch filter {
@@ -101,40 +119,61 @@ struct StatusGroupCard: View {
         }
     }
 
+    private var inline: Bool { Presentation.expandsInline(filter, count: sessions.count) }
+
     var body: some View {
+        let ordered = Presentation.byAttention(sessions)
         let preview = Presentation.preview(sessions, limit: Presentation.previewLimit(for: filter))
+        let shown = inline && expanded ? ordered : preview.shown
         let count = sessions.count
+        let label = "\(filter.heading), \(count == 1 ? "1 session" : "\(count) sessions")"
         HomeGroupCard(needsYou: filter == .needsYou) {
-            NavigationLink(value: HomeRoute.status(filter)) {
-                HStack(spacing: 10) {
-                    StatusDot(color: tone)
-                    Text(filter.heading).font(.headline).foregroundStyle(Theme.ink)
-                    Spacer(minLength: 8)
-                    if filter == .needsYou {
-                        CountBadge(count: count)
-                    } else {
-                        Text("\(count)").font(.body).foregroundStyle(Theme.muted).monospacedDigit()
+            header(count: count)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(label)
+                .accessibilityValue(inline ? (expanded ? "Expanded" : "Collapsed") : "")
+                .accessibilityHint(inline ? (expanded ? "Shows fewer sessions" : "Shows all sessions") : "Opens the list")
+                .accessibilityAddTraits(inline ? .isButton : [])
+            ForEach(shown) { SessionPreviewRow(session: $0, context: .status) }
+            if preview.more > 0 {
+                if inline {
+                    CardFooterRow(title: expanded ? "Show less" : "Show all \(count)", symbol: expanded ? .chevronUp : .chevronDown) { content in
+                        Button { toggle() } label: { content }.buttonStyle(.plain)
                     }
-                    Lucide(.chevronRight, size: 16, color: Theme.subtle)
+                } else {
+                    CardFooterRow(title: "View all \(count) sessions", symbol: .chevronRight) { content in
+                        NavigationLink(value: HomeRoute.status(filter)) { content }.buttonStyle(.plain)
+                    }
                 }
-                .padding(14).frame(minHeight: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(filter.heading), \(count == 1 ? "1 session" : "\(count) sessions")")
-            .accessibilityHint("Opens the list")
-            ForEach(preview.shown) { SessionPreviewRow(session: $0, context: .status) }
-            if let more = Presentation.moreLine(preview.more) {
-                NavigationLink(value: HomeRoute.status(filter)) {
-                    Text(more).font(.footnote).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 14).padding(.top, 2).padding(.bottom, 12)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Opens the list")
             } else {
                 Color.clear.frame(height: 4)
             }
+        }
+    }
+
+    private func toggle() {
+        withAnimation(.easeOut(duration: 0.2)) { expanded.toggle() }
+    }
+
+    @ViewBuilder
+    private func header(count: Int) -> some View {
+        let row = HStack(spacing: 10) {
+            // Needs you has its left edge and its badge; a third red mark would only repeat them.
+            if filter != .needsYou { StatusDot(color: tone) }
+            Text(filter.heading).font(.headline).foregroundStyle(Theme.ink)
+            Spacer(minLength: 8)
+            if filter == .needsYou {
+                CountBadge(count: count)
+            } else {
+                Text("\(count)").font(.body).foregroundStyle(Theme.muted).monospacedDigit()
+            }
+            Lucide(inline ? (expanded ? .chevronUp : .chevronDown) : .chevronRight, size: 16, color: Theme.subtle)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
+        if inline {
+            Button { toggle() } label: { row }.buttonStyle(.plain)
+        } else {
+            NavigationLink(value: HomeRoute.status(filter)) { row }.buttonStyle(.plain)
         }
     }
 }
@@ -177,7 +216,7 @@ struct SessionPreviewRow: View {
                     }
                     second.font(.footnote).lineLimit(1)
                     if let detail {
-                        Text(detail).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
+                        Text(detail).font(.footnote).foregroundStyle(Theme.muted).lineLimit(context == .project ? 1 : 2)
                     }
                 }
             }
@@ -188,7 +227,7 @@ struct SessionPreviewRow: View {
         .buttonStyle(.plain)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(Presentation.displayTitle(session)), \(status.text)\(detail.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), \(Age.spoken(session.lastActivityAt))")
+        .accessibilityLabel("\(Presentation.displayTitle(session)), \(status.text)\(detail.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
         .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "Opens the chat")
     }
 }
@@ -226,27 +265,6 @@ struct AgentAvatar: View {
                     .frame(width: size * 0.5, height: size * 0.5)
                     .background(Theme.surface, in: Circle().inset(by: -1.5))
                     .offset(x: size * 0.12, y: size * 0.12)
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
-
-/// The agents a project's chats run on, as a small overlapping stack of their icons.
-struct AgentStack: View {
-    let sessions: [PhoneSnapshot.Session]
-    var size: CGFloat = 18
-
-    private var assets: [String] {
-        var seen = Set<String>()
-        return sessions.compactMap { AgentAvatar.asset($0.agent) }.filter { seen.insert($0).inserted }
-    }
-
-    var body: some View {
-        HStack(spacing: -size * 0.25) {
-            ForEach(Array(assets.enumerated()), id: \.element) { index, name in
-                Image(name, bundle: .module).resizable().scaledToFit().frame(width: size, height: size)
-                    .zIndex(Double(assets.count - index))
             }
         }
         .accessibilityHidden(true)

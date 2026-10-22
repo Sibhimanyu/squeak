@@ -499,23 +499,33 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   (phone). Hover: `surface-raised`.
 
 - **The phone's Home is group cards** (owner's decision, 2026-10-21; evolved
-  2026-10-22 from short group rows). A large title ("Projects" or "Status") and
-  a segmented switch pick **Projects** (one card per repository) or **Status**
-  (one card per state that has chats in it, in attention order: Needs you,
-  Working, Done, Error, Idle), over the same snapshot, so the switch needs no
-  round trip. A card is one neutral surface (12pt, a hairline, no shadow, no
-  state fill): a header that opens the group (a neutral Lucide folder tile and
-  the project's name with `projectSummary` in words, or the state's word with
-  a dot and its count), then up to two of its most urgent chats (three under
-  Needs you) as text-first rows, each its own tap target: title and age, the
-  state in words with `agent` (`repo · agent` under Status), and, for a chat
-  that needs you, failed, or (under Status) finished, the agent's own words.
-  "N more sessions" says the card is a preview. The only colour is the
-  needs-you left edge and its red badge; a dot appears only in a Status card's
-  header. One duck, in the header; never in a card. **Earlier** is a quiet card
-  at the foot. Searching skips the cards and lists every match. A tap on a
-  header opens that group's chats; Needs you opens as decision cards (§8.4)
-  with their one-tap answers. Swipe actions live in those lists, not on Home.
+  2026-10-22 from short group rows). A large title and, in an embedded layout
+  with no tab bar, a segmented switch pick **Projects** (one card per
+  repository) or **Status** (one card per state that has chats in it, in
+  attention order: Needs you, Working, Done, Error, Idle), over the same
+  snapshot, so nothing waits on the network. A card is one neutral surface
+  (12pt, a hairline, no shadow, no state fill) and stays short:
+  - A **project card**: a neutral Lucide folder tile, the name, and one line of
+    counts in attention order that adds up to the whole ("3 sessions · 1 needs
+    you · 1 working", idle included); then its one or two most urgent chats; then
+    **View all N sessions**, a real row with a chevron, not a caption. Its only
+    needs-you mark is the left edge: no badge, because the line says it.
+  - A **status card**: the state's word, a dot (not under Needs you, which has
+    its left edge and badge) and a count, then its first chats. A group of six
+    or fewer opens **in place** (the header and **Show all N / Show less** are
+    disclosure buttons, the chevron turns, VoiceOver hears expanded or
+    collapsed), so a tap never lands on a nearly empty page. A longer group, and
+    Needs you, whose one-tap answers are the reason to go there, open their own
+    list under a compact bar and the same tab.
+  - A chat row: the agent's own app icon (Claude, Codex; a neutral tile for any
+    other) with a Conductor badge when Conductor holds it, title and age
+    (VoiceOver: "last active 12 minutes ago"), the state in words with `agent`
+    (`repo · agent` under Status), and, for a chat that needs you, failed, or
+    (under Status) finished, the agent's own words. An approval that only the
+    Mac can give says so; no button promises it. Each row is its own tap target.
+  - One duck, in the header; never in a card. **Earlier** is a quiet card at the
+    foot. Searching skips the cards and lists every match. The last card scrolls
+    clear of the floating tab bar. Swipe actions live in the lists, not on Home.
 - **The phone's own bottom bar** (standalone app only): **Home** (the cards by
   project), **Sessions** (the same cards by status) and, as before, **Needs you**
   (the decision cards; the one red badge, counting only chats blocked on you)
