@@ -12,6 +12,8 @@ struct HotKeyPreset: Identifiable, Hashable {
 
     static let all: [HotKeyPreset] = [
         HotKeyPreset(id: "opt-space", title: "⌥ Space", keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey)),
+        HotKeyPreset(id: "ctrl-shift-space", title: "⌃⇧ Space", keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | shiftKey)),
+        HotKeyPreset(id: "ctrl-shift-k", title: "⌃⇧ K", keyCode: UInt32(kVK_ANSI_K), modifiers: UInt32(controlKey | shiftKey)),
         HotKeyPreset(id: "ctrl-opt-space", title: "⌃⌥ Space", keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey)),
         HotKeyPreset(id: "ctrl-opt-cmd-space", title: "⌃⌥⌘ Space", keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey | cmdKey)),
         HotKeyPreset(id: "ctrl-opt-cmd-s", title: "⌃⌥⌘ S", keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(controlKey | optionKey | cmdKey)),
