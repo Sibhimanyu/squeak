@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.15
+
+- Two new shortcuts for Quick message, easy to reach with one hand: ⌃⇧ Space and
+  ⌃⇧ K. Choose one in Settings.
+- ⌘\ shows or hides the sidebar from anywhere in the window, even while typing.
+- The session list now says "10 sessions · 3 working" instead of "10 active
+  across your Mac", which also counted finished and errored chats.
+
 ## 2.1.14
 
 - Settings now opens inside the main window, System Settings style: a sidebar of
