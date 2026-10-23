@@ -67,6 +67,7 @@ struct SettingsView: View {
     @Environment(\.squeakScreen) private var screen
     @State private var confirmingUnpair = false
     @State private var awakeProblem: String?
+    @State private var lidActionsProblem: String?
 
     /// "64% · on battery · 35 W", "100% · plugged in".
     /// " · 37m ago" on a reading from a Mac that is not answering, nothing otherwise.
@@ -91,6 +92,9 @@ struct SettingsView: View {
             Form {
                 if model.awakeOffered {
                     AwakeSection(problem: $awakeProblem)
+                    if model.lidActionsOffered {
+                        LidActionsSection(problem: $lidActionsProblem)
+                    }
                 }
                 Section("Your Mac") {
                     LabeledContent("Name", value: model.snapshot?.mac ?? "Not seen yet")
@@ -231,6 +235,37 @@ private struct HotspotSection: View {
     }
 }
 
+/// What the Mac does when its lid closes during a lid-closed session: four switches, each a signed change
+/// to the Mac's own setting. Shown only for a Mac that sends them.
+private struct LidActionsSection: View {
+    @Environment(AppModel.self) private var model
+    @Binding var problem: String?
+
+    var body: some View {
+        Section {
+            ForEach(AwakeFormat.lidActionInfos) { info in
+                Toggle(isOn: Binding(
+                    get: { model.lidActions?[info.key] ?? false },
+                    set: { on in Task { problem = await model.changeLidAction(info.key, on) } }
+                )) {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(info.title)
+                            Text(info.detail).font(.footnote).foregroundStyle(Theme.muted)
+                        }
+                        if model.lidActionPending(info.key) { ProgressView() }
+                    }
+                }
+                .tint(Theme.primaryFill)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("lid-action-\(info.key)")
+            }
+        } header: { Text("When the lid closes") } footer: {
+            Text(problem ?? "Only during a lid closed session. Each one is undone when the lid opens or the session ends.")
+        }
+    }
+}
+
 /// The Mac's awake session: what it is doing now, then a way to start one for a while, add time or end it.
 /// Everything shown is what the Mac reports; the phone only words it.
 private struct AwakeSection: View {
@@ -258,6 +293,18 @@ private struct AwakeSection: View {
                 .accessibilityElement(children: .combine)
             }
             .frame(minHeight: 44)
+            if let problem = model.snapshot?.awakeSleepProblem {
+                HStack(alignment: .top, spacing: 10) {
+                    StatusDot(color: Theme.error).padding(.top, 5)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Sleep is still turned off").font(.body)
+                        Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 4).frame(minHeight: 44)
+                .accessibilityElement(children: .combine)
+            }
             if let awake = model.awake {
                 if let lid = awake.lid { lidRow(lid, problem: awake.lidProblem) }
                 if let safety = awake.safety {
@@ -279,6 +326,9 @@ private struct AwakeSection: View {
                         Button("End awake session", role: .destructive) { change(.end) }
                     }
             } else {
+                if let ended = AwakeFormat.ended(model.snapshot?.awakeLastEnd) {
+                    Text(ended).font(.footnote).foregroundStyle(Theme.muted)
+                }
                 if model.awakeLidReady {
                     Toggle(isOn: $withLid) {
                         Text("With the lid closed")
@@ -350,7 +400,7 @@ private struct AwakeSection: View {
     private var lid: Bool { withLid && model.awakeLidReady }
 
     private var footer: String {
-        let safety = "Low Power Mode comes on at 40% battery or when your Mac runs hot, and the session ends by itself at 10% or when it gets very hot."
+        let safety = AwakeFormat.safetySentence(model.snapshot?.awakeRules)
         if model.awakeLidReady {
             return "Stops your Mac sleeping, on battery too, so this iPhone can reach it. \(safety)"
         }

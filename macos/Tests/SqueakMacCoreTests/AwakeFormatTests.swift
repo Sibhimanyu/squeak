@@ -46,4 +46,40 @@ struct AwakeFormatTests {
         #expect(state.awakeLastEnd?.reason == "battery" && state.awakeSleepProblem == "p")
         #expect(state.hotspot?.lastNote == "Joined")
     }
+
+    @Test func safetyRulesUseTheDaemonsNumbersAndFallBackToFortyAndTen() {
+        let rules = DaemonAwakeRules(lowPowerPercent: 35, endPercent: 8, heat: true)
+        #expect(AwakeFormat.lowPowerTitle(rules) == "Low Power Mode at 35%")
+        #expect(AwakeFormat.endTitle(rules) == "Ends at 8%")
+        #expect(AwakeFormat.lowPowerDetail(rules).contains("drops to 35% or your Mac runs hot"))
+        #expect(AwakeFormat.endDetail(rules).contains("at 8% battery or when your Mac gets very hot"))
+        // An older daemon says nothing: the numbers it always enforced.
+        #expect(AwakeFormat.lowPowerTitle(nil) == "Low Power Mode at 40%")
+        #expect(AwakeFormat.endTitle(nil) == "Ends at 10%")
+        // Without heat the lines don't promise it.
+        let cool = DaemonAwakeRules(lowPowerPercent: 30, endPercent: 5, heat: false)
+        #expect(!AwakeFormat.lowPowerDetail(cool).contains("hot"))
+        #expect(!AwakeFormat.endDetail(cool).contains("hot"))
+    }
+
+    @Test func decodesTheRules() throws {
+        let json = #"{"active":[],"keepAwake":false,"awakeRules":{"lowPowerPercent":35,"endPercent":8,"heat":true}}"#
+        let state = try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8))
+        #expect(state.awakeRules == DaemonAwakeRules(lowPowerPercent: 35, endPercent: 8, heat: true))
+        let older = try JSONDecoder().decode(DaemonState.self, from: Data(#"{"active":[]}"#.utf8))
+        #expect(older.awakeRules == nil)
+    }
+
+    @Test func hotspotInputIsCheckedLikeTheDaemonChecksIt() {
+        #expect(AwakeFormat.hotspotProblem(ssid: "Sibhi's iPhone", password: "secret-pass") == nil)
+        #expect(AwakeFormat.hotspotProblem(ssid: "  ", password: "secret-pass") != nil)
+        #expect(AwakeFormat.hotspotProblem(ssid: String(repeating: "a", count: 33), password: "secret-pass") != nil)
+        #expect(AwakeFormat.hotspotProblem(ssid: "bad\nname", password: "secret-pass") != nil)
+        #expect(AwakeFormat.hotspotProblem(ssid: "Phone", password: "short") != nil)
+        #expect(AwakeFormat.hotspotProblem(ssid: "Phone", password: String(repeating: "a", count: 64)) != nil)
+        #expect(AwakeFormat.hotspotProblem(ssid: "Phone", password: "ünicode!!") != nil)
+        // No password: only fine when this name is already saved with one.
+        #expect(AwakeFormat.hotspotProblem(ssid: "Phone", password: "") == "Enter the hotspot's password.")
+        #expect(AwakeFormat.hotspotProblem(ssid: "Phone", password: "", keepsPassword: true) == nil)
+    }
 }

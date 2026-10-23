@@ -601,6 +601,11 @@ final class AppModel {
     private(set) var awakeLidClosedNow = false
     private(set) var awakeLastEnd: DaemonAwakeEnd?
     private(set) var awakeSleepProblem: String?
+    /// The daemon's effective safety floors; nil from an older daemon (the views then say 40 and 10).
+    private(set) var awakeRules: DaemonAwakeRules?
+    /// Why the last hotspot save or removal did not happen, and whether one is in flight.
+    private(set) var hotspotNote: String?
+    private(set) var savingHotspot = false
     /// Why the last change to it did not happen, in plain words.
     private(set) var awakeNote: String?
 
@@ -624,6 +629,44 @@ final class AppModel {
         if state.awakeLidClosedNow != awakeLidClosedNow { awakeLidClosedNow = state.awakeLidClosedNow }
         if state.awakeLastEnd != awakeLastEnd { awakeLastEnd = state.awakeLastEnd }
         if state.awakeSleepProblem != awakeSleepProblem { awakeSleepProblem = state.awakeSleepProblem }
+        if state.awakeRules != awakeRules { awakeRules = state.awakeRules }
+    }
+
+    /// Saves the iPhone hotspot's name and password (the daemon keeps the password in the Keychain).
+    /// An empty password keeps the stored one. True when it was saved.
+    @discardableResult
+    func saveHotspot(ssid: String, password: String) async -> Bool {
+        guard !savingHotspot else { return false }
+        let name = ssid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keeps = hotspot?.configured == true && hotspot?.ssid == name
+        if let problem = AwakeFormat.hotspotProblem(ssid: name, password: password, keepsPassword: keeps) {
+            hotspotNote = problem
+            return false
+        }
+        savingHotspot = true
+        defer { savingHotspot = false }
+        if demoMode {
+            hotspot = DaemonHotspot(configured: true, ssid: name, enabled: true, onHotspot: false)
+            hotspotNote = nil
+            return true
+        }
+        hotspotNote = await client.setHotspot(ssid: name, password: password)
+        await readAwake()
+        return hotspotNote == nil
+    }
+
+    /// Forgets the hotspot: its name and the password in the Keychain.
+    func removeHotspot() async {
+        guard !savingHotspot else { return }
+        savingHotspot = true
+        defer { savingHotspot = false }
+        if demoMode {
+            hotspot = DaemonHotspot(configured: false, ssid: nil, enabled: false, onHotspot: false)
+            hotspotNote = nil
+            return
+        }
+        hotspotNote = await client.clearHotspot()
+        await readAwake()
     }
 
     /// Turns one thing a closed lid does on or off. Shown at once, then confirmed by the daemon's next report.
@@ -661,7 +704,7 @@ final class AppModel {
     /// Demo captures only: the awake state a screenshot should show.
     func installDemoAwake(
         _ awake: DaemonAwake?, lidReady: Bool, actions: DaemonLidActions? = DaemonLidActions(), end: DaemonAwakeEnd? = nil,
-        hotspot: DaemonHotspot? = nil, sleepProblem: String? = nil
+        hotspot: DaemonHotspot? = nil, sleepProblem: String? = nil, rules: DaemonAwakeRules? = nil
     ) {
         guard demoMode else { return }
         awakeOffered = true
@@ -671,6 +714,7 @@ final class AppModel {
         awakeLastEnd = end
         self.hotspot = hotspot
         awakeSleepProblem = sleepProblem
+        awakeRules = rules
     }
 
     /// "start" (minutes nil: until ended), "extend" or "end".

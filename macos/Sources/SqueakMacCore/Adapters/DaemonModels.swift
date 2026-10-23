@@ -171,6 +171,26 @@ public struct DaemonLidActions: Decodable, Sendable, Equatable {
     }
 }
 
+/// The safety rules as the daemon applies them (`awakeRules`): the effective floors, never numbers a surface picks.
+public struct DaemonAwakeRules: Decodable, Sendable, Equatable {
+    /// On battery at or below this percent: Low Power Mode.
+    public var lowPowerPercent: Int
+    /// On battery at or below this percent: the session ends.
+    public var endPercent: Int
+    /// Heat acts too: running hot turns Low Power Mode on, critically hot ends the session.
+    public var heat: Bool
+    public init(lowPowerPercent: Int, endPercent: Int, heat: Bool = true) {
+        self.lowPowerPercent = lowPowerPercent; self.endPercent = endPercent; self.heat = heat
+    }
+    enum CodingKeys: String, CodingKey { case lowPowerPercent, endPercent, heat }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        lowPowerPercent = c.lenient(Int.self, .lowPowerPercent) ?? 40
+        endPercent = c.lenient(Int.self, .endPercent) ?? 10
+        heat = c.lenient(Bool.self, .heat) ?? true
+    }
+}
+
 /// How the last session ended (`awakeLastEnd`): "ended", "expired", "replaced", "battery" or "heat".
 public struct DaemonAwakeEnd: Decodable, Sendable, Equatable {
     public var reason: String
@@ -230,10 +250,12 @@ public struct DaemonState: Decodable, Sendable, Equatable {
     public var awakeLidClosedNow = false
     public var awakeLastEnd: DaemonAwakeEnd?
     public var awakeSleepProblem: String?
+    /// The effective safety floors; nil from an older daemon, and surfaces then say 40 and 10.
+    public var awakeRules: DaemonAwakeRules?
 
     enum CodingKeys: String, CodingKey {
         case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot
-        case awakeLidActions, awakeLidClosedNow, awakeLastEnd, awakeSleepProblem
+        case awakeLidActions, awakeLidClosedNow, awakeLastEnd, awakeSleepProblem, awakeRules
     }
 
     /// Both readings and today's estimated cost, for the usage screens.
@@ -263,6 +285,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
         awakeLidClosedNow = c.lenient(Bool.self, .awakeLidClosedNow) ?? false
         awakeLastEnd = c.lenient(DaemonAwakeEnd.self, .awakeLastEnd)
         awakeSleepProblem = c.lenient(String.self, .awakeSleepProblem)
+        awakeRules = c.lenient(DaemonAwakeRules.self, .awakeRules)
     }
 
     public init(generatedAt: Date? = nil, sessions: [DaemonSession], claudeUsage: ProviderUsage? = nil, codexUsage: ProviderUsage? = nil) {

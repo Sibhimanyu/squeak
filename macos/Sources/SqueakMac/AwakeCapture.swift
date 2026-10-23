@@ -33,7 +33,7 @@ extension CaptureRunner {
         sw.titlebarAppearsTransparent = true
         sw.titleVisibility = .hidden
         sw.contentView = NSHostingView(rootView: ConversationView().environment(model))
-        sw.setContentSize(NSSize(width: 1100, height: 1000))
+        sw.setContentSize(NSSize(width: 1100, height: 1500))
         sw.makeKeyAndOrderFront(nil)
         let hotspot = DaemonHotspot(configured: true, ssid: "Sibhi's iPhone", enabled: true, onHotspot: false, lastNote: "Joined Sibhi's iPhone's hotspot at 9:12 AM.", lastOk: true)
         let page: [(String, DaemonAwake?, Bool, DaemonAwakeEnd?, DaemonHotspot?, String?)] = [
@@ -43,11 +43,25 @@ extension CaptureRunner {
             ("lid-failed", DaemonAwake(until: soon, lid: true, lidStatus: "failed", lidProblem: "Something on this Mac turned sleep back on, so a closed lid would sleep it now."), true, nil, hotspot, nil),
         ]
         for (name, awake, ready, end, hs, problem) in page {
-            model.installDemoAwake(awake, lidReady: ready, end: end, hotspot: hs, sleepProblem: problem)
+            model.installDemoAwake(awake, lidReady: ready, end: end, hotspot: hs, sleepProblem: problem,
+                                   rules: DaemonAwakeRules(lowPowerPercent: 35, endPercent: 8))
             model.openSettingsInPlace(.awake)
             try? await Task.sleep(for: .milliseconds(1400))
             write(sw.contentView?.superview ?? sw.contentView, to: "\(prefix)-settings-\(name).png")
+            // The page is taller than the screen: scroll to the end for the safety rules and the hotspot form.
+            if let scroll = Self.scrollViews(in: sw.contentView).max(by: { $0.documentView?.frame.height ?? 0 < $1.documentView?.frame.height ?? 0 }),
+               let doc = scroll.documentView {
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, doc.frame.height - scroll.contentView.bounds.height)))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                try? await Task.sleep(for: .milliseconds(500))
+                write(sw.contentView?.superview ?? sw.contentView, to: "\(prefix)-settings-\(name)-bottom.png")
+            }
         }
         NSApp.terminate(nil)
+    }
+
+    private static func scrollViews(in view: NSView?) -> [NSScrollView] {
+        guard let view else { return [] }
+        return ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap { scrollViews(in: $0) }
     }
 }

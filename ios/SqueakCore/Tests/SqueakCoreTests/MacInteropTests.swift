@@ -24,6 +24,18 @@ final class MacInteropTests: XCTestCase {
         let liveHistoryBox: String
     }
 
+    /// The awake fields a Mac with sessions writes, as the phone's model reads them.
+    func testDecodesTheMacsAwakeRulesAndLidActions() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let whole = try ChannelCrypto.open(PhoneSnapshot.self, box: f.snapshotBox, key: key)
+        XCTAssertEqual(whole.awakeLidActions, .init(displayOff: true, mute: false, lowPower: true, freezeApps: true))
+        XCTAssertEqual(whole.awakeRules, .init(lowPowerPercent: 35, endPercent: 8, heat: true))
+        XCTAssertEqual(whole.awakeLastEnd?.reason, "battery")
+        XCTAssertEqual(whole.awakeLastEnd?.why, "Battery at 8%")
+        XCTAssertNil(whole.awakeSleepProblem)
+    }
+
     /// What a Mac writes for a phone that says it reads compressed, split documents.
     func testDecodesTheMacsCompressedSplitViewAndFoldsTheRecentListBackIn() throws {
         let f = try fixture()

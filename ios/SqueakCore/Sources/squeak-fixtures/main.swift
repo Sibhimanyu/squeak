@@ -22,6 +22,7 @@ let (promoteId, promoteDocument) = try channel.queueDocument(
     sessionId: "s1", messageId: "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31", action: .promote, signer: signer, now: madeAt)
 let (hotspotId, hotspotDocument) = try channel.hotspotDocument(
     action: .configure, ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true, signer: signer, now: madeAt)
+let (lidId, lidDocument) = try channel.lidActionsDocument(.init(mute: false, freezeApps: true), signer: signer, now: madeAt)
 let (imageId, imageDocument) = try channel.imageDocument(sessionId: "s1", source: "/w/.context/shot.png", signer: signer, now: madeAt)
 let (diffId, diffDocument) = try channel.diffDocument(sessionId: "s1", file: 0, signer: signer, now: madeAt)
 let (stopId, stopDocument) = try channel.stopDocument(to: session, signer: signer, now: madeAt)
@@ -73,6 +74,9 @@ let fixture: [String: Any] = [
     // Hotspot failover set up from the phone.
     "hotspotCommandId": hotspotId,
     "hotspotCommand": ["box": hotspotDocument.box, "sig": hotspotDocument.sig!, "device": hotspotDocument.device!],
+    // What a closed lid does: mute off, pause chat apps on.
+    "lidActionsCommandId": lidId,
+    "lidActionsCommand": ["box": lidDocument.box, "sig": lidDocument.sig!, "device": lidDocument.device!],
     // An image chat s1's agent showed.
     "imageCommandId": imageId,
     "imageCommand": ["box": imageDocument.box, "sig": imageDocument.sig!, "device": imageDocument.device!],

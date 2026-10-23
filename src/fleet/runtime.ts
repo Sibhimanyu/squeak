@@ -1,5 +1,7 @@
 import type { AwakeEnd, AwakeState } from "./awake-session.js";
+import type { HotspotState } from "./hotspot.js";
 import type { LidActionSettings } from "./lid-actions.js";
+import type { AwakeRules } from "./power-monitor.js";
 
 /** The awake session as /state shows it (src/squeak/app.ts assembles it). */
 export interface AwakeView {
@@ -10,6 +12,10 @@ export interface AwakeView {
   lidClosedNow: boolean;
   /** Sleep left disabled outside any session (a restore owed, or not Squeak's); null when none. */
   sleepProblem?: string | null;
+  /** The effective safety floors (config, normalized); surfaces draw these, never their own numbers. */
+  rules?: AwakeRules;
+  /** Hotspot failover's name and status; never the password. */
+  hotspot?: HotspotState;
 }
 import os from "node:os";
 import path from "node:path";
@@ -251,6 +257,8 @@ export function serializeState(
           awakeLidClosedNow: awake.lidClosedNow,
           // Sleep disabled with no session to show it, and what to do about it.
           awakeSleepProblem: awake.sleepProblem ?? null,
+          ...(awake.rules ? { awakeRules: awake.rules } : {}),
+          ...(awake.hotspot ? { hotspot: awake.hotspot } : {}),
         }
       : {}),
     active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),

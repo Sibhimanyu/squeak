@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { applyAwakeAction, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
+import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
+import { awakeRules } from "../fleet/power-monitor.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
@@ -2044,6 +2046,147 @@ describe("RemoteBridge awake session from the phone", () => {
     expect(t.bridge.phoneView()).not.toHaveProperty("keepAwake");
     const verdict = await t.bridge.handleCommand(t.config, "a1", t.command({ on: true }));
     expect(verdict.result).toMatchObject({ status: "refused" });
+    t.bridge.stop();
+  });
+});
+
+describe("RemoteBridge lid actions from the phone", () => {
+  async function lidT(options: { offered?: boolean } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-lid-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    const lid = new LidActions({
+      settingsPath: path.join(dir, "awake-settings.json"),
+      journalPath: path.join(dir, "lid-actions.json"),
+      setLowPowerWanted: () => undefined,
+      lidSessionOn: () => false,
+    });
+    // What the daemon's applyAwake does with a lid-actions request.
+    const apply = vi.fn((request: unknown) => {
+      const settings = (request as { action?: string; settings?: object }).settings;
+      lid.updateSettings(readLidActionSettings({ ...lid.settings, ...settings }));
+      return { ok: true as const, state: null };
+    });
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      ...(options.offered === false
+        ? { awake: { state: () => null, apply } }
+        : {
+            awake: {
+              state: () => null,
+              apply,
+              lidActions: () => lid.settings,
+              rules: () => awakeRules({ lowPowerPercent: 35, endPercent: 8 }),
+              lastEnd: () => ({ reason: "battery" as const, at: "2026-10-23T01:00:00.000Z", why: "Battery at 8%" }),
+              sleepProblem: () => "Sleep is disabled.",
+            },
+          }),
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const phone = device();
+    await store.set(`channels/${payload.c}/pairing/iphone-1`, {
+      box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }),
+    });
+    await bridge.tick();
+    await bridge.approve("iphone-1");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    const command = (fields: Record<string, unknown>, extra: Record<string, unknown> = {}, signer = phone) => {
+      const box = seal(payload.k, {
+        v: 1,
+        kind: "lidActions",
+        settings: fields,
+        nonce: crypto.randomBytes(16).toString("hex"),
+        expiresAt: NOW + 60_000,
+        ...extra,
+      });
+      return { box, sig: signer.sign(box), device: "iphone-1" };
+    };
+    return { bridge, config, command, apply, lid, dir };
+  }
+
+  it("applies the settings through the awake entry and shows the new ones", async () => {
+    const t = await lidT();
+    expect(t.bridge.phoneView().awakeLidActions).toEqual({
+      displayOff: true,
+      mute: true,
+      lowPower: true,
+      freezeApps: false,
+    });
+    const verdict = await t.bridge.handleCommand(t.config, "l1", t.command({ mute: false, freezeApps: true }));
+    expect(verdict.result).toEqual({ id: "l1", status: "sent" });
+    expect(t.apply).toHaveBeenCalledWith({ action: "lid-actions", settings: { mute: false, freezeApps: true } });
+    expect(t.lid.settings).toEqual({ displayOff: true, mute: false, lowPower: true, freezeApps: true });
+    expect(t.bridge.phoneView().awakeLidActions).toEqual(t.lid.settings);
+    expect(JSON.parse(fs.readFileSync(path.join(t.dir, "awake-settings.json"), "utf8"))).toMatchObject({
+      mute: false,
+      freezeApps: true,
+    });
+    t.bridge.stop();
+  });
+
+  it("refuses a bad payload: unknown keys, non-booleans, nothing at all", async () => {
+    const t = await lidT();
+    for (const [i, settings] of [
+      { mute: "no" },
+      { mute: false, volume: 3 },
+      {},
+      { displayOff: 1 },
+      { __proto__: { mute: false }, mute: null },
+    ].entries()) {
+      const verdict = await t.bridge.handleCommand(t.config, `b${i}`, t.command(settings as Record<string, unknown>));
+      expect(verdict.result).toMatchObject({ status: "refused" });
+    }
+    const notAnObject = await t.bridge.handleCommand(t.config, "b9", t.command([] as never));
+    expect(notAnObject.result).toMatchObject({ status: "refused" });
+    expect(t.apply).not.toHaveBeenCalled();
+    t.bridge.stop();
+  });
+
+  it("keeps every shared check: signature, expiry, replay", async () => {
+    const t = await lidT();
+    const forged = await t.bridge.handleCommand(t.config, "f1", t.command({ mute: false }, {}, device()));
+    expect(forged.write).toBe(false);
+    const expired = await t.bridge.handleCommand(t.config, "f2", t.command({ mute: false }, { expiresAt: NOW - 1 }));
+    expect(expired.result).toMatchObject({ status: "refused", reason: expect.stringContaining("expired") });
+    const tooLong = await t.bridge.handleCommand(
+      t.config,
+      "f3",
+      t.command({ mute: false }, { expiresAt: NOW + 60 * 60_000 }),
+    );
+    expect(tooLong.result).toMatchObject({ status: "refused" });
+    const signed = t.command({ mute: false });
+    expect((await t.bridge.handleCommand(t.config, "f4", signed)).result).toMatchObject({ status: "sent" });
+    const replay = await t.bridge.handleCommand(t.config, "f5", signed);
+    expect(replay.result).toMatchObject({ status: "refused", reason: expect.stringContaining("already") });
+    expect(t.apply).toHaveBeenCalledTimes(1);
+    t.bridge.stop();
+  });
+
+  it("a Mac that does not offer it refuses, and leaves the fields out of the view", async () => {
+    const t = await lidT({ offered: false });
+    const view = t.bridge.phoneView();
+    for (const key of ["awakeLidActions", "awakeRules", "awakeLastEnd", "awakeSleepProblem"]) {
+      expect(view).not.toHaveProperty(key);
+    }
+    const verdict = await t.bridge.handleCommand(t.config, "n1", t.command({ mute: false }));
+    expect(verdict.result).toMatchObject({ status: "refused" });
+    expect(t.apply).not.toHaveBeenCalled();
+    t.bridge.stop();
+  });
+
+  it("sends the safety floors, how the last session ended, and a sleep problem", async () => {
+    const t = await lidT();
+    expect(t.bridge.phoneView()).toMatchObject({
+      awakeRules: { lowPowerPercent: 35, endPercent: 8, heat: true },
+      awakeLastEnd: { reason: "battery", at: "2026-10-23T01:00:00.000Z", why: "Battery at 8%" },
+      awakeSleepProblem: "Sleep is disabled.",
+    });
     t.bridge.stop();
   });
 });

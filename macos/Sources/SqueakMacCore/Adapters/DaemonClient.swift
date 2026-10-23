@@ -252,6 +252,31 @@ public struct DaemonClient: Sendable {
         }
     }
 
+    /// Sets up hotspot failover (`POST /control/hotspot`): the iPhone hotspot's name and password (the daemon
+    /// keeps the password in the login Keychain, and an empty `password` leaves the stored one alone), or
+    /// clears it. Nil when it worked, else the daemon's reason. The password is never logged or kept here.
+    public func setHotspot(ssid: String, password: String?, enabled: Bool = true) async -> String? {
+        var body: [String: Any] = ["action": "configure", "ssid": ssid, "enabled": enabled]
+        if let password, !password.isEmpty { body["password"] = password }
+        return await hotspotCall(body)
+    }
+
+    public func clearHotspot() async -> String? { await hotspotCall(["action": "clear"]) }
+
+    private func hotspotCall(_ body: [String: Any]) async -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return "Couldn't send that." }
+        do {
+            let r = try await post("/control/hotspot", body: data)
+            if (200..<300).contains(r.status) { return nil }
+            if r.status == 401 || r.status == 403 { return "Squeak rejected the access token" }
+            if r.status == 404 || r.status == 503 { return "This version of the Squeak service can't set up a hotspot. Update it first." }
+            let reason = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any]
+            return (reason?["error"] as? String) ?? "Squeak couldn't change that."
+        } catch {
+            return "Squeak isn't running."
+        }
+    }
+
     /// The sudoers text lid-closed sessions need, built by the daemon for its own user
     /// (`GET /control/keep-awake/lid-rule`). Nil from a daemon without it.
     public func lidRule() async -> String? {

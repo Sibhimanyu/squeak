@@ -15,7 +15,7 @@ import { Caffeinator } from "../fleet/caffeinate.js";
 import { applyAwakeAction, type AwakeEnd, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
 import { LidSleepGuard, SUDOERS_PATH, sudoersRule } from "../fleet/lid-sleep.js";
 import { ensureBackstop } from "../fleet/awake-backstop.js";
-import { readPower, type PowerReading } from "../fleet/power-monitor.js";
+import { awakeRules, readPower, type PowerReading } from "../fleet/power-monitor.js";
 import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
@@ -270,18 +270,17 @@ export class SqueakApp {
           refreshUsage: () => this.claudeRefresher.refresh(),
           hotspot: {
             state: () => this.hotspot.state,
-            apply: async (request) => {
-              const parsed = readHotspotRequest(request);
-              return parsed
-                ? this.hotspot.apply(parsed)
-                : { ok: false as const, reason: "Not a hotspot request this Mac understands." };
-            },
+            apply: (request) => this.applyHotspot(request),
           },
           awake: {
             state: () => this.awake.state,
             lidReady: () => this.awake.lidReady,
             power: () => (this.power ? phonePower(this.power) : null),
             apply: (request) => this.applyAwake(request),
+            lidActions: () => this.lidActions.settings,
+            rules: () => awakeRules(config.awakeSafety),
+            lastEnd: () => this.awake.lastEnd,
+            sleepProblem: () => this.awake.sleepProblem,
           },
           // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
           answerer: answers,
@@ -335,6 +334,8 @@ export class SqueakApp {
       },
       refreshClaudeUsage: () => this.claudeRefresher.refresh(),
       awake: (request) => this.applyAwake(request),
+      // The same function the phone's signed `hotspot` command ends in.
+      hotspot: (request) => this.applyHotspot(request),
       lidRule: () => {
         const rule = sudoersRule(os.userInfo().username);
         return rule ? { path: SUDOERS_PATH, rule } : null;
@@ -364,6 +365,8 @@ export class SqueakApp {
       lidActions: this.lidActions.settings,
       lidClosedNow: this.lidActions.active,
       sleepProblem: this.awake.sleepProblem,
+      rules: awakeRules(config.awakeSafety),
+      hotspot: this.hotspot.state,
     }));
     const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
       this.claudeLimits.record(limits),
@@ -487,6 +490,14 @@ export class SqueakApp {
     await this.replier.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);
     logger.info("squeak stopped");
+  }
+
+  /** Hotspot failover's one entry: the phone's signed command and the Mac app's control route both end here. */
+  private async applyHotspot(request: unknown) {
+    const parsed = readHotspotRequest(request);
+    return parsed
+      ? this.hotspot.apply(parsed)
+      : { ok: false as const, reason: "Not a hotspot request this Mac understands." };
   }
 
   private async applyAwake(request: unknown) {

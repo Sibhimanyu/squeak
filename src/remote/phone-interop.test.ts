@@ -40,6 +40,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   imageCommand: { box: string; sig: string; device: string };
   hotspotCommandId: string;
   hotspotCommand: { box: string; sig: string; device: string };
+  lidActionsCommandId: string;
+  lidActionsCommand: { box: string; sig: string; device: string };
   workflowChooseCommandId: string;
   workflowChooseCommand: { box: string; sig: string; device: string };
   workflowMoreCommandId: string;
@@ -73,6 +75,7 @@ function bridge(turn: string) {
   const queueActions: Array<[string, string, QueueAction]> = [];
   const stops: string[] = [];
   const hotspotRequests: unknown[] = [];
+  const awakeRequests: unknown[] = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
   const answers: Array<[string, unknown]> = [];
   const acts: Array<[string, unknown]> = [];
@@ -140,6 +143,14 @@ function bridge(turn: string) {
         };
       },
     },
+    awake: {
+      state: () => null,
+      lidActions: () => ({ displayOff: true, mute: true, lowPower: true, freezeApps: false }),
+      apply: (request: unknown) => {
+        awakeRequests.push(request);
+        return { ok: true as const, state: null };
+      },
+    },
     diff: {
       readSummary: async () => ({
         baseRef: null,
@@ -194,6 +205,7 @@ function bridge(turn: string) {
     answers,
     stops,
     hotspotRequests,
+    awakeRequests,
     acts,
     pictures,
     written,
@@ -265,6 +277,13 @@ describe("a reply made on the iPhone", () => {
     expect(hotspotRequests).toEqual([
       { action: "configure", ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true },
     ]);
+  });
+
+  it("changes what a closed lid does when the phone signs a lidActions request", async () => {
+    const { remote, config, awakeRequests } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.lidActionsCommandId, fixture.lidActionsCommand);
+    expect(verdict.result).toEqual({ id: fixture.lidActionsCommandId, status: "sent" });
+    expect(awakeRequests).toEqual([{ action: "lid-actions", settings: { mute: false, freezeApps: true } }]);
   });
 
   it("sends an image the chat showed when the phone signs an image request", async () => {

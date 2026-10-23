@@ -161,6 +161,8 @@ struct AwakeSettings: View {
     @Environment(AppModel.self) private var model
     @AppStorage("awakeWithLid") private var withLid = true
     @AppStorage("awakeMinutes") private var minutes = 120
+    @State private var hotspotName = ""
+    @State private var hotspotPassword = ""
 
     var body: some View {
         Form {
@@ -274,10 +276,10 @@ struct AwakeSettings: View {
 
     private var safetySection: some View {
         Section {
-            StatusLine(dot: nil, text: "Low Power Mode at 40%",
-                       detail: "Squeak switches it on when the battery drops to 40% or your Mac runs hot, so the session lasts longer.")
-            StatusLine(dot: nil, text: "Ends at 10%",
-                       detail: "The session ends by itself at 10% battery or when your Mac gets very hot, and sleep comes back on.")
+            StatusLine(dot: nil, text: AwakeFormat.lowPowerTitle(model.awakeRules),
+                       detail: AwakeFormat.lowPowerDetail(model.awakeRules))
+            StatusLine(dot: nil, text: AwakeFormat.endTitle(model.awakeRules),
+                       detail: AwakeFormat.endDetail(model.awakeRules))
             if let ended = AwakeFormat.ended(model.awakeLastEnd) { Footnote(ended) }
         } header: { Text("Safety") } footer: {
             Footnote("These rules are always on. They protect the battery, and a Mac in a bag.")
@@ -286,23 +288,40 @@ struct AwakeSettings: View {
 
     // MARK: Hotspot
 
-    @ViewBuilder private var hotspotSection: some View {
-        if let hotspot = model.hotspot {
-            Section {
-                if hotspot.configured {
-                    StatusLine(
-                        dot: hotspot.onHotspot ? Theme.working : Theme.idle,
-                        text: hotspot.onHotspot ? "On your iPhone's hotspot" : (hotspot.enabled ? "Ready" : "Off"),
-                        detail: hotspot.ssid.map { "Hotspot: \($0)" })
-                    if let note = hotspot.lastNote {
-                        Footnote(note).foregroundStyle(hotspot.lastOk == false ? Theme.error : Theme.muted)
-                    }
-                } else {
-                    StatusLine(dot: Theme.idle, text: "Not set up", detail: "Set it up in Squeak on your iPhone, under Settings, Hotspot.")
+    private var hotspotSection: some View {
+        let hotspot = model.hotspot
+        let configured = hotspot?.configured == true
+        return Section {
+            if let hotspot, configured {
+                StatusLine(
+                    dot: hotspot.onHotspot ? Theme.working : Theme.idle,
+                    text: hotspot.onHotspot ? "On your iPhone's hotspot" : (hotspot.enabled ? "Ready" : "Off"),
+                    detail: hotspot.ssid.map { "Hotspot: \($0)" })
+                if let note = hotspot.lastNote {
+                    Footnote(note).foregroundStyle(hotspot.lastOk == false ? Theme.error : Theme.muted)
                 }
-            } header: { Text("Hotspot failover") } footer: {
-                Footnote("During an awake session, or while an agent works, a Mac that loses its internet for about 30 seconds joins your iPhone's Personal Hotspot. Turn the hotspot on before you leave: iOS doesn't let an app do that.")
+            } else {
+                StatusLine(dot: Theme.idle, text: "Not set up", detail: "Add your iPhone hotspot's name and password.")
             }
+            TextField("iPhone hotspot name", text: $hotspotName)
+                .textContentType(.username)
+                .onAppear { if hotspotName.isEmpty { hotspotName = hotspot?.ssid ?? "" } }
+            SecureField(configured ? "Password (leave empty to keep it)" : "Password", text: $hotspotPassword)
+            HStack(spacing: Space.s) {
+                if model.savingHotspot { ProgressView().controlSize(.small) }
+                Spacer(minLength: 0)
+                if configured {
+                    Button("Remove") { Task { await model.removeHotspot(); hotspotName = ""; hotspotPassword = "" } }
+                        .buttonStyle(SecondaryButtonStyle()).disabled(model.savingHotspot)
+                }
+                Button("Save") {
+                    Task { if await model.saveHotspot(ssid: hotspotName, password: hotspotPassword) { hotspotPassword = "" } }
+                }
+                .buttonStyle(PrimaryButtonStyle()).disabled(model.savingHotspot)
+            }
+            if let note = model.hotspotNote { Footnote(note).foregroundStyle(Theme.error) }
+        } header: { Text("Hotspot failover") } footer: {
+            Footnote("When your Mac loses its internet for about 30 seconds during an awake session, or while an agent works, it joins your iPhone's Personal Hotspot, and goes back to its Wi-Fi when that returns. macOS hides Wi-Fi names from apps, so Squeak can't look the hotspot up: type its name as it shows in Settings, Personal Hotspot. The password stays in your Mac's Keychain. Turn the hotspot on before you leave: iOS doesn't let an app do that.")
         }
     }
 }

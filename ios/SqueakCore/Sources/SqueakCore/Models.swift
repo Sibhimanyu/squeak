@@ -263,6 +263,14 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public let awakeSafety: String?
     /// The Mac's battery, power draw and lid, as last read. Optional: older Macs omit it.
     public let macPower: MacPower?
+    /// What a closed lid does during a lid-closed session; this phone may change it (`lidActions` command).
+    /// Optional: an older Mac omits it, and the phone then hides the group.
+    public var awakeLidActions: LidActions? = nil
+    /// The Mac's effective safety floors. Optional: an older Mac omits it, and the phone says 40 and 10.
+    public var awakeRules: AwakeRules? = nil
+    /// How the last awake session ended, and a sleep problem that outlives a session. Optional.
+    public var awakeLastEnd: AwakeEnd? = nil
+    public var awakeSleepProblem: String? = nil
     /// Hotspot failover (src/fleet/hotspot.ts). Optional: older Macs omit it, and the phone hides it.
     public var hotspot: Hotspot? = nil
     /// The Mac's write counter (shared with the live turn): a view older than the one on screen is
@@ -290,6 +298,54 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         }
     }
 
+    /// The four things a closed lid can do (src/fleet/lid-actions.ts).
+    public struct LidActions: Codable, Equatable, Sendable {
+        public var displayOff: Bool
+        public var mute: Bool
+        public var lowPower: Bool
+        public var freezeApps: Bool
+        public init(displayOff: Bool = true, mute: Bool = true, lowPower: Bool = true, freezeApps: Bool = false) {
+            self.displayOff = displayOff; self.mute = mute; self.lowPower = lowPower; self.freezeApps = freezeApps
+        }
+        public subscript(key: String) -> Bool {
+            get {
+                switch key {
+                case "displayOff": displayOff
+                case "mute": mute
+                case "lowPower": lowPower
+                default: freezeApps
+                }
+            }
+            set {
+                switch key {
+                case "displayOff": displayOff = newValue
+                case "mute": mute = newValue
+                case "lowPower": lowPower = newValue
+                default: freezeApps = newValue
+                }
+            }
+        }
+    }
+
+    /// The safety floors the Mac applies to an awake session.
+    public struct AwakeRules: Codable, Equatable, Sendable {
+        public let lowPowerPercent: Int
+        public let endPercent: Int
+        /// Heat acts too: hot turns Low Power Mode on, critically hot ends the session.
+        public let heat: Bool?
+        public init(lowPowerPercent: Int, endPercent: Int, heat: Bool? = true) {
+            self.lowPowerPercent = lowPowerPercent; self.endPercent = endPercent; self.heat = heat
+        }
+    }
+
+    /// How the last session ended: "ended", "expired", "replaced", "battery" or "heat".
+    public struct AwakeEnd: Codable, Equatable, Sendable {
+        public let reason: String
+        public let at: String?
+        public let why: String?
+        public init(reason: String, at: String? = nil, why: String? = nil) { self.reason = reason; self.at = at; self.why = why }
+    }
+
     public struct MacPower: Codable, Equatable, Sendable {
         public let percent: Int?
         public let onBattery: Bool?
@@ -305,8 +361,11 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         v: Int, mac: String, generatedAt: String, duck: Duck, sessions: [Session], usage: Usage? = nil,
         workspaces: [Workspace]? = nil, recent: [Session]? = nil, recentMore: Bool? = nil, keepAwake: Bool? = nil,
         awakeUntil: String? = nil, awakeLid: String? = nil, awakeLidProblem: String? = nil, awakeLidReady: Bool? = nil,
-        awakeSafety: String? = nil, macPower: MacPower? = nil
+        awakeSafety: String? = nil, macPower: MacPower? = nil, awakeLidActions: LidActions? = nil,
+        awakeRules: AwakeRules? = nil, awakeLastEnd: AwakeEnd? = nil, awakeSleepProblem: String? = nil
     ) {
+        self.awakeLidActions = awakeLidActions; self.awakeRules = awakeRules
+        self.awakeLastEnd = awakeLastEnd; self.awakeSleepProblem = awakeSleepProblem
         self.recentMore = recentMore
         self.keepAwake = keepAwake
         self.awakeUntil = awakeUntil
@@ -832,6 +891,26 @@ public struct AwakeCommand: Codable, Equatable, Sendable {
     public let extend: Int?
     /// Stay awake with the lid closed too; needs `minutes`.
     public let lid: Bool?
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// A signed change to what the Mac does when its lid closes in a lid-closed session. Reaches no agent.
+/// `settings` carries only the switches being changed; the Mac refuses any key it does not know.
+public struct LidActionsCommand: Codable, Equatable, Sendable {
+    public struct Settings: Codable, Equatable, Sendable {
+        public var displayOff: Bool?
+        public var mute: Bool?
+        public var lowPower: Bool?
+        public var freezeApps: Bool?
+        public init(displayOff: Bool? = nil, mute: Bool? = nil, lowPower: Bool? = nil, freezeApps: Bool? = nil) {
+            self.displayOff = displayOff; self.mute = mute; self.lowPower = lowPower; self.freezeApps = freezeApps
+        }
+    }
+    public let v: Int
+    public let kind: String
+    public let settings: Settings
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

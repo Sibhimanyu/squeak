@@ -74,6 +74,42 @@ public enum AwakeFormat {
         return what + why + "."
     }
 
+    /// What older daemons enforce and say nothing about; used only when `awakeRules` is absent.
+    public static let defaultRules = DaemonAwakeRules(lowPowerPercent: 40, endPercent: 10, heat: true)
+
+    public static func lowPowerTitle(_ rules: DaemonAwakeRules?) -> String {
+        "Low Power Mode at \((rules ?? defaultRules).lowPowerPercent)%"
+    }
+
+    public static func lowPowerDetail(_ rules: DaemonAwakeRules?) -> String {
+        let r = rules ?? defaultRules
+        return "Squeak switches it on when the battery drops to \(r.lowPowerPercent)%\(r.heat ? " or your Mac runs hot" : ""), so the session lasts longer."
+    }
+
+    public static func endTitle(_ rules: DaemonAwakeRules?) -> String {
+        "Ends at \((rules ?? defaultRules).endPercent)%"
+    }
+
+    public static func endDetail(_ rules: DaemonAwakeRules?) -> String {
+        let r = rules ?? defaultRules
+        return "The session ends by itself at \(r.endPercent)% battery\(r.heat ? " or when your Mac gets very hot" : ""), and sleep comes back on."
+    }
+
+    /// Why hotspot input cannot be saved, in words; nil when it can. The daemon checks the same rules again.
+    /// `keepsPassword`: this name is the one already saved, so an empty password leaves the stored one alone.
+    public static func hotspotProblem(ssid: String, password: String, keepsPassword: Bool = false) -> String? {
+        let name = ssid.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { return "Enter your iPhone hotspot's name." }
+        if name.utf8.count > 32 { return "A Wi-Fi name is at most 32 characters." }
+        if name.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f }) { return "That name has a character Wi-Fi can't use." }
+        if password.isEmpty { return keepsPassword ? nil : "Enter the hotspot's password." }
+        if password.utf8.count < 8 || password.utf8.count > 63 { return "A hotspot password is 8 to 63 characters." }
+        if password.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value > 0x7e }) {
+            return "A hotspot password uses plain letters, numbers and symbols."
+        }
+        return nil
+    }
+
     /// The four lid actions, in the order they are shown, with what each does.
     public struct LidActionInfo: Identifiable, Equatable, Sendable {
         public let key: String

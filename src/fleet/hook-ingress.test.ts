@@ -434,6 +434,59 @@ describe("HookIngressServer control routes", () => {
     expect(await refused.json()).toEqual({ error: "No awake session is running to add time to." });
   });
 
+  it("sets up the hotspot only for a caller with the token, and never echoes the password", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const requests: unknown[] = [];
+    const state = { configured: true, ssid: "Phone", enabled: true, onHotspot: false, last: null };
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      hotspot: async (request) => {
+        requests.push(request);
+        return (request as { action?: string }).action === "configure"
+          ? { ok: true, state }
+          : { ok: false, reason: "Not a hotspot request this Mac understands." };
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/hotspot`;
+    const auth = { "x-squeak-token": harness.token };
+    const body = JSON.stringify({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
+    expect((await fetch(url, { method: "POST", body })).status).toBe(403);
+    expect((await fetch(url, { method: "GET", headers: auth })).status).toBe(405);
+    expect((await fetch(url, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
+    expect(requests).toEqual([]);
+    const ok = await fetch(url, { method: "POST", headers: auth, body });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    const text = await ok.text();
+    expect(JSON.parse(text)).toEqual({ hotspot: state });
+    expect(text).not.toContain("secret-pass");
+    const refused = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ action: "nope" }) });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "Not a hotspot request this Mac understands." });
+  });
+
+  it("answers 500 without the request when the hotspot call fails, and 503 when none is wired", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/hotspot`;
+    const auth = { "x-squeak-token": harness.token };
+    const body = JSON.stringify({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(url, { method: "POST", headers: auth, body })).status).toBe(503);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      hotspot: async () => {
+        throw new Error("keychain said secret-pass");
+      },
+    });
+    const failed = await fetch(url, { method: "POST", headers: auth, body });
+    expect(failed.status).toBe(500);
+    expect(await failed.text()).not.toContain("secret-pass");
+  });
+
   it("rejects an empty reply and an unknown route", async () => {
     const { base, auth, replies } = await withControl();
     const empty = await fetch(`${base}/reply`, { method: "POST", headers: auth, body: JSON.stringify({ text: "  " }) });

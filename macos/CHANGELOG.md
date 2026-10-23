@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.21
+
+- Hotspot failover can be set up on the Mac: Settings, Keep awake, type your iPhone's hotspot
+  name and password, Save. The password stays in your Mac's Keychain.
+- The safety rules show your Mac's real battery levels, not fixed 40% and 10%.
+
 ## 2.1.20
 
 - Keep awake has its own page in Settings: what is on and until when, the one-time lid-closed

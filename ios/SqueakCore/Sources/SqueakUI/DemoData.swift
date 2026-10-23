@@ -196,7 +196,10 @@ enum DemoData {
                              awakeLidProblem: awake != nil && lidFailed ? "Something on this Mac turned sleep back on, so a closed lid would sleep it now." : nil,
                              awakeLidReady: lid ? true : nil,
                              awakeSafety: awake != nil && args.contains("-squeak-demo-safety") ? "Low Power Mode on · Battery at 38%" : nil,
-                             macPower: .init(percent: 64, onBattery: true, watts: 12, lidClosed: false))
+                             macPower: .init(percent: 64, onBattery: true, watts: 12, lidClosed: false),
+                             awakeLidActions: .init(displayOff: true, mute: true, lowPower: true, freezeApps: args.contains("-squeak-demo-freeze")),
+                             awakeRules: .init(lowPowerPercent: 35, endPercent: 8, heat: true),
+                             awakeLastEnd: awake == nil && args.contains("-squeak-demo-ended") ? .init(reason: "battery", at: ISO8601DateFormatter().string(from: Date()), why: "Battery at 9%") : nil)
         if args.contains("-squeak-demo-hotspot") {
             demo.hotspot = .init(configured: true, ssid: "Sibhi's iPhone", enabled: true, onHotspot: false)
         }
