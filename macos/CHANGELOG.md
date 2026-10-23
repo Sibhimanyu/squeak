@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.16
+
+- Keep Mac awake: the menu lists the lid-closed choices first, so a Mac you set to stay
+  awake stays awake with its lid shut. Lid open, and until you end it, are still there.
+
 ## 2.1.15
 
 - Two new shortcuts for Quick message, easy to reach with one hand: ⌃⇧ Space and
