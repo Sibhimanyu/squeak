@@ -34,6 +34,12 @@ if ! otool -l "$APP/Contents/MacOS/SqueakMac" | grep -q "@executable_path/../Fra
   install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/SqueakMac"
 fi
 
+# squeak-fans (helpers/squeak-fans): reads temperatures and fans for the daemon, and is what Settings ›
+# Keep awake › Set up fan control installs root-owned. Signed below with the app's identity, which the
+# installer checks before the admin prompt.
+mkdir -p "$APP/Contents/Helpers"
+"$REPO/helpers/squeak-fans/build.sh" "$APP/Contents/Helpers" >/dev/null
+
 # The brand's own duck files (DESIGN.md 6.1) and the menu-bar template; the app never redraws them.
 BRAND="$APP/Contents/Resources/brand"
 mkdir -p "$BRAND"
@@ -98,6 +104,7 @@ for part in "$FW/XPCServices/Installer.xpc" "$FW/XPCServices/Downloader.xpc" "$F
   codesign -s "$IDENTITY" --force "$part"
 done
 codesign -s "$IDENTITY" --force "$APP/Contents/Frameworks/Sparkle.framework"
+codesign -s "$IDENTITY" --force --identifier com.squeak.fans "$APP/Contents/Helpers/squeak-fans"
 codesign -s "$IDENTITY" --force "$APP"
 codesign --verify --deep --strict "$APP"
 

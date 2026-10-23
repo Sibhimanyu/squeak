@@ -286,6 +286,20 @@ public struct DaemonClient: Sendable {
         return json["rule"] as? String
     }
 
+    /// Fan control's sudoers rule (`GET /control/heat/fan-rule`); nil from a daemon without it, or one
+    /// naming any other path than `FanRule`'s.
+    public func fanRule() async -> String? {
+        guard let r = try? await get("/control/heat/fan-rule", token: true), (200..<300).contains(r.status),
+              let json = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any],
+              json["path"] as? String == FanRule.path, json["helperPath"] as? String == FanRule.helperPath else { return nil }
+        return json["rule"] as? String
+    }
+
+    /// Asks the daemon to look for fan control again, right after it was installed.
+    public func recheckFans() async {
+        _ = try? await post("/control/keep-awake", body: Data(#"{"action":"recheck-fans"}"#.utf8))
+    }
+
     /// Asks the daemon to look for the rule again, right after it was installed.
     public func recheckLidRule() async {
         _ = try? await post("/control/keep-awake", body: Data(#"{"action":"recheck-lid"}"#.utf8))

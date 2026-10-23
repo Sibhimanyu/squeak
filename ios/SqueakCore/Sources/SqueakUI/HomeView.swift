@@ -720,6 +720,10 @@ enum Connection {
         }
         // The server answering says nothing about the Mac: asleep, it leaves its last view standing.
         if case .silent(let since) = mac {
+            // During an awake session it is meant to be awake, so it is most likely offline: say how to fix that.
+            if let advice = MacStrip.offlineAdvice(awake: snapshot.keepAwake == true, hotspot: snapshot.hotspot) {
+                return State(text: "Mac offline · \(advice.short) · last heard \(Age.sync(since, now: now))", color: Theme.offline)
+            }
             return State(text: "Mac not answering, maybe asleep · last heard \(Age.sync(since, now: now))", color: Theme.offline)
         }
         // "Synced" is when this phone last heard from the server, which is what
@@ -793,7 +797,7 @@ struct MacStripView: View {
     private func strip() -> MacStrip? {
         MacStrip.compose(awake: model.awake.map { .init(until: $0.until, lid: $0.lid, safety: $0.safety, pending: $0.pending) }, power: model.snapshot?.macPower, liveness: model.macLiveness(),
                          sleepProblem: model.snapshot?.awakeSleepProblem, lastEnd: model.snapshot?.awakeLastEnd,
-                         offered: model.awakeOffered)
+                         offered: model.awakeOffered, hotspot: model.snapshot?.hotspot)
     }
 
     var body: some View {

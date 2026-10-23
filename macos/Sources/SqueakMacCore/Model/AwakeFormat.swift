@@ -95,6 +95,26 @@ public enum AwakeFormat {
         return "The session ends by itself at \(r.endPercent)% battery\(r.heat ? " or when your Mac gets very hot" : ""), and sleep comes back on."
     }
 
+    /// Heat's headline: the daemon's own line while it acts, else the plain state.
+    public static func heatTitle(_ heat: DaemonHeat) -> String {
+        switch heat.level {
+        case "hot": return "Hot"
+        case "warm": return "Warm"
+        default: return "Cool"
+        }
+    }
+
+    /// "Chip 62°C · Battery 33°C · Fans 2,300 rpm"; nil when nothing was read.
+    public static func heatReading(_ heat: DaemonHeat, locale: Locale = .current) -> String? {
+        var parts: [String] = []
+        if let die = heat.die { parts.append("Chip \(die)°C") }
+        if let battery = heat.battery { parts.append("Battery \(battery)°C") }
+        if let fastest = heat.fansRpm.max() {
+            parts.append(fastest == 0 ? "Fans off" : "Fans \(fastest.formatted(.number.locale(locale))) rpm\(heat.fansMax ? ", full" : "")")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     /// Why hotspot input cannot be saved, in words; nil when it can. The daemon checks the same rules again.
     /// `keepsPassword`: this name is the one already saved, so an empty password leaves the stored one alone.
     public static func hotspotProblem(ssid: String, password: String, keepsPassword: Bool = false) -> String? {

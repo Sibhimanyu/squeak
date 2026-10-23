@@ -273,6 +273,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public var awakeSleepProblem: String? = nil
     /// Hotspot failover (src/fleet/hotspot.ts). Optional: older Macs omit it, and the phone hides it.
     public var hotspot: Hotspot? = nil
+    /// Temperatures and fans while an awake session runs (src/fleet/heat.ts). Optional: older Macs,
+    /// and any Mac outside a session, omit it.
+    public var macHeat: MacHeat? = nil
     /// Where this Mac listens on the local network, for the direct same-Wi-Fi path (docs/remote-channel.md).
     /// Optional: older Macs, and a Mac with the path off, omit it. A phone off that network just fails to
     /// connect and stays on the cloud.
@@ -289,6 +292,30 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// The non-identifying tag Bonjour carries (`LocalAuth.tag`).
         public let tag: String
         public init(port: Int, hosts: [String], tag: String) { self.port = port; self.hosts = hosts; self.tag = tag }
+    }
+
+    public struct MacHeat: Codable, Equatable, Sendable {
+        /// "ok", "warm" or "hot".
+        public let level: String
+        public let chip: Int?
+        public let battery: Int?
+        public let fansRpm: [Int]?
+        public let fansMax: Bool?
+        public let fanControl: Bool?
+        public init(level: String, chip: Int? = nil, battery: Int? = nil, fansRpm: [Int]? = nil, fansMax: Bool? = nil, fanControl: Bool? = nil) {
+            self.level = level; self.chip = chip; self.battery = battery; self.fansRpm = fansRpm; self.fansMax = fansMax; self.fanControl = fanControl
+        }
+
+        /// "Chip 62°C · battery 33°C · fans 2,300 rpm", for Settings; nil when nothing was read.
+        public var reading: String? {
+            var parts: [String] = []
+            if let chip { parts.append("Chip \(chip)°C") }
+            if let battery { parts.append("battery \(battery)°C") }
+            if let fastest = fansRpm?.max() {
+                parts.append(fastest == 0 ? "fans off" : "fans \(fastest.formatted(.number.locale(Locale(identifier: "en_US")))) rpm\(fansMax == true ? ", full" : "")")
+            }
+            return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        }
     }
 
     public struct Hotspot: Codable, Equatable, Sendable {

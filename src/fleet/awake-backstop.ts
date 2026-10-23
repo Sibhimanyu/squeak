@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
+import { FANS_HELPER_PRIVILEGED } from "./heat.js";
 
 /**
  * The last line of defence for an awake session (todo.md, stay-awake plan
@@ -29,19 +30,23 @@ const DAEMON_LABEL = "com.squeak.daemon";
  * paused, sound muted while the lid was shut): undone only when the daemon is
  * not running, since a running one undoes it when the lid opens.
  */
-export function backstopScript(journalPath: string, actionsPath: string): string {
+export function backstopScript(journalPath: string, actionsPath: string, heatPath?: string): string {
+  const heat = heatPath ?? path.join(path.dirname(journalPath), "heat-journal.json");
   return `#!/bin/bash
 # Squeak's awake backstop (src/fleet/awake-backstop.ts). Undoes what Squeak
 # journalled but did not undo: a sleep disable or Low Power Mode when the
 # daemon is not running or the session's end passed two minutes ago (an
 # unreadable journal: sleep, at once); paused apps and muted sound when the
-# daemon is not running. No journal: nothing.
+# daemon is not running; fans left on full and agents left on the efficiency
+# cores (heat.ts) when the daemon is not running. No journal: nothing.
 JOURNAL=${shellQuote(journalPath)}
 ACTIONS=${shellQuote(actionsPath)}
+HEAT=${shellQuote(heat)}
+TASKPOLICY="\${SQUEAK_BACKSTOP_TASKPOLICY:-/usr/sbin/taskpolicy}"
 SUDO="\${SQUEAK_BACKSTOP_SUDO:-/usr/bin/sudo}"
 LAUNCHCTL="\${SQUEAK_BACKSTOP_LAUNCHCTL:-/bin/launchctl}"
 OSASCRIPT="\${SQUEAK_BACKSTOP_OSASCRIPT:-/usr/bin/osascript}"
-[ -f "$JOURNAL" ] || [ -f "$ACTIONS" ] || exit 0
+[ -f "$JOURNAL" ] || [ -f "$ACTIONS" ] || [ -f "$HEAT" ] || exit 0
 running=0
 "$LAUNCHCTL" print "gui/$(/usr/bin/id -u)/${DAEMON_LABEL}" 2>/dev/null | /usr/bin/grep -q "state = running" && running=1
 if [ "$running" = 0 ] && [ -f "$ACTIONS" ]; then
@@ -75,6 +80,30 @@ if [ "$running" = 0 ] && [ -f "$ACTIONS" ]; then
   fi
   echo "$(/bin/date -u +%FT%TZ) squeak backstop undid $(/bin/cat "$ACTIONS") (ok=$undone)" >&2
   [ "$undone" = 1 ] && /bin/rm -f "$ACTIONS"
+fi
+if [ "$running" = 0 ] && [ -f "$HEAT" ]; then
+  heat() { local out; out="$(/usr/bin/plutil -extract "$1" raw -o - "$HEAT" 2>/dev/null)" || return 1; printf '%s\n' "$out"; }
+  cooled=1
+  if [ "$(heat fansMax)" = "true" ]; then
+    "$SUDO" -n ${FANS_HELPER_PRIVILEGED} auto || cooled=0
+  fi
+  # Back to every core, only while the start time still matches: a reused pid is someone else's.
+  i=0
+  while [ "$i" -lt 1000 ]; do
+    pid="$(heat "slowed.$i.pid")" || break
+    started="$(heat "slowed.$i.startedAt")"
+    case "$pid" in
+      ''|*[!0-9]*) ;;
+      *)
+        if [ "$(TZ=UTC /bin/ps -o lstart= -p "$pid" 2>/dev/null | /usr/bin/xargs)" = "$started" ]; then
+          "$TASKPOLICY" -B -p "$pid" 2>/dev/null
+        fi
+        ;;
+    esac
+    i=$((i + 1))
+  done
+  echo "$(/bin/date -u +%FT%TZ) squeak backstop undid $(/bin/cat "$HEAT") (ok=$cooled)" >&2
+  [ "$cooled" = 1 ] && /bin/rm -f "$HEAT"
 fi
 [ -f "$JOURNAL" ] || exit 0
 field() { local out; out="$(/usr/bin/plutil -extract "$1" raw -o - "$JOURNAL" 2>/dev/null)" || return 1; printf '%s\n' "$out"; }

@@ -176,6 +176,7 @@ struct AwakeSettings: View {
                 lidSection
                 actionsSection
                 safetySection
+                heatSection
                 hotspotSection
             }
         }
@@ -246,7 +247,7 @@ struct AwakeSettings: View {
             }
         } header: { Text("Lid closed") } footer: {
             Footnote(model.awakeLidReady
-                ? "Keep it on a hard, open surface, never in a bag. A lid closed session always has an end, and Squeak turns sleep back on when it ends or when Squeak quits."
+                ? "A hard, open surface keeps it coolest; in a bag, Squeak watches its heat (below). A lid closed session always has an end, and Squeak turns sleep back on when it ends or when Squeak quits."
                 : "A one-time setup that asks for your Mac password, so Squeak can switch sleep off for a session. Nothing else is changed.")
         }
     }
@@ -283,6 +284,33 @@ struct AwakeSettings: View {
             if let ended = AwakeFormat.ended(model.awakeLastEnd) { Footnote(ended) }
         } header: { Text("Safety") } footer: {
             Footnote("These rules are always on. They protect the battery, and a Mac in a bag.")
+        }
+    }
+
+    // MARK: Heat
+
+    private var heatSection: some View {
+        let heat = model.heat
+        return Section {
+            if let heat {
+                StatusLine(
+                    dot: heat.level == "hot" ? Theme.error : heat.level == "warm" ? Theme.needsYou : Theme.idle,
+                    text: AwakeFormat.heatTitle(heat),
+                    detail: heat.why ?? AwakeFormat.heatReading(heat))
+            }
+            if heat?.fanControl == true {
+                StatusLine(dot: nil, text: "Fan control ready", detail: "When your Mac warms up during a session, its fans go to full.")
+            } else {
+                StatusLine(dot: nil, text: "Fan control not set up", detail: "macOS runs the fans on its own, and lets the chip get hot first.")
+                HStack(spacing: Space.s) {
+                    if model.settingUpFans { ProgressView().controlSize(.small); Text("Waiting for your Mac password…").foregroundStyle(.secondary) }
+                    Spacer(minLength: 0)
+                    Button("Set up fan control…") { Task { await model.setUpFanControl() } }
+                        .buttonStyle(SecondaryButtonStyle()).disabled(model.settingUpFans)
+                }
+            }
+        } header: { Text("Heat") } footer: {
+            Footnote("During a session Squeak watches the chip and battery. When it warms up (battery 40°C, or the chip 90°C with the lid shut) it turns on Low Power Mode and moves your agents to the efficiency cores, so they keep going but slower. If the battery reaches 45°C for two minutes, it lets your Mac sleep. A closed bag still traps heat; fans help only a little there.")
         }
     }
 

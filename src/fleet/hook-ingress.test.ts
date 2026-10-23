@@ -487,6 +487,21 @@ describe("HookIngressServer control routes", () => {
     expect(await failed.text()).not.toContain("secret-pass");
   });
 
+  it("serves fan control's sudoers rule only with the token, and 503 when none is wired", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/heat/fan-rule`;
+    const auth = { "x-squeak-token": harness.token };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(url, { headers: auth })).status).toBe(503);
+    const rule = { path: "/etc/sudoers.d/squeak-fans", rule: "me ALL=(root) NOPASSWD: x\n", helperPath: "/x" };
+    server.setControl({ sessionMessage: () => null, reply: async () => null, fanRule: () => rule });
+    expect((await fetch(url)).status).toBe(403);
+    const ok = await fetch(url, { headers: auth });
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual(rule);
+  });
+
   it("rejects an empty reply and an unknown route", async () => {
     const { base, auth, replies } = await withControl();
     const empty = await fetch(`${base}/reply`, { method: "POST", headers: auth, body: JSON.stringify({ text: "  " }) });

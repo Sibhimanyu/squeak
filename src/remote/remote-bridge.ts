@@ -51,6 +51,16 @@ import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from 
  */
 
 /** What is kept on the Mac, never in the cloud. Mode 0600. */
+/** Heat as the phone shows it (fleet/heat.ts): whole °C, fan speeds rounded to 100 rpm. */
+export interface PhoneHeat {
+  level: "ok" | "warm" | "hot";
+  chip: number | null;
+  battery: number | null;
+  fansRpm: number[];
+  fansMax: boolean;
+  fanControl: boolean;
+}
+
 export interface RemoteConfig {
   projectId: string;
   channelId: string;
@@ -496,6 +506,8 @@ export interface RemoteBridgeDependencies {
       watts: number | null;
       lidClosed: boolean | null;
     } | null;
+    /** Temperatures and fans while a session runs (fleet/heat.ts); null otherwise. */
+    heat?(): PhoneHeat | null;
     apply(
       request: unknown,
     ):
@@ -2347,6 +2359,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeLidReady) +
       JSON.stringify(view.awakeSafety) +
       JSON.stringify(view.macPower) +
+      JSON.stringify(view.macHeat) +
       JSON.stringify(view.awakeLidActions) +
       JSON.stringify(view.awakeRules) +
       JSON.stringify(view.awakeLastEnd) +
@@ -2493,6 +2506,7 @@ export class RemoteBridge {
     awakeLidReady?: boolean;
     awakeSafety?: string;
     macPower?: { percent: number | null; onBattery: boolean | null; watts: number | null; lidClosed: boolean | null };
+    macHeat?: PhoneHeat;
     awakeLidActions?: LidActionSettings;
     awakeRules?: AwakeRules;
     awakeLastEnd?: AwakeEnd;
@@ -2514,6 +2528,7 @@ export class RemoteBridge {
       ...(state?.safety ? { awakeSafety: state.lowPower ? `Low Power Mode on · ${state.safety}` : state.safety } : {}),
       // Battery, draw and lid, for the phone's "Your Mac".
       ...(awake.power?.() ? { macPower: awake.power()! } : {}),
+      ...(awake.heat?.() ? { macHeat: awake.heat()! } : {}),
       // What a closed lid does, the safety floors, how the last session ended, a sleep problem; each
       // optional, and older phones ignore them.
       ...(awake.lidActions ? { awakeLidActions: awake.lidActions() } : {}),

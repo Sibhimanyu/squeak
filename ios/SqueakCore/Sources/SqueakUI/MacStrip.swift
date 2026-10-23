@@ -35,11 +35,15 @@ struct MacStrip: Equatable {
     static func compose(
         awake: Awake?, power: PhoneSnapshot.MacPower?, liveness: MacLiveness,
         sleepProblem: String? = nil, lastEnd: PhoneSnapshot.AwakeEnd? = nil, offered: Bool = true,
-        now: Date = Date(), locale: Locale = .current
+        hotspot: PhoneSnapshot.Hotspot? = nil, now: Date = Date(), locale: Locale = .current
     ) -> MacStrip? {
         // A Mac that stopped answering left its awake and battery readings behind: say so instead of them.
         if case .silent(let since) = liveness {
-            return MacStrip(tone: .silent, lines: ["Mac not answering", "Last heard \(Age.sync(since, now: now))"])
+            let heard = "Last heard \(Age.sync(since, now: now))"
+            if let advice = offlineAdvice(awake: awake != nil, hotspot: hotspot) {
+                return MacStrip(tone: .silent, lines: ["Mac offline · \(heard.lowercased())", advice.long])
+            }
+            return MacStrip(tone: .silent, lines: ["Mac not answering", heard])
         }
         guard offered else { return nil }
 
@@ -64,6 +68,24 @@ struct MacStrip: Equatable {
         var second = [lid.text]
         if let p = powerText(awake: awake, power: power) { second.append(p) }
         return MacStrip(tone: lid.failed ? .failed : .awake, lines: [first, second.joined(separator: " · ")])
+    }
+
+    /// What to do about a Mac that stopped answering during an awake session. It is meant to stay awake, so
+    /// the likely cause is its internet, and the hotspot is how it gets back: iOS advertises Personal Hotspot
+    /// only while its screen is open, and no app may turn it on (src/fleet/hotspot.ts). nil without an awake
+    /// session, where an asleep Mac is the usual reason. `short` is for the connection bar.
+    static func offlineAdvice(awake: Bool, hotspot: PhoneSnapshot.Hotspot?) -> (short: String, long: String)? {
+        guard awake else { return nil }
+        guard let hotspot, hotspot.configured, hotspot.enabled else {
+            return ("may have lost its internet",
+                    "It may have lost its internet. Set up a hotspot in Squeak's Settings so it can get back on.")
+        }
+        if hotspot.onHotspot {
+            return ("check your iPhone's hotspot",
+                    "It was on your hotspot. Check Personal Hotspot is still on and this iPhone has signal.")
+        }
+        return ("open Personal Hotspot on this iPhone",
+                "Open Settings › Personal Hotspot on this iPhone and stay a few seconds. Your Mac joins it by itself.")
     }
 
     private static func lidText(awake: Awake?, power: PhoneSnapshot.MacPower?) -> (text: String, failed: Bool) {

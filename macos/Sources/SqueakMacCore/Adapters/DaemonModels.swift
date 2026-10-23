@@ -232,6 +232,38 @@ public struct DaemonHotspot: Decodable, Sendable, Equatable {
     }
 }
 
+/// Heat as `/state` reports it (`heat`, src/fleet/heat.ts): temperatures, fans, and what Squeak is
+/// doing about them. Every field optional on the wire; an older daemon sends none.
+public struct DaemonHeat: Decodable, Sendable, Equatable {
+    /// "ok", "warm" or "hot".
+    public var level: String
+    public var die: Int?
+    public var battery: Int?
+    public var fansRpm: [Int]
+    public var fansMax: Bool
+    /// The root-owned fan helper and its rule are installed.
+    public var fanControl: Bool
+    public var slowed: Int
+    public var why: String?
+    public init(level: String = "ok", die: Int? = nil, battery: Int? = nil, fansRpm: [Int] = [], fansMax: Bool = false,
+                fanControl: Bool = false, slowed: Int = 0, why: String? = nil) {
+        self.level = level; self.die = die; self.battery = battery; self.fansRpm = fansRpm; self.fansMax = fansMax
+        self.fanControl = fanControl; self.slowed = slowed; self.why = why
+    }
+    enum CodingKeys: String, CodingKey { case level, die, battery, fansRpm, fansMax, fanControl, slowed, why }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        level = c.lenient(String.self, .level) ?? "ok"
+        die = c.lenient(Int.self, .die)
+        battery = c.lenient(Int.self, .battery)
+        fansRpm = c.lenient([Int].self, .fansRpm) ?? []
+        fansMax = c.lenient(Bool.self, .fansMax) ?? false
+        fanControl = c.lenient(Bool.self, .fanControl) ?? false
+        slowed = c.lenient(Int.self, .slowed) ?? 0
+        why = c.lenient(String.self, .why)
+    }
+}
+
 public struct DaemonState: Decodable, Sendable, Equatable {
     public var generatedAt: Date?
     public var sessions: [DaemonSession]
@@ -244,6 +276,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
     /// Whether a lid-closed session can start: the sudoers rule is installed.
     public var awakeLidReady = false
     public var hotspot: DaemonHotspot?
+    public var heat: DaemonHeat?
     /// What a closed lid does, whether the lid is closed now, how the last session ended, and a sleep
     /// problem that outlives a session. All optional: older daemons send none of them.
     public var awakeLidActions: DaemonLidActions?
@@ -254,7 +287,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
     public var awakeRules: DaemonAwakeRules?
 
     enum CodingKeys: String, CodingKey {
-        case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot
+        case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot, heat
         case awakeLidActions, awakeLidClosedNow, awakeLastEnd, awakeSleepProblem, awakeRules
     }
 
@@ -281,6 +314,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
         awake = keepAwake == true ? (c.lenient(DaemonAwake.self, .awake) ?? DaemonAwake(until: nil)) : nil
         awakeLidReady = c.lenient(Bool.self, .awakeLidReady) ?? false
         hotspot = c.lenient(DaemonHotspot.self, .hotspot)
+        heat = c.lenient(DaemonHeat.self, .heat)
         awakeLidActions = c.lenient(DaemonLidActions.self, .awakeLidActions)
         awakeLidClosedNow = c.lenient(Bool.self, .awakeLidClosedNow) ?? false
         awakeLastEnd = c.lenient(DaemonAwakeEnd.self, .awakeLastEnd)

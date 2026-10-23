@@ -56,7 +56,17 @@ describe("readPower", () => {
       watts: null,
       lidClosed: null,
       hasBattery: null,
+      batteryTemp: null,
     });
+  });
+
+  it("reads the battery's temperature for heat.ts", async () => {
+    const reading = await readPower(async (command, args) =>
+      command === "/usr/sbin/ioreg" && args[1] === "AppleSmartBattery"
+        ? '"Voltage" = 12000\n"Temperature" = 4123\n'
+        : null,
+    );
+    expect(reading.batteryTemp).toBe(41.2);
   });
 
   it("knows a laptop by its AppleSmartBattery even when pmset says nothing", async () => {

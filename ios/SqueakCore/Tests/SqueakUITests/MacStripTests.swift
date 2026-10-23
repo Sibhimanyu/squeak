@@ -62,7 +62,27 @@ final class MacStripTests: XCTestCase {
         let s = try XCTUnwrap(strip(awake: .init(until: now.addingTimeInterval(3600), lid: "on"), power: battery,
                                     liveness: .silent(since: now.addingTimeInterval(-37 * 60))))
         XCTAssertEqual(s.tone, .silent)
-        XCTAssertEqual(s.lines, ["Mac not answering", "Last heard 37m ago"])
+        XCTAssertEqual(s.lines[0], "Mac offline · last heard 37m ago")
         XCTAssertFalse(s.spoken.contains("battery"))
+    }
+
+    func testAnOfflineMacInAnAwakeSessionSaysToOpenPersonalHotspot() throws {
+        let silent = MacLiveness.silent(since: now.addingTimeInterval(-3 * 60))
+        let awake = MacStrip.Awake(until: now.addingTimeInterval(3600), lid: "on")
+        let ready = PhoneSnapshot.Hotspot(configured: true, ssid: "Phone", enabled: true, onHotspot: false)
+        let s = try XCTUnwrap(MacStrip.compose(awake: awake, power: battery, liveness: silent, hotspot: ready, now: now))
+        XCTAssertEqual(s.tone, .silent)
+        XCTAssertEqual(s.lines[0], "Mac offline · last heard 3m ago")
+        XCTAssertTrue(s.lines[1].hasPrefix("Open Settings › Personal Hotspot on this iPhone"))
+        // Already on the hotspot: the hotspot is what to check.
+        let on = PhoneSnapshot.Hotspot(configured: true, ssid: "Phone", enabled: true, onHotspot: true)
+        XCTAssertTrue(try XCTUnwrap(MacStrip.compose(awake: awake, power: nil, liveness: silent, hotspot: on, now: now))
+            .lines[1].contains("still on"))
+        // No hotspot set up: say where to set one up.
+        XCTAssertTrue(try XCTUnwrap(MacStrip.compose(awake: awake, power: nil, liveness: silent, hotspot: nil, now: now))
+            .lines[1].contains("Squeak's Settings"))
+        // No awake session: an asleep Mac is the usual reason, so no advice.
+        XCTAssertEqual(try XCTUnwrap(MacStrip.compose(awake: nil, power: nil, liveness: silent, hotspot: ready, now: now)).lines,
+                       ["Mac not answering", "Last heard 3m ago"])
     }
 }
