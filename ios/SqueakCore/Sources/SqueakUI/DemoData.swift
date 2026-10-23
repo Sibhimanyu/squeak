@@ -67,6 +67,13 @@ enum DemoData {
                 ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-plan") ? plan : question) : nil,
             failure: s.failure)
         titled.workflow = s.workflow
+        // The demo's chats run on the models a real Mac names.
+        switch s.key {
+        case "pay": titled.model = "Opus 5.5 · 1M"; titled.effort = "Medium"
+        case "search": titled.model = "GPT 5.5"; titled.effort = "High"
+        case "tg": titled.model = "Opus 5.5 · 1M"; titled.effort = "Extra high"; titled.fast = true
+        default: break
+        }
         return titled
     }
 

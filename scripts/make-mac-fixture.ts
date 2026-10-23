@@ -114,6 +114,10 @@ const sessions = [
     branch: "pr",
     title: "PR",
     asks: "Want me to open a PR?",
+    // What the chat runs, named on the Mac (Conductor's own row; absent for a terminal agent).
+    model: "Opus 5.5 · 1M",
+    effort: "Extra high",
+    fast: true,
   }),
 ];
 const codexUsage = {

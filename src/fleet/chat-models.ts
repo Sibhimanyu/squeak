@@ -49,6 +49,13 @@ export function modelLabel(id: string): string {
   return label || id;
 }
 
+/** A stored thinking level in words: "xhigh" is "Extra high", the rest are capitalised. */
+export function levelLabel(level: string): string {
+  const clean = level.trim().toLowerCase();
+  if (!clean) return "";
+  return clean === "xhigh" ? "Extra high" : clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
 function agentOf(id: string, hinted?: unknown): NewChatAgent | null {
   if (hinted === "claude" || hinted === "codex") return hinted;
   if (id.startsWith("gpt-")) return "codex";

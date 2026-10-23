@@ -127,6 +127,22 @@ final class MacInteropTests: XCTestCase {
         XCTAssertFalse(plain.needsYou)
     }
 
+    func testDecodesTheModelAndEffortAChatRuns() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let snapshot = try ChannelCrypto.open(PhoneSnapshot.self, box: f.snapshotBox, key: key)
+        let named = try XCTUnwrap(snapshot.sessions.first { $0.model != nil })
+        XCTAssertEqual(named.model, "Opus 5.5 · 1M")
+        XCTAssertEqual(named.effort, "Extra high")
+        XCTAssertEqual(named.fast, true)
+        XCTAssertEqual(named.setupLine, "Opus 5.5 · 1M · Extra high · Fast")
+        XCTAssertEqual(named.setupAccessibilityLabel, "Model Opus 5.5 1M, effort extra high, fast mode")
+        // An older Mac (or a terminal agent) sends none of it: nothing to show.
+        let plain = try XCTUnwrap(snapshot.sessions.first { $0.model == nil })
+        XCTAssertNil(plain.setupLine)
+        XCTAssertNil(plain.setupAccessibilityLabel)
+    }
+
     func testDecodesAFilmWaitingOnItsLookCall() throws {
         let f = try fixture()
         let key = try PairingPayload.parse(f.pairingURL).k
