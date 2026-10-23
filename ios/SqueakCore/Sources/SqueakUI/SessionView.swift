@@ -989,6 +989,10 @@ struct Composer: View {
     @AppStorage("squeak.queueSteerExplained") private var explained = false
     private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
+    /// One height for the field's single line and the button beside it, so they line up (the field grows
+    /// upward with more lines; the button stays at its foot).
+    static let control: CGFloat = 48
+
     /// Always there: after a send the field clears and keeps focus, so the next message can be typed at once.
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -998,7 +1002,7 @@ struct Composer: View {
                     .focused(composing)
                     .disabled(block != nil)
                     .padding(.horizontal, 14).padding(.vertical, 12)
-                    .frame(minHeight: 44)
+                    .frame(minHeight: Self.control)
                     .glassSurface(in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.ink, lineWidth: 1.5).opacity(composing.wrappedValue ? 1 : 0))
                     .accessibilityLabel("Message for \(label)")
@@ -1048,7 +1052,7 @@ struct Composer: View {
             } label: {
                 RoundedRectangle(cornerRadius: 3).fill(stopping ? Theme.muted : Theme.needsYou)
                     .frame(width: 12, height: 12)
-                    .frame(width: 44, height: 44)
+                    .frame(width: Self.control, height: Self.control)
                     .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             }
@@ -1087,7 +1091,9 @@ struct Composer: View {
 
     private var sendFace: some View {
         Lucide(.arrowUp, size: 20, color: sendDisabled ? Theme.muted : Theme.primaryText)
-            .frame(width: glass ? 20 : 44, height: glass ? 24 : 44)
+            // The glass button pads its label (about 11.5 by 6.5 points), so its label is smaller than the
+            // button: together they make the same 48-point square as the field's height.
+            .frame(width: glass ? Self.control - 23 : Self.control, height: glass ? Self.control - 13 : Self.control)
     }
 
     private var glass: Bool {
