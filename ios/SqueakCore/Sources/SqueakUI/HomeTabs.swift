@@ -33,6 +33,7 @@ struct HomeTabs: View {
                 .tabItem { TabLabel("Settings", icon: .settings) }
                 .tag(Tab.settings)
         }
+        .environment(\.openSettingsTab, { selection = .settings })
         // A link to a chat opens it from Home, whichever tab was in front.
         .onChange(of: router.pendingSessionId, initial: true) { _, id in if id != nil { selection = .home } }
         .onChange(of: selection) { _, tab in

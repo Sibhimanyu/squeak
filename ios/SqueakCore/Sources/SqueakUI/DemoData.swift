@@ -187,7 +187,7 @@ enum DemoData {
         // -squeak-demo-awake: a timed awake session with 1h 23m left, for screenshots.
         let awake = ProcessInfo.processInfo.arguments.contains("-squeak-demo-awake") ? now(83 * 60 + 30) : nil
         // -squeak-demo-lid: lid closed too and set up; -squeak-demo-lid-failed: it did not turn on;
-        // -squeak-demo-safety: a safety rule is acting; -squeak-demo-hotspot: failover is set up.
+        // -squeak-demo-lid-closed: the lid is shut; -squeak-demo-silent: the Mac stopped answering; -squeak-demo-safety: a safety rule is acting; -squeak-demo-hotspot: failover is set up.
         let args = ProcessInfo.processInfo.arguments
         let lidFailed = args.contains("-squeak-demo-lid-failed")
         let lid = args.contains("-squeak-demo-lid") || lidFailed
@@ -196,7 +196,7 @@ enum DemoData {
                              awakeLidProblem: awake != nil && lidFailed ? "Something on this Mac turned sleep back on, so a closed lid would sleep it now." : nil,
                              awakeLidReady: lid ? true : nil,
                              awakeSafety: awake != nil && args.contains("-squeak-demo-safety") ? "Low Power Mode on · Battery at 38%" : nil,
-                             macPower: .init(percent: 64, onBattery: true, watts: 12, lidClosed: false),
+                             macPower: .init(percent: 64, onBattery: true, watts: 12, lidClosed: args.contains("-squeak-demo-lid-closed")),
                              awakeLidActions: .init(displayOff: true, mute: true, lowPower: true, freezeApps: args.contains("-squeak-demo-freeze")),
                              awakeRules: .init(lowPowerPercent: 35, endPercent: 8, heat: true),
                              awakeLastEnd: awake == nil && args.contains("-squeak-demo-ended") ? .init(reason: "battery", at: ISO8601DateFormatter().string(from: Date()), why: "Battery at 9%") : nil)

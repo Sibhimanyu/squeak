@@ -1,0 +1,68 @@
+import XCTest
+import SqueakCore
+@testable import SqueakUI
+
+final class MacStripTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    private let us = Locale(identifier: "en_US")
+
+    private func strip(awake: MacStrip.Awake? = nil, power: PhoneSnapshot.MacPower? = nil,
+                       liveness: MacLiveness = .answering, sleepProblem: String? = nil,
+                       lastEnd: PhoneSnapshot.AwakeEnd? = nil, offered: Bool = true) -> MacStrip? {
+        MacStrip.compose(awake: awake, power: power, liveness: liveness, sleepProblem: sleepProblem,
+                         lastEnd: lastEnd, offered: offered, now: now, locale: us)
+    }
+
+    private let battery = PhoneSnapshot.MacPower(percent: 64, onBattery: true, watts: 12, lidClosed: false)
+
+    func testTimedAwakeWithLidClosedAndBattery() throws {
+        let s = try XCTUnwrap(strip(awake: .init(until: now.addingTimeInterval(80 * 60), lid: "on"), power: battery))
+        XCTAssertEqual(s.tone, .awake)
+        XCTAssertTrue(s.lines[0].hasPrefix("Awake until "), s.lines[0])
+        XCTAssertTrue(s.lines[0].hasSuffix("· 1h 20m left"), s.lines[0])
+        XCTAssertEqual(s.lines[1], "Lid closed OK · 64% on battery")
+        XCTAssertTrue(s.spoken.hasPrefix("Mac awake."))
+    }
+
+    func testAwakeWithNoEnd() throws {
+        let s = try XCTUnwrap(strip(awake: .init(until: nil), power: .init(percent: 100, onBattery: false, watts: nil, lidClosed: false)))
+        XCTAssertEqual(s.lines, ["Kept awake until you end it", "Lid open only · 100% plugged in"])
+    }
+
+    func testLidFailedIsVioletToneNotAwake() throws {
+        let s = try XCTUnwrap(strip(awake: .init(until: nil, lid: "failed"), power: battery))
+        XCTAssertEqual(s.tone, .failed)
+        XCTAssertTrue(s.lines[1].hasPrefix("Lid closed didn't turn on"))
+    }
+
+    func testSafetySentenceReplacesBattery() throws {
+        let s = try XCTUnwrap(strip(awake: .init(until: nil, lid: "on", safety: "Low Power Mode on · Battery at 38%"), power: battery))
+        XCTAssertEqual(s.lines[1], "Lid closed OK · Low Power Mode on · Battery at 38%")
+    }
+
+    func testStartingAndGettingReady() throws {
+        let s = try XCTUnwrap(strip(awake: .init(until: nil, lid: "starting", pending: true)))
+        XCTAssertEqual(s.lines, ["Starting…", "Getting ready for a closed lid"])
+    }
+
+    func testOffIsHiddenWhenNothingNotable() {
+        XCTAssertNil(strip(power: battery))
+        XCTAssertNil(strip(awake: .init(until: nil), offered: false))
+    }
+
+    func testOffWithLidClosedSleepProblemAndEnd() throws {
+        XCTAssertEqual(strip(power: .init(percent: 50, onBattery: true, watts: nil, lidClosed: true))?.lines, ["Lid closed · Sleeps as usual"])
+        let p = try XCTUnwrap(strip(sleepProblem: "Another app turned sleep off."))
+        XCTAssertEqual(p.tone, .failed)
+        let end = PhoneSnapshot.AwakeEnd(reason: "battery", at: ISO8601DateFormatter().string(from: now), why: "Battery at 9%")
+        XCTAssertTrue(try XCTUnwrap(strip(lastEnd: end)).lines[0].contains("battery ran low"))
+    }
+
+    func testNotAnsweringReplacesStaleAwakeAndBattery() throws {
+        let s = try XCTUnwrap(strip(awake: .init(until: now.addingTimeInterval(3600), lid: "on"), power: battery,
+                                    liveness: .silent(since: now.addingTimeInterval(-37 * 60))))
+        XCTAssertEqual(s.tone, .silent)
+        XCTAssertEqual(s.lines, ["Mac not answering", "Last heard 37m ago"])
+        XCTAssertFalse(s.spoken.contains("battery"))
+    }
+}
