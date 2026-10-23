@@ -31,6 +31,7 @@ import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
 import { listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
+import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "../fleet/project-icons.js";
 import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
 import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
@@ -118,6 +119,9 @@ export class SqueakApp {
   private readonly caffeinator: Caffeinator;
   /** Joins the iPhone's hotspot when the Mac's internet drops while something needs it. */
   private readonly hotspot: HotspotFailover;
+  /** Conductor's icon for each repository, for the phone to mark a project with. */
+  private readonly projectIcons: ProjectIcons;
+  private projectIconsTimer: NodeJS.Timeout | null = null;
   /** The user's awake session (menu bar, window, phone); held through the caffeinator. */
   private readonly awake: AwakeSession;
   /** What a closed lid does during a lid session: display off, mute, Low Power Mode, pause chat apps. */
@@ -142,6 +146,7 @@ export class SqueakApp {
       // Sleep left disabled (a failed restore, another tool's disable, a bit put back mid-session).
       onWarning: (text) => this.announce(text),
     });
+    this.projectIcons = new ProjectIcons(() => readRepositoryIcons(config.conductorDbPath), shrinkWithSips);
     this.hotspot = new HotspotFailover({
       settingsPath: path.join(config.supportDir, "hotspot.json"),
       system: macHotspotSystem(config.handsAppPath),
@@ -271,6 +276,8 @@ export class SqueakApp {
           },
           // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
           answerer: answers,
+          projectIcons: () => this.projectIcons.current(),
+          renamer: { rename: (sessionId, title) => this.runtime.registry.renameSession(sessionId, title) },
           newChat: {
             workspaces: () => listNewChatWorkspaces(config.conductorDbPath, 20),
             start: (args) =>
@@ -401,6 +408,10 @@ export class SqueakApp {
     // The safety rules read the battery and heat once a minute while a session runs.
     this.safetyTimer = setInterval(() => void this.checkAwakeSafety(), 60_000);
     this.safetyTimer.unref?.();
+    // Conductor's repository icons, read now and every few minutes (they change when someone sets one).
+    void this.refreshProjectIcons();
+    this.projectIconsTimer = setInterval(() => void this.refreshProjectIcons(), 5 * 60_000);
+    this.projectIconsTimer.unref?.();
     if (this.config.caffeinateOnPower) {
       this.caffeinator.holdOnPower();
     }
@@ -455,6 +466,7 @@ export class SqueakApp {
     this.unwatchCaffeinate?.();
     if (this.lidRuleTimer) clearInterval(this.lidRuleTimer);
     if (this.safetyTimer) clearInterval(this.safetyTimer);
+    if (this.projectIconsTimer) clearInterval(this.projectIconsTimer);
     await this.lidActions.stop().catch(() => undefined);
     await this.awake.stop().catch(() => undefined);
     this.hotspot.stop();
@@ -499,6 +511,12 @@ export class SqueakApp {
   }
 
   /** Re-checks the sudoers rule; with it in, makes sure the backstop agent is there too. */
+  private async refreshProjectIcons(): Promise<void> {
+    if (await this.projectIcons.refresh()) {
+      this.remote?.changed();
+    }
+  }
+
   private async refreshLidRule(): Promise<void> {
     if (!(await this.awake.refreshLidRule())) {
       return;

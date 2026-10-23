@@ -79,6 +79,7 @@ final class AppModel {
     @ObservationIgnored private var baseSnapshot: PhoneSnapshot?
     @ObservationIgnored private var recentDoc: PhoneRecent?
     @ObservationIgnored private var seenSessions = SeenSessions()
+    @ObservationIgnored private var iconCache: [String: (length: Int, image: UIImage)] = [:]
     @ObservationIgnored private let pathMonitor = NWPathMonitor()
     @ObservationIgnored private var lastPath: (satisfied: Bool, interfaces: [NWInterface.InterfaceType])?
     /// How many recent chats Home has asked for; "Show more" adds 20, up to the Mac's 50.
@@ -374,6 +375,21 @@ final class AppModel {
         let view = base.merged(with: recentDoc).reconciled(with: watching.flatMap { liveTurns[$0] })
         seenSessions.record(view)
         if view != snapshot { snapshot = view }
+    }
+
+    /// Conductor's icon for a project, decoded once. Nil when the Mac sent none for it.
+    func projectIcon(_ name: String) -> UIImage? {
+        guard let base64 = snapshot?.projectIcons?[name] else { return nil }
+        if let cached = iconCache[name], cached.length == base64.count { return cached.image }
+        guard let data = Data(base64Encoded: base64), let image = UIImage(data: data) else { return nil }
+        iconCache[name] = (base64.count, image)
+        return image
+    }
+
+    /// Whether the Mac is answering, so a "working" mark is not drawn moving for a Mac that went quiet.
+    var macIsLive: Bool {
+        if case .silent = macLiveness() { return false }
+        return true
     }
 
     /// A session by key, active or recent, and for a short while after the Mac moved it between the two
@@ -923,6 +939,31 @@ final class AppModel {
             problemFor[session.key] = nil
         }
         return refusal
+    }
+
+    /// The chat whose name is being edited: set by a row's menu or the chat's header, read by the one alert at the root.
+    var renameTarget: PhoneSnapshot.Session?
+
+    /// Gives a chat a new name, in Conductor too. Nil when the Mac did it, else why not. The new name
+    /// shows once the Mac's next view carries it, a second or two later.
+    func rename(_ session: PhoneSnapshot.Session, to title: String) async -> String? {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= RenameCommand.maxLength else { return "A name is 1 to \(RenameCommand.maxLength) characters." }
+        if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
+        guard session.conductorSessionId != nil else { return "Only a Conductor chat can be renamed." }
+        guard await confirmWithBiometrics(reason: "Rename \(session.label)") else { return "Face ID was cancelled." }
+        guard let channel else { return "Not connected to your Mac." }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.renameDocument(to: session, title: name, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return "Your Mac didn't answer. Is Squeak running?" }
+            return result.sent ? nil : (result.reason ?? "Your Mac refused that.")
+        } catch {
+            return "Couldn't reach your Mac."
+        }
     }
 
     /// The last thing that went wrong with a chat's control (a Stop), shown under its composer.

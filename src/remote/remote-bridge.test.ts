@@ -117,6 +117,7 @@ function fixture(
     hotspot?: RemoteBridgeDependencies["hotspot"];
     workflow?: RemoteWorkflows | null;
     media?: RemoteBridgeDependencies["media"];
+    renamer?: RemoteBridgeDependencies["renamer"];
     /** The chat's latest message, as the replier reads it. */
     lastText?: string;
     /** Why the chat's newest turn failed, as the replier reads it. */
@@ -184,6 +185,7 @@ function fixture(
     newChat: options.newChat ?? null,
     answerer: options.answerer ?? null,
     diff: options.diff ?? null,
+    renamer: options.renamer ?? null,
     image: options.image ?? null,
     hotspot: options.hotspot ?? null,
     workflow: options.workflow ?? null,
@@ -272,6 +274,20 @@ function fixture(
       kind: "stop",
       sessionId: "s1",
       answersTurn: "turn-1",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
+  const renameCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "rename",
+      sessionId: "s1",
+      title: "Coupon codes at checkout",
       nonce: crypto.randomBytes(16).toString("hex"),
       expiresAt: now + 60_000,
       ...overrides,
@@ -370,6 +386,7 @@ function fixture(
     answerCommand,
     queueCommand,
     stopCommand,
+    renameCommand,
     diffCommand,
     imageCommand,
     hotspotCommand,
@@ -678,6 +695,42 @@ describe("RemoteBridge diff", () => {
     await bare.store.set(`${bare.channel}/commands/c1`, bare.diffCommand());
     await bare.bridge.tick();
     expect(bare.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't show changes on a phone." });
+  });
+});
+
+describe("RemoteBridge rename", () => {
+  it("renames a chat the phone is shown, to one clean line", async () => {
+    const renames: Array<[string, string]> = [];
+    const f = fixture({ renamer: { rename: (id, title) => (renames.push([id, title]), true) } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.renameCommand({ title: "  Fix\nthe   splitter\u0007  " }));
+    await f.bridge.tick();
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent" });
+    expect(renames).toEqual([["s1", "Fix the splitter"]]);
+    expect(f.sends).toEqual([]);
+  });
+
+  it("refuses an empty or long name, a chat not shown, a Mac that cannot, and a refusal from Conductor", async () => {
+    const renames: Array<[string, string]> = [];
+    const f = fixture({ renamer: { rename: (id, title) => (renames.push([id, title]), true) } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/a`, f.renameCommand({ title: "   " }));
+    await f.store.set(`${f.channel}/commands/b`, f.renameCommand({ title: "x".repeat(121) }));
+    await f.store.set(`${f.channel}/commands/c`, f.renameCommand({ sessionId: "s-elsewhere" }));
+    await f.store.set(`${f.channel}/commands/d`, f.renameCommand({ title: 7 as never }));
+    await f.bridge.tick();
+    for (const id of ["a", "b", "c", "d"]) expect(f.result(id)).toMatchObject({ status: "refused" });
+    expect(renames).toEqual([]);
+    const none = fixture();
+    await none.pair();
+    await none.store.set(`${none.channel}/commands/e`, none.renameCommand());
+    await none.bridge.tick();
+    expect(none.result("e")).toMatchObject({ status: "refused", reason: "This Mac can't rename a chat from a phone." });
+    const no = fixture({ renamer: { rename: () => false } });
+    await no.pair();
+    await no.store.set(`${no.channel}/commands/f`, no.renameCommand());
+    await no.bridge.tick();
+    expect(no.result("f")).toMatchObject({ status: "refused", reason: "Conductor didn't take the new name." });
   });
 });
 
@@ -1865,10 +1918,15 @@ describe("RemoteBridge usage refresh from the phone", () => {
 });
 
 describe("RemoteBridge recent chats", () => {
-  function recent(sessions: FleetSession[], active: FleetSession[]) {
+  function recent(
+    sessions: FleetSession[],
+    active: FleetSession[],
+    extra: Partial<ConstructorParameters<typeof RemoteBridge>[0]> = {},
+  ) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-recent-"));
     dirs.push(dir);
     return new RemoteBridge({
+      ...extra,
       configPath: path.join(dir, "remote.json"),
       projectId: "squeak-test",
       store: new MemoryStore(),
@@ -1927,6 +1985,15 @@ describe("RemoteBridge recent chats", () => {
     ]);
     expect((bridge as unknown as { phoneShows(id: string): boolean }).phoneShows("open")).toBe(true);
     expect((bridge as unknown as { phoneShows(id: string): boolean }).phoneShows("closed")).toBe(false);
+  });
+
+  it("sends Conductor's repository icons in the recent document, and none when there are none", () => {
+    const withIcons = recent([chat("a", 5)], [], { projectIcons: () => ({ storefront: "UE5H" }) });
+    expect(withIcons.phoneView().projectIcons).toEqual({ storefront: "UE5H" });
+    expect(withIcons.phoneViewParts().recent.projectIcons).toEqual({ storefront: "UE5H" });
+    expect((withIcons.phoneViewParts().snapshot as Record<string, unknown>).projectIcons).toBeUndefined();
+    expect(recent([chat("a", 5)], [], { projectIcons: () => ({}) }).phoneView()).not.toHaveProperty("projectIcons");
+    expect(recent([chat("a", 5)], []).phoneView()).not.toHaveProperty("projectIcons");
   });
 
   it("keeps the list short and each message shorter than an active chat's", () => {

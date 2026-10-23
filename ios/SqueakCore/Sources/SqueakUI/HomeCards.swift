@@ -71,10 +71,7 @@ struct ProjectCard: View {
         HomeGroupCard(needsYou: needs > 0) {
             NavigationLink(value: HomeRoute.project(project.name)) {
                 HStack(spacing: 12) {
-                    Lucide(.folder, size: 16, color: Theme.muted)
-                        .frame(width: tile, height: tile)
-                        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
+                    ProjectMark(name: project.name, size: tile, folder: true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(project.name).font(.headline).foregroundStyle(Theme.ink).lineLimit(2)
                         Text(summary).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
@@ -159,7 +156,7 @@ struct StatusGroupCard: View {
     private func header(count: Int) -> some View {
         let row = HStack(spacing: 10) {
             // Needs you has its left edge and its badge; a third red mark would only repeat them.
-            if filter != .needsYou { StatusDot(color: tone) }
+            if filter == .working { WorkingPulse() } else if filter != .needsYou { StatusDot(color: tone) }
             Text(filter.heading).font(.headline).foregroundStyle(Theme.ink)
             Spacer(minLength: 8)
             if filter == .needsYou {
@@ -209,12 +206,18 @@ struct SessionPreviewRow: View {
             HStack(alignment: .top, spacing: 10) {
                 AgentAvatar(session: session).padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
+                        // Under Status the project is not the card's title, so its icon says which one this is.
+                        if context == .status { ProjectMark(name: Presentation.projectName(session), size: 18) }
                         Text(Presentation.displayTitle(session)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 4)
                         Text(Age.describe(session.lastActivityAt)).font(.footnote).foregroundStyle(Theme.muted).monospacedDigit()
                     }
-                    second.font(.footnote).lineLimit(1)
+                    HStack(spacing: 6) {
+                        // The one thing that moves on Home: an agent that is working right now.
+                        if status.tone == .working { WorkingPulse() }
+                        second.font(.footnote).lineLimit(1)
+                    }
                     if let detail {
                         Text(detail).font(.footnote).foregroundStyle(Theme.muted).lineLimit(context == .project ? 1 : 2)
                     }
@@ -225,10 +228,47 @@ struct SessionPreviewRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .renameMenu(session, model: model)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(Presentation.displayTitle(session)), \(status.text)\(detail.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
         .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "Opens the chat")
+    }
+}
+
+/// Conductor's icon for a project, as the Mac sent it: a small rounded square. Without one, a neutral folder
+/// when `folder` is set (a project's own card), else nothing, so a row never carries a made-up mark.
+struct ProjectMark: View {
+    @Environment(AppModel.self) private var model
+    let name: String
+    var size: CGFloat = 16
+    var folder = false
+
+    var body: some View {
+        let radius = size * 0.25
+        if let image = model.projectIcon(name) {
+            Image(uiImage: image).resizable().scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: radius))
+                .overlay(RoundedRectangle(cornerRadius: radius).stroke(Theme.line))
+                .accessibilityHidden(true)
+        } else if folder {
+            Lucide(.folder, size: size * 0.5, color: Theme.muted)
+                .frame(width: size, height: size)
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: radius))
+                .overlay(RoundedRectangle(cornerRadius: radius).stroke(Theme.line))
+        }
+    }
+}
+
+/// The green dot that says an agent is working right now: it pulses, drawn by the render server and never
+/// under Reduce Motion (StatusDot). Still, not drawn at all, when the Mac has stopped answering: then
+/// "working" is the last thing it said, not something to show moving.
+struct WorkingPulse: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if model.macIsLive { StatusDot(color: Theme.working, pulses: true) } else { StatusDot(color: Theme.subtle) }
     }
 }
 

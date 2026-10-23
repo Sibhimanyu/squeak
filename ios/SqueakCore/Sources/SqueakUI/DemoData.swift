@@ -179,10 +179,14 @@ enum DemoData {
         let raw = rawSnapshot
         // -squeak-demo-awake: a timed awake session with 1h 23m left, for screenshots.
         let awake = ProcessInfo.processInfo.arguments.contains("-squeak-demo-awake") ? now(83 * 60 + 30) : nil
-        return PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: ProcessInfo.processInfo.arguments.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent, keepAwake: awake != nil, awakeUntil: awake,
+        var demo = PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: ProcessInfo.processInfo.arguments.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent, keepAwake: awake != nil, awakeUntil: awake,
                              awakeLid: awake != nil && ProcessInfo.processInfo.arguments.contains("-squeak-demo-lid") ? "on" : nil,
                              awakeLidReady: ProcessInfo.processInfo.arguments.contains("-squeak-demo-lid") ? true : nil,
                              macPower: .init(percent: 64, onBattery: true, watts: 12, lidClosed: false))
+        #if DEBUG
+        demo.projectIcons = DemoIcons.byProject
+        #endif
+        return demo
     }
 
     /// Chats from earlier, to pick up again. `-squeak-demo-empty-active` shows them with nothing active.
@@ -316,8 +320,7 @@ enum DemoData {
             .init(id: "6b1d0c7e-8a43-4f0e-b2d9-1c5e7a9f3d20", text: "Run the whole suite before you finish.", mode: "queue", position: 1),
         ], history: [
             .init(role: "user", text: "Telegram shows ** and ## literally in long answers. Find out why.", at: now(-1500)),
-            .init(role: "assistant", text: "Long answers are split before sending, and the splitter can cut inside an open tag. Telegram then rejects the markup and the retry falls back to plain text.", at: now(-1200)),
-            .init(role: "assistant", text: "The splitter cuts messages inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. I can fix the splitter and keep the fallback.", at: now(-900)),
+            .init(role: "assistant", text: "The splitter cuts messages inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. I can fix the splitter and keep the fallback.", at: now(-900), workBefore: 6),
             .init(role: "user", text: "Fix the splitter, and make sure tables still render.", at: now(-700)),
         ])]
     }

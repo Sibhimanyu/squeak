@@ -85,6 +85,8 @@ export interface HistoryEntry {
   role: "user" | "assistant";
   text: string;
   at: string | null;
+  /** Tool calls the agent made since the entry before this one (the work between two messages). Absent when none. */
+  workBefore?: number;
 }
 
 /**
@@ -104,8 +106,17 @@ export function condenseHistory(
       text: message.text.length > chars ? `${message.text.slice(0, chars - 1).trimEnd()}…` : message.text,
       at: message.at,
     };
+    const work = message.workBefore ?? 0;
+    if (work > 0) {
+      entry.workBefore = work;
+    }
     const previous = kept[kept.length - 1];
     if (entry.role === "assistant" && previous?.role === "assistant") {
+      // A run of agent messages is one answer; the work behind every message of it is the answer's work.
+      const total = (previous.workBefore ?? 0) + work;
+      if (total > 0) {
+        entry.workBefore = total;
+      }
       kept[kept.length - 1] = entry;
     } else {
       kept.push(entry);

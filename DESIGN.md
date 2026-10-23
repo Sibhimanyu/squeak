@@ -526,6 +526,25 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   - One duck, in the header; never in a card. **Earlier** is a quiet card at the
     foot. Searching skips the cards and lists every match. The last card scrolls
     clear of the floating tab bar. Swipe actions live in the lists, not on Home.
+- **Each project wears Conductor's own icon** (2026-10-23). The Mac reads the
+  icon Conductor shows for each repository (`repos.icon`), shrinks it to 96 px
+  and sends it with the recent chats; the phone puts it on the project's card
+  and before a chat's title wherever the project is not already the heading.
+  A project with none keeps the neutral folder tile on its card and nothing on
+  a row: the phone never invents a mark. The icons are the person's own, so a
+  duck among them is theirs; the mascot rule is about the app's own artwork.
+- **Motion means working.** A chat that is working has a small green dot that
+  pulses before its state words, and the Working card's header too: the render
+  server draws it, Reduce Motion stills it, and a Mac that has stopped
+  answering gets a still grey one, because then "working" is only the last
+  thing it said. Nothing else on Home moves.
+- **A chat can be renamed** from its header, or by pressing and holding its row
+  (Rename). It is a signed command: the Mac sets the chat's title in Conductor's
+  own database, so it is renamed there too, and the new name shows with the
+  Mac's next view. Only a chat Conductor holds open can be renamed.
+- **Between two messages, the work is counted**: "Worked · 5 steps" stands
+  where the agent worked, from the number of tool calls the Mac counts between
+  messages. Never what they were: a command never leaves the Mac this way.
 - **Earlier is a page with controls** (2026-10-23). The chats that went quiet,
   newest first, each tagged **Open** or **Closed** (whether its tab is open in
   Conductor; the Mac says so per chat, and an older Mac sends nothing, so the

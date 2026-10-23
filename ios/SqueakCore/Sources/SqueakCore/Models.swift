@@ -189,6 +189,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public var recent: [Session]?
     /// Whether the Mac has more recent chats than it sent ("Show more"). Optional: older Macs omit it.
     public var recentMore: Bool?
+    /// Conductor's icon for each repository (a small PNG, base64), by repository name. Arrives in the recent
+    /// document. Optional: older Macs omit it, and a repository without an icon has no entry.
+    public var projectIcons: [String: String]? = nil
     /// Whether the Mac's awake session runs. Optional: a Mac without sessions omits it, and the phone hides them.
     public let keepAwake: Bool?
     /// When a timed awake session ends (ISO); absent for one that runs until ended, and from older Macs.
@@ -287,6 +290,8 @@ public struct PhoneRecent: Codable, Equatable, Sendable {
     public let recentMore: Bool?
     /// Absent when the Mac cannot start chats.
     public let workspaces: [PhoneSnapshot.Workspace]?
+    /// Conductor's repository icons, by repository name; absent when there are none.
+    public let projectIcons: [String: String]?
 }
 
 extension PhoneSnapshot {
@@ -297,6 +302,7 @@ extension PhoneSnapshot {
         view.recent = recent?.recent
         view.recentMore = recent?.recentMore
         view.workspaces = recent?.workspaces
+        view.projectIcons = recent?.projectIcons
         return view
     }
 
@@ -675,6 +681,19 @@ public struct StopCommand: Codable, Equatable, Sendable {
     public let kind: String
     public let sessionId: String
     public let answersTurn: String?
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// A new name for a chat, as renaming it in Conductor does. The Mac takes one plain line of at most
+/// 120 characters, for a chat it shows the phone.
+public struct RenameCommand: Codable, Equatable, Sendable {
+    public static let maxLength = 120
+    public let v: Int
+    public let kind: String
+    public let sessionId: String
+    public let title: String
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

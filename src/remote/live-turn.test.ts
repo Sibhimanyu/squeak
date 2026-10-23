@@ -64,6 +64,26 @@ describe("condenseHistory", () => {
     ]);
   });
 
+  it("adds up the work behind a run of agent messages, and carries the work before a user message", () => {
+    const withWork = (role: "user" | "assistant", text: string, i: number, workBefore?: number) => ({
+      ...m(role, text, i),
+      ...(workBefore ? { workBefore } : {}),
+    });
+    const history = condenseHistory([
+      withWork("user", "Fix it", 0),
+      withWork("assistant", "Looking", 1, 2),
+      withWork("assistant", "Fixed.", 2, 3),
+      withWork("user", "Again", 3, 4),
+      withWork("assistant", "Done.", 4),
+    ]);
+    expect(history.map((h) => [h.role, h.workBefore])).toEqual([
+      ["user", undefined],
+      ["assistant", 5],
+      ["user", 4],
+      ["assistant", undefined],
+    ]);
+  });
+
   it("keeps the newest few and clips each", () => {
     const many = Array.from({ length: 20 }, (_, i) => m(i % 2 ? "assistant" : "user", `${i}`, i));
     expect(condenseHistory(many, 4).map((h) => h.text)).toEqual(["16", "17", "18", "19"]);

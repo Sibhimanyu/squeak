@@ -77,6 +77,12 @@ struct SessionView: View {
             ToolbarItem(placement: .principal) {
                 if let session { SessionHeader(session: session) }
             }
+            // Rename: the Mac can rename a chat Conductor holds open.
+            if let session, session.conductorSessionId != nil, session.open != false {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { model.renameTarget = session } label: { Lucide(.filePen, size: 20, label: "Rename chat", color: Theme.muted) }
+                }
+            }
         }
     }
 
@@ -105,13 +111,12 @@ struct SessionView: View {
             .scrollPosition(id: $topRow, anchor: .top)
             .modifier(StickToBottom(following: atEnd))
             .scrollDismissesKeyboard(.interactively)
-            // Open where you were reading, or at the newest message; after the first layout too
-            // (markdown sizes itself late).
+            // Open where you were reading. At the newest message there is nothing to do: the scroll view
+            // starts at the bottom and keeps it as the chat grows (StickToBottom), so it never starts at the
+            // top and travels down, as scrolling to the end after the first layout did.
             .onAppear {
-                let place = ReadingPlace.row(for: key).flatMap { saved in rows.contains { $0.id == saved } ? saved : nil }
-                let go = { if let place { proxy.scrollTo(place, anchor: .top) } else { proxy.scrollTo(Self.end, anchor: .bottom) } }
-                go()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: go)
+                guard let place = ReadingPlace.row(for: key).flatMap({ saved in rows.contains { $0.id == saved } ? saved : nil }) else { return }
+                DispatchQueue.main.async { proxy.scrollTo(place, anchor: .top) }
             }
             .onDisappear { ReadingPlace.save(row: atEnd ? nil : topRow, draft: draft, for: key) }
             // A draft survives the app being closed from the background, not just going back.
@@ -121,7 +126,10 @@ struct SessionView: View {
             .onChange(of: atEnd) { _, now in if now { newBelow = false } }
             // A new row (a message, a steer, the reply) eases into view; a new step inside the
             // live box just follows, so a busy turn does not run an animation a second.
-            .onChange(of: rows.map(\.id)) { _, _ in
+            .onChange(of: rows.map(\.id)) { old, new in
+                // Earlier messages arriving above (the chat's history loads a moment after it opens) are not
+                // news at the end: nothing scrolls, so the chat does not jump while you look at it.
+                guard old.last != new.last else { return }
                 guard atEnd else { newBelow = true; return }
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
             }
@@ -330,6 +338,14 @@ private struct ChatRows: View {
                         AgentMessage(agentName: agentName, text: text, atISO: atISO ?? "", muted: true, choices: nil, disabled: true) { _ in }
                             .equatable()
                     }
+                case .worked(_, let steps):
+                    HStack(spacing: 6) {
+                        Lucide(.clipboardList, size: 14, color: Theme.muted).accessibilityHidden(true)
+                        Text(steps == 1 ? "Worked · 1 step" : "Worked · \(steps) steps").font(.subheadline).foregroundStyle(Theme.muted)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(minHeight: 28)
+                    .accessibilityElement(children: .combine)
                 case .working(let label, let steps):
                     // After a steer the live part is its own count; "the latest 3 of 7" would count the folded parts too.
                     WorkingRow(agentName: agentName, label: stopping ? "Stopping…" : label, steps: steps, total: parted ? steps.count : total, live: live, open: $stepsOpen)

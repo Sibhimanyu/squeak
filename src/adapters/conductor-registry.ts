@@ -855,6 +855,12 @@ export class ConductorRegistryAdapter {
       .run(sessionId, workspaceId);
   }
 
+  /** Sets a chat's title, as Conductor's own rename does. False when no such chat. */
+  renameSession(sessionId: string, title: string): boolean {
+    const result = this.db.prepare(`UPDATE sessions SET title = ? WHERE id = ?`).run(title, sessionId);
+    return result.changes > 0;
+  }
+
   updateSessionStatus(sessionId: string, status: SessionStatus): void {
     this.db
       .prepare(

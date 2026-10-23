@@ -45,6 +45,24 @@ export function extractAssistantEnvelopeText(content: string): string | null {
 }
 
 /**
+ * How many tool calls an assistant row makes (its `tool_use` blocks). Only the count leaves: never a
+ * tool's name or input, so the phone can say "Worked · 5 steps" without showing a command.
+ */
+export function countToolCalls(content: string): number {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return 0;
+  }
+  const blocks = asRecord(asRecord(parsed)?.message)?.content;
+  if (!Array.isArray(blocks)) {
+    return 0;
+  }
+  return blocks.filter((block) => asString(asRecord(block)?.type) === "tool_use").length;
+}
+
+/**
  * What went wrong, from a row that ended a turn badly: an agent's
  * `{"type":"error","content":…}` or a `result` row with `is_error`. Null for
  * anything else, for "aborted by user" (that is you pressing stop, not a

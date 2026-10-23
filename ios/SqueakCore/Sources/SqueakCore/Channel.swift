@@ -403,6 +403,24 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed document that gives a chat a new name.
+    public func renameDocument(to session: PhoneSnapshot.Session, title: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+        guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = RenameCommand(
+            v: 1,
+            kind: "rename",
+            sessionId: sessionId,
+            title: title,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
     /// The signed document that steers a queued message now (`promote`) or takes it out of the queue (`cancel`).
     public func queueDocument(
         sessionId: String,

@@ -284,4 +284,28 @@ final class ChatTimelineTests: XCTestCase {
         let rows = ChatTimeline.rows(session: session("finished", message: "Earlier answer"), remembered: previous, sends: [], now: now)
         XCTAssertFalse(rows.contains { if case .history = $0 { true } else { false } })
     }
+
+    func testTheWorkBetweenMessagesShowsAsACountBeforeTheMessageItLedTo() {
+        let history = [
+            LiveTurn.HistoryEntry(role: "user", text: "Fix it"),
+            LiveTurn.HistoryEntry(role: "assistant", text: "Fixed.", workBefore: 5),
+            LiveTurn.HistoryEntry(role: "user", text: "Again", workBefore: 1),
+            LiveTurn.HistoryEntry(role: "assistant", text: "Done."),
+        ]
+        let rows = ChatTimeline.earlier(history, shown: [], remembered: nil, steps: [])
+        let shape = rows.map { row -> String in
+            switch row {
+            case .history(_, let fromUser, let text, _): "\(fromUser ? "you" : "agent"): \(text)"
+            case .worked(_, let steps): "worked \(steps)"
+            default: "?"
+            }
+        }
+        XCTAssertEqual(shape, ["you: Fix it", "worked 5", "agent: Fixed.", "worked 1", "you: Again", "agent: Done."])
+        // The latest answer is already on screen: its row is not repeated, but the work behind it still shows.
+        let onScreen = ChatTimeline.earlier(history, shown: [.agent(text: "Done.", atISO: "", muted: false)], remembered: nil, steps: [])
+        XCTAssertEqual(onScreen.count, 5)
+        // An older Mac sends no counts: nothing extra.
+        let plain = ChatTimeline.earlier([LiveTurn.HistoryEntry(role: "user", text: "Hi")], shown: [], remembered: nil, steps: [])
+        XCTAssertEqual(plain.count, 1)
+    }
 }

@@ -69,6 +69,34 @@ describe("buildTranscript", () => {
     expect(result.messages[0]?.at).toBeNull();
   });
 
+  it("counts the tool calls between messages onto the next message, and never carries a command", () => {
+    const result = buildTranscript(rows, { limit: 40, scanRows: 600 });
+    // The one Bash call came after "Looking" and before "Final answer".
+    expect(result.messages.map((m) => [m.id, m.workBefore])).toEqual([
+      ["u1", undefined],
+      ["u2", undefined],
+      ["a1", undefined],
+      ["a3", 1],
+    ]);
+    // Work with no message after it (an agent that ended on tools) is counted onto the next thing said.
+    const silent = buildTranscript(
+      [
+        { id: "u2", role: "user", content: "again", sentAt: null, turnId: "t2", model: null },
+        assistant("a2", "t1", [
+          { type: "tool_use", name: "Read", input: {} },
+          { type: "tool_use", name: "Edit", input: {} },
+        ]),
+        { id: "u1", role: "user", content: "first", sentAt: null, turnId: "t1", model: null },
+      ],
+      { limit: 40, scanRows: 600 },
+    );
+    expect(silent.messages.map((m) => [m.id, m.workBefore])).toEqual([
+      ["u1", undefined],
+      ["u2", 2],
+    ]);
+    expect(JSON.stringify(silent)).not.toContain("Edit");
+  });
+
   it("returns the newest messages when the limit bites, and says it is incomplete", () => {
     const result = buildTranscript(rows, { limit: 2, scanRows: 600 });
     expect(result.messages.map((m) => m.id)).toEqual(["a1", "a3"]);

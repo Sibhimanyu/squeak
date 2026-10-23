@@ -279,6 +279,27 @@ final class ChannelTests: XCTestCase {
         XCTAssertNil(command.mode)
     }
 
+    func testARenameSignsTheChatAndTheNewNameIn() throws {
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: Data(repeating: 7, count: 32).base64EncodedString(), n: "Mac")
+        let channel = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())
+        let session = PhoneSnapshot.Session(
+            key: "k", conductorSessionId: "s1", label: "l", agent: "claude", state: "idle",
+            lastActivityAt: "", detail: nil, git: nil, contextPercent: nil, turnId: "t1", message: nil, choices: nil
+        )
+        let (_, document) = try channel.renameDocument(to: session, title: "Coupon codes", signer: SoftwareSigner())
+        let command = try ChannelCrypto.open(RenameCommand.self, box: document.box, key: pairing.k)
+        XCTAssertEqual(command.kind, "rename")
+        XCTAssertEqual(command.sessionId, "s1")
+        XCTAssertEqual(command.title, "Coupon codes")
+        XCTAssertEqual(command.nonce.count, 32)
+        // A chat Conductor does not hold has nothing to rename.
+        let terminal = PhoneSnapshot.Session(
+            key: "t", conductorSessionId: nil, label: "l", agent: "claude", state: "idle",
+            lastActivityAt: "", detail: nil, git: nil, contextPercent: nil, turnId: nil, message: nil, choices: nil
+        )
+        XCTAssertThrowsError(try channel.renameDocument(to: terminal, title: "x", signer: SoftwareSigner()))
+    }
+
     func testASteeredReplySignsItsModeIn() throws {
         let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: Data(repeating: 7, count: 32).base64EncodedString(), n: "Mac")
         let channel = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())

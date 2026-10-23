@@ -149,6 +149,8 @@ enum ChatTimeline {
         case working(label: String, steps: [TurnStep] = [])
         /// Earlier in the chat, from the Mac's history: yours on the right, the agent's answers muted.
         case history(id: String, fromUser: Bool, text: String, atISO: String?)
+        /// The agent's work between two messages, counted (the Mac sends how many tool calls, never what they were).
+        case worked(id: String, steps: Int)
         case empty(String)
 
         var id: String {
@@ -159,6 +161,7 @@ enum ChatTimeline {
             case .folded(let id, _): id
             case .working: "working"
             case .history(let id, _, _, _): id
+            case .worked(let id, _): id
             case .empty: "empty"
             }
         }
@@ -270,9 +273,16 @@ enum ChatTimeline {
             }
         }
         func shownAlready(_ text: String) -> Bool { onScreen.contains { same(text, $0) || same($0, text) } }
-        return history.enumerated().compactMap { i, entry in
-            shownAlready(entry.text) ? nil
-                : .history(id: "h-\(entry.at ?? "")-\(i)-\(entry.text.prefix(16))", fromUser: entry.role == "user", text: entry.text, atISO: entry.at)
+        // Each entry may be preceded by the work behind it; the work shows even where the entry itself is
+        // already on screen (the latest answer), so a chat of several sends reads message, work, message.
+        return history.enumerated().flatMap { i, entry -> [Row] in
+            let id = "h-\(entry.at ?? "")-\(i)-\(entry.text.prefix(16))"
+            var rows: [Row] = []
+            if let work = entry.workBefore, work > 0 { rows.append(.worked(id: "w-\(id)", steps: work)) }
+            if !shownAlready(entry.text) {
+                rows.append(.history(id: id, fromUser: entry.role == "user", text: entry.text, atISO: entry.at))
+            }
+            return rows
         }
     }
 

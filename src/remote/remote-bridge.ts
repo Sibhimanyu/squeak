@@ -115,6 +115,28 @@ export interface StopCommand {
 }
 
 /**
+ * A signed new name for a Conductor chat: the same as renaming it in Conductor. Same envelope as a reply;
+ * only a chat the phone is shown, and only a plain one-line name.
+ */
+export interface RenameCommand {
+  v: 1;
+  kind: "rename";
+  sessionId: string;
+  title: string;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/** A chat's name is one short line. */
+export const RENAME_MAX_CHARS = 120;
+
+/** What a phone may rename: Conductor's chat title, nothing else. */
+export interface RemoteRenamer {
+  rename(sessionId: string, title: string): boolean;
+}
+
+/**
  * A signed request to see what a chat changed: its file list against the
  * base branch, and one file's patch when `file` names its index in that list.
  * Read-only, but it reveals code, so it is signed like everything else and
@@ -339,6 +361,10 @@ export interface RemoteBridgeDependencies {
   activity?: ((session: FleetSession) => Activity | null) | null;
   /** Workspaces a phone may start a chat in, and the way to start one. */
   newChat?: RemoteChatStarter | null;
+  /** Renames a Conductor chat (its title in Conductor's own database). Absent: renames are refused. */
+  renamer?: RemoteRenamer | null;
+  /** Conductor's icon for each repository, shrunk, by repository name (fleet/project-icons.ts). */
+  projectIcons?: (() => Record<string, string>) | null;
   /** Answers a chat's pending question or plan (src/fleet/answer.ts). */
   answerer?: Answerer | null;
   /**
@@ -1132,6 +1158,9 @@ export class RemoteBridge {
     if (kind === "stop") {
       return this.handleStop(device, id, command as unknown as StopCommand);
     }
+    if (kind === "rename") {
+      return this.handleRename(device, id, command as unknown as RenameCommand);
+    }
     if (kind === "workflow") {
       return this.handleWorkflow(device, id, command as unknown as WorkflowCommand);
     }
@@ -1367,6 +1396,49 @@ export class RemoteBridge {
       return { write: true, result: { id, status: "refused", reason: outcome.reason } };
     }
     this.log(device.name, "sent", `stopped ${command.sessionId.slice(0, 8)}`);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /** A new name for a chat. Signature, freshness and nonce have already held. */
+  private async handleRename(
+    device: PairedDevice,
+    id: string,
+    command: RenameCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `rename: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (command.v !== 1 || typeof command.sessionId !== "string" || typeof command.title !== "string") {
+      return refuse("Not a request this Mac understands.");
+    }
+    // One plain line: control characters become spaces, runs of space collapse, and it is not empty.
+    const title = [...command.title]
+      .map((char) => (char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 ? " " : char))
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (title.length === 0 || title.length > RENAME_MAX_CHARS) {
+      return refuse(`A name is 1 to ${RENAME_MAX_CHARS} characters.`);
+    }
+    const renamer = this.deps.renamer;
+    if (!renamer) {
+      return refuse("This Mac can't rename a chat from a phone.");
+    }
+    if (!this.phoneShows(command.sessionId)) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    let renamed = false;
+    try {
+      renamed = renamer.rename(command.sessionId, title);
+    } catch (error) {
+      logger.debug("could not rename a chat", { error: error instanceof Error ? error.message : String(error) });
+    }
+    if (!renamed) {
+      return refuse("Conductor didn't take the new name.");
+    }
+    this.log(device.name, "sent", `renamed ${command.sessionId.slice(0, 8)}`);
+    this.nudgePublish(1_000);
     return { write: true, result: { id, status: "sent" } };
   }
 
@@ -1903,8 +1975,8 @@ export class RemoteBridge {
       JSON.stringify(view.macPower) +
       JSON.stringify(view.hotspot) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
-    const { recent, recentMore, workspaces, ...rest } = view;
-    const lists = JSON.stringify([recent, recentMore, workspaces ?? null]);
+    const { recent, recentMore, workspaces, projectIcons, ...rest } = view;
+    const lists = JSON.stringify([recent, recentMore, workspaces ?? null, projectIcons ?? null]);
     const kind = `${format.split ? "split" : "whole"}|${format.compress ? "z" : "plain"}|`;
     const serialized = kind + core + (format.split ? "" : lists);
     if (format.split) {
@@ -1912,7 +1984,14 @@ export class RemoteBridge {
       // view's size, so a phone that reads them apart gets them only when
       // they change. Written first, so the view never names a list not there.
       if (kind + lists !== this.lastRecentPublished) {
-        const doc = { v: 1, recent, recentMore, ...(workspaces ? { workspaces } : {}), seq: this.nextSeq() };
+        const doc = {
+          v: 1,
+          recent,
+          recentMore,
+          ...(workspaces ? { workspaces } : {}),
+          ...(projectIcons ? { projectIcons } : {}),
+          seq: this.nextSeq(),
+        };
         const box = this.sealForPhone(config, doc);
         await this.deps.store.set(this.channel(config, "state", "recent"), { box, at: this.now() });
         logger.debug("remote recent published", { bytes: box.length });
@@ -1924,7 +2003,10 @@ export class RemoteBridge {
     if (serialized === this.lastPublished) {
       return;
     }
-    const doc = format.split ? { ...rest, split: true, seq: this.nextSeq() } : { ...view, seq: this.nextSeq() };
+    // The icons go only in the recent document: the whole format has size limits and no room for them.
+    const doc = format.split
+      ? { ...rest, split: true, seq: this.nextSeq() }
+      : { ...rest, recent, recentMore, ...(workspaces ? { workspaces } : {}), seq: this.nextSeq() };
     const box = this.sealForPhone(config, doc);
     await this.deps.store.set(this.channel(config, "state", "snapshot"), { box, at: this.now() });
     logger.debug("remote snapshot published", {
@@ -1965,10 +2047,16 @@ export class RemoteBridge {
 
   /** The phone's view in the split format: the snapshot and the recent document, each as published. */
   phoneViewParts() {
-    const { recent, recentMore, workspaces, ...rest } = this.phoneView();
+    const { recent, recentMore, workspaces, projectIcons, ...rest } = this.phoneView();
     return {
       snapshot: { ...rest, split: true as const },
-      recent: { v: 1 as const, recent, recentMore, ...(workspaces ? { workspaces } : {}) },
+      recent: {
+        v: 1 as const,
+        recent,
+        recentMore,
+        ...(workspaces ? { workspaces } : {}),
+        ...(projectIcons ? { projectIcons } : {}),
+      },
     };
   }
 
@@ -1991,6 +2079,7 @@ export class RemoteBridge {
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
       // Where a phone may start a chat; absent when this Mac can't (phones then hide the button).
       ...(this.deps.newChat ? { workspaces: this.phoneWorkspaces() } : {}),
+      ...this.phoneProjectIcons(),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
       // Older phones ignore it; newer ones list it under Recent and can reply to any of them.
       recent: recent.map((session, index) =>
@@ -2140,6 +2229,16 @@ export class RemoteBridge {
     }
     this.questionCache.set(key, value);
     return value;
+  }
+
+  /** The icon Conductor shows for each repository, so the phone can mark a project with it; absent when there are none. */
+  private phoneProjectIcons(): { projectIcons?: Record<string, string> } {
+    try {
+      const icons = this.deps.projectIcons?.() ?? {};
+      return Object.keys(icons).length > 0 ? { projectIcons: icons } : {};
+    } catch {
+      return {};
+    }
   }
 
   private phoneWorkspaces(): PhoneWorkspace[] {

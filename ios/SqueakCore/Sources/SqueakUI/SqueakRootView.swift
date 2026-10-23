@@ -67,6 +67,7 @@ struct RootView: View {
         case let .awaitingApproval(code, mac): AwaitingApprovalView(code: code, mac: mac)
         case .paired:
             Group { if tabs { HomeTabs() } else { HomeView() } }
+                .renameAlert()
                 .onAppear { screen.report?("Sessions"); onMainScreen?() }
         }
     }

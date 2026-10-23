@@ -98,6 +98,8 @@ struct HomeView: View {
                 if let i = args.firstIndex(of: "-squeak-group"), i + 1 < args.count, let g = Presentation.Grouping(rawValue: args[i + 1]) { storedGrouping = g }
                 if let i = args.firstIndex(of: "-squeak-filter"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) { path = [.status(f)] }
                 if args.contains("-squeak-earlier") { path = [.recent] }
+                // `-squeak-rename <key>`: the rename alert, for screenshots of the demo.
+                if let i = args.firstIndex(of: "-squeak-rename"), i + 1 < args.count { model.renameTarget = model.snapshot?.session(args[i + 1]) }
                 if let i = args.firstIndex(of: "-squeak-project"), i + 1 < args.count { path = [.project(args[i + 1])] }
             }
             .sheet(isPresented: $showingUsage) { UsageView() }
@@ -559,17 +561,22 @@ struct SessionRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text)\(third.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
         .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "")
+        .renameMenu(session, model: model)
     }
 
     private var rowText: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                if !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
                 Text(Presentation.displayTitle(session)).font(.headline).lineLimit(2)
                 Spacer(minLength: 4)
                 if recent, let open = session.open { OpenTag(open: open) }
                 Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
             }
-            secondLine.font(.subheadline).lineLimit(1)
+            HStack(spacing: 6) {
+                if !recent, status.tone == .working { WorkingPulse() }
+                secondLine.font(.subheadline).lineLimit(1)
+            }
             if !recent, let why = third {
                 Text(why).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
             }

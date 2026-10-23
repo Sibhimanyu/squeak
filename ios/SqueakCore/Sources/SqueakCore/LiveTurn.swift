@@ -38,8 +38,13 @@ public struct LiveTurn: Codable, Equatable, Sendable {
         public let role: String
         public let text: String
         public let at: String?
+        /// Tool calls the agent made since the entry before this one: the work between two messages, which has
+        /// no words of its own. Absent when there was none, and from an older Mac.
+        public let workBefore: Int?
 
-        public init(role: String, text: String, at: String? = nil) { self.role = role; self.text = text; self.at = at }
+        public init(role: String, text: String, at: String? = nil, workBefore: Int? = nil) {
+            self.role = role; self.text = text; self.at = at; self.workBefore = workBefore
+        }
     }
 
     public struct QueuedMessage: Codable, Equatable, Sendable, Identifiable {
