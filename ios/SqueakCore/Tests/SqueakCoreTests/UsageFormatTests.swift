@@ -28,14 +28,16 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.fraction(140), 1)
         XCTAssertEqual(UsageFormat.fraction(-3), 0)
     }
-    func testTheBarShowsWhatIsLeftAndIsFullOnceTheWindowResets() {
+    func testTheBarShowsWhatIsUsedAndIsEmptyOnceTheWindowResets() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let past = ISO8601DateFormatter().string(from: now.addingTimeInterval(-60))
         let future = ISO8601DateFormatter().string(from: now.addingTimeInterval(3600))
-        XCTAssertEqual(UsageFormat.left(76, resetsAt: past, now: now), "Reset")
-        XCTAssertEqual(UsageFormat.remaining(76, resetsAt: past, now: now), 1)
-        XCTAssertEqual(UsageFormat.left(76, resetsAt: future, now: now), "24% left")
-        XCTAssertEqual(UsageFormat.remaining(76, resetsAt: future, now: now), 0.24, accuracy: 0.0001)
-        XCTAssertEqual(UsageFormat.left(140, resetsAt: future, now: now), "0% left")
+        XCTAssertEqual(UsageFormat.usedLabel(76, resetsAt: past, now: now), "Reset")
+        XCTAssertEqual(UsageFormat.usedFraction(76, resetsAt: past, now: now), 0)
+        XCTAssertEqual(UsageFormat.usedLabel(76, resetsAt: future, now: now), "76% used")
+        XCTAssertEqual(UsageFormat.usedFraction(76, resetsAt: future, now: now), 0.76, accuracy: 0.0001)
+        XCTAssertEqual(UsageFormat.usedLabel(140, resetsAt: future, now: now), "100% used")
+        XCTAssertEqual(UsageFormat.usedFraction(140, resetsAt: future, now: now), 1)
+        XCTAssertEqual(UsageFormat.usedLabel(-5, resetsAt: future, now: now), "0% used")
     }
 }

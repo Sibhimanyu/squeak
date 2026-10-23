@@ -232,6 +232,7 @@ struct NewChatView: View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text).focused($focused)
+                    .pasteImages(into: $photos, focused: focused)
                     .frame(minHeight: 140).scrollContentBackground(.hidden).padding(.horizontal, 10).padding(.vertical, 6)
                 if text.isEmpty {
                     Text("What should it do?").foregroundStyle(Theme.subtle)

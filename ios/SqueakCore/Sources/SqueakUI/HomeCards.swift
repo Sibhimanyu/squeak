@@ -5,9 +5,11 @@ import SwiftUI
 
 /// DESIGN.md §8.2: Home's cards. One neutral surface (12pt, a hairline, no shadow) per group, with a
 /// header that opens the group and up to a few chats under it that open themselves. The only colour
-/// is the needs-you left edge and badge; every state is in words.
+/// is a state-coloured left edge and badge (red for needs you, blue for unread replies); every state is in words.
 struct HomeGroupCard<Content: View>: View {
     var needsYou = false
+    /// An edge colour other than needs-you red, e.g. `Theme.done` for unreviewed finishes.
+    var edge: Color? = nil
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -16,23 +18,25 @@ struct HomeGroupCard<Content: View>: View {
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             .overlay(alignment: .leading) {
-                if needsYou {
-                    Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 12).padding(.leading, 3)
+                if needsYou || edge != nil {
+                    Capsule().fill(edge ?? Theme.needsYou).frame(width: 3).padding(.vertical, 12).padding(.leading, 3)
                         .accessibilityHidden(true)
                 }
             }
     }
 }
 
-/// §8.3: the red pill for what waits on you. Absent at zero, so the caller never draws "0".
+/// §8.3: the pill for a count: red for what waits on you, blue (`Theme.done`) for unreviewed finishes.
+/// Absent at zero, so the caller never draws "0".
 struct CountBadge: View {
     let count: Int
+    var color: Color = Theme.needsYou
 
     var body: some View {
         Text("\(count)")
             .font(.caption2.weight(.bold)).monospacedDigit().foregroundStyle(.white)
             .padding(.horizontal, 7).frame(minWidth: 20, minHeight: 20)
-            .background(Theme.needsYou, in: Capsule())
+            .background(color, in: Capsule())
             .accessibilityHidden(true)
     }
 }
@@ -211,6 +215,7 @@ struct SessionPreviewRow: View {
                         if context == .status { ProjectMark(name: Presentation.projectName(session), size: 18) }
                         Text(Presentation.displayTitle(session)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 4)
+                        if model.isUnread(session) { UnreadMark() }
                         Text(Age.describe(session.lastActivityAt)).font(.footnote).foregroundStyle(Theme.muted).monospacedDigit()
                     }
                     HStack(spacing: 6) {
@@ -308,6 +313,86 @@ struct AgentAvatar: View {
             }
         }
         .accessibilityHidden(true)
+    }
+}
+
+/// A small blue dot beside the age: this chat answered and you have not opened it. Blue is Done (§3.3),
+/// never the red of needs-you.
+struct UnreadMark: View {
+    var body: some View {
+        Circle().fill(Theme.done).frame(width: 8, height: 8).accessibilityHidden(true)
+    }
+}
+
+/// Replies you have not read, however long ago they came: a chat does not drop off Home just because the
+/// quarter hour passed. Quiet Done blue (left edge, count), placed below every active group so needs-you
+/// stays first and the only red on screen.
+struct NewRepliesCard: View {
+    let sessions: [PhoneSnapshot.Session]
+
+    var body: some View {
+        HomeGroupCard(edge: Theme.done) {
+            HStack(spacing: 10) {
+                Text("New replies").font(.headline).foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                CountBadge(count: sessions.count, color: Theme.done)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44)
+            .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
+            ForEach(sessions.prefix(6)) { session in
+                Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true)
+                NavigationLink(value: HomeRoute.session(session.key)) {
+                    SessionRow(session: session, recent: true)
+                        .padding(.horizontal, 14).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Color.clear.frame(height: 4)
+        }
+    }
+}
+
+/// Home with nothing running: Earlier opens in place, so the newest quiet chats are one tap from reviving.
+/// The header folds it away; the foot goes to the whole list.
+struct RecentInlineCard: View {
+    let sessions: [PhoneSnapshot.Session]
+    @Binding var open: Bool
+    private static let shown = 5
+
+    var body: some View {
+        HomeGroupCard {
+            Button { open.toggle(); UISelectionFeedbackGenerator().selectionChanged() } label: {
+                HStack(spacing: 10) {
+                    Lucide(.history, size: 18, color: Theme.muted).frame(width: 24)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Earlier").font(.headline).foregroundStyle(Theme.ink)
+                        Text("Pick one up where it stopped").font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 8)
+                    Lucide(open ? .chevronUp : .chevronDown, size: 16, color: Theme.subtle)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityValue(open ? "Expanded" : "Collapsed")
+            .accessibilityHint(open ? "Hides the recent chats" : "Shows the recent chats")
+            if open {
+                ForEach(sessions.prefix(Self.shown)) { session in
+                    Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true)
+                    NavigationLink(value: HomeRoute.session(session.key)) {
+                        SessionRow(session: session, recent: true)
+                            .padding(.horizontal, 14).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true)
+            CardFooterRow(title: "View all earlier chats", symbol: .chevronRight) { content in
+                NavigationLink(value: HomeRoute.recent) { content }.buttonStyle(.plain)
+            }
+            .accessibilityHint("Opens older chats")
+        }
     }
 }
 

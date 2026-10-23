@@ -4,13 +4,15 @@ import SqueakIcons
 import SwiftUI
 
 /// Plan usage: what the Mac last saw for Claude and Codex. Bars are ink, not state colours
-/// (DESIGN.md §3.3: a state colour is never a fill). Refresh asks the Mac for a new Claude reading,
-/// signed like a reply; it fetches usage without consuming tokens, at most once a minute.
+/// (DESIGN.md §3.3: a state colour is never a fill); they fill as a window is used. The sheet asks
+/// the Mac for a new Claude reading when it opens, and again on Refresh, signed like a reply; it
+/// fetches usage without consuming tokens, at most once a minute.
 struct UsageView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var refreshing = false
     @State private var refreshNote: String?
+    @State private var refreshedOnOpen = false
 
     var body: some View {
         NavigationStack {
@@ -25,7 +27,7 @@ struct UsageView: View {
                             : "Your Mac hasn't sent usage yet. Update Squeak on your Mac to see it here.")
                             .foregroundStyle(Theme.muted)
                     }
-                    Text(refreshNote ?? "Refresh asks your Mac for a new Claude reading. It fetches usage without consuming tokens, at most once a minute.")
+                    Text(refreshNote ?? "Usage refreshes when you open this, and on Refresh. It asks your Mac for a new Claude reading and fetches usage without consuming tokens, at most once a minute.")
                         .font(.footnote).foregroundStyle(Theme.muted)
                 }
                 .padding(20)
@@ -37,11 +39,7 @@ struct UsageView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
-                        refreshing = true
-                        Task {
-                            refreshNote = await model.refreshUsage()
-                            refreshing = false
-                        }
+                        Task { await refresh() }
                     } label: {
                         if refreshing { ProgressView() } else { Text("Refresh") }
                     }
@@ -52,6 +50,18 @@ struct UsageView: View {
             }
         }
         .foregroundStyle(Theme.ink)
+        .task(id: model.snapshot == nil) {
+            guard model.snapshot != nil, !refreshedOnOpen else { return }
+            refreshedOnOpen = true
+            await refresh()
+        }
+    }
+
+    private func refresh() async {
+        guard !refreshing else { return }
+        refreshing = true
+        refreshNote = await model.refreshUsage()
+        refreshing = false
     }
 
     @ViewBuilder
@@ -96,11 +106,11 @@ struct UsageView: View {
                 Text(name).font(.subheadline)
                 Spacer()
                 if let window {
-                    Text(UsageFormat.left(window.usedPercent, resetsAt: window.resetsAt)).font(.subheadline.weight(.semibold)).monospacedDigit()
+                    Text(UsageFormat.usedLabel(window.usedPercent, resetsAt: window.resetsAt)).font(.subheadline.weight(.semibold)).monospacedDigit()
                 }
             }
             if let window {
-                UsageBar(fraction: UsageFormat.remaining(window.usedPercent, resetsAt: window.resetsAt))
+                UsageBar(fraction: UsageFormat.usedFraction(window.usedPercent, resetsAt: window.resetsAt))
                 Text(UsageFormat.resets(window.resetsAt)).font(.footnote).foregroundStyle(Theme.muted)
             } else {
                 Text("Not reported").font(.footnote).foregroundStyle(Theme.muted)
@@ -110,7 +120,7 @@ struct UsageView: View {
     }
 }
 
-/// A thin track and an ink fill.
+/// A thin line track and an ink fill that grows with use (never a state colour).
 struct UsageBar: View {
     let fraction: Double
 

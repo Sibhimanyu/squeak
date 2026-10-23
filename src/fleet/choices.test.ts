@@ -75,3 +75,41 @@ describe("parseChoices", () => {
     expect(parseChoices("Recommendation: D\nA) one\nB) two")?.recommended).toBeNull();
   });
 });
+
+describe("choices read from prose (the phone only)", () => {
+  const prose = { prose: true };
+
+  it("offers the two numbers a closing question points at, sending the agent's own words", () => {
+    const text =
+      "I fixed the import and the tests pass. The retry is flaky though.\n\nWant to do number one or number two?";
+    const result = parseChoices(text, prose);
+    expect(result?.options.map((o) => o.reply)).toEqual(["Number one", "Number two"]);
+    expect(result?.question).toBe("Want to do number one or number two?");
+  });
+
+  it("takes each option's name from the numbered list above", () => {
+    const text =
+      "Two ways forward:\n1. Retry with backoff\n2. Fail fast and alert\n\nWhich would you like, option 1 or option 2?";
+    const result = parseChoices(text, prose);
+    expect(result?.options.map((o) => o.title)).toEqual(["Retry with backoff", "Fail fast and alert"]);
+    expect(result?.options.map((o) => o.reply)).toEqual(["Option 1", "Option 2"]);
+  });
+
+  it("reads a numbered list closed by a which-question and sends the number", () => {
+    const text = "Options:\n1. Rebase\n2. Merge\n\nWhich do you prefer?";
+    expect(parseChoices(text, prose)?.options.map((o) => o.reply)).toEqual(["1", "2"]);
+  });
+
+  it("does not turn a numbered summary into buttons", () => {
+    const text = "Done:\n1. Ran the tests\n2. Fixed the import\n\nWant me to commit this?";
+    expect(parseChoices(text, prose)).toBeNull();
+  });
+
+  it("stays off for Telegram and Cliq, which send letters", () => {
+    expect(parseChoices("Want to do number one or number two?")).toBeNull();
+  });
+
+  it("only counts the closing question", () => {
+    expect(parseChoices("Should I do number one or number two? I went ahead with one.", prose)).toBeNull();
+  });
+});

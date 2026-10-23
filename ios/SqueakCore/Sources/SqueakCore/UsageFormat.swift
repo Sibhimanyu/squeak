@@ -53,14 +53,15 @@ public enum UsageFormat {
         return at <= now
     }
 
-    /// "58% left", or "Reset" once the window has started over. The bars show what is left, like
-    /// a battery (owner's decision, 2026-10-19): full when there is plenty, short as it runs out.
-    public static func left(_ percent: Double, resetsAt: String, now: Date = Date()) -> String {
-        hasReset(resetsAt, now: now) ? "Reset" : "\(Int((100 - min(max(percent, 0), 100)).rounded()))% left"
+    /// "42% used", or "Reset" once the window has started over. The bars show what is used and
+    /// fill as you use it: empty at the start of a window (owner's decision, 2026-10-23,
+    /// reversing 2026-10-19, when they showed what was left).
+    public static func usedLabel(_ percent: Double, resetsAt: String, now: Date = Date()) -> String {
+        hasReset(resetsAt, now: now) ? "Reset" : used(min(max(percent, 0), 100))
     }
 
-    /// The bar for a reading: what is left of the window, full once it has reset.
-    public static func remaining(_ percent: Double, resetsAt: String, now: Date = Date()) -> Double {
-        hasReset(resetsAt, now: now) ? 1 : 1 - fraction(percent)
+    /// The bar for a reading: how much of the window is used, empty once it has reset.
+    public static func usedFraction(_ percent: Double, resetsAt: String, now: Date = Date()) -> Double {
+        hasReset(resetsAt, now: now) ? 0 : fraction(percent)
     }
 }

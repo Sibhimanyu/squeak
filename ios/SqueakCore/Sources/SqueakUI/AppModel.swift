@@ -79,6 +79,14 @@ final class AppModel {
     @ObservationIgnored private var baseSnapshot: PhoneSnapshot?
     @ObservationIgnored private var recentDoc: PhoneRecent?
     @ObservationIgnored private var seenSessions = SeenSessions()
+    /// Chats this phone has a stake in (opened, sent to, or watched working) and when each was last looked at,
+    /// as seconds since 1970. A reply that lands after that is unread. Kept across launches.
+    private(set) var replySeen: [String: Double] = UserDefaults.standard.dictionary(forKey: "squeak.replySeen") as? [String: Double] ?? [:] {
+        didSet {
+            if replySeen.count > 300 { replySeen = Dictionary(uniqueKeysWithValues: replySeen.sorted { $0.value > $1.value }.prefix(200).map { ($0.key, $0.value) }) }
+            UserDefaults.standard.set(replySeen, forKey: "squeak.replySeen")
+        }
+    }
     @ObservationIgnored private var iconCache: [String: (length: Int, image: UIImage)] = [:]
     @ObservationIgnored private let pathMonitor = NWPathMonitor()
     @ObservationIgnored private var lastPath: (satisfied: Bool, interfaces: [NWInterface.InterfaceType])?
@@ -369,11 +377,37 @@ final class AppModel {
         problem = nil
     }
 
+    /* ---------- replies you have not read ---------- */
+
+    /// The agent has answered since you last looked at this chat, in a chat you have a stake in. A chat waiting on
+    /// you has its own, louder mark, so it is never also "unread".
+    func isUnread(_ session: PhoneSnapshot.Session) -> Bool {
+        guard let seen = replySeen[session.key], !session.needsYou, session.state != "working",
+              session.message != nil || session.detail != nil,
+              let at = Age.date(session.lastActivityAt) else { return false }
+        return at.timeIntervalSince1970 > seen + 1
+    }
+
+    /// Chats with an unread reply, newest first, whether they are still active or went quiet.
+    var unreadReplies: [PhoneSnapshot.Session] {
+        let all = (snapshot?.sessions ?? []) + recentChats
+        return all.filter(isUnread).sorted {
+            (Age.date($0.lastActivityAt) ?? .distantPast) > (Age.date($1.lastActivityAt) ?? .distantPast)
+        }
+    }
+
+    /// You looked at the chat: what it said so far is read. Also the start of caring about its next reply.
+    func markSeen(_ key: String) { replySeen[key] = Date().timeIntervalSince1970 }
+
     /// The view on screen from its parts. An unchanged view must not redraw every screen.
     private func rebuild() {
         guard let base = baseSnapshot else { return }
         let view = base.merged(with: recentDoc).reconciled(with: watching.flatMap { liveTurns[$0] })
         seenSessions.record(view)
+        // A chat seen working is one you are waiting on: its next reply is news.
+        for session in view.sessions where session.state == "working" && replySeen[session.key] == nil {
+            replySeen[session.key] = Date().timeIntervalSince1970
+        }
         if view != snapshot { snapshot = view }
     }
 
@@ -474,6 +508,7 @@ final class AppModel {
         guard !trimmed.isEmpty else { return false }
         // Mode only means something mid-turn; an idle chat is simply sent.
         let mode: ReplyMode = session.state == "working" ? mode : .queue
+        markSeen(session.key)
         // On screen first, like any chat app: the bubble ("Sending…") and the agent's "Starting…"
         // row appear on the tap, and Face ID, signing and the network all happen behind them.
         UIImpactFeedbackGenerator(style: mode == .steer ? .medium : .light).impactOccurred()
@@ -701,6 +736,8 @@ final class AppModel {
         var lidProblem: String? = nil
         /// A safety rule acting now.
         var safety: String? = nil
+        /// Asked for on this phone and not yet confirmed by the Mac's own snapshot.
+        var pending = false
     }
 
     enum AwakeChange {
@@ -710,7 +747,9 @@ final class AppModel {
     }
 
     /// The session as last changed here, shown until the Mac's snapshot has had time to agree.
-    private var awakeTapped: (status: AwakeStatus?, at: Date)?
+    private var awakeTapped: (change: AwakeChange, status: AwakeStatus?, at: Date)?
+    /// Bumped when a tapped session's wait runs out, so the screen draws what the Mac says without waiting for news.
+    private var awakeTick = 0
 
     /// Whether this Mac offers awake sessions at all.
     var awakeOffered: Bool { snapshot?.keepAwake != nil }
@@ -718,13 +757,38 @@ final class AppModel {
     /// Whether this Mac can start a lid-closed session.
     var awakeLidReady: Bool { snapshot?.awakeLidReady == true }
 
-    /// The running awake session, or nil when there is none.
+    /// The running awake session, or nil when there is none. What this phone just asked for shows only until the
+    /// Mac's snapshot has caught up with it: from then on the Mac's own word is what is drawn, so "Turning on…"
+    /// gives way to "On" the moment the Mac says so, and never hides the real state.
     var awake: AwakeStatus? {
-        if let tapped = awakeTapped, Date().timeIntervalSince(tapped.at) < 30 { return tapped.status }
-        guard snapshot?.keepAwake == true else { return nil }
-        return AwakeStatus(
-            until: snapshot?.awakeUntil.flatMap(Self.parseISO), lid: snapshot?.awakeLid, lidProblem: snapshot?.awakeLidProblem,
-            safety: snapshot?.awakeSafety)
+        _ = awakeTick
+        let mac: AwakeStatus? = snapshot?.keepAwake == true
+            ? AwakeStatus(until: snapshot?.awakeUntil.flatMap(Self.parseISO), lid: snapshot?.awakeLid,
+                          lidProblem: snapshot?.awakeLidProblem, safety: snapshot?.awakeSafety)
+            : nil
+        guard let tapped = awakeTapped else { return mac }
+        let age = Date().timeIntervalSince(tapped.at)
+        switch tapped.change {
+        case .start(_, let lid):
+            if let mac, !lid || mac.lid != nil { return mac }
+            return age < 45 ? tapped.status : mac
+        case .extend:
+            if let mac, let now = mac.until, let want = tapped.status?.until, now >= want.addingTimeInterval(-90) { return mac }
+            return age < 20 ? tapped.status : mac
+        case .end:
+            if mac == nil { return nil }
+            return age < 20 ? nil : mac
+        }
+    }
+
+    /// Redraws once the phone's own expectation has run out (see `awake`).
+    private func expireAwakeTap() {
+        Task { [weak self] in
+            for delay in [21.0, 25.0] {
+                try? await Task.sleep(for: .seconds(delay))
+                self?.awakeTick += 1
+            }
+        }
     }
 
     /// "1h 23m" / "45m" / "under a minute" until `until`.
@@ -777,13 +841,15 @@ final class AppModel {
         let expected: AwakeStatus?
         switch change {
         case .start(let minutes, let lid):
-            expected = AwakeStatus(until: minutes.map { Date().addingTimeInterval(Double($0) * 60) }, lid: lid ? "starting" : nil)
+            expected = AwakeStatus(until: minutes.map { Date().addingTimeInterval(Double($0) * 60) }, lid: lid ? "starting" : nil,
+                                   pending: true)
         case .extend(let minutes):
             expected = AwakeStatus(
                 until: awake?.until.map { max($0, Date()).addingTimeInterval(Double(minutes) * 60) }, lid: awake?.lid)
         case .end: expected = nil
         }
-        awakeTapped = (expected, Date())
+        awakeTapped = (change, expected, Date())
+        expireAwakeTap()
         if demo { return nil }
         guard let channel else { awakeTapped = nil; return "Not connected to your Mac." }
         do {
@@ -800,6 +866,8 @@ final class AppModel {
                 return "Your Mac didn't answer. Is Squeak running?"
             }
             guard result.sent else { awakeTapped = nil; return result.reason ?? "Your Mac couldn't change that." }
+            // The Mac has acted: read what it now says rather than wait for the next push.
+            await refresh()
             return nil
         } catch {
             awakeTapped = nil

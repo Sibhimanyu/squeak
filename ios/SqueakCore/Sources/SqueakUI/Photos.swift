@@ -71,6 +71,58 @@ struct AttachButton: View {
     }
 }
 
+/// Pasting a copied image into the message field. A text view only offers Paste for text, so the two UITextView
+/// methods are widened once: with only images on the pasteboard, Paste is offered and, instead of pasting,
+/// posts the images. The field that has focus takes them (`pasteImages`); any other paste is untouched.
+enum ImagePaste {
+    static let notification = Notification.Name("squeak.pasteImages")
+    nonisolated(unsafe) private static var installed = false
+
+    private static var onlyImages: Bool { UIPasteboard.general.hasImages && !UIPasteboard.general.hasStrings }
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        swap(#selector(UITextView.paste(_:)), #selector(UITextView.squeak_paste(_:)))
+        swap(#selector(UITextView.canPerformAction(_:withSender:)), #selector(UITextView.squeak_canPerform(_:withSender:)))
+    }
+
+    private static func swap(_ a: Selector, _ b: Selector) {
+        guard let x = class_getInstanceMethod(UITextView.self, a), let y = class_getInstanceMethod(UITextView.self, b) else { return }
+        method_exchangeImplementations(x, y)
+    }
+
+    fileprivate static func offered(for action: Selector) -> Bool { action == #selector(UIResponder.paste(_:)) && onlyImages }
+
+    fileprivate static func post() {
+        let images = UIPasteboard.general.images ?? []
+        NotificationCenter.default.post(name: notification, object: images.compactMap { $0.jpegData(compressionQuality: 1) })
+    }
+}
+
+extension UITextView {
+    @objc fileprivate func squeak_paste(_ sender: Any?) {
+        if ImagePaste.offered(for: #selector(UIResponder.paste(_:))) { ImagePaste.post() } else { squeak_paste(sender) }
+    }
+
+    @objc fileprivate func squeak_canPerform(_ action: Selector, withSender sender: Any?) -> Bool {
+        ImagePaste.offered(for: action) || squeak_canPerform(action, withSender: sender)
+    }
+}
+
+extension View {
+    /// Pasted images join `photos` while `focused` (the field that is being typed in), up to the limit.
+    func pasteImages(into photos: Binding<[ChatPhoto]>, focused: Bool) -> some View {
+        onAppear { ImagePaste.install() }
+            .onReceive(NotificationCenter.default.publisher(for: ImagePaste.notification)) { note in
+                guard focused, let all = note.object as? [Data] else { return }
+                for data in all where photos.wrappedValue.count < PhotoAttachment.maxPhotos {
+                    if let photo = PhotoPrep.prepare(data) { photos.wrappedValue.append(photo) }
+                }
+            }
+    }
+}
+
 /// The photos waiting to go, as small pictures with a way to take each one off again.
 struct PhotoTray: View {
     @Binding var photos: [ChatPhoto]

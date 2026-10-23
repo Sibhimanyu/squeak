@@ -31,6 +31,8 @@ struct HomeView: View {
     @State private var query = ""
     /// The small states opened in place on Home; kept here so a card scrolled away keeps its state.
     /// `-squeak-expand <working|done|…>` starts with that state open: screenshots of the demo only.
+    /// Earlier, open in place when nothing is running.
+    @State private var recentOpen = true
     @State private var expanded: Set<Presentation.Filter> = {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "-squeak-expand"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) else { return [] }
@@ -50,7 +52,9 @@ struct HomeView: View {
         return [.session(args[index + 1])]
     }()
 
-    private var sessions: [PhoneSnapshot.Session] { model.snapshot?.sessions ?? [] }
+    /// Chats on screen under the groups: those with an unread reply are in New replies above them instead.
+    private var sessions: [PhoneSnapshot.Session] { (model.snapshot?.sessions ?? []).filter { !model.isUnread($0) } }
+    private var unreadReplies: [PhoneSnapshot.Session] { model.unreadReplies }
     /// Chats that are not active any more, to pick up again.
     private var recent: [PhoneSnapshot.Session] { model.recentChats }
     /// The large title: the grouping's, except that by status in the tab bar is the Sessions tab.
@@ -132,6 +136,8 @@ struct HomeView: View {
             if let starting = model.startingChat { StartingRow(label: starting.label) }
             if sessions.isEmpty {
                 restingDuck
+                if !unreadReplies.isEmpty { NewRepliesCard(sessions: unreadReplies) }
+                if !recent.filter({ !model.isUnread($0) }).isEmpty { RecentInlineCard(sessions: recent.filter { !model.isUnread($0) }, open: $recentOpen) }
             } else {
                 switch grouping {
                 case .projects:
@@ -143,8 +149,10 @@ struct HomeView: View {
                                                           set: { if $0 { expanded.insert(group.filter) } else { expanded.remove(group.filter) } }))
                     }
                 }
+                // After the active groups: needs-you is always first, and the only red.
+                if !unreadReplies.isEmpty { NewRepliesCard(sessions: unreadReplies) }
             }
-            if !recent.isEmpty { EarlierCard() }
+            if !recent.isEmpty && !sessions.isEmpty { EarlierCard() }
             Color.clear.frame(height: 1).id("end")
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
@@ -251,7 +259,7 @@ struct HomeView: View {
             Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: 88, height: 88).accessibilityHidden(true)
             Text("Nothing's running. The duck is resting.").foregroundStyle(Theme.muted)
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 40)
+        .frame(maxWidth: .infinity).padding(.top, 32).padding(.bottom, recent.isEmpty ? 40 : 20)
     }
 
     private var waiting: some View {
@@ -432,7 +440,7 @@ struct SessionSwipe: ViewModifier {
                     .tint(Theme.subtle)
                 if session.state != "working", session.question == nil, let choices = session.choices {
                     ForEach(choices.options.prefix(3).reversed(), id: \.letter) { option in
-                        Button { Task { await model.send(option.letter, to: session) } } label: { Text(option.letter) }
+                        Button { Task { await model.send(option.sent, to: session) } } label: { Text(option.letter) }
                             .tint(option.letter == choices.recommended ? Theme.ink.opacity(0.7) : Theme.lineStrong)
                             .accessibilityLabel("Send \(option.letter): \(option.title)")
                     }
@@ -567,23 +575,56 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            AgentAvatar(session: session).padding(.top, 2)
+            AgentAvatar(session: session, size: recent ? 36 : 28).padding(.top, 2)
             rowText
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, recent ? 6 : 2)
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text)\(third.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
+        .accessibilityLabel("\(unread ? "New reply, " : "")\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text)\(third.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
         .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "")
         .renameMenu(session, model: model)
     }
 
+    /// An Earlier row gets three lines, one job each, so the marks do not crowd the title: the title and its
+    /// age; what the agent last said; then where it ran (project mark, project, agent) with Open/Closed at the end.
+    private var unread: Bool { model.isUnread(session) }
+
+    private var recentText: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(Presentation.displayTitle(session)).font(.headline).fontWeight(.semibold).lineLimit(2)
+                Spacer(minLength: 4)
+                if unread { UnreadMark() }
+                Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(unread ? Theme.ink : Theme.muted).monospacedDigit()
+            }
+            if let lastWords {
+                Text(lastWords).font(.subheadline)
+                    .foregroundStyle(unread ? Theme.ink : Theme.muted).lineLimit(2)
+            }
+            HStack(spacing: 6) {
+                if !inProject { ProjectMark(name: Presentation.projectName(session), size: 18) }
+                Text(inProject ? Presentation.agentName(session.agent) : Presentation.subtitle(session))
+                    .font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
+                Spacer(minLength: 4)
+                if let open = session.open { OpenTag(open: open) }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    @ViewBuilder
     private var rowText: some View {
+        if recent { recentText } else { activeText }
+    }
+
+    private var activeText: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .center, spacing: 8) {
                 if !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
-                Text(Presentation.displayTitle(session)).font(.headline).lineLimit(2)
+                Text(Presentation.displayTitle(session)).font(.headline).fontWeight(.semibold).lineLimit(2)
                 Spacer(minLength: 4)
+                if unread { UnreadMark() }
                 if recent, let open = session.open { OpenTag(open: open) }
                 Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
             }

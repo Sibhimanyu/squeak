@@ -11,8 +11,12 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public struct Option: Codable, Equatable, Sendable, Identifiable {
         public let letter: String
         public let title: String
+        /// What a tap sends when it is not the letter: a choice the agent put in words ("Number two").
+        public let reply: String?
         public var id: String { letter }
-        public init(letter: String, title: String) { self.letter = letter; self.title = title }
+        /// What a tap sends to the agent.
+        public var sent: String { reply ?? letter }
+        public init(letter: String, title: String, reply: String? = nil) { self.letter = letter; self.title = title; self.reply = reply }
     }
 
     public struct Choices: Codable, Equatable, Sendable {

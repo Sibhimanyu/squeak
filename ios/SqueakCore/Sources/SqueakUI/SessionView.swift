@@ -75,7 +75,10 @@ struct SessionView: View {
         }
         // A chat has its composer at the bottom: the app's tab bar floats over it, so it steps aside.
         .toolbar(.hidden, for: .tabBar)
-        .onAppear { screen.report?("Session"); model.watch(key) }
+        .onAppear { screen.report?("Session"); model.watch(key); model.markSeen(key) }
+        // Whatever it says while you are looking at it, you have read; and what it said when you leave.
+        .onChange(of: session?.lastActivityAt) { _, _ in model.markSeen(key) }
+        .onDisappear { model.markSeen(key) }
         // The agent you are watching finishes: one light tap, so you can look up from the keyboard.
         .onChange(of: session?.state) { old, new in
             guard old == "working", let new, new != "working" else { return }
@@ -966,7 +969,7 @@ struct OptionsView: View {
                 let split = Presentation.splitOption(option.title)
                 let detail = split.detail ?? details[option.letter]
                 let recommended = option.letter == choices.recommended
-                Button { onPick(option.letter) } label: {
+                Button { onPick(option.sent) } label: {
                     HStack(alignment: .top, spacing: 12) {
                         Text(option.letter).font(.body.weight(.bold)).frame(width: 32, height: 32)
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.lineStrong))
@@ -1056,6 +1059,7 @@ struct Composer: View {
                     .glassSurface(in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.ink, lineWidth: 1.5).opacity(composing.wrappedValue ? 1 : 0))
                     .accessibilityLabel("Message for \(label)")
+                    .pasteImages(into: $photos, focused: composing.wrappedValue)
                 sendButton
             }
             caption
