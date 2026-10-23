@@ -173,7 +173,7 @@ struct HomeView: View {
     /// Searching skips the groups: every chat that matches, active ones first.
     @ViewBuilder
     private var results: some View {
-        let active = Presentation.byAttention(sessions.filter { Presentation.matches($0, query: query) })
+        let active = Presentation.newestFirst(sessions.filter { Presentation.matches($0, query: query) })
         let older = recent.filter { Presentation.matches($0, query: query) }
         if active.isEmpty && older.isEmpty {
             ContentUnavailableView.search(text: query).listRowBackground(Color.clear).listRowSeparator(.hidden)
@@ -278,8 +278,8 @@ struct GroupView: View {
     private var active: [PhoneSnapshot.Session] {
         let all = model.snapshot?.sessions ?? []
         switch route {
-        case .project(let name): return Presentation.byAttention(all.filter { Presentation.projectName($0) == name })
-        case .status(let filter): return Presentation.byAttention(all.filter { Presentation.inFilter($0, filter) })
+        case .project(let name): return Presentation.newestFirst(all.filter { Presentation.projectName($0) == name })
+        case .status(let filter): return Presentation.newestFirst(all.filter { Presentation.inFilter($0, filter) })
         case .recent, .session: return []
         }
     }
@@ -390,7 +390,7 @@ extension AppModel {
     var recentChats: [PhoneSnapshot.Session] {
         guard let snapshot else { return [] }
         let active = Set(snapshot.sessions.map(\.key))
-        return (snapshot.recent ?? []).filter { !active.contains($0.key) }
+        return Presentation.newestFirst((snapshot.recent ?? []).filter { !active.contains($0.key) })
     }
 }
 

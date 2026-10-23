@@ -142,6 +142,7 @@ final class AppModel {
         unread = real ? d.data(forKey: "unreadUpdates").flatMap { try? JSONDecoder().decode(UnreadTracker.self, from: $0) } ?? UnreadTracker() : UnreadTracker()
         anchorLog = real ? d.data(forKey: "notificationAnchors").flatMap { try? JSONDecoder().decode(NotificationAnchorLog.self, from: $0) } ?? NotificationAnchorLog() : NotificationAnchorLog()
         HotKeyCenter.shared.isDisabled = captureMode || demoMode
+        HotKeyCenter.shared.previewNotGranted = demoMode
         if !(captureMode || demoMode) {
             d.set(true, forKey: HotKeyPreference.migrationKey)
             d.set(HotKeyPreference.storedValue(for: hotKeyID), forKey: "hotKey")
@@ -154,7 +155,11 @@ final class AppModel {
         guard !started else { return }
         started = true
         HotKeyCenter.shared.onFire = { QuickComposerController.shared.toggle() }
-        if !captureMode { HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID)) }
+        HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID))  // a no-op in capture and demo runs
+        // Input Monitoring is granted in System Settings: pick it up the moment the app comes back.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { HotKeyCenter.shared.recheck() }
+        }
         Notifier.shared.onOpen = { open in QuickComposerController.shared.show(notification: open) }
         observeWindowVisibility()
         AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")
@@ -532,8 +537,17 @@ final class AppModel {
     var attentionCount: Int { sessions.filter { $0.state == .blocked && $0.alive != false }.count }
 
     func canSend(_ s: HostSession) -> Bool {
-        if case .unsupported = s.capabilities.send { return false }
+        guard s.capabilities.send.isOffered else { return false }
         return s.replyTarget != nil
+    }
+
+    /// Sending is off only because the service isn't answering right now (the chat itself is fine).
+    func serviceDown(_ s: HostSession) -> Bool { s.capabilities.send.isServiceUnavailable }
+
+    /// Looks at the service again now (a composer that is open and not ready calls this every few seconds).
+    func probeService() {
+        guard !demoMode else { return }
+        Task { await broker.refresh() }
     }
 
     var sendableSessions: [HostSession] { ordered.flattened.filter(canSend) }
@@ -832,6 +846,12 @@ final class AppModel {
         case .refused: AppLog.info("send refused")
         case .uncertain: AppLog.info("send uncertain")
         case .notSent: AppLog.info("send not sent")
+        }
+        // Nothing left our hands: the words go back to the draft so they are never lost.
+        switch result {
+        case .refused, .notSent:
+            if key == selected, draft.isEmpty { setDraft(text) }
+        default: break
         }
         return result
     }

@@ -207,21 +207,29 @@ export function rank(session) {
   }
 }
 
-const newer = (a, b) => (time(b.lastActivityAt) ?? -Infinity) - (time(a.lastActivityAt) ?? -Infinity);
+/** Newest first by last activity; an unparseable time sorts last; ties are stable by title. */
+export const newer = (a, b) => {
+  const x = time(a.lastActivityAt) ?? -Infinity;
+  const y = time(b.lastActivityAt) ?? -Infinity;
+  if (x !== y) return x > y ? -1 : 1;
+  const s = a.title ?? "";
+  const t = b.title ?? "";
+  return s < t ? -1 : s > t ? 1 : 0;
+};
 
-/** By attention, newest first among equals; an unparseable time sorts last. */
-export function byAttention(sessions) {
-  return [...sessions].sort((a, b) => rank(a) - rank(b) || newer(a, b));
+/** Every list is newest first by last activity. Urgency lives in Needs you, not in sort order. */
+export function newestFirst(sessions) {
+  return [...sessions].sort(newer);
 }
 
-/** A card's preview: the first `limit` chats of a group in attention order, and how many more it holds. */
+/** A card's preview: the newest `limit` chats of a group, and how many more it holds. */
 export function preview(sessions, limit = 2) {
-  const ordered = byAttention(sessions);
+  const ordered = newestFirst(sessions);
   const shown = ordered.slice(0, Math.max(0, limit));
   return { shown, more: ordered.length - shown.length };
 }
 
-/** Sessions by repository: projects in attention order (the most urgent chat decides, then the most recent), chats likewise. */
+/** Sessions by repository: projects by their most recent chat (newest first), chats likewise. */
 export function projects(sessions) {
   const groups = new Map();
   for (const session of sessions) {
@@ -230,11 +238,11 @@ export function projects(sessions) {
     groups.get(name).push(session);
   }
   return [...groups]
-    .map(([name, list]) => ({ name, sessions: byAttention(list) }))
+    .map(([name, list]) => ({ name, sessions: newestFirst(list) }))
     .sort((a, b) => {
       const x = a.sessions[0];
       const y = b.sessions[0];
-      return rank(x) - rank(y) || newer(x, y) || (a.name < b.name ? -1 : 1);
+      return newer(x, y) || (a.name < b.name ? -1 : 1);
     });
 }
 

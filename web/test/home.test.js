@@ -98,21 +98,30 @@ describe("Home groups and words (the iPhone's HomeGroupingTests)", () => {
     expect(p.projectSummary(mixed)).toBe("5 sessions · 1 needs you · 2 working · 1 done · 1 idle");
   });
 
-  it("groups by repo in attention order, and a chat without a repo is its own project", () => {
+  it("groups by repo, newest project first and newest chat first even when an older chat needs you, and a chat without a repo is its own project", () => {
     const chats = [
       chat("t1", "working", { repo: "squeak", at: "2026-10-19T10:30:00Z" }),
-      chat("p1", "finished", { repo: "storefront", at: "2026-10-19T08:00:00Z" }),
+      chat("p1", "finished", { repo: "storefront", at: "2026-10-19T09:30:00Z" }),
       chat("p2", "awaiting_input", { repo: "storefront", at: "2026-10-19T09:00:00Z" }),
-      chat("i1", "idle", { repo: "compass" }),
+      chat("i1", "idle", { repo: "compass", at: "2026-10-19T09:45:00Z" }),
       chat("s1", "finished", { repo: "atlas", at: "2026-10-19T10:00:00Z" }),
     ];
     const list = p.projects(chats);
-    expect(list.map((x) => x.name)).toEqual(["storefront", "atlas", "squeak", "compass"]);
-    expect(list[0].sessions.map((s) => s.key)).toEqual(["p2", "p1"]);
+    expect(list.map((x) => x.name)).toEqual(["squeak", "atlas", "compass", "storefront"]);
+    expect(list[3].sessions.map((s) => s.key)).toEqual(["p1", "p2"]);
     expect(p.projectName({ label: "scratch", agent: "codex", state: "working" })).toBe("scratch");
   });
 
-  it("previews the most urgent chats and counts the rest", () => {
+  it("sorts rows newest first with ties stable by title", () => {
+    const rows = [
+      chat("old", "working", { at: "2026-10-19T08:00:00Z" }),
+      chat("new", "working", { at: "2026-10-19T11:00:00Z" }),
+    ];
+    expect(p.newestFirst(rows).map((s) => s.key)).toEqual(["new", "old"]);
+    expect(p.newestFirst([chat("b", "idle"), chat("a", "idle")]).map((s) => s.key)).toEqual(["a", "b"]);
+  });
+
+  it("previews the newest chats and counts the rest", () => {
     const chats = [
       chat("i", "idle", { at: "2026-10-19T10:05:00Z" }),
       chat("w", "working", { at: "2026-10-19T10:04:00Z" }),
@@ -120,10 +129,10 @@ describe("Home groups and words (the iPhone's HomeGroupingTests)", () => {
       chat("d", "finished", { at: "2026-10-19T10:00:00Z" }),
     ];
     const two = p.preview(chats);
-    expect(two.shown.map((s) => s.key)).toEqual(["n", "d"]);
+    expect(two.shown.map((s) => s.key)).toEqual(["i", "w"]);
     expect(two.more).toBe(2);
     const three = p.preview(chats, p.previewLimit("needsYou"));
-    expect(three.shown.map((s) => s.key)).toEqual(["n", "d", "w"]);
+    expect(three.shown.map((s) => s.key)).toEqual(["i", "w", "d"]);
     expect(three.more).toBe(1);
     expect(p.previewLimit("working")).toBe(2);
     expect(p.preview([chat("a", "idle")])).toMatchObject({ more: 0 });
@@ -336,14 +345,14 @@ describe("Needs you (the iPhone's NeedsYouTests)", () => {
     expect(needs.card(chat("a", "finished", { message: "Short.\n\nShip it?", asks: "Ship it?" })).hasMore).toBe(false);
   });
 
-  it("orders approvals first, then the one that has waited longest", () => {
+  it("orders Needs you newest first, whatever the kind", () => {
     const sessions = [
       chat("new-q", "finished", { at: "2026-10-19T12:00:00Z", message: "Q?", asks: "Q?" }),
       chat("old-q", "finished", { at: "2026-10-19T09:00:00Z", message: "Q?", asks: "Q?" }),
       chat("approve", "awaiting_approval", { at: "2026-10-19T11:00:00Z" }),
       chat("working", "working", { at: "2026-10-19T08:00:00Z" }),
     ];
-    expect(needs.ordered(sessions).map((s) => s.key)).toEqual(["approve", "old-q", "new-q"]);
+    expect(needs.ordered(sessions).map((s) => s.key)).toEqual(["new-q", "approve", "old-q"]);
   });
 
   it("lays out one or two whole cards, then rows", () => {

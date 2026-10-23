@@ -1,5 +1,5 @@
 import { logger } from "../utils/logger.js";
-import { selectActiveSessions } from "./active.js";
+import { newestFirst, selectActiveSessions } from "./active.js";
 import {
   DEFAULT_CONTEXT_PRESSURE_PERCENT,
   PUSH_FINISH_WITHIN_MS,
@@ -437,7 +437,7 @@ export class FleetMonitor {
 
     return {
       sessions: enriched.sessions,
-      active: enriched.sessions.filter((session) => activeKeys.has(session.key)),
+      active: newestFirst(enriched.sessions.filter((session) => activeKeys.has(session.key))),
       attention: sortAttention(attention.map((item) => enriched.remap(gitEnriched.remap(item)))),
       generatedAt: observedAt,
       codexUsage,

@@ -9,6 +9,10 @@ public protocol ConductorSender: Sendable {
     /// Re-checks readiness. Called by the adapter on every poll, before it maps
     /// sessions, so `isReady` is never older than one poll.
     func refresh() async
+    /// Whether `unavailableReason` is the service not answering (it can come back), rather than a setup problem.
+    var unavailableIsTransient: Bool { get }
+    /// Re-checks readiness now, ignoring any rate limit on `refresh`. A send calls this before giving up.
+    func recheck() async
     func send(workspaceId: String, sessionId: String, text: String) async -> SendResult
     /// Same, with how to meet an agent that is mid-turn. The default queues.
     func send(workspaceId: String, sessionId: String, text: String, mode: SendMode) async -> SendResult
@@ -20,7 +24,12 @@ public extension ConductorSender {
     }
     var unavailableReason: String { "Squeak's relay is not set up yet" }
     func refresh() async {}
+    var unavailableIsTransient: Bool { false }
+    func recheck() async { await refresh() }
 }
+
+/// What a send says when the Squeak service never answered, even after a recheck. The text stays in the composer.
+public let serviceNotAnsweringReason = "Squeak's service isn't answering. Try again in a moment."
 
 /// The default sender before the relay is set up: never sends.
 public struct NullSender: ConductorSender {
@@ -96,6 +105,8 @@ public struct ConductorLocalAdapter: HostAdapter {
             sendCapability = .unsupported("This chat is closed or its workspace is archived")
         } else if sender.isReady {
             sendCapability = .supported
+        } else if sender.unavailableIsTransient {
+            sendCapability = .unavailable(sender.unavailableReason)
         } else {
             sendCapability = .unsupported(sender.unavailableReason)
         }
@@ -201,7 +212,13 @@ public struct ConductorLocalAdapter: HostAdapter {
     public func send(_ text: String, to session: HostSession, clientId: UUID, mode: SendMode) async -> SendResult {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .notSent(reason: "Nothing to send") }
         guard let workspace = session.conductorWorkspaceId else { return .notSent(reason: "This chat has no Conductor workspace") }
-        guard sender.isReady else { return .notSent(reason: sender.unavailableReason) }
+        if !sender.isReady {
+            // A blip (the service restarting) must not strand the message: look again right now, once.
+            await sender.recheck()
+            guard sender.isReady else {
+                return .notSent(reason: sender.unavailableIsTransient ? serviceNotAnsweringReason : sender.unavailableReason)
+            }
+        }
         return await sender.send(workspaceId: workspace, sessionId: sessionId(of: session), text: text, mode: mode)
     }
 

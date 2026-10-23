@@ -140,7 +140,70 @@ struct DaemonSenderTests {
             activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path)), clock: FakeClock())
         await broker.refresh()
         let chat = try #require(await broker.sessions().first)
-        if case .unsupported = chat.capabilities.send {} else { Issue.record("send must be unsupported with the daemon down") }
+        // Not "this chat can't be answered": the service is down, which is app-wide and may pass.
+        #expect(chat.capabilities.send.isServiceUnavailable && chat.capabilities.send.reason?.contains("isn't running") == true)
+    }
+
+    @Test func serviceDownIsNotAChatThatCannotBeAnswered() async throws {
+        let f = try ConductorFixture()
+        try f.addSession("c1")
+        let t = FakeTransport()
+        await t.route("GET", "/state", .failure(.connectionRefused))
+        let adapter = ConductorSources.adapters(
+            client: client(t), database: f.database,
+            activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path))
+        let broker = Broker(adapters: adapter, clock: FakeClock())
+        await broker.refresh()
+        let chat = try #require(await broker.sessions().first)
+        // Offered (so Send stays on) but with the real reason; a retired chat is the other kind.
+        #expect(chat.capabilities.send.isOffered && chat.capabilities.send.isServiceUnavailable)
+        #expect(Capability.unsupported("closed").isOffered == false && !Capability.unsupported("closed").isServiceUnavailable)
+        #expect(Capability.supported.isOffered && !Capability.supported.isServiceUnavailable)
+    }
+
+    @Test func sendRechecksTheServiceAtOnceAndGoesThroughWhenItIsBack() async throws {
+        let f = try ConductorFixture()
+        try f.addSession("c1")
+        let t = FakeTransport()
+        await t.route("GET", "/state", .failure(.connectionRefused))
+        // A long minRecheck: only a forced recheck can see the daemon come back.
+        let sender = DaemonSender(client: client(t), minRecheck: 3600)
+        let adapter = ConductorLocalAdapter(
+            database: f.database, activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path),
+            sender: sender, now: { Date() })
+        let broker = Broker(adapters: [adapter], clock: FakeClock())
+        await broker.refresh()
+        let chat = try #require(await broker.sessions().first)
+        #expect(chat.capabilities.send.isServiceUnavailable)
+
+        await t.json("GET", "/state", syntheticState)
+        await t.json("POST", "/control/session/c1/reply", #"{"status":"started","via":"conductor"}"#)
+        let r = await broker.send("C", to: chat.key)
+        #expect(r == .accepted(via: "conductor"))
+        let posts = await t.requests.filter { $0.method == "POST" }
+        #expect(posts.count == 1)
+        // The broker learned it too: the chat reads as sendable again.
+        let after = try #require(await broker.sessions().first)
+        #expect(after.capabilities.send == .supported)
+    }
+
+    @Test func stillDownAfterTheRecheckSaysSoAndKeepsTheDraft() async throws {
+        let f = try ConductorFixture()
+        try f.addSession("c1")
+        let t = FakeTransport()
+        await t.route("GET", "/state", .failure(.connectionRefused))
+        let sender = DaemonSender(client: client(t), minRecheck: 3600)
+        let adapter = ConductorLocalAdapter(
+            database: f.database, activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path),
+            sender: sender, now: { Date() })
+        let broker = Broker(adapters: [adapter], clock: FakeClock())
+        await broker.refresh()
+        let chat = try #require(await broker.sessions().first)
+        await broker.setDraft("C", for: chat.key)
+        let r = await broker.send("C", to: chat.key)
+        #expect(r == .notSent(reason: serviceNotAnsweringReason))
+        #expect(await t.requests.filter { $0.method == "POST" }.isEmpty)  // nothing left the Mac
+        #expect(await broker.draft(for: chat.key) == "C")
     }
 
     @Test func missingDatabaseFallsBackToTheDaemonForConductorToo() async throws {

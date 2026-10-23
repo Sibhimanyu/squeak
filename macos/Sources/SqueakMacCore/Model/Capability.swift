@@ -3,14 +3,32 @@ import Foundation
 public enum Capability: Hashable, Codable, Sendable {
     case supported
     case unsupported(String)
+    /// Not this chat's doing: the Squeak service the action goes through isn't answering right now.
+    /// Unlike `.unsupported` it does not disable the action: a send rechecks the service first, and the
+    /// UI says "Reconnecting" instead of "pick another chat".
+    case unavailable(String)
     case unknown
 
     public var isSupported: Bool { self == .supported }
 
     /// Why the action is unavailable, for the UI to show.
     public var reason: String? {
-        if case .unsupported(let r) = self { return r }
-        return nil
+        switch self {
+        case .unsupported(let r), .unavailable(let r): r
+        default: nil
+        }
+    }
+
+    /// True while only the service is the obstacle (it may come back); false for a chat that can't be answered.
+    public var isServiceUnavailable: Bool {
+        if case .unavailable = self { return true }
+        return false
+    }
+
+    /// Whether to offer the action at all: everything but a chat that can't take it.
+    public var isOffered: Bool {
+        if case .unsupported = self { return false }
+        return true
     }
 }
 

@@ -112,15 +112,10 @@ enum NeedsYou {
         return head + "…"
     }
 
-    /// The chats that wait on you, in the order the page shows them. The snapshot says who needs you;
-    /// this only puts a tool call that nothing else can answer ahead of questions the phone can, and the one
-    /// that has waited longest first. (The daemon sends no ranking of its own for this.)
+    /// The chats that wait on you, newest first by last activity (the house rule: every list is newest
+    /// first; this page is where urgency lives, not the sort order).
     static func ordered(_ sessions: [PhoneSnapshot.Session]) -> [PhoneSnapshot.Session] {
-        func rank(_ s: PhoneSnapshot.Session) -> Int { [.approval, .blocked].contains(kind(of: s)) ? 0 : 1 }
-        func since(_ s: PhoneSnapshot.Session) -> Date { Age.date(s.lastActivityAt) ?? .distantFuture }
-        return sessions.filter(\.needsYou).sorted { a, b in
-            rank(a) != rank(b) ? rank(a) < rank(b) : since(a) < since(b)
-        }
+        Presentation.newestFirst(sessions.filter(\.needsYou))
     }
 
     /// How many cards are full and how many are compact rows: one or two are all full; from three on

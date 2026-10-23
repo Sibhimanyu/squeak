@@ -135,7 +135,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: Space.m) {
                 bullet(.check, "Read conversations and see what an agent is doing")
                 bullet(.check, "Reply to Conductor chats, one message at a time")
-                bullet(.check, "Quick message from anywhere with a shortcut you choose")
+                bullet(.check, "Quick message from anywhere: double-tap Control, or pick another shortcut")
                 bullet(.minus, "Approvals and attachments aren't supported yet. Squeak says so and offers Open in Conductor.")
             }
             .padding(.top, Space.s)

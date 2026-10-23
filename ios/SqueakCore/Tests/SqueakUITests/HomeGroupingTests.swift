@@ -49,17 +49,26 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertFalse(Presentation.expandsInline(.needsYou, count: 1))
     }
 
-    func testProjectsGroupByRepoInAttentionOrder() {
+    func testProjectsGroupByRepoNewestFirstEvenWhenAnOlderChatNeedsYou() {
         let chats = [
             chat("t1", "working", repo: "squeak", at: "2026-10-19T10:30:00Z"),
-            chat("p1", "finished", repo: "storefront", at: "2026-10-19T08:00:00Z"),
+            chat("p1", "finished", repo: "storefront", at: "2026-10-19T09:30:00Z"),
             chat("p2", "awaiting_input", repo: "storefront", at: "2026-10-19T09:00:00Z"),
-            chat("i1", "idle", repo: "compass"),
+            chat("i1", "idle", repo: "compass", at: "2026-10-19T09:45:00Z"),
             chat("s1", "finished", repo: "atlas", at: "2026-10-19T10:00:00Z"),
         ]
         let projects = Presentation.projects(chats)
-        XCTAssertEqual(projects.map(\.name), ["storefront", "atlas", "squeak", "compass"])
-        XCTAssertEqual(projects.first?.sessions.map(\.key), ["p2", "p1"])
+        XCTAssertEqual(projects.map(\.name), ["squeak", "atlas", "compass", "storefront"])
+        // The older chat that needs you does not outrank the newer one that finished.
+        XCTAssertEqual(projects.last?.sessions.map(\.key), ["p1", "p2"])
+    }
+
+    func testStatusGroupRowsAreNewestFirst() {
+        let rows = [chat("old", "working", at: "2026-10-19T08:00:00Z"), chat("new", "working", at: "2026-10-19T11:00:00Z"),
+                    chat("mid", "working", at: "2026-10-19T09:00:00Z")]
+        XCTAssertEqual(Presentation.newestFirst(rows).map(\.key), ["new", "mid", "old"])
+        // Ties are stable by title.
+        XCTAssertEqual(Presentation.newestFirst([chat("b", "idle"), chat("a", "idle")]).map(\.key), ["a", "b"])
     }
 
     func testAChatWithoutARepoIsItsOwnProject() {
@@ -85,14 +94,14 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertEqual(Presentation.ask(chat("a", "awaiting_approval")), "Wants approval for a tool call. Answer it on your Mac.")
     }
 
-    func testAPreviewShowsTheMostUrgentChatsAndCountsTheRest() {
+    func testAPreviewShowsTheNewestChatsAndCountsTheRest() {
         let chats = [chat("i", "idle", at: "2026-10-19T10:05:00Z"), chat("w", "working", at: "2026-10-19T10:04:00Z"),
                      chat("n", "awaiting_input", at: "2026-10-19T09:00:00Z"), chat("d", "finished", at: "2026-10-19T10:00:00Z")]
         let two = Presentation.preview(chats)
-        XCTAssertEqual(two.shown.map(\.key), ["n", "d"])
+        XCTAssertEqual(two.shown.map(\.key), ["i", "w"])
         XCTAssertEqual(two.more, 2)
         let three = Presentation.preview(chats, limit: Presentation.previewLimit(for: .needsYou))
-        XCTAssertEqual(three.shown.map(\.key), ["n", "d", "w"])
+        XCTAssertEqual(three.shown.map(\.key), ["i", "w", "d"])
         XCTAssertEqual(three.more, 1)
         XCTAssertEqual(Presentation.previewLimit(for: .working), 2)
         XCTAssertEqual(Presentation.previewLimit(for: nil), 2)

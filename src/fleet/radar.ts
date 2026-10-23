@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { TelegramInlineKeyboard } from "../types.js";
+import { newestFirst } from "./active.js";
 import { DEFAULT_CONTEXT_PRESSURE_PERCENT, isActionable } from "./attention.js";
 import { summarizeOutcome } from "./card-text.js";
 import type { ParsedChoices } from "./choices.js";
@@ -204,7 +205,8 @@ function stateWord(state: FleetState): string {
  * listing those makes this an archive instead of a status display.
  */
 export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
-  const active = snapshot.active;
+  // Newest first by last activity, inside each section below.
+  const active = newestFirst(snapshot.active);
   const blocked = active.filter(needsYou);
   const working = active.filter((session) => session.state === "working");
   const done = active.filter((session) => session.state === "finished" && !needsYou(session));
@@ -222,8 +224,7 @@ export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
     lines.push(quotaLine);
   }
 
-  // One block per session, ordered by how much it wants you: blocked, then
-  // finished, then still going.
+  // One block per session: blocked, then finished, then still going, each section newest first.
   const ordered = [
     ...blocked,
     ...done,

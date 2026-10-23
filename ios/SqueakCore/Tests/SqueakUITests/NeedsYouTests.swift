@@ -79,14 +79,14 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertFalse(short.hasMore)
     }
 
-    func testOrderPutsApprovalsFirstThenTheOldestWaiting() {
+    func testOrderIsNewestFirstWhateverTheKind() {
         let sessions = [
             chat("new-q", "finished", at: "2026-10-19T12:00:00Z", message: "Q?", asks: "Q?"),
             chat("old-q", "finished", at: "2026-10-19T09:00:00Z", message: "Q?", asks: "Q?"),
             chat("approve", "awaiting_approval", at: "2026-10-19T11:00:00Z"),
             chat("working", "working", at: "2026-10-19T08:00:00Z"),
         ]
-        XCTAssertEqual(NeedsYou.ordered(sessions).map(\.key), ["approve", "old-q", "new-q"])
+        XCTAssertEqual(NeedsYou.ordered(sessions).map(\.key), ["new-q", "approve", "old-q"])
     }
 
     func testLayoutIsOneOrTwoFullThenRows() {
