@@ -1,4 +1,6 @@
-import type { AwakeState } from "../fleet/awake-session.js";
+import type { AwakeEnd, AwakeState } from "../fleet/awake-session.js";
+import type { LidActionSettings } from "../fleet/lid-actions.js";
+import type { AwakeRules } from "../fleet/power-monitor.js";
 import type { HotspotState } from "../fleet/hotspot.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -319,6 +321,43 @@ export interface AwakeCommand {
   expiresAt: number;
 }
 
+/**
+ * A signed change to what the Mac does when its lid closes during a lid-closed
+ * awake session (fleet/lid-actions.ts). `settings` holds one to four of the
+ * four switches, booleans only. It reaches no agent and carries no text.
+ */
+export interface LidActionsCommand {
+  v: 1;
+  kind: "lidActions";
+  settings: Partial<LidActionSettings>;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+const LID_ACTION_KEYS: ReadonlyArray<keyof LidActionSettings> = ["displayOff", "mute", "lowPower", "freezeApps"];
+
+/** The settings of a lidActions command if every key is known and every value a boolean; else null. */
+export function readLidActionsChange(value: unknown): Partial<LidActionSettings> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length === 0 || keys.some((key) => !(LID_ACTION_KEYS as readonly string[]).includes(key))) {
+    return null;
+  }
+  const change: Partial<LidActionSettings> = {};
+  for (const key of LID_ACTION_KEYS) {
+    if (record[key] === undefined) continue;
+    if (typeof record[key] !== "boolean") {
+      return null;
+    }
+    change[key] = record[key] as boolean;
+  }
+  return change;
+}
+
 export interface RemoteActivity {
   at: string;
   device: string;
@@ -422,6 +461,14 @@ export interface RemoteBridgeDependencies {
     state(): AwakeState | null;
     /** Whether a lid-closed session can start (the sudoers rule is installed). */
     lidReady?(): boolean;
+    /** What a closed lid does (lid-actions.ts); a phone may change it with a `lidActions` command. */
+    lidActions?(): LidActionSettings;
+    /** The effective safety floors, for the phone to draw. */
+    rules?(): AwakeRules;
+    /** How the last session ended, so the phone can say a safety rule did. */
+    lastEnd?(): AwakeEnd | null;
+    /** Sleep left disabled outside any session; null when none. */
+    sleepProblem?(): string | null;
     /** The Mac's battery, power draw and lid, as last read. */
     power?(): {
       percent: number | null;
@@ -1219,6 +1266,9 @@ export class RemoteBridge {
     }
     if (kind === "awake") {
       return this.handleAwake(device, id, command as unknown as AwakeCommand);
+    }
+    if (kind === "lidActions") {
+      return this.handleLidActions(device, id, command as unknown as LidActionsCommand);
     }
     if (kind === "usage") {
       return this.handleUsage(device, id, command as unknown as UsageCommand);
@@ -2020,6 +2070,37 @@ export class RemoteBridge {
     return { write: true, result: { id, status: "sent" } };
   }
 
+  /**
+   * A change to what a closed lid does. Signature, freshness and nonce have
+   * already held; the payload is checked strictly here (known keys, booleans)
+   * and applied through the same awake entry the Mac app's control route uses.
+   */
+  private async handleLidActions(
+    device: PairedDevice,
+    id: string,
+    command: LidActionsCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `lid actions: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const awake = this.deps.awake;
+    if (!awake?.lidActions || command.v !== 1) {
+      return refuse("This Mac can't change its lid settings from a phone.", "not available");
+    }
+    const change = readLidActionsChange(command.settings);
+    if (!change) {
+      return refuse("Not a lid setting this Mac understands.", "bad settings");
+    }
+    const outcome = await awake.apply({ action: "lid-actions", settings: change });
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.nudgePublish(0);
+    this.log(device.name, "sent", `lid actions ${Object.keys(change).join(", ")}`);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
   /** A keep-awake flip. Signature, freshness and nonce have already held. */
   private async handleAwake(
     device: PairedDevice,
@@ -2129,6 +2210,10 @@ export class RemoteBridge {
       JSON.stringify(view.awakeLidReady) +
       JSON.stringify(view.awakeSafety) +
       JSON.stringify(view.macPower) +
+      JSON.stringify(view.awakeLidActions) +
+      JSON.stringify(view.awakeRules) +
+      JSON.stringify(view.awakeLastEnd) +
+      JSON.stringify(view.awakeSleepProblem) +
       JSON.stringify(view.hotspot) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     const { recent, recentMore, workspaces, projectIcons, chatModels, ...rest } = view;
@@ -2263,6 +2348,10 @@ export class RemoteBridge {
     awakeLidReady?: boolean;
     awakeSafety?: string;
     macPower?: { percent: number | null; onBattery: boolean | null; watts: number | null; lidClosed: boolean | null };
+    awakeLidActions?: LidActionSettings;
+    awakeRules?: AwakeRules;
+    awakeLastEnd?: AwakeEnd;
+    awakeSleepProblem?: string;
   } {
     const awake = this.deps.awake;
     if (!awake) {
@@ -2280,6 +2369,12 @@ export class RemoteBridge {
       ...(state?.safety ? { awakeSafety: state.lowPower ? `Low Power Mode on · ${state.safety}` : state.safety } : {}),
       // Battery, draw and lid, for the phone's "Your Mac".
       ...(awake.power?.() ? { macPower: awake.power()! } : {}),
+      // What a closed lid does, the safety floors, how the last session ended, a sleep problem; each
+      // optional, and older phones ignore them.
+      ...(awake.lidActions ? { awakeLidActions: awake.lidActions() } : {}),
+      ...(awake.rules ? { awakeRules: awake.rules() } : {}),
+      ...(awake.lastEnd?.() ? { awakeLastEnd: awake.lastEnd()! } : {}),
+      ...(awake.sleepProblem?.() ? { awakeSleepProblem: awake.sleepProblem()! } : {}),
     };
   }
 

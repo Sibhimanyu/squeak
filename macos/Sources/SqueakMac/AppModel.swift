@@ -596,6 +596,16 @@ final class AppModel {
     private(set) var awakeLidReady = false
     private(set) var settingUpLid = false
     private(set) var hotspot: DaemonHotspot?
+    /// What a closed lid does (nil from a daemon that does not say), and the rest of the daemon's awake report.
+    private(set) var awakeLidActions: DaemonLidActions?
+    private(set) var awakeLidClosedNow = false
+    private(set) var awakeLastEnd: DaemonAwakeEnd?
+    private(set) var awakeSleepProblem: String?
+    /// The daemon's effective safety floors; nil from an older daemon (the views then say 40 and 10).
+    private(set) var awakeRules: DaemonAwakeRules?
+    /// Why the last hotspot save or removal did not happen, and whether one is in flight.
+    private(set) var hotspotNote: String?
+    private(set) var savingHotspot = false
     /// Why the last change to it did not happen, in plain words.
     private(set) var awakeNote: String?
 
@@ -615,6 +625,96 @@ final class AppModel {
         if state.awakeOffered != awakeOffered { awakeOffered = state.awakeOffered }
         if state.awakeLidReady != awakeLidReady { awakeLidReady = state.awakeLidReady }
         if state.hotspot != hotspot { hotspot = state.hotspot }
+        if state.awakeLidActions != awakeLidActions { awakeLidActions = state.awakeLidActions }
+        if state.awakeLidClosedNow != awakeLidClosedNow { awakeLidClosedNow = state.awakeLidClosedNow }
+        if state.awakeLastEnd != awakeLastEnd { awakeLastEnd = state.awakeLastEnd }
+        if state.awakeSleepProblem != awakeSleepProblem { awakeSleepProblem = state.awakeSleepProblem }
+        if state.awakeRules != awakeRules { awakeRules = state.awakeRules }
+    }
+
+    /// Saves the iPhone hotspot's name and password (the daemon keeps the password in the Keychain).
+    /// An empty password keeps the stored one. True when it was saved.
+    @discardableResult
+    func saveHotspot(ssid: String, password: String) async -> Bool {
+        guard !savingHotspot else { return false }
+        let name = ssid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keeps = hotspot?.configured == true && hotspot?.ssid == name
+        if let problem = AwakeFormat.hotspotProblem(ssid: name, password: password, keepsPassword: keeps) {
+            hotspotNote = problem
+            return false
+        }
+        savingHotspot = true
+        defer { savingHotspot = false }
+        if demoMode {
+            hotspot = DaemonHotspot(configured: true, ssid: name, enabled: true, onHotspot: false)
+            hotspotNote = nil
+            return true
+        }
+        hotspotNote = await client.setHotspot(ssid: name, password: password)
+        await readAwake()
+        return hotspotNote == nil
+    }
+
+    /// Forgets the hotspot: its name and the password in the Keychain.
+    func removeHotspot() async {
+        guard !savingHotspot else { return }
+        savingHotspot = true
+        defer { savingHotspot = false }
+        if demoMode {
+            hotspot = DaemonHotspot(configured: false, ssid: nil, enabled: false, onHotspot: false)
+            hotspotNote = nil
+            return
+        }
+        hotspotNote = await client.clearHotspot()
+        await readAwake()
+    }
+
+    /// Turns one thing a closed lid does on or off. Shown at once, then confirmed by the daemon's next report.
+    func setLidAction(_ key: String, _ on: Bool) async {
+        if demoMode {
+            var a = awakeLidActions ?? DaemonLidActions()
+            switch key {
+            case "displayOff": a.displayOff = on
+            case "mute": a.mute = on
+            case "lowPower": a.lowPower = on
+            default: a.freezeApps = on
+            }
+            awakeLidActions = a
+            return
+        }
+        let before = awakeLidActions
+        if var a = awakeLidActions {
+            switch key {
+            case "displayOff": a.displayOff = on
+            case "mute": a.mute = on
+            case "lowPower": a.lowPower = on
+            default: a.freezeApps = on
+            }
+            awakeLidActions = a
+        }
+        if let problem = await client.setLidActions([key: on]) {
+            awakeLidActions = before
+            awakeNote = problem
+        } else {
+            awakeNote = nil
+        }
+        await readAwake()
+    }
+
+    /// Demo captures only: the awake state a screenshot should show.
+    func installDemoAwake(
+        _ awake: DaemonAwake?, lidReady: Bool, actions: DaemonLidActions? = DaemonLidActions(), end: DaemonAwakeEnd? = nil,
+        hotspot: DaemonHotspot? = nil, sleepProblem: String? = nil, rules: DaemonAwakeRules? = nil
+    ) {
+        guard demoMode else { return }
+        awakeOffered = true
+        self.awake = awake
+        awakeLidReady = lidReady
+        awakeLidActions = actions
+        awakeLastEnd = end
+        self.hotspot = hotspot
+        awakeSleepProblem = sleepProblem
+        awakeRules = rules
     }
 
     /// "start" (minutes nil: until ended), "extend" or "end".
@@ -629,16 +729,16 @@ final class AppModel {
         settingUpLid = true
         defer { settingUpLid = false }
         guard let rule = await client.lidRule() else {
-            awakeNote = "This version of the Squeak service can't set up lid-closed sessions. Update it first."
+            awakeNote = "This version of the Squeak service can't set up lid closed. Update it first."
             return
         }
         switch await LidRule.install(rule) {
         case .installed:
             await client.recheckLidRule()
             await readAwake()
-            awakeNote = awakeLidReady ? "Lid-closed is set up. Start a session with the lid closed below." : "Installed, but Squeak can't use it yet. Try again in a moment."
+            awakeNote = awakeLidReady ? "Lid closed is ready. Start a session and your Mac stays awake with the lid shut." : "Installed, but Squeak can't use it yet. Try again in a moment."
         case .cancelled: awakeNote = nil
-        case .failed(let reason): awakeNote = "Lid-closed wasn't set up. \(reason)"
+        case .failed(let reason): awakeNote = "Lid closed wasn't set up. \(reason)"
         }
     }
 

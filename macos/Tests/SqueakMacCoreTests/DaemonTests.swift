@@ -156,6 +156,36 @@ struct DaemonClientTests {
         #expect(steps == [ActivityStep(kind: "tool", text: "Ran tests", at: Date(timeIntervalSince1970: 1_893_553_445))])
     }
 
+    static func object(_ data: Data?) throws -> [String: Any] {
+        let data = try #require(data)
+        return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    @Test func hotspotSetupPostsToTheTokenGatedRouteAndExplainsFailures() async throws {
+        let t = FakeTransport()
+        let client = DaemonClient(baseURL: base, transport: t, tokenProvider: { "tok" })
+        await t.json("POST", "/control/hotspot", #"{"hotspot":{"configured":true}}"#)
+        #expect(await client.setHotspot(ssid: "Sibhi's iPhone", password: "secret-pass") == nil)
+        let req = await t.requests[0]
+        #expect(req.headers["x-squeak-token"] == "tok")
+        let body = try Self.object(req.body)
+        #expect(body["action"] as? String == "configure" && body["ssid"] as? String == "Sibhi's iPhone")
+        #expect(body["password"] as? String == "secret-pass" && body["enabled"] as? Bool == true)
+        // An empty password is not sent: the daemon then keeps the stored one.
+        _ = await client.setHotspot(ssid: "Sibhi's iPhone", password: "")
+        let again = try Self.object(await t.requests[1].body)
+        #expect(again["password"] == nil)
+        // The daemon's reason comes back; an older daemon (no route) is told to update.
+        await t.json("POST", "/control/hotspot", status: 400, #"{"error":"Enter the hotspot's password too."}"#)
+        #expect(await client.setHotspot(ssid: "x", password: nil) == "Enter the hotspot's password too.")
+        await t.route("POST", "/control/hotspot", .success(HTTPResponse(status: 404)))
+        #expect(await client.clearHotspot()?.contains("Update it") == true)
+        await t.json("POST", "/control/hotspot", #"{"hotspot":{"configured":false}}"#)
+        #expect(await client.clearHotspot() == nil)
+        let clear = try Self.object(await t.requests.last?.body)
+        #expect(clear["action"] as? String == "clear")
+    }
+
     // MARK: send mapping
 
     func sendOutcome(_ route: Result<HTTPResponse, TransportError>, token: String? = "tok") async -> (SendResult, [HTTPRequest]) {

@@ -125,6 +125,18 @@ export function normalizeThresholds(thresholds: SafetyThresholds): SafetyThresho
   return { endPercent, lowPowerPercent: Math.max(thresholds.lowPowerPercent, endPercent + 1) };
 }
 
+/** The rules as surfaces show them: the effective floors, and that heat acts too (hot: Low Power Mode, critical: end). */
+export interface AwakeRules {
+  lowPowerPercent: number;
+  endPercent: number;
+  heat: boolean;
+}
+
+export function awakeRules(thresholds: SafetyThresholds = DEFAULT_THRESHOLDS): AwakeRules {
+  const { lowPowerPercent, endPercent } = normalizeThresholds(thresholds);
+  return { lowPowerPercent, endPercent, heat: true };
+}
+
 export type SafetyEnd = "battery" | "heat";
 
 /** What the rules want for a running awake session, given one reading. */

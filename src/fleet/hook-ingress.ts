@@ -60,6 +60,12 @@ export interface IngressControl {
     | Promise<{ ok: true; state: unknown } | { ok: false; reason: string }>
     | { ok: true; state: unknown }
     | { ok: false; reason: string };
+  /**
+   * Hotspot failover (fleet/hotspot.ts, `readHotspotRequest` shapes): set it up
+   * (name and password go to hotspot.json and the Keychain), switch now or
+   * back, or clear it. Answers its state, never the password.
+   */
+  hotspot?(request: unknown): Promise<{ ok: true; state: unknown } | { ok: false; reason: string }>;
   /** Which channels are set up and healthy. Never carries a secret. */
   channels?(): unknown;
   /** Chats that messaged the Telegram bot without being allowed. */
@@ -399,6 +405,58 @@ export class HookIngressServer {
           .catch((error: unknown) => {
             logger.warn("control keep-awake failed", { error: error instanceof Error ? error.message : String(error) });
             respond(response, 500, "keep awake failed");
+          });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/hotspot") {
+      if (request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!control.hotspot) {
+        request.resume();
+        respond(response, 503, "hotspot unavailable");
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        control.hotspot!(parsed)
+          .then((outcome) => {
+            if (!outcome.ok) {
+              respondJson(response, 400, { error: outcome.reason });
+              return;
+            }
+            respondJson(response, 200, { hotspot: outcome.state });
+          })
+          .catch(() => {
+            // Nothing from the request or the error: the body holds a password.
+            logger.warn("control hotspot failed");
+            respond(response, 500, "hotspot failed");
           });
       });
       request.on("error", () => {

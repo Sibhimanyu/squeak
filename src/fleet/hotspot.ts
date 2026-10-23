@@ -74,7 +74,9 @@ export interface HotspotState {
 export type HotspotRequest =
   | { action: "configure"; ssid: string; password?: string; enabled: boolean }
   | { action: "join" }
-  | { action: "leave" };
+  | { action: "leave" }
+  /** Forget the hotspot: its name, and its password in the Keychain. */
+  | { action: "clear" };
 
 export interface HotspotSystem {
   /** The Wi-Fi interface (`en0` on most Macs), or null without Wi-Fi. */
@@ -91,6 +93,8 @@ export interface HotspotSystem {
   cycle(device: string): Promise<void>;
   readPassword(): Promise<string | null>;
   storePassword(password: string): Promise<void>;
+  /** Removes the stored password (`clear`); absent: it stays, unused. */
+  deletePassword?(): Promise<void>;
 }
 
 export interface HotspotOptions {
@@ -126,7 +130,7 @@ export function readHotspotRequest(value: unknown): HotspotRequest | null {
   if (!record) {
     return null;
   }
-  if (record.action === "join" || record.action === "leave") {
+  if (record.action === "join" || record.action === "leave" || record.action === "clear") {
     return { action: record.action };
   }
   if (record.action !== "configure" || typeof record.enabled !== "boolean" || !validSsid(record.ssid)) {
@@ -207,6 +211,16 @@ export class HotspotFailover {
       // Now, while someone is at the Mac to answer macOS's prompt; not at
       // the moment the Wi-Fi drops, perhaps with the lid shut.
       if (request.enabled) void this.system.prepare?.();
+      this.options.onChange?.();
+      return { ok: true, state: this.state };
+    }
+    if (request.action === "clear") {
+      await this.system.deletePassword?.();
+      this.hasPassword = false;
+      this.settings = { enabled: false, ssid: null };
+      writeSettings(this.options.settingsPath, this.settings);
+      this.failures = 0;
+      this.tries = 0;
       this.options.onChange?.();
       return { ok: true, state: this.state };
     }
@@ -516,6 +530,17 @@ export function macHotspotSystem(handsAppPath: string | null = null): HotspotSys
       if ((await this.readPassword()) !== password) {
         throw new Error("the Keychain did not keep the hotspot password");
       }
+    },
+    async deletePassword() {
+      await new Promise<void>((resolve) => {
+        // Exits 44 when there is no such item, which is the state wanted.
+        execFile(
+          "/usr/bin/security",
+          ["delete-generic-password", "-a", "squeak", "-s", HOTSPOT_KEYCHAIN_SERVICE],
+          { timeout: 15_000 },
+          () => resolve(),
+        );
+      });
     },
   };
 }

@@ -3,13 +3,14 @@ import Foundation
 /// The pages of Settings, which lives inside the main window. `AppModel.settingsSection` is the
 /// page on screen, or nil while the window shows sessions.
 public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifiable {
-    case general, connections, telegram, cliq, iphone, privacy, about
+    case general, awake, connections, telegram, cliq, iphone, privacy, about
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .general: "General"
+        case .awake: "Keep awake"
         case .connections: "Connections"
         case .telegram: "Telegram"
         case .cliq: "Zoho Cliq"
@@ -21,7 +22,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
 
     /// Sidebar grouping: how the app behaves, the services it talks to, then Squeak itself.
     public static let groups: [[SettingsSection]] = [
-        [.general, .connections],
+        [.general, .awake, .connections],
         [.telegram, .cliq, .iphone],
         [.privacy, .about],
     ]

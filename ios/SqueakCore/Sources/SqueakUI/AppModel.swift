@@ -190,7 +190,9 @@ final class AppModel {
                         sessions: current.sessions, usage: current.usage, workspaces: current.workspaces, recent: current.recent,
                         keepAwake: current.keepAwake, awakeUntil: current.awakeUntil,
                         awakeLid: current.awakeLid, awakeLidProblem: current.awakeLidProblem, awakeLidReady: current.awakeLidReady,
-                        awakeSafety: current.awakeSafety, macPower: current.macPower)
+                        awakeSafety: current.awakeSafety, macPower: current.macPower,
+                        awakeLidActions: current.awakeLidActions, awakeRules: current.awakeRules,
+                        awakeLastEnd: current.awakeLastEnd, awakeSleepProblem: current.awakeSleepProblem)
                 }
                 n += 1
             }
@@ -760,7 +762,9 @@ final class AppModel {
                     sessions: [session] + current.sessions, usage: current.usage, workspaces: current.workspaces,
                     recent: current.recent, keepAwake: current.keepAwake, awakeUntil: current.awakeUntil,
                         awakeLid: current.awakeLid, awakeLidProblem: current.awakeLidProblem, awakeLidReady: current.awakeLidReady,
-                        awakeSafety: current.awakeSafety, macPower: current.macPower)
+                        awakeSafety: current.awakeSafety, macPower: current.macPower,
+                        awakeLidActions: current.awakeLidActions, awakeRules: current.awakeRules,
+                        awakeLastEnd: current.awakeLastEnd, awakeSleepProblem: current.awakeSleepProblem)
             }
             return .started
         }
@@ -962,6 +966,73 @@ final class AppModel {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    }
+
+    /* ---------- what a closed lid does ---------- */
+
+    /// Switches this phone just flipped, shown until the Mac's own snapshot agrees or 20 seconds pass.
+    private var lidActionTaps: [String: (value: Bool, at: Date)] = [:]
+    private var lidActionTick = 0
+
+    /// Whether this Mac sends what a closed lid does (an older one does not, and the group is hidden).
+    var lidActionsOffered: Bool { snapshot?.awakeLidActions != nil }
+
+    /// The Mac's settings with this phone's unconfirmed taps laid over them.
+    var lidActions: PhoneSnapshot.LidActions? {
+        _ = lidActionTick
+        guard var actions = snapshot?.awakeLidActions else { return nil }
+        for (key, tap) in lidActionTaps where Date().timeIntervalSince(tap.at) < 20 { actions[key] = tap.value }
+        return actions
+    }
+
+    /// Whether a flip is waiting on the Mac.
+    func lidActionPending(_ key: String) -> Bool {
+        _ = lidActionTick
+        guard let tap = lidActionTaps[key] else { return false }
+        return Date().timeIntervalSince(tap.at) < 20 && snapshot?.awakeLidActions?[key] != tap.value
+    }
+
+    /// Turns one thing a closed lid does on or off. No Face ID: it is a Mac setting, reaches no agent and
+    /// carries no words. Returns a reason on failure, after putting the switch back.
+    func changeLidAction(_ key: String, _ on: Bool) async -> String? {
+        lidActionTaps[key] = (on, Date())
+        lidActionTick += 1
+        let expire = { [weak self] in
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(21))
+                self?.lidActionTick += 1
+            }
+        }
+        expire()
+        if demo {
+            // No Mac to ask: the demo keeps what was tapped.
+            if var current = snapshot?.awakeLidActions { current[key] = on; snapshot?.awakeLidActions = current }
+            lidActionTaps[key] = nil
+            return nil
+        }
+        func fail(_ reason: String) -> String {
+            lidActionTaps[key] = nil
+            lidActionTick += 1
+            return reason
+        }
+        guard let channel else { return fail("Not connected to your Mac.") }
+        var change = LidActionsCommand.Settings()
+        switch key {
+        case "displayOff": change.displayOff = on
+        case "mute": change.mute = on
+        case "lowPower": change.lowPower = on
+        default: change.freezeApps = on
+        }
+        do {
+            let (id, document) = try channel.lidActionsDocument(change, signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return fail("Your Mac didn't answer. Is Squeak running?") }
+            guard result.sent else { return fail(result.reason ?? "Your Mac couldn't change that.") }
+            await refresh()
+            return nil
+        } catch {
+            return fail("Couldn't reach your Mac.")
+        }
     }
 
     enum HotspotChange { case configure(ssid: String, password: String?, enabled: Bool), join, leave }

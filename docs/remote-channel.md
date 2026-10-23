@@ -327,6 +327,24 @@ answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
   carries `hotspot: { configured, ssid, enabled, onHotspot, last }`. `join`
   switches the Mac to it now and `leave` back to its usual Wi-Fi. Face ID on
   the phone first: it changes how the Mac reaches the internet.
+  The Mac app sets the same thing up through the token-gated
+  `POST /control/hotspot` (`configure`, `join`, `leave`, and `clear`, which
+  also removes the Keychain item); both end in the daemon's one
+  `applyHotspot`, and neither echoes or logs the password.
+- **Lid actions (2026-10-23).** `{ v: 1, kind: "lidActions", settings:
+  { displayOff?, mute?, lowPower?, freezeApps? }, nonce, expiresAt }` changes
+  what the Mac does when its lid closes in a lid-closed awake session
+  (fleet/lid-actions.ts). After the shared checks the Mac reads `settings`
+  strictly: one to four known keys, booleans only, anything else is refused,
+  and nothing is applied. It is applied through the daemon's `applyAwake`
+  (`{ action: "lid-actions", settings }`), the same path as the Mac app's
+  control route. It reaches no agent and carries no words, so no Face ID. The
+  phone view gains optional `awakeLidActions: { displayOff, mute, lowPower,
+  freezeApps }`, `awakeRules: { lowPowerPercent, endPercent, heat }` (the
+  effective safety floors; a phone says 40 and 10 only when absent),
+  `awakeLastEnd: { reason, at, why? }` and `awakeSleepProblem`. Older phones
+  ignore them, so no `caps` entry is needed; a phone hides the switches when
+  the Mac sends no `awakeLidActions`.
 - **Images from a chat (2026-10-19).** `{ v: 1, kind: "image", sessionId,
   source, nonce, expiresAt }` asks for an image the chat's agent showed
   (`![alt](source)` alone in a paragraph). Read-only but signed. After the

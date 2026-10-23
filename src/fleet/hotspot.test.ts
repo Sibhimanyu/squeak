@@ -50,6 +50,10 @@ function fakeMac(options: { joinWorks?: boolean; online?: boolean } = {}) {
     storePassword: async (pw) => {
       password = pw;
     },
+    deletePassword: async () => {
+      calls.push("deletePassword");
+      password = null;
+    },
   };
   return {
     system,
@@ -99,6 +103,19 @@ describe("HotspotFailover", () => {
     expect(JSON.parse(file)).toEqual({ enabled: true, ssid: "Sibhi's iPhone" });
     // Location Services is asked for now, while someone is at the Mac.
     expect(mac.calls).toEqual(["prepare"]);
+  });
+
+  it("clears the name and the Keychain password", async () => {
+    const mac = fakeMac();
+    const { hotspot, dir, onChange } = failover(mac);
+    await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
+    onChange.mockClear();
+    const result = await hotspot.apply({ action: "clear" });
+    expect(result).toMatchObject({ ok: true, state: { configured: false, ssid: null, enabled: false } });
+    expect(mac.calls).toContain("deletePassword");
+    expect(JSON.parse(fs.readFileSync(path.join(dir, "hotspot.json"), "utf8"))).toEqual({ enabled: false, ssid: null });
+    expect(onChange).toHaveBeenCalled();
+    expect(await hotspot.apply({ action: "join" })).toMatchObject({ ok: false });
   });
 
   it("joins the hotspot after half a minute without internet, when something needs the Mac", async () => {
@@ -233,6 +250,7 @@ describe("hotspot requests", () => {
     });
     expect(readHotspotRequest({ action: "configure", ssid: "Phone", password: "short", enabled: true })).toBeNull();
     expect(readHotspotRequest({ action: "configure", ssid: "", enabled: true })).toBeNull();
+    expect(readHotspotRequest({ action: "clear" })).toEqual({ action: "clear" });
     expect(readHotspotRequest({ action: "delete" })).toBeNull();
     expect(validSsid("a".repeat(33))).toBe(false);
     expect(validSsid("bad\nname")).toBe(false);

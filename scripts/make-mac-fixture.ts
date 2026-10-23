@@ -184,6 +184,15 @@ const bridge = new RemoteBridge({
         }
       : null,
   workflow: rasanai,
+  // The awake session as the daemon reports it, so the phone's tests decode the real fields.
+  awake: {
+    state: () => null,
+    apply: () => ({ ok: true, state: null }),
+    lidActions: () => ({ displayOff: true, mute: false, lowPower: true, freezeApps: true }),
+    rules: () => ({ lowPowerPercent: 35, endPercent: 8, heat: true }),
+    lastEnd: () => ({ reason: "battery", at: "2026-09-25T01:00:00.000Z", why: "Battery at 8%" }),
+    sleepProblem: () => null,
+  },
   now: () => Date.parse("2026-09-25T03:00:00.000Z"),
   macName: "Test Mac",
 });
@@ -219,7 +228,13 @@ fs.writeFileSync(
       mediaResultBox: seal(key, {
         id: "c7",
         status: "sent",
-        media: { id: "abcdef0123456789", chunks: 1, bytes: 5, sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", mime: "audio/mp4" },
+        media: {
+          id: "abcdef0123456789",
+          chunks: 1,
+          bytes: 5,
+          sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+          mime: "audio/mp4",
+        },
       }),
       mediaChunkBox: seal(key, { i: 0, n: 1, data: Buffer.from("hello").toString("base64") }),
       // For a phone whose presence says caps ["z", "split"]: compressed, the recent list apart.

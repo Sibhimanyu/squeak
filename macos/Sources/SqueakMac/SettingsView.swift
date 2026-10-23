@@ -37,6 +37,7 @@ private extension SettingsSection {
     var symbol: LucideName {
         switch self {
         case .general: .settings
+        case .awake: .moon
         case .connections: .link
         case .telegram: .send
         case .cliq: .messageSquare
@@ -98,6 +99,7 @@ private struct SettingsPage: View {
     @ViewBuilder private var page: some View {
         switch section {
         case .general: GeneralSettings()
+        case .awake: AwakeSettings()
         case .connections: ConnectionsSettings()
         case .telegram: TelegramSettings()
         case .cliq: CliqSettings()
