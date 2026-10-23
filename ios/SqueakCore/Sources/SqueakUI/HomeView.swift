@@ -24,6 +24,7 @@ struct HomeView: View {
     var opensLinks = true
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openSettingsTab) private var openSettingsTab
     @ObservedObject private var router = SqueakRouter.shared
     /// Projects or Status, remembered between launches.
     @AppStorage("homeGrouping") private var storedGrouping = Presentation.Grouping.projects
@@ -131,6 +132,7 @@ struct HomeView: View {
                     .onChange(of: storedGrouping) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
                 }
                 if !sessions.isEmpty { summary }
+                MacStripView { if let open = openSettingsTab { open() } else { showingSettings = true } }
             }
             .padding(.bottom, 4)
             if let starting = model.startingChat { StartingRow(label: starting.label) }
@@ -159,8 +161,8 @@ struct HomeView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: grouping)
     }
 
-    /// "6 sessions · 3 working", or the Mac awake's countdown, in words only: ConnectionBar speaks up
-    /// when the connection is not fine.
+    /// "6 sessions · 3 working", always: the Mac's awake and power state has its own strip below.
+    /// In words only: ConnectionBar speaks up when the connection is not fine.
     private var summary: some View {
         TimelineView(.periodic(from: .now, by: 5)) { _ in
             Text(subtitle).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
@@ -235,14 +237,7 @@ struct HomeView: View {
         }
     }
 
-    private var subtitle: String {
-        let active = Presentation.headerCount(sessions)
-        // While an awake session runs its countdown takes the line: the list shows the count anyway.
-        // A Mac that stopped answering is not awake, whatever it said last.
-        if case .silent = model.macLiveness() { return "Mac not answering" }
-        guard let awake = model.awake else { return active }
-        return awake.until.map { "Mac awake · \(AppModel.awakeLeft($0))" } ?? "Mac kept awake"
-    }
+    private var subtitle: String { Presentation.headerCount(sessions) }
 
     private func openPending() {
         guard let id = router.pendingSessionId,
@@ -307,20 +302,14 @@ struct GroupView: View {
     }
 
     var body: some View {
-        if case .recent = route { EarlierView(path: $path) } else { list }
+        if case .recent = route { EarlierView(path: $path) }
+        else if case .status(.needsYou) = route { NeedsYouPage(path: $path) }
+        else { list }
     }
 
     private var list: some View {
         List {
-            if case .status(.needsYou) = route {
-                ForEach(active) { session in
-                    Section {
-                        AskCard(session: session, onReply: { quickReply = session }, onOpen: { path.append(.session(session.key)) })
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Theme.surface)
-                    }
-                }
-            } else if !active.isEmpty {
+            if !active.isEmpty {
                 Section {
                     ForEach(active) { session in
                         NavigationLink(value: HomeRoute.session(session.key)) {
@@ -784,6 +773,61 @@ struct QuickReply: View {
         .foregroundStyle(Theme.ink)
         .presentationDetents([.medium])
         .onAppear { focused = true }
+    }
+}
+
+
+
+/// Home's Mac status strip: awake, lid and power in one or two muted lines, tapping through to Settings.
+/// Hidden when there is nothing worth saying. All wording comes from `MacStrip.compose`.
+struct MacStripView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var type
+    let open: () -> Void
+
+    private func strip() -> MacStrip? {
+        MacStrip.compose(awake: model.awake.map { .init(until: $0.until, lid: $0.lid, safety: $0.safety, pending: $0.pending) }, power: model.snapshot?.macPower, liveness: model.macLiveness(),
+                         sleepProblem: model.snapshot?.awakeSleepProblem, lastEnd: model.snapshot?.awakeLastEnd,
+                         offered: model.awakeOffered)
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 15)) { _ in
+            if let strip = strip() {
+                Button(action: open) {
+                    HStack(alignment: .top, spacing: 10) {
+                        StatusDot(color: color(strip.tone)).padding(.top, 5)
+                        VStack(alignment: .leading, spacing: 1) {
+                            ForEach(Array(strip.lines.enumerated()), id: \.offset) { i, line in
+                                Text(line).font(.footnote).foregroundStyle(i == 0 ? Theme.ink : Theme.muted).monospacedDigit()
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        Lucide(.chevronRight, size: 14, color: Theme.subtle).padding(.top, 2)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8).frame(minHeight: 44)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                    .contentShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(strip.spoken)
+                .accessibilityHint("Opens Keep Mac awake settings")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("mac-strip")
+            }
+        }
+    }
+
+    private func color(_ tone: MacStrip.Tone) -> Color {
+        switch tone {
+        case .awake: Theme.working
+        case .off: Theme.idle
+        case .failed: Theme.error
+        case .silent: Theme.offline
+        }
     }
 }
 

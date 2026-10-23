@@ -233,9 +233,9 @@ public struct ConductorRegistry: Sendable {
 
 public enum ConductorStatus {
     /// An idle chat this recent counts as freshly finished.
-    public static let finishedWithin: TimeInterval = 6 * 60 * 60
+    public static let finishedWithin: TimeInterval = 24 * 60 * 60
     /// How long a finished session stays on screen.
-    public static let recentlyFinished: TimeInterval = 15 * 60
+    public static let recentlyFinished: TimeInterval = 24 * 60 * 60
 
     public static func state(of row: ConductorSessionRow, now: Date) -> SessionState {
         // Conductor keeps `working` while its question modal is open; the only
@@ -279,7 +279,7 @@ public enum ConductorStatus {
     }
 
     /// Port of `isActiveSession` for Conductor chats: retired never; working or
-    /// blocked always; finished/error for 15 minutes; idle never (Conductor
+    /// blocked always; finished/error for 24 hours; idle never (Conductor
     /// keeps warm processes for hours, so liveness means nothing here).
     public static func isActive(state: SessionState, retired: Bool, lastActivityAt: Date?, now: Date) -> Bool {
         if retired { return false }

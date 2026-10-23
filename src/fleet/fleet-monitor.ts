@@ -2,6 +2,7 @@ import { logger } from "../utils/logger.js";
 import { selectActiveSessions } from "./active.js";
 import {
   DEFAULT_CONTEXT_PRESSURE_PERCENT,
+  PUSH_FINISH_WITHIN_MS,
   shouldPush,
   classifyAttentions,
   scoreAttention,
@@ -393,6 +394,13 @@ export class FleetMonitor {
         // D2: only genuinely blocked sessions interrupt. Everything else waits
         // on the radar, where it costs the user nothing to not look.
         if (!shouldPush(kind, session) || this.isMuted(session, observedAt)) {
+          continue;
+        }
+        // Active for a day, but a finish is news only for a few minutes.
+        if (
+          (kind === "finished_unreviewed" || kind === "asked_question") &&
+          this.now() - Date.parse(session.lastActivityAt) >= PUSH_FINISH_WITHIN_MS
+        ) {
           continue;
         }
         const claimed = this.deps.store.claimNotification({

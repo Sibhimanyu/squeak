@@ -47,6 +47,13 @@ describe("isActiveSession", () => {
     expect(isActiveSession(session({ state: "finished" }), now)).toBe(true);
   });
 
+  it("keeps a session finished 3 hours ago, and an errored one, on screen for a day", () => {
+    const at = new Date(now - 3 * 3600_000).toISOString();
+    expect(isActiveSession(session({ state: "finished", lastActivityAt: at }), now)).toBe(true);
+    expect(isActiveSession(session({ state: "error", lastActivityAt: at }), now)).toBe(true);
+    expect(DEFAULT_RECENTLY_FINISHED_MS).toBe(24 * 3600_000);
+  });
+
   it("drops a session that finished a while ago", () => {
     const stale = session({
       state: "finished",

@@ -80,6 +80,20 @@ describe("deriveDuckState", () => {
     expect(state.justFinished).toEqual([]);
   });
 
+  it("does not celebrate a finish from 3 hours ago, even one the store just met", () => {
+    const old = { ...session("finished"), lastActivityAt: new Date(now - 3 * 3600_000).toISOString() };
+    const item: AttentionItem = {
+      session: old,
+      kind: "finished_unreviewed",
+      score: 300,
+      since: new Date(now - 1000).toISOString(),
+    };
+    const state = deriveDuckState([old], [item], now);
+
+    expect(state.mood).toBe("idle");
+    expect(state.justFinished).toEqual([]);
+  });
+
   it("puts being blocked above celebrating", () => {
     // One agent finishing does not matter while another is waiting on you.
     const state = deriveDuckState(

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.23
+
+- A finished chat stays in the list for a day, not 15 minutes, so work you have not looked at yet
+  does not vanish.
+
+## 2.1.22
+
+- Tables in an agent's message lay out properly: each row is as tall as its longest cell, cells
+  never overlap, and a wide table scrolls sideways instead of being cut off.
+
 ## 2.1.21
 
 - Hotspot failover can be set up on the Mac: Settings, Keep awake, type your iPhone's hotspot

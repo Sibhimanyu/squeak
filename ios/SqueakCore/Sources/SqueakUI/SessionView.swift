@@ -1022,7 +1022,7 @@ struct SentBubble: View, Equatable {
 
 /// What to do with a message that did not go through: send it again, or take its text back to edit.
 /// Neither happens by itself: an unconfirmed message may be in the chat already.
-private struct FailedSendActions: View {
+struct FailedSendActions: View {
     @Environment(AppModel.self) private var model
     let sendId: UUID
     let session: PhoneSnapshot.Session

@@ -31,6 +31,15 @@ public enum AwakeFormat {
             + "and the session ends by itself at \(r.endPercent)%\(heat ? " or when it gets very hot" : "")."
     }
 
+    /// "1h 23m" / "45m" / "under a minute" until `until`.
+    public static func left(_ until: Date, now: Date = Date()) -> String {
+        let minutes = Int((until.timeIntervalSince(now) / 60).rounded(.up))
+        if minutes <= 1 { return "under a minute" }
+        let hours = minutes / 60
+        if hours >= 24 { return "\(hours / 24)d \(hours % 24)h" }
+        return hours > 0 ? "\(hours)h \(minutes % 60)m" : "\(minutes)m"
+    }
+
     /// A line for a session a safety rule ended (and only within the last 6 hours), or nil.
     public static func ended(_ end: PhoneSnapshot.AwakeEnd?, now: Date = Date()) -> String? {
         guard let end, end.reason == "battery" || end.reason == "heat" else { return nil }

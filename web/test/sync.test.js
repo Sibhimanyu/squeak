@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isStale, Sync } from "../js/sync.js";
+import { isStale, LATE_RESULT_MS, RESULT_TIMEOUT_MS, Sync } from "../js/sync.js";
 
 /** A channel whose reads the test controls. */
 function fakeChannel() {
@@ -129,5 +129,84 @@ describe("Sync", () => {
     channel.emit("state", { kind: "dropped" });
     expect(sync.state.streamUp).toBe(false);
     sync.stop();
+  });
+});
+
+describe("Sync.reply", () => {
+  /** A channel and clock the test drives; `answers` is what the Mac has written. */
+  function replyRig({ deleteOk = true, sendFails = false } = {}) {
+    let clock = 1_000_000;
+    const channel = {
+      ...fakeChannel(),
+      now: () => clock,
+      deleted: [],
+      answer: null,
+      replyDocument: async () => ({ id: "cmd-1", document: { box: "b" } }),
+      send: async () => {
+        if (sendFails) throw new Error("offline");
+      },
+      result: async () => channel.answer,
+      deleteResult: async () => {},
+      deleteCommand: async (id) => (channel.deleted.push(id), deleteOk),
+    };
+    let poll = () => {};
+    const fake = { ...timers, setInterval: (fn, ms) => (ms === 1_500 && (poll = fn), 0) };
+    const sync = new Sync({ channel, signingKey: null, onState: () => {}, timers: fake });
+    sync.start();
+    const advance = async (ms) => {
+      await tick(10);
+      clock += ms;
+      poll();
+      await tick(10);
+    };
+    return { sync, channel, advance };
+  }
+
+  it.each(["sent", "answered", "refused", "unconfirmed"])("hands back what the Mac wrote: %s", async (status) => {
+    const { sync, channel } = replyRig();
+    channel.answer = { status, reason: "no" };
+    expect(await sync.reply({}, "hi")).toEqual({ status, reason: "no" });
+    expect(channel.deleted).toEqual([]);
+    sync.stop();
+  });
+
+  it("takes a silent command back at 30 s, waits the grace, and reports nothing started if it stays silent", async () => {
+    const { sync, channel, advance } = replyRig();
+    const done = sync.reply({}, "hi");
+    await advance(RESULT_TIMEOUT_MS + 1);
+    expect(channel.deleted).toEqual(["cmd-1"]);
+    await advance(LATE_RESULT_MS + 1);
+    expect(await done).toEqual({ status: "withdrawn" });
+    sync.stop();
+  });
+
+  it("lets a late answer inside the grace win over the withdrawal", async () => {
+    const { sync, channel, advance } = replyRig();
+    const done = sync.reply({}, "hi");
+    await advance(RESULT_TIMEOUT_MS + 1);
+    channel.answer = { status: "sent", delivery: "sent" };
+    await advance(2_000);
+    expect(await done).toEqual({ status: "sent", delivery: "sent" });
+    sync.stop();
+  });
+
+  it("says it could not confirm when the command could not be taken back", async () => {
+    const { sync, channel, advance } = replyRig({ deleteOk: false });
+    const done = sync.reply({}, "hi");
+    await advance(RESULT_TIMEOUT_MS + 1);
+    expect(channel.deleted).toEqual(["cmd-1"]);
+    await advance(1_001);
+    expect(await done).toEqual({ status: "unconfirmed" });
+    sync.stop();
+  });
+
+  it("on a failed write takes the command back before saying nothing was sent, and never resends", async () => {
+    const ok = replyRig({ sendFails: true });
+    await expect(ok.sync.reply({}, "hi")).rejects.toThrow("offline");
+    expect(ok.channel.deleted).toEqual(["cmd-1"]);
+    const stuck = replyRig({ sendFails: true, deleteOk: false });
+    expect(await stuck.sync.reply({}, "hi")).toEqual({ status: "unconfirmed" });
+    ok.sync.stop();
+    stuck.sync.stop();
   });
 });

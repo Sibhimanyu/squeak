@@ -33,6 +33,7 @@ struct HomeTabs: View {
                 .tabItem { TabLabel("Settings", icon: .settings) }
                 .tag(Tab.settings)
         }
+        .environment(\.openSettingsTab, { selection = .settings })
         // A link to a chat opens it from Home, whichever tab was in front.
         .onChange(of: router.pendingSessionId, initial: true) { _, id in if id != nil { selection = .home } }
         .onChange(of: selection) { _, tab in
@@ -74,7 +75,7 @@ private struct NeedsYouTab: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            GroupView(route: .status(.needsYou), path: $path)
+            NeedsYouPage(path: $path)
                 .navigationDestination(for: HomeRoute.self) { route in
                     if case .session(let key) = route { SessionView(key: key) } else { GroupView(route: route, path: $path) }
                 }

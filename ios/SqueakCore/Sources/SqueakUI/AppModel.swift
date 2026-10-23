@@ -387,7 +387,8 @@ final class AppModel {
 
     /// Whether the Mac is answering, for the header, the bar and Settings.
     func macLiveness(now: Date = Date()) -> MacLiveness {
-        demo ? .answering : MacLiveness.read(aliveAt: macAliveAt, lookingSince: lookingSince, now: now)
+        demo ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-silent") ? .silent(since: now.addingTimeInterval(-37 * 60)) : .answering)
+            : MacLiveness.read(aliveAt: macAliveAt, lookingSince: lookingSince, now: now)
     }
 
     private func heard(_ alive: MacAlive) {
@@ -954,13 +955,7 @@ final class AppModel {
     }
 
     /// "1h 23m" / "45m" / "under a minute" until `until`.
-    static func awakeLeft(_ until: Date) -> String {
-        let minutes = Int((until.timeIntervalSinceNow / 60).rounded(.up))
-        if minutes <= 1 { return "under a minute" }
-        let hours = minutes / 60
-        if hours >= 24 { return "\(hours / 24)d \(hours % 24)h" }
-        return hours > 0 ? "\(hours)h \(minutes % 60)m" : "\(minutes)m"
-    }
+    static func awakeLeft(_ until: Date, now: Date = Date()) -> String { AwakeFormat.left(until, now: now) }
 
     private static func parseISO(_ value: String) -> Date? {
         let formatter = ISO8601DateFormatter()

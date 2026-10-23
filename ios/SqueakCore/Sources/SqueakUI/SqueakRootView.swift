@@ -142,5 +142,7 @@ struct ScreenReporter: @unchecked Sendable {
 
 extension EnvironmentValues {
     @Entry var squeakScreen = ScreenReporter()
+    /// Set by the tab bar so Home's Mac strip can switch to the Settings tab; nil outside it (a sheet opens).
+    @Entry var openSettingsTab: (() -> Void)? = nil
 }
 #endif

@@ -23,7 +23,7 @@ let package = Package(
         .executableTarget(name: "squeak-fixtures", dependencies: ["SqueakCore"]),
         // A phone in a terminal: pairs and replies over real Firestore (scripts/e2e-remote.sh).
         .executableTarget(name: "squeak-e2e", dependencies: ["SqueakCore"]),
-        .testTarget(name: "SqueakUITests", dependencies: ["SqueakUI", "SqueakCore"]),
+        .testTarget(name: "SqueakUITests", dependencies: ["SqueakUI", "SqueakCore", .product(name: "SqueakMarkup", package: "markup")]),
         .testTarget(name: "SqueakCoreTests", dependencies: ["SqueakCore"], resources: [.copy("Fixtures")]),
     ]
 )

@@ -178,7 +178,7 @@ struct ConductorStatusTests {
     }
 
     @Test func activeRule() {
-        let recent = NOW.addingTimeInterval(-60), stale = NOW.addingTimeInterval(-3600)
+        let recent = NOW.addingTimeInterval(-60), stale = NOW.addingTimeInterval(-25 * 3600)
         #expect(ConductorStatus.isActive(state: .working, retired: false, lastActivityAt: stale, now: NOW))
         #expect(ConductorStatus.isActive(state: .blocked, retired: false, lastActivityAt: stale, now: NOW))
         #expect(!ConductorStatus.isActive(state: .working, retired: true, lastActivityAt: recent, now: NOW))

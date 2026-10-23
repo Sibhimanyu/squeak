@@ -9,10 +9,10 @@ public struct OrderedSessions: Equatable, Sendable {
 }
 
 public enum SessionOrdering {
-    public static let recentFinishWindow: TimeInterval = 15 * 60
+    public static let recentFinishWindow: TimeInterval = 24 * 60 * 60
 
     /// A session is active if it is working or blocked (and not known to be dead),
-    /// or it finished within the last 15 minutes.
+    /// or it finished within the last 24 hours.
     public static func isActive(_ s: HostSession, now: Date) -> Bool {
         switch s.state {
         case .working, .blocked:

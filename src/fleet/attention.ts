@@ -41,6 +41,14 @@ export const PUSH_KINDS: ReadonlySet<AttentionKind> = new Set<AttentionKind>([
 ]);
 
 /**
+ * A finish pushes only while it is news. Sessions now stay on screen for a day,
+ * but the push window stays what it always was, so a daemon that starts (or a
+ * store that is new) does not announce every finish of the last 24 hours.
+ * Blocked and stalled sessions are not bound by this: they are still waiting.
+ */
+export const PUSH_FINISH_WITHIN_MS = 15 * 60 * 1000;
+
+/**
  * How long a turn may wait before it "seems stuck". Measured over 1,580 turns
  * on a real machine: after a tool result the model answered within 5 minutes
  * in 17 of 48 long waits and thinking alone ran up to 10, while 26 waits went

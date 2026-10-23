@@ -47,6 +47,29 @@ enum DemoData {
     Say the word and I will cover the symlink case too.
     """
 
+    /// `-squeak-demo-tables`: the Session isolation chat answers with tables, one with long wrapped
+    /// cells (a report's sources) and one too wide for a phone, to check they never overlap.
+    static let tablesMessage = """
+    A report can come from one of three sources (`ReportSource` in `functions/src/core/types.ts:94`):
+
+    | Source | Who sends it |
+    | --- | --- |
+    | `sdk` (also the default when no source is set) | Someone using the app through the Report button, or a team member's agent reporting while it works |
+    | `chat` | A conversation in the **team's chat**: the anonymous reporter whose message was turned into a report |
+    | `agent` | Another chat agent that noticed a problem while working, sent with `from_report` and a [link](https://example.com/docs) |
+
+    There is also a platform field, and the full matrix is wide:
+
+    | Platform | Reporter | Default state | Where it shows |
+    | :--- | :--- | :---: | ---: |
+    | `web` | The Report button in a page | **open** | Dashboard, inbox and the weekly digest email |
+    | `ios` | The Report sheet in the app | open | Dashboard and inbox |
+    | `react-native` | The shake gesture or the Report button | `triaged` | Dashboard |
+    | `flutter` | A custom call from the app's own menu | open | Inbox |
+
+    That is every platform today.
+    """
+
     private static var replyable: Bool { ProcessInfo.processInfo.arguments.contains("-squeak-demo-replyable") }
 
     private static func id(_ n: Int) -> String { String(format: "d0000000-0000-4000-8000-%012d", n) }
@@ -55,7 +78,7 @@ enum DemoData {
     private static let titles = [
         "pay": "Payment retry logic", "search": "Search index migration", "tg": "Telegram message formatting",
         "link": "Fix onboarding deep link", "cache": "API response caching", "iso": "Session isolation checks",
-        "copy": "Checkout copy review", "quota": "Nightly dependency upgrade across every workspace",
+        "copy": "Checkout copy review", "farm": "Light control rollout", "pr": "Irrigation schedule fix", "quota": "Nightly dependency upgrade across every workspace",
     ]
 
     private static func titled(_ s: PhoneSnapshot.Session) -> PhoneSnapshot.Session {
@@ -66,7 +89,7 @@ enum DemoData {
             question: s.key == "pay" && s.state == "awaiting_input"
                 ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-plan") ? plan : question) : nil,
             failure: s.failure)
-        titled.workflow = s.workflow
+        titled.workflow = s.workflow; titled.asks = s.asks
         // The demo's chats run on the models a real Mac names.
         switch s.key {
         case "pay": titled.model = "Opus 5.5 · 1M"; titled.effort = "Medium"
@@ -182,21 +205,71 @@ enum DemoData {
         ]),
     ])
 
+    /// `-squeak-demo-needs one|two|many|none`: what waits on you, for the Needs you page's screenshots. `one`
+    /// is a lettered question; `two` adds a tool call to approve; `many` adds a yes/no question and the
+    /// payment chat's question card; `none` leaves only working chats. Without it the demo keeps its two.
+    private static func needsScenario(_ sessions: [PhoneSnapshot.Session]) -> [PhoneSnapshot.Session] {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-squeak-demo-needs"), i + 1 < args.count else { return sessions }
+        let farm = PhoneSnapshot.Session(
+            key: "farm", conductorSessionId: id(10), label: "farm-dashboard · light-control", agent: "claude", state: "finished",
+            lastActivityAt: now(-540), detail: "Arm device control on the farm?", git: "+120/−8 · 6 files", contextPercent: 33, turnId: "tf",
+            message: """
+            The light-control endpoints are in and tested against the simulator. Every call is rate-limited, and the controller refuses anything outside the greenhouse schedule.
+
+            Before I wire it to the real controller there is one decision, because it switches on hardware in the greenhouse.
+
+            **Arm device control on the farm?**
+
+            **A) Arm it now.** The pumps and lights answer the dashboard straight away.
+
+            **B) Arm it later, near the hardware.** I leave it off and add a switch you flip on site.
+
+            **C) Leave it off.** Read-only dashboard for now.
+
+            I would arm it later: nobody is on site today to catch a mistake.
+            """,
+            choices: .init(question: "Arm device control on the farm?",
+                           options: [.init(letter: "A", title: "Arm it now"), .init(letter: "B", title: "Arm it later, near the hardware"),
+                                     .init(letter: "C", title: "Leave it off")], recommended: "B"))
+        var farmAsking = farm
+        farmAsking.asks = "Arm device control on the farm?"
+        var pr = PhoneSnapshot.Session(
+            key: "pr", conductorSessionId: id(11), label: "orchard · irrigation", agent: "codex", state: "finished",
+            lastActivityAt: now(-1500), detail: "Want me to open a PR for this?", git: "+18/−4 · 2 files", contextPercent: nil, turnId: "tp",
+            message: "The irrigation schedule now skips a cycle after rain. The tests pass and nothing else changed.\n\nWant me to open a PR for this?",
+            choices: nil)
+        pr.asks = "Want me to open a PR for this?"
+        let blockedKeys: Set<String>
+        var extra: [PhoneSnapshot.Session]
+        switch args[i + 1] {
+        case "one": blockedKeys = []; extra = [farmAsking]
+        case "two": blockedKeys = ["search"]; extra = [farmAsking]
+        case "many": blockedKeys = ["search", "pay"]; extra = [farmAsking, pr]
+        default: blockedKeys = []; extra = []
+        }
+        let keep = sessions.filter { s in
+            if s.key == "pay" || s.key == "search" { return blockedKeys.contains(s.key) }
+            return true
+        }
+        return extra + keep
+    }
+
     static var snapshot: PhoneSnapshot {
         let raw = rawSnapshot
         // -squeak-demo-awake: a timed awake session with 1h 23m left, for screenshots.
         let awake = ProcessInfo.processInfo.arguments.contains("-squeak-demo-awake") ? now(83 * 60 + 30) : nil
         // -squeak-demo-lid: lid closed too and set up; -squeak-demo-lid-failed: it did not turn on;
-        // -squeak-demo-safety: a safety rule is acting; -squeak-demo-hotspot: failover is set up.
+        // -squeak-demo-lid-closed: the lid is shut; -squeak-demo-silent: the Mac stopped answering; -squeak-demo-safety: a safety rule is acting; -squeak-demo-hotspot: failover is set up.
         let args = ProcessInfo.processInfo.arguments
         let lidFailed = args.contains("-squeak-demo-lid-failed")
         let lid = args.contains("-squeak-demo-lid") || lidFailed
-        var demo = PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: args.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent, keepAwake: awake != nil, awakeUntil: awake,
+        var demo = PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: args.contains("-squeak-demo-empty-active") ? [] : needsScenario(raw.sessions).map(titled), usage: usage, workspaces: workspaces, recent: recent, keepAwake: awake != nil, awakeUntil: awake,
                              awakeLid: awake != nil && lid ? (lidFailed ? "failed" : "on") : nil,
                              awakeLidProblem: awake != nil && lidFailed ? "Something on this Mac turned sleep back on, so a closed lid would sleep it now." : nil,
                              awakeLidReady: lid ? true : nil,
                              awakeSafety: awake != nil && args.contains("-squeak-demo-safety") ? "Low Power Mode on · Battery at 38%" : nil,
-                             macPower: .init(percent: 64, onBattery: true, watts: 12, lidClosed: false),
+                             macPower: .init(percent: 64, onBattery: true, watts: 12, lidClosed: args.contains("-squeak-demo-lid-closed")),
                              awakeLidActions: .init(displayOff: true, mute: true, lowPower: true, freezeApps: args.contains("-squeak-demo-freeze")),
                              awakeRules: .init(lowPowerPercent: 35, endPercent: 8, heat: true),
                              awakeLastEnd: awake == nil && args.contains("-squeak-demo-ended") ? .init(reason: "battery", at: ISO8601DateFormatter().string(from: Date()), why: "Battery at 9%") : nil)
@@ -296,7 +369,7 @@ enum DemoData {
                       activity: .init(total: 3, steps: [.init(kind: "tool", text: "Read src/api/cache.ts")])),
                 .init(key: "iso", conductorSessionId: id(6), label: "squeak · session-isolation", agent: "claude", state: "finished",
                       lastActivityAt: now(-3600), detail: "Each session now runs in its own worktree.", git: "+42/−3 · 2 files", contextPercent: nil,
-                      turnId: "t5", message: ProcessInfo.processInfo.arguments.contains("-squeak-demo-tail") ? String(richMessage[richMessage.range(of: "```ts")!.lowerBound...]) : richMessage, choices: nil),
+                      turnId: "t5", message: ProcessInfo.processInfo.arguments.contains("-squeak-demo-tail") ? String(richMessage[richMessage.range(of: "```ts")!.lowerBound...]) : ProcessInfo.processInfo.arguments.contains("-squeak-demo-tables") ? tablesMessage : richMessage, choices: nil),
                 .init(key: "copy", conductorSessionId: id(7), label: "storefront · checkout-copy", agent: "codex", state: "finished",
                       lastActivityAt: now(-7200), detail: "Reviewed the checkout copy.", git: nil, contextPercent: nil,
                       turnId: "t6", message: "Reviewed the checkout copy. Three strings were tightened.\n\n![Checkout, before and after](</Users/demo/conductor/workspaces/storefront/oslo/.context/checkout.png>)\n\nThe button now says what it does.", choices: nil),

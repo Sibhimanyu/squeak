@@ -31,7 +31,7 @@ button {
 }
 
 .app {
-  min-height: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -173,6 +173,7 @@ button {
 .layout {
   flex: 1;
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(280px, 360px) 1fr;
   min-height: 0;
 }
@@ -453,4 +454,741 @@ button {
 
 .welcome .note {
   margin-top: 16px;
+}
+
+/* A chat: header, the timeline that scrolls, the queue and composer that stay */
+.detail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.detail > .empty {
+  padding: 24px;
+}
+.chat-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 24px 12px;
+  border-bottom: 1px solid var(--sq-line);
+  flex: none;
+}
+.chat-head .grow {
+  min-width: 0;
+}
+.chat-head h2 {
+  overflow-wrap: anywhere;
+}
+.chat-head .setup {
+  color: var(--sq-subtle);
+}
+.timeline {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  outline: none;
+}
+.timeline > * {
+  flex: none;
+}
+.chat-foot {
+  flex: none;
+  padding: 12px 24px 16px;
+  border-top: 1px solid var(--sq-line);
+  background: var(--sq-sidebar);
+}
+.chat-foot .actions {
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+.chat-foot .note {
+  margin: 8px 0 0;
+}
+
+.msg .who {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  line-height: 18px;
+}
+.msg .who .name {
+  font-weight: 600;
+}
+.msg .who .at {
+  color: var(--sq-muted);
+  font-variant-numeric: tabular-nums;
+}
+.msg.mine {
+  align-self: flex-end;
+  max-width: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.msg.theirs {
+  max-width: 760px;
+}
+.msg.muted .message {
+  color: var(--sq-muted);
+}
+.bubble {
+  background: var(--sq-surface-raised);
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-card);
+  padding: 10px 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.line {
+  color: var(--sq-muted);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: right;
+}
+.line.bad {
+  color: var(--sq-needs-you);
+}
+.actions.end {
+  justify-content: flex-end;
+}
+.worked {
+  color: var(--sq-subtle);
+  font-size: 13px;
+  line-height: 18px;
+}
+.folded summary {
+  color: var(--sq-subtle);
+  font-size: 13px;
+  line-height: 18px;
+  cursor: pointer;
+}
+.working {
+  background: var(--sq-surface);
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-card);
+  padding: 12px 14px;
+}
+.working-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 18px;
+}
+.working-top .btn {
+  padding: 4px 8px;
+}
+.working .steps {
+  margin-top: 8px;
+}
+.working .steps .text {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.folded .steps .text,
+.working.open .steps .text {
+  display: block;
+}
+.queue {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.queue .label {
+  margin: 0;
+}
+.queued {
+  background: var(--sq-surface);
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-card);
+  padding: 10px 12px;
+}
+.queued .actions {
+  margin-top: 8px;
+  justify-content: flex-start;
+}
+.queued .line {
+  text-align: left;
+  margin-top: 6px;
+}
+.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.btn.danger {
+  color: var(--sq-needs-you);
+}
+.btn[hidden] {
+  display: none;
+}
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.more {
+  width: 100%;
+  margin-top: 8px;
+}
+@media (max-width: 760px) {
+  .chat-head,
+  .timeline,
+  .chat-foot {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .back {
+    margin: 0;
+    align-self: center;
+  }
+}
+
+/* Home: the list pane (HomeView, DESIGN.md §8.2). One neutral card per group, one accent for what needs you. */
+.homehead {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.search {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--sq-surface);
+  border: 1px solid var(--sq-line-strong);
+  border-radius: var(--sq-radius-control);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  color: inherit;
+}
+.seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 2px;
+  gap: 2px;
+  background: var(--sq-surface);
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-control);
+}
+.seg-btn {
+  border: 0;
+  background: transparent;
+  color: var(--sq-muted);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 550;
+}
+.seg-btn[aria-pressed="true"] {
+  background: var(--sq-surface-raised);
+  color: var(--sq-ink);
+  box-shadow: 0 0 0 1px var(--sq-line-strong);
+}
+.summary {
+  color: var(--sq-muted);
+  font-size: 13px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.strip {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 12px;
+  background: var(--sq-surface);
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-card);
+  font-size: 13px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.strip .dot {
+  margin-top: 5px;
+}
+.strip-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.strip .first {
+  color: var(--sq-ink);
+}
+.strip .second {
+  color: var(--sq-muted);
+}
+.dot.strip-awake,
+.dot.d-working {
+  background: var(--sq-working);
+}
+.dot.strip-off,
+.dot.d-idle {
+  background: var(--sq-idle);
+}
+.dot.strip-failed,
+.dot.d-error {
+  background: var(--sq-error);
+}
+.dot.strip-silent {
+  background: var(--sq-offline);
+}
+.dot.d-needs,
+.dot.d-needsYou {
+  background: var(--sq-needs-you);
+}
+.dot.d-done {
+  background: var(--sq-done);
+}
+.dot.pulse {
+  animation: sq-pulse 1.6s ease-in-out infinite;
+}
+@keyframes sq-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot.pulse {
+    animation: none;
+  }
+}
+
+.gcard {
+  position: relative;
+  margin-bottom: 12px;
+  background: var(--sq-surface);
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-card);
+  overflow: hidden;
+}
+.gcard.needs::before,
+.gcard.unread::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--sq-needs-you);
+}
+.gcard.unread::before {
+  background: var(--sq-done);
+}
+.ghead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--sq-ink);
+}
+.ghead:hover:not(.static) {
+  background: var(--sq-surface-raised);
+}
+.ghead .gtext {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.gname {
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.gsub {
+  color: var(--sq-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+.ghead svg,
+.gfoot svg {
+  color: var(--sq-subtle);
+  flex: none;
+}
+.count {
+  color: var(--sq-muted);
+  font-variant-numeric: tabular-nums;
+}
+.badge {
+  min-width: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--sq-needs-you);
+  color: #fff;
+  font-size: 11px;
+  line-height: 20px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.badge.done {
+  background: var(--sq-done);
+}
+.gfoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-top: 1px solid var(--sq-line);
+  background: transparent;
+  color: var(--sq-ink);
+  font-size: 13px;
+  font-weight: 550;
+  text-align: left;
+}
+.gfoot:hover {
+  background: var(--sq-surface-raised);
+}
+
+.srow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 14px;
+  text-align: left;
+  border: 0;
+  border-top: 1px solid var(--sq-line);
+  background: transparent;
+  color: var(--sq-ink);
+}
+.srow:hover {
+  background: var(--sq-surface-raised);
+}
+.srow[aria-current="true"] {
+  background: var(--sq-surface-raised);
+  box-shadow: inset 3px 0 0 var(--sq-duck);
+}
+.srow[data-cursor="true"] {
+  outline: 2px solid var(--sq-line-strong);
+  outline-offset: -2px;
+}
+.srow .line1,
+.srow .line2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.srow .title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.srow .age {
+  color: var(--sq-muted);
+  font-size: 12px;
+  line-height: 17px;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.srow .line2 {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--sq-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.srow .word.loud {
+  color: var(--sq-ink);
+  font-weight: 600;
+}
+.srow .rest {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srow .detail {
+  color: var(--sq-muted);
+  font-size: 12px;
+  line-height: 17px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.srow .detail.one {
+  -webkit-line-clamp: 1;
+}
+
+.mark {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 25%;
+  object-fit: cover;
+  border: 1px solid var(--sq-line);
+  color: var(--sq-muted);
+  background: var(--sq-surface-raised);
+}
+.mark.xs {
+  width: 18px;
+  height: 18px;
+}
+.mark.sm {
+  width: 24px;
+  height: 24px;
+}
+.mark.md {
+  width: 32px;
+  height: 32px;
+}
+.mark.lg {
+  width: 40px;
+  height: 40px;
+}
+.mark.folder svg {
+  width: 55%;
+  height: 55%;
+}
+
+.resting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--sq-muted);
+}
+.resting img {
+  opacity: 0.55;
+  filter: grayscale(0.6);
+}
+.resting p {
+  margin: 0;
+}
+.resting .strong {
+  color: var(--sq-ink);
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+}
+.resting.pick {
+  margin: auto;
+}
+.splash {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  color: var(--sq-muted);
+}
+.splash img {
+  width: 96px;
+}
+.splash p {
+  margin: 0;
+}
+
+/* Needs you: an inbox of decisions (NeedsYouView, DESIGN.md §8.4) */
+.needs-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  outline: none;
+}
+.needs-body > * {
+  flex: none;
+}
+.dcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+  padding: 16px 16px 16px 20px;
+  background: var(--sq-surface);
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-panel);
+}
+.dcard.prominent {
+  gap: 16px;
+  padding: 20px 20px 20px 24px;
+}
+.dcard::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 16px;
+  bottom: 16px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--sq-needs-you);
+}
+.dhead {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.dtitle {
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+.dstate {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--sq-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+.dcontext {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.dheading {
+  margin: 0;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+h2.dheading {
+  font-size: 22px;
+  line-height: 28px;
+}
+.doptions .optdetail {
+  display: block;
+  margin-top: 2px;
+  color: var(--sq-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+.dnote {
+  margin: 0;
+}
+.dnote .message.strong {
+  font-weight: 600;
+}
+.dreply {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.composer.small {
+  min-height: 48px;
+  flex: 1;
+}
+.dopen {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--sq-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.dopen svg {
+  color: var(--sq-muted);
+}
+.dreceipt .actions {
+  margin-top: 8px;
+}
+.drow {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  max-width: 720px;
+  min-height: 56px;
+  padding: 12px 16px 12px 20px;
+  text-align: left;
+  background: var(--sq-surface);
+  color: var(--sq-ink);
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-card);
+}
+.drow::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--sq-needs-you);
+}
+.drow .dtitle,
+.drow .dask,
+.drow .dmeta {
+  display: block;
+}
+.drow .dask {
+  color: var(--sq-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+.drow .dmeta {
+  color: var(--sq-subtle);
+  font-size: 12px;
+  line-height: 17px;
+}
+.drow svg {
+  color: var(--sq-subtle);
+  flex: none;
+}
+.field.rename {
+  min-height: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 16px;
+}
+.renaming .actions {
+  margin-top: 8px;
+}
+
+/* A wide screen is two panes: the list on the left, the chat or the inbox on the right. */
+@media (min-width: 1100px) {
+  .layout {
+    grid-template-columns: minmax(340px, 420px) 1fr;
+  }
+}
+@media (min-width: 761px) {
+  /* Back is for the narrow screen, where the list is hidden behind the chat. */
+  .needs-body .back,
+  .chat-head .back {
+    display: none;
+  }
 }
