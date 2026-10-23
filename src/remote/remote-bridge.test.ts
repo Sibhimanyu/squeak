@@ -173,8 +173,8 @@ function fixture(
     codexUsage: null,
   } as FleetSnapshot;
   const listeners = new Set<(s: FleetSnapshot) => void>();
-  const emit = (active: FleetSession[]) => {
-    snapshot = { ...snapshot, sessions: active, active };
+  const emit = (active: FleetSession[], sessions: FleetSession[] = active) => {
+    snapshot = { ...snapshot, sessions, active };
     for (const listener of listeners) listener(snapshot);
   };
   const configPath = path.join(dir, "remote.json");
@@ -1370,6 +1370,91 @@ describe("RemoteBridge snapshot", () => {
     }
   });
 
+  it("a change only in the Recent list publishes promptly too", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture();
+      await f.pair();
+      f.bridge.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const recentChat = (overrides: Partial<FleetSession> = {}) =>
+        session({
+          key: "claude-transcript:old",
+          conductorSessionId: "old",
+          sourceId: "old",
+          lastActivityAt: "2026-09-25T02:00:00.000Z",
+          ...overrides,
+        });
+      const emitBoth = (recent: FleetSession) => f.emit([session()], [session(), recent]);
+      emitBoth(recentChat()); // baseline
+      await vi.advanceTimersByTimeAsync(500);
+      const sets = vi.spyOn(f.store, "set");
+      f.advance(2_000);
+      emitBoth(recentChat({ title: "Renamed" }));
+      await vi.advanceTimersByTimeAsync(400);
+      expect(sets).toHaveBeenCalled();
+      f.bridge.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a failed change publish after 5 s, then 15 s, and stops once it works", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture();
+      await f.pair();
+      f.bridge.start();
+      await vi.advanceTimersByTimeAsync(0);
+      f.emit([session()]);
+      f.advance(2_000);
+      const sets = vi.spyOn(f.store, "set").mockRejectedValue(new Error("offline"));
+      f.emit([session({ state: "working" })]);
+      await vi.advanceTimersByTimeAsync(400);
+      expect(sets).toHaveBeenCalledTimes(1);
+      f.advance(5_000);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(sets).toHaveBeenCalledTimes(2);
+      f.advance(15_000);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(sets).toHaveBeenCalledTimes(3);
+      // Out of retries: left to the regular pass.
+      f.advance(30_000);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(sets).toHaveBeenCalledTimes(3);
+      f.bridge.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a retry that works ends the retrying", async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture();
+      await f.pair();
+      f.bridge.start();
+      await vi.advanceTimersByTimeAsync(0);
+      f.emit([session()]);
+      f.advance(2_000);
+      const sets = vi.spyOn(f.store, "set").mockRejectedValueOnce(new Error("offline"));
+      f.emit([session({ state: "working" })]);
+      await vi.advanceTimersByTimeAsync(400);
+      f.advance(5_000);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const after = sets.mock.calls.length;
+      expect(
+        open<{ sessions: Array<{ state: string }> }>(f.payload.k, f.store.docs.get(`${f.channel}/state/snapshot`)!.box)
+          .sessions[0]!.state,
+      ).toBe("working");
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(sets.mock.calls.length).toBe(after);
+      f.bridge.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a minimum gap between change-driven publishes", async () => {
     vi.useFakeTimers();
     try {
@@ -1683,6 +1768,7 @@ describe("RemoteBridge verbose view (live turn)", () => {
     let now = NOW;
     const working = session({ key: "claude-transcript:s1", state: "working" });
     let active = [working];
+    let others: FleetSession[] = [];
     const liveActivity = vi.fn((_session: FleetSession, _limit: number, stepChars: number) => ({
       total: 1,
       steps: [{ kind: "thinking" as const, text: "x".repeat(Math.min(stepChars, 900)), at: null }],
@@ -1698,7 +1784,14 @@ describe("RemoteBridge verbose view (live turn)", () => {
         ...(options.queue ? { queue: options.queue } : {}),
         ...(options.transcript ? { transcript: options.transcript } : {}),
       },
-      snapshot: () => ({ sessions: active, active, attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      snapshot: () =>
+        ({
+          sessions: [...active, ...others],
+          active,
+          attention: [],
+          generatedAt: "",
+          codexUsage: null,
+        }) as FleetSnapshot,
       liveActivity,
       ...(options.verbose === undefined ? {} : { verbose: options.verbose }),
       now: () => now,
@@ -1729,6 +1822,7 @@ describe("RemoteBridge verbose view (live turn)", () => {
       liveActivity,
       advance: (ms: number) => (now += ms),
       setActive: (next: FleetSession[]) => (active = next),
+      setOthers: (next: FleetSession[]) => (others = next),
     };
   }
 
@@ -1798,6 +1892,43 @@ describe("RemoteBridge verbose view (live turn)", () => {
       { role: "user", text: "Fix it", at: null },
       { role: "assistant", text: "Fixed.", at: "2026-10-19T09:00:00.000Z" },
     ]);
+    t.bridge.stop();
+  });
+
+  it("a recent chat the phone opens gets its history and queue, never steps; an unknown key gets nothing", async () => {
+    const transcript = vi.fn((sessionId: string) => ({
+      messages: [{ id: "a", role: "user" as const, text: `hello ${sessionId}`, at: null, turnId: "t1" }],
+    }));
+    const queue = vi.fn(async (): Promise<QueueItem[] | null> => []);
+    const t = verbose({ transcript, queue });
+    const older = session({
+      key: "claude-transcript:old",
+      conductorSessionId: "old",
+      sourceId: "old",
+      state: "finished",
+      lastActivityAt: "2026-09-24T03:00:00.000Z",
+    });
+    t.setOthers([older]);
+    await t.pair();
+    await t.presence("claude-transcript:old");
+    await t.bridge.tick();
+    await settle();
+    const [doc] = t.liveDocs();
+    expect(doc).toBeDefined();
+    const turn = open<{ key: string; working: boolean; steps: unknown[]; history?: unknown[]; queue?: unknown[] }>(
+      t.payload.k,
+      t.store.docs.get(doc!)!.box,
+    );
+    expect(turn).toMatchObject({ key: "claude-transcript:old", working: false, steps: [], queue: [] });
+    expect(turn.history).toEqual([{ role: "user", text: "hello old", at: null }]);
+    expect(transcript).toHaveBeenCalledWith("old", 40);
+    expect(t.liveActivity).not.toHaveBeenCalledWith(older, expect.anything(), expect.anything());
+
+    // A key the phone cannot see (not active, not recent) publishes nothing and clears the old document.
+    await t.presence("claude-transcript:nobody");
+    await t.bridge.tick();
+    await settle();
+    expect(t.liveDocs()).toEqual([]);
     t.bridge.stop();
   });
 

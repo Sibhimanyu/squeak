@@ -365,7 +365,9 @@ answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
   message and the agent's last message of each turn, the newest eight, each
   up to 2,000 characters (`condenseHistory`, read from `session_messages`).
   It has the same narrowness as the rest of the live doc: only the chat on
-  screen, deleted when the phone leaves it, and only for a Conductor chat.
+  screen (an active one, or one in the phone's Recent list, found by
+  `watchableSession`; never an arbitrary key), deleted when the phone leaves
+  it, and only for a Conductor chat.
   The phone shows it above the chat, less what it already shows.
 - **Usage refresh from the phone (2026-10-19).** A third signed command,
   `{ v: 1, kind: "usage", nonce, expiresAt }`, with no text and no target. It
