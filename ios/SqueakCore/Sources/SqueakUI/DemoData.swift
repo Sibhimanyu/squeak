@@ -47,6 +47,29 @@ enum DemoData {
     Say the word and I will cover the symlink case too.
     """
 
+    /// `-squeak-demo-tables`: the Session isolation chat answers with tables, one with long wrapped
+    /// cells (a report's sources) and one too wide for a phone, to check they never overlap.
+    static let tablesMessage = """
+    A report can come from one of three sources (`ReportSource` in `functions/src/core/types.ts:94`):
+
+    | Source | Who sends it |
+    | --- | --- |
+    | `sdk` (also the default when no source is set) | Someone using the app through the Report button, or a team member's agent reporting while it works |
+    | `chat` | A conversation in the **team's chat**: the anonymous reporter whose message was turned into a report |
+    | `agent` | Another chat agent that noticed a problem while working, sent with `from_report` and a [link](https://example.com/docs) |
+
+    There is also a platform field, and the full matrix is wide:
+
+    | Platform | Reporter | Default state | Where it shows |
+    | :--- | :--- | :---: | ---: |
+    | `web` | The Report button in a page | **open** | Dashboard, inbox and the weekly digest email |
+    | `ios` | The Report sheet in the app | open | Dashboard and inbox |
+    | `react-native` | The shake gesture or the Report button | `triaged` | Dashboard |
+    | `flutter` | A custom call from the app's own menu | open | Inbox |
+
+    That is every platform today.
+    """
+
     private static var replyable: Bool { ProcessInfo.processInfo.arguments.contains("-squeak-demo-replyable") }
 
     private static func id(_ n: Int) -> String { String(format: "d0000000-0000-4000-8000-%012d", n) }
@@ -346,7 +369,7 @@ enum DemoData {
                       activity: .init(total: 3, steps: [.init(kind: "tool", text: "Read src/api/cache.ts")])),
                 .init(key: "iso", conductorSessionId: id(6), label: "squeak · session-isolation", agent: "claude", state: "finished",
                       lastActivityAt: now(-3600), detail: "Each session now runs in its own worktree.", git: "+42/−3 · 2 files", contextPercent: nil,
-                      turnId: "t5", message: ProcessInfo.processInfo.arguments.contains("-squeak-demo-tail") ? String(richMessage[richMessage.range(of: "```ts")!.lowerBound...]) : richMessage, choices: nil),
+                      turnId: "t5", message: ProcessInfo.processInfo.arguments.contains("-squeak-demo-tail") ? String(richMessage[richMessage.range(of: "```ts")!.lowerBound...]) : ProcessInfo.processInfo.arguments.contains("-squeak-demo-tables") ? tablesMessage : richMessage, choices: nil),
                 .init(key: "copy", conductorSessionId: id(7), label: "storefront · checkout-copy", agent: "codex", state: "finished",
                       lastActivityAt: now(-7200), detail: "Reviewed the checkout copy.", git: nil, contextPercent: nil,
                       turnId: "t6", message: "Reviewed the checkout copy. Three strings were tightened.\n\n![Checkout, before and after](</Users/demo/conductor/workspaces/storefront/oslo/.context/checkout.png>)\n\nThe button now says what it does.", choices: nil),

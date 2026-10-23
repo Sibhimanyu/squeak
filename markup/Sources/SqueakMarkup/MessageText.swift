@@ -448,49 +448,156 @@ private struct TableView: View {
     let rows: [[[MessageMarkup.Inline]]]
     let ctx: RenderContext
 
+    /// The width this table may use, read from its box so the layout can decide what wraps and
+    /// what scrolls (a horizontal ScrollView proposes no width of its own).
+    @State private var available: CGFloat?
+
     var body: some View {
-        // Prefer a table that fits the width, wrapping long cells; scroll only when it cannot.
-        ViewThatFits(in: .horizontal) {
-            grid(cellMax: nil)
-            grid(cellMax: 14)
-            grid(cellMax: 9)
-            ScrollView(.horizontal, showsIndicators: false) { grid(cellMax: 14) }
-                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        ScrollView(.horizontal, showsIndicators: false) {
+            grid
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ctx.style.line))
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(GeometryReader { proxy in
+            Color.clear.preference(key: TableWidthKey.self, value: proxy.size.width)
+        })
+        .onPreferenceChange(TableWidthKey.self) { width in
+            if width > 0, available != width { available = width }
         }
     }
 
-    private func grid(cellMax: CGFloat?) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-            GridRow {
-                ForEach(Array(header.enumerated()), id: \.offset) { i, cell in
-                    cellView(cell, column: i, isHeader: true, cellMax: cellMax)
-                        .background(ctx.style.tableHeader)
-                }
+    private var grid: some View {
+        let columnCount = max(header.count, 1)
+        return TableLayout(columns: columnCount, available: available) {
+            Rectangle().fill(ctx.style.tableHeader).accessibilityHidden(true)
+            ForEach(0..<rows.count, id: \.self) { _ in
+                Rectangle().fill(ctx.style.line).accessibilityHidden(true)
+            }
+            ForEach(Array(header.enumerated()), id: \.offset) { i, cell in
+                cellView(cell, column: i, isHeader: true)
+                    .accessibilityLabel(MessageMarkup.plainText(cell))
+                    .accessibilityAddTraits(.isHeader)
             }
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                Rectangle().fill(ctx.style.line).frame(height: 1).gridCellColumns(max(header.count, 1))
-                GridRow {
-                    ForEach(Array(row.enumerated()), id: \.offset) { i, cell in
-                        cellView(cell, column: i, isHeader: false, cellMax: cellMax)
-                    }
+                ForEach(0..<columnCount, id: \.self) { i in
+                    let cell = i < row.count ? row[i] : []
+                    let name = i < header.count ? MessageMarkup.plainText(header[i]) : ""
+                    cellView(cell, column: i, isHeader: false)
+                        .accessibilityLabel(name.isEmpty ? MessageMarkup.plainText(cell) : "\(name): \(MessageMarkup.plainText(cell))")
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ctx.style.line))
     }
 
-    private func cellView(_ inlines: [MessageMarkup.Inline], column: Int, isHeader: Bool, cellMax: CGFloat?) -> some View {
+    private func cellView(_ inlines: [MessageMarkup.Inline], column: Int, isHeader: Bool) -> some View {
         let align = column < alignments.count ? alignments[column] : .leading
         let frameAlign: Alignment = align == .center ? .center : align == .trailing ? .trailing : .leading
         let size = ctx.body * 0.96
         return Text(InlineRenderer.attributed(inlines, ctx: ctx, size: size, weight: isHeader ? .semibold : .regular, color: ctx.style.ink))
             .multilineTextAlignment(align == .center ? .center : align == .trailing ? .trailing : .leading)
             .lineSpacing(ctx.leading * 0.6)
-            .fixedSize(horizontal: cellMax == nil, vertical: true)
-            .frame(maxWidth: cellMax.map { ctx.body * $0 } ?? .infinity, alignment: frameAlign)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: frameAlign)
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .gridColumnAlignment(align == .center ? .center : align == .trailing ? .trailing : .leading)
+            .layoutValue(key: WordShare.self, value: MessageMarkup.longestWordShare(inlines))
+    }
+}
+
+/// The share of a cell's text taken by its longest word (0...1), set by the cell for the layout.
+private struct WordShare: LayoutValueKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension MessageMarkup {
+    static func longestWordShare(_ inlines: [Inline]) -> CGFloat {
+        let text = plainText(inlines)
+        guard !text.isEmpty else { return 0 }
+        let longest = text.split(whereSeparator: { $0.isWhitespace }).map(\.count).max() ?? 0
+        return CGFloat(longest) / CGFloat(text.count)
+    }
+}
+
+private struct TableWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// A table as one layout unit: every row is as tall as its tallest cell, so wrapped text never
+/// overlaps the row below. Subviews, in order: the header's background, one separator for each
+/// body row, then the cells row by row (header first). `TableMetrics` picks the column widths.
+private struct TableLayout: Layout {
+    let columns: Int
+    let available: CGFloat?
+    private let padding: CGFloat = 20
+
+    struct Plan {
+        var widths: [CGFloat] = []
+        var rowHeights: [CGFloat] = []
+        var scrolls = false
+    }
+
+    private func bodyRowCount(_ subviews: Subviews) -> Int {
+        max((subviews.count - 1 - columns) / (columns + 1), 0)
+    }
+
+    func makeCache(subviews: Subviews) -> Plan { Plan() }
+
+    private func plan(_ subviews: Subviews) -> Plan {
+        let body = bodyRowCount(subviews)
+        let cells = Array(subviews.dropFirst(1 + body))
+        var ideal = [CGFloat](repeating: 0, count: columns)
+        var minimum = [CGFloat](repeating: 0, count: columns)
+        for (k, cell) in cells.enumerated() {
+            let c = k % columns
+            ideal[c] = max(ideal[c], cell.sizeThatFits(.unspecified).width)
+            // Text breaks inside a word when given no room, so its own minimum says nothing: a
+            // cell's longest word is estimated as its share of the characters instead.
+            let one = cell.sizeThatFits(.unspecified).width
+            minimum[c] = max(minimum[c], padding + (one - padding) * cell[WordShare.self])
+        }
+        let chosen = TableMetrics.columns(ideal: ideal, minimum: minimum, available: available)
+        var heights: [CGFloat] = []
+        for r in 0..<(body + 1) {
+            var h: CGFloat = 0
+            for c in 0..<columns where r * columns + c < cells.count {
+                h = max(h, cells[r * columns + c].sizeThatFits(ProposedViewSize(width: chosen.widths[c], height: nil)).height)
+            }
+            heights.append(h)
+        }
+        return Plan(widths: chosen.widths, rowHeights: heights, scrolls: chosen.scrolls)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Plan) -> CGSize {
+        guard columns > 0, subviews.count > columns else { return .zero }
+        cache = plan(subviews)
+        return CGSize(width: cache.widths.reduce(0, +), height: cache.rowHeights.reduce(0, +) + CGFloat(max(cache.rowHeights.count - 1, 0)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Plan) {
+        guard columns > 0, subviews.count > columns else { return }
+        cache = plan(subviews)
+        let body = bodyRowCount(subviews)
+        let total = cache.widths.reduce(0, +)
+        var y = bounds.minY
+        for r in 0...body {
+            let h = cache.rowHeights[r]
+            if r == 0 {
+                subviews[0].place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: total, height: h))
+            } else {
+                subviews[r].place(at: CGPoint(x: bounds.minX, y: y - 1), anchor: .topLeading, proposal: ProposedViewSize(width: total, height: 1))
+            }
+            var x = bounds.minX
+            for c in 0..<columns {
+                let index = 1 + body + r * columns + c
+                if index < subviews.count {
+                    subviews[index].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: cache.widths[c], height: h))
+                }
+                x += cache.widths[c]
+            }
+            y += h + 1
+        }
     }
 }
 
