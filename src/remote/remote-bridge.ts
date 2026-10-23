@@ -552,6 +552,8 @@ const IDLE_PUBLISH_MS = 60_000;
 const CHANGE_PUBLISH_DELAY_MS = 300;
 /** Even change-driven publishes keep this gap, to bound Firestore writes. */
 const CHANGE_PUBLISH_MIN_GAP_MS = 1_000;
+/** Waits before retrying a failed change publish; after these the 60 s pass is the retry. */
+const PUBLISH_RETRY_MS = [5_000, 15_000];
 /** With a streaming store a pass runs on every change; this is only the safety net. */
 const STREAM_FALLBACK_MS = 60_000;
 /** A burst of changes (a command, then its deletion) becomes one pass. */
@@ -643,6 +645,9 @@ export class RemoteBridge {
   private readonly live: LiveTurnPublisher | null;
   private lastSignature: string | null = null;
   private lastStepsSignature: string | null = null;
+  private lastRecentSignature: string | null = null;
+  /** Change publishes that failed in a row; drives the retry backoff. */
+  private publishFailures = 0;
   /** What the phone in front of this Mac said it can read (its presence `caps`). */
   private phoneCaps: string[] = [];
   /** The counter every published document carries as `seq`, so a phone keeps only the newest. */
@@ -663,14 +668,16 @@ export class RemoteBridge {
     this.live = liveActivity
       ? new LiveTurnPublisher({
           read: (key) => {
-            const session = this.deps.snapshot().active.find((candidate) => candidate.key === key);
-            if (!session) {
+            const found = this.watchableSession(key);
+            if (!found) {
               return null;
             }
+            const { session, active } = found;
             const conductorSessionId = session.conductorSessionId;
             return {
-              activity: liveActivity(session, LIVE_STEPS, LIVE_STEP_CHARS),
-              working: session.state === "working",
+              // A recent chat is not running: its history and queue are what the phone opened it for.
+              activity: active ? liveActivity(session, LIVE_STEPS, LIVE_STEP_CHARS) : null,
+              working: active && session.state === "working",
               state: session.state,
               turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
             };
@@ -689,16 +696,14 @@ export class RemoteBridge {
           },
           history: deps.replier.transcript
             ? (key) => {
-                const session = this.deps.snapshot().active.find((candidate) => candidate.key === key);
-                const conductorSessionId = session?.conductorSessionId;
+                const conductorSessionId = this.watchableSession(key)?.session.conductorSessionId;
                 const read = conductorSessionId ? this.deps.replier.transcript?.(conductorSessionId, 40) : null;
                 return read ? condenseHistory(read.messages) : null;
               }
             : null,
           queue: deps.replier.queue
             ? async (key) => {
-                const session = this.deps.snapshot().active.find((candidate) => candidate.key === key);
-                const conductorSessionId = session?.conductorSessionId;
+                const conductorSessionId = this.watchableSession(key)?.session.conductorSessionId;
                 return conductorSessionId ? ((await this.deps.replier.queue?.(conductorSessionId)) ?? null) : null;
               }
             : null,
@@ -732,7 +737,10 @@ export class RemoteBridge {
     this.unsubscribe =
       this.deps.onSnapshot?.((snapshot) => {
         const signature = snapshotSignature(snapshot);
-        const changed = this.lastSignature !== null && signature !== this.lastSignature;
+        const recentSignature = this.recentSignature(snapshot);
+        const recentChanged = this.lastRecentSignature !== null && recentSignature !== this.lastRecentSignature;
+        this.lastRecentSignature = recentSignature;
+        const changed = (this.lastSignature !== null && signature !== this.lastSignature) || recentChanged;
         this.lastSignature = signature;
         // A working chat's newest steps are on the phone's Home row too. They
         // change constantly, so while a phone looks they publish on the
@@ -786,9 +794,34 @@ export class RemoteBridge {
     }
     try {
       await this.publish(config, true);
+      if (this.publishFailures > 0) {
+        logger.info("remote change publish recovered", { after: this.publishFailures });
+        this.publishFailures = 0;
+      }
     } catch (error) {
+      this.publishFailures += 1;
       logger.warn("remote change publish failed", { error: error instanceof Error ? error.message : String(error) });
+      // Retry soon rather than leaving the phone stale until the 60 s pass: 5 s, 15 s, then that pass.
+      const retry = PUBLISH_RETRY_MS[this.publishFailures - 1];
+      if (retry !== undefined) {
+        this.nudgePublish(retry);
+      }
     }
+  }
+
+  /** What the phone's Recent list shows, cheaply: a change here publishes promptly like an active one. */
+  private recentSignature(snapshot: FleetSnapshot): string {
+    const { recent } = this.recentSessions(snapshot, this.phoneOpen() ? this.recentWanted : PHONE_RECENT_LIMIT);
+    return JSON.stringify(
+      recent.map((session) => [
+        session.key,
+        session.lastActivityAt,
+        session.state,
+        session.title,
+        session.closed ?? null,
+        session.detail,
+      ]),
+    );
   }
 
   stop(): void {
@@ -961,8 +994,9 @@ export class RemoteBridge {
   /**
    * Verbose: publish the turn of the session the phone is watching, only
    * while it is open, a phone is paired, the owner has not switched verbose
-   * off, and that session is one the phone can see. Anything else stops it,
-   * which deletes the document.
+   * off, and that session is one the phone can see: active, or in its Recent
+   * list (an older chat opened from there gets its history and queue, never
+   * steps). Anything else stops it, which deletes the document.
    */
   private updateLive(): void {
     const key = this.presenceWatching;
@@ -971,8 +1005,23 @@ export class RemoteBridge {
       key !== null &&
       this.phoneOpen() &&
       this.hasPairedPhone() &&
-      this.deps.snapshot().active.some((session) => session.key === key);
+      this.watchableSession(key) !== null;
     this.live?.watch(allowed ? key : null);
+  }
+
+  /**
+   * The session the phone may watch in verbose mode: any active one, or a
+   * Conductor chat in the phone's Recent list. Never an arbitrary key.
+   */
+  private watchableSession(key: string): { session: FleetSession; active: boolean } | null {
+    const snapshot = this.deps.snapshot();
+    const active = snapshot.active.find((session) => session.key === key);
+    if (active) {
+      return { session: active, active: true };
+    }
+    const { recent } = this.recentSessions(snapshot, this.phoneOpen() ? this.recentWanted : PHONE_RECENT_LIMIT);
+    const session = recent.find((candidate) => candidate.key === key);
+    return session?.conductorSessionId ? { session, active: false } : null;
   }
 
   /* ---------- streaming (Realtime Database) ---------- */
