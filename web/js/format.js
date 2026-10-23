@@ -1,5 +1,9 @@
 // What the phone view says, in the words of DESIGN.md §9. Pure, so tests can run it.
 
+import { COULDNT_CONFIRM, isDelivered, statusLine, verdict } from "./send-state.js";
+
+export { COULDNT_CONFIRM };
+
 /** `PhoneSnapshot.Session.stateWord`. */
 export function stateWord(state) {
   switch (state) {
@@ -44,6 +48,59 @@ export function canReply(session) {
   return typeof session.conductorSessionId === "string" && session.conductorSessionId !== "" && !needsYou(session);
 }
 
+/** A finished chat whose last message closes on a question for you (`asks`): idle, yet waiting on you. */
+export function asksYou(session) {
+  return session.state === "finished" && typeof session.asks === "string" && session.asks !== "";
+}
+
+/** Waiting on you: blocked, or finished and asking. */
+export function waitsOnYou(session) {
+  return needsYou(session) || asksYou(session);
+}
+
+/** The state word for a whole session: a finished chat that asks reads "needs an answer", not "done". */
+export function sessionStateWord(session) {
+  return asksYou(session) ? "needs an answer" : stateWord(session.state);
+}
+
+export function sessionStateClass(session) {
+  return asksYou(session) ? "st-needs" : stateClass(session.state);
+}
+
+/** "Opus 5.5 · 1M · Medium · Fast": what the chat runs, on one muted line; null when the Mac sent none. */
+export function setupLine(session) {
+  const parts = [session.model, session.effort, session.fast === true ? "Fast" : null].filter(
+    (part) => typeof part === "string" && part !== "",
+  );
+  return parts.length ? parts.join(" · ") : null;
+}
+
+export function agentName(agent) {
+  const name = typeof agent === "string" ? agent : "";
+  if (name.toLowerCase() === "claude") return "Claude";
+  if (name.toLowerCase() === "codex") return "Codex";
+  return name ? name[0].toUpperCase() + name.slice(1) : "The agent";
+}
+
+/** Why the browser cannot reply, or null when it can (`Presentation.replyBlock`). */
+export function replyBlock(session) {
+  if (!session.conductorSessionId) return "Not a Conductor session. Answer it where it runs.";
+  if (session.open === false) return "Closed in Conductor. Reopen its tab there to reply.";
+  if (needsYou(session)) return "Waiting inside Conductor. Answer it on your Mac.";
+  return null;
+}
+
+/** The one line of what a chat that needs you wants: its question, else the state in words. */
+export function askLine(session) {
+  if (session.question?.plan) return "Wants you to approve a plan.";
+  const prompt = session.question?.questions?.[0]?.question;
+  if (typeof prompt === "string" && prompt) return prompt;
+  if (asksYou(session)) return session.asks;
+  if (session.choices?.question) return session.choices.question;
+  if (session.state === "awaiting_approval") return "Wants approval for a tool call. Answer it on your Mac.";
+  return "";
+}
+
 /** The heading: the chat's own title when the Mac sends one, else the repo and branch. */
 export function heading(session) {
   return session.title || session.label || "Session";
@@ -61,46 +118,15 @@ export function ago(iso, now = Date.now()) {
   return `${Math.round(hours / 24)}d`;
 }
 
-export const COULDNT_CONFIRM = "Couldn't confirm it arrived. Check the chat before sending again.";
-const NOT_SENT = "Not sent. Nothing started.";
-
-function sentence(why) {
-  const t = typeof why === "string" ? why.trim() : "";
-  if (!t) return "";
-  const s = t[0].toUpperCase() + t.slice(1);
-  return /[.!?]$/.test(s) ? s : `${s}.`;
-}
-
 /**
- * A line for the result the Mac wrote: what happened, in one sentence, worded
- * as the iPhone words it. Only "sent" and "answered" are success. `retry` marks
- * "Not sent": nothing started, so the kept draft may be sent again. Anything
+ * A line for the result the Mac wrote, worded as the iPhone words it
+ * (send-state.js). Only "sent" and "answered" are success. `retry` marks "Not
+ * sent": nothing started, so the kept draft may be sent again. Anything
  * unrecognised reads as "couldn't confirm", never as sent, and never retries.
- * `withdrawn` is the web client's own status: the command was taken back off
- * the channel after the Mac stayed silent, so it can never run.
  */
-export function describeResult(result) {
-  const status = result && typeof result === "object" ? result.status : undefined;
-  if (status === "sent" || status === "answered") {
-    const how =
-      result.delivery === "queued"
-        ? "Queued behind the running turn."
-        : result.delivery === "steered"
-          ? "Steered into the running turn."
-          : "Sent.";
-    return { ok: true, text: typeof result.note === "string" && result.note ? `${how} ${result.note}` : how };
-  }
-  if (status === "refused") {
-    return { ok: false, retry: true, text: `${NOT_SENT} ${sentence(result.reason) || "Your Mac refused that reply."}` };
-  }
-  if (status === "withdrawn") {
-    return {
-      ok: false,
-      retry: true,
-      text: `${NOT_SENT} Your Mac didn't pick it up (is Squeak running there?), so the message was taken back.`,
-    };
-  }
-  return { ok: false, retry: false, text: COULDNT_CONFIRM };
+export function describeResult(result, agent = "the agent") {
+  const status = verdict(result, agent);
+  return { ok: isDelivered(status), retry: status.kind === "refused", text: statusLine(status) };
 }
 
 /** The sessions the Mac shows, then its recent ones, each at most once. */

@@ -53,7 +53,7 @@ function session(overrides = {}) {
   };
 }
 
-function world() {
+function world({ renamer, projectIcons } = {}) {
   const database = fakeDatabase();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "web-e2e-"));
   dirs.push(dir);
@@ -75,6 +75,8 @@ function world() {
     },
     snapshot: () => ({ sessions: [chat], active: [chat], attention: [], generatedAt: "", codexUsage: null }),
     macName: "Test Mac",
+    ...(renamer ? { renamer } : {}),
+    ...(projectIcons ? { projectIcons } : {}),
   });
   bridge.stop();
   const { url } = bridge.startPairing();
@@ -162,6 +164,15 @@ describe("a paired browser", () => {
     expect(await channel.result(id)).toMatchObject({ id, status: "sent", via: "conductor", delivery: "sent" });
   });
 
+  it("folds the recent document's project icons into the view, for Home's marks", async () => {
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAHpyVfQAAAABJRU5ErkJggg==";
+    const w = world({ projectIcons: () => ({ farm: png }) });
+    const { channel } = await pairedWeb(w);
+    await channel.touchPresence();
+    await w.bridge.tick();
+    expect((await channel.view()).projectIcons).toEqual({ farm: png });
+  });
+
   it("answers the Mac's presence ping and sees it alive", async () => {
     const w = world();
     const { channel } = await pairedWeb(w);
@@ -189,6 +200,51 @@ describe("a paired browser", () => {
     await waitFor(() => ![...w.database.docs.keys()].some((k) => k.includes("/results/") && !k.includes("pair-")));
     sync.stop();
     channel.db.closeAll();
+  });
+});
+
+describe("renaming a chat from the browser", () => {
+  it("is accepted by the Mac's real bridge: signed, fresh, for a chat it shows, and the new name reaches Conductor", async () => {
+    const renamed = [];
+    const w = world({ renamer: { rename: (id, title) => (renamed.push([id, title]), true) } });
+    const { record, channel } = await pairedWeb(w);
+    const view = { conductorSessionId: "s1", label: "farm · arm" };
+    const { id, document } = await channel.renameDocument(view, "  Irrigation\tpull   to refresh  ", record.signingKey);
+    await channel.send(id, document);
+    await w.bridge.tick();
+    // One plain line: the Mac trims and folds the whitespace itself.
+    expect(renamed).toEqual([["s1", "Irrigation pull to refresh"]]);
+    expect(await channel.result(id)).toMatchObject({ id, status: "sent" });
+  });
+
+  it("is refused with the Mac's own words when Conductor does not take it, and for a chat it does not show", async () => {
+    const w = world({ renamer: { rename: () => false } });
+    const { record, channel } = await pairedWeb(w);
+    const refused = await channel.renameDocument({ conductorSessionId: "s1" }, "New name", record.signingKey);
+    await channel.send(refused.id, refused.document);
+    const gone = await channel.renameDocument({ conductorSessionId: "nope" }, "New name", record.signingKey);
+    await channel.send(gone.id, gone.document);
+    await w.bridge.tick();
+    expect(await channel.result(refused.id)).toMatchObject({
+      status: "refused",
+      reason: "Conductor didn't take the new name.",
+    });
+    expect(await channel.result(gone.id)).toMatchObject({
+      status: "refused",
+      reason: "That chat isn't on your phone any more.",
+    });
+  });
+
+  it("is ignored from a key the Mac never approved", async () => {
+    const renamed = [];
+    const w = world({ renamer: { rename: (id, title) => (renamed.push([id, title]), true) } });
+    const { channel } = await pairedWeb(w);
+    const stranger = await generateDeviceKey();
+    const { id, document } = await channel.renameDocument({ conductorSessionId: "s1" }, "Hijack", stranger.privateKey);
+    await channel.send(id, document);
+    await w.bridge.tick();
+    expect(renamed).toEqual([]);
+    expect(await channel.result(id)).toBeNull();
   });
 });
 

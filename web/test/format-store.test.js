@@ -35,12 +35,17 @@ describe("words", () => {
   });
 
   it("describes what the Mac answered, worded as the iPhone words it", () => {
-    expect(describeResult({ status: "sent", delivery: "queued" })).toEqual({
+    expect(describeResult({ status: "sent", delivery: "queued" }, "Claude")).toEqual({
       ok: true,
-      text: "Queued behind the running turn.",
+      retry: false,
+      text: "Queued · Claude reads it after this turn",
     });
-    expect(describeResult({ status: "sent" })).toEqual({ ok: true, text: "Sent." });
-    expect(describeResult({ status: "answered" })).toEqual({ ok: true, text: "Sent." });
+    expect(describeResult({ status: "sent", delivery: "steered" })).toMatchObject({
+      ok: true,
+      text: "Steered into the current turn",
+    });
+    expect(describeResult({ status: "sent" })).toEqual({ ok: true, retry: false, text: "Sent" });
+    expect(describeResult({ status: "answered" })).toEqual({ ok: true, retry: false, text: "Sent" });
     expect(describeResult({ status: "refused", reason: "that chat has moved on" })).toEqual({
       ok: false,
       retry: true,

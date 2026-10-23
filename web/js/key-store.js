@@ -58,6 +58,31 @@ export class KeyStore {
     }
   }
 
+  /** One named value besides the device record (the chat caches). Null when there is none. */
+  async read(name) {
+    const db = await openDatabase(this.factory);
+    try {
+      const request = db.transaction(STORE, "readonly").objectStore(STORE).get(name);
+      return await new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result ?? null);
+        request.onerror = () => reject(request.error);
+      });
+    } finally {
+      db.close();
+    }
+  }
+
+  async write(name, value) {
+    const db = await openDatabase(this.factory);
+    try {
+      const transaction = db.transaction(STORE, "readwrite");
+      transaction.objectStore(STORE).put(value, name);
+      await done(transaction);
+    } finally {
+      db.close();
+    }
+  }
+
   /** Wipes every key and every trace of the pairing from this browser. */
   forget() {
     return new Promise((resolve, reject) => {

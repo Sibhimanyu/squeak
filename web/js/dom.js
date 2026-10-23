@@ -16,3 +16,13 @@ export function h(tag, attrs, ...children) {
   }
   return node;
 }
+
+const SVG = "http://www.w3.org/2000/svg";
+
+/** An SVG element from fixed, built-in shapes (an icon's path); never from channel data. */
+export function svg(tag, attrs, ...children) {
+  const node = document.createElementNS(SVG, tag);
+  for (const [name, value] of Object.entries(attrs ?? {})) node.setAttribute(name, String(value));
+  for (const child of children) if (child) node.append(child);
+  return node;
+}
