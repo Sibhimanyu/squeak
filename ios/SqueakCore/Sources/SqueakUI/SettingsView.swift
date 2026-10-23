@@ -28,6 +28,7 @@ struct ConnectionDetailsView: View {
             Section {
                 let state = model.connection()
                 LabeledContent("Status") { HStack(spacing: 7) { StatusDot(color: state.color); Text(state.text) } }
+                if !model.demo { LabeledContent("Route", value: Connection.routeText(model.route)) }
                 if let since = model.streamDownSince {
                     LabeledContent("Down since", value: Age.sync(since))
                 }
@@ -90,6 +91,14 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !model.hiddenHere.isEmpty {
+                    Section {
+                        Button("Show \(model.hiddenHere.count) hidden \(model.hiddenHere.count == 1 ? "chat" : "chats") again") { model.showHiddenAgain() }
+                            .frame(minHeight: 44)
+                    } header: { Text("Hidden on this iPhone") } footer: {
+                        Text("Hiding only tidies this iPhone. A hidden chat comes back by itself when it has news.")
+                    }
+                }
                 if model.awakeOffered {
                     AwakeSection(problem: $awakeProblem)
                     if model.lidActionsOffered {
@@ -103,6 +112,9 @@ struct SettingsView: View {
                         LabeledContent("Status") {
                             HStack(spacing: 7) { StatusDot(color: state.color); Text(state.text) }
                         }
+                    }
+                    if !model.demo, model.snapshot != nil {
+                        LabeledContent("Route", value: Connection.routeText(model.route))
                     }
                     if let snapshot = model.snapshot {
                         if snapshot.workspaces == nil {

@@ -91,9 +91,20 @@ struct SessionView: View {
                 if let session { SessionHeader(session: session) }
             }
             // Rename: the Mac can rename a chat Conductor holds open.
-            if let session, session.conductorSessionId != nil, session.open != false {
+            if let session {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { model.renameTarget = session } label: { Lucide(.filePen, size: 20, label: "Rename chat", color: Theme.muted) }
+                    Menu {
+                        if session.conductorSessionId != nil, session.open != false {
+                            Button("Rename", systemImage: "pencil") { model.renameTarget = session }
+                        }
+                        if session.conductorSessionId != nil, session.open != false, session.state != "working", !session.needsYou {
+                            Button("Close in Conductor", systemImage: "xmark.circle", role: .destructive) { model.closeTarget = session }
+                        }
+                        Button("Hide on this iPhone", systemImage: "eye.slash") {
+                            model.hideHere(session)
+                            dismiss()
+                        }
+                    } label: { Lucide(.ellipsis, size: 20, label: "Chat options", color: Theme.muted) }
                 }
             }
         }

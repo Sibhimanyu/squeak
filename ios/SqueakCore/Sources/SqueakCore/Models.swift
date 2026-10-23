@@ -273,11 +273,23 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public var awakeSleepProblem: String? = nil
     /// Hotspot failover (src/fleet/hotspot.ts). Optional: older Macs omit it, and the phone hides it.
     public var hotspot: Hotspot? = nil
+    /// Where this Mac listens on the local network, for the direct same-Wi-Fi path (docs/remote-channel.md).
+    /// Optional: older Macs, and a Mac with the path off, omit it. A phone off that network just fails to
+    /// connect and stays on the cloud.
+    public var local: LocalEndpointInfo? = nil
     /// The Mac's write counter (shared with the live turn): a view older than the one on screen is
     /// dropped. Optional: older Macs omit it.
     public var seq: Int64? = nil
     /// True when `recent`, `recentMore` and `workspaces` are in the recent document (`PhoneRecent`).
     public var split: Bool? = nil
+
+    public struct LocalEndpointInfo: Codable, Equatable, Sendable {
+        public let port: Int
+        public let hosts: [String]
+        /// The non-identifying tag Bonjour carries (`LocalAuth.tag`).
+        public let tag: String
+        public init(port: Int, hosts: [String], tag: String) { self.port = port; self.hosts = hosts; self.tag = tag }
+    }
 
     public struct Hotspot: Codable, Equatable, Sendable {
         public struct Event: Codable, Equatable, Sendable {
@@ -362,8 +374,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         workspaces: [Workspace]? = nil, recent: [Session]? = nil, recentMore: Bool? = nil, keepAwake: Bool? = nil,
         awakeUntil: String? = nil, awakeLid: String? = nil, awakeLidProblem: String? = nil, awakeLidReady: Bool? = nil,
         awakeSafety: String? = nil, macPower: MacPower? = nil, awakeLidActions: LidActions? = nil,
-        awakeRules: AwakeRules? = nil, awakeLastEnd: AwakeEnd? = nil, awakeSleepProblem: String? = nil
+        awakeRules: AwakeRules? = nil, awakeLastEnd: AwakeEnd? = nil, awakeSleepProblem: String? = nil,
+        local: LocalEndpointInfo? = nil
     ) {
+        self.local = local
         self.awakeLidActions = awakeLidActions; self.awakeRules = awakeRules
         self.awakeLastEnd = awakeLastEnd; self.awakeSleepProblem = awakeSleepProblem
         self.recentMore = recentMore
@@ -830,6 +844,16 @@ public struct RenameCommand: Codable, Equatable, Sendable {
     public let kind: String
     public let sessionId: String
     public let title: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// Close a Conductor chat's tab, as closing it in Conductor does. The Mac refuses a chat that is working.
+public struct CloseCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let sessionId: String
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

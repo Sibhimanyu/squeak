@@ -1,0 +1,36 @@
+{
+  "channelKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "localKey": "bmd3eHB0nIcP1zLDuxIK0sQtbZ+S/CyZkrXOugxwoFE=",
+  "tag": "aa85f1343db6bfd6",
+  "request": {
+    "method": "PUT",
+    "target": "/commands/0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31.json?print=silent",
+    "ts": "1790000000000",
+    "nonce": "00112233445566778899aabbccddeeff",
+    "body": "{\"box\":\"AAAA\",\"sig\":\"BBBB\",\"device\":\"iphone-1\"}",
+    "bodyHash": "e9a4d49c2cda1e8d1a88cddf93e411da2aeb2a9d76dcef9842a22958574d02f6",
+    "canonical": "squeak-local-v1\nPUT\n/commands/0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31.json?print=silent\n1790000000000\n00112233445566778899aabbccddeeff\ne9a4d49c2cda1e8d1a88cddf93e411da2aeb2a9d76dcef9842a22958574d02f6",
+    "mac": "4JNZq1Gig9CKVZAP56ZfdMKlThgkBiqwKxEj/+b3gLg="
+  },
+  "response": {
+    "nonce": "00112233445566778899aabbccddeeff",
+    "status": 204,
+    "body": "",
+    "canonical": "squeak-local-v1-resp\n00112233445566778899aabbccddeeff\n204\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mac": "qwi1rC8GfIRfsAvTpqMhWqSIt1+ZNf5LCJ8gTm/TjnM="
+  },
+  "readRequest": {
+    "method": "GET",
+    "target": "/state/snapshot.json",
+    "ts": "1790000000001",
+    "nonce": "ffeeddccbbaa99887766554433221100",
+    "body": "",
+    "mac": "qCcw8RkIf3NVHO6r6y66/GbnBloUAayx8fYDU3s9azw="
+  },
+  "readResponse": {
+    "nonce": "ffeeddccbbaa99887766554433221100",
+    "status": 200,
+    "body": "{\"box\":\"CCCC\",\"at\":1790000000000}",
+    "mac": "24PuJN0xi5ArV2csX4CI21INFv4m4socf0RXA3VuQpA="
+  }
+}

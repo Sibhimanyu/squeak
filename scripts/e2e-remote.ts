@@ -9,13 +9,24 @@
 // Database instead (the emulator works: http://127.0.0.1:9000?ns=<name>).
 // The bridge then runs on its own, woken only by the stream, so the run
 // proves nothing waits for a poll.
-import { execFile } from "node:child_process";
+//
+// With SQUEAK_E2E_LOCAL=1 it runs the direct same-Wi-Fi path instead: an
+// in-memory Realtime Database stands in for the cloud (no Firebase), the
+// Mac's LocalChannelServer listens on 127.0.0.1, and the phone pairs through
+// the "cloud", finds the Mac from its sealed view, and carries every command
+// over the local path (the "cloud" must see none of them). Then the local
+// server is stopped, and the phone must notice and send one more through the
+// cloud.
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import type { FleetSnapshot } from "../src/fleet/fleet-monitor.js";
+import { FakeRtdb } from "../src/remote/fake-rtdb.js";
 import { FirestoreRest } from "../src/remote/firestore-rest.js";
+import { LocalChannelServer } from "../src/remote/local-channel.js";
+import { MirrorStore } from "../src/remote/mirror-store.js";
 import { RemoteBridge } from "../src/remote/remote-bridge.js";
 import { RtdbRest } from "../src/remote/rtdb-rest.js";
 
@@ -52,9 +63,17 @@ const session = {
   costUsd: null,
   git: null,
 };
-const databaseUrl = process.env.SQUEAK_E2E_DATABASE_URL ?? null;
-const store = databaseUrl ? new RtdbRest(databaseUrl) : new FirestoreRest(project);
+const localMode = process.env.SQUEAK_E2E_LOCAL === "1";
+const fake = localMode && !process.env.SQUEAK_E2E_DATABASE_URL ? new FakeRtdb() : null;
+const databaseUrl = (await fake?.start()) ?? process.env.SQUEAK_E2E_DATABASE_URL ?? null;
+const cloudStore = databaseUrl ? new RtdbRest(databaseUrl) : new FirestoreRest(project);
+const mirror = localMode ? new MirrorStore(cloudStore) : null;
+const store = mirror ?? cloudStore;
+let localServer: LocalChannelServer | null = null;
+const continueFile = path.join(dir, "continue");
 const bridge = new RemoteBridge({
+  localEndpoint: () => localServer?.endpoint() ?? null,
+  onDevicesChanged: () => void localServer?.refresh(),
   configPath: path.join(dir, "remote.json"),
   projectId: project,
   store,
@@ -107,6 +126,17 @@ const bridge = new RemoteBridge({
   macName: "E2E Mac",
 });
 
+if (mirror) {
+  localServer = new LocalChannelServer({
+    mirror,
+    access: () => bridge.localAccess(),
+    host: "127.0.0.1",
+    advertiser: null,
+    hosts: () => ["127.0.0.1"],
+  });
+  await localServer.start();
+  console.log(`mac:   direct path listening on 127.0.0.1:${localServer.port}`);
+}
 const { url } = bridge.startPairing();
 if (databaseUrl) {
   bridge.start(); // streamed: the bridge reacts to the phone by itself
@@ -119,9 +149,29 @@ console.log(
 );
 
 const phone = new Promise<{ code: number; out: string }>((resolve) => {
-  execFile(phoneBin, [url, codeFile], { timeout: 180_000, env: { ...process.env } }, (error, stdout, stderr) =>
-    resolve({ code: error ? ((error as { code?: number }).code ?? 1) : 0, out: `${stdout}${stderr}` }),
-  );
+  const child = spawn(phoneBin, [url, codeFile], {
+    env: {
+      ...process.env,
+      ...(databaseUrl ? { SQUEAK_E2E_DATABASE_URL: databaseUrl } : {}),
+      ...(localMode ? { SQUEAK_E2E_LOCAL: "1", SQUEAK_E2E_CONTINUE_FILE: continueFile } : {}),
+    },
+  });
+  let out = "";
+  const timer = setTimeout(() => child.kill(), 180_000);
+  const onData = (chunk: Buffer) => {
+    out += chunk.toString();
+    // The phone has run everything over the local path: take the path away and let it carry on.
+    if (localServer && out.includes("phone: local phase done") && !fs.existsSync(continueFile)) {
+      console.log("mac:   stopping the direct path");
+      void localServer.stop().then(() => fs.writeFileSync(continueFile, "1"));
+    }
+  };
+  child.stdout.on("data", onData);
+  child.stderr.on("data", onData);
+  child.on("close", (code) => {
+    clearTimeout(timer);
+    resolve({ code: code ?? 1, out });
+  });
 });
 let done = false;
 void phone.then(() => (done = true));
@@ -138,6 +188,7 @@ while (!done && Date.now() < deadline) {
     if (phoneCode === request.code) {
       console.log(`mac:   codes match (${request.code}), approving`);
       await bridge.approve(request.id);
+      await localServer?.refresh();
     } else {
       console.log(`mac:   code mismatch (${request.code} vs ${phoneCode}), rejecting`);
       await bridge.reject(request.id);
@@ -158,6 +209,13 @@ console.log(`mac:   replies delivered to the (fake) chat: ${JSON.stringify(sends
 
 console.log(`mac:   chats started on the (fake) relay: ${JSON.stringify(starts)}`);
 
+const cloudCommandWrites = fake?.requests.filter((request) => /^PUT .*\/commands\//.test(request)).length ?? 0;
+if (localMode) {
+  console.log(
+    `mac:   commands the cloud saw written: ${cloudCommandWrites} (only the one sent after the local path went away)`,
+  );
+}
+
 // Leave nothing behind in the real database. `live` exists only in the
 // Realtime Database; Firestore's rules refuse to list it.
 for (const kind of databaseUrl
@@ -169,13 +227,16 @@ for (const kind of databaseUrl
 }
 const ok =
   result.code === 0 &&
-  sends.length === 2 &&
+  sends.length === (localMode ? 3 : 2) &&
   sends[0]![1] === "B" &&
   sends[0]![2] === "queue" &&
   sends[1]![2] === "steer" &&
+  (!localMode || (cloudCommandWrites === 1 && sends[2]![1] === "C")) &&
   starts.length === 1 &&
   starts[0]!.workspaceId === "e2e-ws" &&
   starts[0]!.agent === "codex" &&
   starts[0]!.text === "Add a timer";
+await localServer?.stop();
+await fake?.stop();
 console.log(ok ? "E2E PASS" : "E2E FAIL");
 process.exit(ok ? 0 : 1);

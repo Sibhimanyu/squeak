@@ -38,6 +38,8 @@ import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
+import { LocalAdvertiser, LocalChannelServer } from "../remote/local-channel.js";
+import { MirrorStore } from "../remote/mirror-store.js";
 import { RasanaiProvider } from "../workflows/rasanai/provider.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
@@ -108,6 +110,8 @@ export class SqueakApp {
   /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
   private readonly router: FleetReplyRouter;
   private readonly remote: RemoteBridge | null;
+  /** The direct same-Wi-Fi path to a paired phone (remote/local-channel.ts); null when off. */
+  private readonly localChannel: LocalChannelServer | null;
   private readonly cliq: CliqChannel | null;
   /** The Cliq webhook the channel posts through, for one-off notes (an awake session's end). */
   private cliqWebhook: CliqWebhook | null = null;
@@ -236,64 +240,84 @@ export class SqueakApp {
 
     // The phone channel, when a Firebase project is configured. Same replier,
     // same busy rules; the bridge adds pairing and signature checks on top.
-    this.remote = config.remoteProjectId
-      ? new RemoteBridge({
-          configPath: path.join(config.supportDir, "remote.json"),
-          projectId: config.remoteProjectId,
-          // The Realtime Database when configured: streamed, billed by bytes not reads.
-          store: config.remoteDatabaseUrl
-            ? new RtdbRest(config.remoteDatabaseUrl)
-            : new FirestoreRest(config.remoteProjectId),
-          databaseUrl: config.remoteDatabaseUrl,
-          announce: config.remoteDatabaseUrl ? new FirestoreRest(config.remoteProjectId) : null,
-          replier: this.replier,
-          snapshot: () => this.runtime.monitor.snapshot,
-          onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
-          activity: (session) => (session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null),
-          // A question's prompts, or a plan waiting on approval with its text (the phone's plan card).
-          question: (session) =>
-            session.agent === "claude" && session.transcriptPath ? readPendingAsk(session.transcriptPath) : null,
-          liveActivity: (session, limit, stepChars) =>
-            session.transcriptPath ? readActivity(session.agent, session.transcriptPath, limit, { stepChars }) : null,
-          verbose: config.remoteVerbose,
-          // The phone's "what changed": the same reader Telegram's diff pages use.
-          diff: this.runtime.diff,
-          // An image a chat's agent showed, for the phone: only inside that chat's workspace.
-          image: (source, cwd) => readPhoneImage(source, cwd),
-          // A film waiting on a call (RasanAI): its card, and the answer.
-          workflow: this.rasanai,
-          // Its film or soundtrack as a phone copy (avconvert / afconvert), cached beside Squeak's state.
-          media: (source, cwd) =>
-            preparePhoneMedia(source, cwd, { cacheDir: path.join(config.supportDir, "media-cache") }),
-          claudeLimits: () => this.claudeLimits?.latest() ?? null,
-          // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
-          refreshUsage: () => this.claudeRefresher.refresh(),
-          hotspot: {
-            state: () => this.hotspot.state,
-            apply: (request) => this.applyHotspot(request),
-          },
-          awake: {
-            state: () => this.awake.state,
-            lidReady: () => this.awake.lidReady,
-            power: () => (this.power ? phonePower(this.power) : null),
-            apply: (request) => this.applyAwake(request),
-            lidActions: () => this.lidActions.settings,
-            rules: () => awakeRules(config.awakeSafety),
-            lastEnd: () => this.awake.lastEnd,
-            sleepProblem: () => this.awake.sleepProblem,
-          },
-          // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
-          answerer: answers,
-          projectIcons: () => this.projectIcons.current(),
-          renamer: { rename: (sessionId, title) => this.runtime.registry.renameSession(sessionId, title) },
-          newChat: {
-            workspaces: () => listNewChatWorkspaces(config.conductorDbPath, 20),
-            models: () => listChatModels(config.conductorDbPath),
-            start: (args) =>
-              newChatControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }).startChat(args),
-          },
-        })
+    const cloudStore = config.remoteProjectId
+      ? config.remoteDatabaseUrl
+        ? new RtdbRest(config.remoteDatabaseUrl)
+        : new FirestoreRest(config.remoteProjectId)
       : null;
+    // The direct path mirrors every document the bridge writes, so both transports show the same sealed ones.
+    const localMirror = cloudStore && config.remoteLocal ? new MirrorStore(cloudStore) : null;
+    this.remote =
+      config.remoteProjectId && cloudStore
+        ? new RemoteBridge({
+            configPath: path.join(config.supportDir, "remote.json"),
+            projectId: config.remoteProjectId,
+            // The Realtime Database when configured: streamed, billed by bytes not reads.
+            store: localMirror ?? cloudStore,
+            localEndpoint: () => this.localChannel?.endpoint() ?? null,
+            onDevicesChanged: () => void this.localChannel?.refresh(),
+            databaseUrl: config.remoteDatabaseUrl,
+            announce: config.remoteDatabaseUrl ? new FirestoreRest(config.remoteProjectId) : null,
+            replier: this.replier,
+            snapshot: () => this.runtime.monitor.snapshot,
+            onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
+            activity: (session) =>
+              session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null,
+            // A question's prompts, or a plan waiting on approval with its text (the phone's plan card).
+            question: (session) =>
+              session.agent === "claude" && session.transcriptPath ? readPendingAsk(session.transcriptPath) : null,
+            liveActivity: (session, limit, stepChars) =>
+              session.transcriptPath ? readActivity(session.agent, session.transcriptPath, limit, { stepChars }) : null,
+            verbose: config.remoteVerbose,
+            // The phone's "what changed": the same reader Telegram's diff pages use.
+            diff: this.runtime.diff,
+            // An image a chat's agent showed, for the phone: only inside that chat's workspace.
+            image: (source, cwd) => readPhoneImage(source, cwd),
+            // A film waiting on a call (RasanAI): its card, and the answer.
+            workflow: this.rasanai,
+            // Its film or soundtrack as a phone copy (avconvert / afconvert), cached beside Squeak's state.
+            media: (source, cwd) =>
+              preparePhoneMedia(source, cwd, { cacheDir: path.join(config.supportDir, "media-cache") }),
+            claudeLimits: () => this.claudeLimits?.latest() ?? null,
+            // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
+            refreshUsage: () => this.claudeRefresher.refresh(),
+            hotspot: {
+              state: () => this.hotspot.state,
+              apply: (request) => this.applyHotspot(request),
+            },
+            awake: {
+              state: () => this.awake.state,
+              lidReady: () => this.awake.lidReady,
+              power: () => (this.power ? phonePower(this.power) : null),
+              apply: (request) => this.applyAwake(request),
+              lidActions: () => this.lidActions.settings,
+              rules: () => awakeRules(config.awakeSafety),
+              lastEnd: () => this.awake.lastEnd,
+              sleepProblem: () => this.awake.sleepProblem,
+            },
+            // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
+            answerer: answers,
+            projectIcons: () => this.projectIcons.current(),
+            renamer: { rename: (sessionId, title) => this.runtime.registry.renameSession(sessionId, title) },
+            closer: { close: (sessionId) => this.runtime.registry.closeSession(sessionId) },
+            newChat: {
+              workspaces: () => listNewChatWorkspaces(config.conductorDbPath, 20),
+              models: () => listChatModels(config.conductorDbPath),
+              start: (args) =>
+                newChatControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }).startChat(args),
+            },
+          })
+        : null;
+    const bridge = this.remote;
+    this.localChannel =
+      bridge && localMirror
+        ? new LocalChannelServer({
+            mirror: localMirror,
+            access: () => bridge.localAccess(),
+            port: config.remoteLocalPort,
+            advertiser: new LocalAdvertiser(),
+          })
+        : null;
 
     // The Mac app answers chats through the same replier as Telegram, over
     // the loopback ingress, gated by the hook token.
@@ -431,6 +455,10 @@ export class SqueakApp {
     await this.controller.start();
     this.conductorRelay.start();
     this.remote?.start();
+    // Never fatal: the cloud path carries on if the port or the network is not available.
+    await this.localChannel?.start().catch((error: unknown) => {
+      logger.warn("direct phone path did not start", { error: error instanceof Error ? error.message : String(error) });
+    });
     if (this.telegram) {
       await this.startTelegram(this.telegram);
     } else {
@@ -485,6 +513,7 @@ export class SqueakApp {
     this.hotspot.stop();
     this.caffeinator.stop();
     this.remote?.stop();
+    await this.localChannel?.stop().catch(() => undefined);
     this.cliq?.stop();
     await this.conductorRelay.stop().catch(() => undefined);
     await this.replier.stop().catch(() => undefined);

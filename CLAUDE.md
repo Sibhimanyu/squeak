@@ -39,6 +39,7 @@ deployment section before changing anything under `src/`.
 | `src/fleet/claude-cost.ts` | whole-file, cached, lazy Claude cost estimate — see the note below on why |
 | `src/workflows/` | products an agent runs that wait on the person for their own calls. `rasanai/`: a RasanAI film's director is a Claude session whose cwd has `.rasanai/current`; `session.json` says which call waits (Studio's rule, ignored after 24 h), the newest session in the folder pages as `awaiting_input`, and the phone's `workflow` card answers through RasanAI's file protocol (`actions.jsonl` under `actions.lock`, `source: "squeak-phone"`), checked against the file as it is then. Only runs whose `console.json` says `external_actions: 1` (RasanAI's `references/remote.md`), or, before that contract, headless Studio runs. Never the console's HTTP server. The animatic and the film are reviewed on the phone (`review`: scenes, notes, apply/approve/render); what plays leaves only as a phone copy (`phone-media.ts`: RasanAI's own `proxy`, else `avconvert` WiFi preset / `afconvert` AAC, cached) in sealed 384 KB chunks under the channel's `media` kind, Realtime Database only, deleted after 30 min (`remote-media.json` ledger, swept at start). A chunk write gets 90 s, not the store's 10 s: behind this Mac's proxy, uploads ran at 28-65 KB/s. Design: `docs/rasanai-plugin.md` |
 | `src/remote/` | the phone channel's Mac side: crypto, Firestore REST, `RemoteBridge` |
+| `src/remote/local-channel.ts`, `mirror-store.ts`, `local-auth.ts` | the direct same-Wi-Fi path to a paired phone: an HMAC-gated LAN server over a mirror of the channel's documents, Bonjour `_squeak._tcp` through `dns-sd`, request/response MACs (docs/remote-channel.md, "The direct path"). `SQUEAK_REMOTE_LOCAL=off` disables it; `fake-rtdb.ts` is an in-memory database for tests and the local e2e |
 | `src/adapters/claude-code.ts` | spawns `claude`, parses its stream-json output |
 | `src/adapters/codex-app-server.ts` | JSON-RPC client for the codex app-server |
 | `src/adapters/conductor-registry.ts` | all reads/writes against `conductor.db` |
@@ -383,6 +384,18 @@ test for anything you fix is expected; the suite is fast.
   no steps), plus that chat's Conductor queue, deleted from the database when the phone leaves it
   (`live-turn.ts`). Keep it that narrow; `SQUEAK_REMOTE_VERBOSE=off` refuses
   it on the Mac.
+- **The direct path is one more untrusted pipe, not a second brain.** `MirrorStore` wraps the bridge's store:
+  every write also lands in the in-memory `DocTree` the `LocalChannelServer` serves, and a phone's local presence and
+  commands are merged into what the bridge reads, so a local command runs through `handleCommand` with every check
+  unchanged. Never give the local server a code path of its own for what the Mac says or does. It serves only the
+  channel's `state`/`results`/`live`/`commands` (never pairing, never media), with the channel id left out of every
+  path, an HMAC on every request (`local-auth.ts`: HKDF `squeak-local-v1`, 60 s, nonce, constant-time) and one on every
+  response that binds the request's nonce. A refusal is a bare 401. Streams carry "changed", never data. A handled
+  command's id is remembered 15 min so the other transport's copy cannot run or overwrite its result. On the phone
+  (`LocalRoute.swift`) a command goes out on exactly one transport: local failure that proves nothing was sent goes to
+  the cloud; an ambiguous one is taken back from the Mac first, and if that cannot be confirmed it is not sent again.
+  `local-auth.json` pins Node and Swift byte for byte (`scripts/make-local-fixture.ts`);
+  `SQUEAK_E2E_LOCAL=1 npx tsx scripts/e2e-remote.ts` runs the whole thing with the prebuilt `squeak-e2e`.
 - **The iPhone app is standalone.** `SqueakRootView` (module `SqueakUI`) is
   the whole UI in one view and `ios/Squeak` is a window around it. The app
   owns the `squeak://` scheme; Telegram's "Open in Squeak" goes through

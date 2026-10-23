@@ -466,6 +466,35 @@ func runWifi(mode: String, requestPath: String, resultPath: String) {
         write(["ok": status == .authorizedAlways, "location": locationStatusName(status)], to: resultPath)
         return
     }
+    if mode == "wifi-scan" {
+        // Whether the hotspot can be seen, without leaving the current
+        // network: a check that is safe while the Mac is in use remotely.
+        struct ScanRequest: Decodable { let device: String; let ssid: String }
+        // A new manager can read notDetermined until locationd answers; wait
+        // for that answer, but never ask (nobody may be at the Mac).
+        let manager = CLLocationManager()
+        let settle = Date().addingTimeInterval(3)
+        while manager.authorizationStatus == .notDetermined, Date() < settle {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+        }
+        let status = manager.authorizationStatus
+        guard let data = FileManager.default.contents(atPath: requestPath),
+              let request = try? JSONDecoder().decode(ScanRequest.self, from: data),
+              let ssid = request.ssid.data(using: .utf8), !ssid.isEmpty, ssid.count <= 32,
+              let interface = CWWiFiClient.shared().interface(withName: request.device)
+        else {
+            write(["ok": false, "error": "bad-request"], to: resultPath)
+            exit(65)
+        }
+        let found = (try? interface.scanForNetworks(withSSID: ssid)) ?? []
+        var result: [String: Any] = ["ok": true, "location": locationStatusName(status), "found": !found.isEmpty]
+        if let network = found.first {
+            result["rssi"] = network.rssiValue
+            result["band"] = network.wlanChannel?.channelBand == .band5GHz ? "5GHz" : "2.4GHz"
+        }
+        write(result, to: resultPath)
+        return
+    }
     struct JoinRequest: Decodable { let device: String; let ssid: String; let password: String }
     guard let data = FileManager.default.contents(atPath: requestPath),
           let request = try? JSONDecoder().decode(JoinRequest.self, from: data),
@@ -522,7 +551,7 @@ let outPath = args.count > 2 ? args[2] : "/tmp/squeak-hands.json"
 // Where errors go: the probe writes to its only path, send to its second.
 let errorPath = (mode == "send" || mode == "press" || mode == "choose-file") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
 let terminalModes: Set<String> = ["terminal-read", "terminal-type"]
-let wifiModes: Set<String> = ["wifi-join", "wifi-location"]
+let wifiModes: Set<String> = ["wifi-join", "wifi-location", "wifi-scan"]
 
 // Terminal is driven by Apple Events, which need Automation, not Accessibility;
 // Wi-Fi needs Location Services.
@@ -667,7 +696,7 @@ case "send":
 case "terminal-read", "terminal-type":
     // terminal-read|terminal-type <request.json> <result.json>
     runTerminal(mode: mode, requestPath: outPath, resultPath: args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json")
-case "wifi-join", "wifi-location":
+case "wifi-join", "wifi-location", "wifi-scan":
     // wifi-join|wifi-location <request.json> <result.json>
     runWifi(mode: mode, requestPath: outPath, resultPath: args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json")
 default:

@@ -74,6 +74,13 @@ const schema = z.object({
    */
   SQUEAK_REMOTE_VERBOSE: z.string().optional(),
   /**
+   * "off": no direct same-Wi-Fi path to the phone (remote/local-channel.ts);
+   * everything goes through the cloud. On by default whenever the phone
+   * channel is. SQUEAK_REMOTE_LOCAL_PORT pins its port (default: a free one).
+   */
+  SQUEAK_REMOTE_LOCAL: z.string().optional(),
+  SQUEAK_REMOTE_LOCAL_PORT: z.string().optional(),
+  /**
    * Keeping the Mac awake (fleet/caffeinate.ts). Default: while agents work,
    * and always while plugged in, so the phone can reach it. "working": only
    * while agents work. "off": never.
@@ -125,6 +132,10 @@ export interface SqueakConfig {
   remoteDatabaseUrl: string | null;
   /** Whether a phone may ask for a session's whole turn (live-turn.ts). */
   remoteVerbose: boolean;
+  /** The direct same-Wi-Fi path to a paired phone (SQUEAK_REMOTE_LOCAL=off turns it off). */
+  remoteLocal: boolean;
+  /** 0: pick a free port. */
+  remoteLocalPort: number;
   /** Keep the Mac awake while an agent works. */
   caffeinate: boolean;
   /** And always while it is plugged in. */
@@ -201,6 +212,8 @@ export function loadSqueakConfig(): SqueakConfig {
     remoteProjectId: parsed.SQUEAK_REMOTE_PROJECT?.trim() || null,
     remoteDatabaseUrl: databaseUrl(parsed.SQUEAK_REMOTE_DATABASE_URL),
     remoteVerbose: parsed.SQUEAK_REMOTE_VERBOSE?.trim().toLowerCase() !== "off",
+    remoteLocal: parsed.SQUEAK_REMOTE_LOCAL?.trim().toLowerCase() !== "off",
+    remoteLocalPort: localPort(parsed.SQUEAK_REMOTE_LOCAL_PORT),
     caffeinate: parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() !== "off",
     caffeinateOnPower: !["off", "working"].includes(parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() ?? ""),
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
@@ -218,6 +231,12 @@ export function loadSqueakConfig(): SqueakConfig {
     codexQuotaWarnPercent: parsed.FLEET_CODEX_QUOTA_WARN_PERCENT,
     envFilePath,
   };
+}
+
+/** A pinned port for the direct phone path, or 0 (a free one) when unset or not a valid port. */
+export function localPort(raw: string | undefined): number {
+  const port = Number(raw?.trim());
+  return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : 0;
 }
 
 /** Only an https Realtime Database host: it goes into pairing codes, and the phone refuses anything else. */
