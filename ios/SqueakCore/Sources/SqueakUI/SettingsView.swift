@@ -237,7 +237,9 @@ private struct AwakeSection: View {
     @Binding var problem: String?
     @State private var confirmingEnd = false
     @State private var untilTime = Date().addingTimeInterval(3 * 3600)
-    @State private var withLid = false
+    /// On unless you turn it off, and remembered: a Mac you set to stay awake should stay awake with its lid shut.
+    /// Without the lid-closed setup on the Mac there is nothing to turn on, and the footer says so.
+    @AppStorage("awakeWithLid") private var withLid = true
 
     private static let durations: [(String, Int)] = [("1h", 60), ("2h", 120), ("4h", 240), ("8h", 480)]
 

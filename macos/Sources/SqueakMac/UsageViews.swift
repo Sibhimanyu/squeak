@@ -230,20 +230,22 @@ struct AwakeRow: View {
                     .menuStyle(.borderlessButton).fixedSize()
                 } else {
                     Menu {
+                        // Closed lid first: a Mac set to stay awake should stay awake when it is shut. Lid open
+                        // is the choice for a Mac not yet set up for it, and for no end ("Until I end it").
+                        if model.awakeLidReady {
+                            Section("Lid closed too") {
+                                ForEach(Self.lengths, id: \.0) { hours, minutes in
+                                    Button("For \(hours) hour\(hours == 1 ? "" : "s")") { Task { await model.changeAwake("start", minutes: minutes, lid: true) } }
+                                }
+                            }
+                        } else {
+                            Section("Lid closed too") { setUpButton }
+                        }
                         Section("Lid open") {
                             ForEach(Self.lengths, id: \.0) { hours, minutes in
                                 Button("For \(hours) hour\(hours == 1 ? "" : "s")") { Task { await model.changeAwake("start", minutes: minutes) } }
                             }
                             Button("Until I end it") { Task { await model.changeAwake("start") } }
-                        }
-                        Section("Lid closed too") {
-                            if model.awakeLidReady {
-                                ForEach(Self.lengths, id: \.0) { hours, minutes in
-                                    Button("For \(hours) hour\(hours == 1 ? "" : "s")") { Task { await model.changeAwake("start", minutes: minutes, lid: true) } }
-                                }
-                            } else {
-                                setUpButton
-                            }
                         }
                     } label: { Text("Off").font(Typo.meta) }
                     .menuStyle(.borderlessButton).fixedSize()
