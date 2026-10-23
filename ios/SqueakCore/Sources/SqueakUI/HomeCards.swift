@@ -123,7 +123,7 @@ struct StatusGroupCard: View {
     private var inline: Bool { Presentation.expandsInline(filter, count: sessions.count) }
 
     var body: some View {
-        let ordered = Presentation.byAttention(sessions)
+        let ordered = Presentation.newestFirst(sessions)
         let preview = Presentation.preview(sessions, limit: Presentation.previewLimit(for: filter))
         let shown = inline && expanded ? ordered : preview.shown
         let count = sessions.count

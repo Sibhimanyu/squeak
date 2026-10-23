@@ -54,3 +54,10 @@ export function selectActiveSessions(
 ): FleetSession[] {
   return sessions.filter((session) => isActiveSession(session, nowMs, options));
 }
+
+/** Every list is newest first by last activity; urgency lives in the sections, not in the sort. */
+export function newestFirst(sessions: FleetSession[]): FleetSession[] {
+  return [...sessions].sort(
+    (a, b) => (Date.parse(b.lastActivityAt) || 0) - (Date.parse(a.lastActivityAt) || 0) || a.key.localeCompare(b.key),
+  );
+}

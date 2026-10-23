@@ -107,6 +107,16 @@ struct SessionGroupingTests {
         #expect(g[4].sessions.map(\.title) == ["dead", "idle", "olderr", "old", "none"])
     }
 
+    @Test func rowsInsideASectionAreNewestFirstEvenWhenAnOlderOneNeedsYou() {
+        let g = SessionGrouping.group([s("older-blocked", .blocked, ago: 600), s("newer-blocked", .blocked, ago: 5),
+                                       s("w-old", .working, ago: 900), s("w-new", .working, ago: 3)], now: now)
+        #expect(g[0].sessions.map(\.title) == ["newer-blocked", "older-blocked"])
+        #expect(g[1].sessions.map(\.title) == ["w-new", "w-old"])
+        // Search lists the newest chat first among equal matches.
+        let hits = SearchIndex(sessions: [s("fix a", .idle, ago: 900), s("fix b", .idle, ago: 5)], messages: [:]).search("fix")
+        #expect(hits.map(\.key.hostSessionId) == ["fix b", "fix a"])
+    }
+
     @Test func staleFinishesFallToIdleAndAreEarlier() {
         let old = s("old", .finished, ago: 86400 * 3)
         #expect(SessionGrouping.kind(of: old, now: now) == .idle)

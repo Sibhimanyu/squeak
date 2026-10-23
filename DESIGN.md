@@ -493,8 +493,14 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   agent's own failure reason ("You've hit your session limit · resets 7:20pm")
   in muted footnote type, two lines at most, with the error colour on its left
   edge as well as its dot.
-- Rows are grouped and ordered by attention: needs you, then done, then
-  working, then error, then idle.
+- **Every list is newest first by last activity; urgency lives in Needs you,
+  not in sort order** (owner's rule, 2026-10-23). Home by project puts the
+  project with the newest chat on top, and a project's chats are newest first
+  (an older chat that needs you does not outrank a newer one; it is marked and
+  waits in Needs you). Status groups keep their order (Needs you, Working,
+  Done, Error, Idle) with rows newest first inside each; so do previews, View
+  all, Earlier, search results (active before earlier), the Needs you page
+  and the Telegram radar's sections. Ties are stable by title.
 - A row is a button: it opens the session's detail (app) or offers its actions
   (phone). Hover: `surface-raised`.
 
@@ -506,8 +512,8 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   snapshot, so nothing waits on the network. A card is one neutral surface
   (12pt, a hairline, no shadow, no state fill) and stays short:
   - A **project card**: a neutral Lucide folder tile, the name, and one line of
-    counts in attention order that adds up to the whole ("3 sessions · 1 needs
-    you · 1 working", idle included); then its one or two most urgent chats; then
+    counts that add up to the whole ("3 sessions · 1 needs
+    you · 1 working", idle included); then its one or two newest chats; then
     **View all N sessions**, a real row with a chevron, not a caption. Its only
     needs-you mark is the left edge: no badge, because the line says it.
   - A **status card**: the state's word, a dot (not under Needs you, which has

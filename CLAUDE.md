@@ -458,6 +458,10 @@ transcripts, and ranks them by what is blocked on the human.
 - **Callback data caps at 64 bytes.** Session keys do not fit, so
   `FleetStore.handleFor` allocates short integer aliases. Never put a raw
   session key in `callback_data`.
+- **Every list is newest first by last activity; urgency lives in Needs you, not in sort order.**
+  Home projects by their newest chat, chats newest first inside a project and inside a status group
+  (group order stays Needs you, Working, Done, Error, Idle), on the phone, web, Mac and the daemon's
+  `/state` and radar. Ties are stable by title. Do not reintroduce attention ranking into a sort.
 - **Only *active* sessions reach a screen** — running, blocked, finished in the
   last 24 hours (`DEFAULT_RECENTLY_FINISHED_MS`; the Mac app's `ConductorStatus`
   and `SessionOrdering` mirror it), or quiet with a live process. Everything else stays

@@ -4,7 +4,7 @@
 // needs you, and what it asks, are the Mac's words.
 
 import { replyBlock, waitsOnYou } from "./format.js";
-import { ask, firstLine, read, status } from "./presentation.js";
+import { ask, firstLine, newestFirst, read, status } from "./presentation.js";
 import { isFailed, statusLine } from "./send-state.js";
 
 /** What the chat waits for, which decides the card's controls. */
@@ -114,19 +114,12 @@ export function card(session) {
   };
 }
 
-const sinceMs = (session) => {
-  const t = Date.parse(session.lastActivityAt);
-  return Number.isFinite(t) ? t : Infinity;
-};
-
 /**
- * The chats that wait on you, in the order the page shows them: a tool call
- * nothing else can answer ahead of questions this browser can, and the one
- * that has waited longest first.
+ * The chats that wait on you, in the order the page shows them: newest first by
+ * last activity (every list is; this page is where urgency lives, not the sort).
  */
 export function ordered(sessions) {
-  const rank = (s) => (["approval", "blocked"].includes(kind(s)) ? 0 : 1);
-  return sessions.filter(waitsOnYou).sort((a, b) => rank(a) - rank(b) || sinceMs(a) - sinceMs(b));
+  return newestFirst(sessions.filter(waitsOnYou));
 }
 
 /** One or two are all full; from three on the first two are full and the rest wait in rows. */

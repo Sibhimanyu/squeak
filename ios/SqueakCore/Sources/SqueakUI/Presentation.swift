@@ -378,7 +378,7 @@ enum Presentation {
     /// A card's preview: the first `limit` chats of a group already in attention order, and how many
     /// more the group holds. Nothing is invented; a group of two shows both and says nothing more.
     static func preview(_ sessions: [PhoneSnapshot.Session], limit: Int = 2) -> (shown: [PhoneSnapshot.Session], more: Int) {
-        let ordered = byAttention(sessions)
+        let ordered = newestFirst(sessions)
         let shown = Array(ordered.prefix(max(0, limit)))
         return (shown, ordered.count - shown.count)
     }
@@ -423,13 +423,15 @@ enum Presentation {
         }
     }
 
-    /// Newest first among equals; an unparseable time sorts last.
-    private static func newer(_ a: PhoneSnapshot.Session, _ b: PhoneSnapshot.Session) -> Bool {
-        (Age.date(a.lastActivityAt) ?? .distantPast) > (Age.date(b.lastActivityAt) ?? .distantPast)
+    /// Newest first by last activity; an unparseable time sorts last; ties are stable by title.
+    static func newer(_ a: PhoneSnapshot.Session, _ b: PhoneSnapshot.Session) -> Bool {
+        let x = Age.date(a.lastActivityAt) ?? .distantPast, y = Age.date(b.lastActivityAt) ?? .distantPast
+        return x != y ? x > y : (a.title ?? "") < (b.title ?? "")
     }
 
-    static func byAttention(_ sessions: [PhoneSnapshot.Session]) -> [PhoneSnapshot.Session] {
-        sessions.sorted { rank($0) != rank($1) ? rank($0) < rank($1) : newer($0, $1) }
+    /// Every list is newest first by last activity. Urgency lives in Needs you, not in sort order.
+    static func newestFirst(_ sessions: [PhoneSnapshot.Session]) -> [PhoneSnapshot.Session] {
+        sessions.sorted(by: newer)
     }
 
     struct Project: Equatable, Identifiable {
@@ -444,8 +446,8 @@ enum Presentation {
         split(label: repoBranch(session)).repo ?? repoBranch(session)
     }
 
-    /// Sessions by repository. Projects in attention order (the most urgent chat in each decides,
-    /// then the most recent), and each project's chats the same way.
+    /// Sessions by repository. Projects ordered by their most recent chat, newest first, and each
+    /// project's chats newest first.
     static func projects(_ sessions: [PhoneSnapshot.Session]) -> [Project] {
         var groups: [String: [PhoneSnapshot.Session]] = [:]
         var order: [String] = []
@@ -454,10 +456,10 @@ enum Presentation {
             if groups[name] == nil { order.append(name) }
             groups[name, default: []].append(session)
         }
-        let projects = order.map { Project(name: $0, sessions: byAttention(groups[$0] ?? [])) }
+        let projects = order.map { Project(name: $0, sessions: newestFirst(groups[$0] ?? [])) }
         return projects.sorted { a, b in
             guard let x = a.sessions.first, let y = b.sessions.first else { return a.name < b.name }
-            return rank(x) != rank(y) ? rank(x) < rank(y) : newer(x, y)
+            return newer(x, y) || (!newer(y, x) && a.name < b.name)
         }
     }
 
@@ -590,7 +592,7 @@ struct EarlierFilter: Equatable {
     mutating func clear() { self = EarlierFilter(sort: sort) }
 
     func apply(_ sessions: [PhoneSnapshot.Session], query: String = "") -> [PhoneSnapshot.Session] {
-        sessions.filter { session in
+        Presentation.newestFirst(sessions).filter { session in
             (!openOnly || session.open == true)
                 && (project.map { Presentation.projectName(session) == $0 } ?? true)
                 && (agent.map { session.agent.lowercased() == $0 } ?? true)

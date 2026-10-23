@@ -8,7 +8,7 @@ import { chevronDown, chevronRight, chevronUp, history, projectMark } from "./ic
 import {
   age,
   agentLabel as agent,
-  byAttention,
+  newestFirst,
   displayTitle,
   filterHeading,
   headerCount,
@@ -32,7 +32,7 @@ export function homeModel({ view, active, recent, seen, query, grouping }) {
   const unread = unreadReplies(active, recent, seen);
   const unreadKeys = new Set(unread.map((s) => s.key));
   const sessions = active.filter((s) => !unreadKeys.has(s.key));
-  const earlier = recent.filter((s) => !unreadKeys.has(s.key));
+  const earlier = newestFirst(recent.filter((s) => !unreadKeys.has(s.key)));
   const searching = String(query ?? "").trim() !== "";
   return {
     hasView: view !== null && view !== undefined,
@@ -47,8 +47,8 @@ export function homeModel({ view, active, recent, seen, query, grouping }) {
     // Search skips the groups: every chat that matches, active ones first, then the earlier ones.
     results: searching
       ? {
-          active: byAttention(active.filter((s) => matches(s, query))),
-          older: recent.filter((s) => matches(s, query)),
+          active: newestFirst(active.filter((s) => matches(s, query))),
+          older: newestFirst(recent.filter((s) => matches(s, query))),
         }
       : null,
   };
@@ -150,7 +150,7 @@ function statusCard({ filter, count }, env, all) {
   const id = `s:${filter}`;
   const open = !needs && env.expanded.has(id);
   const pv = preview(sessions, previewLimit(filter));
-  const shown = open ? byAttention(sessions) : pv.shown;
+  const shown = open ? newestFirst(sessions) : pv.shown;
   const act = needs ? env.actions.openNeeds : () => env.actions.toggle(id);
   return cardShell(
     needs ? "gcard needs" : "gcard",

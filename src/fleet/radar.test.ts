@@ -97,6 +97,34 @@ describe("formatAge", () => {
 });
 
 describe("renderRadar", () => {
+  it("lists each section newest first, even when an older session is the blocked one", () => {
+    const text = renderRadar(
+      snapshot({
+        sessions: [
+          session({ key: "w-old", title: "Old worker", state: "working", lastActivityAt: "2026-09-20T11:00:00.000Z" }),
+          session({ key: "w-new", title: "New worker", state: "working", lastActivityAt: "2026-09-20T11:59:00.000Z" }),
+          session({
+            key: "b-old",
+            title: "Old ask",
+            state: "awaiting_input",
+            lastActivityAt: "2026-09-20T10:00:00.000Z",
+          }),
+          session({
+            key: "b-new",
+            title: "New ask",
+            state: "awaiting_input",
+            lastActivityAt: "2026-09-20T11:30:00.000Z",
+          }),
+        ],
+      }),
+      now,
+    );
+    // Blocked stays its own section first; inside each section, newest first.
+    expect(text.indexOf("New ask")).toBeLessThan(text.indexOf("Old ask"));
+    expect(text.indexOf("Old ask")).toBeLessThan(text.indexOf("New worker"));
+    expect(text.indexOf("New worker")).toBeLessThan(text.indexOf("Old worker"));
+  });
+
   it("always names the agent, so two sessions on the same branch are never identical rows", () => {
     // Conductor allows a Claude chat and a Codex chat open on the same
     // workspace at once; before this, two such rows rendered with nothing to

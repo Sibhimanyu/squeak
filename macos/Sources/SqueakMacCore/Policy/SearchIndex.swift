@@ -21,7 +21,7 @@ public struct SearchIndex: Sendable {
     private let entries: [Entry]
 
     public init(sessions: [HostSession], messages: [SessionKey: [ChatMessage]]) {
-        entries = sessions.enumerated().map { i, s in
+        entries = sessions.sorted(by: SessionOrdering.before).enumerated().map { i, s in
             let titles = [s.title, s.distinctTitle ?? ""].joined(separator: " ")
             return Entry(
                 key: s.key,
@@ -37,7 +37,7 @@ public struct SearchIndex: Sendable {
     }
 
     /// Every whitespace-separated term must appear in the session's title or in its
-    /// messages. Title matches come first, then catalog order.
+    /// messages. Title matches come first, then newest first by last activity.
     public func search(_ query: String) -> [SearchHit] {
         let terms = Self.fold(query).split(whereSeparator: \.isWhitespace).map(String.init)
         guard !terms.isEmpty else { return [] }

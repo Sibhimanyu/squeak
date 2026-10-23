@@ -1,7 +1,7 @@
 import Foundation
 
-/// DESIGN.md 8.2: rows are grouped and ordered by attention: needs you, then done, then working,
-/// then error, then idle.
+/// DESIGN.md 8.2: sections keep their order (needs you, done, working, error, idle); inside every
+/// section, rows are newest first by last activity. Urgency lives in Needs you, not in sort order.
 public enum SessionSectionKind: String, CaseIterable, Sendable {
     case needsYou, done, working, error, idle
 
