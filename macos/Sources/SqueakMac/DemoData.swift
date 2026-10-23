@@ -75,6 +75,10 @@ enum DemoData {
                approval: Bool = false) -> HostSession {
             var caps = Capabilities(readTranscript: .supported, send: .supported, activity: .supported)
             if provider == "conductor" { caps.openInHost = .supported }
+            // Capture only: the composer's "Reconnecting" state (SQUEAK_MAC_DEMO_SERVICE_DOWN=1).
+            if ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_SERVICE_DOWN"] == "1" {
+                caps.send = .unavailable("The Squeak service isn't running, so replies can't be delivered")
+            }
             return HostSession(
                 key: SessionKey(provider: provider, hostSessionId: id), title: title, repoName: repo, branch: branch,
                 agent: agent, state: state, lastActivityAt: now.addingTimeInterval(-min * 60), alive: true, replyTarget: id,

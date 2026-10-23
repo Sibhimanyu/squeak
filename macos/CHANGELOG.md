@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.24
+
+- Quick message no longer says a chat can't be answered when Squeak's service is only restarting.
+  It says it is reconnecting, keeps Send on, and checks again when you press it; your text stays
+  if it still can't go.
+
 ## 2.1.23
 
 - A finished chat stays in the list for a day, not 15 minutes, so work you have not looked at yet

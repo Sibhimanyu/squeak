@@ -314,6 +314,14 @@ struct QuickComposerView: View {
         .onPreferenceChange(QuickHeightKey.self) { resize($0) }
         // Follows the panel to another display, so the context's room is the screen it is on.
         .background(ScreenHeightReader { if let h = $0 { state.screenHeight = h } })
+        // Open and the service isn't answering: look again now and every few seconds, so Send's
+        // recovery shows within moments instead of at the next full refresh.
+        .task(id: reconnecting) {
+            while reconnecting, !Task.isCancelled {
+                model.probeService()
+                try? await Task.sleep(for: .seconds(2.5))
+            }
+        }
         .onChange(of: state.sending) { _, sending in
             guard !reduceMotion else { return }
             if sending {
@@ -481,7 +489,15 @@ struct QuickComposerView: View {
     /// Terminal). The destination menu lists the chats it can answer.
     private var cannotReply: String? {
         guard let target, !model.canSend(target) else { return nil }
+        // Say the actual reason; "pick another" only when this chat is the problem.
+        if let why = target.capabilities.send.reason, !why.isEmpty { return "\(why). Pick another chat with To." }
         return "Squeak can't reply to this chat from here. Pick one it can with To."
+    }
+
+    /// Send stays on, but the service isn't answering: say so, and keep looking.
+    private var reconnecting: Bool {
+        guard let target else { return false }
+        return model.serviceDown(target)
     }
 
     private var destinationTitle: String {
@@ -510,6 +526,9 @@ struct QuickComposerView: View {
                 HStack(spacing: 6) { Lucide(f.symbol, size: 14, color: f.color); Text(f.text).foregroundStyle(f.color).lineLimit(1) }
             } else if !model.isConnected, model.health != nil {
                 Text("Offline").foregroundStyle(Theme.muted)
+            } else if reconnecting {
+                Text("Reconnecting to Squeak… Send tries again.").foregroundStyle(Theme.muted).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if let reason = cannotReply {
                 // Send is off for a reason you can act on: say it, never just grey the button.
                 HStack(spacing: 6) {

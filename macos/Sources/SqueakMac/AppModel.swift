@@ -532,8 +532,17 @@ final class AppModel {
     var attentionCount: Int { sessions.filter { $0.state == .blocked && $0.alive != false }.count }
 
     func canSend(_ s: HostSession) -> Bool {
-        if case .unsupported = s.capabilities.send { return false }
+        guard s.capabilities.send.isOffered else { return false }
         return s.replyTarget != nil
+    }
+
+    /// Sending is off only because the service isn't answering right now (the chat itself is fine).
+    func serviceDown(_ s: HostSession) -> Bool { s.capabilities.send.isServiceUnavailable }
+
+    /// Looks at the service again now (a composer that is open and not ready calls this every few seconds).
+    func probeService() {
+        guard !demoMode else { return }
+        Task { await broker.refresh() }
     }
 
     var sendableSessions: [HostSession] { ordered.flattened.filter(canSend) }
@@ -832,6 +841,12 @@ final class AppModel {
         case .refused: AppLog.info("send refused")
         case .uncertain: AppLog.info("send uncertain")
         case .notSent: AppLog.info("send not sent")
+        }
+        // Nothing left our hands: the words go back to the draft so they are never lost.
+        switch result {
+        case .refused, .notSent:
+            if key == selected, draft.isEmpty { setDraft(text) }
+        default: break
         }
         return result
     }

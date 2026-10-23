@@ -539,6 +539,12 @@ struct SessionDetail: View {
         VStack(alignment: .leading, spacing: 8) {
             composer
             Text(verbatim: destinationNote).font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, 4)
+                .task(id: model.serviceDown(session)) {
+                    while model.serviceDown(session), !Task.isCancelled {
+                        model.probeService()
+                        try? await Task.sleep(for: .seconds(2.5))
+                    }
+                }
         }
         .frame(maxWidth: 820)
         .padding(.horizontal, 28)
@@ -565,6 +571,7 @@ struct SessionDetail: View {
     private var destinationNote: String {
         if let why = sendBlock { return "Can't reply here: \(why)" }
         if !model.isConnected { return "Not connected. Replies wait until Squeak's service is back." }
+        if model.serviceDown(session) { return "Reconnecting to Squeak's service… Send tries again." }
         if working {
             return queueSteerExplained
                 ? "Queues after this turn · ⇧⌘↩ steers now"

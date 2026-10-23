@@ -329,6 +329,7 @@ public actor Broker {
             record(r.messageState)
             return r
         }
+        // `.unavailable` (the service is down) passes: the adapter rechecks and says so if it still is.
         if case .unsupported(let reason) = session.capabilities.send {
             let r = SendResult.notSent(reason: reason)
             record(r.messageState)
@@ -337,6 +338,8 @@ public actor Broker {
         // Recorded before awaiting, so a re-entrant call with this id sees it.
         record(.pending)
         let result = await adapter.send(text, to: session, clientId: clientId, mode: mode)
+        // The send rechecked the service; let every surface see what it learned.
+        if session.capabilities.send.isServiceUnavailable { await refresh() }
         setLocalState(clientId, in: key, to: result.messageState)
         switch result {
         case .accepted, .uncertain:

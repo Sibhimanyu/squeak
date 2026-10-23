@@ -29,9 +29,17 @@ public final class DaemonSender: ConductorSender, @unchecked Sendable {
         return "Sending is not available"
     }
 
+    public var unavailableIsTransient: Bool { !lock.withLock { reachable } }
+
     public func refresh() async {
         let due = lock.withLock { checkedAt.map { now().timeIntervalSince($0) >= minRecheck } ?? true }
         guard due else { return }
+        await probe()
+    }
+
+    public func recheck() async { await probe() }
+
+    private func probe() async {
         let ok = (try? await client.state()) != nil
         lock.withLock {
             reachable = ok
