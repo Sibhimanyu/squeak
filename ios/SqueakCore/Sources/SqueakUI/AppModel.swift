@@ -83,6 +83,9 @@ final class AppModel {
     /// The Mac's view as written, and the recent document a split one leaves out. `snapshot` is these
     /// merged, with the open chat's state from its live turn when that is newer (`rebuild`).
     @ObservationIgnored private var baseSnapshot: PhoneSnapshot?
+    /// When a view last arrived from the Mac (stream or fetch) in this run: never the demo's, never anything
+    /// read from disk. The launch splash waits for it.
+    private(set) var freshSnapshotAt: Date?
     @ObservationIgnored private var recentDoc: PhoneRecent?
     @ObservationIgnored private var seenSessions = SeenSessions()
     /// Chats this phone has a stake in (opened, sent to, or watched working) and when each was last looked at,
@@ -384,6 +387,7 @@ final class AppModel {
         snapshotEpoch += 1
         if let next, !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) {
             baseSnapshot = next
+            freshSnapshotAt = Date()
             rebuild()
         }
         lastFetch = Date()
@@ -497,6 +501,7 @@ final class AppModel {
             if let next = try await channel.snapshot(), epoch == snapshotEpoch {
                 if next.split == true, let recent = try await channel.recent() { recentDoc = recent }
                 if !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) { baseSnapshot = next }
+                freshSnapshotAt = Date()
                 rebuild()
             }
             // Best effort: an older Mac never answers, and that must not read as a broken channel.
