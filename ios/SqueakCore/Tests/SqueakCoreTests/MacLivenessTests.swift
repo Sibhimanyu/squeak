@@ -34,3 +34,15 @@ final class MacLivenessTests: XCTestCase {
         XCTAssertEqual(alive.date.timeIntervalSince1970, 1_792_400_000.123, accuracy: 0.001)
     }
 }
+
+final class MacHeatTests: XCTestCase {
+    func testHeatReadsAsOneLineAndOlderMacsSendNone() throws {
+        let json = #"{"v":1,"mac":"Mac","generatedAt":"2026-10-23T08:00:00Z","duck":{"blockedCount":0,"workingCount":0},"sessions":[],"macHeat":{"level":"warm","chip":91,"battery":41,"fansRpm":[7800,7700],"fansMax":true,"fanControl":true}}"#
+        let heat = try XCTUnwrap(try JSONDecoder().decode(PhoneSnapshot.self, from: Data(json.utf8)).macHeat)
+        XCTAssertEqual(heat.reading, "Chip 91°C · battery 41°C · fans 7,800 rpm, full")
+        XCTAssertEqual(PhoneSnapshot.MacHeat(level: "ok", chip: 50, fansRpm: [0]).reading, "Chip 50°C · fans off")
+        XCTAssertNil(PhoneSnapshot.MacHeat(level: "ok").reading)
+        let old = #"{"v":1,"mac":"Mac","generatedAt":"2026-10-23T08:00:00Z","duck":{"blockedCount":0,"workingCount":0},"sessions":[]}"#
+        XCTAssertNil(try JSONDecoder().decode(PhoneSnapshot.self, from: Data(old.utf8)).macHeat)
+    }
+}

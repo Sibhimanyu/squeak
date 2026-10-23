@@ -128,6 +128,9 @@ export class AwakeSession {
   private wantLowPower = false;
   /** The lid is closed during a lid session and its actions ask for Low Power Mode (lid-actions.ts). */
   private lidLowPower = false;
+  /** heat.ts wants Low Power Mode, and its line for surfaces. */
+  private heatLowPower = false;
+  private heatWhy: string | null = null;
   /** Low Power Mode was already on (the user's) when asked: leave it alone until the want goes. */
   private lowPowerDeclined = false;
   /** Whether Squeak turned Low Power Mode on and has not turned it off. */
@@ -158,8 +161,20 @@ export class AwakeSession {
       lidStatus: this.lidStatus,
       ...(this.lidProblem ? { lidProblem: this.lidProblem } : {}),
       lowPower: this.lowPowerActual,
-      ...(this.safetyWhy ? { safety: this.safetyWhy } : {}),
+      ...(this.safetyWhy || this.heatWhy ? { safety: (this.safetyWhy ?? this.heatWhy)! } : {}),
     };
+  }
+
+  /** The Mac runs warm during the session (heat.ts): Low Power Mode, and the line surfaces show. */
+  setHeat(wanted: boolean, why: string | null): Promise<void> {
+    const changed = this.heatWhy !== why;
+    this.heatWhy = this.saved ? why : null;
+    if (changed) this.options.onChange?.();
+    if (this.heatLowPower === wanted) {
+      return this.lidChain;
+    }
+    this.heatLowPower = wanted;
+    return this.syncLid();
   }
 
   /** The lid closed (or opened) during a lid session, and its actions want Low Power Mode. */
@@ -353,6 +368,8 @@ export class AwakeSession {
     this.safetyWhy = null;
     this.wantLowPower = false;
     this.lidLowPower = false;
+    this.heatLowPower = false;
+    this.heatWhy = null;
     this.ended = { reason, at: new Date(this.now()).toISOString(), ...(why ? { why } : {}) };
     this.options.hold(false);
     this.write(null);
@@ -383,7 +400,11 @@ export class AwakeSession {
 
   private async reconcileLowPower(): Promise<void> {
     const lid = this.options.lid;
-    const want = (this.wantLowPower || this.lidLowPower) && this.lidRule && this.saved !== null && !this.stopping;
+    const want =
+      (this.wantLowPower || this.lidLowPower || this.heatLowPower) &&
+      this.lidRule &&
+      this.saved !== null &&
+      !this.stopping;
     if (!want) this.lowPowerDeclined = false;
     if (!lid || want === this.lowPowerActual || (want && this.lowPowerDeclined)) {
       return;

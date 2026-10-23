@@ -51,6 +51,11 @@ export interface IngressControl {
   /** The sudoers file lid-closed sessions need, for the Mac app to install with an admin prompt. */
   lidRule?(): { path: string; rule: string } | null;
   /**
+   * Fan control's sudoers file and where its root-owned helper goes (fleet/heat.ts), for the Mac
+   * app to install with an admin prompt; it copies the helper from its own bundle.
+   */
+  fanRule?(): { path: string; rule: string; helperPath: string } | null;
+  /**
    * Starts, extends or ends an awake session (fleet/awake-session.ts,
    * `readAwakeAction` shapes). Answers the session after, or why not.
    */
@@ -348,6 +353,17 @@ export class HookIngressServer {
       request.on("error", () => {
         aborted = true;
       });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/heat/fan-rule") {
+      request.resume();
+      const rule = control.fanRule?.() ?? null;
+      if (!rule) {
+        respond(response, 503, "fan rule unavailable");
+        return;
+      }
+      respondJson(response, 200, rule);
       return;
     }
 

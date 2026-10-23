@@ -21,6 +21,14 @@ import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
 import { preparePhoneMedia } from "../remote/phone-media.js";
 import { HotspotFailover, macHotspotSystem, readHotspotRequest } from "../fleet/hotspot.js";
+import {
+  FANS_HELPER_PRIVILEGED,
+  FANS_SUDOERS_PATH,
+  fansSudoersRule,
+  HEAT_CHECK_MS,
+  HeatGovernor,
+  macHeatSystem,
+} from "../fleet/heat.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
@@ -133,6 +141,9 @@ export class SqueakApp {
   private readonly lidActions: LidActions;
   private lidRuleTimer: NodeJS.Timeout | null = null;
   private safetyTimer: NodeJS.Timeout | null = null;
+  /** Temperatures and fans while an awake session runs (fleet/heat.ts). */
+  private readonly heat: HeatGovernor;
+  private heatTimer: NodeJS.Timeout | null = null;
   /** The Mac's last battery/heat/lid reading, for the phone; refreshed once a minute. */
   private power: PowerReading | null = null;
   private unwatchCaffeinate: (() => void) | null = null;
@@ -160,6 +171,18 @@ export class SqueakApp {
         this.awake.active || this.runtime?.monitor.snapshot.active.some((s) => s.state === "working") === true,
       onChange: () => this.remote?.changed(),
       notify: (text) => this.announce(text),
+    });
+    this.heat = new HeatGovernor({
+      // The Mac app bundles the reader; a hand-built one in the support folder works too.
+      system: macHeatSystem([
+        "/Applications/Squeak.app/Contents/Helpers/squeak-fans",
+        path.join(config.supportDir, "squeak-fans"),
+      ]),
+      journalPath: path.join(config.supportDir, "heat-journal.json"),
+      setLowPower: (want, why) => void this.awake.setHeat(want, why),
+      end: (why) => this.awake.end("heat", why),
+      notify: (text) => this.announce(text),
+      onChange: () => this.remote?.changed(),
     });
     this.lidActions = new LidActions({
       settingsPath: path.join(config.supportDir, "awake-settings.json"),
@@ -289,6 +312,7 @@ export class SqueakApp {
               state: () => this.awake.state,
               lidReady: () => this.awake.lidReady,
               power: () => (this.power ? phonePower(this.power) : null),
+              heat: () => phoneHeat(this.heat, this.awake.active),
               apply: (request) => this.applyAwake(request),
               lidActions: () => this.lidActions.settings,
               rules: () => awakeRules(config.awakeSafety),
@@ -360,6 +384,10 @@ export class SqueakApp {
       awake: (request) => this.applyAwake(request),
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
+      fanRule: () => {
+        const rule = fansSudoersRule(os.userInfo().username);
+        return rule ? { path: FANS_SUDOERS_PATH, rule, helperPath: FANS_HELPER_PRIVILEGED } : null;
+      },
       lidRule: () => {
         const rule = sudoersRule(os.userInfo().username);
         return rule ? { path: SUDOERS_PATH, rule } : null;
@@ -391,6 +419,7 @@ export class SqueakApp {
       sleepProblem: this.awake.sleepProblem,
       rules: awakeRules(config.awakeSafety),
       hotspot: this.hotspot.state,
+      heat: this.heat.state,
     }));
     const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
       this.claudeLimits.record(limits),
@@ -433,6 +462,7 @@ export class SqueakApp {
     // with the lid still shut, and keep what they did rather than undo and redo it.
     await this.awake.restore();
     await this.lidActions.recover();
+    await this.heat.recover();
     await this.hotspot.start().catch((error: unknown) =>
       logger.warn("hotspot failover failed to start", {
         error: error instanceof Error ? error.message : String(error),
@@ -445,6 +475,9 @@ export class SqueakApp {
     // The safety rules read the battery and heat once a minute while a session runs.
     this.safetyTimer = setInterval(() => void this.checkAwakeSafety(), 60_000);
     this.safetyTimer.unref?.();
+    // Heat is looked at every 15 s, but acted on only during an awake session.
+    this.heatTimer = setInterval(() => void this.checkHeat(), HEAT_CHECK_MS);
+    this.heatTimer.unref?.();
     // Conductor's repository icons, read now and every few minutes (they change when someone sets one).
     void this.refreshProjectIcons();
     this.projectIconsTimer = setInterval(() => void this.refreshProjectIcons(), 5 * 60_000);
@@ -507,6 +540,8 @@ export class SqueakApp {
     this.unwatchCaffeinate?.();
     if (this.lidRuleTimer) clearInterval(this.lidRuleTimer);
     if (this.safetyTimer) clearInterval(this.safetyTimer);
+    if (this.heatTimer) clearInterval(this.heatTimer);
+    await this.heat.stop().catch(() => undefined);
     if (this.projectIconsTimer) clearInterval(this.projectIconsTimer);
     await this.lidActions.stop().catch(() => undefined);
     await this.awake.stop().catch(() => undefined);
@@ -537,6 +572,12 @@ export class SqueakApp {
         return { ok: false as const, reason: "Expected settings." };
       }
       this.lidActions.updateSettings(readLidActionSettings({ ...this.lidActions.settings, ...settings }));
+      return { ok: true as const, state: this.awake.state };
+    }
+    // The Mac app asks after installing fan control.
+    if ((request as { action?: unknown } | null)?.action === "recheck-fans") {
+      this.heat.recheckFanControl();
+      await this.checkHeat(true);
       return { ok: true as const, state: this.awake.state };
     }
     // The Mac app asks after installing or removing the lid rule.
@@ -578,6 +619,15 @@ export class SqueakApp {
     }).catch((error: unknown) => {
       logger.warn("awake backstop failed", { error: error instanceof Error ? error.message : String(error) });
     });
+  }
+
+  /** A session's look at heat; outside one, a look a minute only so surfaces have a reading. */
+  private heatLooks = 0;
+  private async checkHeat(now = false): Promise<void> {
+    const active = this.awake.active;
+    if (!active && !now && this.heatLooks++ % 4 !== 0) return;
+    const power = active ? await readPower() : this.power;
+    await this.heat.check({ battery: power?.batteryTemp ?? null, lidClosed: power?.lidClosed ?? null }, active);
   }
 
   private async checkAwakeSafety(): Promise<void> {
@@ -824,5 +874,19 @@ function phonePower(reading: PowerReading) {
     onBattery: reading.onBattery,
     watts: reading.watts == null ? null : Math.round(reading.watts),
     lidClosed: reading.lidClosed ?? null,
+  };
+}
+
+/** Heat as the phone shows it, while a session runs: whole degrees, rounded fan speeds. */
+function phoneHeat(heat: HeatGovernor, active: boolean) {
+  const state = heat.state;
+  if (!active || (state.die === null && state.battery === null)) return null;
+  return {
+    level: state.level,
+    chip: state.die,
+    battery: state.battery,
+    fansRpm: state.fansRpm,
+    fansMax: state.fansMax,
+    fanControl: state.fanControl,
   };
 }

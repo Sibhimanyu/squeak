@@ -17,7 +17,12 @@ function runScript(
   journal: Record<string, unknown> | string | null,
   daemonRunning: boolean,
   actions: Record<string, unknown> | null = null,
-  fakes: { sudoFails?: boolean; osascriptFails?: boolean; plutilDiagnosticsOnStdout?: boolean } = {},
+  fakes: {
+    sudoFails?: boolean;
+    osascriptFails?: boolean;
+    plutilDiagnosticsOnStdout?: boolean;
+    heat?: Record<string, unknown>;
+  } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak backstop '"));
   dirs.push(dir);
@@ -25,6 +30,11 @@ function runScript(
   if (journal) fs.writeFileSync(journalPath, typeof journal === "string" ? journal : JSON.stringify(journal));
   const actionsPath = path.join(dir, "lid-actions.json");
   if (actions) fs.writeFileSync(actionsPath, JSON.stringify(actions));
+  const heatPath = path.join(dir, "heat-journal.json");
+  if (fakes.heat) fs.writeFileSync(heatPath, JSON.stringify(fakes.heat));
+  const taskpolicyLog = path.join(dir, "taskpolicy.log");
+  const taskpolicy = path.join(dir, "taskpolicy");
+  fs.writeFileSync(taskpolicy, `#!/bin/bash\necho "$*" >> ${JSON.stringify(taskpolicyLog)}\n`, { mode: 0o755 });
   const osascriptLog = path.join(dir, "osascript.log");
   const osascript = path.join(dir, "osascript");
   fs.writeFileSync(
@@ -42,7 +52,7 @@ function runScript(
     mode: 0o755,
   });
   const script = path.join(dir, "backstop.sh");
-  let text = backstopScript(journalPath, actionsPath);
+  let text = backstopScript(journalPath, actionsPath, heatPath);
   if (fakes.plutilDiagnosticsOnStdout) {
     // The macOS 15 runner's plutil reported "Could not extract value" on
     // stdout, not stderr. Same real plutil, with its stderr folded into stdout.
@@ -64,6 +74,7 @@ function runScript(
       SQUEAK_BACKSTOP_SUDO: sudo,
       SQUEAK_BACKSTOP_LAUNCHCTL: launchctl,
       SQUEAK_BACKSTOP_OSASCRIPT: osascript,
+      SQUEAK_BACKSTOP_TASKPOLICY: taskpolicy,
     },
     stdio: ["ignore", "ignore", "ignore"],
   });
@@ -71,11 +82,37 @@ function runScript(
     sudo: fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : [],
     journalLeft: fs.existsSync(journalPath),
     actionsLeft: fs.existsSync(actionsPath),
+    heatLeft: fs.existsSync(heatPath),
+    taskpolicy: fs.existsSync(taskpolicyLog) ? fs.readFileSync(taskpolicyLog, "utf8").trim().split("\n") : [],
     osascript: fs.existsSync(osascriptLog) ? fs.readFileSync(osascriptLog, "utf8").trim() : "",
   };
 }
 
 describe("the awake backstop script", { timeout: 30_000 }, () => {
+  it("gives the fans back and agents every core when the daemon is gone, only for the same process", () => {
+    const startedAt = execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(process.pid)], {
+      env: { ...process.env, TZ: "UTC" },
+    })
+      .toString()
+      .trim()
+      .replace(/\s+/g, " ");
+    const heat = {
+      fansMax: true,
+      slowed: [
+        { pid: process.pid, startedAt },
+        { pid: process.pid, startedAt: "Thu Jan 1 00:00:00 1970" },
+      ],
+    };
+    const gone = runScript(null, false, null, { heat });
+    expect(gone.sudo).toEqual(["-n /Library/PrivilegedHelperTools/com.squeak.fans auto"]);
+    expect(gone.taskpolicy).toEqual([`-B -p ${process.pid}`]);
+    expect(gone.heatLeft).toBe(false);
+    const running = runScript(null, true, null, { heat });
+    expect(running).toMatchObject({ sudo: [], taskpolicy: [], heatLeft: true });
+    // A refused `auto` keeps the journal, so the next minute tries again.
+    expect(runScript(null, false, null, { heat, sudoFails: true }).heatLeft).toBe(true);
+  });
+
   it("does nothing without a journal", () => {
     expect(runScript(null, false)).toMatchObject({ sudo: [], journalLeft: false, osascript: "" });
   });

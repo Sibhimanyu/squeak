@@ -82,4 +82,18 @@ struct AwakeFormatTests {
         #expect(AwakeFormat.hotspotProblem(ssid: "Phone", password: "") == "Enter the hotspot's password.")
         #expect(AwakeFormat.hotspotProblem(ssid: "Phone", password: "", keepsPassword: true) == nil)
     }
+
+    @Test func heatReadsAsOneLine() throws {
+        let json = #"{"keepAwake":true,"awake":{},"heat":{"level":"warm","die":91,"battery":41,"fansRpm":[7800,7700],"fansMax":true,"fanControl":true,"slowed":3,"why":"Running warm · chip 91°C, battery 41°C · fans on full · agents slowed"}}"#
+        let heat = try #require(try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8)).heat)
+        #expect(heat == DaemonHeat(level: "warm", die: 91, battery: 41, fansRpm: [7800, 7700], fansMax: true, fanControl: true, slowed: 3,
+                                   why: "Running warm · chip 91°C, battery 41°C · fans on full · agents slowed"))
+        #expect(AwakeFormat.heatTitle(heat) == "Warm")
+        let en = Locale(identifier: "en_US")
+        #expect(AwakeFormat.heatReading(heat, locale: en) == "Chip 91°C · Battery 41°C · Fans 7,800 rpm, full")
+        #expect(AwakeFormat.heatReading(DaemonHeat(die: 50, fansRpm: [0, 0]), locale: en) == "Chip 50°C · Fans off")
+        #expect(AwakeFormat.heatReading(DaemonHeat()) == nil)
+        // An older daemon sends no heat at all.
+        #expect(try JSONDecoder().decode(DaemonState.self, from: Data(#"{"keepAwake":false}"#.utf8)).heat == nil)
+    }
 }

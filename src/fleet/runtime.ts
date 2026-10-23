@@ -1,4 +1,5 @@
 import type { AwakeEnd, AwakeState } from "./awake-session.js";
+import type { HeatState } from "./heat.js";
 import type { HotspotState } from "./hotspot.js";
 import type { LidActionSettings } from "./lid-actions.js";
 import type { AwakeRules } from "./power-monitor.js";
@@ -16,6 +17,8 @@ export interface AwakeView {
   rules?: AwakeRules;
   /** Hotspot failover's name and status; never the password. */
   hotspot?: HotspotState;
+  /** Temperatures, fans and what heat.ts is doing about them. */
+  heat?: HeatState;
 }
 import os from "node:os";
 import path from "node:path";
@@ -259,6 +262,7 @@ export function serializeState(
           awakeSleepProblem: awake.sleepProblem ?? null,
           ...(awake.rules ? { awakeRules: awake.rules } : {}),
           ...(awake.hotspot ? { hotspot: awake.hotspot } : {}),
+          ...(awake.heat ? { heat: awake.heat } : {}),
         }
       : {}),
     active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),

@@ -131,6 +131,9 @@ struct SettingsView: View {
                                 LabeledContent("Lid", value: (closed ? "Closed" : "Open") + stale)
                             }
                         }
+                        if let heat = snapshot.macHeat, let reading = heat.reading {
+                            LabeledContent("Heat", value: reading + Self.lastKnown(model.macLiveness()))
+                        }
                         LabeledContent("Last change", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")
                     }
                     NavigationLink("Connection details") { ConnectionDetailsView() }

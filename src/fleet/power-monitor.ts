@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 
+import { readBatteryTemperature } from "./heat.js";
 import { readClamshell } from "./lid-sleep.js";
 
 /**
@@ -29,6 +30,8 @@ export interface PowerReading {
   lidClosed?: boolean | null;
   /** ioreg shows an AppleSmartBattery: a laptop, whatever pmset managed to say. Null when unread. */
   hasBattery?: boolean | null;
+  /** The battery's temperature, °C (heat.ts); null on a desktop or when unread. */
+  batteryTemp?: number | null;
 }
 
 export const THERMAL_SERIOUS = 2;
@@ -92,6 +95,7 @@ export async function readPower(run: Run = defaultRun): Promise<PowerReading> {
     watts: battery.onBattery && smartBattery !== null ? readWatts(smartBattery) : null,
     lidClosed: clamshell === null ? null : readClamshell(clamshell),
     hasBattery: smartBattery === null ? null : /"Voltage" = \d+/.test(smartBattery),
+    batteryTemp: smartBattery === null ? null : readBatteryTemperature(smartBattery),
   };
 }
 

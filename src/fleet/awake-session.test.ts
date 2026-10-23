@@ -465,6 +465,24 @@ describe("AwakeSession safety rules", () => {
     expect(t.session.lastEnd).toMatchObject({ reason: "heat" });
   });
 
+  it("heat.ts's warm Mac gets Low Power Mode and its line, until it cools or the session ends", async () => {
+    const t = safetySetup();
+    await t.session.refreshLidRule();
+    t.session.start(120);
+    await t.session.setHeat(true, "Running warm · battery 41°C");
+    expect(t.session.state).toMatchObject({ lowPower: true, safety: "Running warm · battery 41°C" });
+    await t.session.setHeat(true, "Running warm · battery 42°C");
+    expect(t.session.state?.safety).toBe("Running warm · battery 42°C");
+    await t.session.setHeat(false, null);
+    expect(t.session.state).toMatchObject({ lowPower: false });
+    expect(t.session.state).not.toHaveProperty("safety");
+    await t.session.setHeat(true, "Running warm · battery 41°C");
+    t.session.end("heat", "Your Mac stayed hot");
+    await t.session.lidSettled();
+    expect(t.calls).toEqual(["lowPowerOn", "lowPowerOff", "lowPowerOn", "lowPowerOff"]);
+    expect(t.session.lastEnd).toMatchObject({ reason: "heat", why: "Your Mac stayed hot" });
+  });
+
   it("cooling down turns Low Power Mode off again mid-session", async () => {
     const t = safetySetup();
     await t.session.refreshLidRule();

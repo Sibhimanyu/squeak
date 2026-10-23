@@ -609,6 +609,8 @@ final class AppModel {
     /// Lid-closed sessions are set up (the sudoers rule is in).
     private(set) var awakeLidReady = false
     private(set) var settingUpLid = false
+    private(set) var settingUpFans = false
+    private(set) var heat: DaemonHeat?
     private(set) var hotspot: DaemonHotspot?
     /// What a closed lid does (nil from a daemon that does not say), and the rest of the daemon's awake report.
     private(set) var awakeLidActions: DaemonLidActions?
@@ -639,6 +641,7 @@ final class AppModel {
         if state.awakeOffered != awakeOffered { awakeOffered = state.awakeOffered }
         if state.awakeLidReady != awakeLidReady { awakeLidReady = state.awakeLidReady }
         if state.hotspot != hotspot { hotspot = state.hotspot }
+        if state.heat != heat { heat = state.heat }
         if state.awakeLidActions != awakeLidActions { awakeLidActions = state.awakeLidActions }
         if state.awakeLidClosedNow != awakeLidClosedNow { awakeLidClosedNow = state.awakeLidClosedNow }
         if state.awakeLastEnd != awakeLastEnd { awakeLastEnd = state.awakeLastEnd }
@@ -753,6 +756,27 @@ final class AppModel {
             awakeNote = awakeLidReady ? "Lid closed is ready. Start a session and your Mac stays awake with the lid shut." : "Installed, but Squeak can't use it yet. Try again in a moment."
         case .cancelled: awakeNote = nil
         case .failed(let reason): awakeNote = "Lid closed wasn't set up. \(reason)"
+        }
+    }
+
+    /// Installs fan control (the root-owned helper and its rule) with macOS's admin prompt, once per Mac.
+    func setUpFanControl() async {
+        guard !settingUpFans, !demoMode else { return }
+        settingUpFans = true
+        defer { settingUpFans = false }
+        guard let rule = await client.fanRule() else {
+            awakeNote = "This version of the Squeak service can't control the fans. Update it first."
+            return
+        }
+        switch await FanRule.install(rule) {
+        case .installed:
+            await client.recheckFans()
+            await readAwake()
+            awakeNote = heat?.fanControl == true
+                ? "Fan control is ready. When your Mac warms up during a session, its fans go to full."
+                : "Installed. Squeak picks it up within a few seconds."
+        case .cancelled: awakeNote = nil
+        case .failed(let reason): awakeNote = "Fan control wasn't set up. \(reason)"
         }
     }
 
