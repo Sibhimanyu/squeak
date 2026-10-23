@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  describeDuration,
   describeHandsJoin,
   HOTSPOT_FAILURES_TO_SWITCH,
   HOTSPOT_MANUAL_QUIET_MS,
@@ -144,7 +145,7 @@ describe("HotspotFailover", () => {
     expect([...off.calls, ...idle.calls.filter((call) => call !== "prepare")]).toEqual([]);
   });
 
-  it("keeps trying on a short backoff through an outage, and says so once", async () => {
+  it("keeps trying on a short backoff through an outage, and says nothing while offline", async () => {
     let now = 1_000_000;
     const mac = fakeMac({ joinWorks: false, online: false });
     const { hotspot, notify } = failover(mac, true, () => now);
@@ -154,8 +155,8 @@ describe("HotspotFailover", () => {
     for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
     expect(joins()).toBe(1);
     expect(hotspot.state.last).toMatchObject({ ok: false, note: expect.stringContaining("is Personal Hotspot on?") });
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0]![0]).toContain("keeps trying");
+    // Telegram and Cliq cannot carry it with no internet.
+    expect(notify).not.toHaveBeenCalled();
     // Not before the wait, then once per wait: 10, 20, 30, 30 s.
     await hotspot.tick();
     expect(joins()).toBe(1);
@@ -164,26 +165,55 @@ describe("HotspotFailover", () => {
       await hotspot.tick();
     }
     expect(joins()).toBe(5);
-    expect(notify).toHaveBeenCalledTimes(1);
-    // The phone's hotspot comes up: joined, and that is said.
+    expect(notify).not.toHaveBeenCalled();
+    // The phone's hotspot comes up: joined, and only that is said.
     mac.setJoinWorks(true);
     now += 60_000;
     await hotspot.tick();
-    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith("The Mac's Wi-Fi dropped, so it joined Phone.");
+    await hotspot.tick();
+    expect(notify).toHaveBeenCalledTimes(1);
   });
 
-  it("says when the Mac is back online after a failed outage, once", async () => {
-    const now = 1_000_000;
+  it("says what went wrong once the Mac is back online, once", async () => {
+    let now = 1_000_000;
     const mac = fakeMac({ joinWorks: false, online: false });
     const { hotspot, notify } = failover(mac, true, () => now);
     await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
     for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
-    expect(notify).toHaveBeenCalledTimes(1);
+    now += HOTSPOT_RETRY_BACKOFF_MS[0]!;
+    await hotspot.tick();
+    now += 7 * 60_000;
     mac.setOnline(true);
     await hotspot.tick();
     await hotspot.tick();
-    expect(notify).toHaveBeenCalledTimes(2);
-    expect(notify.mock.calls[1]![0]).toBe("The Mac is back online.");
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]![0]).toMatch(
+      /^The Mac is back online after 7 min offline\. Couldn't join Phone: is Personal Hotspot on\?.* Squeak tried 2 times\.$/,
+    );
+  });
+
+  it("says nothing when the outage ends because failover was switched off", async () => {
+    const mac = fakeMac({ joinWorks: false, online: false });
+    const { hotspot, notify } = failover(mac);
+    await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
+    for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
+    await hotspot.apply({ action: "configure", ssid: "Phone", enabled: false });
+    await hotspot.tick();
+    mac.setOnline(true);
+    await hotspot.tick();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("does not try to join while on a hotspot that is offline too", async () => {
+    const mac = fakeMac();
+    const { hotspot } = failover(mac);
+    await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
+    await hotspot.apply({ action: "join" });
+    mac.setOnline(false);
+    for (let i = 0; i < 5; i += 1) await hotspot.tick();
+    expect(mac.calls.filter((call) => call.startsWith("join"))).toHaveLength(1);
   });
 
   it("starts each outage's backoff afresh", async () => {
@@ -198,8 +228,8 @@ describe("HotspotFailover", () => {
     now += 1_000;
     for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
     expect(mac.calls.filter((call) => call.startsWith("join"))).toHaveLength(2);
-    // failure, back online, failure
-    expect(notify).toHaveBeenCalledTimes(3);
+    // The first outage is told once it ends; the second is still going.
+    expect(notify).toHaveBeenCalledTimes(1);
   });
 
   it("leaves the network alone for a while after you switch by hand", async () => {
@@ -236,6 +266,15 @@ describe("HotspotFailover", () => {
       reason: /password/,
     });
     expect(await hotspot.apply({ action: "configure", ssid: "Phone", enabled: false })).toMatchObject({ ok: true });
+  });
+});
+
+describe("describeDuration", () => {
+  it("reads like a person would say it", () => {
+    expect(describeDuration(20_000)).toBe("under a minute");
+    expect(describeDuration(60_000)).toBe("1 min");
+    expect(describeDuration(125 * 60_000)).toBe("2 h 5 min");
+    expect(describeDuration(120 * 60_000)).toBe("2 h");
   });
 });
 

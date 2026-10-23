@@ -46,6 +46,8 @@ export const HOTSPOT_RETRY_BACKOFF_MS = [10_000, 20_000, 30_000];
 export const HOTSPOT_MANUAL_QUIET_MS = 5 * 60_000;
 const SETTLE_MS = 20_000;
 const SETTLE_POLL_MS = 2_000;
+/** Squeak Hands' join: Location's first answer (20 s), two scans and two associations. */
+const HANDS_JOIN_TIMEOUT_MS = 60_000;
 const IPHONE_HOTSPOT_PREFIX = "172.20.10.";
 
 export interface HotspotSettings {
@@ -161,8 +163,14 @@ export class HotspotFailover {
   private tries = 0;
   private nextTryAt = Number.NEGATIVE_INFINITY;
   private quietUntil = Number.NEGATIVE_INFINITY;
-  /** An outage's failure has been told, so its end is too. */
-  private toldOutage = false;
+  /** When the current outage began; null when online. */
+  private outageSince: number | null = null;
+  /**
+   * The newest failed automatic try of this outage. Said when the Mac is
+   * back online, not when it happens: with no internet, Telegram and Cliq
+   * cannot carry it, and every such notice was lost.
+   */
+  private failedTry: string | null = null;
   private busy = false;
   private timer: NodeJS.Timeout | null = null;
 
@@ -244,12 +252,18 @@ export class HotspotFailover {
     if (was !== this.onHotspot) {
       this.options.onChange?.();
     }
-    if (!this.settings.enabled || !this.state.configured || this.onHotspot) {
-      this.endOutage();
+    if (!this.settings.enabled || !this.state.configured) {
+      this.resetOutage();
       return;
     }
     if (await this.system.online().catch(() => false)) {
       this.endOutage();
+      return;
+    }
+    this.outageSince ??= this.now();
+    if (this.onHotspot) {
+      // On the hotspot already, and it has no internet either: nothing to switch to.
+      this.failures = 0;
       return;
     }
     this.failures += 1;
@@ -266,13 +280,21 @@ export class HotspotFailover {
     }
   }
 
+  /** Online again: says what the failed tries could not say while offline. */
   private endOutage(): void {
-    if (this.toldOutage) {
-      this.toldOutage = false;
+    if (this.failedTry && this.outageSince !== null) {
+      const where = this.onHotspot ? `, on ${this.settings.ssid},` : "";
+      const tried = this.tries > 1 ? ` Squeak tried ${this.tries} times.` : "";
       this.options.notify?.(
-        this.onHotspot ? `The Mac is back online, on ${this.settings.ssid}.` : "The Mac is back online.",
+        `The Mac is back online${where} after ${describeDuration(this.now() - this.outageSince)} offline. ${this.failedTry}${tried}`,
       );
     }
+    this.resetOutage();
+  }
+
+  private resetOutage(): void {
+    this.outageSince = null;
+    this.failedTry = null;
     this.failures = 0;
     this.tries = 0;
     this.nextTryAt = Number.NEGATIVE_INFINITY;
@@ -363,15 +385,26 @@ export class HotspotFailover {
     const event: HotspotEvent = { at: new Date(this.now()).toISOString(), to, ok, note, automatic };
     this.last = event;
     logger.info("hotspot", { to, ok, automatic, note, ...(automatic ? { attempt: this.tries } : {}) });
-    // Once per outage: the first failed try says what to do, the rest only
-    // log, and a success always says so.
-    if (automatic && (ok || this.tries <= 1)) {
-      this.toldOutage = !ok;
-      this.options.notify?.(ok || this.tries > 1 ? note : `${note} Squeak keeps trying while the Mac is offline.`);
+    // A success is said at once (the hotspot carries it); a failure waits
+    // for the internet in endOutage.
+    if (automatic && ok) {
+      this.failedTry = null;
+      this.options.notify?.(note);
+    } else if (automatic) {
+      this.failedTry = note;
     }
     this.options.onChange?.();
     return event;
   }
+}
+
+/** "under a minute", "1 min", "12 min", "2 h 5 min". */
+export function describeDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes} min`;
+  const rest = minutes % 60;
+  return `${Math.floor(minutes / 60)} h${rest ? ` ${rest} min` : ""}`;
 }
 
 function readSettings(file: string): HotspotSettings {
@@ -478,7 +511,12 @@ export function macHotspotSystem(handsAppPath: string | null = null): HotspotSys
     async join(dev, ssid, password) {
       if (handsAppPath) {
         // The password goes over as a 0600 file, never in a process's arguments.
-        const outcome = await runHands(handsAppPath, "wifi-join", { device: dev, ssid, password });
+        const outcome = await runHands(
+          handsAppPath,
+          "wifi-join",
+          { device: dev, ssid, password },
+          HANDS_JOIN_TIMEOUT_MS,
+        );
         if (outcome.status === "result" && outcome.result.error !== "unknown-mode") {
           return describeHandsJoin(outcome.result);
         }
