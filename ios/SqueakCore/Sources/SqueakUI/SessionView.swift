@@ -126,6 +126,13 @@ struct SessionView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { ReadingPlace.save(row: nil, draft: draft, for: key) }
         }
+        // A message that did not go through, taken back: its text returns to the field.
+        .onChange(of: model.restoredDraft[key]) { _, text in
+            guard let text else { return }
+            draft = draft.isEmpty ? text : draft + "\n" + text
+            composing = true
+            model.draftRestored(for: key)
+        }
         // Sending starts a fresh, folded working row.
         .onChange(of: sends.count) { _, _ in
             stepsOpen = false
@@ -365,7 +372,8 @@ private struct ChatRows: View {
             ForEach(rows) { row in
                 switch row {
                 case .sent(let message):
-                    SentBubble(text: message.text, date: message.date, line: message.status.line)
+                    SentBubble(text: message.text, date: message.date, line: message.status.line, failed: message.status.failed)
+                    if message.status.failed { FailedSendActions(sendId: message.id, session: session) }
                 case .steer(_, let text, let line):
                     SentBubble(text: text, date: nil, line: line)
                 case .agent(_, _, _) where session.workflow != nil && session.message == nil:
@@ -970,6 +978,8 @@ struct SentBubble: View, Equatable {
     let date: Date?
     /// nil for an earlier message from the chat's history: no delivery to report.
     let line: String?
+    /// It did not go through (or cannot be vouched for): its line reads as a problem, not as a receipt.
+    var failed = false
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
@@ -993,11 +1003,34 @@ struct SentBubble: View, Equatable {
             }
             if !parts.refs.isEmpty { PhotoPills(count: parts.refs.count) }
             // Exactly one muted line per message this phone sent.
-            if let line { Text(line).font(.footnote).foregroundStyle(Theme.muted).multilineTextAlignment(.trailing) }
+            if let line { Text(line).font(.footnote).foregroundStyle(failed ? Theme.error : Theme.muted).multilineTextAlignment(.trailing) }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("You\(date.map { ", \($0.formatted(date: .omitted, time: .shortened))" } ?? ""): \(text)\(line.map { ". \($0)" } ?? "")")
+    }
+}
+
+/// What to do with a message that did not go through: send it again, or take its text back to edit.
+/// Neither happens by itself: an unconfirmed message may be in the chat already.
+private struct FailedSendActions: View {
+    @Environment(AppModel.self) private var model
+    let sendId: UUID
+    let session: PhoneSnapshot.Session
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Spacer(minLength: 0)
+            Button("Edit") { model.edit(sendId, in: session) }
+                .buttonStyle(.bordered)
+            Button("Send again") { Task { await model.retry(sendId, in: session) } }
+                .buttonStyle(.bordered)
+                .fontWeight(.semibold)
+        }
+        .tint(Theme.ink)
+        .font(.subheadline)
+        .controlSize(.regular)
+        .frame(minHeight: 44)
     }
 }
 

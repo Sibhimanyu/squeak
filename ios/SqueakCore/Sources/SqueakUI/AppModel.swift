@@ -62,9 +62,18 @@ final class AppModel {
     }
     /// The verbose view per session key, while it is being watched.
     private(set) var liveTurns: [String: LiveTurn] = [:]
-    /// The newest history each chat had when last open, in memory only (never written to the phone). A chat opened
-    /// again shows it in its first frame, so the history arriving a moment later does not push everything down.
+    /// The newest history each chat had when last open, also kept on the phone (`HistoryStore`: Caches, complete
+    /// file protection, no backup, 30 chats, gone on unpair). A chat opened again, even after a relaunch, shows it
+    /// in its first frame, so the history arriving a moment later does not push everything down.
     private(set) var lastHistory: [String: [LiveTurn.HistoryEntry]] = [:]
+    /// Nil in the demo, which must neither read nor write the real cache.
+    @ObservationIgnored private let historyStore: HistoryStore?
+    /// Sends not settled yet, kept across relaunches (`OutboxStore`). Nil in the demo.
+    @ObservationIgnored private let outboxStore: OutboxStore?
+    /// Restored sends whose answer, if the Mac wrote one while the app was gone, has not been looked for yet.
+    @ObservationIgnored private var unreconciled = true
+    /// A failed message put back for editing, per chat; the chat's composer takes it and clears it.
+    var restoredDraft: [String: String] = [:]
     /// False once it is known the Mac's channel cannot stream (Firestore), so verbose cannot work.
     private(set) var liveAvailable = true
 
@@ -80,6 +89,9 @@ final class AppModel {
     /// The Mac's view as written, and the recent document a split one leaves out. `snapshot` is these
     /// merged, with the open chat's state from its live turn when that is newer (`rebuild`).
     @ObservationIgnored private var baseSnapshot: PhoneSnapshot?
+    /// When a view last arrived from the Mac (stream or fetch) in this run: never the demo's, never anything
+    /// read from disk. The launch splash waits for it.
+    private(set) var freshSnapshotAt: Date?
     @ObservationIgnored private var recentDoc: PhoneRecent?
     @ObservationIgnored private var seenSessions = SeenSessions()
     /// Chats this phone has a stake in (opened, sent to, or watched working) and when each was last looked at,
@@ -116,6 +128,10 @@ final class AppModel {
     init() {
         demo = ProcessInfo.processInfo.arguments.contains("-squeak-demo")
         signer = demo ? SoftwareSigner() : KeyStore.signer()
+        historyStore = demo ? nil : HistoryStore()
+        if let historyStore { lastHistory = historyStore.all() }
+        outboxStore = demo ? nil : OutboxStore()
+        if let outboxStore { outbox = Self.restore(outboxStore.all()) }
         if demo {
             snapshot = DemoData.snapshot
             outbox = DemoData.outbox
@@ -216,6 +232,11 @@ final class AppModel {
         liveTask?.cancel()
         liveTask = nil
         liveTurns = [:]
+        lastHistory = [:]
+        historyStore?.clear()
+        outboxStore?.clear()
+        outbox = [:]
+        unreconciled = true
     }
 
     /* ---------- the loop: only while the app is on screen ---------- */
@@ -339,7 +360,10 @@ final class AppModel {
                 guard let self, !PhoneSnapshot.isStale(turn?.seq, than: self.liveTurns[key]?.seq) else { continue }
                 if self.liveTurns[key] != turn {
                     self.liveTurns[key] = turn
-                    if let history = turn?.history, !history.isEmpty { self.lastHistory[key] = history }
+                    if let history = turn?.history, !history.isEmpty {
+                        self.lastHistory[key] = history
+                        self.historyStore?.record(history, for: key)
+                    }
                     self.noteQueue(turn, for: key)
                     self.rebuild()
                 }
@@ -374,6 +398,7 @@ final class AppModel {
         snapshotEpoch += 1
         if let next, !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) {
             baseSnapshot = next
+            freshSnapshotAt = Date()
             rebuild()
         }
         lastFetch = Date()
@@ -487,12 +512,14 @@ final class AppModel {
             if let next = try await channel.snapshot(), epoch == snapshotEpoch {
                 if next.split == true, let recent = try await channel.recent() { recentDoc = recent }
                 if !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) { baseSnapshot = next }
+                freshSnapshotAt = Date()
                 rebuild()
             }
             // Best effort: an older Mac never answers, and that must not read as a broken channel.
             if let alive = try? await channel.alive() { heard(alive) }
             lastFetch = Date()
             problem = nil
+            await reconcileRestored(on: channel)
         } catch ChannelCrypto.Failure.badBox, ChannelCrypto.Failure.badKey {
             problem = "This phone's pairing no longer matches your Mac. Pair again."
         } catch {
@@ -528,25 +555,152 @@ final class AppModel {
             finish(sentId, !working ? .sent : mode == .steer ? .steered : .queued(agent: agent, steerUnavailable: false), for: session)
             return true
         }
-        guard let channel else { finish(sentId, .refused("not connected to your Mac."), for: session); return true }
+        await deliver(sentId, to: session, mode: mode)
+        return true
+    }
+
+    /// How long a send waits for the Mac before it stops waiting and says so.
+    static let resultWait: TimeInterval = 30
+    /// After taking a silent command back, how long a Mac that had just read it gets to answer anyway.
+    static let lateResultWait: TimeInterval = 12
+
+    /// Puts send `sentId` on the channel and settles its bubble to what is proven, and only that:
+    /// the Mac's "sent" is delivered; its "not sent", a failed write, and a command the Mac never read are
+    /// "Not sent, nothing started"; "unconfirmed", and silence that could not be undone, are "Couldn't confirm".
+    private func deliver(_ sentId: UUID, to session: PhoneSnapshot.Session, mode: ReplyMode) async {
+        guard let send = outbox[session.key]?.first(where: { $0.id == sentId }) else { return }
+        let agent = Presentation.agentName(session.agent)
+        guard let channel else { finish(sentId, .refused("this phone isn't connected to your Mac."), for: session); return }
+        let text = send.text, messageId = send.messageId
+        let id: String
         do {
             let signer = signer
-            let messageId = outbox[session.key]?.first(where: { $0.id == sentId })?.messageId
-            let (id, document) = try await Task.detached(priority: .userInitiated) {
-                try channel.replyDocument(to: session, text: trimmed, mode: mode, messageId: messageId, signer: signer)
+            let (commandId, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.replyDocument(to: session, text: text, mode: mode, messageId: messageId, signer: signer)
             }.value
+            id = commandId
+            setCommand(id, for: sentId, in: session.key)
             try await channel.send(document, id: id)
-            // The Mac answers within a few seconds while this app is open.
-            if let result = try await awaitResult(id, on: channel) {
-                finish(sentId, result.sent ? .delivered(result, agent: agent) : .refused(result.reason ?? "your Mac refused that reply."), for: session)
-                return true
-            }
-            // Written, but the Mac never said: it may still arrive within its five minutes.
-            finish(sentId, .notConfirmed, for: session)
         } catch {
-            finish(sentId, .refused(error.localizedDescription), for: session)
+            // The write may have landed even though the answer to it did not: take it back before saying "not sent".
+            if let commandId = outbox[session.key]?.first(where: { $0.id == sentId })?.commandId, !(await channel.deleteCommand(commandId)) {
+                finish(sentId, .notConfirmed, for: session)
+            } else {
+                finish(sentId, .refused("Couldn't reach your Mac's server. \(error.localizedDescription)"), for: session)
+            }
+            return
         }
-        return true
+        // The Mac answers within a few seconds while this app is open.
+        let result: CommandResult?
+        do { result = try await awaitResult(id, on: channel, within: Self.resultWait) } catch { result = nil }
+        if let result {
+            settle(sentId, with: result, agent: agent, for: session)
+            return
+        }
+        // Silence. Take the command back so it can never run later, then give a Mac that had just read it a
+        // moment: whatever it says is the truth. Nothing at all and the command gone means it never started.
+        let withdrawn = await channel.deleteCommand(id)
+        if let late = try? await awaitResult(id, on: channel, within: withdrawn ? Self.lateResultWait : 1) {
+            settle(sentId, with: late, agent: agent, for: session)
+        } else {
+            finish(sentId, .silence(withdrawn: withdrawn), for: session)
+        }
+    }
+
+    private func settle(_ sentId: UUID, with result: CommandResult, agent: String, for session: PhoneSnapshot.Session) {
+        finish(sentId, .verdict(result, agent: agent), for: session)
+    }
+
+    /// Sends a message that did not go through again, under the same Conductor id (so Conductor does not
+    /// take it twice if the first try did arrive). Face ID first, like any send.
+    func retry(_ sentId: UUID, in session: PhoneSnapshot.Session) async {
+        guard let i = outbox[session.key]?.firstIndex(where: { $0.id == sentId }), outbox[session.key]![i].status.failed else { return }
+        guard await confirmWithBiometrics(reason: "Send to \(session.label)") else { return }
+        guard let i = outbox[session.key]?.firstIndex(where: { $0.id == sentId }) else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        outbox[session.key]?[i].status = .sending
+        outbox[session.key]?[i].date = Date()
+        outbox[session.key]?[i].commandId = nil
+        let mode = outbox[session.key]![i].mode
+        persistOutbox()
+        if demo {
+            try? await Task.sleep(for: .seconds(1))
+            finish(sentId, .sent, for: session)
+            return
+        }
+        await deliver(sentId, to: session, mode: session.state == "working" ? mode : .queue)
+    }
+
+    /// Takes a message that did not go through out of the chat and puts its text back in the composer.
+    func edit(_ sentId: UUID, in session: PhoneSnapshot.Session) {
+        guard let send = outbox[session.key]?.first(where: { $0.id == sentId }), send.status.failed else { return }
+        outbox[session.key]?.removeAll { $0.id == sentId }
+        persistOutbox()
+        restoredDraft[session.key] = send.text
+    }
+
+    /// The composer took the restored text.
+    func draftRestored(for key: String) { restoredDraft[key] = nil }
+
+    private func setCommand(_ commandId: String, for sentId: UUID, in key: String) {
+        guard let i = outbox[key]?.firstIndex(where: { $0.id == sentId }) else { return }
+        outbox[key]?[i].commandId = commandId
+        persistOutbox()
+    }
+
+    /* ---------- the outbox on disk ---------- */
+
+    /// What is kept: sends not delivered. A "Sending…" that survived a relaunch is unknown, not in flight.
+    private func persistOutbox() {
+        guard let outboxStore else { return }
+        var entries: [OutboxStore.Entry] = []
+        for (key, sends) in outbox {
+            for s in sends {
+                let state: OutboxStore.Entry.State, reason: String?
+                switch s.status {
+                case .sending: state = .sending; reason = nil
+                case .refused(let why): state = .refused; reason = why
+                case .notConfirmed: state = .unconfirmed; reason = nil
+                default: continue
+                }
+                entries.append(OutboxStore.Entry(
+                    key: key, id: s.id.uuidString, text: s.text, at: s.origin.timeIntervalSince1970, answersTurn: s.answersTurn,
+                    messageId: s.messageId, mode: s.mode == .steer ? "steer" : "queue", queuedBehindTurn: s.queuedBehindTurn,
+                    state: state, reason: reason, commandId: s.commandId))
+            }
+        }
+        outboxStore.replace(with: entries.sorted { $0.at < $1.at })
+    }
+
+    private static func restore(_ entries: [OutboxStore.Entry]) -> [String: [ChatSend]] {
+        var out: [String: [ChatSend]] = [:]
+        for e in entries {
+            let status: ChatSend.Status
+            switch e.state {
+            case .sending, .unconfirmed: status = .notConfirmed
+            case .refused: status = .refused(e.reason ?? "your Mac refused that reply.")
+            }
+            var send = ChatSend(id: UUID(uuidString: e.id) ?? UUID(), text: e.text, date: Date(timeIntervalSince1970: e.at),
+                                answersTurn: e.answersTurn, status: status, messageId: e.messageId,
+                                mode: e.mode == "steer" ? .steer : .queue, queuedBehindTurn: e.queuedBehindTurn)
+            send.commandId = e.commandId
+            out[e.key, default: []].append(send)
+        }
+        return out
+    }
+
+    /// Once per launch: a send the app lost sight of (killed mid-send) may have an answer waiting on the channel.
+    private func reconcileRestored(on channel: Channel) async {
+        guard unreconciled else { return }
+        unreconciled = false
+        for (key, sends) in outbox {
+            for send in sends where send.status == .notConfirmed {
+                guard let commandId = send.commandId, let result = try? await channel.result(for: commandId) else { continue }
+                guard let session = session(key) else { continue }
+                Task { await channel.deleteResult(commandId) }
+                settle(send.id, with: result, agent: Presentation.agentName(session.agent), for: session)
+            }
+        }
     }
 
     /// The Mac's answer to command `id`, or nil after 30 seconds. Streamed, it
@@ -887,6 +1041,8 @@ final class AppModel {
             text: text, date: Date(), answersTurn: session.turnId ?? remembered[session.key]?.turnId, status: .sending,
             mode: mode, queuedBehindTurn: mode == .queue && session.state == "working")
         outbox[session.key, default: []].append(send)
+        // On disk before anything else happens: an app killed mid-send must not lose what was typed.
+        persistOutbox()
         return send.id
     }
 
@@ -1073,12 +1229,16 @@ final class AppModel {
         var changed = false
         for i in sends.indices where !sends[i].seenInQueue && ids.contains(sends[i].messageId) {
             sends[i].seenInQueue = true; changed = true
+            // Conductor's own queue has it: an unconfirmed send did arrive.
+            if case .notConfirmed = sends[i].status {
+                sends[i].status = .queued(agent: session(key).map { Presentation.agentName($0.agent) } ?? "The agent", steerUnavailable: false)
+            }
         }
         // Once the Mac stops listing it, it went to the agent: its bubble says sent.
         for i in sends.indices where sends[i].seenInQueue && !ids.contains(sends[i].messageId) {
             if case .queued = sends[i].status { sends[i].status = .sent; changed = true }
         }
-        if changed { outbox[key] = sends }
+        if changed { outbox[key] = sends; persistOutbox() }
         hiddenQueued.formIntersection(ids)
     }
 
@@ -1105,6 +1265,7 @@ final class AppModel {
         let refusal = await queueCommand(.promote, card: card, session: session)
         if let refusal {
             outbox[session.key]?.removeAll { $0.id == steerId }
+            persistOutbox()
             hiddenQueued.remove(card.id)
             queueProblem[card.id] = refusal
             UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -1126,6 +1287,7 @@ final class AppModel {
             return nil
         }
         outbox[session.key]?.removeAll { $0.messageId == card.id }
+        persistOutbox()
         return card.text
     }
 
@@ -1152,11 +1314,13 @@ final class AppModel {
     /// A send that never left the phone (Face ID declined): gone from the chat, its text back in the field.
     private func withdraw(_ id: UUID, for session: PhoneSnapshot.Session) {
         outbox[session.key]?.removeAll { $0.id == id }
+        persistOutbox()
     }
 
     private func finish(_ id: UUID, _ status: ChatSend.Status, for session: PhoneSnapshot.Session) {
         guard let i = outbox[session.key]?.firstIndex(where: { $0.id == id }) else { return }
         outbox[session.key]?[i].status = status
+        persistOutbox()
         // The Mac's verdict, felt: success when it took it, an error when it refused.
         switch status {
         case .refused: UINotificationFeedbackGenerator().notificationOccurred(.error)

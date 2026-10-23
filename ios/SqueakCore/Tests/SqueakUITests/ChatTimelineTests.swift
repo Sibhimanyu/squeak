@@ -101,8 +101,10 @@ final class ChatTimelineTests: XCTestCase {
     func testOneShortDeliveryLinePerSend() {
         XCTAssertEqual(ChatSend.Status.sending.line, "Sending…")
         XCTAssertEqual(ChatSend.Status.sent.line, "Sent")
-        XCTAssertEqual(ChatSend.Status.notConfirmed.line, "Not confirmed")
-        XCTAssertEqual(ChatSend.Status.refused("Waiting inside Conductor.").line, "Not sent: Waiting inside Conductor.")
+        XCTAssertEqual(ChatSend.Status.notConfirmed.line, "Couldn't confirm it arrived. Check the chat before sending again.")
+        XCTAssertEqual(ChatSend.Status.refused("Waiting inside Conductor.").line, "Not sent. Nothing started. Waiting inside Conductor.")
+        // The Mac's own lower-case reason reads as a sentence.
+        XCTAssertEqual(ChatSend.Status.refused("your Mac didn't pick it up").line, "Not sent. Nothing started. Your Mac didn't pick it up.")
     }
 
     func testTwoSendsWhileWorkingKeepBothBubblesInOrderThenOneWorkingRow() {
@@ -111,9 +113,69 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertEqual(rows, [.agent(text: "Earlier answer", atISO: previous.atISO, muted: true), .sent(read(a)), .sent(b), .working(label: "Starting…")])
     }
 
-    func testNotConfirmedStillCountsAsWaiting() {
-        let rows = ChatTimeline.rows(session: session("finished", message: "Earlier answer"), remembered: previous, sends: [send(.notConfirmed)], now: now)
-        XCTAssertTrue(rows.contains { if case .working = $0 { true } else { false } })
+    func result(_ json: String) throws -> CommandResult { try JSONDecoder().decode(CommandResult.self, from: Data(json.utf8)) }
+
+    func testOnlyTheMacsSentReadsAsDelivered() throws {
+        XCTAssertEqual(ChatSend.Status.verdict(try result(#"{"status":"sent","via":"conductor"}"#), agent: "Claude"), .sent)
+        XCTAssertEqual(ChatSend.Status.verdict(try result(#"{"status":"sent","delivery":"queued"}"#), agent: "Claude"),
+                       .queued(agent: "Claude", steerUnavailable: false))
+        XCTAssertEqual(ChatSend.Status.verdict(try result(#"{"status":"refused","reason":"That chat has moved on."}"#), agent: "Claude"),
+                       .refused("That chat has moved on."))
+        XCTAssertEqual(ChatSend.Status.verdict(try result(#"{"status":"refused"}"#), agent: "Claude"), .refused("your Mac refused that reply."))
+        // The Mac could not prove it arrived: neither sent nor refused.
+        XCTAssertEqual(ChatSend.Status.verdict(try result(#"{"status":"unconfirmed","reason":"x"}"#), agent: "Claude"), .notConfirmed)
+        // A status this phone does not know is not a delivery.
+        XCTAssertFalse(ChatSend.Status.verdict(try result(#"{"status":"whatever"}"#), agent: "Claude") == .sent)
+    }
+
+    func testSilenceNeverReadsAsSent() {
+        XCTAssertEqual(ChatSend.Status.silence(withdrawn: false), .notConfirmed)
+        guard case .refused(let why) = ChatSend.Status.silence(withdrawn: true) else { return XCTFail("should be not sent") }
+        XCTAssertTrue(ChatSend.Status.refused(why).line.hasPrefix("Not sent. Nothing started."))
+    }
+
+    func testNotConfirmedIsNeverShownAsStarting() {
+        // Nothing proves it arrived, so no "Starting…" row: the bubble says so and offers Send again.
+        let s = send(.notConfirmed)
+        let rows = ChatTimeline.rows(session: session("finished", message: "Earlier answer"), remembered: previous, sends: [s], now: now)
+        XCTAssertFalse(rows.contains { if case .working = $0 { true } else { false } })
+        XCTAssertTrue(rows.contains(.sent(s)))
+        XCTAssertTrue(s.status.failed)
+        XCTAssertTrue(ChatSend.Status.refused("x").failed)
+        XCTAssertFalse(ChatSend.Status.sent.failed)
+        XCTAssertFalse(ChatSend.Status.sending.failed)
+    }
+
+    func testNotConfirmedBehindATurnStaysABubbleNotAQueueCard() {
+        var s = ChatSend(text: "go", date: now.addingTimeInterval(-5), answersTurn: "t1", status: .notConfirmed, queuedBehindTurn: true)
+        s.seenInQueue = false
+        let working = session("working", turn: "t1")
+        XCTAssertTrue(ChatQueue.cards(session: working, live: nil, sends: [s], now: now).isEmpty)
+        // Conductor's own queue listing it proves it arrived: it is a queue card again.
+        let live = LiveTurn(key: "k", working: true, total: 0, steps: [],
+                            queue: [.init(id: s.messageId, text: "go", mode: "queue", position: 0)])
+        XCTAssertEqual(ChatQueue.cards(session: working, live: live, sends: [s], now: now).map(\.id), [s.messageId])
+    }
+
+    func testNotConfirmedBecomesSentWhenTheChatHistoryShowsIt() {
+        let s = send(.notConfirmed, ago: 120)
+        let history = [LiveTurn.HistoryEntry(role: "user", text: "go", at: iso(100))]
+        let rows = ChatTimeline.rows(session: session("working", turn: "t2"), remembered: previous, sends: [s], cachedHistory: history, now: now)
+        var proven = s; proven.status = .sent
+        XCTAssertFalse(rows.contains(.sent(s)))
+        XCTAssertTrue(rows.contains { if case .sent(let shown) = $0 { shown.id == s.id && !shown.status.failed } else { false } })
+        _ = proven
+        // The same words from before it was sent prove nothing.
+        let older = [LiveTurn.HistoryEntry(role: "user", text: "go", at: iso(3000))]
+        XCTAssertFalse(ChatTimeline.arrived(s, in: older))
+        XCTAssertTrue(ChatTimeline.arrived(s, in: history))
+    }
+
+    func testASendSentAgainKeepsItsFirstTimeForProof() {
+        var s = send(.refused("x"), ago: 300)
+        s.date = now // sent again just now
+        let history = [LiveTurn.HistoryEntry(role: "user", text: "go", at: iso(290))]
+        XCTAssertTrue(ChatTimeline.arrived(s, in: history), "the first try may be the one that arrived")
     }
 
     func testQueuedLineHoldsWhileTheAgentWorksThenReadsSent() {
@@ -129,7 +191,7 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertEqual(ChatSend.Status.queued(agent: "Claude", steerUnavailable: false).line, "Queued · Claude reads it after this turn")
         XCTAssertEqual(ChatSend.Status.steered.line, "Steered into the current turn")
         XCTAssertEqual(ChatSend.Status.sent.line, "Sent")
-        XCTAssertEqual(ChatSend.Status.refused("busy").line, "Not sent: busy")
+        XCTAssertEqual(ChatSend.Status.refused("busy").line, "Not sent. Nothing started. Busy.")
         XCTAssertTrue(ChatSend.Status.queued(agent: "Claude", steerUnavailable: true).line.contains("steering isn't available"))
     }
 
@@ -278,6 +340,17 @@ final class ChatTimelineTests: XCTestCase {
         let earlier = rows.compactMap { row -> String? in if case .history(_, _, let text, _) = row { text } else { nil } }
         XCTAssertEqual(earlier, ["Find out why", "It cuts inside a tag."])
         guard case .history(_, true, _, _)? = rows.first else { return XCTFail("history first, the user's on the right") }
+    }
+
+    func testAnEmptyLiveHistoryDoesNotEraseTheCachedOne() {
+        var live = liveTurn(working: false)
+        live.history = []
+        let cached = [LiveTurn.HistoryEntry(role: "user", text: "Cached question", at: iso(900)),
+                      LiveTurn.HistoryEntry(role: "assistant", text: "Cached answer", at: iso(800))]
+        let rows = ChatTimeline.rows(session: session("finished", turn: "t2", message: "New answer", ago: 1), remembered: previous, sends: [], live: live, cachedHistory: cached, now: now)
+        let earlier = rows.compactMap { row -> String? in if case .history(_, _, let text, _) = row { text } else { nil } }
+        XCTAssertEqual(earlier, ["Cached question", "Cached answer"])
+        XCTAssertNil(ChatTimeline.firstNonEmpty(nil, []))
     }
 
     func testNoHistoryWithoutTheLiveTurn() {

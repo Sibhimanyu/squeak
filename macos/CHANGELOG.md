@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.19
+
+- A chat whose reply ends with a question ("Want me to open a PR?") now counts as needing you:
+  it moves to Needs you, shows the question, and raises the same banner as an agent waiting on
+  an answer. Click the banner to answer in Quick message.
+
 ## 2.1.18
 
 - The menu-bar panel no longer sits inside a taller, square-edged window after a section folds:

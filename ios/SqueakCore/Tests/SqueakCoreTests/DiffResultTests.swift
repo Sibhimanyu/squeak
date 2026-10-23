@@ -20,3 +20,12 @@ final class DiffResultTests: XCTestCase {
         XCTAssertNil(result.patch)
     }
 }
+
+final class UnconfirmedResultTests: XCTestCase {
+    func testUnconfirmedIsNotSent() throws {
+        let result = try JSONDecoder().decode(CommandResult.self, from: Data(#"{"status":"unconfirmed","reason":"Check the chat."}"#.utf8))
+        XCTAssertTrue(result.unconfirmed)
+        XCTAssertFalse(result.sent)
+        XCTAssertEqual(result.reason, "Check the chat.")
+    }
+}

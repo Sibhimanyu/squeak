@@ -304,7 +304,7 @@ export class CliqChannel {
     const outcome = await inbound.replier.send(card.target, text, (message) => {
       void this.post(`🟣 **${card.label}** — the reply did not go through: ${message}`);
     });
-    if (outcome.status === "refused") {
+    if (outcome.status === "refused" || outcome.status === "unconfirmed") {
       await this.post(outcome.reason);
       return;
     }
