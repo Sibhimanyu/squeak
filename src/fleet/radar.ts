@@ -10,7 +10,7 @@ import { describeWindowSpan, type CodexUsage } from "./codex-usage.js";
 import { diffPageCount, diffPageSlice, type WorkspaceDiff } from "./diff-view.js";
 import { describeGitState } from "./git-state.js";
 import type { FleetSnapshot } from "./fleet-monitor.js";
-import { isBlockedState, type AttentionItem, type AttentionKind, type FleetSession, type FleetState } from "./types.js";
+import { needsYou, type AttentionItem, type AttentionKind, type FleetSession, type FleetState } from "./types.js";
 
 const MAX_ACTIVE_ROWS = 8;
 const MAX_ACTION_BUTTONS = 6;
@@ -30,6 +30,11 @@ const STATE_GLYPH: Record<FleetState, string> = {
 
 export function stateGlyph(state: FleetState): string {
   return STATE_GLYPH[state];
+}
+
+/** A session's glyph: a finish that ends on a question is "needs you" red, not the calm done mark. */
+export function sessionGlyph(session: Pick<FleetSession, "state" | "asks">): string {
+  return needsYou(session) ? STATE_GLYPH.awaiting_input : STATE_GLYPH[session.state];
 }
 
 /** "3m", "2h 10m" — relative age is the only time that matters on a radar. */
@@ -200,9 +205,9 @@ function stateWord(state: FleetState): string {
  */
 export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
   const active = snapshot.active;
-  const blocked = active.filter((session) => isBlockedState(session.state));
+  const blocked = active.filter(needsYou);
   const working = active.filter((session) => session.state === "working");
-  const done = active.filter((session) => session.state === "finished");
+  const done = active.filter((session) => session.state === "finished" && !needsYou(session));
 
   const headline = [
     blocked.length > 0 ? `${blocked.length} needs you` : null,
@@ -240,12 +245,12 @@ export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
     // Bold, so the heading a session is filed under is the thing the eye
     // lands on first, with the plain detail line beneath it visually lighter.
     const heading = distinctTitle ? `**${label}** _(${distinctTitle})_` : `**${label}**`;
-    lines.push(`${stateGlyph(session.state)} ${heading}`);
+    lines.push(`${sessionGlyph(session)} ${heading}`);
 
     const detail = [
       agentTag(session),
-      stateWord(session.state),
-      session.detail,
+      session.asks && session.state === "finished" ? "asks you" : stateWord(session.state),
+      session.asks && session.state === "finished" ? session.asks : session.detail,
       formatAge(session.lastActivityAt, nowMs),
       contextTag(session),
     ]
@@ -421,7 +426,7 @@ export function radarKeyboard(
     const label = truncateStart(sessionLabel(item.session), 38);
     rows.push([
       {
-        text: `${stateGlyph(item.session.state)} ${label}`,
+        text: `${sessionGlyph(item.session)} ${label}`,
         callback_data: `fleet:open:${handleFor(item.session.key)}`,
       },
     ]);
@@ -452,7 +457,7 @@ export function radarKeyboard(
 export function renderAttentionCard(item: AttentionItem, nowMs: number, choices: ParsedChoices | null = null): string {
   const session = item.session;
   const verb = choices ? "needs a decision" : cardVerb(item.kind);
-  const lines = [`${stateGlyph(session.state)} **${cardLabel(session)}** — ${verb}`];
+  const lines = [`${sessionGlyph(session)} **${cardLabel(session)}** — ${verb}`];
 
   // A decision card trades the summary for the question and its options: the
   // summary of a message that ends on a choice is its preamble, and the
@@ -461,7 +466,9 @@ export function renderAttentionCard(item: AttentionItem, nowMs: number, choices:
     ? (choices.question ?? summarizeOutcome(session.detail))
     : item.kind === "stalled"
       ? stalledLine(session, item.since, nowMs)
-      : summarizeOutcome(session.detail);
+      : item.kind === "asked_question" && session.asks
+        ? session.asks
+        : summarizeOutcome(session.detail);
   if (outcome) {
     lines.push(outcome);
   } else if (item.kind !== "finished_unreviewed") {
@@ -523,6 +530,8 @@ function cardVerb(kind: AttentionKind): string {
       return "needs approval";
     case "blocked_question":
       return "needs an answer";
+    case "asked_question":
+      return "asks you";
     case "stalled":
       return "seems stuck";
     case "errored":

@@ -1,5 +1,7 @@
 import type { TelegramInlineKeyboardButton } from "../types.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { canReplyFromCard } from "./fleet-controller.js";
 
 import type { FleetSnapshot } from "./fleet-monitor.js";
 import {
@@ -456,6 +458,42 @@ describe("radarKeyboard", () => {
     // with nothing to show it was shortened.
     expect(text).toContain("…");
     expect(text.endsWith("hu")).toBe(false);
+  });
+});
+
+describe("a finish that asks", () => {
+  const asking = session({
+    state: "finished",
+    conductorSessionId: "c1",
+    asks: "Want me to open a PR?",
+    detail: "Pushed the branch and CI is green.",
+  });
+  const asked = item({ session: asking, kind: "asked_question", score: 850 });
+
+  it("leads the card with the question under the needs-you red", () => {
+    const lines = renderAttentionCard(asked, now).split("\n");
+    expect(lines[0]).toBe("🔴 **repo · main** — asks you");
+    expect(lines[1]).toBe("Want me to open a PR?");
+  });
+
+  it("keeps Reply and the full message on the card, since the chat is idle", () => {
+    expect(canReplyFromCard(asked, { send: vi.fn(), lastTurnText: vi.fn() } as never)).toBe(true);
+    const buttons = attentionCardKeyboard(asked, 1, { reply: true, open: false, full: true }).flat();
+    expect(buttons.map((button) => button.text)).toEqual(expect.arrayContaining(["Reply", "Full message"]));
+  });
+
+  it("counts under needs you on the radar, with the question as its line", () => {
+    const text = renderRadar(snapshot({ sessions: [asking] }), now);
+    expect(text).toContain("1 needs you");
+    expect(text).not.toContain("1 done");
+    expect(text).toContain("🔴");
+    expect(text).toContain("asks you · Want me to open a PR?");
+  });
+
+  it("a plain finish stays done", () => {
+    const text = renderRadar(snapshot({ sessions: [{ ...asking, asks: null }] }), now);
+    expect(text).toContain("1 done");
+    expect(text).not.toContain("needs you");
   });
 });
 

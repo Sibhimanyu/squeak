@@ -105,6 +105,16 @@ const sessions = [
   }),
   director!,
   animaticDirector!,
+  // A finished chat that closes on a question for you: `asks`, which the phone counts as needing you.
+  session({
+    key: "claude-transcript:s3",
+    sourceId: "s3",
+    agentSessionId: "s3",
+    conductorSessionId: "s3",
+    branch: "pr",
+    title: "PR",
+    asks: "Want me to open a PR?",
+  }),
 ];
 const codexUsage = {
   planType: "pro",

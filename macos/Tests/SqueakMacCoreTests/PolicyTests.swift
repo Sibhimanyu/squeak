@@ -137,6 +137,17 @@ struct NotificationTests {
         #expect(NotificationPolicy.detect(previous: [first], current: [second]).map(\.kind) == [.question])
     }
 
+    @Test func aFinishThatAsksIsOneQuestionBannerNotAFinishToo() {
+        let prev = [makeSession("a", state: .working)]
+        var asking = makeSession("a", state: .blocked)
+        asking.pendingQuestion = "Want me to open a PR?"
+        let n = NotificationPolicy.detect(previous: prev, current: [asking])
+        #expect(n.map(\.kind) == [.question])
+        #expect(n[0].detail == "Want me to open a PR?")
+        // Still asking on the next poll: nothing new to say.
+        #expect(NotificationPolicy.detect(previous: [asking], current: [asking]).isEmpty)
+    }
+
     @Test func aFinishedChatSqueakCannotSendToStillNotifies() {
         let prev = [makeSession("a", state: .working, canSend: false)]
         let n = NotificationPolicy.detect(previous: prev, current: [makeSession("a", state: .finished, canSend: false)])

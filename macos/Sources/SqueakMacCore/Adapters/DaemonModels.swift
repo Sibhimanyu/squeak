@@ -41,11 +41,14 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
     public var distinctTitle: String?
     /// The estimated cost of the whole session so far, when the model is priced.
     public var costUsd: Double?
+    /// The question a finished session's last message closes on ("Want me to open a PR?"). Present means the
+    /// agent waits on an answer: the daemon counts it as needing you, and so does this app. Nil from an older daemon.
+    public var asks: String?
 
     enum CodingKeys: String, CodingKey {
         case key, agent, origin, originLabel, source, state, title, repoName, branch, cwd
         case lastActivityAt, contextPercent, alive, conductorSessionId, conductorWorkspaceId
-        case replyTarget, distinctTitle, costUsd
+        case replyTarget, distinctTitle, costUsd, asks
     }
 
     public init(from decoder: Decoder) throws {
@@ -72,6 +75,12 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
         replyTarget = c.lenient(String.self, .replyTarget)
         distinctTitle = c.lenient(String.self, .distinctTitle)
         costUsd = c.lenient(Double.self, .costUsd)
+        asks = DaemonSession.cleaned(c.lenient(String.self, .asks))
+    }
+
+    private static func cleaned(_ s: String?) -> String? {
+        guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        return s
     }
 
     public init(key: String) { self.key = key }
@@ -286,5 +295,16 @@ struct DaemonReplyBody: Decodable {
         fallbackReason = c.lenient(String.self, .fallbackReason)
         delivery = c.lenient(String.self, .delivery)
         note = c.lenient(String.self, .note)
+    }
+}
+
+/// What the daemon says about a Conductor chat's closing question, for the local adapter to lay over a chat
+/// it reads itself: the daemon alone reads the agent's last message.
+public struct DaemonAskView: Sendable, Equatable {
+    public var state: String?
+    public var lastActivityAt: Date?
+    public var asks: String?
+    public init(state: String?, lastActivityAt: Date?, asks: String?) {
+        self.state = state; self.lastActivityAt = lastActivityAt; self.asks = asks
     }
 }

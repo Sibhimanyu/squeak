@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseChoices } from "./choices.js";
+import { closingQuestion, parseChoices } from "./choices.js";
 
 /** The shape of a real decision message from a Conductor session, trimmed. */
 const DECISION = [
@@ -111,5 +111,76 @@ describe("choices read from prose (the phone only)", () => {
 
   it("only counts the closing question", () => {
     expect(parseChoices("Should I do number one or number two? I went ahead with one.", prose)).toBeNull();
+  });
+});
+
+describe("closingQuestion", () => {
+  it("reads the question a message closes on", () => {
+    expect(closingQuestion("The PR branch is pushed and CI is green.\n\nWant me to open a PR?")).toBe(
+      "Want me to open a PR?",
+    );
+    expect(closingQuestion("Fixed the import. Should I also update the docs?")).toBe("Should I also update the docs?");
+  });
+
+  it("takes only the last sentence of a closing paragraph, markdown stripped", () => {
+    expect(closingQuestion("All tests pass. **Want me to open a PR against `main`?**")).toBe(
+      "Want me to open a PR against main?",
+    );
+    expect(closingQuestion("Done.\nShould I push?\n")).toBe("Should I push?");
+  });
+
+  it("is null for a statement, even a polite one inviting an answer", () => {
+    expect(
+      closingQuestion(
+        "I refactored the parser and added tests for the edge cases.\n\nLet me know if you want changes.",
+      ),
+    ).toBeNull();
+    expect(closingQuestion(null)).toBeNull();
+    expect(closingQuestion("")).toBeNull();
+  });
+
+  it("is null when a question mark sits mid-way but the message ends on a statement", () => {
+    expect(
+      closingQuestion("Why did it fail? The cache key was stale.\n\nI cleared it and the build now passes."),
+    ).toBeNull();
+    expect(closingQuestion("Should I push? I already did, so there is nothing left to do.")).toBeNull();
+  });
+
+  it("ignores a question inside a code block, closed or not", () => {
+    expect(closingQuestion("Run this:\n\n```\necho 'ready?'\n```")).toBeNull();
+    expect(closingQuestion("Here is the prompt:\n```\nShould I continue?")).toBeNull();
+    expect(closingQuestion("```\nShould I continue?\n```\n\nThat is what it prints.")).toBeNull();
+  });
+
+  it("ignores a question mark inside inline code, a quote, a URL or a blockquote", () => {
+    expect(closingQuestion("The optional chaining operator is `?`")).toBeNull();
+    expect(closingQuestion('The error said "is it plugged in?"')).toBeNull();
+    expect(closingQuestion("Docs: https://example.com/search?q=pr")).toBeNull();
+    expect(closingQuestion("> Should I continue?")).toBeNull();
+  });
+
+  it("is null when the last line is a list item", () => {
+    expect(closingQuestion("Open questions:\n\n- Should we keep the flag?\n- Is the cache needed?")).toBeNull();
+  });
+
+  it("reads the question above lettered options", () => {
+    expect(
+      closingQuestion(
+        "**Arm device control on the farm?** (reply with a letter)\n\n**A) Arm it now.**\n**B) Leave it off.**",
+      ),
+    ).toBe("Arm device control on the farm?");
+  });
+
+  it("reads a closing question after options that state none", () => {
+    expect(closingQuestion("A) keep it\nB) drop it\n\nWhich do you prefer?")).toBe("Which do you prefer?");
+  });
+
+  it("allows a closing bracket or emoji after the mark and clips a long one", () => {
+    expect(closingQuestion("Ready to merge (want me to open the PR?)")).toBe(
+      "Ready to merge (want me to open the PR?)",
+    );
+    expect(closingQuestion("Want me to open a PR? 🙂")).toBe("Want me to open a PR?");
+    const long = `${"Should I really go and rewrite every single one of the migration scripts ".repeat(3)}now?`;
+    expect(closingQuestion(long)!.length).toBeLessThanOrEqual(120);
   });
 });

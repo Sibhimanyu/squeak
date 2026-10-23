@@ -110,6 +110,23 @@ final class MacInteropTests: XCTestCase {
         XCTAssertEqual(session.choices?.recommended, "A")
     }
 
+    func testDecodesAFinishedChatThatAsksAsNeedingYouYetReplyable() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let snapshot = try ChannelCrypto.open(PhoneSnapshot.self, box: f.snapshotBox, key: key)
+        let asking = try XCTUnwrap(snapshot.sessions.first { $0.asks != nil })
+        XCTAssertEqual(asking.asks, "Want me to open a PR?")
+        XCTAssertEqual(asking.state, "finished")
+        XCTAssertTrue(asking.needsYou)
+        XCTAssertEqual(asking.stateWord, "needs an answer")
+        // Idle, so it can be answered: a blocked Conductor chat could not.
+        XCTAssertTrue(asking.canReply)
+        // A finished chat without the field is a plain finish, as an older Mac sends it.
+        let plain = try XCTUnwrap(snapshot.sessions.first)
+        XCTAssertNil(plain.asks)
+        XCTAssertFalse(plain.needsYou)
+    }
+
     func testDecodesAFilmWaitingOnItsLookCall() throws {
         let f = try fixture()
         let key = try PairingPayload.parse(f.pairingURL).k

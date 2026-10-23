@@ -1,4 +1,4 @@
-import { isBlockedState, type AttentionItem, type FleetSession } from "./types.js";
+import { needsYou, type AttentionItem, type FleetSession } from "./types.js";
 
 /**
  * What the desktop duck is doing. Derived here rather than in the renderer so
@@ -35,7 +35,8 @@ export function deriveDuckState(
   nowMs: number,
   celebrationMs = CELEBRATION_MS,
 ): DuckState {
-  const blocked = active.filter((session) => isBlockedState(session.state));
+  // Blocked, or finished on a question put to you: both are waiting on you.
+  const blocked = active.filter(needsYou);
   const working = active.filter((session) => session.state === "working");
 
   // `since` rather than lastActivityAt: it is when the session entered the

@@ -321,7 +321,7 @@ private struct SessionHeader: View {
             Text(Presentation.displayTitle(session))
                 .font(.headline).lineLimit(1).truncationMode(.tail)
             HStack(spacing: 5) {
-                StatusDot(color: Theme.stateColor(session.state), pulses: session.needsYou || session.state == "working",
+                StatusDot(color: session.needsYou ? Theme.needsYou : Theme.stateColor(session.state), pulses: session.needsYou || session.state == "working",
                           period: session.state == "working" ? 1.6 : 1.0)
                 ViewThatFits(in: .horizontal) {
                     // By position: ViewThatFits traps on two children with one id.

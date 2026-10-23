@@ -17,6 +17,7 @@ import type { ClaudeTranscriptObserver } from "./observers/claude-transcript.js"
 import type { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import type { ConductorObserver } from "./observers/conductor.js";
 import type { CodexUsage, CodexUsageReader } from "./codex-usage.js";
+import { closingQuestion } from "./choices.js";
 import type { ClaudeCostReader } from "./claude-cost.js";
 import type { GitState, GitStateReader } from "./git-state.js";
 import type { ProcessLivenessObserver } from "./observers/process-liveness.js";
@@ -52,6 +53,12 @@ export interface FleetMonitorDependencies {
    * (src/workflows/). Without it they read as plain Claude sessions.
    */
   workflows?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
+  /**
+   * Optional: the agent's last message in full, for a finished session. Without it nothing is ever read as
+   * asking a question. Set later with `setLastMessageSource`, since the replier that reads Conductor's
+   * rows is built after the fleet.
+   */
+  lastMessage?: ((session: FleetSession) => string | null) | null;
 }
 
 export interface FleetMonitorOptions {
@@ -92,6 +99,10 @@ const DEFAULT_STOP_FOLLOW_UPS_MS = [500, 1_500, 4_000];
 const DEFAULT_HOOK_DEBOUNCE_MS = 400;
 const DEFAULT_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_CODEX_QUOTA_WARN_PERCENT = 85;
+/** A finished session is read for a closing question only this long: older ones are not waiting on you. */
+const ASKS_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** A message not readable yet (a transcript still flushing) is looked at again after this. */
+const ASKS_RETRY_MS = 5_000;
 
 /**
  * Turns "what is on this machine" into "what needs you".
@@ -119,6 +130,8 @@ export class FleetMonitor {
   private watcher: WatchHandle | null = null;
   private watchCoalescer: Coalescer | null = null;
   private readonly followUpTimers = new Set<unknown>();
+  /** What a finished session's last message asked, read once per `key|lastActivityAt`. */
+  private readonly asksCache = new Map<string, { asks: string | null; at: number }>();
 
   /** Latest hook report per agent session id. */
   private readonly hookEvents = new Map<string, HookEvent>();
@@ -154,6 +167,12 @@ export class FleetMonitor {
     this.stopFollowUpsMs = options.stopFollowUpsMs ?? DEFAULT_STOP_FOLLOW_UPS_MS;
     this.timers = options.timers ?? realTimers;
     this.watchDeps = options.watchDeps ?? realWatchDeps;
+  }
+
+  /** Where a finished session's last message is read from, to tell whether it ends on a question. */
+  setLastMessageSource(read: ((session: FleetSession) => string | null) | null): void {
+    this.deps.lastMessage = read;
+    this.asksCache.clear();
   }
 
   get snapshot(): FleetSnapshot {
@@ -315,8 +334,10 @@ export class FleetMonitor {
     ];
 
     const processes = await this.deps.liveness.observe();
-    const sessions = this.annotateWorkflows(
-      applyLiveness(applyHookEvents(mergeObservations(observations), this.hookEvents), processes),
+    const sessions = this.annotateAsks(
+      this.annotateWorkflows(
+        applyLiveness(applyHookEvents(mergeObservations(observations), this.hookEvents), processes),
+      ),
     );
 
     const attention: AttentionItem[] = [];
@@ -413,6 +434,58 @@ export class FleetMonitor {
       generatedAt: observedAt,
       codexUsage,
     };
+  }
+
+  /**
+   * Marks a finished session whose last message closes on a question for the person. Only finished, open
+   * sessions touched in the last day are read, once per change, so a long list of old chats costs nothing.
+   */
+  private annotateAsks(sessions: FleetSession[]): FleetSession[] {
+    const read = this.deps.lastMessage;
+    if (!read) {
+      return sessions;
+    }
+    const nowMs = this.now();
+    const live = new Set<string>();
+    const result = sessions.map((session) => {
+      if (
+        session.state !== "finished" ||
+        session.retired ||
+        nowMs - Date.parse(session.lastActivityAt) > ASKS_WINDOW_MS
+      ) {
+        return session;
+      }
+      const cacheKey = `${session.key}|${session.lastActivityAt}`;
+      live.add(cacheKey);
+      let entry = this.asksCache.get(cacheKey);
+      // A just-ended turn may not be readable yet (a transcript still flushing): look again for a minute.
+      if (
+        entry?.asks === null &&
+        nowMs - entry.at >= ASKS_RETRY_MS &&
+        nowMs - Date.parse(session.lastActivityAt) < 60_000
+      ) {
+        entry = undefined;
+      }
+      if (!entry) {
+        let asks: string | null = null;
+        try {
+          asks = closingQuestion(read(session));
+        } catch (error) {
+          logger.debug("fleet last message read failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        entry = { asks, at: nowMs };
+        this.asksCache.set(cacheKey, entry);
+      }
+      return entry.asks ? { ...session, asks: entry.asks } : session;
+    });
+    for (const key of [...this.asksCache.keys()]) {
+      if (!live.has(key)) {
+        this.asksCache.delete(key);
+      }
+    }
+    return result;
   }
 
   private annotateWorkflows(sessions: FleetSession[]): FleetSession[] {

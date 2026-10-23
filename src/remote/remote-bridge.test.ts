@@ -1073,6 +1073,20 @@ describe("RemoteBridge starting a chat", () => {
     expect(starts[0]).not.toHaveProperty("thinking");
   });
 
+  it("counts a finished chat that asks you something as needing you, and sends the question only then", () => {
+    const f = fixture();
+    f.emit([session({ asks: "Want me to open a PR?" }), session({ key: "k:2", conductorSessionId: "s2" })]);
+    const view = f.bridge.phoneView();
+    expect(view.duck.blockedCount).toBe(1);
+    // The chat is still finished, so the phone can reply to it; `asks` is what marks it as waiting.
+    expect(view.sessions[0]).toMatchObject({ state: "finished", asks: "Want me to open a PR?" });
+    expect(view.sessions[1]).not.toHaveProperty("asks");
+    // A stale `asks` on a chat that moved on is never sent.
+    f.emit([session({ state: "working", asks: "Want me to open a PR?" })]);
+    expect(f.bridge.phoneView().sessions[0]).not.toHaveProperty("asks");
+    expect(f.bridge.phoneView().duck.blockedCount).toBe(0);
+  });
+
   it("publishes the models in the recent document, and none when this Mac cannot list them", () => {
     const f = fixture({ newChat: chatStarter().starter });
     expect(f.bridge.phoneView().chatModels).toEqual(CHAT_MODELS);

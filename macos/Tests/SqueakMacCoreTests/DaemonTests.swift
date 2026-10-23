@@ -34,6 +34,27 @@ struct DaemonDecodingTests {
         #expect(mapped.allSatisfy { $0.origin == .hostOwned })
     }
 
+    @Test func aFinishedSessionThatAsksReadsAsBlockedWithItsQuestionAndStaysReplyable() throws {
+        let json = #"""
+        {"active":[
+          {"key":"conductor:c1","origin":"conductor","agent":"claude","state":"finished","title":"PR","replyTarget":"c1","conductorSessionId":"c1","conductorWorkspaceId":"w1","asks":"Want me to open a PR?"},
+          {"key":"conductor:c2","origin":"conductor","agent":"claude","state":"finished","title":"Plain","replyTarget":"c2","asks":null},
+          {"key":"conductor:c3","origin":"conductor","agent":"claude","state":"working","title":"Moved on","replyTarget":"c3","asks":"Stale?"},
+          {"key":"conductor:c4","origin":"conductor","agent":"claude","state":"finished","title":"Blank","replyTarget":"c4","asks":"  "}
+        ]}
+        """#
+        let mapped = try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8)).sessions.map(ConductorDaemonAdapter.map)
+        #expect(mapped[0].state == .blocked)
+        #expect(mapped[0].pendingQuestion == "Want me to open a PR?")
+        #expect(mapped[0].awaitingApproval == nil)
+        #expect(mapped[0].capabilities.send == .supported)
+        #expect(mapped[1].state == .finished && mapped[1].pendingQuestion == nil)
+        // A question only counts while the chat is finished; a daemon that predates `asks` sends none.
+        #expect(mapped[2].state == .working && mapped[2].pendingQuestion == nil)
+        #expect(mapped[3].state == .finished)
+        #expect(SessionGrouping.kind(of: mapped[0], now: Date()) == .needsYou)
+    }
+
     @Test func capabilitiesFollowReplyTarget() throws {
         let state = try JSONDecoder().decode(DaemonState.self, from: Data(syntheticState.utf8))
         let mapped = state.sessions.map(ConductorDaemonAdapter.map)

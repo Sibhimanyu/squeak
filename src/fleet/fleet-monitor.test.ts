@@ -165,6 +165,95 @@ describe("FleetMonitor", () => {
     expect(harness.pushes[0]?.[0]?.kind).toBe("finished_unreviewed");
   });
 
+  describe("a finish that ends on a question", () => {
+    const FINISHED = { state: "finished", detail: "Pushed the branch.", conductorSessionId: "c1" } as const;
+
+    it("is an asked_question push in place of a quiet finish, carrying the question", async () => {
+      const harness = makeMonitor([observed(FINISHED)]);
+      harness.monitor.setLastMessageSource(() => "Pushed the branch.\n\nWant me to open a PR?");
+
+      const snapshot = await harness.monitor.refresh();
+
+      expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["asked_question"]);
+      expect(snapshot.active[0]?.asks).toBe("Want me to open a PR?");
+      expect(harness.pushes.flat().map((entry) => entry.kind)).toEqual(["asked_question"]);
+    });
+
+    it("pushes once for the episode, not on every refresh", async () => {
+      const harness = makeMonitor([observed(FINISHED)]);
+      harness.monitor.setLastMessageSource(() => "Want me to open a PR?");
+
+      await harness.monitor.refresh();
+      await harness.monitor.refresh();
+      await harness.monitor.refresh();
+
+      expect(harness.pushes).toHaveLength(1);
+    });
+
+    it("reads the message once per change, not once per refresh", async () => {
+      const harness = makeMonitor([observed(FINISHED)]);
+      const read = vi.fn(() => "Want me to open a PR?");
+      harness.monitor.setLastMessageSource(read);
+
+      await harness.monitor.refresh();
+      await harness.monitor.refresh();
+
+      expect(read).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves a finish that ends on a statement as a quiet finish", async () => {
+      const harness = makeMonitor([observed(FINISHED)]);
+      harness.monitor.setLastMessageSource(() => "All done. Let me know if you want changes.");
+
+      const snapshot = await harness.monitor.refresh();
+
+      expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["finished_unreviewed"]);
+      expect(snapshot.active[0]?.asks).toBeUndefined();
+    });
+
+    it("stops asking once a new turn starts", async () => {
+      const harness = makeMonitor([observed(FINISHED)]);
+      harness.monitor.setLastMessageSource(() => "Want me to open a PR?");
+      await harness.monitor.refresh();
+
+      harness.setClaude([observed({ ...FINISHED, state: "working", lastActivityAt: "2026-09-20T11:59:50.000Z" })]);
+      const snapshot = await harness.monitor.refresh();
+
+      expect(snapshot.attention).toEqual([]);
+      expect(snapshot.active[0]?.asks).toBeUndefined();
+    });
+
+    it("carries on when the message cannot be read", async () => {
+      const harness = makeMonitor([observed(FINISHED)]);
+      harness.monitor.setLastMessageSource(() => {
+        throw new Error("database is locked");
+      });
+
+      const snapshot = await harness.monitor.refresh();
+
+      expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["finished_unreviewed"]);
+    });
+
+    it("does not read a session that is not finished or finished days ago", async () => {
+      const harness = makeMonitor([
+        observed({ ...FINISHED, state: "working" }),
+        observed({
+          key: "claude-transcript:old",
+          sourceId: "old",
+          agentSessionId: "old",
+          ...FINISHED,
+          lastActivityAt: "2026-09-18T09:00:00.000Z",
+        }),
+      ]);
+      const read = vi.fn(() => "Want me to open a PR?");
+      harness.monitor.setLastMessageSource(read);
+
+      await harness.monitor.refresh();
+
+      expect(read).not.toHaveBeenCalled();
+    });
+  });
+
   it("leaves a terminal session finishing on the radar rather than messaging about it", async () => {
     const harness = makeMonitor([observed({ state: "finished", detail: "Done." })]);
 

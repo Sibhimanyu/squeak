@@ -7,6 +7,8 @@ import type { AttentionItem, AttentionKind, FleetSession } from "./types.js";
 const KIND_SCORE: Record<AttentionKind, number> = {
   blocked_approval: 1000,
   blocked_question: 900,
+  // A finish that ends on a question: an answer is wanted, but nothing is held open.
+  asked_question: 850,
   stalled: 700,
   errored: 600,
   finished_unreviewed: 300,
@@ -33,6 +35,7 @@ const CONTEXT_PRESSURE_STATES = new Set(["working", "finished", "awaiting_approv
 export const PUSH_KINDS: ReadonlySet<AttentionKind> = new Set<AttentionKind>([
   "blocked_approval",
   "blocked_question",
+  "asked_question",
   "stalled",
   "finished_unreviewed",
 ]);
@@ -101,8 +104,9 @@ export function classifyAttentions(
       break;
     case "finished":
       // Work the user already signed off on should stop asking to be reviewed.
+      // A turn that ends on a question is waiting on the person, so it is that and not a quiet finish.
       if (!session.retired) {
-        kinds.push("finished_unreviewed");
+        kinds.push(session.asks ? "asked_question" : "finished_unreviewed");
       }
       break;
     default:
@@ -135,7 +139,24 @@ export function shouldPush(kind: AttentionKind, session: FleetSession): boolean 
   if (!PUSH_KINDS.has(kind)) {
     return false;
   }
+  if (kind === "asked_question") {
+    return isActionable(session) || isReplyableTerminal(session);
+  }
   return kind === "finished_unreviewed" ? isActionable(session) : true;
+}
+
+/**
+ * A live terminal agent Squeak could type an answer into (the static part of `TerminalReplier.canReply`).
+ * A question it asks is worth a push because the answer can go back; one it cannot answer stays on the radar.
+ */
+function isReplyableTerminal(session: FleetSession): boolean {
+  return (
+    session.origin === "terminal" &&
+    session.conductorSessionId === null &&
+    session.alive &&
+    session.agentSessionId !== null &&
+    session.transcriptPath !== null
+  );
 }
 
 /** A session we can actually reply to, versus one we can only watch. */

@@ -106,7 +106,8 @@ enum Presentation {
                 return .init(text: "working", tone: .working)
             }
             return .init(text: phrase, tone: .working)
-        case "finished": return .init(text: "done", tone: .done)
+        case "finished":
+            return session.asksYou ? .init(text: "needs an answer", tone: .needsYou) : .init(text: "done", tone: .done)
         case "error": return .init(text: "error", tone: .error)
         default: return .init(text: "idle", tone: .idle)
         }
@@ -312,7 +313,7 @@ enum Presentation {
         case .all: return true
         case .needsYou: return session.needsYou
         case .working: return session.state == "working"
-        case .done: return session.state == "finished"
+        case .done: return session.state == "finished" && !session.needsYou
         case .error: return session.state == "error"
         case .idle: return !session.needsYou && !["working", "finished", "error"].contains(session.state)
         }
@@ -493,6 +494,7 @@ enum Presentation {
             if question.plan != nil { return "Wants you to approve a plan." }
             if let prompt = question.questions.first { return prompt.question }
         }
+        if session.asksYou, let asked = session.asks { return asked }
         if let asked = session.choices?.question { return asked }
         if session.state == "awaiting_approval" { return "Wants approval for a tool call. Answer it on your Mac." }
         return firstLine(session.message ?? session.detail) ?? status(session).text
@@ -514,7 +516,7 @@ enum Presentation {
         if session.state == "awaiting_input", session.question?.toolUseId != nil {
             return session.question?.plan != nil ? "Approve the plan above, or ask for changes." : "Answer the question above."
         }
-        if session.needsYou { return "Waiting inside Conductor. Answer it on your Mac." }
+        if session.isBlocked { return "Waiting inside Conductor. Answer it on your Mac." }
         return nil
     }
 }

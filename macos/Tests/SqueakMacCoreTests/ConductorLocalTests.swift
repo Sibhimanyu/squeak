@@ -566,3 +566,47 @@ struct PendingQuestionTests {
         #expect(s?.pendingQuestion == "Which one? [A / B]")
     }
 }
+
+@Suite("Closing questions from the daemon")
+struct ClosingQuestionTests {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func chat(_ id: String, _ state: SessionState, ago: TimeInterval = 5) -> HostSession {
+        HostSession(
+            key: SessionKey(provider: "conductor", workspaceId: "w", hostSessionId: id), state: state,
+            lastActivityAt: now.addingTimeInterval(-ago), conductorSessionId: id)
+    }
+
+    @Test func aFinishedChatTheDaemonSaysAsksBecomesBlockedWithTheQuestion() {
+        let daemon = ["a": DaemonAskView(state: "finished", lastActivityAt: now.addingTimeInterval(-5), asks: "Want me to open a PR?")]
+        let out = ConductorLocalAdapter.layAsks(daemon, over: [chat("a", .finished), chat("b", .finished), chat("c", .working)])
+        #expect(out[0].state == .blocked)
+        #expect(out[0].pendingQuestion == "Want me to open a PR?")
+        #expect(out[1].state == .finished)
+        #expect(out[2].state == .working)
+    }
+
+    @Test func aQuestionFromAnEarlierTurnIsNotLaidOverALaterFinish() {
+        // The daemon has not seen the newer finish yet: its question is the old turn's.
+        let stale = ["a": DaemonAskView(state: "finished", lastActivityAt: now.addingTimeInterval(-600), asks: "Old question?")]
+        let session = chat("a", .finished)
+        #expect(ConductorLocalAdapter.layAsks(stale, over: [session])[0].state == .finished)
+        #expect(ConductorLocalAdapter.awaitsDaemon(session, daemon: stale, at: now))
+    }
+
+    @Test func onlyAFreshFinishWaitsForTheDaemonToCatchUp() {
+        let none: [String: DaemonAskView] = [:]
+        #expect(ConductorLocalAdapter.awaitsDaemon(chat("a", .finished, ago: 3), daemon: none, at: now))
+        #expect(!ConductorLocalAdapter.awaitsDaemon(chat("a", .finished, ago: 3600), daemon: none, at: now))
+        #expect(!ConductorLocalAdapter.awaitsDaemon(chat("a", .working, ago: 3), daemon: none, at: now))
+        let caught = ["a": DaemonAskView(state: "finished", lastActivityAt: now, asks: nil)]
+        #expect(!ConductorLocalAdapter.awaitsDaemon(chat("a", .finished, ago: 3), daemon: caught, at: now))
+    }
+
+    @Test func withoutTheDaemonNothingChanges() async {
+        let adapter = ConductorLocalAdapter(askSource: { nil }, now: { Date() })
+        let sessions = [chat("a", .finished)]
+        #expect(await adapter.layingAsks(over: sessions, at: now) == sessions)
+    }
+}
+

@@ -213,7 +213,7 @@ enum ChatTimeline {
             default: !replied($0)
             }
         }
-        let isWorking = working || (!awaiting.isEmpty && !session.needsYou && session.state != "error")
+        let isWorking = working || (!awaiting.isEmpty && !session.isBlocked && session.state != "error")
 
         let anchorTurn = isWorking ? remembered?.turnId : session.turnId
         func after(_ s: ChatSend) -> Bool {
