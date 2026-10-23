@@ -438,7 +438,7 @@ struct SessionSwipe: ViewModifier {
                     .tint(Theme.subtle)
                 if session.state != "working", session.question == nil, let choices = session.choices {
                     ForEach(choices.options.prefix(3).reversed(), id: \.letter) { option in
-                        Button { Task { await model.send(option.letter, to: session) } } label: { Text(option.letter) }
+                        Button { Task { await model.send(option.sent, to: session) } } label: { Text(option.letter) }
                             .tint(option.letter == choices.recommended ? Theme.ink.opacity(0.7) : Theme.lineStrong)
                             .accessibilityLabel("Send \(option.letter): \(option.title)")
                     }

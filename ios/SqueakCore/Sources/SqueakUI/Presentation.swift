@@ -484,7 +484,7 @@ enum Presentation {
         }
         guard replyBlock(session) == nil, session.state != "working", let choices = session.choices,
               (1...3).contains(choices.options.count) else { return [] }
-        return choices.options.map { .letter($0.letter, title: $0.title) }
+        return choices.options.map { .letter($0.sent, title: $0.title) }
     }
 
     /// A Needs you card's one line of what the agent wants: its question, else the state in words.

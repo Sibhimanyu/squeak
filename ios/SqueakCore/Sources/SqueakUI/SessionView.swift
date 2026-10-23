@@ -969,7 +969,7 @@ struct OptionsView: View {
                 let split = Presentation.splitOption(option.title)
                 let detail = split.detail ?? details[option.letter]
                 let recommended = option.letter == choices.recommended
-                Button { onPick(option.letter) } label: {
+                Button { onPick(option.sent) } label: {
                     HStack(alignment: .top, spacing: 12) {
                         Text(option.letter).font(.body.weight(.bold)).frame(width: 32, height: 32)
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.lineStrong))

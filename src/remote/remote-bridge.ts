@@ -2441,7 +2441,7 @@ export class RemoteBridge {
     }
     const full = this.deps.replier.lastTurnText(sessionId);
     const text = full && full.length > MESSAGE_MAX_CHARS ? `${full.slice(0, MESSAGE_MAX_CHARS)}…` : full;
-    const value = { text, choices: parseChoices(full) };
+    const value = { text, choices: parseChoices(full, { prose: true }) };
     if (this.messageCache.size > 200) {
       this.messageCache.clear();
     }
