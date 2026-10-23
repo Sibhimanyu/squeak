@@ -75,7 +75,10 @@ struct SessionView: View {
         }
         // A chat has its composer at the bottom: the app's tab bar floats over it, so it steps aside.
         .toolbar(.hidden, for: .tabBar)
-        .onAppear { screen.report?("Session"); model.watch(key) }
+        .onAppear { screen.report?("Session"); model.watch(key); model.markSeen(key) }
+        // Whatever it says while you are looking at it, you have read; and what it said when you leave.
+        .onChange(of: session?.lastActivityAt) { _, _ in model.markSeen(key) }
+        .onDisappear { model.markSeen(key) }
         // The agent you are watching finishes: one light tap, so you can look up from the keyboard.
         .onChange(of: session?.state) { old, new in
             guard old == "working", let new, new != "working" else { return }

@@ -52,7 +52,9 @@ struct HomeView: View {
         return [.session(args[index + 1])]
     }()
 
-    private var sessions: [PhoneSnapshot.Session] { model.snapshot?.sessions ?? [] }
+    /// Chats on screen under the groups: those with an unread reply are in New replies above them instead.
+    private var sessions: [PhoneSnapshot.Session] { (model.snapshot?.sessions ?? []).filter { !model.isUnread($0) } }
+    private var unreadReplies: [PhoneSnapshot.Session] { model.unreadReplies }
     /// Chats that are not active any more, to pick up again.
     private var recent: [PhoneSnapshot.Session] { model.recentChats }
     /// The large title: the grouping's, except that by status in the tab bar is the Sessions tab.
@@ -132,9 +134,10 @@ struct HomeView: View {
             }
             .padding(.bottom, 4)
             if let starting = model.startingChat { StartingRow(label: starting.label) }
+            if !unreadReplies.isEmpty { NewRepliesCard(sessions: unreadReplies) }
             if sessions.isEmpty {
                 restingDuck
-                if !recent.isEmpty { RecentInlineCard(sessions: recent, open: $recentOpen) }
+                if !recent.filter({ !model.isUnread($0) }).isEmpty { RecentInlineCard(sessions: recent.filter { !model.isUnread($0) }, open: $recentOpen) }
             } else {
                 switch grouping {
                 case .projects:
@@ -576,21 +579,27 @@ struct SessionRow: View {
         .padding(.vertical, recent ? 6 : 2)
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text)\(third.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
+        .accessibilityLabel("\(unread ? "New reply, " : "")\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text)\(third.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
         .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "")
         .renameMenu(session, model: model)
     }
 
     /// An Earlier row gets three lines, one job each, so the marks do not crowd the title: the title and its
     /// age; what the agent last said; then where it ran (project mark, project, agent) with Open/Closed at the end.
+    private var unread: Bool { model.isUnread(session) }
+
     private var recentText: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(Presentation.displayTitle(session)).font(.headline).lineLimit(2)
+                Text(Presentation.displayTitle(session)).font(.headline).fontWeight(unread ? .heavy : .semibold).lineLimit(2)
                 Spacer(minLength: 4)
-                Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+                if unread { UnreadMark() }
+                Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(unread ? Theme.ink : Theme.muted).monospacedDigit()
             }
-            if let lastWords { Text(lastWords).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2) }
+            if let lastWords {
+                Text(lastWords).font(.subheadline).fontWeight(unread ? .semibold : .regular)
+                    .foregroundStyle(unread ? Theme.ink : Theme.muted).lineLimit(2)
+            }
             HStack(spacing: 6) {
                 if !inProject { ProjectMark(name: Presentation.projectName(session), size: 18) }
                 Text(inProject ? Presentation.agentName(session.agent) : Presentation.subtitle(session))
@@ -611,8 +620,9 @@ struct SessionRow: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .center, spacing: 8) {
                 if !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
-                Text(Presentation.displayTitle(session)).font(.headline).lineLimit(2)
+                Text(Presentation.displayTitle(session)).font(.headline).fontWeight(unread ? .heavy : .semibold).lineLimit(2)
                 Spacer(minLength: 4)
+                if unread { UnreadMark() }
                 if recent, let open = session.open { OpenTag(open: open) }
                 Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
             }

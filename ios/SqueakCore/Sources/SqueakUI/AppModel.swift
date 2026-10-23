@@ -79,6 +79,14 @@ final class AppModel {
     @ObservationIgnored private var baseSnapshot: PhoneSnapshot?
     @ObservationIgnored private var recentDoc: PhoneRecent?
     @ObservationIgnored private var seenSessions = SeenSessions()
+    /// Chats this phone has a stake in (opened, sent to, or watched working) and when each was last looked at,
+    /// as seconds since 1970. A reply that lands after that is unread. Kept across launches.
+    private(set) var replySeen: [String: Double] = UserDefaults.standard.dictionary(forKey: "squeak.replySeen") as? [String: Double] ?? [:] {
+        didSet {
+            if replySeen.count > 300 { replySeen = Dictionary(uniqueKeysWithValues: replySeen.sorted { $0.value > $1.value }.prefix(200).map { ($0.key, $0.value) }) }
+            UserDefaults.standard.set(replySeen, forKey: "squeak.replySeen")
+        }
+    }
     @ObservationIgnored private var iconCache: [String: (length: Int, image: UIImage)] = [:]
     @ObservationIgnored private let pathMonitor = NWPathMonitor()
     @ObservationIgnored private var lastPath: (satisfied: Bool, interfaces: [NWInterface.InterfaceType])?
@@ -369,11 +377,37 @@ final class AppModel {
         problem = nil
     }
 
+    /* ---------- replies you have not read ---------- */
+
+    /// The agent has answered since you last looked at this chat, in a chat you have a stake in. A chat waiting on
+    /// you has its own, louder mark, so it is never also "unread".
+    func isUnread(_ session: PhoneSnapshot.Session) -> Bool {
+        guard let seen = replySeen[session.key], !session.needsYou, session.state != "working",
+              session.message != nil || session.detail != nil,
+              let at = Age.date(session.lastActivityAt) else { return false }
+        return at.timeIntervalSince1970 > seen + 1
+    }
+
+    /// Chats with an unread reply, newest first, whether they are still active or went quiet.
+    var unreadReplies: [PhoneSnapshot.Session] {
+        let all = (snapshot?.sessions ?? []) + recentChats
+        return all.filter(isUnread).sorted {
+            (Age.date($0.lastActivityAt) ?? .distantPast) > (Age.date($1.lastActivityAt) ?? .distantPast)
+        }
+    }
+
+    /// You looked at the chat: what it said so far is read. Also the start of caring about its next reply.
+    func markSeen(_ key: String) { replySeen[key] = Date().timeIntervalSince1970 }
+
     /// The view on screen from its parts. An unchanged view must not redraw every screen.
     private func rebuild() {
         guard let base = baseSnapshot else { return }
         let view = base.merged(with: recentDoc).reconciled(with: watching.flatMap { liveTurns[$0] })
         seenSessions.record(view)
+        // A chat seen working is one you are waiting on: its next reply is news.
+        for session in view.sessions where session.state == "working" && replySeen[session.key] == nil {
+            replySeen[session.key] = Date().timeIntervalSince1970
+        }
         if view != snapshot { snapshot = view }
     }
 
@@ -474,6 +508,7 @@ final class AppModel {
         guard !trimmed.isEmpty else { return false }
         // Mode only means something mid-turn; an idle chat is simply sent.
         let mode: ReplyMode = session.state == "working" ? mode : .queue
+        markSeen(session.key)
         // On screen first, like any chat app: the bubble ("Sending…") and the agent's "Starting…"
         // row appear on the tap, and Face ID, signing and the network all happen behind them.
         UIImpactFeedbackGenerator(style: mode == .steer ? .medium : .light).impactOccurred()

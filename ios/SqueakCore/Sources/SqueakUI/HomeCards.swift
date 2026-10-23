@@ -211,6 +211,7 @@ struct SessionPreviewRow: View {
                         if context == .status { ProjectMark(name: Presentation.projectName(session), size: 18) }
                         Text(Presentation.displayTitle(session)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 4)
+                        if model.isUnread(session) { UnreadMark() }
                         Text(Age.describe(session.lastActivityAt)).font(.footnote).foregroundStyle(Theme.muted).monospacedDigit()
                     }
                     HStack(spacing: 6) {
@@ -308,6 +309,40 @@ struct AgentAvatar: View {
             }
         }
         .accessibilityHidden(true)
+    }
+}
+
+/// A small filled mark beside the age: this chat answered and you have not opened it. The bold words say it too.
+struct UnreadMark: View {
+    var body: some View {
+        Circle().fill(Theme.ink).frame(width: 8, height: 8).accessibilityHidden(true)
+    }
+}
+
+/// Replies you have not read, at the top of Home, however long ago they came: a chat does not drop off
+/// Home just because the quarter hour passed.
+struct NewRepliesCard: View {
+    let sessions: [PhoneSnapshot.Session]
+
+    var body: some View {
+        HomeGroupCard(needsYou: true) {
+            HStack(spacing: 10) {
+                Text("New replies").font(.headline).foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                CountBadge(count: sessions.count)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44)
+            .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
+            ForEach(sessions.prefix(6)) { session in
+                Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true)
+                NavigationLink(value: HomeRoute.session(session.key)) {
+                    SessionRow(session: session, recent: true)
+                        .padding(.horizontal, 14).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Color.clear.frame(height: 4)
+        }
     }
 }
 
