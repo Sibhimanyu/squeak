@@ -125,6 +125,7 @@ private struct SectionFootnote: View {
 
 private struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
+    private let hotKeys = HotKeyCenter.shared
     @State private var loginOn = LoginItem.isEnabled
     @State private var loginError: String?
     @State private var bannersShown: Bool?
@@ -156,14 +157,32 @@ private struct GeneralSettings: View {
             }
             Section {
                 Picker("Quick message shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
+                    ForEach(HotKeyPreset.all) { preset in
+                        Text(preset.title).tag(preset.id).accessibilityLabel(preset.title)
+                    }
                     Text("None").tag("")
-                    ForEach(HotKeyPreset.all) { Text($0.title).tag($0.id) }
+                }
+                if hotKeys.needsInputMonitoring {
+                    LabeledContent {
+                        HStack {
+                            Button("Allow Input Monitoring") { hotKeys.requestInputMonitoring() }
+                            if hotKeys.requestedThisRun { Button("Relaunch Squeak") { hotKeys.relaunch() } }
+                        }
+                    } label: {
+                        Text("Squeak needs Input Monitoring")
+                        Text("Double-tap needs Input Monitoring so Squeak can notice Control taps. It never reads what you type.")
+                    }
                 }
             } footer: {
-                if let error = HotKeyCenter.shared.registrationError {
+                if let error = hotKeys.registrationError {
                     SectionFootnote(error)
+                } else if hotKeys.needsInputMonitoring {
+                    SectionFootnote("Until it's allowed, ⌃⇧ Space opens the quick message. If you just allowed it and nothing changed, relaunch Squeak.")
+                } else if model.hotKeyID == QuickShortcut.controlShiftSpace || model.hotKeyID == QuickShortcut.optionSpace {
+                    SectionFootnote("A key combination from any app, with no special permission. Pick a different one if an app already uses it.")
                 } else {
-                    SectionFootnote("⌥ Space is the default: one hand, from any app, no special permission. Pick another if an app already uses it.")
+                    let key = model.hotKeyID == QuickShortcut.doubleOption ? "Option" : "Control"
+                    SectionFootnote("Tap \(key) twice, quickly and on its own, from any app. Holding \(key) to use it with another key never counts.")
                 }
             }
             Section {

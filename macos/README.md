@@ -69,7 +69,22 @@ The Conductor relay is set up only through the terminal CLI; the app has no rela
 setup UI. The Swift relay is written but not wired in. Sparkle updates have
 not yet been exercised end to end against a published appcast (see Updates).
 
-The release zip is ad-hoc signed and not notarized.
+The release is signed with the Apple Development identity (not notarized), so macOS keeps its
+permission grants across updates.
+
+**Quick message shortcut.** Settings, General: Double-tap Control (default), Double-tap Option,
+⌃⇧ Space, ⌥ Space, or None. A double-tap is the modifier pressed and released alone twice
+(each press under 250 ms, the second starting within 350 ms of the first release; left and right
+count alike; any other key, click or modifier spoils it, so holding Control for ⌃C never fires).
+It is a listen-only `CGEventTap` (session level) on modifier changes, with key and click events
+used only as "something happened" (no key code or text is read, nothing is logged), and it needs
+**Input Monitoring** (TCC `kTCCServiceListenEvent`), not Accessibility. `DoubleTapDetector` in
+SqueakMacCore holds the logic. Until the grant is given, ⌃⇧ Space stands in and Settings says so;
+the app re-checks when it becomes active, starts the tap with no relaunch when macOS allows it,
+and Settings offers Relaunch after the grant button was pressed. ⌃⇧ Space and ⌥ Space use Carbon
+`RegisterEventHotKey` (no permission). Stored ids move once (`hotKeyMovedToDoubleTap`): ⌥ Space and the
+removed presets become Double-tap Control; ⌃⇧ Space and None stay. Capture and demo runs never
+install a tap or a hotkey.
 
 ## Architecture
 
@@ -191,8 +206,8 @@ or `swift run`). Info.plist carries `SUFeedURL`
 `SUAllowsAutomaticUpdates`; the user can turn automatic checks off in Settings, About.
 
 - The update archive is the release DMG. Sparkle accepts it only if its EdDSA
-  signature matches `SUPublicEDKey`; the app's own ad-hoc code signature is not what
-  protects updates.
+  signature matches `SUPublicEDKey`; the app's own code signature is not what
+  protects updates (it only keeps the Input Monitoring grant: see Signing).
 - `CFBundleVersion` is the build number Sparkle compares: `major*10000 + minor*100 +
   patch` (2.0.2 is 20002). It must grow with every release.
 - The EdDSA private key lives in the login Keychain (account `squeak`, made with
@@ -201,8 +216,14 @@ or `swift run`). Info.plist carries `SUFeedURL`
   it. Restore on a new Mac with `generate_keys --account squeak -f <that file>`.
   Losing it means installed copies can never be updated; they would need a manual
   reinstall with a new public key.
-- The frameworks and the app are signed ad hoc, inside out, without the hardened
-  runtime (its library validation refuses an ad-hoc framework: no Team ID).
+- **Signing.** `build-app.sh` signs Sparkle's helpers, the framework and the app, inside out, with
+  the Apple Development identity (same lookup as `helpers/squeak-hands/build.sh`;
+  `SQUEAK_MAC_SIGN_IDENTITY` overrides, `-` forces ad hoc). The designated requirement is then
+  `identifier "com.squeak.mac" and anchor apple generic and certificate leaf[subject.CN] = ...`, not a
+  cdhash, so the Input Monitoring grant survives updates. With no identity it falls back to ad hoc
+  with a loud warning (do not release that: every update would lose the grant). No hardened runtime.
+  Sparkle still verifies updates by EdDSA only; the appcast and Info.plist are unchanged. The first
+  update from an old ad-hoc build to a signed one is the last time the code identity changes.
 
 ### Message rendering
 
@@ -252,7 +273,7 @@ swift run SqueakMac            # needs the daemon running for real data
 ```
 
 `scripts/build-app.sh` writes only inside `macos/build/`: `Squeak.app`
-(Sparkle embedded, ad-hoc signed inside out, icon taken from
+(Sparkle embedded, signed inside out with the Apple Development identity, icon taken from
 `macos/assets/squeak.icns`), `Squeak-<version>.zip` and its `.sha256`.
 It installs nothing and makes no DMG.
 
@@ -286,7 +307,7 @@ The demo flags never send: the model refuses every send and reads no network.
 
 ## Install (for users)
 
-The build is unsigned by Apple (ad-hoc signature only) and not notarized, so
+The build is signed with a development certificate, not notarized, so
 Gatekeeper will warn the first time.
 
 1. Check the download against its checksum file:
@@ -311,8 +332,8 @@ sessions, need the Squeak daemon running on the same Mac (step 1 above).
 - Messages the app has seen are cached in one encrypted file,
   `~/Library/Application Support/Squeak Mac/cache.squeak` (directory mode 0700).
 - The cache key is a private file beside the cache (`cache-key.key`, mode 0600, excluded
-  from backups), not a Keychain item: Squeak is ad-hoc signed, so every update has a new
-  code identity and macOS would ask about a Keychain item again each time.
+  from backups), not a Keychain item: kept as a file so it never prompts, and it
+  works the same whichever identity signed the build.
 - Messages expire after 14 days and the cache is capped at 50 MB.
   Settings has a "Delete cache" button that purges it; Squeak rebuilds it as you
   open conversations.

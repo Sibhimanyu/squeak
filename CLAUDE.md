@@ -223,8 +223,8 @@ test for anything you fix is expected; the suite is fast.
   appears only while the conversation window, Settings or Welcome is open.
   Cmd-Q closes its windows, "Quit Squeak" in the menu really quits. Its cache is
   one encrypted file in `Application Support/Squeak Mac/`, key in a 0600 file
-  beside it, not the Keychain (ad-hoc signing would re-prompt every update).
-  The release is ad-hoc signed, not notarized. Full detail, status and what is
+  beside it, not the Keychain.
+  The release is signed with the Apple Development identity (`build-app.sh`, same lookup as Squeak Hands, so the Input Monitoring grant for the double-tap Quick message shortcut survives updates; ad hoc with a warning if none), not notarized. Full detail, status and what is
   still untested: `macos/README.md`.
 - **Control routes are token-gated and carry no CORS header.**
   `/control/session/<id>/message` and `/reply` on the ingress let the Mac app

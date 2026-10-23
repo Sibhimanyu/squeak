@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.25
+
+- Quick message opens with a double-tap of Control. Settings, General offers Double-tap Control,
+  Double-tap Option, ⌃⇧ Space, ⌥ Space or None. Double-tap needs Input Monitoring once (Squeak only
+  notices the modifier taps, never what you type); until it is allowed, ⌃⇧ Space works.
+- Squeak is now signed with a stable certificate, so permissions you grant stay across updates.
+
 ## 2.1.24
 
 - Quick message no longer says a chat can't be answered when Squeak's service is only restarting.

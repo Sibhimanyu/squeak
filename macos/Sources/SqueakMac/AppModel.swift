@@ -142,6 +142,7 @@ final class AppModel {
         unread = real ? d.data(forKey: "unreadUpdates").flatMap { try? JSONDecoder().decode(UnreadTracker.self, from: $0) } ?? UnreadTracker() : UnreadTracker()
         anchorLog = real ? d.data(forKey: "notificationAnchors").flatMap { try? JSONDecoder().decode(NotificationAnchorLog.self, from: $0) } ?? NotificationAnchorLog() : NotificationAnchorLog()
         HotKeyCenter.shared.isDisabled = captureMode || demoMode
+        HotKeyCenter.shared.previewNotGranted = demoMode
         if !(captureMode || demoMode) {
             d.set(true, forKey: HotKeyPreference.migrationKey)
             d.set(HotKeyPreference.storedValue(for: hotKeyID), forKey: "hotKey")
@@ -154,7 +155,11 @@ final class AppModel {
         guard !started else { return }
         started = true
         HotKeyCenter.shared.onFire = { QuickComposerController.shared.toggle() }
-        if !captureMode { HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID)) }
+        HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID))  // a no-op in capture and demo runs
+        // Input Monitoring is granted in System Settings: pick it up the moment the app comes back.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { HotKeyCenter.shared.recheck() }
+        }
         Notifier.shared.onOpen = { open in QuickComposerController.shared.show(notification: open) }
         observeWindowVisibility()
         AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")

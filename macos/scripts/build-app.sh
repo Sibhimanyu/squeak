@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds macos/build/Squeak.app (ad-hoc signed, Sparkle embedded) and
+# Builds macos/build/Squeak.app (signed with the Apple Development identity, ad hoc with a warning if none; Sparkle embedded) and
 # macos/build/Squeak-<version>.zip + .sha256.
 # Output stays inside macos/build. Never installs anywhere and never makes a DMG.
 set -euo pipefail
@@ -75,14 +75,30 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signing, inside out (no --deep): Sparkle's helpers, then the framework, then the app.
-# No hardened runtime: its library validation would refuse an ad-hoc framework (no Team ID).
+# Signing, inside out (no --deep): Sparkle's helpers, then the framework, then the app.
+# macOS ties the Input Monitoring grant (double-tap shortcut) to the app's code identity. An ad-hoc
+# signature is a new identity every build, so every update would silently lose the grant. Sign with the
+# Apple Development identity instead (the same lookup as helpers/squeak-hands/build.sh, which exists for
+# the same reason): its designated requirement names the bundle id and certificate, not a cdhash, and
+# survives rebuilds. SQUEAK_MAC_SIGN_IDENTITY overrides the pick; "-" forces ad hoc.
+# No hardened runtime: nothing here needs it, and it would add library validation for no gain.
+IDENTITY="${SQUEAK_MAC_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)}"
+if [ -z "$IDENTITY" ] || [ "$IDENTITY" = "-" ]; then
+  IDENTITY="-"
+  echo "################################################################" >&2
+  echo "WARNING: no Apple Development identity in the keychain: signing AD HOC." >&2
+  echo "Every build gets a new code identity, so macOS will drop Squeak's Input" >&2
+  echo "Monitoring grant (double-tap shortcut) on each update. Do not release this." >&2
+  echo "################################################################" >&2
+else
+  echo "Signing with: $IDENTITY"
+fi
 FW="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 for part in "$FW/XPCServices/Installer.xpc" "$FW/XPCServices/Downloader.xpc" "$FW/Autoupdate" "$FW/Updater.app"; do
-  codesign -s - --force "$part"
+  codesign -s "$IDENTITY" --force "$part"
 done
-codesign -s - --force "$APP/Contents/Frameworks/Sparkle.framework"
-codesign -s - --force "$APP"
+codesign -s "$IDENTITY" --force "$APP/Contents/Frameworks/Sparkle.framework"
+codesign -s "$IDENTITY" --force "$APP"
 codesign --verify --deep --strict "$APP"
 
 (cd "$OUT" && ditto -c -k --keepParent Squeak.app "Squeak-$VERSION.zip")
