@@ -17,11 +17,6 @@ struct SessionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let key: String
     @State private var draft: String
-    /// The row at the top of the screen, while you read above the end.
-    @State private var topRow: String?
-    /// Something arrived below while you were reading further up.
-    @State private var newBelow = false
-
     init(key: String) {
         self.key = key
         let args = ProcessInfo.processInfo.arguments
@@ -94,78 +89,26 @@ struct SessionView: View {
         let sends = model.outbox[session.key] ?? []
         let rows = ChatTimeline.rows(session: session, remembered: model.remembered[session.key], sends: sends, live: live)
         let cards = ChatQueue.cards(session: session, live: live, sends: sends, hidden: model.hiddenQueued)
-        ScrollViewReader { proxy in
-            ScrollView {
-                ChatRows(
-                    rows: rows, session: session, sending: model.isSending(session.key), stopping: model.isStopping(session.key),
-                    total: live?.working == true ? live?.total ?? 0 : session.activity?.total ?? 0, live: live?.working == true,
-                    stepsOpen: $stepsOpen, openParts: $openParts
-                )
-                .padding(.horizontal, 20).padding(.top, 16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                // The end of the chat: whether it is on screen says whether to follow new content.
-                Color.clear.frame(height: 16).id(Self.end)
-                    .onAppear { atEnd = true }
-                    .onDisappear { atEnd = false }
-            }
-            .scrollPosition(id: $topRow, anchor: .top)
-            .modifier(StickToBottom(following: atEnd))
-            .scrollDismissesKeyboard(.interactively)
-            // Open where you were reading. At the newest message there is nothing to do: the scroll view
-            // starts at the bottom and keeps it as the chat grows (StickToBottom), so it never starts at the
-            // top and travels down, as scrolling to the end after the first layout did.
-            .onAppear {
-                guard let place = ReadingPlace.row(for: key).flatMap({ saved in rows.contains { $0.id == saved } ? saved : nil }) else { return }
-                DispatchQueue.main.async { proxy.scrollTo(place, anchor: .top) }
-            }
-            .onDisappear { ReadingPlace.save(row: atEnd ? nil : topRow, draft: draft, for: key) }
-            // A draft survives the app being closed from the background, not just going back.
-            .onChange(of: scenePhase) { _, phase in
-                if phase != .active { ReadingPlace.save(row: atEnd ? nil : topRow, draft: draft, for: key) }
-            }
-            .onChange(of: atEnd) { _, now in if now { newBelow = false } }
-            // A new row (a message, a steer, the reply) eases into view; a new step inside the
-            // live box just follows, so a busy turn does not run an animation a second.
-            .onChange(of: rows.map(\.id)) { old, new in
-                // Earlier messages arriving above (the chat's history loads a moment after it opens) are not
-                // news at the end: nothing scrolls, so the chat does not jump while you look at it.
-                guard old.last != new.last else { return }
-                guard atEnd else { newBelow = true; return }
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
-            }
-            .onChange(of: stepCount(rows)) { _, _ in
-                guard atEnd else { newBelow = true; return }
-                proxy.scrollTo(Self.end, anchor: .bottom)
-            }
-            // Reading further up: what arrived below is one tap away, and nothing moves under you.
-            .overlay(alignment: .bottom) {
-                if newBelow, !atEnd {
-                    Button {
-                        newBelow = false
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Lucide(.chevronDown, size: 14, color: Theme.ink)
-                            Text("New").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
-                        }
-                        .padding(.horizontal, 14).frame(minHeight: 36)
-                        .background(Theme.surfaceRaised, in: Capsule())
-                        .overlay(Capsule().stroke(Theme.line))
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.bottom, 8)
-                    .accessibilityLabel("Jump to the newest message")
-                    .transition(.opacity)
-                }
-            }
-            // Sending is always a reason to look at the end, and starts a fresh, folded working row.
-            .onChange(of: sends.count) { _, _ in
-                stepsOpen = false
-                ReadingPlace.save(row: nil, draft: draft, for: key)
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(Self.end, anchor: .bottom) }
-            }
+        chatScroll(
+            ChatRows(
+                rows: rows, session: session, sending: model.isSending(session.key), stopping: model.isStopping(session.key),
+                total: live?.working == true ? live?.total ?? 0 : session.activity?.total ?? 0, live: live?.working == true,
+                stepsOpen: $stepsOpen, openParts: $openParts
+            )
+            .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 16)
+            .frame(maxWidth: .infinity, alignment: .leading),
+            sends: sends.count,
+            arrivals: "\(rows.last?.id ?? "")|\(stepCount(rows))"
+        )
+        .onDisappear { ReadingPlace.save(row: nil, draft: draft, for: key) }
+        // A draft survives the app being closed from the background, not just going back.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { ReadingPlace.save(row: nil, draft: draft, for: key) }
+        }
+        // Sending starts a fresh, folded working row.
+        .onChange(of: sends.count) { _, _ in
+            stepsOpen = false
+            ReadingPlace.save(row: nil, draft: draft, for: key)
         }
         .background(Theme.bg.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -202,12 +145,93 @@ struct SessionView: View {
         }
     }
 
-    private static let end = "chat-end"
-    @State private var atEnd = true
+    /// The chat's scroll view: it opens at the newest message and follows what arrives while you are at the
+    /// bottom (iOS 18's scroll APIs); on iOS 17 it opens at the bottom and the system keeps it there.
+    @ViewBuilder
+    private func chatScroll<Rows: View>(_ rows: Rows, sends: Int, arrivals: String) -> some View {
+        if #available(iOS 18, *) {
+            FollowingScroll(sends: sends, arrivals: arrivals) { rows }
+        } else {
+            ScrollView { rows }.defaultScrollAnchor(.bottom).scrollDismissesKeyboard(.interactively)
+        }
+    }
 
     private func stepCount(_ rows: [ChatTimeline.Row]) -> Int {
         guard case .working(_, let steps)? = rows.last else { return 0 }
         return steps.count * 1_000 + (steps.last?.text.count ?? 0) % 1_000
+    }
+}
+
+/// A chat's scroll view, as chat apps do it (and as iOS 18 lets SwiftUI do it): it starts at the bottom and,
+/// while it is at the bottom, stays pinned there as content grows. Scroll up to read and it lets go, shows a
+/// "New" pill if something arrives, and picks up again when you scroll back down or send.
+///
+/// What it avoids, each a source of the jitter this replaced: deciding "am I at the bottom" from a view
+/// appearing and disappearing (it flipped as the chat grew), scrolling to the end on every streamed step,
+/// and scrolling in animations that fight the content's own growth. `following` changes only while you
+/// scroll; the chat growing never touches it.
+@available(iOS 18, *)
+private struct FollowingScroll<Content: View>: View {
+    /// How many messages this phone has sent: a change is a send.
+    let sends: Int
+    /// What the end of the chat holds: a change is something arriving there.
+    let arrivals: String
+    @ViewBuilder var content: Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var position = ScrollPosition(edge: .bottom)
+    @State private var following = true
+    @State private var nearBottom = true
+    @State private var scrolling = false
+    @State private var newBelow = false
+
+    var body: some View {
+        ScrollView { content }
+            .scrollPosition($position)
+            .defaultScrollAnchor(.bottom)
+            // Growth keeps the bottom while following; reading further up it leaves your text where it is.
+            .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
+            .scrollDismissesKeyboard(.interactively)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentSize.height - geometry.visibleRect.maxY < 32
+            } action: { _, near in
+                nearBottom = near
+                if scrolling { following = near }
+                if near { newBelow = false }
+            }
+            .onScrollPhaseChange { _, phase in
+                scrolling = phase.isScrolling
+                if !phase.isScrolling { following = nearBottom }
+            }
+            .onChange(of: arrivals) { _, _ in if !following { newBelow = true } }
+            .onChange(of: sends) { _, _ in
+                following = true
+                newBelow = false
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
+            }
+            .overlay(alignment: .bottom) {
+                if newBelow, !following {
+                    Button {
+                        newBelow = false
+                        following = true
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Lucide(.chevronDown, size: 14, color: Theme.ink)
+                            Text("New").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
+                        }
+                        .padding(.horizontal, 14).frame(minHeight: 36)
+                        .background(Theme.surfaceRaised, in: Capsule())
+                        .overlay(Capsule().stroke(Theme.line))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 8)
+                    .accessibilityLabel("Jump to the newest message")
+                    .transition(.opacity)
+                }
+            }
     }
 }
 
@@ -365,10 +389,9 @@ private struct ChatRows: View {
                 }
             }
         }
-        // Each row is a scroll target, so the chat knows which one you were reading.
-        .scrollTargetLayout()
         .sheet(isPresented: $showingDiff) { DiffView(session: session) }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: rows.map(\.id))
+        // No implicit animation on rows arriving: in a chat pinned to its bottom, content that slides while the
+        // scroll view is also adjusting itself put two lines of text on top of each other for a moment.
     }
 }
 
@@ -498,8 +521,9 @@ private struct LiveBox: View {
                         .italic(step.kind == "thinking")
                         .lineLimit(1).truncationMode(.tail)
                 }
+                // No transition: a step arriving crossfaded over the one it replaced, and for that moment two
+                // lines of text sat on top of each other. The box is a ticker; it just updates.
                 .id(first + offset)
-                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, minHeight: CGFloat(WorkingRow.boxLines) * 20, alignment: .bottomLeading)
@@ -507,7 +531,6 @@ private struct LiveBox: View {
         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: first + steps.count)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Latest steps: \(steps.map(\.text).joined(separator: ". "))")
     }
@@ -1135,21 +1158,6 @@ private struct SendFace: ViewModifier {
     }
 }
 
-/// Keeps the newest content in view as it grows (iOS 18); earlier, the view just grows downward.
-private struct StickToBottom: ViewModifier {
-    /// At the end: growth keeps the newest in view. Reading further up: growth below leaves the
-    /// text you are reading where it is (a bottom anchor would slide it up as each step arrived).
-    let following: Bool
-
-    func body(content: Content) -> some View {
-        if #available(iOS 18, *) {
-            content.defaultScrollAnchor(.bottom, for: .initialOffset).defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
-        } else {
-            content
-        }
-    }
-}
-
 /// A working turn's steps: the newest six the snapshot carries, clipped, or the whole turn when it
 /// is streamed live (verbose, "Show thinking live").
 struct StepList: View {
@@ -1214,9 +1222,10 @@ struct StepList: View {
                         if more { Lucide(open ? .chevronUp : .chevronDown, size: 12, color: Theme.subtle) }
                     }
                     if open {
+                        // Not selectable in place: selectable text takes the taps, so an opened step could not be
+                        // folded by touching its text. Copy and Share are on a long press of the row.
                         Text(step.text).font(.subheadline).foregroundStyle(Theme.ink).italic(step.kind == "thinking")
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
                     }
                 }
             }

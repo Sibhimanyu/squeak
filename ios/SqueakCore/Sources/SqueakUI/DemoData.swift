@@ -306,6 +306,20 @@ enum DemoData {
 
     /// The working chat's turn as the Mac streams it: whole steps, the steer where it landed, and
     /// Conductor's queue (one from this phone, one typed on the Mac).
+    /// `-squeak-demo-long`: a long chat above the turn, to see the chat open at its newest message.
+    private static var longHistory: [LiveTurn.HistoryEntry] {
+        guard ProcessInfo.processInfo.arguments.contains("-squeak-demo-long") else { return [] }
+        var entries: [LiveTurn.HistoryEntry] = []
+        for i in 0..<14 {
+            let ask = "Question \(i + 1): what does the splitter do with a table that is longer than one message?"
+            let answer = "Answer \(i + 1): it splits on block boundaries first, so a table stays whole when it fits, and falls back to rows when it does not."
+            let seconds: Double = Double(5000 - i * 200)
+            entries.append(LiveTurn.HistoryEntry(role: "user", text: ask, at: now(-seconds)))
+            entries.append(LiveTurn.HistoryEntry(role: "assistant", text: answer, at: now(-(seconds - 100)), workBefore: i % 3 == 0 ? 4 : nil))
+        }
+        return entries
+    }
+
     static var liveTurns: [String: LiveTurn] {
         ["tg": LiveTurn(key: "tg", working: true, total: 7, steps: [
             .init(kind: "note", text: "Checking why bold text arrives as literal asterisks."),
@@ -318,7 +332,7 @@ enum DemoData {
         ], queue: [
             .init(id: demoQueued, text: "Then update the README's formatting section.", mode: "queue", position: 0),
             .init(id: "6b1d0c7e-8a43-4f0e-b2d9-1c5e7a9f3d20", text: "Run the whole suite before you finish.", mode: "queue", position: 1),
-        ], history: [
+        ], history: longHistory + [
             .init(role: "user", text: "Telegram shows ** and ## literally in long answers. Find out why.", at: now(-1500)),
             .init(role: "assistant", text: "The splitter cuts messages inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. I can fix the splitter and keep the fallback.", at: now(-900), workBefore: 6),
             .init(role: "user", text: "Fix the splitter, and make sure tables still render.", at: now(-700)),
