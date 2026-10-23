@@ -248,7 +248,7 @@ describe("ConductorReplier.send through Conductor's window", () => {
     const { replier, claude } = fixture(session(), [], ui);
 
     const outcome = await replier.send("s1", "A", () => undefined);
-    expect(outcome.status).toBe("refused");
+    expect(outcome.status).toBe("unconfirmed");
     expect(claude.turns).toHaveLength(0);
   });
 
@@ -281,17 +281,58 @@ describe("ConductorReplier.send through Conductor's window", () => {
 });
 
 describe("ConductorReplier.send queue and steer", () => {
-  function relayFixture(status: ConductorSessionRef["status"], ok = true) {
+  /**
+   * `proof`: what Conductor shows after the relay's 2xx. `auto` is what a healthy one does: a working chat
+   * lists the message in its queue, a resting one records it as a user message.
+   */
+  function relayFixture(
+    status: ConductorSessionRef["status"],
+    ok = true,
+    proof: "auto" | "none" | "queue-idle" = "auto",
+  ) {
     const sent: Array<{ text: string; mode?: string }> = [];
+    const rows: SessionMessageRecord[] = [];
     const relay: ConductorRelaySender = {
       isReady: () => true,
       send: async ({ text, mode }) => {
         sent.push({ text, ...(mode ? { mode } : {}) });
+        if (ok && proof === "auto" && status === "idle") {
+          rows.push({ role: "user", content: text, sentAt: new Date().toISOString() } as SessionMessageRecord);
+        }
         return ok ? { ok: true } : { ok: false, reason: "down" };
       },
+      queue: async () => ({
+        ok: true,
+        items:
+          proof === "none" || (proof === "auto" && status === "idle")
+            ? []
+            : sent.map((message, position) => ({
+                id: `q${position}`,
+                text: message.text,
+                mode: "queue" as const,
+                position,
+              })),
+      }),
     };
-    return { ...fixture(session({ status }), [], null, relay), sent };
+    return { ...fixture(session({ status }), rows, null, relay), sent };
   }
+
+  it("never says sent when Conductor accepted a message and nothing shows it", async () => {
+    const { replier } = relayFixture("idle", true, "none");
+    const outcome = await replier.send("s1", "hi", () => undefined);
+    expect(outcome.status).toBe("unconfirmed");
+  });
+
+  it("says nothing started when the message sits in the queue of a chat that is not running", async () => {
+    const { replier } = relayFixture("idle", true, "queue-idle");
+    const outcome = await replier.send("s1", "hi", () => undefined);
+    expect(outcome).toMatchObject({ status: "unconfirmed", reason: expect.stringMatching(/not started/) });
+  });
+
+  it("does not take a queued message that is not there for one that is mid-turn", async () => {
+    const { replier } = relayFixture("working", true, "none");
+    expect((await replier.send("s1", "next", () => undefined)).status).toBe("unconfirmed");
+  });
 
   it("reports queued when the agent is mid-turn and the message was queued", async () => {
     const { replier, sent } = relayFixture("working");
@@ -370,9 +411,12 @@ describe("ConductorReplier queued messages", () => {
   it("passes the caller's message id to the relay, and only there", async () => {
     const { replier, calls } = queueFixture();
     await replier.send("s1", "next", () => undefined, { messageId: item.id });
-    expect(calls).toEqual([
-      ["send", { workspaceId: "w1", sessionId: "s1", text: "next", mode: "queue", messageId: item.id }],
+    expect(calls[0]).toEqual([
+      "send",
+      { workspaceId: "w1", sessionId: "s1", text: "next", mode: "queue", messageId: item.id },
     ]);
+    // Every other call is the read that proves it arrived.
+    expect(calls.slice(1).every((call) => call[0] === "queue")).toBe(true);
   });
 
   it("reads the queue through the relay, in the chat's workspace", async () => {

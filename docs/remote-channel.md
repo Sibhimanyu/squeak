@@ -429,3 +429,15 @@ documents spanning 22 hours because nothing deleted them.
   its clock behind). The live turn also carries the session's `state` and
   `turnId`; for the chat on screen, the newer of the view and the live turn
   says what it is doing.
+
+## Honest delivery of a reply
+
+A bubble on the phone says "Sent" only when the Mac's result says `sent`, and the Mac says `sent` only
+once the chat shows the message (`ConductorReplier.confirmRelayDelivery`: a `session_messages` user row, the chat
+starting, or, mid-turn, the message in Conductor's queue). The relay's 2xx alone is not proof (a paused queue
+answers 2xx). The result statuses are `sent`, `refused` (nothing started) and `unconfirmed` (the route took it, nothing
+proved it arrived: never resent by the app, the person checks the chat). The phone waits 30 s, then deletes the
+command from the channel (so it can never run later), gives a Mac that had just read it 12 s more, and only
+then says "Not sent. Nothing started." (command taken back) or "Couldn't confirm" (the delete failed too).
+Unsettled sends are kept in `OutboxStore` (Caches, complete file protection, no backup, cleared on unpair) so a relaunch
+never loses the text; Send again reuses the Conductor message id, Edit puts the text back in the composer.

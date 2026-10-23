@@ -11,8 +11,10 @@ struct ChatSend: Identifiable, Equatable {
         case queued(agent: String, steerUnavailable: Bool)
         /// Went into the turn in progress.
         case steered
-        /// Written to the channel, but the Mac has not said it arrived.
+        /// Neither delivered nor refused: the Mac could not prove it arrived, or never answered. It may be in
+        /// the chat. Never shown as sent, and never sent again by the app on its own.
         case notConfirmed
+        /// It did not go through and nothing started; `String` is why. Its text is kept for Send again or Edit.
         case refused(String)
         /// The agent has it: its turn started from it, it shows in the turn, or it left the queue.
         /// Only ever worked out for display (`ChatTimeline.receipt`), never stored.
@@ -27,10 +29,40 @@ struct ChatSend: Identifiable, Equatable {
                 unavailable ? "Queued · \(agent) reads it after this turn (steering isn't available here)"
                     : "Queued · \(agent) reads it after this turn"
             case .steered: "Steered into the current turn"
-            case .notConfirmed: "Not confirmed"
-            case .refused(let why): "Not sent: \(why)"
+            case .notConfirmed: "Couldn't confirm it arrived. Check the chat before sending again."
+            case .refused(let why): "Not sent. Nothing started. \(Self.sentence(why))"
             case .read(let agent): "Read by \(agent)"
             }
+        }
+
+        /// The Mac's reason as a sentence of its own.
+        static func sentence(_ why: String) -> String {
+            let t = why.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let first = t.first else { return "" }
+            let s = first.uppercased() + t.dropFirst()
+            return s.hasSuffix(".") || s.hasSuffix("!") || s.hasSuffix("?") ? s : s + "."
+        }
+
+        /// A send that did not go through, or that nobody can vouch for: it offers Send again and Edit.
+        var failed: Bool {
+            switch self {
+            case .refused, .notConfirmed: true
+            default: false
+            }
+        }
+
+        /// What a bubble says once the Mac has answered: sent only when the Mac says it put it in the chat,
+        /// "couldn't confirm" when it could not prove that, and "not sent" otherwise, with its reason.
+        static func verdict(_ result: CommandResult, agent: String) -> Status {
+            if result.sent { return delivered(result, agent: agent) }
+            if result.unconfirmed { return .notConfirmed }
+            return .refused(result.reason ?? "your Mac refused that reply.")
+        }
+
+        /// What a bubble says when the Mac never answered. `withdrawn`: the command was taken back off the
+        /// channel, so it can never run and nothing started. Otherwise nothing is known, and it says so.
+        static func silence(withdrawn: Bool) -> Status {
+            withdrawn ? .refused("your Mac didn't pick it up (is Squeak running there?), so the message was taken back.") : .notConfirmed
         }
 
         /// What the Mac reported for a delivered message. An older Mac says nothing, which reads as sent.
@@ -44,7 +76,7 @@ struct ChatSend: Identifiable, Equatable {
     }
     let id: UUID
     let text: String
-    let date: Date
+    var date: Date
     /// The agent turn it answered; places it before or after that turn's message.
     let answersTurn: String?
     var status: Status
@@ -55,10 +87,14 @@ struct ChatSend: Identifiable, Equatable {
     let queuedBehindTurn: Bool
     /// Seen in the Mac's copy of Conductor's queue; once it leaves it, it went to the agent.
     var seenInQueue = false
+    /// The channel command carrying it, once there is one.
+    var commandId: String?
+    /// When it was first sent: `date` moves on when it is sent again, and an earlier try may have arrived.
+    var origin: Date
 
     init(id: UUID = UUID(), text: String, date: Date, answersTurn: String?, status: Status = .sent,
          messageId: String = UUID().uuidString.lowercased(), mode: ReplyMode = .queue, queuedBehindTurn: Bool = false) {
-        self.id = id; self.text = text; self.date = date; self.answersTurn = answersTurn; self.status = status
+        self.id = id; self.text = text; self.date = date; self.origin = date; self.answersTurn = answersTurn; self.status = status
         self.messageId = messageId; self.mode = mode; self.queuedBehindTurn = queuedBehindTurn
     }
 
@@ -93,7 +129,10 @@ enum ChatQueue {
         guard send.queuedBehindTurn, send.mode == .queue else { return false }
         switch send.status {
         case .refused, .sent, .steered, .read: return false
-        case .sending, .queued, .notConfirmed: break
+        case .notConfirmed:
+            // Not known to have arrived, so it is shown as a failure, unless Conductor's own queue lists it.
+            return live?.queue?.contains(where: { $0.id == send.messageId }) ?? false
+        case .sending, .queued: break
         }
         if let queue = live?.queue {
             if queue.contains(where: { $0.id == send.messageId }) { return true }
@@ -189,8 +228,16 @@ enum ChatTimeline {
         let working = session.state == "working"
         let live = live?.key == session.key ? live : nil
         let current: String? = working ? nil : [session.message, session.detail].compactMap { $0 }.first { !$0.isEmpty }
+        // A message nobody could confirm that the chat's own history now shows did arrive.
+        let history = firstNonEmpty(live?.history, cachedHistory)
+        let proven: [ChatSend] = allSends.map { send in
+            guard case .notConfirmed = send.status, arrived(send, in: history) else { return send }
+            var copy = send
+            copy.status = .sent
+            return copy
+        }
         // Queued messages wait above the composer, not here.
-        let sends = allSends.filter { !ChatQueue.isQueued($0, session: session, live: live, now: now) }
+        let sends = proven.filter { !ChatQueue.isQueued($0, session: session, live: live, now: now) }
 
         func replied(_ s: ChatSend) -> Bool {
             if now.timeIntervalSince(s.date) > giveUp, !working { return true }
@@ -209,7 +256,8 @@ enum ChatTimeline {
         }
         let awaiting = sends.filter {
             switch $0.status {
-            case .refused: false
+            // A failure started nothing: no "Starting…" row under it.
+            case .refused, .notConfirmed: false
             default: !replied($0)
             }
         }
@@ -267,6 +315,16 @@ enum ChatTimeline {
             rows += turn(steps: steps, steers: steers.map(settled), truncated: total > steps.count, total: total, agentName: agentName)
         }
         return rows.isEmpty ? [.empty(emptyText(canReply: Presentation.replyBlock(session) == nil))] : rows
+    }
+
+    /// The chat's history has this message as a user entry written at or after it was sent.
+    static func arrived(_ send: ChatSend, in history: [LiveTurn.HistoryEntry]?) -> Bool {
+        guard let history else { return false }
+        return history.contains { entry in
+            guard entry.role == "user", same(entry.text, send.text) || same(send.text, entry.text) else { return false }
+            guard let at = entry.at.flatMap(Age.date) else { return false }
+            return at >= send.origin.addingTimeInterval(-5)
+        }
     }
 
     /// The first history that has anything in it: an empty live one (the Mac could not read the chat this

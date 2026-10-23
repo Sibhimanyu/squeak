@@ -876,6 +876,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var ref: String? = nil
 
     public var sent: Bool { status == "sent" }
+    /// The Mac could not prove the message reached the chat (it may have): not sent, not refused.
+    public var unconfirmed: Bool { status == "unconfirmed" }
     /// For an answer: the Mac delivered it (`via` says how: "conductor", "stopped-and-sent").
     public var answered: Bool { status == "answered" }
 }

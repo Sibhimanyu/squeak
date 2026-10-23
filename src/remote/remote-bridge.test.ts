@@ -582,6 +582,52 @@ describe("RemoteBridge commands", () => {
   });
 });
 
+describe("RemoteBridge honest delivery", () => {
+  it("reports a message the Mac could not prove arrived as unconfirmed, never as sent", async () => {
+    const f = fixture({ outcome: { status: "unconfirmed", reason: "I could not see it arrive." } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.command());
+    await f.bridge.tick();
+    expect(f.result("c1")).toEqual({ id: "c1", status: "unconfirmed", reason: "I could not see it arrive." });
+  });
+
+  it("answers a reply that blew up with unconfirmed, so the phone is never left waiting", async () => {
+    const f = fixture();
+    f.replier.send.mockRejectedValueOnce(new Error("boom"));
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.command());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "unconfirmed" });
+    expect(f.store.docs.has(`${f.channel}/commands/c1`)).toBe(false);
+  });
+
+  it("tells the phone a reply expired before the Mac saw it", async () => {
+    const f = fixture();
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.command());
+    f.advance(11 * 60_000);
+    await f.bridge.tick();
+    expect(f.sends).toEqual([]);
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: expect.stringContaining("expired") });
+  });
+
+  it("writes the result again when the network drops it once", async () => {
+    const f = fixture();
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.command());
+    const set = f.store.set.bind(f.store);
+    let failed = 0;
+    f.store.set = async (path: string, doc: never) => {
+      if (path.includes("/results/c1") && failed++ < 1) {
+        throw new Error("fetch failed");
+      }
+      return set(path, doc);
+    };
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "sent" });
+  });
+});
+
 describe("RemoteBridge hotspot", () => {
   const state = { configured: true, ssid: "Phone", enabled: true, onHotspot: false, last: null };
   const hotspot = (outcome: { ok: true } | { ok: false; reason: string } = { ok: true }) => ({

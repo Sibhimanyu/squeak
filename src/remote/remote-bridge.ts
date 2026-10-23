@@ -485,6 +485,9 @@ export interface RemoteBridgeDependencies {
 type PhoneQuestion = { toolUseId: string; questions: QuestionPrompt[]; plan?: string };
 
 /** A command older than this is refused even if nothing else is wrong. */
+const RESULT_WRITE_ATTEMPTS = 3;
+const RESULT_WRITE_RETRY_MS = 400;
+
 export const MAX_COMMAND_LIFETIME_MS = 10 * 60_000;
 /** How long a phone counts as "open" after its last presence ping. */
 const PRESENCE_WINDOW_MS = 60_000;
@@ -1099,13 +1102,48 @@ export class RemoteBridge {
 
   private async readCommands(config: RemoteConfig): Promise<void> {
     for (const { id, doc } of await this.deps.store.list(this.channel(config, "commands"))) {
-      const verdict = await this.handleCommand(config, id, doc);
+      let verdict: { write: boolean; result: Record<string, unknown> };
+      try {
+        verdict = await this.handleCommand(config, id, doc);
+      } catch (error) {
+        // Never leave the phone waiting on a command this Mac gave up on, and never claim it was sent.
+        logger.warn("remote command failed", { error: error instanceof Error ? error.message : String(error) });
+        verdict = {
+          write: true,
+          result: {
+            id,
+            status: "unconfirmed",
+            reason: "Your Mac hit an error handling that. Check the chat before sending again.",
+          },
+        };
+      }
       // Deleted whatever the verdict, so nothing is ever looked at twice.
       await this.deps.store.delete(this.channel(config, "commands", id)).catch(() => undefined);
       if (verdict.write) {
-        await this.deps.store
-          .set(this.channel(config, "results", id), { box: seal(config.key, verdict.result), at: this.now() })
-          .catch(() => undefined);
+        await this.writeResult(config, id, verdict.result);
+      }
+    }
+  }
+
+  /**
+   * The phone is waiting on this. A write that fails on a flaky network is tried again, and a failure is
+   * logged: the command is already gone, so the phone can only say it could not confirm.
+   */
+  private async writeResult(config: RemoteConfig, id: string, result: Record<string, unknown>): Promise<void> {
+    const doc = { box: seal(config.key, result), at: this.now() };
+    for (let attempt = 1; attempt <= RESULT_WRITE_ATTEMPTS; attempt++) {
+      try {
+        await this.deps.store.set(this.channel(config, "results", id), doc);
+        return;
+      } catch (error) {
+        if (attempt === RESULT_WRITE_ATTEMPTS) {
+          logger.warn("remote result not written; the phone will not hear back", {
+            status: result.status,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, RESULT_WRITE_RETRY_MS * attempt));
       }
     }
   }
@@ -1257,6 +1295,11 @@ export class RemoteBridge {
     if (outcome.status === "refused") {
       this.log(device.name, "refused", outcome.reason);
       return { write: true, result: { id, status: "refused", reason: outcome.reason } };
+    }
+    if (outcome.status === "unconfirmed") {
+      // Not "sent": nothing proved the chat has it. The phone says so and does not resend by itself.
+      this.log(device.name, "refused", `unconfirmed: ${outcome.reason}`);
+      return { write: true, result: { id, status: "unconfirmed", reason: outcome.reason } };
     }
     this.log(device.name, "sent", `${text.length <= 3 ? text : "a reply"} to ${command.sessionId.slice(0, 8)}`);
     return {

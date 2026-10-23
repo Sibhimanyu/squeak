@@ -2,8 +2,8 @@ import crypto from "node:crypto";
 import type { EventEmitter } from "node:events";
 
 import { ConductorMirrorWriter, type MirrorFingerprints } from "../adapters/conductor-mirror.js";
-import type { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
-import type { CodexNotification, SupportedAgentType } from "../types.js";
+import { conductorTimestampToIso, type ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
+import type { CodexNotification, ConductorSessionRef, SupportedAgentType } from "../types.js";
 import { extractAssistantEnvelopeText, extractTurnError } from "../utils/conductor-envelope.js";
 import { buildTranscript, TRANSCRIPT_SCAN_ROWS, type TranscriptResult } from "./transcript.js";
 import { describeUiFailure, mayHaveSent, type ConductorUiSender } from "./conductor-ui.js";
@@ -40,7 +40,12 @@ export type ReplyOutcome =
   | ({ status: "started"; via: "conductor" } & DeliveryInfo)
   | ({ status: "started"; via: "terminal" } & DeliveryInfo)
   | ({ status: "started"; via: "background"; fallbackReason: string | null } & DeliveryInfo)
-  | { status: "refused"; reason: string };
+  | { status: "refused"; reason: string }
+  /**
+   * The message may or may not be in the chat: the route accepted it but nothing proved it arrived, and
+   * sending it again another way could deliver it twice. Never reported as sent; the person checks the chat.
+   */
+  | { status: "unconfirmed"; reason: string };
 
 /**
  * How a message was meant to meet a working agent. `queue` waits for the turn
@@ -280,6 +285,7 @@ export class ConductorReplier {
     if (this.deps.relay?.isReady() && !this.isReplying(sessionId)) {
       // Steering an idle chat means nothing: it is simply sent.
       const steer = wantsSteer && inFlight;
+      const startedAt = new Date().toISOString();
       const result = await this.deps.relay.send({
         workspaceId: session.workspaceId,
         sessionId,
@@ -288,7 +294,24 @@ export class ConductorReplier {
         ...(options.messageId ? { messageId: options.messageId } : {}),
       });
       if (result.ok) {
-        return { status: "started", via: "conductor", delivery: steer ? "steered" : inFlight ? "queued" : "sent" };
+        // Conductor's composer took it (a 2xx), which is not the chat having it: a paused queue, a dropped
+        // write or a restarting app all answer 2xx. Say "started" only once the chat or its queue shows it.
+        const delivery = steer ? "steered" : inFlight ? "queued" : "sent";
+        const proof = await this.confirmRelayDelivery(session, input, startedAt, {
+          inFlight,
+          ...(options.messageId ? { messageId: options.messageId } : {}),
+        });
+        if (proof === "confirmed") {
+          return { status: "started", via: "conductor", delivery };
+        }
+        logger.warn("relay reply accepted but not seen in the chat", { sessionId, proof });
+        return {
+          status: "unconfirmed",
+          reason:
+            proof === "waiting"
+              ? "Conductor has it waiting in its queue but the chat has not started. Check that chat."
+              : "Conductor accepted it but I could not see it arrive. Check that chat before sending again.",
+        };
       }
       logger.info("conductor relay reply failed; falling back", { sessionId, reason: result.reason });
     }
@@ -313,7 +336,7 @@ export class ConductorReplier {
         }
         logger.warn("reply through Conductor's window is unconfirmed", { sessionId, detail: result.detail });
         return {
-          status: "refused",
+          status: "unconfirmed",
           reason: "I typed it into Conductor but could not confirm it was sent. Check that chat before sending again.",
         };
       }
@@ -463,14 +486,63 @@ export class ConductorReplier {
   private async confirmUserMessage(sessionId: string, text: string, sinceIso: string): Promise<boolean> {
     const sleep = this.deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
     const deadline = Date.now() + (this.deps.confirmTimeoutMs ?? 6_000);
-    const wanted = text.trim();
     for (;;) {
-      const rows = this.deps.registry.listSessionMessages(sessionId, 10);
-      const found = rows.some(
-        (row) => row.role === "user" && row.content.trim() === wanted && (row.sentAt ?? "") >= sinceIso.slice(0, 19),
-      );
+      const found = this.hasUserRow(sessionId, text, sinceIso);
       if (found || Date.now() >= deadline) {
         return found;
+      }
+      await sleep(500);
+    }
+  }
+
+  private hasUserRow(sessionId: string, text: string, sinceIso: string): boolean {
+    const wanted = squash(text);
+    const since = Date.parse(sinceIso) - 2_000;
+    return this.deps.registry.listSessionMessages(sessionId, 10).some((row) => {
+      if (row.role !== "user" || squash(row.content) !== wanted) {
+        return false;
+      }
+      // Conductor writes two spellings of a time; read both as the instants they are.
+      const at = Date.parse(conductorTimestampToIso(row.sentAt ?? null) ?? "");
+      return Number.isFinite(at) && at >= since;
+    });
+  }
+
+  /**
+   * Proof that a message the relay accepted reached the chat: Conductor recorded it as a user message, the
+   * chat started working because of it, or (while the agent is mid-turn) it is in Conductor's queue.
+   * `waiting`: it sits in the queue of a chat that is not running, so nothing has started.
+   */
+  private async confirmRelayDelivery(
+    session: ConductorSessionRef,
+    text: string,
+    sinceIso: string,
+    options: { inFlight: boolean; messageId?: string },
+  ): Promise<"confirmed" | "waiting" | "unseen"> {
+    const sleep = this.deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+    const deadline = Date.now() + (this.deps.confirmTimeoutMs ?? 6_000);
+    let queued = false;
+    for (;;) {
+      if (this.hasUserRow(session.id, text, sinceIso)) {
+        return "confirmed";
+      }
+      const now = this.deps.registry.getSessionById(session.id);
+      if (!options.inFlight && now && isInFlight(now.status)) {
+        return "confirmed";
+      }
+      const queue = await this.queue(session.id).catch(() => null);
+      const mine = queue?.some((item) =>
+        options.messageId ? item.id === options.messageId : squash(item.text) === squash(text),
+      );
+      if (mine) {
+        // Mid-turn, waiting behind it is the point. At rest, it should already be running.
+        if (options.inFlight) {
+          return "confirmed";
+        }
+        queued = true;
+      }
+      if (Date.now() >= deadline) {
+        return queued ? "waiting" : "unseen";
       }
       await sleep(500);
     }
@@ -543,6 +615,11 @@ export class ConductorReplier {
 }
 
 /** Typed into the window: Conductor queues it if mid-turn; it cannot steer. */
+/** Text as compared for "is this the message I sent": runs of whitespace are one space. */
+function squash(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 function typedDelivery(inFlight: boolean, wantsSteer: boolean): DeliveryInfo {
   return {
     delivery: inFlight ? "queued" : "sent",

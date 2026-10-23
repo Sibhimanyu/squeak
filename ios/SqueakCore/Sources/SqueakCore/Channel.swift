@@ -588,6 +588,12 @@ public struct Channel: Sendable {
         try await store.set(path("commands", id), document)
     }
 
+    /// Takes a command back before the Mac reads it. True when it is gone from the channel, so it can never
+    /// run; false when that could not be done (offline), which proves nothing either way.
+    public func deleteCommand(_ id: String) async -> Bool {
+        do { try await store.delete(path("commands", id)); return true } catch { return false }
+    }
+
     public func result(for id: String) async throws -> CommandResult? {
         guard let document = try await store.get(path("results", id)) else { return nil }
         return try ChannelCrypto.open(CommandResult.self, box: document.box, key: pairing.k)

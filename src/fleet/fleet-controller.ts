@@ -304,7 +304,7 @@ export class FleetController {
       return false;
     }
     const outcome = await replier.send(target.target, text, this.failureNotifier(location, target.label));
-    if (outcome.status === "refused") {
+    if (outcome.status === "refused" || outcome.status === "unconfirmed") {
       await this.send(location, outcome.reason);
       return true;
     }
@@ -330,7 +330,7 @@ export class FleetController {
       letter,
       this.failureNotifier(location, label),
     );
-    if (outcome.status === "refused") {
+    if (outcome.status === "refused" || outcome.status === "unconfirmed") {
       return { handled: true, notice: outcome.reason };
     }
     this.afterReplyStarted();
