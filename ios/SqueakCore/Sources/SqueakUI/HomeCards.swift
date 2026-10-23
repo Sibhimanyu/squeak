@@ -311,6 +311,50 @@ struct AgentAvatar: View {
     }
 }
 
+/// Home with nothing running: Earlier opens in place, so the newest quiet chats are one tap from reviving.
+/// The header folds it away; the foot goes to the whole list.
+struct RecentInlineCard: View {
+    let sessions: [PhoneSnapshot.Session]
+    @Binding var open: Bool
+    private static let shown = 5
+
+    var body: some View {
+        HomeGroupCard {
+            Button { open.toggle(); UISelectionFeedbackGenerator().selectionChanged() } label: {
+                HStack(spacing: 10) {
+                    Lucide(.history, size: 18, color: Theme.muted).frame(width: 24)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Earlier").font(.headline).foregroundStyle(Theme.ink)
+                        Text("Pick one up where it stopped").font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 8)
+                    Lucide(open ? .chevronUp : .chevronDown, size: 16, color: Theme.subtle)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityValue(open ? "Expanded" : "Collapsed")
+            .accessibilityHint(open ? "Hides the recent chats" : "Shows the recent chats")
+            if open {
+                ForEach(sessions.prefix(Self.shown)) { session in
+                    Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true)
+                    NavigationLink(value: HomeRoute.session(session.key)) {
+                        SessionRow(session: session, recent: true)
+                            .padding(.horizontal, 14).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true)
+            CardFooterRow(title: "View all earlier chats", symbol: .chevronRight) { content in
+                NavigationLink(value: HomeRoute.recent) { content }.buttonStyle(.plain)
+            }
+            .accessibilityHint("Opens older chats")
+        }
+    }
+}
+
 /// The chats that went quiet, as one quiet card at the foot of Home.
 struct EarlierCard: View {
     var body: some View {

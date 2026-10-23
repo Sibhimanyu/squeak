@@ -701,6 +701,8 @@ final class AppModel {
         var lidProblem: String? = nil
         /// A safety rule acting now.
         var safety: String? = nil
+        /// Asked for on this phone and not yet confirmed by the Mac's own snapshot.
+        var pending = false
     }
 
     enum AwakeChange {
@@ -710,7 +712,9 @@ final class AppModel {
     }
 
     /// The session as last changed here, shown until the Mac's snapshot has had time to agree.
-    private var awakeTapped: (status: AwakeStatus?, at: Date)?
+    private var awakeTapped: (change: AwakeChange, status: AwakeStatus?, at: Date)?
+    /// Bumped when a tapped session's wait runs out, so the screen draws what the Mac says without waiting for news.
+    private var awakeTick = 0
 
     /// Whether this Mac offers awake sessions at all.
     var awakeOffered: Bool { snapshot?.keepAwake != nil }
@@ -718,13 +722,38 @@ final class AppModel {
     /// Whether this Mac can start a lid-closed session.
     var awakeLidReady: Bool { snapshot?.awakeLidReady == true }
 
-    /// The running awake session, or nil when there is none.
+    /// The running awake session, or nil when there is none. What this phone just asked for shows only until the
+    /// Mac's snapshot has caught up with it: from then on the Mac's own word is what is drawn, so "Turning on…"
+    /// gives way to "On" the moment the Mac says so, and never hides the real state.
     var awake: AwakeStatus? {
-        if let tapped = awakeTapped, Date().timeIntervalSince(tapped.at) < 30 { return tapped.status }
-        guard snapshot?.keepAwake == true else { return nil }
-        return AwakeStatus(
-            until: snapshot?.awakeUntil.flatMap(Self.parseISO), lid: snapshot?.awakeLid, lidProblem: snapshot?.awakeLidProblem,
-            safety: snapshot?.awakeSafety)
+        _ = awakeTick
+        let mac: AwakeStatus? = snapshot?.keepAwake == true
+            ? AwakeStatus(until: snapshot?.awakeUntil.flatMap(Self.parseISO), lid: snapshot?.awakeLid,
+                          lidProblem: snapshot?.awakeLidProblem, safety: snapshot?.awakeSafety)
+            : nil
+        guard let tapped = awakeTapped else { return mac }
+        let age = Date().timeIntervalSince(tapped.at)
+        switch tapped.change {
+        case .start(_, let lid):
+            if let mac, !lid || mac.lid != nil { return mac }
+            return age < 45 ? tapped.status : mac
+        case .extend:
+            if let mac, let now = mac.until, let want = tapped.status?.until, now >= want.addingTimeInterval(-90) { return mac }
+            return age < 20 ? tapped.status : mac
+        case .end:
+            if mac == nil { return nil }
+            return age < 20 ? nil : mac
+        }
+    }
+
+    /// Redraws once the phone's own expectation has run out (see `awake`).
+    private func expireAwakeTap() {
+        Task { [weak self] in
+            for delay in [21.0, 25.0] {
+                try? await Task.sleep(for: .seconds(delay))
+                self?.awakeTick += 1
+            }
+        }
     }
 
     /// "1h 23m" / "45m" / "under a minute" until `until`.
@@ -777,13 +806,15 @@ final class AppModel {
         let expected: AwakeStatus?
         switch change {
         case .start(let minutes, let lid):
-            expected = AwakeStatus(until: minutes.map { Date().addingTimeInterval(Double($0) * 60) }, lid: lid ? "starting" : nil)
+            expected = AwakeStatus(until: minutes.map { Date().addingTimeInterval(Double($0) * 60) }, lid: lid ? "starting" : nil,
+                                   pending: true)
         case .extend(let minutes):
             expected = AwakeStatus(
                 until: awake?.until.map { max($0, Date()).addingTimeInterval(Double(minutes) * 60) }, lid: awake?.lid)
         case .end: expected = nil
         }
-        awakeTapped = (expected, Date())
+        awakeTapped = (change, expected, Date())
+        expireAwakeTap()
         if demo { return nil }
         guard let channel else { awakeTapped = nil; return "Not connected to your Mac." }
         do {
@@ -800,6 +831,8 @@ final class AppModel {
                 return "Your Mac didn't answer. Is Squeak running?"
             }
             guard result.sent else { awakeTapped = nil; return result.reason ?? "Your Mac couldn't change that." }
+            // The Mac has acted: read what it now says rather than wait for the next push.
+            await refresh()
             return nil
         } catch {
             awakeTapped = nil

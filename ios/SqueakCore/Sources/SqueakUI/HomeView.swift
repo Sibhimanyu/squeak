@@ -31,6 +31,8 @@ struct HomeView: View {
     @State private var query = ""
     /// The small states opened in place on Home; kept here so a card scrolled away keeps its state.
     /// `-squeak-expand <working|done|…>` starts with that state open: screenshots of the demo only.
+    /// Earlier, open in place when nothing is running.
+    @State private var recentOpen = true
     @State private var expanded: Set<Presentation.Filter> = {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "-squeak-expand"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) else { return [] }
@@ -132,7 +134,7 @@ struct HomeView: View {
             if let starting = model.startingChat { StartingRow(label: starting.label) }
             if sessions.isEmpty {
                 restingDuck
-                if !recent.isEmpty { pickUpAgain }
+                if !recent.isEmpty { RecentInlineCard(sessions: recent, open: $recentOpen) }
             } else {
                 switch grouping {
                 case .projects:
@@ -145,7 +147,7 @@ struct HomeView: View {
                     }
                 }
             }
-            if !recent.isEmpty { EarlierCard() }
+            if !recent.isEmpty && !sessions.isEmpty { EarlierCard() }
             Color.clear.frame(height: 1).id("end")
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
@@ -253,24 +255,6 @@ struct HomeView: View {
             Text("Nothing's running. The duck is resting.").foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity).padding(.top, 32).padding(.bottom, recent.isEmpty ? 40 : 20)
-    }
-
-    /// With nothing running, the newest quiet chats under the duck, to pick one up where it stopped.
-    private var pickUpAgain: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Pick up again").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted).padding(.leading, 4)
-                .accessibilityAddTraits(.isHeader)
-            HomeGroupCard {
-                ForEach(Array(recent.prefix(4).enumerated()), id: \.element.id) { index, session in
-                    if index > 0 { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true) }
-                    NavigationLink(value: HomeRoute.session(session.key)) {
-                        SessionRow(session: session, recent: true)
-                            .padding(.horizontal, 14).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
     }
 
     private var waiting: some View {
