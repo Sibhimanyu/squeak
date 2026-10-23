@@ -78,6 +78,7 @@ final class AppModel {
     /// merged, with the open chat's state from its live turn when that is newer (`rebuild`).
     @ObservationIgnored private var baseSnapshot: PhoneSnapshot?
     @ObservationIgnored private var recentDoc: PhoneRecent?
+    @ObservationIgnored private var seenSessions = SeenSessions()
     @ObservationIgnored private let pathMonitor = NWPathMonitor()
     @ObservationIgnored private var lastPath: (satisfied: Bool, interfaces: [NWInterface.InterfaceType])?
     /// How many recent chats Home has asked for; "Show more" adds 20, up to the Mac's 50.
@@ -196,6 +197,7 @@ final class AppModel {
         snapshot = nil
         baseSnapshot = nil
         recentDoc = nil
+        seenSessions.reset()
         macAliveAt = nil
         phase = .unpaired
         loop?.cancel()
@@ -370,7 +372,14 @@ final class AppModel {
     private func rebuild() {
         guard let base = baseSnapshot else { return }
         let view = base.merged(with: recentDoc).reconciled(with: watching.flatMap { liveTurns[$0] })
+        seenSessions.record(view)
         if view != snapshot { snapshot = view }
+    }
+
+    /// A session by key, active or recent, and for a short while after the Mac moved it between the two
+    /// lists, so the chat on screen does not go blank in between.
+    func session(_ key: String) -> PhoneSnapshot.Session? {
+        snapshot?.session(key) ?? seenSessions.session(key)
     }
 
     /// Streamed: keep presence inside the Mac's window. No re-read: a quiet

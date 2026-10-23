@@ -508,6 +508,8 @@ enum Presentation {
     /// Why the phone cannot reply, or nil when it can.
     static func replyBlock(_ session: PhoneSnapshot.Session) -> String? {
         if session.conductorSessionId == nil { return "Not a Conductor session. Answer it where it runs." }
+        // The Mac refuses a reply to a closed chat: it would run in the background, where Conductor shows nothing.
+        if session.open == false { return "Closed in Conductor. Reopen its tab there to reply." }
         // ANSWER-CARD: a question this phone can answer is answered on its card, not in the reply box.
         if session.state == "awaiting_input", session.question?.toolUseId != nil {
             return session.question?.plan != nil ? "Approve the plan above, or ask for changes." : "Answer the question above."
@@ -561,4 +563,103 @@ enum Age {
     static func clock(_ iso: String) -> String {
         date(iso)?.formatted(date: .omitted, time: .shortened) ?? ""
     }
+}
+
+/// What the Earlier page can narrow its chats by. Pure, so the controls and the list cannot disagree.
+struct EarlierFilter: Equatable {
+    enum Sort: String, CaseIterable, Identifiable {
+        case newest, project
+        var id: String { rawValue }
+        var title: String { self == .newest ? "Newest first" : "By project" }
+    }
+
+    /// Only chats whose tab is open in Conductor.
+    var openOnly = false
+    var project: String?
+    /// `claude` or `codex`, the session's own `agent`.
+    var agent: String?
+    /// How it ended: done, error or idle.
+    var outcome: Presentation.Filter?
+    var sort: Sort = .newest
+
+    /// Whether anything narrows the list (sorting does not).
+    var isNarrowing: Bool { openOnly || project != nil || agent != nil || outcome != nil }
+
+    mutating func clear() { self = EarlierFilter(sort: sort) }
+
+    func apply(_ sessions: [PhoneSnapshot.Session], query: String = "") -> [PhoneSnapshot.Session] {
+        sessions.filter { session in
+            (!openOnly || session.open == true)
+                && (project.map { Presentation.projectName(session) == $0 } ?? true)
+                && (agent.map { session.agent.lowercased() == $0 } ?? true)
+                && (outcome.map { Presentation.inFilter(session, $0) } ?? true)
+                && Presentation.matches(session, query: query)
+        }
+    }
+
+    /// The projects the chats belong to, newest chat first, with how many each has.
+    static func projects(_ sessions: [PhoneSnapshot.Session]) -> [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for session in sessions {
+            let name = Presentation.projectName(session)
+            if counts[name] == nil { order.append(name) }
+            counts[name, default: 0] += 1
+        }
+        return order.map { ($0, counts[$0] ?? 0) }
+    }
+
+    /// The agents the chats ran on, with how many each has.
+    static func agents(_ sessions: [PhoneSnapshot.Session]) -> [(agent: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for session in sessions { counts[session.agent.lowercased(), default: 0] += 1 }
+        return counts.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+    }
+
+    /// How many chats are open in Conductor, or nil when no chat says (an older Mac): then the
+    /// page has nothing to filter by and shows no switch.
+    static func openCount(_ sessions: [PhoneSnapshot.Session]) -> Int? {
+        sessions.contains { $0.open != nil } ? sessions.filter { $0.open == true }.count : nil
+    }
+
+    /// The chats in sections by project, projects in order of their newest chat; the chats keep their order.
+    static func byProject(_ sessions: [PhoneSnapshot.Session]) -> [(name: String, sessions: [PhoneSnapshot.Session])] {
+        var groups: [String: [PhoneSnapshot.Session]] = [:]
+        var order: [String] = []
+        for session in sessions {
+            let name = Presentation.projectName(session)
+            if groups[name] == nil { order.append(name) }
+            groups[name, default: []].append(session)
+        }
+        return order.map { ($0, groups[$0] ?? []) }
+    }
+
+    /// "12 of 30 chats", or "30 chats" when nothing narrows them.
+    static func countLine(shown: Int, of total: Int) -> String {
+        let word = total == 1 ? "chat" : "chats"
+        return shown == total ? "\(total) \(word)" : "\(shown) of \(total) \(word)"
+    }
+}
+
+/// The sessions the phone saw lately, so a chat open on screen never blanks. The Mac moves a chat
+/// between the active list and the recent one (its turn starts, or ends), and the two reach the phone
+/// as separate documents: for a moment the chat can be in neither. The screen keeps its last view of
+/// the chat through that gap instead of saying it is gone.
+struct SeenSessions {
+    /// Longer than the two documents ever disagree; past it the chat really is gone.
+    static let grace: TimeInterval = 90
+
+    private var seen: [String: (session: PhoneSnapshot.Session, at: Date)] = [:]
+
+    mutating func record(_ snapshot: PhoneSnapshot?, now: Date = Date()) {
+        for session in snapshot?.allSessions ?? [] { seen[session.key] = (session, now) }
+        seen = seen.filter { now.timeIntervalSince($0.value.at) < Self.grace }
+    }
+
+    func session(_ key: String, now: Date = Date()) -> PhoneSnapshot.Session? {
+        guard let entry = seen[key], now.timeIntervalSince(entry.at) < Self.grace else { return nil }
+        return entry.session
+    }
+
+    mutating func reset() { seen = [:] }
 }

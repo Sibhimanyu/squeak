@@ -126,4 +126,76 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertEqual(Presentation.needsYouCount([chat("a", "working"), chat("b", "finished"), chat("c", "error")]), 0)
         XCTAssertEqual(Presentation.needsYouCount([chat("a", "awaiting_input"), chat("b", "awaiting_approval"), chat("c", "idle")]), 2)
     }
+
+    func testAChatKeepsItsLastViewWhileTheMacMovesItBetweenLists() {
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        var seen = SeenSessions()
+        let quiet = chat("q", "idle")
+        let snapshot = PhoneSnapshot(v: 1, mac: "m", generatedAt: "", duck: .init(blockedCount: 0, workingCount: 0),
+                                     sessions: [], recent: [quiet])
+        seen.record(snapshot, now: t0)
+        // Now in neither list: the active one does not have it yet and the recent one let it go.
+        let gap = PhoneSnapshot(v: 1, mac: "m", generatedAt: "", duck: .init(blockedCount: 0, workingCount: 0), sessions: [], recent: [])
+        XCTAssertNil(gap.session("q"))
+        XCTAssertEqual(seen.session("q", now: t0.addingTimeInterval(5))?.key, "q")
+        // A chat that really went away is gone after the grace.
+        XCTAssertNil(seen.session("q", now: t0.addingTimeInterval(SeenSessions.grace + 1)))
+        XCTAssertNil(seen.session("never"))
+    }
+
+    private func earlier(_ key: String, repo: String, agent: String = "claude", state: String = "idle", open: Bool? = true,
+                         at: String = "2026-10-19T10:00:00Z") -> PhoneSnapshot.Session {
+        var s = PhoneSnapshot.Session(key: key, conductorSessionId: key, label: "\(repo) · \(key)", agent: agent, state: state,
+                                      lastActivityAt: at, detail: nil, git: nil, contextPercent: nil, turnId: "t", message: nil,
+                                      choices: nil, title: key)
+        s.open = open
+        return s
+    }
+
+    func testEarlierFiltersNarrowByOpenTabProjectAgentAndOutcome() {
+        let chats = [
+            earlier("a", repo: "storefront", state: "finished", open: true),
+            earlier("b", repo: "storefront", agent: "codex", state: "error", open: false),
+            earlier("c", repo: "atlas", state: "idle", open: true),
+            earlier("d", repo: "atlas", agent: "codex", state: "finished", open: false),
+        ]
+        var f = EarlierFilter()
+        XCTAssertEqual(f.apply(chats).count, 4)
+        XCTAssertFalse(f.isNarrowing)
+        f.openOnly = true
+        XCTAssertEqual(f.apply(chats).map(\.key), ["a", "c"])
+        f.project = "atlas"
+        XCTAssertEqual(f.apply(chats).map(\.key), ["c"])
+        f.clear()
+        f.agent = "codex"
+        XCTAssertEqual(f.apply(chats).map(\.key), ["b", "d"])
+        f.outcome = .done
+        XCTAssertEqual(f.apply(chats).map(\.key), ["d"])
+        XCTAssertEqual(f.apply(chats, query: "zzz"), [])
+        f.sort = .project
+        f.clear()
+        XCTAssertEqual(f.sort, .project, "clearing the filters keeps how the list is sorted")
+        XCTAssertFalse(f.isNarrowing)
+    }
+
+    func testEarlierControlsCountWhatTheListHolds() {
+        let chats = [earlier("a", repo: "storefront"), earlier("b", repo: "atlas", agent: "codex", open: false), earlier("c", repo: "storefront")]
+        XCTAssertEqual(EarlierFilter.projects(chats).map(\.name), ["storefront", "atlas"])
+        XCTAssertEqual(EarlierFilter.projects(chats).map(\.count), [2, 1])
+        XCTAssertEqual(EarlierFilter.agents(chats).map(\.agent), ["claude", "codex"])
+        XCTAssertEqual(EarlierFilter.openCount(chats), 2)
+        // An older Mac says nothing about tabs: no count, so the page shows no switch.
+        XCTAssertNil(EarlierFilter.openCount([earlier("x", repo: "r", open: nil)]))
+        XCTAssertEqual(EarlierFilter.byProject(chats).map(\.name), ["storefront", "atlas"])
+        XCTAssertEqual(EarlierFilter.byProject(chats).first?.sessions.map(\.key), ["a", "c"])
+        XCTAssertEqual(EarlierFilter.countLine(shown: 3, of: 3), "3 chats")
+        XCTAssertEqual(EarlierFilter.countLine(shown: 1, of: 30), "1 of 30 chats")
+        XCTAssertEqual(EarlierFilter.countLine(shown: 1, of: 1), "1 chat")
+    }
+
+    func testAChatClosedInConductorCannotBeRepliedTo() {
+        XCTAssertNil(Presentation.replyBlock(earlier("o", repo: "r", open: true)))
+        XCTAssertNil(Presentation.replyBlock(earlier("u", repo: "r", open: nil)))
+        XCTAssertEqual(Presentation.replyBlock(earlier("c", repo: "r", open: false)), "Closed in Conductor. Reopen its tab there to reply.")
+    }
 }

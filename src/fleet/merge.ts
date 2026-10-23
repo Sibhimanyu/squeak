@@ -90,6 +90,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     // whichever observer supplied the rest of the identity.
     contextPercent: conductor?.contextPercent ?? base.contextPercent,
     retired: conductor?.retired ?? base.retired,
+    ...optionalFlags(conductor, base),
     baseRef: conductor?.baseRef ?? base.baseRef,
     // Only the transcript observer can ever have this; Conductor does not.
     costUsd: base.costUsd,
@@ -182,4 +183,17 @@ export function applyLiveness(sessions: FleetSession[], processes: LiveAgentProc
     const match = assigned.get(session.key);
     return match ? { ...session, pid: match.pid, alive: true } : session;
   });
+}
+
+/** Conductor's word on a chat's tab and workspace, when it has one; absent otherwise (a transcript cannot say). */
+function optionalFlags(
+  conductor: ObservedSession | null | undefined,
+  base: ObservedSession,
+): Pick<ObservedSession, "closed" | "workspaceRetired"> {
+  const closed = conductor?.closed ?? base.closed;
+  const workspaceRetired = conductor?.workspaceRetired ?? base.workspaceRetired;
+  return {
+    ...(closed === undefined ? {} : { closed }),
+    ...(workspaceRetired === undefined ? {} : { workspaceRetired }),
+  };
 }

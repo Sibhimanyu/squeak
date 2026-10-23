@@ -526,6 +526,22 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   - One duck, in the header; never in a card. **Earlier** is a quiet card at the
     foot. Searching skips the cards and lists every match. The last card scrolls
     clear of the floating tab bar. Swipe actions live in the lists, not on Home.
+- **Earlier is a page with controls** (2026-10-23). The chats that went quiet,
+  newest first, each tagged **Open** or **Closed** (whether its tab is open in
+  Conductor; the Mac says so per chat, and an older Mac sends nothing, so the
+  tags and the switch are simply absent). A segmented switch picks **All** or
+  **Open in Conductor** (each with its count); chips narrow by **Project**,
+  **Agent** and **Outcome** (done, error, idle) and order by **Newest first** or
+  **By project** (sections). A line says how many of the loaded chats show
+  ("3 of 6 chats") with **Clear filters**; searching works beside them, and
+  **Show more** loads older chats from the Mac, which the filters then apply to.
+  Every chat whose tab is open is always on the list, however quiet. A chat
+  closed in Conductor can be read but not answered from the phone: a reply
+  would run in the background where Conductor shows nothing.
+- **A chat screen hides the tab bar.** Its composer sits at the bottom, and the
+  bar floats over it. And it never goes blank while the Mac moves a chat
+  between the active and recent lists (the two reach the phone separately): the
+  phone keeps its last view of the chat for 90 s.
 - **The phone's own bottom bar** (standalone app only): **Home** (the cards by
   project), **Sessions** (the same cards by status) and, as before, **Needs you**
   (the decision cards; the one red badge, counting only chats blocked on you)

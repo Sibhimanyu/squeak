@@ -84,6 +84,16 @@ export interface ObservedSession {
    */
   retired: boolean;
   /**
+   * The chat's own tab is closed in Conductor (`is_hidden`). Only Conductor reports it; a transcript
+   * cannot, so it is undefined for anything Conductor does not hold. A closed chat is also `retired`.
+   */
+  closed?: boolean;
+  /**
+   * The workspace is archived, done or canceled: `retired` without counting a closed chat, so the phone
+   * can still list a chat whose tab was closed in a workspace that lives on.
+   */
+  workspaceRetired?: boolean;
+  /**
    * Branch to measure unpushed work against when the session's branch has no
    * upstream, which is the normal state of a fresh Conductor branch.
    */

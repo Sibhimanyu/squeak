@@ -188,17 +188,28 @@ enum DemoData {
     /// Chats from earlier, to pick up again. `-squeak-demo-empty-active` shows them with nothing active.
     private static var recent: [PhoneSnapshot.Session] {
         let ago = { (hours: Double) in ISO8601DateFormatter().string(from: Date().addingTimeInterval(-hours * 3600)) }
+        func chat(_ n: Int, _ label: String, _ agent: String, _ state: String, hours: Double, title: String, said: String,
+                  open: Bool, failure: String? = nil) -> PhoneSnapshot.Session {
+            var s = PhoneSnapshot.Session(
+                key: "r\(n)", conductorSessionId: "00000000-0000-0000-0000-0000000000a\(n)", label: label, agent: agent,
+                state: state, lastActivityAt: ago(hours), detail: nil, git: nil, contextPercent: nil, turnId: "r\(n)t", message: said,
+                choices: nil, title: title, failure: failure)
+            s.open = open
+            return s
+        }
         return [
-            PhoneSnapshot.Session(
-                key: "r1", conductorSessionId: "00000000-0000-0000-0000-0000000000a1", label: "storefront · coupon-codes", agent: "claude",
-                state: "idle", lastActivityAt: ago(3), detail: "Coupons apply before tax now; tests pass.", git: nil, contextPercent: 41,
-                turnId: "r1t", message: "Coupons now apply before tax, and the rounding test covers the 0.5 cent case. Want me to add the admin toggle next?",
-                choices: nil, title: "Coupon codes at checkout"),
-            PhoneSnapshot.Session(
-                key: "r2", conductorSessionId: "00000000-0000-0000-0000-0000000000a2", label: "atlas · rate-limits", agent: "codex",
-                state: "idle", lastActivityAt: ago(26), detail: "Added a token bucket per API key.", git: nil, contextPercent: nil,
-                turnId: "r2t", message: "Added a token bucket per API key, 60 requests a minute. Nothing else changed.", choices: nil,
-                title: "Rate limits per key"),
+            chat(1, "storefront · coupon-codes", "claude", "idle", hours: 3, title: "Coupon codes at checkout",
+                 said: "Coupons now apply before tax, and the rounding test covers the 0.5 cent case. Want me to add the admin toggle next?", open: true),
+            chat(2, "atlas · rate-limits", "codex", "finished", hours: 26, title: "Rate limits per key",
+                 said: "Added a token bucket per API key, 60 requests a minute. Nothing else changed.", open: true),
+            chat(3, "storefront · refund-flow", "claude", "error", hours: 30, title: "Refund flow",
+                 said: "", open: false, failure: "You've hit your session limit · resets 7:20pm"),
+            chat(4, "compass · release-notes", "claude", "finished", hours: 52, title: "Release notes for 2.4",
+                 said: "Drafted the 2.4 notes from the merged pull requests. Two entries need a screenshot.", open: false),
+            chat(5, "squeak · menu-bar-mark", "codex", "idle", hours: 75, title: "Menu bar mark",
+                 said: "The template image is 18 points tall and renders crisp on both appearances.", open: true),
+            chat(6, "atlas · search-synonyms", "claude", "finished", hours: 120, title: "Search synonyms",
+                 said: "Synonyms load from the config file at start. A restart picks up changes.", open: false),
         ]
     }
 

@@ -71,6 +71,8 @@ export class ConductorObserver {
       transcriptPath: null,
       contextPercent: normalizePercent(row.contextUsedPercent),
       retired: isRetiredWorkspace(row, this.now()),
+      closed: row.isHidden === true,
+      workspaceRetired: isRetiredWorkspace({ ...row, isHidden: false }, this.now()),
       // Conductor does not track spend locally.
       baseRef: row.defaultBranch ? `origin/${row.defaultBranch}` : null,
       costUsd: null,

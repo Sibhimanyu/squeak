@@ -97,6 +97,7 @@ struct HomeView: View {
                 // `-squeak-group <projects|status>` and `-squeak-filter <needsYou|…>`: for screenshots.
                 if let i = args.firstIndex(of: "-squeak-group"), i + 1 < args.count, let g = Presentation.Grouping(rawValue: args[i + 1]) { storedGrouping = g }
                 if let i = args.firstIndex(of: "-squeak-filter"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) { path = [.status(f)] }
+                if args.contains("-squeak-earlier") { path = [.recent] }
                 if let i = args.firstIndex(of: "-squeak-project"), i + 1 < args.count { path = [.project(args[i + 1])] }
             }
             .sheet(isPresented: $showingUsage) { UsageView() }
@@ -295,6 +296,10 @@ struct GroupView: View {
     }
 
     var body: some View {
+        if case .recent = route { EarlierView(path: $path) } else { list }
+    }
+
+    private var list: some View {
         List {
             if case .status(.needsYou) = route {
                 ForEach(active) { session in
@@ -561,6 +566,7 @@ struct SessionRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(Presentation.displayTitle(session)).font(.headline).lineLimit(2)
                 Spacer(minLength: 4)
+                if recent, let open = session.open { OpenTag(open: open) }
                 Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
             }
             secondLine.font(.subheadline).lineLimit(1)
@@ -589,6 +595,19 @@ struct SessionRow: View {
             .fontWeight(loud ? .semibold : .regular)
             .foregroundStyle(loud ? Theme.ink : Theme.muted)
         return Text("\(word)\(Text(" · \(rest)").foregroundStyle(Theme.muted))")
+    }
+}
+
+/// Whether a chat's tab is open in Conductor, in words on an Earlier row: the words say it, the outline only frames them.
+struct OpenTag: View {
+    let open: Bool
+
+    var body: some View {
+        Text(open ? "Open" : "Closed")
+            .font(.caption2.weight(.semibold)).foregroundStyle(open ? Theme.ink : Theme.subtle)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(open ? Theme.lineStrong : Theme.line))
+            .accessibilityLabel(open ? "Open in Conductor" : "Closed in Conductor")
     }
 }
 

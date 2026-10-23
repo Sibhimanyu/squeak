@@ -1754,7 +1754,9 @@ export class RemoteBridge {
       return true;
     }
     const { recent } = this.recentSessions(snapshot, this.phoneOpen() ? this.recentWanted : PHONE_RECENT_LIMIT);
-    return recent.some((session) => session.conductorSessionId === conductorSessionId);
+    // A chat whose tab is closed in Conductor is listed, flagged, but never acted on from here: a
+    // reply would go through the background CLI into a chat Conductor is not showing.
+    return recent.some((session) => session.conductorSessionId === conductorSessionId && session.closed !== true);
   }
 
   /**
@@ -2046,13 +2048,21 @@ export class RemoteBridge {
       .filter(
         (session) =>
           !active.has(session.key) &&
-          !session.retired &&
+          // A closed chat is retired too, but its workspace lives on: list it, flagged `open: false`.
+          !(session.workspaceRetired ?? session.retired) &&
           Boolean(session.conductorSessionId) &&
           Date.parse(session.lastActivityAt) >= monthAgo,
       )
       .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
     const inWindow = candidates.filter((session) => Date.parse(session.lastActivityAt) >= since);
-    const recent = inWindow.slice(0, limit);
+    // Every chat whose tab is still open in Conductor is always listed (the phone can filter to them),
+    // however quiet; the page size only limits the closed ones and the rest.
+    const head = inWindow.slice(0, limit);
+    const have = new Set(head.map((session) => session.key));
+    const open = candidates.filter((session) => session.closed === false && !have.has(session.key));
+    const recent = [...head, ...open]
+      .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
+      .slice(0, PHONE_RECENT_MAX);
     return { recent, more: limit < PHONE_RECENT_MAX && candidates.length > recent.length };
   }
 
@@ -2072,6 +2082,8 @@ export class RemoteBridge {
       agent: session.agent,
       state: session.state,
       lastActivityAt: session.lastActivityAt,
+      // Whether the chat's tab is open in Conductor; absent when the Mac cannot tell. Older phones ignore it.
+      ...(session.closed === undefined ? {} : { open: !session.closed }),
       detail: session.detail,
       git: git && git !== "clean" ? git : null,
       contextPercent: session.contextPercent,

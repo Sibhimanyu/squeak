@@ -91,6 +91,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// A film (RasanAI) waiting on one of its calls: the card to show instead of a chat reply.
         /// Only from a Mac new enough to send it.
         public var workflow: Workflow? = nil
+        /// Whether the chat's tab is open in Conductor (false: closed there). Absent from a Mac that
+        /// cannot tell, and from anything Conductor does not hold.
+        public var open: Bool? = nil
         public var id: String { key }
 
         public init(

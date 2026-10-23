@@ -1907,6 +1907,28 @@ describe("RemoteBridge recent chats", () => {
     expect(bridge.phoneView().recent.map((s) => s.key)).toEqual(["k:ok"]);
   });
 
+  it("lists a chat closed in Conductor flagged, keeps every open one, and refuses to act on a closed one", () => {
+    const bridge = recent(
+      [
+        chat("open", 10, { closed: false, workspaceRetired: false, retired: false }),
+        chat("closed", 20, { closed: true, workspaceRetired: false, retired: true }),
+        chat("archived", 30, { closed: true, workspaceRetired: true, retired: true }),
+        // Open but quiet for two weeks: still listed, since the phone can filter to what is open.
+        chat("quiet", 14 * 24 * 60, { closed: false, workspaceRetired: false, retired: false }),
+        chat("old-closed", 14 * 24 * 60, { closed: true, workspaceRetired: false, retired: true }),
+      ],
+      [],
+    );
+    const view = bridge.phoneView();
+    expect(view.recent.map((s) => [s.key, (s as { open?: boolean }).open])).toEqual([
+      ["k:open", true],
+      ["k:closed", false],
+      ["k:quiet", true],
+    ]);
+    expect((bridge as unknown as { phoneShows(id: string): boolean }).phoneShows("open")).toBe(true);
+    expect((bridge as unknown as { phoneShows(id: string): boolean }).phoneShows("closed")).toBe(false);
+  });
+
   it("keeps the list short and each message shorter than an active chat's", () => {
     const many = Array.from({ length: 15 }, (_, i) => chat(`c${i}`, i + 1));
     const view = recent(many, []).phoneView();

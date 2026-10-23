@@ -43,20 +43,28 @@ struct SessionView: View {
     /// Folded parts of the turn (before a steer, or a finished turn's steps) that were opened.
     @State private var openParts: Set<String> = []
 
-    private var session: PhoneSnapshot.Session? { model.snapshot?.session(key) }
+    private var session: PhoneSnapshot.Session? { model.session(key) }
 
     @Environment(\.squeakScreen) private var screen
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         Group {
             if let session {
                 content(session)
             } else {
-                Text("This session is no longer active.").foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.bg)
+                // Only after the chat has been in neither list for longer than the Mac's two documents
+                // ever disagree (`SeenSessions`): it really is gone, so leave a way out of the blank.
+                VStack(spacing: 12) {
+                    Text("This session is no longer on your Mac's list.").foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                    Button("Back to sessions") { dismiss() }.buttonStyle(.bordered).tint(Theme.ink)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.bg)
             }
         }
+        // A chat has its composer at the bottom: the app's tab bar floats over it, so it steps aside.
+        .toolbar(.hidden, for: .tabBar)
         .onAppear { screen.report?("Session"); model.watch(key) }
         // The agent you are watching finishes: one light tap, so you can look up from the keyboard.
         .onChange(of: session?.state) { old, new in
@@ -1000,7 +1008,7 @@ struct Composer: View {
         let wasWorking = working
         Task {
             // The session as it is now, not as this view last drew it.
-            guard let session = model.snapshot?.session(key) else { draft = text; return }
+            guard let session = model.session(key) else { draft = text; return }
             let started = await model.send(text, to: session, mode: wasWorking ? mode : .queue)
             if !started, draft.isEmpty { draft = text }
             if started, wasWorking { explained = true }
@@ -1018,7 +1026,7 @@ struct Composer: View {
             // Like any chat app: while the agent works and nothing is typed, the button stops it.
             Button {
                 Task {
-                    guard let session = model.snapshot?.session(key) else { return }
+                    guard let session = model.session(key) else { return }
                     await model.stop(session)
                 }
             } label: {
