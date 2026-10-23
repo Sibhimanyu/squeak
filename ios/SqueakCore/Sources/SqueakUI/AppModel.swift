@@ -512,7 +512,7 @@ final class AppModel {
 
     /// The Mac's answer to command `id`, or nil after 30 seconds. Streamed, it
     /// is read the moment the Mac writes it; otherwise every 750 ms.
-    private func awaitResult(_ id: String, on channel: Channel, within seconds: TimeInterval = 30) async throws -> CommandResult? {
+    func awaitResult(_ id: String, on channel: Channel, within seconds: TimeInterval = 30) async throws -> CommandResult? {
         let result = try await readResult(id, on: channel, within: seconds)
         // Read: it has nothing more to say, and every stream on `results` would download it again.
         if result != nil { Task { await channel.deleteResult(id) } }
@@ -1101,7 +1101,7 @@ final class AppModel {
     }
 
     /// Face ID once, then not again until the app has been away for a while (`SendUnlock`).
-    private func confirmWithBiometrics(reason: String) async -> Bool {
+    func confirmWithBiometrics(reason: String) async -> Bool {
         if demo || !unlock.needsAuthentication { return true }
         let context = LAContext()
         var error: NSError?
@@ -1111,4 +1111,56 @@ final class AppModel {
         return passed
     }
 }
+
+extension AppModel {
+    /// Sends each photo to the Mac in signed chunks and returns the paths it saved them at. Face ID once
+    /// first, like a send. Nothing is kept on the phone's side but what the caller holds.
+    func upload(_ photos: [ChatPhoto], to target: AttachTarget, progress: @escaping @MainActor (Int, Int) -> Void) async -> UploadResult {
+        if demo {
+            for n in 0..<photos.count {
+                progress(n, photos.count)
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            return .saved(photos.enumerated().map { ".context/attachments/demo\($0.offset)00/image-1.jpg" })
+        }
+        guard await confirmWithBiometrics(reason: "Send a photo") else { return .failed("Face ID was cancelled.") }
+        guard let channel else { return .failed("Not connected to your Mac.") }
+        var refs: [String] = []
+        for (n, photo) in photos.enumerated() {
+            progress(n, photos.count)
+            let uploadId = UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(24).lowercased()
+            let chunks = PhotoAttachment.chunks(of: photo.jpeg)
+            for (index, chunk) in chunks.enumerated() {
+                do {
+                    let signer = self.signer
+                    let (id, document) = try await Task.detached(priority: .userInitiated) { () -> (String, ChannelDocument) in
+                        switch target {
+                        case .session(let session):
+                            guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+                            return try channel.attachDocument(sessionId: sessionId, uploadId: String(uploadId), index: index,
+                                                              total: chunks.count, chunk: chunk, signer: signer)
+                        case .workspace(let workspaceId):
+                            return try channel.attachDocument(workspaceId: workspaceId, uploadId: String(uploadId), index: index,
+                                                              total: chunks.count, chunk: chunk, signer: signer)
+                        }
+                    }.value
+                    try await channel.send(document, id: id)
+                    guard let result = try await awaitResult(id, on: channel, within: 60) else {
+                        return .failed("Your Mac didn't answer. Is Squeak running?")
+                    }
+                    guard result.sent else { return .failed(result.reason ?? "Your Mac refused that photo.") }
+                    if index == chunks.count - 1 {
+                        guard let ref = result.ref else { return .failed("Your Mac didn't say where it saved the photo.") }
+                        refs.append(ref)
+                    }
+                } catch {
+                    return .failed("Couldn't reach your Mac.")
+                }
+            }
+        }
+        progress(photos.count, photos.count)
+        return .saved(refs)
+    }
+}
+
 #endif

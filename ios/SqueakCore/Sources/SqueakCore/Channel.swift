@@ -403,6 +403,36 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed document for one chunk of a photo, for a chat (`sessionId`) or a new chat's workspace.
+    public func attachDocument(
+        sessionId: String? = nil,
+        workspaceId: String? = nil,
+        uploadId: String,
+        index: Int,
+        total: Int,
+        chunk: Data,
+        signer: CommandSigner,
+        now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = AttachCommand(
+            v: 1,
+            kind: "attach",
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            uploadId: uploadId,
+            index: index,
+            total: total,
+            data: chunk.base64EncodedString(),
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
     /// The signed document that gives a chat a new name.
     public func renameDocument(to session: PhoneSnapshot.Session, title: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
         guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }

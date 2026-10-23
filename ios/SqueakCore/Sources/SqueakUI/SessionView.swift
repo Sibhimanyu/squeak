@@ -17,9 +17,24 @@ struct SessionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let key: String
     @State private var draft: String
+    /// Photos picked for the next message; they go with it.
+    @State private var photos: [ChatPhoto] = []
     init(key: String) {
         self.key = key
         let args = ProcessInfo.processInfo.arguments
+        // `-squeak-demo-photos`: two photos waiting in the composer, for screenshots of the demo.
+        if args.contains("-squeak-demo-photos") {
+            _photos = State(initialValue: (0..<2).compactMap { i in
+                let image = UIGraphicsImageRenderer(size: CGSize(width: 800, height: 600)).image { context in
+                    UIColor(hue: 0.58 + 0.12 * CGFloat(i), saturation: 0.45, brightness: 0.55, alpha: 1).setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 800, height: 600))
+                    UIColor.white.withAlphaComponent(0.8).setFill()
+                    context.fill(CGRect(x: 120, y: 160, width: 560, height: 60))
+                    context.fill(CGRect(x: 120, y: 280, width: 360, height: 200))
+                }
+                return image.jpegData(compressionQuality: 0.7).flatMap(PhotoPrep.prepare)
+            })
+        }
         if args.contains("-squeak-demo"), let i = args.firstIndex(of: "-squeak-draft"), i + 1 < args.count {
             _draft = State(initialValue: args[i + 1])
         } else {
@@ -137,7 +152,7 @@ struct SessionView: View {
                         session: session, agentName: Presentation.agentName(session.agent),
                         working: session.state == "working" && Presentation.replyBlock(session) == nil,
                         block: Presentation.replyBlock(session), stopping: model.isStopping(session.key),
-                        draft: $draft, composing: $composing
+                        draft: $draft, photos: $photos, composing: $composing
                     )
                 }
             }
@@ -908,15 +923,20 @@ struct SentBubble: View, Equatable {
                 if let date { Text(date.formatted(date: .omitted, time: .shortened)).foregroundStyle(Theme.muted).monospacedDigit() }
             }
             .font(.subheadline)
-            Text(text)
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
-                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12))
-                .contextMenu {
-                    Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
-                    ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
-                }
+            // Photos travel as `[Image: path]` lines in the text; here they are pills, and the words are the rest.
+            let parts = PhotoAttachment.split(text)
+            if !parts.body.isEmpty || parts.refs.isEmpty {
+                Text(parts.body)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12))
+                    .contextMenu {
+                        Button { UIPasteboard.general.string = parts.body } label: { Label("Copy", systemImage: "doc.on.doc") }
+                        ShareLink(item: parts.body) { Label("Share", systemImage: "square.and.arrow.up") }
+                    }
+            }
+            if !parts.refs.isEmpty { PhotoPills(count: parts.refs.count) }
             // Exactly one muted line per message this phone sent.
             if let line { Text(line).font(.footnote).foregroundStyle(Theme.muted).multilineTextAlignment(.trailing) }
         }
@@ -999,18 +1019,23 @@ struct Composer: View {
     /// A Stop was sent and the agent has not stopped yet.
     let stopping: Bool
     @Binding var draft: String
+    /// Photos waiting to go with the next message.
+    @Binding var photos: [ChatPhoto]
     var composing: FocusState<Bool>.Binding
+    /// "Sending photo 1 of 2…" while they upload, and why one failed.
+    @State private var uploading: String?
+    @State private var uploadProblem: String?
 
     init(session: PhoneSnapshot.Session, agentName: String, working: Bool, block: String?, stopping: Bool = false,
-         draft: Binding<String>, composing: FocusState<Bool>.Binding) {
+         draft: Binding<String>, photos: Binding<[ChatPhoto]>, composing: FocusState<Bool>.Binding) {
         key = session.key; label = session.label; self.agentName = agentName; self.working = working; self.block = block
-        self.stopping = stopping; _draft = draft; self.composing = composing
+        self.stopping = stopping; _draft = draft; _photos = photos; self.composing = composing
     }
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     /// The hold-to-steer hint shows until the first message sent mid-turn; nothing after.
     @AppStorage("squeak.queueSteerExplained") private var explained = false
-    private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photos.isEmpty }
 
     /// One height for the field's single line and the button beside it, so they line up (the field grows
     /// upward with more lines; the button stays at its foot).
@@ -1019,7 +1044,9 @@ struct Composer: View {
     /// Always there: after a send the field clears and keeps focus, so the next message can be typed at once.
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .bottom, spacing: 10) {
+            if !photos.isEmpty { PhotoTray(photos: $photos, locked: uploading != nil) }
+            HStack(alignment: .bottom, spacing: 6) {
+                if block == nil, uploading == nil { AttachButton(photos: $photos, height: Self.control) }
                 TextField("Reply to \(agentName)…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .focused(composing)
@@ -1040,6 +1067,7 @@ struct Composer: View {
     }
 
     private func send(_ mode: ReplyMode = .queue) {
+        if !photos.isEmpty { sendWithPhotos(mode); return }
         let text = draft
         // Clear at once and keep the keyboard up; hand the text back if nothing was sent (Face ID declined).
         draft = ""
@@ -1058,7 +1086,38 @@ struct Composer: View {
         }
     }
 
-    private var sendDisabled: Bool { block != nil || empty }
+    /// The photos go to the Mac first, one by one; the message then names where each was saved. The field and the
+    /// tray stay as they are until it is sent, so a failed upload loses nothing.
+    private func sendWithPhotos(_ mode: ReplyMode) {
+        let text = draft
+        let sending = photos
+        let wasWorking = working
+        uploadProblem = nil
+        uploading = "Sending photo 1 of \(sending.count)…"
+        Task {
+            guard let session = model.session(key) else { uploading = nil; return }
+            let result = await model.upload(sending, to: .session(session)) { done, total in
+                uploading = "Sending photo \(min(done + 1, total)) of \(total)…"
+            }
+            uploading = nil
+            switch result {
+            case .failed(let why):
+                uploadProblem = why
+            case .saved(let refs):
+                draft = ""
+                photos = []
+                composing.wrappedValue = true
+                let message = PhotoAttachment.compose(text, refs: refs)
+                let started = await model.send(message, to: session, mode: wasWorking ? mode : .queue)
+                if !started {
+                    draft = text
+                    uploadProblem = "The photos are on your Mac, but the message wasn't sent. Send it again."
+                }
+            }
+        }
+    }
+
+    private var sendDisabled: Bool { block != nil || empty || uploading != nil }
 
     /// Send is the one primary control: the prominent glass button filled
     /// with duck on iOS 26 (§8.9, owner's decision), a flat duck fill before.
@@ -1129,6 +1188,10 @@ struct Composer: View {
     private var caption: some View {
         if let block {
             Text(block).font(.footnote).foregroundStyle(Theme.muted)
+        } else if let uploading {
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text(uploading).font(.footnote).foregroundStyle(Theme.muted) }
+        } else if let uploadProblem {
+            Text(uploadProblem).font(.footnote).foregroundStyle(Theme.error)
         } else if let problem = model.problemFor[key] {
             Text(problem).font(.footnote).foregroundStyle(Theme.muted)
         } else if working, !explained {

@@ -270,6 +270,7 @@ struct GroupView: View {
     let route: HomeRoute
     @Binding var path: [HomeRoute]
     @State private var quickReply: PhoneSnapshot.Session?
+    @State private var startingChat = false
 
     private var active: [PhoneSnapshot.Session] {
         let all = model.snapshot?.sessions ?? []
@@ -353,6 +354,19 @@ struct GroupView: View {
         .refreshable { await model.refresh() }
         .safeAreaInset(edge: .bottom) { ConnectionBar() }
         .sheet(item: $quickReply) { session in QuickReply(session: session) }
+        .toolbar {
+            // A project's own page starts a chat right there, in that project.
+            if case .project(let name) = route, model.snapshot?.workspaces != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { startingChat = true } label: {
+                        Lucide(.squarePen, size: 20, label: "New chat in \(name)", color: Theme.muted)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $startingChat) {
+            if case .project(let name) = route { NewChatView(workspaces: model.snapshot?.workspaces ?? [], project: name) }
+        }
         .foregroundStyle(Theme.ink)
     }
 

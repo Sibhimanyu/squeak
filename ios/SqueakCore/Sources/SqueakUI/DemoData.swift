@@ -296,7 +296,10 @@ enum DemoData {
     static var outbox: [String: [AppModel.SentMessage]] {
         ["pay": [.init(text: "Add retry handling for failed payments.\nPrevent duplicate charges.", date: Date().addingTimeInterval(-300), answersTurn: "t0")],
          // The working chat: what started the turn, a steer that landed inside it, and one queued behind it.
-         "tg": [.init(text: "Fix the splitter, and make sure tables still render.", date: Date().addingTimeInterval(-700), answersTurn: "t1", status: .sent),
+         "tg": [.init(text: ProcessInfo.processInfo.arguments.contains("-squeak-demo-photos")
+                      ? PhotoAttachment.compose("Fix the splitter, and make sure tables still render. Like this screenshot.",
+                                                refs: [".context/attachments/ab12cd34/image-1.jpg", ".context/attachments/ef56ab78/image-1.png"])
+                      : "Fix the splitter, and make sure tables still render.", date: Date().addingTimeInterval(-700), answersTurn: "t1", status: .sent),
                 .init(text: "Keep the plain-text fallback for anything it still can't parse.", date: Date().addingTimeInterval(-240), answersTurn: "t1",
                       status: .steered, mode: .steer),
                 .init(text: "Then update the README's formatting section.", date: Date().addingTimeInterval(-60), answersTurn: "t1",
@@ -352,7 +355,10 @@ enum DemoData {
         ], history: longHistory + [
             .init(role: "user", text: "Telegram shows ** and ## literally in long answers. Find out why.", at: now(-1500)),
             .init(role: "assistant", text: "The splitter cuts messages inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. I can fix the splitter and keep the fallback.", at: now(-900), workBefore: 6),
-            .init(role: "user", text: "Fix the splitter, and make sure tables still render.", at: now(-700)),
+            .init(role: "user", text: ProcessInfo.processInfo.arguments.contains("-squeak-demo-photos")
+                  ? PhotoAttachment.compose("Fix the splitter, and make sure tables still render. Like this screenshot.",
+                                            refs: [".context/attachments/ab12cd34/image-1.jpg", ".context/attachments/ef56ab78/image-1.png"])
+                  : "Fix the splitter, and make sure tables still render.", at: now(-700)),
         ])]
     }
 

@@ -33,6 +33,7 @@ import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
 import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
 import type { ChannelDoc } from "./firestore-rest.js";
 import type { ChatModel } from "../fleet/chat-models.js";
+import { PhoneAttachments } from "../fleet/phone-attachments.js";
 import { condenseHistory, LIVE_STEP_CHARS, LIVE_STEPS, liveHistoryHandle, LiveTurnPublisher } from "./live-turn.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
 
@@ -117,6 +118,26 @@ export interface StopCommand {
 }
 
 /**
+ * One piece of a photo for a chat (`sessionId`) or for a new chat's workspace (`workspaceId`): the phone
+ * sends an image in signed chunks, the Mac saves it under that folder's `.context/attachments/` and answers
+ * with the path when the last chunk lands (fleet/phone-attachments.ts).
+ */
+export interface AttachCommand {
+  v: 1;
+  kind: "attach";
+  sessionId?: string;
+  workspaceId?: string;
+  uploadId: string;
+  index: number;
+  total: number;
+  /** One slice of the image, base64. */
+  data: string;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/**
  * A signed new name for a Conductor chat: the same as renaming it in Conductor. Same envelope as a reply;
  * only a chat the phone is shown, and only a plain one-line name.
  */
@@ -129,6 +150,9 @@ export interface RenameCommand {
   /** Epoch ms. */
   expiresAt: number;
 }
+
+/** A photo is a few chunks, and a message a few photos: this many chunks a minute, per phone. */
+const ATTACH_CHUNKS_PER_MINUTE = 40;
 
 /** A chat's name is one short line. */
 export const RENAME_MAX_CHARS = 120;
@@ -564,6 +588,8 @@ export class RemoteBridge {
   private presenceWatching: string | null = null;
   /** How many recent chats the phone asked for ("Show more"); a view preference, not a command. */
   private recentWanted = PHONE_RECENT_LIMIT;
+  private readonly attachments = new PhoneAttachments();
+  private readonly attachTimes = new Map<string, number[]>();
   private readonly live: LiveTurnPublisher | null;
   private lastSignature: string | null = null;
   private lastStepsSignature: string | null = null;
@@ -1171,6 +1197,9 @@ export class RemoteBridge {
     if (kind === "stop") {
       return this.handleStop(device, id, command as unknown as StopCommand);
     }
+    if (kind === "attach") {
+      return this.handleAttach(device, id, command as unknown as AttachCommand);
+    }
     if (kind === "rename") {
       return this.handleRename(device, id, command as unknown as RenameCommand);
     }
@@ -1427,6 +1456,59 @@ export class RemoteBridge {
       return { write: true, result: { id, status: "refused", reason: outcome.reason } };
     }
     this.log(device.name, "sent", `stopped ${command.sessionId.slice(0, 8)}`);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /** One chunk of a photo. Signature, freshness and nonce have already held. */
+  private async handleAttach(
+    device: PairedDevice,
+    id: string,
+    command: AttachCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `photo: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const forSession = typeof command.sessionId === "string";
+    const forWorkspace = typeof command.workspaceId === "string";
+    if (command.v !== 1 || forSession === forWorkspace || typeof command.uploadId !== "string") {
+      return refuse("Not a photo this Mac understands.");
+    }
+    // A phone cannot flood the disk or the line: a few photos a minute.
+    const now = this.now();
+    const recent = (this.attachTimes.get(device.id) ?? []).filter((at) => now - at < 60_000);
+    if (recent.length >= ATTACH_CHUNKS_PER_MINUTE) {
+      return refuse("Too many photos at once. Wait a moment and try again.");
+    }
+    this.attachTimes.set(device.id, [...recent, now]);
+    // Where it goes is the Mac's own record of the chat's or workspace's folder, never anything the phone said.
+    let dir: string | null;
+    if (forSession) {
+      const session = this.shownSession(command.sessionId as string);
+      dir = session && session.closed !== true ? session.cwd : null;
+    } else {
+      try {
+        dir = this.deps.newChat?.workspaces().find((candidate) => candidate.id === command.workspaceId)?.path ?? null;
+      } catch {
+        dir = null;
+      }
+    }
+    if (!dir) {
+      return refuse("This Mac can't put a photo in that chat's folder.");
+    }
+    const outcome = this.attachments.accept(dir, {
+      uploadId: command.uploadId,
+      index: command.index,
+      total: command.total,
+      data: command.data,
+    });
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    if (outcome.done) {
+      this.log(device.name, "sent", "saved a photo");
+      return { write: true, result: { id, status: "sent", ref: outcome.ref } };
+    }
     return { write: true, result: { id, status: "sent" } };
   }
 

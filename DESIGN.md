@@ -565,6 +565,14 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   the choice is on screen before it is made. The Mac checks the model and level against Conductor's
   list again, and starts the chat through Conductor's own `sessions/register` so the chat is created
   with them. An older Mac sends no list, and the sheet then offers no model or thinking choice.
+- **A photo can go with a message** (2026-10-23), in a chat's composer and in New chat's first message:
+  a paperclip opens the system photo picker (up to four, nothing asked of the person), small pictures
+  wait in a tray with an x on each, and Send uploads them first ("Sending photo 1 of 2…") and then the
+  message. Conductor's relay refuses attachments, so the phone does what Conductor does itself: the Mac
+  saves each photo (shrunk to 1600 px on the phone, JPEG or PNG only, checked by its bytes) under the
+  chat's or workspace's own `.context/attachments/<id>/` and the message names the path on a
+  `[Image: …]` line the agent reads. In the chat those lines are a "Photo" or "2 photos" pill, never
+  text. Where a photo is written is the Mac's own record of the folder, never anything the phone says.
 - **A chat screen hides the tab bar.** It opens at the newest message and follows what arrives only while
   you are at the bottom; read further up and it lets go, with a "New" pill to come back.
 - **A chat screen hides the tab bar.** Its composer sits at the bottom, and the

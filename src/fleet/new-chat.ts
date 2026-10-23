@@ -20,6 +20,8 @@ export interface NewChatWorkspace {
   title?: string;
   lastActivityAt: string;
   defaultAgent: NewChatAgent;
+  /** The workspace's own folder, from Conductor's records. Never sent to a phone. */
+  path?: string;
 }
 
 interface Row {
@@ -30,6 +32,7 @@ interface Row {
   prTitle: string | null;
   sessionTitle: string | null;
   updatedAt: string | null;
+  workspacePath: string | null;
   agentType: string | null;
   latestAgent: string | null;
 }
@@ -37,6 +40,7 @@ interface Row {
 const SELECT = `
   SELECT w.id, r.name AS repoName, w.branch AS branch, w.directory_name AS directoryName,
          w.pr_title AS prTitle, s.title AS sessionTitle, w.updated_at AS updatedAt,
+         __WORKSPACE_PATH__ AS workspacePath,
          s.agent_type AS agentType,
          (SELECT agent_type FROM sessions WHERE workspace_id = w.id AND IFNULL(is_hidden, 0) = 0
            ORDER BY updated_at DESC LIMIT 1) AS latestAgent
@@ -45,6 +49,15 @@ const SELECT = `
   LEFT JOIN sessions s ON s.id = w.active_session_id
   WHERE IFNULL(r.hidden, 0) = 0 AND IFNULL(w.state, '') != 'archived'
 `;
+
+/** The workspace's folder column is read when this Conductor has it (older databases may not). */
+function selectFor(db: InstanceType<typeof Database>): string {
+  const columns = db.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>;
+  return SELECT.replace(
+    "__WORKSPACE_PATH__",
+    columns.some((column) => column.name === "workspace_path") ? "w.workspace_path" : "NULL",
+  );
+}
 
 function toWorkspace(row: Row): NewChatWorkspace {
   const title = [row.prTitle, row.sessionTitle].find((t) => t && t.trim() && t.trim() !== "Untitled")?.trim();
@@ -55,6 +68,7 @@ function toWorkspace(row: Row): NewChatWorkspace {
     ...(title ? { title } : {}),
     lastActivityAt: conductorTimestampToIso(row.updatedAt) ?? row.updatedAt ?? "",
     defaultAgent: row.agentType === "claude" || row.latestAgent === "claude" ? "claude" : "codex",
+    ...(row.workspacePath ? { path: row.workspacePath } : {}),
   };
 }
 
@@ -63,7 +77,7 @@ export function listNewChatWorkspaces(dbPath: string, limit = LIST_LIMIT): NewCh
   const db = new Database(dbPath, { readonly: true });
   try {
     db.pragma("busy_timeout = 2000");
-    const rows = db.prepare(`${SELECT} ORDER BY datetime(w.updated_at) DESC LIMIT ?`).all(limit) as Row[];
+    const rows = db.prepare(`${selectFor(db)} ORDER BY datetime(w.updated_at) DESC LIMIT ?`).all(limit) as Row[];
     return rows.map(toWorkspace);
   } finally {
     db.close();
@@ -74,7 +88,7 @@ export function findNewChatWorkspace(dbPath: string, id: string): NewChatWorkspa
   const db = new Database(dbPath, { readonly: true });
   try {
     db.pragma("busy_timeout = 2000");
-    const row = db.prepare(`${SELECT} AND w.id = ? LIMIT 1`).get(id) as Row | undefined;
+    const row = db.prepare(`${selectFor(db)} AND w.id = ? LIMIT 1`).get(id) as Row | undefined;
     return row ? toWorkspace(row) : null;
   } finally {
     db.close();

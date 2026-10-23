@@ -709,6 +709,23 @@ public struct StopCommand: Codable, Equatable, Sendable {
     public let expiresAt: Int64
 }
 
+/// One piece of a photo for a chat (`sessionId`) or a new chat's workspace (`workspaceId`), exactly as the Mac
+/// verifies it (AttachCommand on the Mac). The Mac saves the photo when the last chunk lands and says where.
+public struct AttachCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public var sessionId: String? = nil
+    public var workspaceId: String? = nil
+    public let uploadId: String
+    public let index: Int
+    public let total: Int
+    /// One slice of the image, base64.
+    public let data: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
 /// A new name for a chat, as renaming it in Conductor does. The Mac takes one plain line of at most
 /// 120 characters, for a chat it shows the phone.
 public struct RenameCommand: Codable, Equatable, Sendable {
@@ -838,6 +855,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var said: String? = nil
     /// For a media request: where the phone copy waits.
     public var media: MediaRef? = nil
+    /// For the last chunk of a photo: where the Mac saved it, relative to the chat's folder.
+    public var ref: String? = nil
 
     public var sent: Bool { status == "sent" }
     /// For an answer: the Mac delivered it (`via` says how: "conductor", "stopped-and-sent").

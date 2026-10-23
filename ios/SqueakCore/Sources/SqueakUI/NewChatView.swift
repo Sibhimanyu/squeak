@@ -17,6 +17,9 @@ struct NewChatView: View {
     @State private var level: String?
     @State private var showingAllModels = false
     @State private var text = ""
+    @State private var photos: [ChatPhoto] = []
+    /// "Sending photo 1 of 2…" while they upload.
+    @State private var uploading: String?
     @State private var sending = false
     @State private var problem: String?
     @FocusState private var focused: Bool
@@ -25,10 +28,11 @@ struct NewChatView: View {
     /// Models shown before "More models": the favourites, or the first few.
     private static let shortList = 4
 
-    init(workspaces: [PhoneSnapshot.Workspace]) {
+    /// `project` (a repo name) starts the chat in that project's first workspace, from its own page.
+    init(workspaces: [PhoneSnapshot.Workspace], project: String? = nil) {
         self.workspaces = workspaces
         let args = ProcessInfo.processInfo.arguments
-        let first = workspaces.first
+        let first = project.flatMap { name in workspaces.first { Presentation.split(label: $0.label).repo == name } } ?? workspaces.first
         _workspaceId = State(initialValue: first?.id)
         _agent = State(initialValue: first?.agent ?? .claude)
         if args.contains("-squeak-newchat-filled") {
@@ -42,7 +46,7 @@ struct NewChatView: View {
     private var workspace: PhoneSnapshot.Workspace? { workspaces.first { $0.id == workspaceId } }
     private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var tooLong: Bool { trimmed.count > Self.maxCharacters }
-    private var canStart: Bool { workspace != nil && !trimmed.isEmpty && !tooLong && !sending }
+    private var canStart: Bool { workspace != nil && (!trimmed.isEmpty || !photos.isEmpty) && !tooLong && !sending }
 
     /// The models for the chosen agent, favourites first as the Mac listed them. Empty from an older Mac.
     private var models: [PhoneSnapshot.ChatModel] { (model.snapshot?.chatModels ?? []).filter { $0.agent == agent.rawValue } }
@@ -225,13 +229,24 @@ struct NewChatView: View {
     }
 
     private var messageField: some View {
-        ZStack(alignment: .topLeading) {
-            TextEditor(text: $text).focused($focused)
-                .frame(minHeight: 140).scrollContentBackground(.hidden).padding(.horizontal, 10).padding(.vertical, 6)
-            if text.isEmpty {
-                Text("What should it do?").foregroundStyle(Theme.subtle)
-                    .padding(.top, 14).padding(.leading, 15).allowsHitTesting(false)
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $text).focused($focused)
+                    .frame(minHeight: 140).scrollContentBackground(.hidden).padding(.horizontal, 10).padding(.vertical, 6)
+                if text.isEmpty {
+                    Text("What should it do?").foregroundStyle(Theme.subtle)
+                        .padding(.top, 14).padding(.leading, 15).allowsHitTesting(false)
+                }
             }
+            if !photos.isEmpty { PhotoTray(photos: $photos, locked: sending).padding(.horizontal, 14).padding(.bottom, 4) }
+            Rectangle().fill(Theme.line).frame(height: 1)
+            HStack(spacing: 4) {
+                AttachButton(photos: $photos, height: 44).disabled(sending)
+                Text(photos.isEmpty ? "Add a photo" : "\(photos.count) of \(PhotoAttachment.maxPhotos)")
+                    .font(.footnote).foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
         }
     }
 
@@ -268,7 +283,7 @@ struct NewChatView: View {
             Button { Task { await start() } } label: {
                 HStack(spacing: 8) {
                     if sending { ProgressView().tint(Theme.primaryText) }
-                    Text(sending ? "Starting…" : "Start chat").font(.headline)
+                    Text(uploading ?? (sending ? "Starting…" : "Start chat")).font(.headline)
                 }
                 .frame(maxWidth: .infinity, minHeight: 44)
             }
@@ -298,8 +313,25 @@ struct NewChatView: View {
         problem = nil
         // What is on screen is what is sent: the model and level, when the Mac listed any.
         let picked = chosen
+        // Photos first, to the workspace's own folder; the message then names where each was saved.
+        var message = trimmed
+        if !photos.isEmpty {
+            uploading = "Sending photo 1 of \(photos.count)…"
+            let uploaded = await model.upload(photos, to: .workspace(workspace.id)) { done, total in
+                uploading = "Sending photo \(min(done + 1, total)) of \(total)…"
+            }
+            uploading = nil
+            switch uploaded {
+            case .failed(let why):
+                sending = false
+                problem = why
+                return
+            case .saved(let refs):
+                message = PhotoAttachment.compose(trimmed, refs: refs)
+            }
+        }
         let result = await model.startChat(
-            in: workspace, agent: agent, text: trimmed,
+            in: workspace, agent: agent, text: message,
             model: picked?.id, thinking: picked.flatMap { $0.levels.isEmpty ? nil : (level ?? $0.defaultLevel) })
         sending = false
         switch result {
@@ -310,7 +342,8 @@ struct NewChatView: View {
     }
 }
 
-/// Every workspace the Mac listed, searchable by repo or branch.
+/// Every workspace the Mac listed, grouped by project under the project's own icon, searchable by repo
+/// or branch.
 private struct WorkspacePicker: View {
     let workspaces: [PhoneSnapshot.Workspace]
     @Binding var selection: String?
@@ -318,40 +351,74 @@ private struct WorkspacePicker: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
 
-    private var shown: [PhoneSnapshot.Workspace] {
+    private struct Group: Identifiable {
+        let name: String
+        let items: [PhoneSnapshot.Workspace]
+        var id: String { name }
+    }
+
+    private var groups: [Group] {
         let q = query.trimmingCharacters(in: .whitespaces)
-        return q.isEmpty ? workspaces : workspaces.filter { $0.label.localizedCaseInsensitiveContains(q) }
+        let shown = q.isEmpty ? workspaces : workspaces.filter { $0.label.localizedCaseInsensitiveContains(q) }
+        var byName: [String: [PhoneSnapshot.Workspace]] = [:]
+        var order: [String] = []
+        for workspace in shown {
+            let name = Presentation.split(label: workspace.label).repo ?? workspace.label
+            if byName[name] == nil { order.append(name) }
+            byName[name, default: []].append(workspace)
+        }
+        return order.map { Group(name: $0, items: byName[$0] ?? []) }
     }
 
     var body: some View {
+        let groups = groups
         List {
-            ForEach(shown) { workspace in
-                Button {
-                    selection = workspace.id
-                    onPick(workspace)
-                    dismiss()
-                } label: {
-                    HStack {
-                        Text(workspace.label).lineLimit(1)
-                        Spacer(minLength: 8)
-                        Text(Presentation.agentName(workspace.defaultAgent)).font(.subheadline).foregroundStyle(Theme.muted)
-                        if workspace.id == selection {
-                            Lucide(.check, size: 18, label: "Selected", color: Theme.ink)
-                        }
+            ForEach(groups) { group in
+                Section {
+                    ForEach(group.items) { workspace in row(workspace, project: group.name) }
+                } header: {
+                    HStack(spacing: 8) {
+                        ProjectMark(name: group.name, size: 22, folder: true)
+                        Text(group.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                     }
-                    .frame(minHeight: 44)
+                    .textCase(nil).padding(.bottom, 2)
+                    .accessibilityAddTraits(.isHeader)
                 }
-                .foregroundStyle(Theme.ink)
-                .listRowBackground(Color.clear)
             }
-            if shown.isEmpty { ContentUnavailableView.search(text: query).listRowBackground(Color.clear) }
+            if groups.isEmpty { ContentUnavailableView.search(text: query).listRowBackground(Color.clear) }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(16)
         .scrollContentBackground(.hidden)
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle("Workspace")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search workspaces…")
+    }
+
+    private func row(_ workspace: PhoneSnapshot.Workspace, project: String) -> some View {
+        let parts = Presentation.split(label: workspace.label)
+        let branch = parts.repo == nil ? workspace.label : parts.title
+        return Button {
+            selection = workspace.id
+            onPick(workspace)
+            dismiss()
+        } label: {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(branch).font(.body).lineLimit(1)
+                    Text(Presentation.agentName(workspace.defaultAgent)).font(.footnote).foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 8)
+                if workspace.id == selection { Lucide(.check, size: 18, label: "Selected", color: Theme.ink) }
+            }
+            .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.ink)
+        .listRowBackground(Theme.surface)
+        .accessibilityLabel("\(project), \(branch)")
+        .accessibilityAddTraits(workspace.id == selection ? [.isButton, .isSelected] : .isButton)
     }
 }
 #endif

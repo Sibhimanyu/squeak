@@ -296,6 +296,23 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const attachCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "attach",
+      sessionId: "s1",
+      uploadId: crypto.randomBytes(8).toString("hex"),
+      index: 0,
+      total: 1,
+      data: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(32, 9)]).toString("base64"),
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const diffCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
     const body = {
       v: 1,
@@ -387,6 +404,7 @@ function fixture(
     queueCommand,
     stopCommand,
     renameCommand,
+    attachCommand,
     diffCommand,
     imageCommand,
     hotspotCommand,
@@ -695,6 +713,76 @@ describe("RemoteBridge diff", () => {
     await bare.store.set(`${bare.channel}/commands/c1`, bare.diffCommand());
     await bare.bridge.tick();
     expect(bare.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't show changes on a phone." });
+  });
+});
+
+describe("RemoteBridge photos", () => {
+  const tmp: string[] = [];
+  const folder = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-photo-"));
+    tmp.push(dir);
+    return dir;
+  };
+  afterEach(() => {
+    for (const dir of tmp.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("saves a photo for a chat the phone is shown, in that chat's own folder, and says where", async () => {
+    const dir = folder();
+    const f = fixture();
+    f.emit([session({ cwd: dir })]);
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/p1`, f.attachCommand());
+    await f.bridge.tick();
+    const result = f.result("p1") as { status: string; ref?: string };
+    expect(result.status).toBe("sent");
+    expect(result.ref).toMatch(/^\.context\/attachments\/[0-9a-f]{8}\/image-1\.jpg$/);
+    expect(fs.existsSync(path.join(dir, result.ref!))).toBe(true);
+  });
+
+  it("saves a photo for a new chat in the workspace's folder, which comes from the Mac's list", async () => {
+    const dir = folder();
+    const { starter } = chatStarter([workspace("w1", { path: dir })]);
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/p1`, f.attachCommand({ sessionId: undefined, workspaceId: "w1" }));
+    await f.bridge.tick();
+    expect(f.result("p1")).toMatchObject({ status: "sent", ref: expect.stringContaining(".context/attachments/") });
+    expect(fs.readdirSync(path.join(dir, ".context", "attachments"))).toHaveLength(1);
+  });
+
+  it("refuses a chat that is not shown, a closed one, both targets or neither, and a file that is not a photo", async () => {
+    const dir = folder();
+    const f = fixture();
+    f.emit([session({ cwd: dir }), session({ conductorSessionId: "gone", key: "k:gone", cwd: dir, closed: true })]);
+    await f.pair();
+    const send = async (name: string, overrides: Record<string, unknown>) => {
+      await f.store.set(`${f.channel}/commands/${name}`, f.attachCommand(overrides));
+      await f.bridge.tick();
+      return f.result(name);
+    };
+    expect(await send("a", { sessionId: "s-elsewhere" })).toMatchObject({ status: "refused" });
+    expect(await send("b", { sessionId: "gone" })).toMatchObject({ status: "refused" });
+    expect(await send("c", { workspaceId: "w1" })).toMatchObject({ status: "refused" });
+    expect(await send("d", { sessionId: undefined })).toMatchObject({ status: "refused" });
+    expect(await send("e", { data: Buffer.from("not an image").toString("base64") })).toMatchObject({
+      status: "refused",
+    });
+    expect(fs.existsSync(path.join(dir, ".context"))).toBe(false);
+  });
+
+  it("slows a phone that sends too many pieces in a minute", async () => {
+    const dir = folder();
+    const f = fixture();
+    f.emit([session({ cwd: dir })]);
+    await f.pair();
+    let refused = 0;
+    for (let i = 0; i < 45; i++) {
+      await f.store.set(`${f.channel}/commands/r${i}`, f.attachCommand());
+      await f.bridge.tick();
+      if ((f.result(`r${i}`) as { status: string }).status === "refused") refused++;
+    }
+    expect(refused).toBeGreaterThan(0);
   });
 });
 
