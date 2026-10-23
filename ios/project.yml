@@ -45,6 +45,11 @@ targets:
           - UIInterfaceOrientationPortrait
         NSCameraUsageDescription: Squeak uses the camera once, to scan the pairing code on your Mac.
         NSFaceIDUsageDescription: Squeak asks for Face ID before it sends anything to your agents.
+        NSLocalNetworkUsageDescription: Squeak talks to your Mac directly when you're on the same Wi-Fi.
+        NSBonjourServices:
+          - _squeak._tcp
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         SqueakSourceURL: $(SQUEAK_SOURCE_URL)
         CFBundleURLTypes:
           - CFBundleURLName: com.squeak.open

@@ -5,6 +5,8 @@ import SqueakCore
 // Firestore: pair with the Mac's link, wait for approval, read the snapshot,
 // answer the first lettered question with its second option, and wait for
 // the Mac's verdict. Usage: squeak-e2e <pairing-url> <code-out-file>
+// The script that runs this reads its output as it comes (it takes the direct path away on a cue).
+setlinebuf(stdout)
 let args = CommandLine.arguments
 let parsed = try PairingPayload.parse(args[1])
 // SQUEAK_E2E_DATABASE_URL points the phone at a Realtime Database the code
@@ -12,7 +14,11 @@ let parsed = try PairingPayload.parse(args[1])
 let payload = ProcessInfo.processInfo.environment["SQUEAK_E2E_DATABASE_URL"].map {
     PairingPayload(v: parsed.v, p: parsed.p, c: parsed.c, k: parsed.k, n: parsed.n, r: $0)
 } ?? parsed
-let channel = Channel(pairing: payload, deviceId: "e2e-" + UUID().uuidString.prefix(8).lowercased())
+// SQUEAK_E2E_LOCAL=1 turns on the direct same-Wi-Fi path (no Bonjour here: the Mac's own view says where it listens).
+struct NoDiscovery: LocalDiscovery { func candidates(tag: String) async -> [URL] { [] } }
+let localMode = ProcessInfo.processInfo.environment["SQUEAK_E2E_LOCAL"] == "1"
+let channel = Channel(pairing: payload, deviceId: "e2e-" + UUID().uuidString.prefix(8).lowercased(),
+                      local: localMode ? LocalSupport(discovery: NoDiscovery(), requests: LocalSupport.requestSession, streams: LocalSupport.streamSession) : nil)
 let signer = SoftwareSigner()
 let code = ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963)
 FileManager.default.createFile(atPath: args[2], contents: Data(code.utf8))
@@ -45,6 +51,15 @@ guard let session = snapshot.sessions.first(where: { $0.choices != nil }), let c
     print("phone: no question in the snapshot"); exit(1)
 }
 print("phone: sees \(snapshot.sessions.count) session(s); question: \(choices.question ?? "-")")
+if localMode {
+    // The view names where the Mac listens; from here every command should travel the direct path.
+    guard let info = snapshot.local else { print("phone: the Mac's view carries no local address"); exit(1) }
+    print("phone: the Mac listens on \(info.hosts) port \(info.port)")
+    await channel.startLocal()
+    await channel.learnLocal(info)
+    let route = try await poll("local route", seconds: 15) { await channel.route() == .local ? ChannelRoute.local : nil }
+    print("phone: route is \(route)")
+}
 let letter = choices.options[1].letter
 let (id, document) = try channel.replyDocument(to: session, text: letter, signer: signer)
 try await channel.send(document, id: id)
@@ -128,4 +143,18 @@ if streamed {
     liveOk = longest > 200 && gone
 }
 print("phone: usage claude=\(snapshot.usage?.claude?.fiveHour?.usedPercent.description ?? "-") codex=\(snapshot.usage?.codex == nil ? "-" : "seen")")
-exit(usageOk && liveOk && startOk && steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42 ? 0 : 1)
+var allOk = usageOk && liveOk && startOk && steered.sent && steered.delivery == "steered" && snapshot.usage?.claude?.fiveHour?.usedPercent == 42
+if localMode {
+    guard await channel.route() == .local else { print("phone: fell off the local path on its own"); exit(1) }
+    print("phone: local phase done")
+    // The Mac takes the direct path away; the next command must notice and go through the cloud, once.
+    let continueFile = ProcessInfo.processInfo.environment["SQUEAK_E2E_CONTINUE_FILE"] ?? ""
+    _ = try await poll("the Mac to stop its direct path", seconds: 60) { FileManager.default.fileExists(atPath: continueFile) ? true : nil }
+    let (fallbackId, fallbackDocument) = try channel.replyDocument(to: session, text: choices.options[2].letter, signer: signer)
+    try await channel.send(fallbackDocument, id: fallbackId)
+    let fallback = try await verdict(fallbackId, "fallback result")
+    let route = await channel.route()
+    print("phone: after the direct path went away: route is \(route), mac says \(fallback.status) delivery=\(fallback.delivery ?? "-")")
+    allOk = allOk && fallback.sent && route == .cloud
+}
+exit(allOk ? 0 : 1)

@@ -14,11 +14,12 @@ public struct Channel: Sendable {
     /// enough that a stale one is refused (the Mac caps it at ten).
     public static let commandLifetime: TimeInterval = 5 * 60
 
-    public init(pairing: PairingPayload, deviceId: String, transport: HTTPTransport = URLSession.shared) {
+    /// `local`: the direct same-Wi-Fi path (docs/remote-channel.md); nil keeps everything on the cloud.
+    public init(pairing: PairingPayload, deviceId: String, transport: HTTPTransport = URLSession.shared, local: LocalSupport? = nil) {
         self.pairing = pairing
         self.deviceId = deviceId
         firestore = FirestoreClient(projectId: pairing.p, transport: transport)
-        router = BackendRouter(pairing: pairing, firestore: firestore, transport: transport, streams: Self.streamSession)
+        router = BackendRouter(pairing: pairing, firestore: firestore, transport: transport, streams: Self.streamSession, local: local)
     }
 
     /// Streams get a session of their own, so a held stream can never take
@@ -33,11 +34,11 @@ public struct Channel: Sendable {
         return URLSession(configuration: configuration)
     }()
 
-    public init(pairing: PairingPayload, deviceId: String, transport: HTTPTransport = URLSession.shared, streams: LineStreamTransport) {
+    public init(pairing: PairingPayload, deviceId: String, transport: HTTPTransport = URLSession.shared, streams: LineStreamTransport, local: LocalSupport? = nil) {
         self.pairing = pairing
         self.deviceId = deviceId
         firestore = FirestoreClient(projectId: pairing.p, transport: transport)
-        router = BackendRouter(pairing: pairing, firestore: firestore, transport: transport, streams: streams)
+        router = BackendRouter(pairing: pairing, firestore: firestore, transport: transport, streams: streams, local: local)
     }
 
     func path(_ kind: String, _ id: String) -> String { "channels/\(pairing.c)/\(kind)/\(id)" }
@@ -104,8 +105,29 @@ public struct Channel: Sendable {
         try? await store.delete(path("results", id))
     }
 
-    /// Whether replies and the view travel through the Realtime Database.
-    public var streams: Bool { get async { await store is RealtimeDatabaseClient } }
+    /// Whether replies and the view travel through the Realtime Database (directly, or through the Mac's local path).
+    public var streams: Bool { get async { await router.isStreamed() } }
+
+    /* ---------- the direct path ---------- */
+
+    /// Starts looking for the Mac on the local network (the first time asks for Local Network access). Cheap and
+    /// safe to call again; does nothing without `local` support or on a channel that is not on the Realtime Database.
+    public func startLocal() async { await router.startLocal() }
+
+    /// Stops probing (the app left the screen).
+    public func stopLocal() async { await router.stopLocal() }
+
+    /// The Mac's own list of where it listens, from its sealed view: tried at once when the cloud is in use.
+    public func learnLocal(_ info: PhoneSnapshot.LocalEndpointInfo?) async { await router.learnLocal(info) }
+
+    /// The network changed: forget the local route and look again.
+    public func networkChanged() async { await router.networkChanged() }
+
+    /// Which way the phone is talking to the Mac right now.
+    public func route() async -> ChannelRoute { await router.route() }
+
+    /// The route now and every change to it.
+    public func routeUpdates() async -> AsyncStream<ChannelRoute> { await router.routeUpdates() }
 
     /// A Realtime Database instance URL, and nothing else: the phone will send
     /// signed commands there, so a pairing code or the sealed transport
@@ -451,6 +473,23 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed document that closes a chat's tab in Conductor.
+    public func closeDocument(to session: PhoneSnapshot.Session, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+        guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = CloseCommand(
+            v: 1,
+            kind: "close",
+            sessionId: sessionId,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
     /// The signed document that steers a queued message now (`promote`) or takes it out of the queue (`cancel`).
     public func queueDocument(
         sessionId: String,
@@ -635,24 +674,78 @@ public enum StateEvent: Equatable, Sendable {
 /// `state/transport` Firestore document (a phone paired before the move),
 /// else Firestore. The announcement is re-checked every few minutes while on
 /// Firestore, so a Mac that moves later is followed without re-pairing.
+///
+/// On the Realtime Database, with `local` support, the backend it hands out is
+/// a `RoutedBackend`: the direct same-Wi-Fi path when a probe finds the Mac,
+/// the cloud otherwise and at once on any local failure.
 actor BackendRouter {
     private let pairing: PairingPayload
     private let firestore: FirestoreClient
     private let transport: HTTPTransport
     private let streams: LineStreamTransport
+    private let local: LocalRouter?
     private var chosen: ChannelBackend?
+    private var routed: ChannelBackend?
     private var checkedAt: Date?
+    private var localStarted = false
 
     static let recheck: TimeInterval = 5 * 60
 
-    init(pairing: PairingPayload, firestore: FirestoreClient, transport: HTTPTransport, streams: LineStreamTransport) {
+    init(pairing: PairingPayload, firestore: FirestoreClient, transport: HTTPTransport, streams: LineStreamTransport, local: LocalSupport? = nil) {
         self.pairing = pairing
         self.firestore = firestore
         self.transport = transport
         self.streams = streams
+        self.local = local.flatMap { LocalRouter.make(pairing: pairing, support: $0) }
     }
 
     func backend(now: Date = Date()) async -> ChannelBackend {
+        let cloud = await cloudBackend(now: now)
+        guard let local, cloud is RealtimeDatabaseClient else { return cloud }
+        if let routed { return routed }
+        let backend = RoutedBackend(cloud: cloud, router: local)
+        routed = backend
+        return backend
+    }
+
+    func isStreamed() async -> Bool { await cloudBackend() is RealtimeDatabaseClient }
+
+    func startLocal() async {
+        guard let local, await cloudBackend() is RealtimeDatabaseClient else { return }
+        localStarted = true
+        await local.start()
+    }
+
+    func stopLocal() async {
+        localStarted = false
+        await local?.stop()
+    }
+
+    func learnLocal(_ info: PhoneSnapshot.LocalEndpointInfo?) async {
+        guard let local, localStarted else { return }
+        await local.learn(hints: LocalEndpointHints.urls(info, expectedTag: LocalAuth.tag(channelKey: pairing.k)))
+    }
+
+    func networkChanged() async { await local?.networkChanged() }
+    func route() async -> ChannelRoute { await local?.route ?? .cloud }
+
+    func routeUpdates() async -> AsyncStream<ChannelRoute> {
+        guard let local else { return AsyncStream { $0.yield(.cloud); $0.finish() } }
+        let updates = await local.updates()
+        return AsyncStream { continuation in
+            let task = Task {
+                var last: ChannelRoute?
+                for await update in updates where update.route != last {
+                    last = update.route
+                    continuation.yield(update.route)
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func cloudBackend(now: Date = Date()) async -> ChannelBackend {
         if let chosen, chosen is RealtimeDatabaseClient { return chosen }
         if let url = pairing.r { return use(url) }
         if let checkedAt, now.timeIntervalSince(checkedAt) < Self.recheck, let chosen { return chosen }

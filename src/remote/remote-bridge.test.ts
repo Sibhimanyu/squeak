@@ -120,6 +120,7 @@ function fixture(
     workflow?: RemoteWorkflows | null;
     media?: RemoteBridgeDependencies["media"];
     renamer?: RemoteBridgeDependencies["renamer"];
+    closer?: RemoteBridgeDependencies["closer"];
     /** The chat's latest message, as the replier reads it. */
     lastText?: string;
     /** Why the chat's newest turn failed, as the replier reads it. */
@@ -188,6 +189,7 @@ function fixture(
     answerer: options.answerer ?? null,
     diff: options.diff ?? null,
     renamer: options.renamer ?? null,
+    closer: options.closer ?? null,
     image: options.image ?? null,
     hotspot: options.hotspot ?? null,
     workflow: options.workflow ?? null,
@@ -867,6 +869,49 @@ describe("RemoteBridge rename", () => {
     await no.store.set(`${no.channel}/commands/f`, no.renameCommand());
     await no.bridge.tick();
     expect(no.result("f")).toMatchObject({ status: "refused", reason: "Conductor didn't take the new name." });
+  });
+});
+
+describe("RemoteBridge close", () => {
+  const closeCommand = (f: ReturnType<typeof fixture>, overrides: Record<string, unknown> = {}) =>
+    f.renameCommand({ kind: "close", title: undefined, ...overrides });
+
+  it("closes a chat the phone is shown", async () => {
+    const closed: string[] = [];
+    const f = fixture({ closer: { close: (id) => (closed.push(id), "closed") } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, closeCommand(f));
+    await f.bridge.tick();
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent" });
+    expect(closed).toEqual(["s1"]);
+  });
+
+  it("refuses a chat not shown, a busy chat, a missing one, and a Mac that cannot", async () => {
+    const closed: string[] = [];
+    const f = fixture({ closer: { close: (id) => (closed.push(id), "closed") } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/a`, closeCommand(f, { sessionId: "s-elsewhere" }));
+    await f.bridge.tick();
+    expect(f.result("a")).toMatchObject({ status: "refused" });
+    expect(closed).toEqual([]);
+    const busy = fixture({ closer: { close: () => "busy" } });
+    await busy.pair();
+    await busy.store.set(`${busy.channel}/commands/b`, closeCommand(busy));
+    await busy.bridge.tick();
+    expect(busy.result("b")).toMatchObject({
+      status: "refused",
+      reason: expect.stringContaining("running or waiting"),
+    });
+    const gone = fixture({ closer: { close: () => "missing" } });
+    await gone.pair();
+    await gone.store.set(`${gone.channel}/commands/c`, closeCommand(gone));
+    await gone.bridge.tick();
+    expect(gone.result("c")).toMatchObject({ status: "refused", reason: "Conductor didn't close it." });
+    const none = fixture();
+    await none.pair();
+    await none.store.set(`${none.channel}/commands/d`, closeCommand(none));
+    await none.bridge.tick();
+    expect(none.result("d")).toMatchObject({ status: "refused", reason: "This Mac can't close a chat from a phone." });
   });
 });
 

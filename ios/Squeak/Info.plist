@@ -33,8 +33,19 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Squeak uses the camera once, to scan the pairing code on your Mac.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_squeak._tcp</string>
+	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Squeak asks for Face ID before it sends anything to your agents.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Squeak talks to your Mac directly when you're on the same Wi-Fi.</string>
 	<key>SqueakSourceURL</key>
 	<string>$(SQUEAK_SOURCE_URL)</string>
 	<key>UILaunchScreen</key>

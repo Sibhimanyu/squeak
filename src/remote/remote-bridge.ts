@@ -153,6 +153,24 @@ export interface RenameCommand {
   expiresAt: number;
 }
 
+/**
+ * A signed request to close a Conductor chat's tab: the same as closing it in Conductor. Same envelope as a
+ * rename; only a chat the phone is shown, and never one that is running or waiting on an answer.
+ */
+export interface CloseCommand {
+  v: 1;
+  kind: "close";
+  sessionId: string;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/** What a phone may close: a Conductor chat's tab, nothing else. */
+export interface RemoteCloser {
+  close(sessionId: string): "closed" | "busy" | "missing";
+}
+
 /** A photo is a few chunks, and a message a few photos: this many chunks a minute, per phone. */
 const ATTACH_CHUNKS_PER_MINUTE = 40;
 
@@ -439,6 +457,8 @@ export interface RemoteBridgeDependencies {
   newChat?: RemoteChatStarter | null;
   /** Renames a Conductor chat (its title in Conductor's own database). Absent: renames are refused. */
   renamer?: RemoteRenamer | null;
+  /** Closes a Conductor chat's tab. Absent: closing is refused. */
+  closer?: RemoteCloser | null;
   /** Conductor's icon for each repository, shrunk, by repository name (fleet/project-icons.ts). */
   projectIcons?: (() => Record<string, string>) | null;
   /** Answers a chat's pending question or plan (src/fleet/answer.ts). */
@@ -524,6 +544,14 @@ export interface RemoteBridgeDependencies {
   workflow?: RemoteWorkflows | null;
   /** Makes a phone copy of a film or soundtrack a card plays (phone-media.ts). Absent: refused. */
   media?: ((source: string, cwd: string) => Promise<PhoneMediaResult>) | null;
+  /**
+   * Where the direct same-Wi-Fi path listens (local-channel.ts), for the sealed
+   * view: a phone that cannot find the Mac by Bonjour tries these addresses.
+   * Absent or null: the view carries no `local`.
+   */
+  localEndpoint?: (() => { port: number; hosts: string[]; tag: string } | null) | null;
+  /** Called after a phone is approved or revoked, or the channel is reset: the direct path opens or closes its port. */
+  onDevicesChanged?: (() => void) | null;
   now?: () => number;
   macName?: string;
 }
@@ -840,6 +868,18 @@ export class RemoteBridge {
     }
   }
 
+  /**
+   * What the direct path needs to serve this channel: its id and key, only
+   * while a paired phone exists. Null otherwise, and the local server then
+   * serves and advertises nothing.
+   */
+  localAccess(): { channelId: string; key: string } | null {
+    const config = this.config;
+    return config && config.devices.some((device) => !device.revokedAt)
+      ? { channelId: config.channelId, key: config.key }
+      : null;
+  }
+
   /** Whether any phone could act on a link to one of its sessions right now. */
   hasPairedPhone(): boolean {
     return Boolean(this.config?.devices.some((device) => !device.revokedAt));
@@ -896,6 +936,7 @@ export class RemoteBridge {
     });
     this.save();
     this.pending.delete(deviceId);
+    this.deps.onDevicesChanged?.();
     await this.answerPairing(deviceId, true);
     this.log(request.name, "sent", "paired");
     return true;
@@ -917,6 +958,7 @@ export class RemoteBridge {
     device.revokedAt = new Date(this.now()).toISOString();
     this.save();
     this.log(device.name, "rejected", "revoked on this Mac");
+    this.deps.onDevicesChanged?.();
     return true;
   }
 
@@ -936,6 +978,7 @@ export class RemoteBridge {
     } catch {
       // Nothing to remove.
     }
+    this.deps.onDevicesChanged?.();
   }
 
   /* ---------- the loop ---------- */
@@ -966,7 +1009,12 @@ export class RemoteBridge {
         await this.readPresence(config);
         this.updateLive();
         if (this.pairingOpenUntil > this.now()) {
-          await this.readPairing(config);
+          // The cloud being out of reach must not stop commands arriving on the direct path.
+          await this.readPairing(config).catch((error: unknown) =>
+            logger.debug("remote pairing read failed", {
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
         }
         if (config.devices.some((device) => !device.revokedAt)) {
           await this.readCommands(config);
@@ -1340,6 +1388,9 @@ export class RemoteBridge {
     if (kind === "rename") {
       return this.handleRename(device, id, command as unknown as RenameCommand);
     }
+    if (kind === "close") {
+      return this.handleClose(device, id, command as unknown as CloseCommand);
+    }
     if (kind === "workflow") {
       return this.handleWorkflow(device, id, command as unknown as WorkflowCommand);
     }
@@ -1693,6 +1744,43 @@ export class RemoteBridge {
       return refuse("Conductor didn't take the new name.");
     }
     this.log(device.name, "sent", `renamed ${command.sessionId.slice(0, 8)}`);
+    this.nudgePublish(1_000);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /** Closes a chat's tab in Conductor. Signature, freshness and nonce have already held. */
+  private async handleClose(
+    device: PairedDevice,
+    id: string,
+    command: CloseCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `close: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (command.v !== 1 || typeof command.sessionId !== "string") {
+      return refuse("Not a request this Mac understands.");
+    }
+    const closer = this.deps.closer;
+    if (!closer) {
+      return refuse("This Mac can't close a chat from a phone.");
+    }
+    if (!this.phoneShows(command.sessionId)) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    let outcome: "closed" | "busy" | "missing" = "missing";
+    try {
+      outcome = closer.close(command.sessionId);
+    } catch (error) {
+      logger.debug("could not close a chat", { error: error instanceof Error ? error.message : String(error) });
+    }
+    if (outcome === "busy") {
+      return refuse("That chat is running or waiting on you. Close it once it has finished.");
+    }
+    if (outcome !== "closed") {
+      return refuse("Conductor didn't close it.");
+    }
+    this.log(device.name, "sent", `closed ${command.sessionId.slice(0, 8)}`);
     this.nudgePublish(1_000);
     return { write: true, result: { id, status: "sent" } };
   }
@@ -2264,6 +2352,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeLastEnd) +
       JSON.stringify(view.awakeSleepProblem) +
       JSON.stringify(view.hotspot) +
+      JSON.stringify(view.local) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     const { recent, recentMore, workspaces, projectIcons, chatModels, ...rest } = view;
     const lists = JSON.stringify([recent, recentMore, workspaces ?? null, projectIcons ?? null, chatModels ?? null]);
@@ -2370,6 +2459,8 @@ export class RemoteBridge {
       ...this.phoneAwake(),
       // Hotspot failover: name, switch, whether the Mac is on it, the last switch. Never the password.
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
+      // Where this Mac listens on the local network, for the direct path; absent when it does not.
+      ...this.phoneLocal(),
       // Where a phone may start a chat; absent when this Mac can't (phones then hide the button).
       ...(this.deps.newChat ? { workspaces: this.phoneWorkspaces() } : {}),
       ...this.phoneProjectIcons(),
@@ -2386,6 +2477,11 @@ export class RemoteBridge {
       // Whether "Show more" would find anything; older phones ignore it.
       recentMore: more,
     };
+  }
+
+  private phoneLocal(): { local?: { port: number; hosts: string[]; tag: string } } {
+    const endpoint = this.deps.localEndpoint?.();
+    return endpoint ? { local: endpoint } : {};
   }
 
   /** The awake session for the phone: on/off, and its end when it has one. Absent when this Mac can't. */

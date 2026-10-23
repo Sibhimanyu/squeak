@@ -34,7 +34,9 @@ touches a machine other than this Mac. Each is a later, separate decision.
 | Prompt injection _through_ the channel                      | A message crafted to look like a reply                            | Only the paired human can author commands; nothing from an agent is ever turned into a command                            |
 
 The single most important property: **the Mac trusts a key, not a server.**
-Firebase (or anything) is a dumb, untrusted pipe.
+Firebase (or anything) is a dumb, untrusted pipe. The same-Wi-Fi path added later
+(see "The direct path") is one more such pipe, with its own rows in the
+threat model there.
 
 ## Options
 
@@ -461,3 +463,113 @@ command from the channel (so it can never run later), gives a Mac that had just 
 then says "Not sent. Nothing started." (command taken back) or "Couldn't confirm" (the delete failed too).
 Unsettled sends are kept in `OutboxStore` (Caches, complete file protection, no backup, cleared on unpair) so a relaunch
 never loses the text; Send again reuses the Conductor message id, Edit puts the text back in the composer.
+
+## The direct path: same Wi-Fi, no cloud (2026-10-23)
+
+Option C above, built differently from how it was first sketched: not Tailscale, and not instead of the cloud.
+When the phone and the Mac are on the same network the phone talks to the Mac **directly**, and whenever that
+fails for any reason it is on the cloud again within the same call. Everything that makes the cloud path safe is
+kept, because the direct path is just another untrusted pipe: the same sealed boxes, the same device signatures,
+the same `handleCommand`.
+
+**How it is built.**
+
+- **The Mac.** `LocalChannelServer` (`src/remote/local-channel.ts`) listens on every IPv4 interface (port from
+  `SQUEAK_REMOTE_LOCAL_PORT`, else a free one) while at least one unrevoked phone is paired; `SQUEAK_REMOTE_LOCAL=off`
+  never starts it. It serves the channel's documents **exactly as the Realtime Database holds them**, from memory, in
+  the database's own REST dialect with the channel id left out of the path:
+  `GET /state/snapshot.json`, `PUT /state/presence.json`, `PUT|DELETE /commands/<id>.json`, `DELETE /results/<id>.json`,
+  and an event stream (`GET /state.json` with `accept: text/event-stream`, also `results`, `live`). Nothing else is
+  served: no pairing (a phone is only ever paired through the cloud, behind the human's approval), no media, no other
+  collection, and a phone cannot write what the Mac writes.
+- **A store mirror, not a second path.** `MirrorStore` (`mirror-store.ts`) wraps the store the bridge already uses.
+  Every write the bridge makes (view, recent, live turn, `alive`, results) also lands in the in-memory `DocTree` the
+  server reads, so both transports show the same sealed documents and there is one code path for what the Mac says.
+  What a phone writes locally (presence, commands) is merged into what the bridge reads (`get`/`list`), so a local
+  command goes through **every** check in `handleCommand` unchanged, and the results the bridge writes reach both
+  transports. A write on either side wakes the bridge's pass (`watch`), and a cloud read that fails is not fatal while
+  a phone is local, so a Mac without internet still answers a phone beside it.
+- **Once, even on both.** After the bridge handles a command it deletes it, and `MirrorStore` remembers that id for
+  15 minutes and hides later copies, so the same command arriving on the other transport after the first ran neither
+  runs again nor makes the Mac write "already received" over the real result. If a *different* id carries the same
+  nonce, the nonce check refuses it as ever. A phone's local delete (taking a command back) removes only the local
+  copy, so a withdrawn command can still be sent through the cloud.
+- **The phone.** `LocalRouter` / `RoutedBackend` (`SqueakCore/LocalRoute.swift`) sit behind the `ChannelBackend`
+  the channel already uses, so no caller changed. `RouteMachine` is the pure rule set: prefer local when a probe
+  (an authenticated read of `state/alive`, 1 s timeout) succeeds; any failed or slow local call, or two missed
+  5-second heartbeats, returns to the cloud at once; from the cloud, local is probed again every 30 s, when the
+  network changes (NWPathMonitor), and when the Mac's address becomes known. Streams follow the route (a local stream
+  that drops demotes the route, and the stream moves to the cloud's). The phone finds the Mac two ways: Bonjour
+  `_squeak._tcp` (the TXT tag must equal this channel's own tag) resolved to an IPv4 address, and the `local`
+  field of the Mac's sealed view (`{ port, hosts, tag }`: private IPv4 addresses on `en*` interfaces), for when
+  Bonjour is blocked. The phone tries only private-range or loopback addresses and only when the tag matches.
+- **A command goes out on exactly one transport.** Sent locally, it is not sent to the cloud. If the local write
+  fails with an error that proves nothing was sent (connection refused, no network), it goes through the cloud. If it
+  fails ambiguously (a timeout: the Mac may have it), the phone first deletes it from the Mac, and only a confirmed
+  delete lets it go through the cloud; if the Mac cannot be asked either, it is **not** sent again anywhere and the
+  caller gets the failure, so the app's existing outbox logic (withdraw, "Couldn't confirm", never resend) takes
+  over. Withdrawing a command goes to the transport it was sent on, and to both when that is not known.
+- **Left on the cloud.** Pairing, and a film's media chunks (384 KB each: not worth holding in the Mac's memory
+  twice), always use the cloud. The web client stays on the cloud: a browser cannot browse Bonjour or call
+  `http://` from an https page.
+- **Presence on two paths.** The phone's presence is sealed, so the Mac cannot compare two pings by their own stamp.
+  The newer of the two is whichever the Mac received locally (stamped on arrival) or first saw change in the cloud
+  most recently.
+
+**Request authentication** (`local-auth.ts`, `SqueakCore/LocalAuth.swift`; both pinned by
+`Fixtures/local-auth.json`, regenerated by `scripts/make-local-fixture.ts`). Every request carries
+`x-squeak-ts`, `x-squeak-nonce` (16 random bytes, hex) and `x-squeak-mac`: base64 HMAC-SHA256, under a key derived from
+the channel key (HKDF-SHA256, no salt, info `squeak-local-v1`), of
+`squeak-local-v1 \n METHOD \n target-as-sent \n ts \n nonce \n sha256(body)`. The Mac refuses a stamp more than 60 s
+from its own clock, a MAC that does not match (constant-time), and a nonce it has seen (remembered for the window).
+Every refusal is the same bare `401`, whatever the reason; a path or verb outside the allow-list is a `404` only after
+authentication. A response carries `x-squeak-rmac`, a MAC over `squeak-local-v1-resp \n request-nonce \n status \n
+sha256(body)`: the phone believes a successful answer only if it proves it was made for **this** request, so a host on
+the LAN cannot replay an old document as if the Mac had just said it. An event stream's first answer carries that MAC
+(for an empty body); its events only ever say "something changed" and never carry data, and the phone reads what
+changed through signed requests.
+
+**Limits.** Bodies at most 1,000,000 bytes (the database's box limit is 900,000 characters); documents must have
+exactly the database rules' shape; at most 8 open streams (4 per address), 32 requests in flight, 600 requests a minute
+per address, and an address that fails authentication 20 times in a minute is refused for the rest of it; header and
+request timeouts of 10 and 20 s; the mirror holds at most 32 MB; commands, results and live turns nothing deletes are
+dropped after 15, 30 and 30 minutes. No CORS header is ever sent.
+
+**Discovery.** `LocalAdvertiser` runs macOS's own `dns-sd -R Squeak _squeak._tcp local <port> t=<tag> v=1`
+(no dependency), restarts it with backoff if it dies, moves it when the channel is reset, and stops it with the server
+(or when the last phone is revoked). The only TXT data is `t`, the first 8 bytes of
+`HMAC-SHA256(channel key, "local-id")` in hex: it names no one and cannot be turned into the key, but it is stable,
+so someone on the same network can tell that a Mac running Squeak is there. The service name is just "Squeak".
+
+**Why plain HTTP is acceptable here, and where it is not.** The content is sealed (AES-256-GCM under a key the LAN never
+sees) and every command is signed by a key in the phone's Secure Enclave, so a LAN observer reads only sizes, timing,
+paths (`/commands/<id>`, never the channel id), the paired device's id and a MAC, and a LAN attacker can neither forge
+nor alter content. Adding TLS with a pinned self-signed certificate would hide those too, but would put a certificate
+lifecycle on every Mac and phone for no new authority, and iOS gives a Local Network connection to a private address
+an ATS exemption (`NSAllowsLocalNetworking`) for exactly this. Not accepted: anything unauthenticated, anything that
+puts the channel key or channel id on the wire, anything outside the allow-list.
+
+| Threat on the direct path | Mitigation |
+| --- | --- |
+| A host on the same network reads or sends | Every request needs a MAC under a key only the Mac and paired phones hold; a command still needs a paired device's signature; documents are sealed. A stranger gets a bare 401 |
+| A captured request is sent again | 60 s window plus a remembered nonce; commands also keep their own expiry and nonce checks |
+| A host impersonates the Mac and replays an old view | A response MAC binds the request's nonce; without the key an impostor cannot make one, and the phone falls back to the cloud |
+| A host (or a forged view) aims the phone at a server it controls | The phone tries only private-range addresses, only from the Mac's own sealed view or a Bonjour result whose tag matches, and sends nothing the key is not needed to read: a signed request reveals neither the key nor the channel id |
+| Flooding the Mac | Per-address rate and failure limits, stream and in-flight caps, size caps, timeouts |
+| The channel id leaks from the LAN | It is never in a local path or header, so a sniffer cannot address the cloud channel |
+| A command runs twice (both transports, or a retry) | One transport per command, a confirmed take-back before a cloud resend, the Mac's handled-id memory, and the nonce check |
+| Reading the Mac's other state | Nothing but the channel's `state`, `results`, `live` and `commands` is served, and only what the bridge itself wrote |
+
+**What the owner must do.** The iPhone asks once for **Local Network** access ("Squeak talks to your Mac directly
+when you're on the same Wi-Fi."); declining keeps everything on the cloud. If the Mac's firewall is on, macOS asks once
+whether `node` may accept incoming connections: allow it, or leave the path off. Networks that isolate clients (many
+guest and public Wi-Fi) simply never answer the probe and the phone stays on the cloud. A phone whose clock is more
+than a minute off the Mac's is refused locally and stays on the cloud.
+
+**Shown on the phone.** Settings › Your Mac and Connection details say "Connected · same Wi-Fi" or
+"Connected · via cloud".
+
+**Measured.** `SQUEAK_E2E_LOCAL=1 npx tsx scripts/e2e-remote.ts` (an in-memory database as the cloud, the real
+`LocalChannelServer` on 127.0.0.1, the real phone code): pairing through the "cloud", then a reply's round trip in
+62 ms, a steer's 62 ms, a start's 4 ms and a usage refresh's 8 ms with the cloud seeing none of those commands; then the
+Mac's local server is stopped and the phone's next reply goes through the cloud, once.

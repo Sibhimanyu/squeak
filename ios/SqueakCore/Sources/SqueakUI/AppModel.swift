@@ -35,6 +35,9 @@ final class AppModel {
     private(set) var lastFetch: Date?
     /// Since when the view's stream has been down, nil while it is up.
     private(set) var streamDownSince: Date?
+    /// Which way this phone is talking to the Mac: the direct same-Wi-Fi path or the cloud.
+    private(set) var route: ChannelRoute = .cloud
+    @ObservationIgnored private var routeTask: Task<Void, Never>?
     /// When the Mac last answered a presence ping (its clock), nil from a Mac that never does.
     private(set) var macAliveAt: Date?
     /// When the app last came on screen: the answer on record then is from the visit before.
@@ -145,7 +148,7 @@ final class AppModel {
         if let data = KeyStore.load(account: "pairing"),
            let pairing = try? JSONDecoder().decode(PairingPayload.self, from: data),
            let deviceId = KeyStore.load(account: "device-id").flatMap({ String(data: $0, encoding: .utf8) }) {
-            channel = Channel(pairing: pairing, deviceId: deviceId)
+            channel = Channel(pairing: pairing, deviceId: deviceId, local: LocalSupport.standard)
             phase = KeyStore.load(account: "approved") != nil ? .paired : .awaitingApproval(
                 code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: pairing.n)
         }
@@ -163,6 +166,8 @@ final class AppModel {
         let previous = lastPath
         lastPath = (satisfied, interfaces)
         guard let previous, satisfied, !previous.satisfied || previous.interfaces != interfaces, loop != nil else { return }
+        // What was reachable on the old network may not be on this one: look for the Mac again.
+        if let channel { Task { await channel.networkChanged() } }
         reconnect()
     }
 
@@ -205,7 +210,7 @@ final class AppModel {
         do {
             let pairing = try PairingPayload.parse(text)
             let deviceId = UUID().uuidString.lowercased()
-            let channel = Channel(pairing: pairing, deviceId: deviceId)
+            let channel = Channel(pairing: pairing, deviceId: deviceId, local: LocalSupport.standard)
             try await channel.requestPairing(name: UIDevice.current.name, signer: signer)
             KeyStore.save(try JSONEncoder().encode(pairing), account: "pairing")
             KeyStore.save(Data(deviceId.utf8), account: "device-id")
@@ -221,6 +226,10 @@ final class AppModel {
     }
 
     func unpair() {
+        routeTask?.cancel()
+        routeTask = nil
+        if let channel { Task { await channel.stopLocal() } }
+        route = .cloud
         KeyStore.wipe()
         KeyStore.delete(account: "approved")
         channel = nil
@@ -252,6 +261,7 @@ final class AppModel {
 
     private func startLoop() {
         guard !demo, loop == nil, let channel else { return }
+        if phase == .paired { startLocal(channel) }
         loop = Task { [weak self] in
             await self?.tick()
             self?.restartLive()
@@ -284,6 +294,21 @@ final class AppModel {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    /// Looks for the Mac on the same Wi-Fi (the first time asks for Local Network access) and follows which way it is reached.
+    private func startLocal(_ channel: Channel) {
+        routeTask?.cancel()
+        routeTask = Task { [weak self] in
+            await channel.startLocal()
+            for await route in await channel.routeUpdates() { self?.route = route }
+        }
+    }
+
+    /// The Mac's own list of where it listens, from its view: tried at once if the cloud is in use.
+    private func learnLocal(from snapshot: PhoneSnapshot?) {
+        guard let channel, let info = snapshot?.local else { return }
+        Task { await channel.learnLocal(info) }
     }
 
     /// One event off the state stream.
@@ -324,6 +349,9 @@ final class AppModel {
         unlock.backgrounded()
         loop?.cancel()
         loop = nil
+        routeTask?.cancel()
+        routeTask = nil
+        if let channel { Task { await channel.stopLocal() } }
         streamDownSince = nil
         let wasStreaming = presenceWatching != nil
         liveTask?.cancel()
@@ -402,6 +430,7 @@ final class AppModel {
         if let next, !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) {
             baseSnapshot = next
             freshSnapshotAt = Date()
+            learnLocal(from: next)
             rebuild()
         }
         lastFetch = Date()
@@ -422,7 +451,7 @@ final class AppModel {
 
     /// Chats with an unread reply, newest first, whether they are still active or went quiet.
     var unreadReplies: [PhoneSnapshot.Session] {
-        let all = (snapshot?.sessions ?? []) + recentChats
+        let all = (snapshot?.sessions ?? []).filter { !isHiddenHere($0) } + recentChats
         return all.filter(isUnread).sorted {
             (Age.date($0.lastActivityAt) ?? .distantPast) > (Age.date($1.lastActivityAt) ?? .distantPast)
         }
@@ -499,6 +528,7 @@ final class AppModel {
                     if answer.approved {
                         KeyStore.save(Data("1".utf8), account: "approved")
                         phase = .paired
+                        startLocal(channel)
                     } else {
                         unpair()
                         problem = "Your Mac said no. Pair again if that was a mistake."
@@ -514,7 +544,7 @@ final class AppModel {
             let epoch = snapshotEpoch
             if let next = try await channel.snapshot(), epoch == snapshotEpoch {
                 if next.split == true, let recent = try await channel.recent() { recentDoc = recent }
-                if !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) { baseSnapshot = next }
+                if !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) { baseSnapshot = next; learnLocal(from: next) }
                 freshSnapshotAt = Date()
                 rebuild()
             }
@@ -1260,6 +1290,46 @@ final class AppModel {
             return "Couldn't reach your Mac."
         }
     }
+
+    /// The chat the close sheet is asking about: set by a row's menu or the chat's header, read by the one dialog at the root.
+    var closeTarget: PhoneSnapshot.Session?
+
+    /// Closes the chat's tab in Conductor, as closing it there does (the chat and its history stay). Nil when the Mac
+    /// did it, else why not. It shows as closed once the Mac's next view says so.
+    func closeInConductor(_ session: PhoneSnapshot.Session) async -> String? {
+        if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
+        guard session.conductorSessionId != nil else { return "Only a Conductor chat can be closed." }
+        guard await confirmWithBiometrics(reason: "Close \(session.label)") else { return "Face ID was cancelled." }
+        guard let channel else { return "Not connected to your Mac." }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.closeDocument(to: session, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return "Your Mac didn't answer. Is Squeak running?" }
+            if result.sent { await refresh() }
+            return result.sent ? nil : (result.reason ?? "Your Mac refused that.")
+        } catch {
+            return "Couldn't reach your Mac."
+        }
+    }
+
+    /* ---------- hidden on this phone ---------- */
+
+    /// Chats put away on this phone only, by when (seconds since 1970). The Mac and Conductor are untouched; a chat
+    /// comes back by itself when it has newer activity. Kept across launches.
+    private(set) var hiddenHere: [String: Double] = UserDefaults.standard.dictionary(forKey: "squeak.hiddenHere") as? [String: Double] ?? [:] {
+        didSet { UserDefaults.standard.set(hiddenHere, forKey: "squeak.hiddenHere") }
+    }
+
+    func isHiddenHere(_ session: PhoneSnapshot.Session) -> Bool {
+        guard let at = hiddenHere[session.key] else { return false }
+        return (Age.date(session.lastActivityAt)?.timeIntervalSince1970 ?? 0) <= at
+    }
+
+    func hideHere(_ session: PhoneSnapshot.Session) { hiddenHere[session.key] = Date().timeIntervalSince1970 }
+    func showHiddenAgain() { hiddenHere = [:] }
 
     /// The last thing that went wrong with a chat's control (a Stop), shown under its composer.
     private(set) var problemFor: [String: String] = [:]

@@ -54,7 +54,7 @@ struct HomeView: View {
     }()
 
     /// Chats on screen under the groups: those with an unread reply are in New replies above them instead.
-    private var sessions: [PhoneSnapshot.Session] { (model.snapshot?.sessions ?? []).filter { !model.isUnread($0) } }
+    private var sessions: [PhoneSnapshot.Session] { (model.snapshot?.sessions ?? []).filter { !model.isUnread($0) && !model.isHiddenHere($0) } }
     private var unreadReplies: [PhoneSnapshot.Session] { model.unreadReplies }
     /// Chats that are not active any more, to pick up again.
     private var recent: [PhoneSnapshot.Session] { model.recentChats }
@@ -693,6 +693,11 @@ extension AppModel {
 }
 
 enum Connection {
+    /// How the Mac is being reached, in words: "Connected · same Wi-Fi" on the direct path, "Connected · via cloud" otherwise.
+    static func routeText(_ route: ChannelRoute) -> String {
+        route == .local ? "Connected · same Wi-Fi" : "Connected · via cloud"
+    }
+
     struct State {
         let text: String
         let color: Color

@@ -10,9 +10,31 @@ struct RenameAlert: ViewModifier {
     @State private var text = ""
     @State private var target: PhoneSnapshot.Session?
     @State private var problem: String?
+    @State private var closing: PhoneSnapshot.Session?
+    @State private var closeProblem: String?
 
     func body(content: Content) -> some View {
         content
+            .onChange(of: model.closeTarget) { _, new in closing = new }
+            .confirmationDialog("Close this chat in Conductor?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil; model.closeTarget = nil } }), titleVisibility: .visible) {
+                Button("Close in Conductor", role: .destructive) {
+                    guard let session = closing else { return }
+                    closing = nil; model.closeTarget = nil
+                    Task { closeProblem = await model.closeInConductor(session) }
+                }
+                Button("Hide on this iPhone only") {
+                    if let session = closing { model.hideHere(session) }
+                    closing = nil; model.closeTarget = nil
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Closing shuts its tab in Conductor on your Mac; the chat and its history stay. Hiding only tidies this iPhone, and the chat returns when it has news.")
+            }
+            .alert("Couldn't close", isPresented: Binding(get: { closeProblem != nil }, set: { if !$0 { closeProblem = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(closeProblem ?? "")
+            }
             .alert("Rename chat", isPresented: Binding(get: { model.renameTarget != nil }, set: { if !$0 { model.renameTarget = nil } })) {
                 TextField("Name", text: $text)
                 Button("Cancel", role: .cancel) {}
@@ -45,6 +67,10 @@ extension View {
             if session.conductorSessionId != nil, session.open != false {
                 Button("Rename") { model.renameTarget = session }
             }
+            if session.conductorSessionId != nil, session.open != false, session.state != "working", !session.needsYou {
+                Button("Close in Conductor", systemImage: "xmark.circle", role: .destructive) { model.closeTarget = session }
+            }
+            Button("Hide on this iPhone", systemImage: "eye.slash") { model.hideHere(session) }
         }
     }
 }
