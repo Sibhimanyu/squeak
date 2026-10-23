@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.17
+
+- Quick message: when Send is off because Squeak has no way to reply to the chat it is aimed at
+  (a chat that is not Conductor's, or a Claude or Codex it cannot type into), it now says so and
+  points to the To menu, instead of leaving a greyed button.
+
 ## 2.1.16
 
 - Keep Mac awake: the menu lists the lid-closed choices first, so a Mac you set to stay

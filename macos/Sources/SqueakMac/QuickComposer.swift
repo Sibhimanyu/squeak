@@ -476,6 +476,14 @@ struct QuickComposerView: View {
         [s.label, s.repoName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    /// Why Send is off for the chat this composer is aimed at, when it is the chat and not what you typed:
+    /// Squeak has no way to answer it (not a Conductor chat, and not a Claude or Codex it can type into in
+    /// Terminal). The destination menu lists the chats it can answer.
+    private var cannotReply: String? {
+        guard let target, !model.canSend(target) else { return nil }
+        return "Squeak can't reply to this chat from here. Pick one it can with To."
+    }
+
     private var destinationTitle: String {
         target?.label ?? (state.target == nil ? "Choose a session" : "Unavailable chat")
     }
@@ -502,6 +510,12 @@ struct QuickComposerView: View {
                 HStack(spacing: 6) { Lucide(f.symbol, size: 14, color: f.color); Text(f.text).foregroundStyle(f.color).lineLimit(1) }
             } else if !model.isConnected, model.health != nil {
                 Text("Offline").foregroundStyle(Theme.muted)
+            } else if let reason = cannotReply {
+                // Send is off for a reason you can act on: say it, never just grey the button.
+                HStack(spacing: 6) {
+                    Lucide(.info, size: 14, color: Theme.muted)
+                    Text(reason).foregroundStyle(Theme.muted).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .font(.system(size: 12))
