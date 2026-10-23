@@ -34,6 +34,9 @@ export const FOREIGN_DISABLE_PROBLEM =
 
 export const LID_LOST_PROBLEM = "Something on this Mac turned sleep back on, so a closed lid would sleep it now.";
 
+/** How often a timed session compares its end with the wall clock (timers pause while the Mac sleeps). */
+export const CLOCK_CHECK_MS = 30_000;
+
 /** A week: longer than any real need, short enough that a typo cannot mean forever. */
 export const MAX_AWAKE_MINUTES = 7 * 24 * 60;
 
@@ -329,7 +332,6 @@ export class AwakeSession {
         this.now() + MAX_AWAKE_MINUTES * 60_000,
       );
       this.begin({ ...this.saved, until: capped });
-      this.options.lid?.updateUntil(capped);
     }
     return this.state;
   }
@@ -468,8 +470,11 @@ export class AwakeSession {
       this.timer = null;
     }
     // Replacing a lid session with one without: as at an end, its sleep
-    // disable is over now, whatever end the journal still names.
+    // disable is over now, whatever end the journal still names. Any other
+    // start, extend or replacement moves the journal's end to the new one:
+    // a stale earlier end would let the backstop undo a session still running.
     if (this.saved?.lid && !saved.lid) this.options.lid?.updateUntil(this.now());
+    else if (this.saved) this.options.lid?.updateUntil(saved.until);
     this.saved = saved;
     if (!saved.lid) {
       this.lidStatus = "off";
@@ -479,11 +484,29 @@ export class AwakeSession {
     this.write(saved);
     void this.syncLid();
     if (saved.until !== null) {
-      // setTimeout caps at ~24.8 days; a week fits.
-      this.timer = setTimeout(() => this.end("expired"), Math.max(0, saved.until - this.now()));
-      this.timer.unref?.();
+      this.arm(saved.until);
     }
     this.options.onChange?.();
+  }
+
+  /**
+   * Ends the session at `until` by the wall clock. A Node timer counts awake
+   * time only, so after the Mac sleeps one long timeout fires late (a lid
+   * session must not outlive its end): wait in short steps and look at the
+   * clock each time, so at most CLOCK_CHECK_MS late after a wake.
+   */
+  private arm(until: number): void {
+    const left = until - this.now();
+    this.timer = setTimeout(
+      () => {
+        this.timer = null;
+        if (this.saved?.until !== until) return;
+        if (this.now() >= until) this.end("expired");
+        else this.arm(until);
+      },
+      Math.max(0, Math.min(left, CLOCK_CHECK_MS)),
+    );
+    this.timer.unref?.();
   }
 
   private write(saved: Saved | null): void {
