@@ -262,11 +262,17 @@ enum ChatTimeline {
         }
         rows += plain.filter(after).map { .sent(settled($0)) }
         let total = live?.total ?? session.activity?.total ?? 0
-        rows = merged(live?.history ?? cachedHistory, tail: rows, steerTexts: steps.filter { $0.kind == "you" }.map(\.text) + steers.map(\.text), isWorking: isWorking)
+        rows = merged(Self.firstNonEmpty(live?.history, cachedHistory), tail: rows, steerTexts: steps.filter { $0.kind == "you" }.map(\.text) + steers.map(\.text), isWorking: isWorking)
         if isWorking {
             rows += turn(steps: steps, steers: steers.map(settled), truncated: total > steps.count, total: total, agentName: agentName)
         }
         return rows.isEmpty ? [.empty(emptyText(canReply: Presentation.replyBlock(session) == nil))] : rows
+    }
+
+    /// The first history that has anything in it: an empty live one (the Mac could not read the chat this
+    /// moment) must not blank a good cached one.
+    static func firstNonEmpty(_ histories: [LiveTurn.HistoryEntry]?...) -> [LiveTurn.HistoryEntry]? {
+        histories.first { !($0?.isEmpty ?? true) } ?? nil
     }
 
     /// The Mac's history and what this phone already shows, in the order things happened. A history entry

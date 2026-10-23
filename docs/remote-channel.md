@@ -276,6 +276,11 @@ else on the machine. Each of those is a separate, later decision.
   for). `SQUEAK_REMOTE_VERBOSE=off` on the Mac refuses it outright. An older
   phone's plain `{ at }` presence keeps working. Measured on the live
   project: the turn arrived 786 ms after the phone opened the session.
+  The chat history that comes with it is kept on the phone (2026-10-23,
+  `HistoryStore`): the last non-empty history of at most 30 chats, in
+  `Caches/squeak-history.json` with `.completeFileProtection`, excluded from
+  backup, deleted on unpair, so a chat opened after a relaunch shows its
+  history at once instead of only the newest message.
 - **Steers in the turn, and Conductor's queue (2026-10-19).** The activity
   feed gains a step kind `you`: a message the user sent into a turn that was
   still running (a steer), shown in place inside the turn rather than starting

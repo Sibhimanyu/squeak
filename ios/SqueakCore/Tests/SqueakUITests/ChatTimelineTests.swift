@@ -280,6 +280,17 @@ final class ChatTimelineTests: XCTestCase {
         guard case .history(_, true, _, _)? = rows.first else { return XCTFail("history first, the user's on the right") }
     }
 
+    func testAnEmptyLiveHistoryDoesNotEraseTheCachedOne() {
+        var live = liveTurn(working: false)
+        live.history = []
+        let cached = [LiveTurn.HistoryEntry(role: "user", text: "Cached question", at: iso(900)),
+                      LiveTurn.HistoryEntry(role: "assistant", text: "Cached answer", at: iso(800))]
+        let rows = ChatTimeline.rows(session: session("finished", turn: "t2", message: "New answer", ago: 1), remembered: previous, sends: [], live: live, cachedHistory: cached, now: now)
+        let earlier = rows.compactMap { row -> String? in if case .history(_, _, let text, _) = row { text } else { nil } }
+        XCTAssertEqual(earlier, ["Cached question", "Cached answer"])
+        XCTAssertNil(ChatTimeline.firstNonEmpty(nil, []))
+    }
+
     func testNoHistoryWithoutTheLiveTurn() {
         let rows = ChatTimeline.rows(session: session("finished", message: "Earlier answer"), remembered: previous, sends: [], now: now)
         XCTAssertFalse(rows.contains { if case .history = $0 { true } else { false } })

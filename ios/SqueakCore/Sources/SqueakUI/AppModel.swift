@@ -62,9 +62,12 @@ final class AppModel {
     }
     /// The verbose view per session key, while it is being watched.
     private(set) var liveTurns: [String: LiveTurn] = [:]
-    /// The newest history each chat had when last open, in memory only (never written to the phone). A chat opened
-    /// again shows it in its first frame, so the history arriving a moment later does not push everything down.
+    /// The newest history each chat had when last open, also kept on the phone (`HistoryStore`: Caches, complete
+    /// file protection, no backup, 30 chats, gone on unpair). A chat opened again, even after a relaunch, shows it
+    /// in its first frame, so the history arriving a moment later does not push everything down.
     private(set) var lastHistory: [String: [LiveTurn.HistoryEntry]] = [:]
+    /// Nil in the demo, which must neither read nor write the real cache.
+    @ObservationIgnored private let historyStore: HistoryStore?
     /// False once it is known the Mac's channel cannot stream (Firestore), so verbose cannot work.
     private(set) var liveAvailable = true
 
@@ -116,6 +119,8 @@ final class AppModel {
     init() {
         demo = ProcessInfo.processInfo.arguments.contains("-squeak-demo")
         signer = demo ? SoftwareSigner() : KeyStore.signer()
+        historyStore = demo ? nil : HistoryStore()
+        if let historyStore { lastHistory = historyStore.all() }
         if demo {
             snapshot = DemoData.snapshot
             outbox = DemoData.outbox
@@ -216,6 +221,8 @@ final class AppModel {
         liveTask?.cancel()
         liveTask = nil
         liveTurns = [:]
+        lastHistory = [:]
+        historyStore?.clear()
     }
 
     /* ---------- the loop: only while the app is on screen ---------- */
@@ -339,7 +346,10 @@ final class AppModel {
                 guard let self, !PhoneSnapshot.isStale(turn?.seq, than: self.liveTurns[key]?.seq) else { continue }
                 if self.liveTurns[key] != turn {
                     self.liveTurns[key] = turn
-                    if let history = turn?.history, !history.isEmpty { self.lastHistory[key] = history }
+                    if let history = turn?.history, !history.isEmpty {
+                        self.lastHistory[key] = history
+                        self.historyStore?.record(history, for: key)
+                    }
                     self.noteQueue(turn, for: key)
                     self.rebuild()
                 }
