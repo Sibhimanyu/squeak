@@ -8,6 +8,7 @@ import type { PowerReading } from "./power-monitor.js";
 import {
   applyAwakeAction,
   AwakeSession,
+  CLOCK_CHECK_MS,
   MAX_AWAKE_MINUTES,
   readAwakeAction,
   RESTORE_RETRY_MS,
@@ -223,6 +224,34 @@ describe("AwakeSession with the lid closed", () => {
     t.session.end();
     await t.session.lidSettled();
     expect(t.calls).toEqual(["disable", `until:${Date.now()}`, "restore"]);
+  });
+
+  it("starting a new lid session over a running one moves the journal's end to the new one", async () => {
+    const t = lidSetup();
+    await t.session.refreshLidRule();
+    t.session.start(10, { lid: true });
+    await t.session.lidSettled();
+    t.calls.length = 0;
+    const later = Date.now() + 90 * 60_000;
+    t.session.start(90, { lid: true });
+    await t.session.lidSettled();
+    expect(t.calls).toEqual([`until:${later}`]);
+    expect(t.lid.disableSleep).toHaveBeenCalledTimes(1);
+  });
+
+  it("a timed session ends by the wall clock even when its timer slept through the end", async () => {
+    const t = lidSetup();
+    await t.session.refreshLidRule();
+    t.session.start(10, { lid: true });
+    await t.session.lidSettled();
+    // The Mac slept 20 minutes: the clock moved, the timer did not.
+    vi.setSystemTime(Date.now() + 20 * 60_000);
+    expect(t.session.active).toBe(true);
+    await vi.advanceTimersByTimeAsync(CLOCK_CHECK_MS);
+    await t.session.lidSettled();
+    expect(t.session.active).toBe(false);
+    expect(t.calls.at(-1)).toBe("restore");
+    expect(t.session.lastEnd?.reason).toBe("expired");
   });
 
   it("a restore that fails is said, warned once, and retried until it works", async () => {
