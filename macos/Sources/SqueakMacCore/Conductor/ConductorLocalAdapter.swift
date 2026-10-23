@@ -43,6 +43,7 @@ public struct ConductorLocalAdapter: HostAdapter {
     private let sender: any ConductorSender
     private let now: @Sendable () -> Date
     private let activeOnly: Bool
+    private let askSource: (@Sendable () async -> [String: DaemonAskView]?)?
 
     /// - Parameter activeOnly: when true, `discover` returns only sessions the
     ///   active rule keeps on screen (working, blocked, finished/error in the
@@ -52,8 +53,10 @@ public struct ConductorLocalAdapter: HostAdapter {
         activityReader: ClaudeActivityReader = ClaudeActivityReader(),
         sender: any ConductorSender = NullSender(),
         activeOnly: Bool = false,
+        askSource: (@Sendable () async -> [String: DaemonAskView]?)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.askSource = askSource
         self.registry = ConductorRegistry(database: database)
         self.activityReader = activityReader
         self.sender = sender
@@ -132,7 +135,51 @@ public struct ConductorLocalAdapter: HostAdapter {
             { continue }
             sessions.append(session)
         }
+        sessions = await layingAsks(over: sessions, at: current)
         return Self.applyDistinctTitles(sessions)
+    }
+
+    // MARK: Closing questions
+
+    /// How long after a chat finishes the daemon may still be catching up with it.
+    static let askCatchUp: TimeInterval = 20
+
+    /// Only the daemon reads an agent's last message, so a chat that finished on a question ("Want me to
+    /// open a PR?") learns it from there. It then reads as blocked, carrying the question, like any chat
+    /// waiting on you: the banner, the menu bar count and the Needs you group all follow.
+    func layingAsks(over sessions: [HostSession], at current: Date) async -> [HostSession] {
+        guard let askSource, sessions.contains(where: { $0.state == .finished }) else { return sessions }
+        guard var daemon = await askSource() else { return sessions }
+        // A chat that has only just finished may not have reached the daemon yet. Looking once more
+        // shortly keeps a finish and its question one announcement rather than "done", then "asks you".
+        if sessions.contains(where: { Self.awaitsDaemon($0, daemon: daemon, at: current) }) {
+            try? await Task.sleep(for: .milliseconds(900))
+            daemon = await askSource() ?? daemon
+        }
+        return Self.layAsks(daemon, over: sessions)
+    }
+
+    static func awaitsDaemon(_ s: HostSession, daemon: [String: DaemonAskView], at current: Date) -> Bool {
+        guard s.state == .finished, let at = s.lastActivityAt, current.timeIntervalSince(at) < askCatchUp else { return false }
+        return !caughtUp(daemon[s.conductorSessionId ?? ""], with: s)
+    }
+
+    /// The daemon has seen this finish: it says finished, and its activity is not older than ours.
+    static func caughtUp(_ d: DaemonAskView?, with s: HostSession) -> Bool {
+        guard let d, d.state == "finished" else { return false }
+        guard let mine = s.lastActivityAt, let theirs = d.lastActivityAt else { return true }
+        return theirs >= mine.addingTimeInterval(-5)
+    }
+
+    static func layAsks(_ daemon: [String: DaemonAskView], over sessions: [HostSession]) -> [HostSession] {
+        sessions.map { s in
+            guard s.state == .finished, let id = s.conductorSessionId, let d = daemon[id],
+                  caughtUp(d, with: s), let ask = d.asks, !ask.isEmpty else { return s }
+            var s = s
+            s.state = .blocked
+            s.pendingQuestion = ask
+            return s
+        }
     }
 
     public func transcript(for session: HostSession, limit: Int) async throws -> [ChatMessage] {

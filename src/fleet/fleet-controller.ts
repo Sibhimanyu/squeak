@@ -716,10 +716,12 @@ export function canReplyFromCard(item: AttentionItem, replier: FleetReplier | nu
   if (!canAnswerSession(item.session, replier)) {
     return false;
   }
+  // A question a finished chat asks is answered like any finish: it is idle, so a reply is allowed.
+  const finish = item.kind === "finished_unreviewed" || item.kind === "asked_question";
   if (item.session.conductorSessionId) {
-    return item.kind === "finished_unreviewed";
+    return finish;
   }
-  return item.kind === "finished_unreviewed" || item.kind === "blocked_question";
+  return finish || item.kind === "blocked_question";
 }
 
 /**

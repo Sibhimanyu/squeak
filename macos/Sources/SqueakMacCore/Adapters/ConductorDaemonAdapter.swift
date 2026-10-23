@@ -48,6 +48,11 @@ public struct ConductorDaemonAdapter: HostAdapter {
             attachments: .unsupported("Attachments are not supported yet")
         )
         if provider == "conductor", workspace != nil, conductorSession != nil { caps.openInHost = .supported }
+        // A finished chat that ends on a question is waiting on you: it reads as blocked, carrying the question,
+        // so every surface (grouping, the menu bar count, the banner) treats it as needing you. It stays
+        // replyable: a finished chat is idle.
+        let state = SessionState(daemon: d.state)
+        let ask = state == .finished ? d.asks : nil
         return HostSession(
             key: SessionKey(provider: provider, workspaceId: workspace, hostSessionId: d.key),
             title: d.title ?? "",
@@ -56,7 +61,7 @@ public struct ConductorDaemonAdapter: HostAdapter {
             branch: nonEmpty(d.branch),
             cwd: nonEmpty(d.cwd),
             agent: nonEmpty(d.agent),
-            state: SessionState(daemon: d.state),
+            state: ask == nil ? state : .blocked,
             lastActivityAt: d.lastActivityAt,
             alive: d.alive,
             replyTarget: replyTarget,
@@ -64,7 +69,8 @@ public struct ConductorDaemonAdapter: HostAdapter {
             conductorSessionId: conductorSession,
             capabilities: caps,
             origin: .hostOwned,
-            awaitingApproval: d.state == "awaiting_approval" ? true : nil
+            awaitingApproval: d.state == "awaiting_approval" ? true : nil,
+            pendingQuestion: ask
         )
     }
 

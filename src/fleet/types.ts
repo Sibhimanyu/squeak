@@ -44,6 +44,17 @@ export function isBlockedState(state: FleetState): boolean {
 }
 
 /**
+ * Wants a person right now: blocked, or finished on a question put to them
+ * ("Want me to open a PR?"). The one rule every surface counts "needs you" by,
+ * so the duck, the radar, the Mac app and the phone cannot disagree. A session
+ * that asks stays `finished`, so replying to it is allowed (a blocked Conductor
+ * chat refuses one); only the word and the colour say it is waiting.
+ */
+export function needsYou(session: Pick<FleetSession, "state" | "asks">): boolean {
+  return isBlockedState(session.state) || (session.state === "finished" && Boolean(session.asks));
+}
+
+/**
  * A session as one observer sees it. Observers never merge with each other;
  * the monitor does that, so each observer stays independently testable.
  */
@@ -133,11 +144,19 @@ export interface FleetSession extends ObservedSession {
    * story, pick a look…). The state is then `awaiting_input`.
    */
   workflow?: WorkflowStatus | null;
+  /**
+   * Set only while the session is `finished` and its last message closes on a question put to the person
+   * ("Want me to open a PR?"): that question, clipped. The agent is waiting on an answer, so every surface
+   * treats it as needing you. Gone as soon as a new turn starts, because the state leaves `finished`.
+   */
+  asks?: string | null;
 }
 
 export type AttentionKind =
   | "blocked_approval"
   | "blocked_question"
+  /** The turn ended on a question for the person: finished, but waiting on an answer. */
+  | "asked_question"
   /** Working, but the model has not answered for far longer than it ever takes. */
   | "stalled"
   | "errored"

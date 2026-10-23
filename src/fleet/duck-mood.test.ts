@@ -57,6 +57,21 @@ describe("deriveDuckState", () => {
     expect(state.justFinished).toEqual(["finished"]);
   });
 
+  it("needs you when a finished session asks a question, and does not celebrate it", () => {
+    const asking = { ...session("finished", "asking"), asks: "Want me to open a PR?" };
+    const item: AttentionItem = {
+      session: asking,
+      kind: "asked_question",
+      score: 850,
+      since: "2026-09-21T11:59:45.000Z",
+    };
+    const state = deriveDuckState([asking], [item], now);
+
+    expect(state.mood).toBe("needs_you");
+    expect(state.blockedCount).toBe(1);
+    expect(state.justFinished).toEqual([]);
+  });
+
   it("stops celebrating a finish that has been sitting there", () => {
     const stale = new Date(now - CELEBRATION_MS - 1000).toISOString();
     const state = deriveDuckState([session("finished")], [finishedItem("finished", stale)], now);

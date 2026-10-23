@@ -234,3 +234,61 @@ function parseProseChoices(text: string): ParsedChoices | null {
 function clip(question: string): string {
   return question.length <= QUESTION_MAX ? question : `${question.slice(0, QUESTION_MAX - 1).trimEnd()}…`;
 }
+
+/** A list line: a bullet, a number, or a lettered option. A question in one is a list item, not the closing ask. */
+const LIST_LINE = /^\s*(?:[-*+]|\d+[.)]|\(?[A-Za-z][).:])\s+/;
+/** After the "?": closing brackets, bold marks and emoji may follow it; a quote or backtick means it was inside one. */
+const TRAILING_DECORATION = /[\s)\]*_~]|\p{Extended_Pictographic}|️/gu;
+
+/**
+ * Whether the agent's message ends by asking the person something ("Want me to open a PR?"): that question,
+ * clipped, or null. Only the closing sentence counts, so a "?" in the middle of a summary, in a code block,
+ * in inline code, a quote or a URL never makes a finished turn look like it is waiting. A message that ends on
+ * lettered options is asking when it states its question above them (the same read as `parseChoices`).
+ */
+export function closingQuestion(text: string | null): string | null {
+  if (!text) {
+    return null;
+  }
+  const lettered = parseLettered(text)?.question;
+  if (lettered) {
+    return lettered;
+  }
+
+  // An unclosed fence swallows the rest, as a renderer would.
+  const body = text.replace(/```[\s\S]*?(?:```|$)/g, "\u0000");
+  const trimmed = body.trim();
+  // A message that ends on a code block ends on code, whatever is inside it.
+  if (trimmed === "" || trimmed.endsWith("\u0000")) {
+    return null;
+  }
+
+  const paragraph = trimmed.split(/\n\s*\n/).pop()!;
+  const lines = paragraph.split("\n").filter((line) => line.trim() !== "");
+  const closing: string[] = [];
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]!;
+    if (LIST_LINE.test(line) || /^\s*(?:#{1,6}\s|>)/.test(line) || line.includes("\u0000")) {
+      break;
+    }
+    closing.unshift(line.trim());
+  }
+  if (closing.length === 0) {
+    return null;
+  }
+  // Prose that is a question inside backticks or quotes ends on that mark, not on the "?".
+  const raw = closing.join(" ");
+  const probe = raw.replace(/https?:\/\/\S+/g, "link");
+  if (!probe.includes("?") || probe.slice(probe.lastIndexOf("?") + 1).replace(TRAILING_DECORATION, "") !== "") {
+    return null;
+  }
+
+  const flat = stripMarkdown(raw)
+    .replace(/\be\.g\./gi, "eg")
+    .replace(/\bi\.e\./gi, "ie")
+    .replace(/[\s]*(?:\p{Extended_Pictographic}|\uFE0F)+\s*$/u, "")
+    .trim();
+  const sentences = flat.split(/(?<=[.!?])\s+/);
+  const last = sentences[sentences.length - 1]!.replace(/\s*(?:\p{Extended_Pictographic}|️)+\s*$/u, "").trim();
+  return /\?[)\]*_~\s]*$/.test(last) ? clip(last) : null;
+}

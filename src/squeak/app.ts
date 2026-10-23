@@ -34,7 +34,7 @@ import { listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
 import { listChatModels } from "../fleet/chat-models.js";
 import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "../fleet/project-icons.js";
 import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
-import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
+import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
@@ -207,6 +207,14 @@ export class SqueakApp {
       sessions: () => this.runtime.monitor.snapshot.sessions,
     });
     this.runtime.setCanReply((session) => this.router.canReply(session));
+    // A finished turn's last message, read in full, tells the fleet whether it ends on a question for you.
+    this.runtime.setLastMessage((session) =>
+      session.conductorSessionId
+        ? this.replier.lastTurnText(session.conductorSessionId)
+        : session.transcriptPath
+          ? lastAgentMessage(session.agent, session.transcriptPath)
+          : null,
+    );
 
     // Answers an agent's pending question or plan, for the Mac app and the phone
     // (docs/answering-questions.md): Conductor's API when it accepts answers,

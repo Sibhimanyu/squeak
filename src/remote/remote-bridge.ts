@@ -26,7 +26,7 @@ import type { PhoneImageResult } from "./phone-image.js";
 import type { PhoneMediaResult } from "./phone-media.js";
 import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
-import type { FleetSession } from "../fleet/types.js";
+import { needsYou, type FleetSession } from "../fleet/types.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
 import type { WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../workflows/types.js";
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
@@ -2179,7 +2179,8 @@ export class RemoteBridge {
     const snapshot = this.deps.snapshot();
     const { recent, more } = this.recentSessions(snapshot, this.phoneOpen() ? this.recentWanted : PHONE_RECENT_LIMIT);
     const titles = distinctTitles([...snapshot.active, ...recent]);
-    const blocked = snapshot.active.filter((session) => session.state.startsWith("awaiting")).length;
+    // Blocked, or finished on a question put to you (`asks`): both wait on you.
+    const blocked = snapshot.active.filter(needsYou).length;
     const working = snapshot.active.filter((session) => session.state === "working").length;
     return {
       v: 1,
@@ -2296,6 +2297,9 @@ export class RemoteBridge {
       message: text,
       choices: message?.choices ?? null,
       activity: session.state === "working" ? this.activityFor(session) : null,
+      // A finished turn that closes on a question for you ("Want me to open a PR?"): the phone shows it as
+      // needing you while the chat stays replyable. Absent otherwise; older phones ignore it and show "done".
+      ...(session.state === "finished" && session.asks ? { asks: session.asks } : {}),
       // Only while it waits for an answer; older phones ignore it.
       ...(session.state === "awaiting_input" ? { question: this.questionFor(session) } : {}),
       // A workflow's own card (RasanAI: pick a story, pick a look); older phones ignore it.

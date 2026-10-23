@@ -17,6 +17,27 @@ final class PresentationTests: XCTestCase {
                        "use a tool with a much longer label…")
     }
 
+    func testAFinishedChatThatAsksIsNeedsYouInEveryListAndKeepsItsReply() {
+        var asking = session(state: "finished")
+        asking.asks = "Want me to open a PR?"
+        let plain = session(state: "finished")
+        XCTAssertEqual(Presentation.status(asking), .init(text: "needs an answer", tone: .needsYou))
+        XCTAssertEqual(Presentation.status(plain), .init(text: "done", tone: .done))
+        XCTAssertEqual(Presentation.ask(asking), "Want me to open a PR?")
+        XCTAssertTrue(Presentation.inFilter(asking, .needsYou))
+        XCTAssertFalse(Presentation.inFilter(asking, .done))
+        XCTAssertTrue(Presentation.inFilter(plain, .done))
+        XCTAssertEqual(Presentation.needsYouCount([asking, plain]), 1)
+        XCTAssertLessThan(Presentation.rank(asking), Presentation.rank(plain))
+        // It is idle, so the phone may answer it; a blocked chat it may not.
+        XCTAssertNil(Presentation.replyBlock(asking))
+        XCTAssertNotNil(Presentation.replyBlock(session(state: "awaiting_input")))
+        // A question only counts while the chat is finished.
+        var moved = session(state: "working")
+        moved.asks = "Stale?"
+        XCTAssertFalse(moved.needsYou)
+    }
+
     func testAFailureReasonIsOnlyForAnErroredChat() {
         func with(_ state: String, _ failure: String?) -> PhoneSnapshot.Session {
             .init(key: "k", conductorSessionId: "id", label: "squeak · deps", agent: "claude", state: state, lastActivityAt: "2026-10-19T10:00:00Z",

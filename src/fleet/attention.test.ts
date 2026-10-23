@@ -56,6 +56,17 @@ describe("classifyAttentions", () => {
     }
   });
 
+  it("reads a finish that ends on a question as waiting on you, in place of a quiet finish", () => {
+    expect(classifyAttentions(session({ state: "finished", asks: "Want me to open a PR?" }))).toEqual([
+      "asked_question",
+    ]);
+    // Only a finish asks: a stale `asks` on a session that moved on counts for nothing.
+    expect(classifyAttentions(session({ state: "working", asks: "Want me to open a PR?" }))).toEqual([]);
+    expect(classifyAttentions(session({ state: "finished", asks: "Want me to open a PR?", retired: true }))).toEqual(
+      [],
+    );
+  });
+
   it("flags a session that is close to compacting", () => {
     expect(classifyAttentions(session({ state: "working", contextPercent: 90 }))).toEqual(["context_pressure"]);
   });
@@ -83,6 +94,35 @@ describe("classifyAttentions", () => {
 
   it("stops nagging about a workspace the user already marked done", () => {
     expect(classifyAttentions(session({ state: "finished", contextPercent: 95, retired: true }))).toEqual([]);
+  });
+});
+
+describe("asked_question", () => {
+  const now = Date.parse("2026-09-20T12:00:00.000Z");
+  const since = "2026-09-20T11:59:00.000Z";
+
+  it("ranks between a blocked question and everything quieter", () => {
+    const score = (kind: Parameters<typeof scoreAttention>[0]["kind"]) =>
+      scoreAttention({ kind, since: "2026-09-18T12:00:00.000Z", session: session(), now });
+    expect(score("blocked_question")).toBeGreaterThan(score("asked_question"));
+    expect(score("asked_question")).toBeGreaterThan(score("stalled"));
+    expect(scoreAttention({ kind: "asked_question", since, session: session(), now })).toBeGreaterThan(
+      scoreAttention({ kind: "finished_unreviewed", since, session: session(), now }),
+    );
+  });
+
+  it("pushes for a Conductor chat and for a live terminal agent that can be answered", () => {
+    expect(PUSH_KINDS.has("asked_question")).toBe(true);
+    expect(shouldPush("asked_question", session({ conductorSessionId: "c1" }))).toBe(true);
+    expect(shouldPush("asked_question", session({ origin: "terminal", transcriptPath: "/t.jsonl" }))).toBe(true);
+  });
+
+  it("stays on the radar for a session nothing can answer", () => {
+    expect(
+      shouldPush("asked_question", session({ origin: "terminal", transcriptPath: "/t.jsonl", alive: false })),
+    ).toBe(false);
+    expect(shouldPush("asked_question", session({ origin: "terminal" }))).toBe(false);
+    expect(shouldPush("asked_question", session({ origin: "sdk", transcriptPath: "/t.jsonl" }))).toBe(false);
   });
 });
 

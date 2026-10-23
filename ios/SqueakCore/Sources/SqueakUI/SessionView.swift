@@ -105,7 +105,8 @@ struct SessionView: View {
     private func content(_ session: PhoneSnapshot.Session) -> some View {
         let live = live
         let sends = model.outbox[session.key] ?? []
-        let rows = ChatTimeline.rows(session: session, remembered: model.remembered[session.key], sends: sends, live: live)
+        let rows = ChatTimeline.rows(session: session, remembered: model.remembered[session.key], sends: sends, live: live,
+                                     cachedHistory: model.lastHistory[session.key])
         let cards = ChatQueue.cards(session: session, live: live, sends: sends, hidden: model.hiddenQueued)
         chatScroll(
             ChatRows(
@@ -119,6 +120,8 @@ struct SessionView: View {
             arrivals: "\(rows.last?.id ?? "")|\(stepCount(rows))"
         )
         .onDisappear { ReadingPlace.save(row: nil, draft: draft, for: key) }
+        // A new turn starts folded: what was opened for the last one is not opened for this.
+        .onChange(of: session.turnId) { _, _ in openParts = [] }
         // A draft survives the app being closed from the background, not just going back.
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { ReadingPlace.save(row: nil, draft: draft, for: key) }
@@ -126,6 +129,7 @@ struct SessionView: View {
         // Sending starts a fresh, folded working row.
         .onChange(of: sends.count) { _, _ in
             stepsOpen = false
+            openParts = []
             ReadingPlace.save(row: nil, draft: draft, for: key)
         }
         .background(Theme.bg.ignoresSafeArea())
@@ -180,6 +184,19 @@ struct SessionView: View {
     }
 }
 
+private struct HoldChatScrollKey: EnvironmentKey {
+    static let defaultValue: () -> Void = {}
+}
+
+extension EnvironmentValues {
+    /// Stops the chat following its bottom: called before something above the end grows by a tap (an opened list
+    /// of steps), so the header you tapped stays under your finger and the list opens downward.
+    var holdChatScroll: () -> Void {
+        get { self[HoldChatScrollKey.self] }
+        set { self[HoldChatScrollKey.self] = newValue }
+    }
+}
+
 /// A chat's scroll view, as chat apps do it (and as iOS 18 lets SwiftUI do it): it starts at the bottom and,
 /// while it is at the bottom, stays pinned there as content grows. Scroll up to read and it lets go, shows a
 /// "New" pill if something arrives, and picks up again when you scroll back down or send.
@@ -200,11 +217,12 @@ private struct FollowingScroll<Content: View>: View {
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var following = true
     @State private var nearBottom = true
-    @State private var scrolling = false
+    /// A finger is on the scroll view or it is coasting from one. Not a scroll this view ran itself (`.animating`).
+    @State private var dragging = false
     @State private var newBelow = false
 
     var body: some View {
-        ScrollView { content }
+        ScrollView { content.environment(\.holdChatScroll, { following = false }) }
             .scrollPosition($position)
             .defaultScrollAnchor(.bottom)
             // Growth keeps the bottom while following; reading further up it leaves your text where it is.
@@ -214,12 +232,20 @@ private struct FollowingScroll<Content: View>: View {
                 geometry.contentSize.height - geometry.visibleRect.maxY < 32
             } action: { _, near in
                 nearBottom = near
-                if scrolling { following = near }
+                if dragging { following = near }
                 if near { newBelow = false }
             }
+            // The chat opens before it is whole (the history and the work arrive a second later, above what is on
+            // screen), and the keyboard and the queue change the room: while following, the bottom is re-taken
+            // whenever the content or the room changes, so no late arrival can leave the chat on an old message.
+            .onScrollGeometryChange(for: CGSize.self) { geometry in
+                CGSize(width: geometry.containerSize.height, height: geometry.contentSize.height)
+            } action: { _, _ in
+                if following, !dragging { position.scrollTo(edge: .bottom) }
+            }
             .onScrollPhaseChange { _, phase in
-                scrolling = phase.isScrolling
-                if !phase.isScrolling { following = nearBottom }
+                dragging = phase == .tracking || phase == .interacting || phase == .decelerating
+                if !dragging { following = nearBottom }
             }
             .onChange(of: arrivals) { _, _ in if !following { newBelow = true } }
             .onChange(of: sends) { _, _ in
@@ -295,7 +321,7 @@ private struct SessionHeader: View {
             Text(Presentation.displayTitle(session))
                 .font(.headline).lineLimit(1).truncationMode(.tail)
             HStack(spacing: 5) {
-                StatusDot(color: Theme.stateColor(session.state), pulses: session.needsYou || session.state == "working",
+                StatusDot(color: session.needsYou ? Theme.needsYou : Theme.stateColor(session.state), pulses: session.needsYou || session.state == "working",
                           period: session.state == "working" ? 1.6 : 1.0)
                 ViewThatFits(in: .horizontal) {
                     // By position: ViewThatFits traps on two children with one id.
@@ -470,6 +496,7 @@ struct WorkingRow: View {
     var live = false
     @Binding var open: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.holdChatScroll) private var hold
 
     init(agentName: String, label: String, steps: [TurnStep] = [], total: Int = 0, live: Bool = false, open: Binding<Bool> = .constant(false)) {
         self.agentName = agentName; self.label = label; self.steps = steps; self.total = total; self.live = live; _open = open
@@ -480,6 +507,7 @@ struct WorkingRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
+                hold()
                 withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
             } label: {
                 HStack(spacing: 8) {
@@ -496,7 +524,7 @@ struct WorkingRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(steps.isEmpty)
+            .disabled(steps.isEmpty && !open)
             .accessibilityLabel("\(agentName) is working: \(label)")
             .accessibilityHint(steps.isEmpty ? "" : open ? "Hides the steps" : "Shows the steps of this turn")
             if open, !steps.isEmpty {
@@ -504,9 +532,11 @@ struct WorkingRow: View {
                 StepList(steps: steps, total: max(total, steps.count), live: live, readable: true)
                     .padding(.leading, 4)
                     .transition(.opacity)
+                HideStepsButton { withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open = false } }
             } else if !steps.isEmpty {
                 // The box opens the turn too: it is what you see, so it is what you tap.
                 Button {
+                    hold()
                     withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open = true }
                 } label: {
                     LiveBox(steps: Array(steps.suffix(Self.boxLines)), first: max(total, steps.count) - min(steps.count, Self.boxLines))
@@ -560,10 +590,12 @@ private struct FoldedSteps: View {
     let steps: [TurnStep]
     @Binding var open: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.holdChatScroll) private var hold
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
+                hold()
                 withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
             } label: {
                 HStack(spacing: 6) {
@@ -582,8 +614,28 @@ private struct FoldedSteps: View {
                 StepList(steps: steps, total: steps.count, live: false, readable: true)
                     .padding(.leading, 4)
                     .transition(.opacity)
+                HideStepsButton { withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open = false } }
             }
         }
+    }
+}
+
+/// The way back at the foot of an opened list of steps: the header that opened it can be far above by then.
+private struct HideStepsButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Lucide(.chevronUp, size: 12, color: Theme.muted)
+                Text("Hide steps").font(.subheadline).foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Hide steps")
     }
 }
 

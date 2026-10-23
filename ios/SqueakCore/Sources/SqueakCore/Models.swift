@@ -98,6 +98,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Whether the chat's tab is open in Conductor (false: closed there). Absent from a Mac that
         /// cannot tell, and from anything Conductor does not hold.
         public var open: Bool? = nil
+        /// A finished chat whose last message closes on a question for you ("Want me to open a PR?"): the
+        /// question. Present means the agent waits on an answer, so it counts as needing you, yet the chat
+        /// is idle and can be replied to. Absent from a Mac that predates it (the chat then reads as done).
+        public var asks: String? = nil
         public var id: String { key }
 
         public init(
@@ -115,6 +119,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
 
         /// DESIGN.md §9 vocabulary.
         public var stateWord: String {
+            if asksYou { return "needs an answer" }
             switch state {
             case "awaiting_approval": return "needs approval"
             case "awaiting_input": return "needs an answer"
@@ -125,11 +130,19 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             }
         }
 
-        public var needsYou: Bool { state == "awaiting_approval" || state == "awaiting_input" }
+        /// Holding a question or approval open inside the agent's own process: nothing can be typed into it.
+        public var isBlocked: Bool { state == "awaiting_approval" || state == "awaiting_input" }
+
+        /// Finished on a question put to you: waiting on you, though idle.
+        public var asksYou: Bool { state == "finished" && !(asks ?? "").isEmpty }
+
+        /// Waiting on you: blocked, or finished and asking.
+        public var needsYou: Bool { isBlocked || asksYou }
 
         /// A phone can reply only to a Conductor chat that is not holding a
-        /// question open inside Conductor — the same rule as on the Mac.
-        public var canReply: Bool { conductorSessionId != nil && !needsYou }
+        /// question open inside Conductor — the same rule as on the Mac. A finished chat that asks is idle,
+        /// so it can: that reply is the answer.
+        public var canReply: Bool { conductorSessionId != nil && !isBlocked }
     }
 
     /// One plan window: how much is used (0-100) and when it resets (ISO).

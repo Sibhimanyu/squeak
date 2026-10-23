@@ -65,6 +65,11 @@ export interface FleetRuntime {
    * Set by whoever owns the replier; until then only Conductor chats can.
    */
   setCanReply(canReply: ((session: FleetSession) => boolean) | null): void;
+  /**
+   * Where a finished session's last message is read from, so a turn that ends on a question reads as
+   * waiting on you. Set by whoever owns the replier; until then nothing reads as asking.
+   */
+  setLastMessage(read: ((session: FleetSession) => string | null) | null): void;
   /** Where /state reads Claude's last plan-limit reading from. */
   setClaudeLimits(read: (() => ClaudeLimits | null) | null): void;
   /** Where /state reads the awake session from (fleet/awake-session.ts). */
@@ -129,6 +134,9 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     setCanReply: (next) => {
       canReply = next;
     },
+    setLastMessage: (next) => {
+      monitor.setLastMessageSource(next);
+    },
     setClaudeLimits: (next) => {
       claudeLimits = next;
     },
@@ -162,6 +170,12 @@ function serializeSession(
     branch: session.branch,
     cwd: session.cwd,
     detail: session.detail,
+    /**
+     * The question a finished session's last message closes on ("Want me to open a PR?"), else null.
+     * Present means the agent is waiting on an answer: surfaces count it as needing you. State stays
+     * `finished`, so a reply is allowed (a blocked Conductor chat refuses one).
+     */
+    asks: session.asks ?? null,
     lastActivityAt: session.lastActivityAt,
     contextPercent: session.contextPercent,
     alive: session.alive,

@@ -292,7 +292,7 @@ final class ChatTimelineTests: XCTestCase {
             LiveTurn.HistoryEntry(role: "user", text: "Again", workBefore: 1),
             LiveTurn.HistoryEntry(role: "assistant", text: "Done."),
         ]
-        let rows = ChatTimeline.earlier(history, shown: [], remembered: nil, steps: [])
+        let rows = ChatTimeline.merged(history, tail: [], steerTexts: [], isWorking: false)
         let shape = rows.map { row -> String in
             switch row {
             case .history(_, let fromUser, let text, _): "\(fromUser ? "you" : "agent"): \(text)"
@@ -301,11 +301,70 @@ final class ChatTimelineTests: XCTestCase {
             }
         }
         XCTAssertEqual(shape, ["you: Fix it", "worked 5", "agent: Fixed.", "worked 1", "you: Again", "agent: Done."])
-        // The latest answer is already on screen: its row is not repeated, but the work behind it still shows.
-        let onScreen = ChatTimeline.earlier(history, shown: [.agent(text: "Done.", atISO: "", muted: false)], remembered: nil, steps: [])
-        XCTAssertEqual(onScreen.count, 5)
+        // The latest answer is already on screen: it takes its own place, with the work behind it.
+        let onScreen = ChatTimeline.merged(history, tail: [.agent(text: "Done.", atISO: "", muted: false)], steerTexts: [], isWorking: false)
+        XCTAssertEqual(onScreen.count, 6)
+        guard case .agent? = onScreen.last else { return XCTFail("the answer closes the chat") }
         // An older Mac sends no counts: nothing extra.
-        let plain = ChatTimeline.earlier([LiveTurn.HistoryEntry(role: "user", text: "Hi")], shown: [], remembered: nil, steps: [])
+        let plain = ChatTimeline.merged([LiveTurn.HistoryEntry(role: "user", text: "Hi")], tail: [], steerTexts: [], isWorking: false)
         XCTAssertEqual(plain.count, 1)
+    }
+
+    /* ---------- order ---------- */
+
+    func shape(_ rows: [ChatTimeline.Row]) -> [String] {
+        rows.map { row in
+            switch row {
+            case .history(_, let fromUser, let text, _): "\(fromUser ? "you" : "agent")·h: \(text)"
+            case .sent(let s): "sent: \(s.text)"
+            case .agent(let text, _, let muted): "agent\(muted ? "·muted" : ""): \(text)"
+            case .worked(_, let n): "worked \(n)"
+            case .folded: "folded"
+            case .steer(_, let text, _): "steer: \(text)"
+            case .working: "working"
+            case .empty: "empty"
+            }
+        }
+    }
+
+    func testAQueuedMessageTakenUpAfterTheTurnSitsAfterTheWorkAndAnswerBeforeIt() {
+        // P1 started T1; P2 was queued behind it and the agent took it up at once, so the chat never rested.
+        let p1 = ChatSend(text: "first", date: now.addingTimeInterval(-300), answersTurn: "t0", status: .sent)
+        var p2 = ChatSend(text: "second", date: now.addingTimeInterval(-100), answersTurn: "t1", status: .sent, queuedBehindTurn: true)
+        p2.seenInQueue = true
+        var live = liveTurn(working: true)
+        live.history = [
+            .init(role: "user", text: "first", at: iso(300)),
+            .init(role: "assistant", text: "Answer one", at: iso(120), workBefore: 7),
+            .init(role: "user", text: "second", at: iso(100)),
+        ]
+        let remembered = RememberedMessage(text: "Answer one", atISO: iso(120), turnId: "t1")
+        let rows = ChatTimeline.rows(session: session("working", turn: "t2"), remembered: remembered, sends: [p1, p2], live: live, now: now)
+        XCTAssertEqual(shape(rows).prefix(5), ["sent: first", "worked 7", "agent·muted: Answer one", "sent: second", "working"])
+    }
+
+    func testHistoryKeepsTheSameIdsWhenTheWindowSlides() {
+        let a = LiveTurn.HistoryEntry(role: "user", text: "alpha", at: iso(500))
+        let b = LiveTurn.HistoryEntry(role: "assistant", text: "beta", at: iso(400))
+        let c = LiveTurn.HistoryEntry(role: "user", text: "gamma", at: iso(300))
+        let first = ChatTimeline.merged([a, b, c], tail: [], steerTexts: [], isWorking: false).map(\.id)
+        let slid = ChatTimeline.merged([b, c], tail: [], steerTexts: [], isWorking: false).map(\.id)
+        XCTAssertEqual(Array(first.suffix(2)), slid)
+    }
+
+    func testTheAgentsNotesAfterTheNewestMessageAreNotShownAsMessagesWhileItWorks() {
+        let history: [LiveTurn.HistoryEntry] = [
+            .init(role: "user", text: "do it"),
+            .init(role: "assistant", text: "Looking into it"),
+        ]
+        let rows = ChatTimeline.merged(history, tail: [], steerTexts: [], isWorking: true)
+        XCTAssertEqual(shape(rows), ["you·h: do it"])
+    }
+
+    func testAClippedFeedStillShowsTheWorkBeforeASteer() {
+        let steered = ChatSend(text: "also this", date: now.addingTimeInterval(-10), answersTurn: "t1", status: .steered, mode: .steer)
+        let steps = (0..<5).map { TurnStep(kind: "tool", text: "step \($0)") }
+        let rows = ChatTimeline.turn(steps: steps, steers: [steered], truncated: true, total: 80)
+        XCTAssertEqual(shape(rows).first, "worked 75")
     }
 }

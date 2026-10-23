@@ -184,7 +184,7 @@ enum ChatTimeline {
 
     static func rows(
         session: PhoneSnapshot.Session, remembered: RememberedMessage?, sends allSends: [ChatSend],
-        live: LiveTurn? = nil, now: Date = Date()
+        live: LiveTurn? = nil, cachedHistory: [LiveTurn.HistoryEntry]? = nil, now: Date = Date()
     ) -> [Row] {
         let working = session.state == "working"
         let live = live?.key == session.key ? live : nil
@@ -194,9 +194,18 @@ enum ChatTimeline {
 
         func replied(_ s: ChatSend) -> Bool {
             if now.timeIntervalSince(s.date) > giveUp, !working { return true }
+            // A later message of this phone's own began a turn, so the turn this one started is over: with a
+            // queue, the next turn follows the last at once and the chat may never be seen resting.
+            if !s.isSteer, sends.contains(where: { $0.date > s.date && !$0.isSteer && startedTurn($0) }) { return true }
             guard current != nil, !working else { return false }
             if s.answersTurn == nil { return (Age.date(session.lastActivityAt) ?? .distantPast) > s.date }
             return session.turnId != s.answersTurn
+        }
+        func startedTurn(_ s: ChatSend) -> Bool {
+            switch s.status {
+            case .sent, .read, .queued: true
+            default: false
+            }
         }
         let awaiting = sends.filter {
             switch $0.status {
@@ -204,7 +213,7 @@ enum ChatTimeline {
             default: !replied($0)
             }
         }
-        let isWorking = working || (!awaiting.isEmpty && !session.needsYou && session.state != "error")
+        let isWorking = working || (!awaiting.isEmpty && !session.isBlocked && session.state != "error")
 
         let anchorTurn = isWorking ? remembered?.turnId : session.turnId
         func after(_ s: ChatSend) -> Bool {
@@ -252,38 +261,78 @@ enum ChatTimeline {
             rows.append(.agent(text: current, atISO: session.lastActivityAt, muted: false))
         }
         rows += plain.filter(after).map { .sent(settled($0)) }
-        rows = earlier(live?.history, shown: rows, remembered: remembered, steps: steps) + rows
+        let total = live?.total ?? session.activity?.total ?? 0
+        rows = merged(live?.history ?? cachedHistory, tail: rows, steerTexts: steps.filter { $0.kind == "you" }.map(\.text) + steers.map(\.text), isWorking: isWorking)
         if isWorking {
-            rows += turn(steps: steps, steers: steers.map(settled), truncated: (live?.total ?? session.activity?.total ?? 0) > steps.count, agentName: agentName)
+            rows += turn(steps: steps, steers: steers.map(settled), truncated: total > steps.count, total: total, agentName: agentName)
         }
         return rows.isEmpty ? [.empty(emptyText(canReply: Presentation.replyBlock(session) == nil))] : rows
     }
 
-    /// The chat before what is on screen: the Mac's history less anything already shown (the agent's
-    /// latest message, the previous one kept above a working turn, this phone's own sends, a steer).
-    static func earlier(_ history: [LiveTurn.HistoryEntry]?, shown: [Row], remembered: RememberedMessage?, steps: [TurnStep]) -> [Row] {
-        guard let history, !history.isEmpty else { return [] }
-        var onScreen: [String] = steps.filter { $0.kind == "you" }.map(\.text)
-        if let remembered { onScreen.append(remembered.text) }
-        for row in shown {
-            switch row {
-            case .agent(let text, _, _): onScreen.append(text)
-            case .sent(let s): onScreen.append(s.text)
-            default: break
+    /// The Mac's history and what this phone already shows, in the order things happened. A history entry
+    /// that is one of the rows (this phone's own send, the agent's latest answer) takes that row's place, so
+    /// each message sits between the work before it and the message after it; anything the history does not
+    /// know yet (a send not read yet, the newest answer) follows. The work before an entry shows even where the
+    /// entry is already on screen, so a chat of several sends reads message, work, message.
+    static func merged(_ history: [LiveTurn.HistoryEntry]?, tail: [Row], steerTexts: [String], isWorking: Bool) -> [Row] {
+        guard let history, !history.isEmpty else { return tail }
+        var used = Set<Int>()
+        func take(_ matches: (Row) -> Bool) -> Int? {
+            guard let i = tail.indices.first(where: { !used.contains($0) && matches(tail[$0]) }) else { return nil }
+            used.insert(i)
+            return i
+        }
+        // While a turn runs, the agent's notes after the newest real message are the steps already shown.
+        var cut = history.count
+        if isWorking {
+            let lastUser = history.lastIndex { entry in
+                entry.role == "user" && !steerTexts.contains { same(entry.text, $0) || same($0, entry.text) }
+            }
+            if let lastUser { cut = history[lastUser...].firstIndex { $0.role != "user" } ?? history.count }
+        }
+        var out: [Row] = []
+        var seen: [String: Int] = [:]
+        for (i, entry) in history.enumerated() {
+            let fromUser = entry.role == "user"
+            if i >= cut, !fromUser { continue }
+            if fromUser, steerTexts.contains(where: { same(entry.text, $0) || same($0, entry.text) }) { continue }
+            let work: Row? = (entry.workBefore ?? 0) > 0 ? .worked(id: "w-\(stableID(entry, &seen))", steps: entry.workBefore!) : nil
+            if fromUser {
+                if let work { out.append(work) }
+                if let m = take({ if case .sent(let s) = $0 { same(entry.text, s.text) || same(s.text, entry.text) } else { false } }) {
+                    out.append(tail[m])
+                } else {
+                    out.append(.history(id: stableID(entry, &seen), fromUser: true, text: entry.text, atISO: entry.at))
+                }
+            } else {
+                if let m = take({ if case .agent(let t, _, _) = $0 { same(entry.text, t) || same(t, entry.text) } else { false } }) {
+                    // The finished turn's folded steps sit just before its answer: they stand in for the count.
+                    if m > 0, case .folded = tail[m - 1], !used.contains(m - 1) {
+                        used.insert(m - 1)
+                        out.append(tail[m - 1])
+                    } else if let work { out.append(work) }
+                    out.append(tail[m])
+                } else {
+                    if let work { out.append(work) }
+                    out.append(.history(id: stableID(entry, &seen), fromUser: false, text: entry.text, atISO: entry.at))
+                }
             }
         }
-        func shownAlready(_ text: String) -> Bool { onScreen.contains { same(text, $0) || same($0, text) } }
-        // Each entry may be preceded by the work behind it; the work shows even where the entry itself is
-        // already on screen (the latest answer), so a chat of several sends reads message, work, message.
-        return history.enumerated().flatMap { i, entry -> [Row] in
-            let id = "h-\(entry.at ?? "")-\(i)-\(entry.text.prefix(16))"
-            var rows: [Row] = []
-            if let work = entry.workBefore, work > 0 { rows.append(.worked(id: "w-\(id)", steps: work)) }
-            if !shownAlready(entry.text) {
-                rows.append(.history(id: id, fromUser: entry.role == "user", text: entry.text, atISO: entry.at))
-            }
-            return rows
+        for (i, row) in tail.enumerated() where !used.contains(i) {
+            // A muted earlier answer the history has under other words: the history's copy stands.
+            if case .agent(_, _, true) = row { continue }
+            out.append(row)
         }
+        return out
+    }
+
+    /// A history entry's id: what it is, never where it is in the list, so the window sliding by one does not
+    /// remove and re-insert every row (which also resets what the rows remember, like an open message).
+    private static func stableID(_ entry: LiveTurn.HistoryEntry, _ seen: inout [String: Int]) -> String {
+        let base = "h-\(entry.role)-\(entry.at ?? "")-\(entry.text.prefix(24))"
+        let n = seen[base, default: 0]
+        seen[base] = n + 1
+        return n == 0 ? base : "\(base)#\(n)"
     }
 
     /// The working turn's steps: the live turn's whole steps when the Mac streams them for this turn,
@@ -295,7 +344,7 @@ enum ChatTimeline {
 
     /// The turn in parts: each steer where it landed, the steps before it folded, the live part last.
     /// A steer the Mac has not reported yet goes at the end, the agent still to read it.
-    static func turn(steps: [TurnStep], steers: [ChatSend], truncated: Bool, agentName: String = "the agent") -> [Row] {
+    static func turn(steps: [TurnStep], steers: [ChatSend], truncated: Bool, total: Int = 0, agentName: String = "the agent") -> [Row] {
         var segments: [[TurnStep]] = [[]]
         var yous: [String] = []
         for step in steps {
@@ -306,6 +355,8 @@ enum ChatTimeline {
         // A steer that scrolled out of a clipped feed landed before everything shown.
         if truncated {
             let early = unmatched.filter { s in (s.status == .steered || s.status == .read(agent: agentName)) && !yous.contains { same($0, s.text) } }
+            // The work the feed no longer holds is counted, so a steer never follows the old prompt with nothing between.
+            if !early.isEmpty, total > steps.count { rows.append(.worked(id: "part-hidden", steps: total - steps.count)) }
             rows += early.map { .steer(id: $0.id.uuidString, text: $0.text, line: $0.status.line) }
             unmatched.removeAll { s in early.contains { $0.id == s.id } }
         }
