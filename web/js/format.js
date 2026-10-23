@@ -61,27 +61,46 @@ export function ago(iso, now = Date.now()) {
   return `${Math.round(hours / 24)}d`;
 }
 
-/** A line for the result the Mac wrote: what happened, in one sentence. */
+export const COULDNT_CONFIRM = "Couldn't confirm it arrived. Check the chat before sending again.";
+const NOT_SENT = "Not sent. Nothing started.";
+
+function sentence(why) {
+  const t = typeof why === "string" ? why.trim() : "";
+  if (!t) return "";
+  const s = t[0].toUpperCase() + t.slice(1);
+  return /[.!?]$/.test(s) ? s : `${s}.`;
+}
+
+/**
+ * A line for the result the Mac wrote: what happened, in one sentence, worded
+ * as the iPhone words it. Only "sent" and "answered" are success. `retry` marks
+ * "Not sent": nothing started, so the kept draft may be sent again. Anything
+ * unrecognised reads as "couldn't confirm", never as sent, and never retries.
+ * `withdrawn` is the web client's own status: the command was taken back off
+ * the channel after the Mac stayed silent, so it can never run.
+ */
 export function describeResult(result) {
-  if (!result || result.status === "unknown") {
+  const status = result && typeof result === "object" ? result.status : undefined;
+  if (status === "sent" || status === "answered") {
+    const how =
+      result.delivery === "queued"
+        ? "Queued behind the running turn."
+        : result.delivery === "steered"
+          ? "Steered into the running turn."
+          : "Sent.";
+    return { ok: true, text: typeof result.note === "string" && result.note ? `${how} ${result.note}` : how };
+  }
+  if (status === "refused") {
+    return { ok: false, retry: true, text: `${NOT_SENT} ${sentence(result.reason) || "Your Mac refused that reply."}` };
+  }
+  if (status === "withdrawn") {
     return {
       ok: false,
-      text: "The Mac has not answered. The reply may still arrive; check the chat before sending again.",
+      retry: true,
+      text: `${NOT_SENT} Your Mac didn't pick it up (is Squeak running there?), so the message was taken back.`,
     };
   }
-  if (result.status === "refused") {
-    return {
-      ok: false,
-      text: typeof result.reason === "string" && result.reason ? result.reason : "The Mac refused it.",
-    };
-  }
-  const how =
-    result.delivery === "queued"
-      ? "Queued behind the running turn."
-      : result.delivery === "steered"
-        ? "Steered into the running turn."
-        : "Sent.";
-  return { ok: true, text: typeof result.note === "string" && result.note ? `${how} ${result.note}` : how };
+  return { ok: false, retry: false, text: COULDNT_CONFIRM };
 }
 
 /** The sessions the Mac shows, then its recent ones, each at most once. */

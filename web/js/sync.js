@@ -15,6 +15,10 @@ export const SAFETY_POLL_MS = 60_000;
 export const WAKE_DEBOUNCE_MS = 50;
 export const RESULT_POLL_MS = 1_500;
 export const RESULT_TIMEOUT_MS = 30_000;
+/** After taking a silent command back, how long a Mac that had just read it gets to answer anyway (the iPhone's 12 s). */
+export const LATE_RESULT_MS = 12_000;
+/** When the command could not be taken back there is nothing to wait for but one last look. */
+export const LAST_LOOK_MS = 1_000;
 
 /** Whether a write numbered `incoming` is older than `current` and should be dropped. A gap of over 10 s is a Mac restarted with its clock behind, not a reordering: taken. */
 export function isStale(incoming, current) {
@@ -125,40 +129,54 @@ export class Sync {
 
   /**
    * Signs a plain reply to `session` and sends it, then waits for the Mac's
-   * answer: `{ status: "sent" | "refused", ... }`, or `{ status: "unknown" }`
-   * if it does not answer in 30 s (the reply may still arrive; never resend).
+   * answer (`sent`, `answered`, `refused` or `unconfirmed`, as it wrote it).
+   * If it is silent for 30 s the command is deleted from the channel so the
+   * Mac can never run it later, and a Mac that had just read it gets a short
+   * grace to answer anyway; whatever it says is the truth. With no answer:
+   * `{ status: "withdrawn" }` if the delete succeeded (nothing started), or
+   * `{ status: "unconfirmed" }` if it did not (nothing is known). Never resends.
    */
   async reply(session, text) {
     const { id, document } = await this.channel.replyDocument(session, text, this.signingKey);
-    const answer = new Promise((resolve) => {
-      this.pending.set(id, { resolve, deadline: this.channel.now() + RESULT_TIMEOUT_MS });
-    });
+    const wait = (ms) =>
+      new Promise((resolve) => {
+        this.pending.set(id, { resolve, deadline: this.channel.now() + ms });
+      });
+    const first = wait(RESULT_TIMEOUT_MS);
     try {
       await this.channel.send(id, document);
     } catch (error) {
       this.pending.delete(id);
+      // The write may have landed though its answer did not: take it back before saying nothing was sent.
+      if (!(await this.channel.deleteCommand(id))) {
+        return { status: "unconfirmed" };
+      }
       throw error;
     }
     void this.#pollPending();
-    return answer;
+    const answer = await first;
+    if (answer.status !== "unknown") return answer;
+    const withdrawn = await this.channel.deleteCommand(id);
+    const late = wait(withdrawn ? LATE_RESULT_MS : LAST_LOOK_MS);
+    void this.#pollPending();
+    const last = await late;
+    if (last.status !== "unknown") return last;
+    return { status: withdrawn ? "withdrawn" : "unconfirmed" };
   }
 
   async #pollPending() {
     for (const [id, entry] of [...this.pending]) {
-      if (this.channel.now() > entry.deadline) {
-        this.pending.delete(id);
-        entry.resolve({ status: "unknown" });
-        continue;
-      }
       try {
         const result = await this.channel.result(id);
         if (result && this.pending.delete(id)) {
           entry.resolve(result);
           void this.channel.deleteResult(id);
+          continue;
         }
       } catch {
         // Try again on the next tick.
       }
+      if (this.channel.now() > entry.deadline && this.pending.delete(id)) entry.resolve({ status: "unknown" });
     }
   }
 

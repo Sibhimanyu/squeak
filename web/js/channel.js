@@ -119,6 +119,16 @@ export class Channel {
     return this.db.set(this.path("commands", id), document);
   }
 
+  /** Takes a command back so the Mac can never run it. True only if the channel confirmed the delete. */
+  async deleteCommand(id) {
+    try {
+      await this.db.delete(this.path("commands", id));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** The Mac's answer to a command, or null while it has not answered. */
   result(id) {
     return this.#read(this.path("results", id));

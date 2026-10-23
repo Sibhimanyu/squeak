@@ -34,18 +34,43 @@ describe("words", () => {
     expect(ago("nonsense", now)).toBe("");
   });
 
-  it("describes what the Mac answered, and never claims a reply it cannot confirm", () => {
+  it("describes what the Mac answered, worded as the iPhone words it", () => {
     expect(describeResult({ status: "sent", delivery: "queued" })).toEqual({
       ok: true,
       text: "Queued behind the running turn.",
     });
     expect(describeResult({ status: "sent" })).toEqual({ ok: true, text: "Sent." });
-    expect(describeResult({ status: "refused", reason: "That chat has moved on." })).toEqual({
+    expect(describeResult({ status: "answered" })).toEqual({ ok: true, text: "Sent." });
+    expect(describeResult({ status: "refused", reason: "that chat has moved on" })).toEqual({
       ok: false,
-      text: "That chat has moved on.",
+      retry: true,
+      text: "Not sent. Nothing started. That chat has moved on.",
     });
-    expect(describeResult({ status: "unknown" }).ok).toBe(false);
-    expect(describeResult(null).text).toMatch(/may still arrive/);
+    expect(describeResult({ status: "refused" }).text).toBe("Not sent. Nothing started. Your Mac refused that reply.");
+    expect(describeResult({ status: "withdrawn" })).toMatchObject({ ok: false, retry: true });
+    expect(describeResult({ status: "withdrawn" }).text).toMatch(
+      /^Not sent\. Nothing started\. Your Mac didn't pick it up/,
+    );
+  });
+
+  it("never reads unconfirmed, unknown or garbage as sent, and never offers to send again", () => {
+    const couldnt = {
+      ok: false,
+      retry: false,
+      text: "Couldn't confirm it arrived. Check the chat before sending again.",
+    };
+    for (const result of [
+      { status: "unconfirmed" },
+      { status: "unknown" },
+      { status: "whatever" },
+      { status: 7 },
+      {},
+      "sent",
+      null,
+      undefined,
+    ]) {
+      expect(describeResult(result)).toEqual(couldnt);
+    }
   });
 
   it("lists active sessions, then recent ones not already shown", () => {

@@ -150,10 +150,16 @@ async function send(session, text) {
   try {
     const result = await ui.sync.reply(session, body);
     const line = describeResult(result);
-    ui.delivery.set(session.key, line);
+    // Only "Not sent" offers Send again; the kept draft (or the tapped letter) is what it re-sends.
+    ui.delivery.set(session.key, line.retry ? { ...line, again: body } : line);
     if (line.ok) ui.drafts.delete(session.key);
   } catch {
-    ui.delivery.set(session.key, { ok: false, text: "The reply did not reach the server. Nothing was sent." });
+    ui.delivery.set(session.key, {
+      ok: false,
+      retry: true,
+      again: body,
+      text: "Not sent. Nothing started. Couldn't reach your Mac's server.",
+    });
   } finally {
     ui.sending.delete(session.key);
     render(true);
@@ -505,6 +511,22 @@ function detailFor(session) {
       area,
       h("div", { class: "actions" }, sendButton),
       line ? h("p", { class: line.ok ? "delivery" : "delivery bad", role: "status" }, line.text) : null,
+      line?.again
+        ? h(
+            "div",
+            { class: "actions" },
+            h(
+              "button",
+              {
+                class: "btn quiet",
+                type: "button",
+                disabled: ui.sending.has(session.key),
+                onclick: () => void send(session, line.again),
+              },
+              "Send again",
+            ),
+          )
+        : null,
     ),
   );
   return nodes;
