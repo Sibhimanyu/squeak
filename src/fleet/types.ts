@@ -123,6 +123,15 @@ export interface ObservedSession {
   waitingOn?: "model" | "api" | "tool" | null;
   /** When the transcript's last entry was written, which `waitingOn` has waited since. */
   waitingSince?: string | null;
+  /**
+   * The model the chat runs, as a display name ("Opus 5.5 · 1M"). Only Conductor's own row says; a
+   * transcript's model is not read, so it is absent for terminal agents.
+   */
+  model?: string | null;
+  /** The thinking level in words ("Medium", "Extra high"), when Conductor stores one for the chat's model. */
+  effort?: string | null;
+  /** Fast mode is on for the chat. Absent when off or unknown. */
+  fast?: boolean;
 }
 
 /** A session after the monitor has merged observers, hooks, and liveness. */

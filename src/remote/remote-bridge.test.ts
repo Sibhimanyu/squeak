@@ -1119,6 +1119,17 @@ describe("RemoteBridge starting a chat", () => {
     expect(starts[0]).not.toHaveProperty("thinking");
   });
 
+  it("names the model and thinking level a chat runs, only when the Mac knows them", () => {
+    const f = fixture();
+    f.emit([
+      session({ model: "Opus 5.5 · 1M", effort: "Extra high", fast: true }),
+      session({ key: "k:2", conductorSessionId: "s2" }),
+    ]);
+    const view = f.bridge.phoneView();
+    expect(view.sessions[0]).toMatchObject({ model: "Opus 5.5 · 1M", effort: "Extra high", fast: true });
+    for (const field of ["model", "effort", "fast"]) expect(view.sessions[1]).not.toHaveProperty(field);
+  });
+
   it("counts a finished chat that asks you something as needing you, and sends the question only then", () => {
     const f = fixture();
     f.emit([session({ asks: "Want me to open a PR?" }), session({ key: "k:2", conductorSessionId: "s2" })]);

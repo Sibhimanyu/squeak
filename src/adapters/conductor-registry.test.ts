@@ -785,6 +785,29 @@ describe("ConductorRegistryAdapter", () => {
     expect(sessions[1]?.updatedAt).toBe("2026-09-22T04:10:00.000Z");
   });
 
+  it("reads each chat's thinking level and fast mode, whichever columns this Conductor has", () => {
+    const { adapter, db } = createRegistryFixture();
+    db.prepare(
+      `INSERT INTO repos (id, name, root_path, default_branch, updated_at, remote, hidden) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("repo-1", "repo", "/repos/repo", "main", "2026-09-22T04:00:00.000Z", "origin", 0);
+    db.prepare(
+      `INSERT INTO workspaces (id, repository_id, directory_name, branch, updated_at, state, derived_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    ).run("ws", "repo-1", "ws", "ws", "2026-09-22T04:00:00.000Z", "ready", "in-progress");
+    db.exec(
+      "ALTER TABLE sessions ADD COLUMN claude_effort_level TEXT; ALTER TABLE sessions ADD COLUMN fast_mode INTEGER DEFAULT 0",
+    );
+    const insert = db.prepare(
+      `INSERT INTO sessions (id, workspace_id, status, agent_type, model, updated_at, claude_effort_level, codex_thinking_level, fast_mode)
+       VALUES (?, 'ws', 'idle', ?, ?, '2026-09-22T04:10:00.000Z', ?, ?, ?);`,
+    );
+    insert.run("c", "claude", "opus-5-5-1m", "high", "medium", 1);
+    insert.run("x", "codex", "gpt-5.5", "medium", "xhigh", 0);
+    const byId = new Map(adapter.listFleetSessions(10).map((session) => [session.id, session]));
+    expect(byId.get("c")).toMatchObject({ effortLevel: "high", fastMode: true });
+    expect(byId.get("x")).toMatchObject({ effortLevel: "xhigh", fastMode: false });
+  });
+
   it("reports how each chat's latest turn ended, from the row the agent writes at the end of it", () => {
     const { adapter, db } = createRegistryFixture();
     db.prepare(

@@ -50,6 +50,10 @@ export interface FleetRegistrySessionRef extends ConductorSessionRef {
    * `status` stays `working` while its question modal is open.
    */
   pendingQuestion?: string | null;
+  /** The chat's thinking level as Conductor stores it: `claude_effort_level` for Claude, `codex_thinking_level` for Codex. */
+  effortLevel?: string | null;
+  /** Fast mode is on for the chat (`sessions.fast_mode`). */
+  fastMode?: boolean;
 }
 
 interface DbSessionRow {
@@ -533,6 +537,11 @@ export class ConductorRegistryAdapter {
    * round trips against Conductor's database.
    */
   listFleetSessions(limit: number): FleetRegistrySessionRef[] {
+    // Columns a Conductor release may not have (or a test schema omits) read as null rather than fail the list.
+    const columns = this.tableColumns("sessions");
+    const claudeEffort = columns.has("claude_effort_level") ? "s.claude_effort_level" : "NULL";
+    const codexEffort = columns.has("codex_thinking_level") ? "s.codex_thinking_level" : "NULL";
+    const fast = columns.has("fast_mode") ? "IFNULL(s.fast_mode, 0)" : "0";
     const rows = this.db
       .prepare(
         `
@@ -549,6 +558,8 @@ export class ConductorRegistryAdapter {
             s.last_user_message_at as lastUserMessageAt,
             s.context_used_percent as contextUsedPercent,
             s.is_compacting as isCompacting,
+            CASE s.agent_type WHEN 'codex' THEN ${codexEffort} ELSE ${claudeEffort} END as effortLevel,
+            ${fast} as fastMode,
             w.directory_name as directoryName,
             w.branch as branch,
             w.derived_status as derivedStatus,
@@ -590,11 +601,18 @@ export class ConductorRegistryAdapter {
           LIMIT ?
         `,
       )
-      .all(limit) as Array<FleetRegistrySessionRef & { lastTurnEnd: string | null; hidden: number }>;
-    return rows.map(({ lastTurnEnd, hidden, ...row }) => {
+      .all(limit) as Array<
+      Omit<FleetRegistrySessionRef, "fastMode"> & {
+        lastTurnEnd: string | null;
+        hidden: number;
+        fastMode: number | null;
+      }
+    >;
+    return rows.map(({ lastTurnEnd, hidden, fastMode, ...row }) => {
       const [endedAt, outcome] = lastTurnEnd ? lastTurnEnd.split("|") : [null, null];
       return {
         ...row,
+        fastMode: Number(fastMode) === 1,
         pendingQuestion:
           hidden === 0 && (row.status === "working" || row.status === "waiting" || row.status === "needs_user_input")
             ? this.pendingQuestionFor(row.id)

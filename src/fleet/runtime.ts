@@ -178,6 +178,10 @@ function serializeSession(
     asks: session.asks ?? null,
     lastActivityAt: session.lastActivityAt,
     contextPercent: session.contextPercent,
+    // What the chat runs, named here so no surface formats it; absent when Conductor does not say.
+    ...(session.model ? { model: session.model } : {}),
+    ...(session.effort ? { effort: session.effort } : {}),
+    ...(session.fast ? { fast: true } : {}),
     alive: session.alive,
     conductorSessionId: session.conductorSessionId,
     conductorWorkspaceId: session.conductorWorkspaceId ?? null,

@@ -91,6 +91,10 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     contextPercent: conductor?.contextPercent ?? base.contextPercent,
     retired: conductor?.retired ?? base.retired,
     ...optionalFlags(conductor, base),
+    // Only Conductor's row names the model and its level.
+    ...(conductor?.model ? { model: conductor.model } : {}),
+    ...(conductor?.effort ? { effort: conductor.effort } : {}),
+    ...(conductor?.fast ? { fast: true } : {}),
     baseRef: conductor?.baseRef ?? base.baseRef,
     // Only the transcript observer can ever have this; Conductor does not.
     costUsd: base.costUsd,

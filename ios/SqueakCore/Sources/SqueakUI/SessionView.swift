@@ -162,6 +162,15 @@ struct SessionView: View {
                 }
                 // A film's call is answered on its card; a chat box under it would only say it can't send.
                 if session.workflow == nil {
+                    if let line = session.setupLine {
+                        // The chat's model and thinking level, as the Mac names them: muted, no state colour.
+                        Text(line)
+                            .font(.caption).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20).padding(.top, 6)
+                            .accessibilityLabel(session.setupAccessibilityLabel ?? line)
+                            .accessibilityIdentifier("chat-setup")
+                    }
                     Composer(
                         session: session, agentName: Presentation.agentName(session.agent),
                         working: session.state == "working" && Presentation.replyBlock(session) == nil,

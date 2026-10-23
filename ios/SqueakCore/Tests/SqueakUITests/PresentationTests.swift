@@ -10,6 +10,21 @@ final class PresentationTests: XCTestCase {
               title: title)
     }
 
+    func testTheChatSetupReadsOnOneMutedLineAndAloud() {
+        var chat = session(state: "finished")
+        XCTAssertNil(chat.setupLine)
+        XCTAssertNil(chat.setupAccessibilityLabel)
+        chat.model = "Opus 5.5 · 1M"; chat.effort = "Medium"
+        XCTAssertEqual(chat.setupLine, "Opus 5.5 · 1M · Medium")
+        XCTAssertEqual(chat.setupAccessibilityLabel, "Model Opus 5.5 1M, effort medium")
+        chat.fast = true
+        XCTAssertEqual(chat.setupLine, "Opus 5.5 · 1M · Medium · Fast")
+        // A Mac that names a model but no level (Haiku has none) shows just the model.
+        chat.effort = nil; chat.fast = nil
+        XCTAssertEqual(chat.setupLine, "Opus 5.5 · 1M")
+        XCTAssertEqual(chat.setupAccessibilityLabel, "Model Opus 5.5 1M")
+    }
+
     func testAnUnphrasedStepReadsAsItsOwnLabel() {
         XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Use heresay claim_brief"])).text, "use heresay claim_brief")
         XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Check the simulator logs"])).text, "check the simulator logs")

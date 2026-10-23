@@ -1,4 +1,5 @@
 import type { ConductorRegistryAdapter, FleetRegistrySessionRef } from "../../adapters/conductor-registry.js";
+import { levelLabel, modelLabel } from "../chat-models.js";
 import type { FleetState, ObservedSession } from "../types.js";
 
 export interface ConductorObserverOptions {
@@ -76,6 +77,7 @@ export class ConductorObserver {
       // Conductor does not track spend locally.
       baseRef: row.defaultBranch ? `origin/${row.defaultBranch}` : null,
       costUsd: null,
+      ...modelAndEffort(row),
     };
   }
 
@@ -193,4 +195,18 @@ function isRetiredWorkspace(row: FleetRegistrySessionRef, now: number): boolean 
   }
   const lastUser = row.lastUserMessageAt ? Date.parse(row.lastUserMessageAt) : Number.NaN;
   return !(now - lastUser < DONE_WORKSPACE_GRACE_MS);
+}
+
+/** What the chat runs, for a Claude or Codex chat only: a picker alias for any other agent would read as noise. */
+function modelAndEffort(row: FleetRegistrySessionRef): Pick<ObservedSession, "model" | "effort" | "fast"> {
+  if (row.agentType !== "claude" && row.agentType !== "codex") {
+    return {};
+  }
+  const model = row.model?.trim() ? modelLabel(row.model.trim()) : null;
+  const effort = row.effortLevel?.trim() ? levelLabel(row.effortLevel) : null;
+  return {
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+    ...(row.fastMode ? { fast: true } : {}),
+  };
 }

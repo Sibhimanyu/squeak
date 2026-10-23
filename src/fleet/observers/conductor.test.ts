@@ -41,6 +41,18 @@ function observe(rows: FleetRegistrySessionRef[]) {
 }
 
 describe("ConductorObserver", () => {
+  it("names a Claude or Codex chat's model and thinking level, and skips other agents", () => {
+    const [claude, codex, acp] = observe([
+      row({ id: "c", agentType: "claude", model: "opus-5-5-1m", effortLevel: "xhigh", fastMode: true }),
+      row({ id: "x", agentType: "codex", model: "gpt-5.6-terra", effortLevel: "medium", fastMode: false }),
+      row({ id: "a", agentType: "acp", model: "opencode:opencode/muse", effortLevel: "medium" }),
+    ]);
+    expect(claude).toMatchObject({ model: "Opus 5.5 · 1M", effort: "Extra high", fast: true });
+    expect(codex).toMatchObject({ model: "GPT 5.6 Terra", effort: "Medium" });
+    expect(codex).not.toHaveProperty("fast");
+    for (const field of ["model", "effort", "fast"]) expect(acp).not.toHaveProperty(field);
+  });
+
   it("reports a recently idle session that ran as finished", () => {
     const [session] = observe([row()]);
     expect(session?.state).toBe("finished");

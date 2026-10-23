@@ -102,7 +102,27 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// question. Present means the agent waits on an answer, so it counts as needing you, yet the chat
         /// is idle and can be replied to. Absent from a Mac that predates it (the chat then reads as done).
         public var asks: String? = nil
+        /// What the chat runs, named by the Mac: "Opus 5.5 · 1M", its thinking level ("Medium", "Extra high")
+        /// and whether fast mode is on. Absent from an older Mac and for a terminal agent.
+        public var model: String? = nil
+        public var effort: String? = nil
+        public var fast: Bool? = nil
         public var id: String { key }
+
+        /// "Opus 5.5 · 1M · Medium · Fast", the chat's setup on one muted line; nil when the Mac sent none.
+        public var setupLine: String? {
+            let parts = [model, effort, fast == true ? "Fast" : nil].compactMap { $0 }.filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        }
+
+        /// The same for VoiceOver: "Model Opus 5.5 1M, effort medium, fast mode".
+        public var setupAccessibilityLabel: String? {
+            var parts: [String] = []
+            if let model, !model.isEmpty { parts.append("Model \(model.replacingOccurrences(of: " · ", with: " "))") }
+            if let effort, !effort.isEmpty { parts.append("effort \(effort.lowercased())") }
+            if fast == true { parts.append("fast mode") }
+            return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        }
 
         public init(
             key: String, conductorSessionId: String?, label: String, agent: String, state: String,

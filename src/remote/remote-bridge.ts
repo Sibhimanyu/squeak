@@ -2336,6 +2336,11 @@ export class RemoteBridge {
       detail: session.detail,
       git: git && git !== "clean" ? git : null,
       contextPercent: session.contextPercent,
+      // What the chat runs ("Opus 5.5 · 1M", "Medium", fast on), named on the Mac; absent for a terminal agent
+      // or when Conductor stores none. Older phones ignore them.
+      ...(session.model ? { model: session.model } : {}),
+      ...(session.effort ? { effort: session.effort } : {}),
+      ...(session.fast ? { fast: true } : {}),
       turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
       message: text,
       choices: message?.choices ?? null,
