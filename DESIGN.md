@@ -557,6 +557,16 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   Every chat whose tab is open is always on the list, however quiet. A chat
   closed in Conductor can be read but not answered from the phone: a reply
   would run in the background where Conductor shows nothing.
+- **New chat is one sheet of cards** (2026-10-23): **Where** (the workspace, with its project's icon),
+  **Agent** (Claude or Codex, as their own icons), **Model** (Conductor's own model picker, as the Mac
+  lists it: its favourites first, "More models" for the rest), **Thinking** (the levels the chosen
+  model takes, from Low up to Max; a model with none, like Haiku 4.5, shows no row) and **First message**.
+  A line over Start chat says what will start ("Opus 5.5 · 1M · medium thinking · storefront"), so
+  the choice is on screen before it is made. The Mac checks the model and level against Conductor's
+  list again, and starts the chat through Conductor's own `sessions/register` so the chat is created
+  with them. An older Mac sends no list, and the sheet then offers no model or thinking choice.
+- **A chat screen hides the tab bar.** It opens at the newest message and follows what arrives only while
+  you are at the bottom; read further up and it lets go, with a "New" pill to come back.
 - **A chat screen hides the tab bar.** Its composer sits at the bottom, and the
   bar floats over it. And it never goes blank while the Mac moves a chat
   between the active and recent lists (the two reach the phone separately): the

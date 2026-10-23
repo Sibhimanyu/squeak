@@ -100,3 +100,49 @@ describe("PhoneClient queue", () => {
     ]);
   });
 });
+
+describe("PhoneClient startChat", () => {
+  const WS = "/workspaces/ws";
+  const start = { workspaceLocalId: "ws", sessionId: "s1", agent: "claude" as const, text: "Hello" };
+
+  it("with no model, lets the first send create the chat with the workspace's usual settings", async () => {
+    const { client, asked } = scripted([
+      { status: 200, body: queueState(3) },
+      { status: 200, body: queueState(3) },
+    ]);
+    const res = await client.startChat(start);
+    expect(res.status).toBe(200);
+    expect(asked.map((a) => `${a.method} ${a.target}`)).toEqual([`GET ${BASE}`, `POST ${BASE}/send`]);
+    expect((asked[1]!.body as { config: unknown }).config).toEqual({ harness: "claude" });
+  });
+
+  it("with a model and level, registers the chat with both first, then sends into it", async () => {
+    const { client, asked } = scripted([
+      { status: 200, body: { updatedAt: "x", session: {} } },
+      { status: 200, body: queueState(5) },
+      { status: 200, body: queueState(5) },
+    ]);
+    const res = await client.startChat({ ...start, model: "opus-5-5-1m", thinkingLevel: "high" });
+    expect(res.status).toBe(200);
+    expect(asked.map((a) => `${a.method} ${a.target}`)).toEqual([
+      `POST ${WS}/sessions/register`,
+      `GET ${BASE}`,
+      `POST ${BASE}/send`,
+    ]);
+    expect(asked[0]!.body).toEqual({
+      sessionId: "s1",
+      agentType: "claude",
+      model: "opus-5-5-1m",
+      thinkingLevel: "high",
+      fastMode: false,
+    });
+    expect((asked[2]!.body as { config: unknown }).config).toEqual({ harness: "claude", model: "opus-5-5-1m" });
+  });
+
+  it("stops when Conductor refuses to register the chat, and sends nothing", async () => {
+    const { client, asked } = scripted([{ status: 400, body: { error: "bad model" } }]);
+    const res = await client.startChat({ ...start, model: "nope" });
+    expect(res.status).toBe(400);
+    expect(asked).toHaveLength(1);
+  });
+});

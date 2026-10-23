@@ -333,6 +333,9 @@ export class PhoneClient {
     sessionId: string;
     agent: "claude" | "codex";
     text: string;
+    /** A model alias and thinking level to start the chat with; absent: the workspace's usual. */
+    model?: string;
+    thinkingLevel?: string;
   }): Promise<TunnelResponse> {
     const ws = `/workspaces/${encodeURIComponent(args.workspaceLocalId)}`;
     const base = `${ws}/sessions/${encodeURIComponent(args.sessionId)}/pending-messages`;
@@ -345,7 +348,7 @@ export class PhoneClient {
         body: {
           messageId,
           deliveryPayload: { message: args.text },
-          config: { harness: args.agent },
+          config: { harness: args.agent, ...(args.model ? { model: args.model } : {}) },
           mode: "queue",
           expectedGeneration: generation,
         },
@@ -368,9 +371,27 @@ export class PhoneClient {
       }
     };
 
+    // A chosen model or level is set by creating the chat first (`sessions/register` takes both), then
+    // sending into it; a plain start lets the first send create it with the workspace's usual settings.
+    let registered = false;
+    if (args.model || args.thinkingLevel) {
+      const reg = await this.request({
+        method: "POST",
+        target: `${ws}/sessions/register`,
+        headers: { "content-type": "application/json" },
+        body: {
+          sessionId: args.sessionId,
+          agentType: args.agent,
+          ...(args.model ? { model: args.model } : {}),
+          ...(args.thinkingLevel ? { thinkingLevel: args.thinkingLevel } : {}),
+          fastMode: false,
+        },
+      });
+      if (reg.status < 200 || reg.status >= 300) return reg;
+      registered = true;
+    }
     const queue = await this.request({ method: "GET", target: base });
     let generation = queue.status >= 200 && queue.status < 300 ? (generationOf(queue) ?? 0) : 0;
-    let registered = false;
     let res = await post(generation);
     for (let attempt = 0; attempt < 3 && res.status >= 400; attempt++) {
       if (notFound(res) && !registered) {

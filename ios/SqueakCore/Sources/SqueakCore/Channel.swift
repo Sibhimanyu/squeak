@@ -451,6 +451,8 @@ public struct Channel: Sendable {
         workspaceId: String,
         agent: NewChatAgent,
         text: String,
+        model: String? = nil,
+        thinking: String? = nil,
         signer: CommandSigner,
         now: Date = Date()
     ) throws -> (id: String, document: ChannelDocument) {
@@ -462,6 +464,8 @@ public struct Channel: Sendable {
             workspaceId: workspaceId,
             agent: agent,
             text: text,
+            model: model,
+            thinking: thinking,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

@@ -31,6 +31,7 @@ import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
 import { listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
+import { listChatModels } from "../fleet/chat-models.js";
 import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "../fleet/project-icons.js";
 import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
 import { SqueakHandsTerminal, TerminalReplier } from "../fleet/terminal-reply.js";
@@ -280,6 +281,7 @@ export class SqueakApp {
           renamer: { rename: (sessionId, title) => this.runtime.registry.renameSession(sessionId, title) },
           newChat: {
             workspaces: () => listNewChatWorkspaces(config.conductorDbPath, 20),
+            models: () => listChatModels(config.conductorDbPath),
             start: (args) =>
               newChatControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }).startChat(args),
           },

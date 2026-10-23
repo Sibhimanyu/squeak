@@ -186,6 +186,7 @@ enum DemoData {
         #if DEBUG
         demo.projectIcons = DemoIcons.byProject
         #endif
+        demo.chatModels = chatModels
         return demo
     }
 
@@ -306,6 +307,22 @@ enum DemoData {
 
     /// The working chat's turn as the Mac streams it: whole steps, the steer where it landed, and
     /// Conductor's queue (one from this phone, one typed on the Mac).
+    /// Conductor's model picker as the Mac lists it: favourites first, then the rest.
+    private static var chatModels: [PhoneSnapshot.ChatModel] {
+        let claude = ["low", "medium", "high", "xhigh", "max"]
+        let codex = ["low", "medium", "high", "xhigh"]
+        return [
+            .init(id: "opus-5-5-1m", agent: "claude", label: "Opus 5.5 · 1M", levels: claude, defaultLevel: "medium", favorite: true),
+            .init(id: "sonnet-5-5-1m", agent: "claude", label: "Sonnet 5.5 · 1M", levels: claude, defaultLevel: "medium", favorite: true),
+            .init(id: "gpt-5.6-terra", agent: "codex", label: "GPT 5.6 Terra", levels: codex, defaultLevel: "medium", favorite: true),
+            .init(id: "gpt-6.1-sol", agent: "codex", label: "GPT 6.1 Sol", levels: codex, defaultLevel: "high", favorite: true),
+            .init(id: "opus-5-1m", agent: "claude", label: "Opus 5 · 1M", levels: claude, defaultLevel: "medium"),
+            .init(id: "fable-5-1", agent: "claude", label: "Fable 5.1", levels: claude, defaultLevel: "medium"),
+            .init(id: "haiku-4-5", agent: "claude", label: "Haiku 4.5", levels: []),
+            .init(id: "gpt-5.5", agent: "codex", label: "GPT 5.5", levels: codex, defaultLevel: "high"),
+        ]
+    }
+
     /// `-squeak-demo-long`: a long chat above the turn, to see the chat open at its newest message.
     private static var longHistory: [LiveTurn.HistoryEntry] {
         guard ProcessInfo.processInfo.arguments.contains("-squeak-demo-long") else { return [] }

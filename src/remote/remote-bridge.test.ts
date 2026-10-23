@@ -910,10 +910,29 @@ function workspace(id: string, overrides: Partial<NewChatWorkspace> = {}): NewCh
   };
 }
 
+const CHAT_MODELS = [
+  {
+    agent: "claude" as const,
+    id: "opus-5-5-1m",
+    label: "Opus 5.5 · 1M",
+    levels: ["low", "medium", "high"],
+    favorite: true,
+  },
+  {
+    agent: "codex" as const,
+    id: "gpt-6.1-sol",
+    label: "GPT 6.1 Sol",
+    levels: ["low", "medium", "high"],
+    favorite: false,
+  },
+  { agent: "claude" as const, id: "haiku-4-5", label: "Haiku 4.5", levels: [], favorite: false },
+];
+
 function chatStarter(workspaces: NewChatWorkspace[] = [workspace("w1")], outcome?: StartChatOutcome) {
-  const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
+  const starts: Array<{ workspaceId: string; agent: string; text: string; model?: string; thinking?: string }> = [];
   const starter: RemoteChatStarter = {
     workspaces: vi.fn(() => workspaces),
+    models: vi.fn(() => CHAT_MODELS),
     start: vi.fn(async (args): Promise<StartChatOutcome> => {
       starts.push(args);
       return outcome ?? ({ ok: true, sessionId: "new-session" } as const);
@@ -928,6 +947,52 @@ describe("RemoteBridge starting a chat", () => {
     await f.bridge.tick();
     return f.result("n1");
   }
+
+  it("starts a chat with the model and thinking level the phone chose, when this Mac offers them", async () => {
+    const { starter, starts } = chatStarter();
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    expect(await run(f, f.startCommand({ model: "opus-5-5-1m", thinking: "high" }))).toMatchObject({ status: "sent" });
+    expect(starts).toEqual([
+      { workspaceId: "w1", agent: "claude", text: "Add a timer", model: "opus-5-5-1m", thinking: "high" },
+    ]);
+  });
+
+  it("refuses a model this Mac does not offer for that agent, a level the model lacks, and a level with no model", async () => {
+    const { starter, starts } = chatStarter();
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    const attempt = async (overrides: Partial<StartCommand>, id: string) => {
+      await f.store.set(`${f.channel}/commands/${id}`, f.startCommand(overrides));
+      await f.bridge.tick();
+      f.advance(START_MIN_GAP_MS);
+      return f.result(id);
+    };
+    expect(await attempt({ model: "gpt-6.1-sol" }, "a")).toMatchObject({ status: "refused" });
+    expect(await attempt({ model: "nope" }, "b")).toMatchObject({ status: "refused" });
+    expect(await attempt({ model: "opus-5-5-1m", thinking: "max" }, "c")).toMatchObject({ status: "refused" });
+    expect(await attempt({ model: "haiku-4-5", thinking: "low" }, "d")).toMatchObject({ status: "refused" });
+    expect(await attempt({ thinking: "low" }, "e")).toMatchObject({ status: "refused" });
+    expect(starts).toEqual([]);
+  });
+
+  it("starts a chat on Haiku, which takes no thinking level, with the model alone", async () => {
+    const { starter, starts } = chatStarter();
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    expect(await run(f, f.startCommand({ model: "haiku-4-5" }))).toMatchObject({ status: "sent" });
+    expect(starts[0]).toMatchObject({ model: "haiku-4-5" });
+    expect(starts[0]).not.toHaveProperty("thinking");
+  });
+
+  it("publishes the models in the recent document, and none when this Mac cannot list them", () => {
+    const f = fixture({ newChat: chatStarter().starter });
+    expect(f.bridge.phoneView().chatModels).toEqual(CHAT_MODELS);
+    expect(f.bridge.phoneViewParts().recent.chatModels).toEqual(CHAT_MODELS);
+    expect((f.bridge.phoneViewParts().snapshot as Record<string, unknown>).chatModels).toBeUndefined();
+    const none = fixture({ newChat: { workspaces: () => [], start: vi.fn() } });
+    expect(none.bridge.phoneView()).not.toHaveProperty("chatModels");
+  });
 
   it("answers a pending question through the Mac's answerer, exactly as the phone signed it", async () => {
     const calls: Array<{ id: string; input: unknown }> = [];

@@ -175,6 +175,23 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var agent: NewChatAgent { NewChatAgent(rawValue: defaultAgent) ?? .claude }
     }
 
+    /// A model Conductor offers for a new chat (its picker's list, favourites first), with the thinking
+    /// levels it takes. `id` is Conductor's own alias, which is what the chat stores.
+    public struct ChatModel: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        /// "claude" or "codex".
+        public let agent: String
+        public let label: String
+        /// Lowest first; empty for a model with no thinking level.
+        public let levels: [String]
+        /// The level Conductor's picker starts it at.
+        public let defaultLevel: String?
+        public let favorite: Bool
+        public init(id: String, agent: String, label: String, levels: [String], defaultLevel: String? = nil, favorite: Bool = false) {
+            self.id = id; self.agent = agent; self.label = label; self.levels = levels; self.defaultLevel = defaultLevel; self.favorite = favorite
+        }
+    }
+
     public let v: Int
     public let mac: String
     public let generatedAt: String
@@ -192,6 +209,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// Conductor's icon for each repository (a small PNG, base64), by repository name. Arrives in the recent
     /// document. Optional: older Macs omit it, and a repository without an icon has no entry.
     public var projectIcons: [String: String]? = nil
+    /// The models a new chat can start with. Arrives in the recent document. Optional: older Macs omit it,
+    /// and the phone then offers no model or thinking choice.
+    public var chatModels: [ChatModel]? = nil
     /// Whether the Mac's awake session runs. Optional: a Mac without sessions omits it, and the phone hides them.
     public let keepAwake: Bool?
     /// When a timed awake session ends (ISO); absent for one that runs until ended, and from older Macs.
@@ -292,6 +312,8 @@ public struct PhoneRecent: Codable, Equatable, Sendable {
     public let workspaces: [PhoneSnapshot.Workspace]?
     /// Conductor's repository icons, by repository name; absent when there are none.
     public let projectIcons: [String: String]?
+    /// The models a new chat can start with; absent when the Mac cannot choose one.
+    public let chatModels: [PhoneSnapshot.ChatModel]?
 }
 
 extension PhoneSnapshot {
@@ -303,6 +325,7 @@ extension PhoneSnapshot {
         view.recentMore = recent?.recentMore
         view.workspaces = recent?.workspaces
         view.projectIcons = recent?.projectIcons
+        view.chatModels = recent?.chatModels
         return view
     }
 
@@ -726,6 +749,10 @@ public struct StartCommand: Codable, Equatable, Sendable {
     public let workspaceId: String
     public let agent: NewChatAgent
     public let text: String
+    /// A model alias from the Mac's `chatModels`, and a thinking level it takes. Absent (and so absent from
+    /// the signed JSON, which an older Mac accepts): the workspace's usual.
+    public var model: String? = nil
+    public var thinking: String? = nil
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

@@ -279,6 +279,24 @@ final class ChannelTests: XCTestCase {
         XCTAssertNil(command.mode)
     }
 
+    func testAStartSignsTheModelAndLevelInOnlyWhenChosen() throws {
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: Data(repeating: 7, count: 32).base64EncodedString(), n: "Mac")
+        let channel = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())
+        let plain = try channel.startDocument(workspaceId: "w1", agent: .claude, text: "Hi", signer: SoftwareSigner())
+        let plainCommand = try ChannelCrypto.open(StartCommand.self, box: plain.document.box, key: pairing.k)
+        XCTAssertNil(plainCommand.model)
+        XCTAssertNil(plainCommand.thinking)
+        // A start with no choice is byte-for-byte what an older Mac expects: neither key is in the JSON.
+        let raw = try ChannelCrypto.open([String: AnyJSON].self, box: plain.document.box, key: pairing.k)
+        XCTAssertNil(raw["model"])
+        XCTAssertNil(raw["thinking"])
+        let chosen = try channel.startDocument(workspaceId: "w1", agent: .codex, text: "Hi", model: "gpt-6.1-sol", thinking: "high", signer: SoftwareSigner())
+        let command = try ChannelCrypto.open(StartCommand.self, box: chosen.document.box, key: pairing.k)
+        XCTAssertEqual(command.model, "gpt-6.1-sol")
+        XCTAssertEqual(command.thinking, "high")
+        XCTAssertEqual(command.agent, .codex)
+    }
+
     func testARenameSignsTheChatAndTheNewNameIn() throws {
         let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: Data(repeating: 7, count: 32).base64EncodedString(), n: "Mac")
         let channel = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())
@@ -348,4 +366,10 @@ final class ChannelTests: XCTestCase {
         let snapshot = try await Channel(pairing: pairing, deviceId: "d", transport: transport).snapshot()
         XCTAssertNil(snapshot)
     }
+}
+
+/// Any JSON value, to read which top-level keys a signed document carries.
+private struct AnyJSON: Codable {
+    init(from decoder: Decoder) throws { _ = try? decoder.singleValueContainer() }
+    func encode(to encoder: Encoder) throws {}
 }

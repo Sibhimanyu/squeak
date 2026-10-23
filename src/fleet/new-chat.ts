@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 
 import { conductorTimestampToIso } from "../adapters/conductor-registry.js";
+import { listChatModels, type ChatModel } from "./chat-models.js";
 
 /**
  * Starting a new Conductor chat from a Mac or phone surface: which workspaces
@@ -83,7 +84,33 @@ export function findNewChatWorkspace(dbPath: string, id: string): NewChatWorkspa
 export type StartChatOutcome = { ok: true; sessionId: string } | { ok: false; reason: string };
 
 export interface ChatStarter {
-  startChat(args: { workspaceId: string; agent: NewChatAgent; text: string }): Promise<StartChatOutcome>;
+  startChat(args: {
+    workspaceId: string;
+    agent: NewChatAgent;
+    text: string;
+    /** A model alias from `listChatModels`, and a thinking level it takes; both absent: the workspace's usual. */
+    model?: string;
+    thinking?: string;
+  }): Promise<StartChatOutcome>;
+}
+
+/** A phone's model and level, checked against what Conductor offers; the error is for the person. */
+export function checkChatModel(
+  models: Array<{ agent: NewChatAgent; id: string; levels: string[] }>,
+  agent: NewChatAgent,
+  model: unknown,
+  thinking: unknown,
+): { ok: true; model?: string; thinking?: string } | { ok: false; reason: string } {
+  if (model === undefined && thinking === undefined) return { ok: true };
+  if (typeof model !== "string") return { ok: false, reason: "Choose a model." };
+  const offered = models.find((candidate) => candidate.id === model && candidate.agent === agent);
+  if (!offered)
+    return { ok: false, reason: "That model isn't one this Mac offers for that agent any more. Pick another." };
+  if (thinking === undefined) return { ok: true, model };
+  if (typeof thinking !== "string" || !offered.levels.includes(thinking)) {
+    return { ok: false, reason: "That thinking level isn't available for that model." };
+  }
+  return { ok: true, model, thinking };
 }
 
 /** The ingress control hooks, built over the db path and the relay. */
@@ -96,7 +123,20 @@ export function newChatControl(deps: { conductorDbPath: string; relay: ChatStart
         return { workspaces: [] };
       }
     },
-    startChat: async (body: { workspaceId?: unknown; agent?: unknown; text?: unknown }): Promise<StartChatOutcome> => {
+    models: () => {
+      try {
+        return listChatModels(deps.conductorDbPath);
+      } catch {
+        return [];
+      }
+    },
+    startChat: async (body: {
+      workspaceId?: unknown;
+      agent?: unknown;
+      text?: unknown;
+      model?: unknown;
+      thinking?: unknown;
+    }): Promise<StartChatOutcome> => {
       const text = typeof body.text === "string" ? body.text.trim() : "";
       if (!text) return { ok: false, reason: "Write a first message." };
       if (text.length > NEW_CHAT_MAX_TEXT) {
@@ -115,10 +155,24 @@ export function newChatControl(deps: { conductorDbPath: string; relay: ChatStart
         return { ok: false, reason: "Couldn't read Conductor's workspaces." };
       }
       if (!workspace) return { ok: false, reason: "That workspace doesn't exist or is archived." };
+      const agent = body.agent ?? workspace.defaultAgent;
+      // Only a start that names a model needs Conductor's list; a plain one never reads it.
+      let models: ChatModel[] = [];
+      if (body.model !== undefined || body.thinking !== undefined) {
+        try {
+          models = listChatModels(deps.conductorDbPath);
+        } catch {
+          return { ok: false, reason: "Couldn't read Conductor's models." };
+        }
+      }
+      const chosen = checkChatModel(models, agent, body.model, body.thinking);
+      if (!chosen.ok) return chosen;
       return deps.relay.startChat({
         workspaceId: workspace.id,
-        agent: body.agent ?? workspace.defaultAgent,
+        agent,
         text,
+        ...(chosen.model ? { model: chosen.model } : {}),
+        ...(chosen.thinking ? { thinking: chosen.thinking } : {}),
       });
     },
   };

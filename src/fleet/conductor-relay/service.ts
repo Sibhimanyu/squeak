@@ -211,6 +211,8 @@ export class ConductorRelayService {
     workspaceId: string;
     agent: "claude" | "codex";
     text: string;
+    model?: string;
+    thinking?: string;
   }): Promise<{ ok: true; sessionId: string } | { ok: false; reason: string }> {
     const client = this.client;
     if (!client) return { ok: false, reason: "Conductor's relay isn't connected" };
@@ -221,6 +223,8 @@ export class ConductorRelayService {
         sessionId,
         agent: args.agent,
         text: args.text,
+        ...(args.model ? { model: args.model } : {}),
+        ...(args.thinking ? { thinkingLevel: args.thinking } : {}),
       });
       if (res.status >= 200 && res.status < 300) return { ok: true, sessionId };
       if (res.status === 404) return { ok: false, reason: "Conductor doesn't know that workspace" };

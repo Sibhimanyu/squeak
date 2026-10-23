@@ -12,6 +12,7 @@ import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import { describeGitState } from "../fleet/git-state.js";
 import {
   NEW_CHAT_MAX_TEXT,
+  checkChatModel,
   type NewChatAgent,
   type NewChatWorkspace,
   type StartChatOutcome,
@@ -31,6 +32,7 @@ import type { WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } fro
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
 import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
 import type { ChannelDoc } from "./firestore-rest.js";
+import type { ChatModel } from "../fleet/chat-models.js";
 import { condenseHistory, LIVE_STEP_CHARS, LIVE_STEPS, liveHistoryHandle, LiveTurnPublisher } from "./live-turn.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
 
@@ -251,6 +253,9 @@ export interface StartCommand {
   workspaceId: string;
   agent: NewChatAgent;
   text: string;
+  /** A model alias the Mac offered (`chatModels`), and a thinking level it takes. Absent: the workspace's usual. */
+  model?: string;
+  thinking?: string;
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
@@ -344,7 +349,15 @@ export interface RemoteReplier {
 export interface RemoteChatStarter {
   /** Re-read from the registry on every call: the phone's copy is never trusted. */
   workspaces(): NewChatWorkspace[];
-  start(args: { workspaceId: string; agent: NewChatAgent; text: string }): Promise<StartChatOutcome>;
+  /** The models Conductor offers for a new chat; absent on a Mac that cannot choose one. */
+  models?(): ChatModel[];
+  start(args: {
+    workspaceId: string;
+    agent: NewChatAgent;
+    text: string;
+    model?: string;
+    thinking?: string;
+  }): Promise<StartChatOutcome>;
 }
 
 export interface RemoteBridgeDependencies {
@@ -1275,6 +1288,24 @@ export class RemoteBridge {
     if (!workspace) {
       return refuse("That workspace isn't available any more. Pick another.");
     }
+    // A model and level the phone chose must be ones this Mac offers for that agent, checked again here.
+    let chosenModel: { model?: string; thinking?: string } = {};
+    if (command.model !== undefined || command.thinking !== undefined) {
+      let models: ChatModel[];
+      try {
+        models = starter.models?.() ?? [];
+      } catch {
+        models = [];
+      }
+      const checked = checkChatModel(models, command.agent, command.model, command.thinking);
+      if (!checked.ok) {
+        return refuse(checked.reason);
+      }
+      chosenModel = {
+        ...(checked.model ? { model: checked.model } : {}),
+        ...(checked.thinking ? { thinking: checked.thinking } : {}),
+      };
+    }
     const last = this.lastStartAt.get(device.id);
     if (last !== undefined && now - last < START_MIN_GAP_MS) {
       return refuse("You just started a chat. Wait a few seconds and try again.");
@@ -1282,7 +1313,7 @@ export class RemoteBridge {
     this.lastStartAt.set(device.id, now);
     let outcome: StartChatOutcome;
     try {
-      outcome = await starter.start({ workspaceId: workspace.id, agent: command.agent, text });
+      outcome = await starter.start({ workspaceId: workspace.id, agent: command.agent, text, ...chosenModel });
     } catch (error) {
       outcome = { ok: false, reason: error instanceof Error ? error.message : "The chat could not be started." };
     }
@@ -1975,8 +2006,8 @@ export class RemoteBridge {
       JSON.stringify(view.macPower) +
       JSON.stringify(view.hotspot) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
-    const { recent, recentMore, workspaces, projectIcons, ...rest } = view;
-    const lists = JSON.stringify([recent, recentMore, workspaces ?? null, projectIcons ?? null]);
+    const { recent, recentMore, workspaces, projectIcons, chatModels, ...rest } = view;
+    const lists = JSON.stringify([recent, recentMore, workspaces ?? null, projectIcons ?? null, chatModels ?? null]);
     const kind = `${format.split ? "split" : "whole"}|${format.compress ? "z" : "plain"}|`;
     const serialized = kind + core + (format.split ? "" : lists);
     if (format.split) {
@@ -1990,6 +2021,7 @@ export class RemoteBridge {
           recentMore,
           ...(workspaces ? { workspaces } : {}),
           ...(projectIcons ? { projectIcons } : {}),
+          ...(chatModels ? { chatModels } : {}),
           seq: this.nextSeq(),
         };
         const box = this.sealForPhone(config, doc);
@@ -2047,7 +2079,7 @@ export class RemoteBridge {
 
   /** The phone's view in the split format: the snapshot and the recent document, each as published. */
   phoneViewParts() {
-    const { recent, recentMore, workspaces, projectIcons, ...rest } = this.phoneView();
+    const { recent, recentMore, workspaces, projectIcons, chatModels, ...rest } = this.phoneView();
     return {
       snapshot: { ...rest, split: true as const },
       recent: {
@@ -2056,6 +2088,7 @@ export class RemoteBridge {
         recentMore,
         ...(workspaces ? { workspaces } : {}),
         ...(projectIcons ? { projectIcons } : {}),
+        ...(chatModels ? { chatModels } : {}),
       },
     };
   }
@@ -2080,6 +2113,7 @@ export class RemoteBridge {
       // Where a phone may start a chat; absent when this Mac can't (phones then hide the button).
       ...(this.deps.newChat ? { workspaces: this.phoneWorkspaces() } : {}),
       ...this.phoneProjectIcons(),
+      ...this.phoneChatModels(),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
       // Older phones ignore it; newer ones list it under Recent and can reply to any of them.
       recent: recent.map((session, index) =>
@@ -2236,6 +2270,16 @@ export class RemoteBridge {
     try {
       const icons = this.deps.projectIcons?.() ?? {};
       return Object.keys(icons).length > 0 ? { projectIcons: icons } : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** The models a new chat can start with, as Conductor's picker lists them; absent when this Mac cannot choose one. */
+  private phoneChatModels(): { chatModels?: ChatModel[] } {
+    try {
+      const models = this.deps.newChat?.models?.() ?? [];
+      return models.length > 0 ? { chatModels: models } : {};
     } catch {
       return {};
     }
