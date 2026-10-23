@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.26
+
+- Search results list the newest chats first.
+
 ## 2.1.25
 
 - Quick message opens with a double-tap of Control. Settings, General offers Double-tap Control,

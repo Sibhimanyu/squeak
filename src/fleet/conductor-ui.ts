@@ -125,7 +125,12 @@ export type HandsOutcome =
  * file. Launched through LaunchServices so macOS attributes it to Squeak
  * Hands' own grants, not to whoever spawned it.
  */
-export async function runHands(appPath: string, mode: string, request: unknown): Promise<HandsOutcome> {
+export async function runHands(
+  appPath: string,
+  mode: string,
+  request: unknown,
+  timeoutMs = HELPER_TIMEOUT_MS,
+): Promise<HandsOutcome> {
   if (!fs.existsSync(appPath)) {
     return { status: "missing" };
   }
@@ -138,7 +143,7 @@ export async function runHands(appPath: string, mode: string, request: unknown):
       execFile(
         "/usr/bin/open",
         ["-W", "-n", appPath, "--args", mode, requestPath, resultPath],
-        { timeout: HELPER_TIMEOUT_MS },
+        { timeout: timeoutMs },
         (error) => resolve(!error),
       );
     });

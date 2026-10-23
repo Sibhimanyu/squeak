@@ -485,25 +485,35 @@ func runWifi(mode: String, requestPath: String, resultPath: String) {
         try? interface.setPower(true)
         Thread.sleep(forTimeInterval: 2)
     }
-    do {
-        // A phone's hotspot can take a few seconds to start advertising after
-        // the Mac first looks, so one quick second scan before giving up.
-        var networks = try interface.scanForNetworks(withSSID: ssid)
-        if networks.isEmpty {
-            Thread.sleep(forTimeInterval: 3)
-            networks = try interface.scanForNetworks(withSSID: ssid)
-        }
-        guard let network = networks.first else {
-            write(["ok": false, "error": "not-found", "location": location], to: resultPath)
-            exit(3)
-        }
-        try interface.associate(to: network, password: request.password)
-        write(["ok": true, "location": location], to: resultPath)
-    } catch {
-        let detail = String((error as NSError).localizedDescription.prefix(160))
-        write(["ok": false, "error": "join-failed", "detail": detail, "location": location], to: resultPath)
-        exit(3)
+    // A phone's hotspot can take a few seconds to start advertising after
+    // the Mac first looks, so one quick second scan before giving up.
+    func find() throws -> CWNetwork? {
+        if let network = try interface.scanForNetworks(withSSID: ssid).first { return network }
+        Thread.sleep(forTimeInterval: 3)
+        return try interface.scanForNetworks(withSSID: ssid).first
     }
+    // The first association with a hotspot that has just woken can fail with
+    // tmpErr (seen on this Mac, 2026-10-21); a fresh scan and a second try
+    // is what the Wi-Fi menu would do.
+    var lastError: Error?
+    for attempt in 0..<2 {
+        if attempt > 0 { Thread.sleep(forTimeInterval: 2) }
+        do {
+            guard let network = try find() else {
+                if lastError != nil { break }
+                write(["ok": false, "error": "not-found", "location": location], to: resultPath)
+                exit(3)
+            }
+            try interface.associate(to: network, password: request.password)
+            write(["ok": true, "location": location, "attempts": attempt + 1], to: resultPath)
+            return
+        } catch {
+            lastError = error
+        }
+    }
+    let detail = String((lastError.map { ($0 as NSError).localizedDescription } ?? "no answer").prefix(160))
+    write(["ok": false, "error": "join-failed", "detail": detail, "location": location], to: resultPath)
+    exit(3)
 }
 
 let args = CommandLine.arguments
