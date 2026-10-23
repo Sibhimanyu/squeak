@@ -134,9 +134,9 @@ struct HomeView: View {
             }
             .padding(.bottom, 4)
             if let starting = model.startingChat { StartingRow(label: starting.label) }
-            if !unreadReplies.isEmpty { NewRepliesCard(sessions: unreadReplies) }
             if sessions.isEmpty {
                 restingDuck
+                if !unreadReplies.isEmpty { NewRepliesCard(sessions: unreadReplies) }
                 if !recent.filter({ !model.isUnread($0) }).isEmpty { RecentInlineCard(sessions: recent.filter { !model.isUnread($0) }, open: $recentOpen) }
             } else {
                 switch grouping {
@@ -149,6 +149,8 @@ struct HomeView: View {
                                                           set: { if $0 { expanded.insert(group.filter) } else { expanded.remove(group.filter) } }))
                     }
                 }
+                // After the active groups: needs-you is always first, and the only red.
+                if !unreadReplies.isEmpty { NewRepliesCard(sessions: unreadReplies) }
             }
             if !recent.isEmpty && !sessions.isEmpty { EarlierCard() }
             Color.clear.frame(height: 1).id("end")
@@ -591,13 +593,13 @@ struct SessionRow: View {
     private var recentText: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(Presentation.displayTitle(session)).font(.headline).fontWeight(unread ? .heavy : .semibold).lineLimit(2)
+                Text(Presentation.displayTitle(session)).font(.headline).fontWeight(.semibold).lineLimit(2)
                 Spacer(minLength: 4)
                 if unread { UnreadMark() }
                 Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(unread ? Theme.ink : Theme.muted).monospacedDigit()
             }
             if let lastWords {
-                Text(lastWords).font(.subheadline).fontWeight(unread ? .semibold : .regular)
+                Text(lastWords).font(.subheadline)
                     .foregroundStyle(unread ? Theme.ink : Theme.muted).lineLimit(2)
             }
             HStack(spacing: 6) {
@@ -620,7 +622,7 @@ struct SessionRow: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .center, spacing: 8) {
                 if !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
-                Text(Presentation.displayTitle(session)).font(.headline).fontWeight(unread ? .heavy : .semibold).lineLimit(2)
+                Text(Presentation.displayTitle(session)).font(.headline).fontWeight(.semibold).lineLimit(2)
                 Spacer(minLength: 4)
                 if unread { UnreadMark() }
                 if recent, let open = session.open { OpenTag(open: open) }

@@ -5,9 +5,11 @@ import SwiftUI
 
 /// DESIGN.md §8.2: Home's cards. One neutral surface (12pt, a hairline, no shadow) per group, with a
 /// header that opens the group and up to a few chats under it that open themselves. The only colour
-/// is the needs-you left edge and badge; every state is in words.
+/// is a state-coloured left edge and badge (red for needs you, blue for unread replies); every state is in words.
 struct HomeGroupCard<Content: View>: View {
     var needsYou = false
+    /// An edge colour other than needs-you red, e.g. `Theme.done` for unreviewed finishes.
+    var edge: Color? = nil
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -16,23 +18,25 @@ struct HomeGroupCard<Content: View>: View {
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             .overlay(alignment: .leading) {
-                if needsYou {
-                    Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 12).padding(.leading, 3)
+                if needsYou || edge != nil {
+                    Capsule().fill(edge ?? Theme.needsYou).frame(width: 3).padding(.vertical, 12).padding(.leading, 3)
                         .accessibilityHidden(true)
                 }
             }
     }
 }
 
-/// §8.3: the red pill for what waits on you. Absent at zero, so the caller never draws "0".
+/// §8.3: the pill for a count: red for what waits on you, blue (`Theme.done`) for unreviewed finishes.
+/// Absent at zero, so the caller never draws "0".
 struct CountBadge: View {
     let count: Int
+    var color: Color = Theme.needsYou
 
     var body: some View {
         Text("\(count)")
             .font(.caption2.weight(.bold)).monospacedDigit().foregroundStyle(.white)
             .padding(.horizontal, 7).frame(minWidth: 20, minHeight: 20)
-            .background(Theme.needsYou, in: Capsule())
+            .background(color, in: Capsule())
             .accessibilityHidden(true)
     }
 }
@@ -312,24 +316,26 @@ struct AgentAvatar: View {
     }
 }
 
-/// A small filled mark beside the age: this chat answered and you have not opened it. The bold words say it too.
+/// A small blue dot beside the age: this chat answered and you have not opened it. Blue is Done (§3.3),
+/// never the red of needs-you.
 struct UnreadMark: View {
     var body: some View {
-        Circle().fill(Theme.ink).frame(width: 8, height: 8).accessibilityHidden(true)
+        Circle().fill(Theme.done).frame(width: 8, height: 8).accessibilityHidden(true)
     }
 }
 
-/// Replies you have not read, at the top of Home, however long ago they came: a chat does not drop off
-/// Home just because the quarter hour passed.
+/// Replies you have not read, however long ago they came: a chat does not drop off Home just because the
+/// quarter hour passed. Quiet Done blue (left edge, count), placed below every active group so needs-you
+/// stays first and the only red on screen.
 struct NewRepliesCard: View {
     let sessions: [PhoneSnapshot.Session]
 
     var body: some View {
-        HomeGroupCard(needsYou: true) {
+        HomeGroupCard(edge: Theme.done) {
             HStack(spacing: 10) {
                 Text("New replies").font(.headline).foregroundStyle(Theme.ink)
                 Spacer(minLength: 8)
-                CountBadge(count: sessions.count)
+                CountBadge(count: sessions.count, color: Theme.done)
             }
             .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44)
             .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
