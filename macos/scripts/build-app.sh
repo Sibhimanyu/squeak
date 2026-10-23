@@ -6,7 +6,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
-VERSION="2.1.26"
+VERSION="2.1.27"
 # Sparkle compares CFBundleVersion, so it must only ever grow: 2.0.2 -> 20002, 2.1.0 -> 20100.
 # (A pre-release suffix is ignored; give a beta its own patch number if it must be offered.)
 IFS=. read -r V_MAJOR V_MINOR V_PATCH <<<"${VERSION%%-*}"

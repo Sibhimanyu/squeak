@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.27
+
+- Settings, Keep awake has a Heat section: your Mac's chip and battery temperature and fan speed
+  during a session. When it warms up, Squeak turns on Low Power Mode and moves your agents to the
+  efficiency cores so they keep going but cooler, and lets the Mac sleep if it stays hot.
+- Set up fan control (one Mac password) lets Squeak run the fans at full speed while a session runs
+  warm, and hand them back to macOS when it cools.
+
 ## 2.1.26
 
 - Search results list the newest chats first.
