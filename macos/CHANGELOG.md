@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.18
+
+- The menu-bar panel no longer sits inside a taller, square-edged window after a section folds:
+  the window shrinks to the panel, and its shadow is redrawn to match.
+
 ## 2.1.17
 
 - Quick message: when Send is off because Squeak has no way to reply to the chat it is aimed at

@@ -49,9 +49,28 @@ struct MenuWindowAccessor: NSViewRepresentable {
             if let window { Self.clip(window) }
         }
 
+        /// `MenuBarExtra` grows its window to the panel's tallest and never shrinks it back, so after a
+        /// section folds the rounded panel floats inside a taller window, and the window's own material,
+        /// square at its edges, shows above and below it. Shrink the window to the panel's height, keeping
+        /// the top edge under the menu bar. Only ever shrinks: growing is the system's.
+        static func fit(_ window: NSWindow) {
+            guard let content = window.contentView else { return }
+            let wanted = content.fittingSize.height
+            let frameHeight = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 1, height: wanted)).height
+            guard wanted > 120, wanted < 2_000, window.frame.height - frameHeight > 2 else { return }
+            var frame = window.frame
+            frame.origin.y = frame.maxY - frameHeight
+            frame.size.height = frameHeight
+            window.setFrame(frame, display: true)
+            // The shadow is drawn from the window's alpha once; after a resize it is stale (a square shadow).
+            window.invalidateShadow()
+        }
+
         static func clip(_ window: NSWindow) {
+            DispatchQueue.main.async { fit(window) }
             window.isOpaque = false
             window.backgroundColor = .clear
+            window.invalidateShadow()
             let radius = PopoverMetrics.corner
             for view in [window.contentView?.superview, window.contentView].compactMap({ $0 }) {
                 view.wantsLayer = true
