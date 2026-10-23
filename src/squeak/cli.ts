@@ -12,6 +12,7 @@ import {
   installFleetHooks,
   uninstallFleetHooks,
 } from "../fleet/hook-install.js";
+import { applyAskFormat, askFormatEnabled, defaultAskFormatPaths, uninstallAskFormat } from "../fleet/ask-format.js";
 import { HookIngressServer } from "../fleet/hook-ingress.js";
 import { resolveSqueakEnvPath } from "./paths.js";
 
@@ -164,11 +165,25 @@ export async function main(argv: string[]): Promise<void> {
       for (const file of result.skipped) {
         console.log(`Already installed in ${file}`);
       }
+      const ask = applyAskFormat(defaultAskFormatPaths(path.dirname(resolveSqueakEnvPath())));
+      if (askFormatEnabled()) {
+        console.log("\nAsk format (closing questions as lettered options):");
+        for (const file of ask.changed) {
+          console.log(`Updated ${file} (backup at ${file}.squeak.bak)`);
+        }
+        for (const file of ask.skipped) {
+          console.log(`Already installed in ${file}`);
+        }
+        console.log("Turn it off with SQUEAK_ASK_FORMAT=off and run install-hooks again.");
+      } else if (ask.changed.length > 0) {
+        console.log(`\nSQUEAK_ASK_FORMAT=off: removed the ask format from ${ask.changed.join(", ")}`);
+      }
       console.log("\nHooks never block: they background the request, time out after 2s, and always exit 0.");
       return;
     }
     case "uninstall-hooks": {
       const result = uninstallFleetHooks(hookPaths());
+      result.changed.push(...uninstallAskFormat(defaultAskFormatPaths(path.dirname(resolveSqueakEnvPath()))).changed);
       console.log(
         result.changed.length === 0 ? "Nothing of ours was installed." : `Cleaned ${result.changed.join(", ")}`,
       );

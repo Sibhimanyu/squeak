@@ -186,7 +186,7 @@ export function removeHookConfig(existing: Record<string, unknown>): {
   return { config, changed };
 }
 
-function readJsonObject(filePath: string): Record<string, unknown> {
+export function readJsonObject(filePath: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(filePath, "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -198,7 +198,7 @@ function readJsonObject(filePath: string): Record<string, unknown> {
   return {};
 }
 
-function writeJsonObject(filePath: string, value: Record<string, unknown>): void {
+export function writeJsonObject(filePath: string, value: Record<string, unknown>): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   if (fs.existsSync(filePath)) {
     // These are files the user hand-edits and other tools also write. Keep a

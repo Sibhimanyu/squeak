@@ -336,6 +336,15 @@ test for anything you fix is expected; the suite is fast.
   from**, so they must be repo-relative — a config whose patterns match nothing
   passes everything, which is worse than no linter.
 
+- **Agents are told how to ask, so a closing question becomes buttons.** The text lives in
+  `src/fleet/ask-format.ts` (`ASK_FORMAT_TEXT`; its examples are run through `parseChoices` in
+  `ask-format.test.ts`, so change the parser and the text together). The question goes *above* the lettered
+  options (`A) ...`, `(recommended)` marks one), because that is what the parser reads. `squeak install-hooks`
+  writes `<support dir>/ask-format.sh` (a static script printing a `SessionStart` `additionalContext`, no
+  network, exits 0) and a `SessionStart` entry in `~/.claude/settings.json`, plus a delimited block
+  (`<!-- squeak:ask-format:start/end -->`) in `$CODEX_HOME/AGENTS.md` (`~/.codex`); both back up first and
+  `uninstall-hooks` removes only these. `SQUEAK_ASK_FORMAT=off` then `install-hooks` removes it.
+
 ## The phone channel (docs/remote-channel.md)
 
 - **The Mac trusts a key, not a server.** `RemoteBridge.handleCommand` runs a
