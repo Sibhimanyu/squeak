@@ -132,6 +132,7 @@ struct HomeView: View {
             if let starting = model.startingChat { StartingRow(label: starting.label) }
             if sessions.isEmpty {
                 restingDuck
+                if !recent.isEmpty { pickUpAgain }
             } else {
                 switch grouping {
                 case .projects:
@@ -251,7 +252,25 @@ struct HomeView: View {
             Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: 88, height: 88).accessibilityHidden(true)
             Text("Nothing's running. The duck is resting.").foregroundStyle(Theme.muted)
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 40)
+        .frame(maxWidth: .infinity).padding(.top, 32).padding(.bottom, recent.isEmpty ? 40 : 20)
+    }
+
+    /// With nothing running, the newest quiet chats under the duck, to pick one up where it stopped.
+    private var pickUpAgain: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Pick up again").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted).padding(.leading, 4)
+                .accessibilityAddTraits(.isHeader)
+            HomeGroupCard {
+                ForEach(Array(recent.prefix(4).enumerated()), id: \.element.id) { index, session in
+                    if index > 0 { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true) }
+                    NavigationLink(value: HomeRoute.session(session.key)) {
+                        SessionRow(session: session, recent: true)
+                            .padding(.horizontal, 14).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 
     private var waiting: some View {
@@ -567,10 +586,10 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            AgentAvatar(session: session).padding(.top, 2)
+            AgentAvatar(session: session, size: recent ? 36 : 28).padding(.top, 2)
             rowText
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, recent ? 6 : 2)
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text)\(third.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
@@ -578,7 +597,33 @@ struct SessionRow: View {
         .renameMenu(session, model: model)
     }
 
+    /// An Earlier row gets three lines, one job each, so the marks do not crowd the title: the title and its
+    /// age; what the agent last said; then where it ran (project mark, project, agent) with Open/Closed at the end.
+    private var recentText: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(Presentation.displayTitle(session)).font(.headline).lineLimit(2)
+                Spacer(minLength: 4)
+                Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+            }
+            if let lastWords { Text(lastWords).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2) }
+            HStack(spacing: 6) {
+                if !inProject { ProjectMark(name: Presentation.projectName(session), size: 18) }
+                Text(inProject ? Presentation.agentName(session.agent) : Presentation.subtitle(session))
+                    .font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
+                Spacer(minLength: 4)
+                if let open = session.open { OpenTag(open: open) }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    @ViewBuilder
     private var rowText: some View {
+        if recent { recentText } else { activeText }
+    }
+
+    private var activeText: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .center, spacing: 8) {
                 if !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }

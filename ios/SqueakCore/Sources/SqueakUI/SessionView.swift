@@ -1056,6 +1056,7 @@ struct Composer: View {
                     .glassSurface(in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.ink, lineWidth: 1.5).opacity(composing.wrappedValue ? 1 : 0))
                     .accessibilityLabel("Message for \(label)")
+                    .pasteImages(into: $photos, focused: composing.wrappedValue)
                 sendButton
             }
             caption
