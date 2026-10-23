@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.20
+
+- Keep awake has its own page in Settings: what is on and until when, the one-time lid-closed
+  setup in one button, what happens when the lid closes (display, sound, Low Power Mode, chat
+  apps), the battery and heat safety rules in plain words, and hotspot failover.
+- The menu-bar panel always shows Keep Mac awake: time left, the lid state, and Add 1 hour,
+  Add lid closed and End as buttons instead of hidden menus.
+
 ## 2.1.19
 
 - A chat whose reply ends with a question ("Want me to open a PR?") now counts as needing you:

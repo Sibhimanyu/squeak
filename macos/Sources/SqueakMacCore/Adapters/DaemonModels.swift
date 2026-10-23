@@ -126,12 +126,63 @@ struct DaemonCodexUsage: Decodable, Equatable {
 public struct DaemonAwake: Decodable, Sendable, Equatable {
     public var until: Date?
     public var lid: Bool
-    enum CodingKeys: String, CodingKey { case until, lid }
-    public init(until: Date?, lid: Bool = false) { self.until = until; self.lid = lid }
+    /// "off", "starting", "on" or "failed" for a lid-closed session; nil from a daemon that does not say.
+    public var lidStatus: String?
+    /// Why a lid-closed session did not turn on, in the daemon's words.
+    public var lidProblem: String?
+    /// Squeak turned Low Power Mode on for this session (a safety rule).
+    public var lowPower: Bool
+    /// Why a safety rule is acting now ("Battery at 38%"); nil when none is.
+    public var safety: String?
+    enum CodingKeys: String, CodingKey { case until, lid, lidStatus, lidProblem, lowPower, safety }
+    public init(until: Date?, lid: Bool = false, lidStatus: String? = nil, lidProblem: String? = nil,
+                lowPower: Bool = false, safety: String? = nil) {
+        self.until = until; self.lid = lid; self.lidStatus = lidStatus; self.lidProblem = lidProblem
+        self.lowPower = lowPower; self.safety = safety
+    }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         until = c.lenient(String.self, .until).flatMap(DaemonDate.parse)
         lid = c.lenient(Bool.self, .lid) ?? false
+        lidStatus = c.lenient(String.self, .lidStatus)
+        lidProblem = c.lenient(String.self, .lidProblem)
+        lowPower = c.lenient(Bool.self, .lowPower) ?? false
+        safety = c.lenient(String.self, .safety)
+    }
+}
+
+/// What a closed lid does during a lid-closed session (`awakeLidActions`).
+public struct DaemonLidActions: Decodable, Sendable, Equatable {
+    public var displayOff: Bool
+    public var mute: Bool
+    public var lowPower: Bool
+    public var freezeApps: Bool
+    public init(displayOff: Bool = true, mute: Bool = true, lowPower: Bool = true, freezeApps: Bool = false) {
+        self.displayOff = displayOff; self.mute = mute; self.lowPower = lowPower; self.freezeApps = freezeApps
+    }
+    enum CodingKeys: String, CodingKey { case displayOff, mute, lowPower, freezeApps }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = DaemonLidActions()
+        displayOff = c.lenient(Bool.self, .displayOff) ?? d.displayOff
+        mute = c.lenient(Bool.self, .mute) ?? d.mute
+        lowPower = c.lenient(Bool.self, .lowPower) ?? d.lowPower
+        freezeApps = c.lenient(Bool.self, .freezeApps) ?? d.freezeApps
+    }
+}
+
+/// How the last session ended (`awakeLastEnd`): "ended", "expired", "replaced", "battery" or "heat".
+public struct DaemonAwakeEnd: Decodable, Sendable, Equatable {
+    public var reason: String
+    public var at: Date?
+    public var why: String?
+    enum CodingKeys: String, CodingKey { case reason, at, why }
+    public init(reason: String, at: Date? = nil, why: String? = nil) { self.reason = reason; self.at = at; self.why = why }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        reason = c.lenient(String.self, .reason) ?? "ended"
+        at = c.lenient(String.self, .at).flatMap(DaemonDate.parse)
+        why = c.lenient(String.self, .why)
     }
 }
 
@@ -141,8 +192,23 @@ public struct DaemonHotspot: Decodable, Sendable, Equatable {
     public var ssid: String?
     public var enabled: Bool
     public var onHotspot: Bool
-    public init(configured: Bool, ssid: String?, enabled: Bool, onHotspot: Bool) {
+    /// The daemon's note on its last switch ("Joined Sibhi's iPhone"), and whether it worked.
+    public var lastNote: String?
+    public var lastOk: Bool?
+    public init(configured: Bool, ssid: String?, enabled: Bool, onHotspot: Bool, lastNote: String? = nil, lastOk: Bool? = nil) {
         self.configured = configured; self.ssid = ssid; self.enabled = enabled; self.onHotspot = onHotspot
+        self.lastNote = lastNote; self.lastOk = lastOk
+    }
+    enum CodingKeys: String, CodingKey { case configured, ssid, enabled, onHotspot, last }
+    struct Last: Decodable { var note: String?; var ok: Bool? }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        configured = c.lenient(Bool.self, .configured) ?? false
+        ssid = c.lenient(String.self, .ssid)
+        enabled = c.lenient(Bool.self, .enabled) ?? false
+        onHotspot = c.lenient(Bool.self, .onHotspot) ?? false
+        let last = c.lenient(Last.self, .last)
+        lastNote = last?.note; lastOk = last?.ok
     }
 }
 
@@ -158,8 +224,17 @@ public struct DaemonState: Decodable, Sendable, Equatable {
     /// Whether a lid-closed session can start: the sudoers rule is installed.
     public var awakeLidReady = false
     public var hotspot: DaemonHotspot?
+    /// What a closed lid does, whether the lid is closed now, how the last session ended, and a sleep
+    /// problem that outlives a session. All optional: older daemons send none of them.
+    public var awakeLidActions: DaemonLidActions?
+    public var awakeLidClosedNow = false
+    public var awakeLastEnd: DaemonAwakeEnd?
+    public var awakeSleepProblem: String?
 
-    enum CodingKeys: String, CodingKey { case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot }
+    enum CodingKeys: String, CodingKey {
+        case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot
+        case awakeLidActions, awakeLidClosedNow, awakeLastEnd, awakeSleepProblem
+    }
 
     /// Both readings and today's estimated cost, for the usage screens.
     public func usage(now: Date = Date(), calendar: Calendar = .current) -> UsageSnapshot {
@@ -184,6 +259,10 @@ public struct DaemonState: Decodable, Sendable, Equatable {
         awake = keepAwake == true ? (c.lenient(DaemonAwake.self, .awake) ?? DaemonAwake(until: nil)) : nil
         awakeLidReady = c.lenient(Bool.self, .awakeLidReady) ?? false
         hotspot = c.lenient(DaemonHotspot.self, .hotspot)
+        awakeLidActions = c.lenient(DaemonLidActions.self, .awakeLidActions)
+        awakeLidClosedNow = c.lenient(Bool.self, .awakeLidClosedNow) ?? false
+        awakeLastEnd = c.lenient(DaemonAwakeEnd.self, .awakeLastEnd)
+        awakeSleepProblem = c.lenient(String.self, .awakeSleepProblem)
     }
 
     public init(generatedAt: Date? = nil, sessions: [DaemonSession], claudeUsage: ProviderUsage? = nil, codexUsage: ProviderUsage? = nil) {

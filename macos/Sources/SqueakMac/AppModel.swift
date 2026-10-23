@@ -596,6 +596,11 @@ final class AppModel {
     private(set) var awakeLidReady = false
     private(set) var settingUpLid = false
     private(set) var hotspot: DaemonHotspot?
+    /// What a closed lid does (nil from a daemon that does not say), and the rest of the daemon's awake report.
+    private(set) var awakeLidActions: DaemonLidActions?
+    private(set) var awakeLidClosedNow = false
+    private(set) var awakeLastEnd: DaemonAwakeEnd?
+    private(set) var awakeSleepProblem: String?
     /// Why the last change to it did not happen, in plain words.
     private(set) var awakeNote: String?
 
@@ -615,6 +620,57 @@ final class AppModel {
         if state.awakeOffered != awakeOffered { awakeOffered = state.awakeOffered }
         if state.awakeLidReady != awakeLidReady { awakeLidReady = state.awakeLidReady }
         if state.hotspot != hotspot { hotspot = state.hotspot }
+        if state.awakeLidActions != awakeLidActions { awakeLidActions = state.awakeLidActions }
+        if state.awakeLidClosedNow != awakeLidClosedNow { awakeLidClosedNow = state.awakeLidClosedNow }
+        if state.awakeLastEnd != awakeLastEnd { awakeLastEnd = state.awakeLastEnd }
+        if state.awakeSleepProblem != awakeSleepProblem { awakeSleepProblem = state.awakeSleepProblem }
+    }
+
+    /// Turns one thing a closed lid does on or off. Shown at once, then confirmed by the daemon's next report.
+    func setLidAction(_ key: String, _ on: Bool) async {
+        if demoMode {
+            var a = awakeLidActions ?? DaemonLidActions()
+            switch key {
+            case "displayOff": a.displayOff = on
+            case "mute": a.mute = on
+            case "lowPower": a.lowPower = on
+            default: a.freezeApps = on
+            }
+            awakeLidActions = a
+            return
+        }
+        let before = awakeLidActions
+        if var a = awakeLidActions {
+            switch key {
+            case "displayOff": a.displayOff = on
+            case "mute": a.mute = on
+            case "lowPower": a.lowPower = on
+            default: a.freezeApps = on
+            }
+            awakeLidActions = a
+        }
+        if let problem = await client.setLidActions([key: on]) {
+            awakeLidActions = before
+            awakeNote = problem
+        } else {
+            awakeNote = nil
+        }
+        await readAwake()
+    }
+
+    /// Demo captures only: the awake state a screenshot should show.
+    func installDemoAwake(
+        _ awake: DaemonAwake?, lidReady: Bool, actions: DaemonLidActions? = DaemonLidActions(), end: DaemonAwakeEnd? = nil,
+        hotspot: DaemonHotspot? = nil, sleepProblem: String? = nil
+    ) {
+        guard demoMode else { return }
+        awakeOffered = true
+        self.awake = awake
+        awakeLidReady = lidReady
+        awakeLidActions = actions
+        awakeLastEnd = end
+        self.hotspot = hotspot
+        awakeSleepProblem = sleepProblem
     }
 
     /// "start" (minutes nil: until ended), "extend" or "end".
@@ -629,16 +685,16 @@ final class AppModel {
         settingUpLid = true
         defer { settingUpLid = false }
         guard let rule = await client.lidRule() else {
-            awakeNote = "This version of the Squeak service can't set up lid-closed sessions. Update it first."
+            awakeNote = "This version of the Squeak service can't set up lid closed. Update it first."
             return
         }
         switch await LidRule.install(rule) {
         case .installed:
             await client.recheckLidRule()
             await readAwake()
-            awakeNote = awakeLidReady ? "Lid-closed is set up. Start a session with the lid closed below." : "Installed, but Squeak can't use it yet. Try again in a moment."
+            awakeNote = awakeLidReady ? "Lid closed is ready. Start a session and your Mac stays awake with the lid shut." : "Installed, but Squeak can't use it yet. Try again in a moment."
         case .cancelled: awakeNote = nil
-        case .failed(let reason): awakeNote = "Lid-closed wasn't set up. \(reason)"
+        case .failed(let reason): awakeNote = "Lid closed wasn't set up. \(reason)"
         }
     }
 

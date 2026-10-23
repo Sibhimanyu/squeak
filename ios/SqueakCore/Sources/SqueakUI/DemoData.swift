@@ -186,10 +186,20 @@ enum DemoData {
         let raw = rawSnapshot
         // -squeak-demo-awake: a timed awake session with 1h 23m left, for screenshots.
         let awake = ProcessInfo.processInfo.arguments.contains("-squeak-demo-awake") ? now(83 * 60 + 30) : nil
-        var demo = PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: ProcessInfo.processInfo.arguments.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent, keepAwake: awake != nil, awakeUntil: awake,
-                             awakeLid: awake != nil && ProcessInfo.processInfo.arguments.contains("-squeak-demo-lid") ? "on" : nil,
-                             awakeLidReady: ProcessInfo.processInfo.arguments.contains("-squeak-demo-lid") ? true : nil,
+        // -squeak-demo-lid: lid closed too and set up; -squeak-demo-lid-failed: it did not turn on;
+        // -squeak-demo-safety: a safety rule is acting; -squeak-demo-hotspot: failover is set up.
+        let args = ProcessInfo.processInfo.arguments
+        let lidFailed = args.contains("-squeak-demo-lid-failed")
+        let lid = args.contains("-squeak-demo-lid") || lidFailed
+        var demo = PhoneSnapshot(v: raw.v, mac: raw.mac, generatedAt: raw.generatedAt, duck: raw.duck, sessions: args.contains("-squeak-demo-empty-active") ? [] : raw.sessions.map(titled), usage: usage, workspaces: workspaces, recent: recent, keepAwake: awake != nil, awakeUntil: awake,
+                             awakeLid: awake != nil && lid ? (lidFailed ? "failed" : "on") : nil,
+                             awakeLidProblem: awake != nil && lidFailed ? "Something on this Mac turned sleep back on, so a closed lid would sleep it now." : nil,
+                             awakeLidReady: lid ? true : nil,
+                             awakeSafety: awake != nil && args.contains("-squeak-demo-safety") ? "Low Power Mode on · Battery at 38%" : nil,
                              macPower: .init(percent: 64, onBattery: true, watts: 12, lidClosed: false))
+        if args.contains("-squeak-demo-hotspot") {
+            demo.hotspot = .init(configured: true, ssid: "Sibhi's iPhone", enabled: true, onHotspot: false)
+        }
         #if DEBUG
         demo.projectIcons = DemoIcons.byProject
         #endif

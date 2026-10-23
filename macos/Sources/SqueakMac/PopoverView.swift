@@ -79,10 +79,6 @@ struct PopoverView: View {
             ScrollView(.vertical) {
                 VStack(spacing: 0) {
                     list
-                    if model.awakeOffered {
-                        InsetSeparator()
-                        AwakeRow()
-                    }
                     InsetSeparator()
                     usage
                 }
@@ -368,6 +364,11 @@ struct PopoverView: View {
 
     private var footer: some View {
         VStack(spacing: 0) {
+            // Pinned, not in the scrolling band: whether the Mac is being kept awake is state to see at a glance.
+            if model.awakeOffered {
+                AwakeRow()
+                InsetSeparator().padding(.bottom, 4)
+            }
             MenuRow(title: "Quick message…", hint: "⌘K") {
                 dismissMenu()
                 QuickComposerController.shared.show()

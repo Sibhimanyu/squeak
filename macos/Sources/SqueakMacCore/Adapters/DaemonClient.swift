@@ -237,6 +237,21 @@ public struct DaemonClient: Sendable {
         }
     }
 
+    /// Changes what a closed lid does during a lid-closed session (`action: "lid-actions"`); only the
+    /// keys given change. Nil when it worked, else a reason.
+    public func setLidActions(_ settings: [String: Bool]) async -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["action": "lid-actions", "settings": settings]) else { return "Couldn't send that." }
+        do {
+            let r = try await post("/control/keep-awake", body: data)
+            if (200..<300).contains(r.status) { return nil }
+            if r.status == 401 || r.status == 403 { return "Squeak rejected the access token" }
+            let reason = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any]
+            return (reason?["error"] as? String) ?? "Squeak couldn't change that."
+        } catch {
+            return "Squeak isn't running."
+        }
+    }
+
     /// The sudoers text lid-closed sessions need, built by the daemon for its own user
     /// (`GET /control/keep-awake/lid-rule`). Nil from a daemon without it.
     public func lidRule() async -> String? {

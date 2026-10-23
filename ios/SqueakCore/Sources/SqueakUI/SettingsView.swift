@@ -89,6 +89,9 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if model.awakeOffered {
+                    AwakeSection(problem: $awakeProblem)
+                }
                 Section("Your Mac") {
                     LabeledContent("Name", value: model.snapshot?.mac ?? "Not seen yet")
                     TimelineView(.periodic(from: .now, by: 20)) { _ in
@@ -116,9 +119,6 @@ struct SettingsView: View {
                     }
                     NavigationLink("Connection details") { ConnectionDetailsView() }
                         .frame(minHeight: 44)
-                }
-                if model.awakeOffered {
-                    AwakeSection(problem: $awakeProblem)
                 }
                 if let hotspot = model.snapshot?.hotspot {
                     HotspotSection(hotspot: hotspot)
@@ -231,7 +231,8 @@ private struct HotspotSection: View {
     }
 }
 
-/// The Mac's awake session: start one for a while or until ended, add time, or end it.
+/// The Mac's awake session: what it is doing now, then a way to start one for a while, add time or end it.
+/// Everything shown is what the Mac reports; the phone only words it.
 private struct AwakeSection: View {
     @Environment(AppModel.self) private var model
     @Binding var problem: String?
@@ -241,30 +242,32 @@ private struct AwakeSection: View {
     /// Without the lid-closed setup on the Mac there is nothing to turn on, and the footer says so.
     @AppStorage("awakeWithLid") private var withLid = true
 
-    private static let durations: [(String, Int)] = [("1h", 60), ("2h", 120), ("4h", 240), ("8h", 480)]
+    private static let durations: [(String, String, Int)] = [("1h", "1 hour", 60), ("2h", "2 hours", 120), ("4h", "4 hours", 240), ("8h", "8 hours", 480)]
 
     var body: some View {
         Section {
+            TimelineView(.periodic(from: .now, by: 15)) { _ in
+                HStack(spacing: 10) {
+                    if model.awake?.pending == true { ProgressView() } else { StatusDot(color: model.awake == nil ? Theme.idle : Theme.working) }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Keep Mac awake").font(.headline)
+                        Text(statusLine).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+                    }
+                    Spacer(minLength: 0)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            .frame(minHeight: 44)
             if let awake = model.awake {
-                TimelineView(.periodic(from: .now, by: 15)) { _ in
+                if let lid = awake.lid { lidRow(lid, problem: awake.lidProblem) }
+                if let safety = awake.safety {
                     HStack(spacing: 10) {
-                        if awake.pending { ProgressView() } else { StatusDot(color: Theme.working) }
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(awake.pending ? "Starting…" : "Awake").font(.headline)
-                            Text(awake.until.map { "until \($0.formatted(date: .omitted, time: .shortened)) · \(Self.left($0)) left" }
-                                 ?? "until you end it")
-                                .font(.subheadline).foregroundStyle(Theme.muted)
-                        }
+                        StatusDot(color: Theme.idle)
+                        Text(safety).font(.subheadline).foregroundStyle(Theme.muted)
                         Spacer(minLength: 0)
                     }
+                    .frame(minHeight: 44)
                     .accessibilityElement(children: .combine)
-                }
-                .frame(minHeight: 44)
-                if let lid = awake.lid { lidRow(lid, problem: awake.lidProblem) }
-                if let power = model.snapshot?.macPower { macNow(power) }
-                if let safety = awake.safety {
-                    LabeledContent("Safety") { Text(safety) }
-                        .frame(minHeight: 44)
                 }
                 if awake.until != nil {
                     Button("Add 1 hour") { change(.extend(minutes: 60)) }
@@ -277,19 +280,24 @@ private struct AwakeSection: View {
                     }
             } else {
                 if model.awakeLidReady {
-                    Toggle("Lid closed too", isOn: $withLid)
-                        .tint(Theme.primaryFill)
-                        .frame(minHeight: 44)
+                    Toggle(isOn: $withLid) {
+                        Text("With the lid closed")
+                        Text(withLid ? "Safe to close the lid. It always has an end." : "Closing the lid will sleep your Mac.")
+                            .font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                    .tint(Theme.primaryFill)
+                    .frame(minHeight: 44)
                 }
-                HStack(spacing: 8) {
+                Text("Keep it awake for").font(.subheadline).foregroundStyle(Theme.muted)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
                     ForEach(Self.durations, id: \.0) { choice in
-                        Button(choice.0) { change(.start(minutes: choice.1, lid: lid)) }
+                        Button(choice.0) { change(.start(minutes: choice.2, lid: lid)) }
                             .buttonStyle(.bordered)
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .accessibilityLabel("Keep awake for \(choice.1)")
                     }
                 }
                 .tint(Theme.primaryFill)
-                .frame(minHeight: 44)
                 HStack(spacing: 12) {
                     DatePicker("Until", selection: $untilTime, displayedComponents: .hourAndMinute)
                     Button("Start") { change(.start(minutes: Self.minutes(until: untilTime), lid: lid)) }
@@ -309,6 +317,13 @@ private struct AwakeSection: View {
         }
     }
 
+    private var statusLine: String {
+        guard let awake = model.awake else { return "Off. Your Mac sleeps as usual." }
+        if awake.pending { return "Starting…" }
+        guard let until = awake.until else { return "On until you end it" }
+        return "On until \(until.formatted(date: .omitted, time: .shortened)) · \(Self.left(until)) left"
+    }
+
     /// The lid-closed part of the session, as the Mac reports it: working on it, safe to close, or why not.
     @ViewBuilder
     private func lidRow(_ lid: String, problem: String?) -> some View {
@@ -319,11 +334,11 @@ private struct AwakeSection: View {
             default: ProgressView()
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(lid == "on" ? "Safe to close the lid" : lid == "starting" ? "Getting ready for a closed lid…" : "Lid closed didn't turn on")
+                Text(lid == "on" ? "Lid closed is on" : lid == "starting" ? "Getting ready for a closed lid" : "Lid closed didn't turn on")
                     .font(.body)
-                Text(lid == "on" ? "Your Mac stays awake with the lid shut."
-                     : lid == "starting" ? "Your Mac is turning off sleep. Keep the lid open for a few seconds."
-                     : (problem ?? "The session still runs with the lid open."))
+                Text(lid == "on" ? "Safe to close the lid. Keep your Mac on a hard, open surface, never in a bag."
+                     : lid == "starting" ? "Keep the lid open for a few seconds."
+                     : ((problem.map { $0 + " " } ?? "") + "The session still runs with the lid open."))
                     .font(.footnote).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 0)
@@ -332,25 +347,14 @@ private struct AwakeSection: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// The Mac right now, next to the session: lid, and battery or power. Updates as the Mac reports it.
-    @ViewBuilder
-    private func macNow(_ power: PhoneSnapshot.MacPower) -> some View {
-        let stale = SettingsView.lastKnown(model.macLiveness())
-        if let closed = power.lidClosed {
-            LabeledContent("Lid now", value: (closed ? "Closed" : "Open") + stale).frame(minHeight: 44)
-        }
-        if let percent = power.percent {
-            LabeledContent("Battery", value: SettingsView.battery(percent: percent, power: power) + stale).frame(minHeight: 44)
-        }
-    }
-
     private var lid: Bool { withLid && model.awakeLidReady }
 
     private var footer: String {
+        let safety = "Low Power Mode comes on at 40% battery or when your Mac runs hot, and the session ends by itself at 10% or when it gets very hot."
         if model.awakeLidReady {
-            return "Stops your Mac sleeping, on battery too, so this iPhone can reach it. With the lid closed too, keep it on a hard, open surface — never in a bag."
+            return "Stops your Mac sleeping, on battery too, so this iPhone can reach it. \(safety)"
         }
-        return "Stops your Mac sleeping, on battery too, so this iPhone can reach it. Closing the lid still sleeps it unless you set up lid-closed in Squeak on the Mac."
+        return "Stops your Mac sleeping, on battery too, so this iPhone can reach it. To keep it awake with the lid closed, set that up once in Squeak on your Mac, under Settings, Keep awake. \(safety)"
     }
 
     private func change(_ change: AppModel.AwakeChange) {
