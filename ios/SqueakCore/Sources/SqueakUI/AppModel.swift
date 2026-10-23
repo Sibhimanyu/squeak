@@ -62,6 +62,9 @@ final class AppModel {
     }
     /// The verbose view per session key, while it is being watched.
     private(set) var liveTurns: [String: LiveTurn] = [:]
+    /// The newest history each chat had when last open, in memory only (never written to the phone). A chat opened
+    /// again shows it in its first frame, so the history arriving a moment later does not push everything down.
+    private(set) var lastHistory: [String: [LiveTurn.HistoryEntry]] = [:]
     /// False once it is known the Mac's channel cannot stream (Firestore), so verbose cannot work.
     private(set) var liveAvailable = true
 
@@ -336,6 +339,7 @@ final class AppModel {
                 guard let self, !PhoneSnapshot.isStale(turn?.seq, than: self.liveTurns[key]?.seq) else { continue }
                 if self.liveTurns[key] != turn {
                     self.liveTurns[key] = turn
+                    if let history = turn?.history, !history.isEmpty { self.lastHistory[key] = history }
                     self.noteQueue(turn, for: key)
                     self.rebuild()
                 }
