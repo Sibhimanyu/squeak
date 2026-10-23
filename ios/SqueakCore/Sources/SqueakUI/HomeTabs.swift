@@ -75,7 +75,7 @@ private struct NeedsYouTab: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            GroupView(route: .status(.needsYou), path: $path)
+            NeedsYouPage(path: $path)
                 .navigationDestination(for: HomeRoute.self) { route in
                     if case .session(let key) = route { SessionView(key: key) } else { GroupView(route: route, path: $path) }
                 }

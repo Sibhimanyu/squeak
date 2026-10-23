@@ -302,20 +302,14 @@ struct GroupView: View {
     }
 
     var body: some View {
-        if case .recent = route { EarlierView(path: $path) } else { list }
+        if case .recent = route { EarlierView(path: $path) }
+        else if case .status(.needsYou) = route { NeedsYouPage(path: $path) }
+        else { list }
     }
 
     private var list: some View {
         List {
-            if case .status(.needsYou) = route {
-                ForEach(active) { session in
-                    Section {
-                        AskCard(session: session, onReply: { quickReply = session }, onOpen: { path.append(.session(session.key)) })
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Theme.surface)
-                    }
-                }
-            } else if !active.isEmpty {
+            if !active.isEmpty {
                 Section {
                     ForEach(active) { session in
                         NavigationLink(value: HomeRoute.session(session.key)) {
