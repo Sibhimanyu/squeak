@@ -1,10 +1,12 @@
 import type { FleetSession } from "./types.js";
 
 /**
- * How long a finished session stays on screen. Long enough to notice it went
- * green and read what it did; short enough that the panel does not silt up.
+ * How long a finished (or errored) session stays on screen: a day, so a chat
+ * that ended this morning is still on the Home page this afternoon. This only
+ * keeps it visible. Pushes and the duck's celebration are timed separately
+ * (`PUSH_FINISH_WITHIN_MS`, `CELEBRATION_MS`) and are not stretched by it.
  */
-export const DEFAULT_RECENTLY_FINISHED_MS = 15 * 60 * 1000;
+export const DEFAULT_RECENTLY_FINISHED_MS = 24 * 60 * 60 * 1000;
 
 export interface ActivityOptions {
   recentlyFinishedMs?: number;

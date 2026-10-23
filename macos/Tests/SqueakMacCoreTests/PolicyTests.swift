@@ -11,7 +11,7 @@ struct OrderingTests {
         let working = makeSession("w", state: .working, at: now.addingTimeInterval(-30))
         let blocked = makeSession("b", state: .blocked, at: now.addingTimeInterval(-10))
         let freshFinish = makeSession("f", state: .finished, at: now.addingTimeInterval(-300))
-        let oldFinish = makeSession("of", state: .finished, at: now.addingTimeInterval(-3600))
+        let oldFinish = makeSession("of", state: .finished, at: now.addingTimeInterval(-25 * 3600))
         let idle = makeSession("i", state: .idle, at: now.addingTimeInterval(-60))
         let unknownTime = makeSession("u", state: .idle, at: nil)
         let deadWorking = makeSession("dead", state: .working, at: now, alive: false)

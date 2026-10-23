@@ -106,6 +106,42 @@ function hookEvent(overrides: Partial<HookEvent> = {}): HookEvent {
 }
 
 describe("FleetMonitor", () => {
+  it("does not push finishes from hours ago after a restart or on a fresh store, and never pushes errors", async () => {
+    const finished = observed({
+      state: "finished",
+      lastActivityAt: "2026-09-20T09:00:00.000Z",
+    });
+    const errored = observed({
+      key: "claude-transcript:err",
+      sourceId: "err",
+      agentSessionId: "err",
+      state: "error",
+      lastActivityAt: "2026-09-20T09:30:00.000Z",
+    });
+
+    // A brand-new store meets sessions that finished 3 h ago: still on screen, nothing pushed.
+    const fresh = makeMonitor([finished, errored]);
+    const snapshot = await fresh.monitor.refresh();
+    expect(snapshot.active.map((s) => s.key).sort()).toEqual(["claude-transcript:abc", "claude-transcript:err"]);
+    expect(fresh.pushes).toEqual([]);
+
+    // A second monitor over the same store (a daemon restart): still nothing.
+    const restarted = new FleetMonitor(
+      {
+        store: fresh.store,
+        conductor: { observe: () => [] },
+        claude: { observe: () => [finished, errored] },
+        codex: { observe: () => [] },
+        liveness: { observe: async () => [] },
+      } as unknown as FleetMonitorDependencies,
+      { now: () => Date.parse("2026-09-20T12:05:00.000Z") },
+    );
+    const pushed: AttentionItem[][] = [];
+    restarted.onPush((items) => pushed.push(items));
+    await restarted.refresh();
+    expect(pushed).toEqual([]);
+  });
+
   it("pushes once when a working session stops hearing from the model, and again for a new stall", async () => {
     const harness = makeMonitor([
       observed({
@@ -265,7 +301,7 @@ describe("FleetMonitor", () => {
 
   it("says nothing about a session that finished long ago", async () => {
     // Only recently-finished work is active; the rest is an archive.
-    const harness = makeMonitor([observed({ state: "finished", lastActivityAt: "2026-09-20T09:00:00.000Z" })]);
+    const harness = makeMonitor([observed({ state: "finished", lastActivityAt: "2026-09-18T09:00:00.000Z" })]);
 
     const snapshot = await harness.monitor.refresh();
 

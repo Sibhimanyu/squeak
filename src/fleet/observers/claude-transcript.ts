@@ -16,7 +16,7 @@ export interface ClaudeTranscriptObserverOptions {
   now?: () => number;
 }
 
-const DEFAULT_ACTIVE_WITHIN_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_ACTIVE_WITHIN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_IDLE_AFTER_MS = 10 * 60 * 1000;
 
 /** Entry types that say something about the conversation's state. */

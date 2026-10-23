@@ -47,7 +47,7 @@ public struct ConductorLocalAdapter: HostAdapter {
 
     /// - Parameter activeOnly: when true, `discover` returns only sessions the
     ///   active rule keeps on screen (working, blocked, finished/error in the
-    ///   last 15 minutes). Default false: every non-closed chat, newest first.
+    ///   last 24 hours). Default false: every non-closed chat, newest first.
     public init(
         database: ConductorDatabase = ConductorDatabase(),
         activityReader: ClaudeActivityReader = ClaudeActivityReader(),

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.23
+
+- A finished chat stays in the list for a day, not 15 minutes, so work you have not looked at yet
+  does not vanish.
+
 ## 2.1.22
 
 - Tables in an agent's message lay out properly: each row is as tall as its longest cell, cells

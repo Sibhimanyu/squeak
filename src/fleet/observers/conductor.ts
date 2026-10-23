@@ -10,7 +10,7 @@ export interface ConductorObserverOptions {
 }
 
 const DEFAULT_LIMIT = 100;
-const DEFAULT_FINISHED_WITHIN_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_FINISHED_WITHIN_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Conductor already tracks status for the sessions it spawned, so this

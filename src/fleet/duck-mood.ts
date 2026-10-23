@@ -1,3 +1,4 @@
+import { PUSH_FINISH_WITHIN_MS } from "./attention.js";
 import { needsYou, type AttentionItem, type FleetSession } from "./types.js";
 
 /**
@@ -43,7 +44,14 @@ export function deriveDuckState(
   // finished state, so the celebration is timed from the finish and not from
   // whatever the agent last wrote to its transcript.
   const justFinished = attention
-    .filter((item) => item.kind === "finished_unreviewed" && nowMs - Date.parse(item.since) < celebrationMs)
+    .filter(
+      (item) =>
+        item.kind === "finished_unreviewed" &&
+        nowMs - Date.parse(item.since) < celebrationMs &&
+        // Sessions stay active for a day; a finish the store only just met (new store, first run)
+        // is not a fresh one if the agent's own clock says it ended hours ago.
+        nowMs - Date.parse(item.session.lastActivityAt) < PUSH_FINISH_WITHIN_MS,
+    )
     .map((item) => item.session.key);
 
   return {

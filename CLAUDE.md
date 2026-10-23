@@ -459,7 +459,8 @@ transcripts, and ranks them by what is blocked on the human.
   `FleetStore.handleFor` allocates short integer aliases. Never put a raw
   session key in `callback_data`.
 - **Only *active* sessions reach a screen** — running, blocked, finished in the
-  last fifteen minutes, or quiet with a live process. Everything else stays
+  last 24 hours (`DEFAULT_RECENTLY_FINISHED_MS`; the Mac app's `ConductorStatus`
+  and `SessionOrdering` mirror it), or quiet with a live process. Everything else stays
   tracked but hidden. On this machine that is 4 of 26; without the filter the
   radar is an archive rather than a status display.
 - Blocked sessions get pushed to Telegram wherever they run; a **finish only
