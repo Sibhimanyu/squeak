@@ -111,7 +111,24 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Only from a Mac that can change them (`setup`), and only for a Conductor chat with a model.
         public var modelId: String? = nil
         public var effortId: String? = nil
+        /// Working, but nothing from the model (or only API retries) for long enough that it seems stuck: what
+        /// it waits on ("model" or "api") and since when. Only from a Mac new enough to send it.
+        public var stalled: Stalled? = nil
         public var id: String { key }
+
+        public struct Stalled: Codable, Equatable, Sendable {
+            public let on: String
+            public let since: String
+            public init(on: String, since: String) { self.on = on; self.since = since }
+
+            /// "No response from the model for 14 min", the Mac's radar's words.
+            public func line(now: Date = Date()) -> String {
+                let started = ISO8601DateFormatter.squeakParse(since)
+                let minutes = started.map { max(1, Int(now.timeIntervalSince($0) / 60)) }
+                let age = minutes.map { $0 >= 60 ? "\($0 / 60) h \($0 % 60) min" : "\($0) min" } ?? "a while"
+                return on == "api" ? "Retrying API errors for \(age)" : "No response from the model for \(age)"
+            }
+        }
 
         /// "Opus 5.5 · 1M · Medium · Fast", the chat's setup on one muted line; nil when the Mac sent none.
         public var setupLine: String? {
@@ -147,7 +164,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             switch state {
             case "awaiting_approval": return "needs approval"
             case "awaiting_input": return "needs an answer"
-            case "working": return "working"
+            case "working": return stalled == nil ? "working" : "seems stuck"
             case "finished": return "done"
             case "error": return "error"
             default: return "idle"
@@ -1292,4 +1309,13 @@ public struct FrontTabs: Codable, Equatable, Sendable {
     public let workspaces: [Workspace]?
     /// Why there is nothing to show; nil when there is.
     public let note: String?
+}
+
+extension ISO8601DateFormatter {
+    /// An ISO timestamp with or without fractional seconds, as the Mac writes either.
+    static func squeakParse(_ text: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+    }
 }

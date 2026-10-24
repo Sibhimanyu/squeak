@@ -102,6 +102,7 @@ enum Presentation {
         case "awaiting_approval": return .init(text: "needs approval", tone: .needsYou)
         case "awaiting_input": return .init(text: "needs an answer", tone: .needsYou)
         case "working":
+            if session.stalled != nil { return .init(text: "seems stuck", tone: .needsYou) }
             guard let phrase = stepPhrase(session.activity?.steps ?? []) else {
                 return .init(text: "working", tone: .working)
             }

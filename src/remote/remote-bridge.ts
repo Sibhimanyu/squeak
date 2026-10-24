@@ -38,6 +38,7 @@ import type { PhoneMediaResult } from "./phone-media.js";
 import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
+import { isStalled } from "../fleet/attention.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
 import type { WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../workflows/types.js";
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
@@ -2882,6 +2883,11 @@ export class RemoteBridge {
       message: text,
       choices: message?.choices ?? null,
       activity: session.state === "working" ? this.activityFor(session) : null,
+      // Working but no word from the model (or only API retries) for long enough that it seems stuck: what it
+      // waits on and since when, so the phone can say so and offer Stop. Absent otherwise; older phones ignore it.
+      ...(isStalled(session, this.now()) && session.waitingSince
+        ? { stalled: { on: session.waitingOn === "api" ? "api" : "model", since: session.waitingSince } }
+        : {}),
       // A finished turn that closes on a question for you ("Want me to open a PR?"): the phone shows it as
       // needing you while the chat stays replyable. Absent otherwise; older phones ignore it and show "done".
       ...(session.state === "finished" && session.asks ? { asks: session.asks } : {}),

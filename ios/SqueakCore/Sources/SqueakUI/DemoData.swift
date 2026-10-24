@@ -94,6 +94,10 @@ enum DemoData {
                 ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-plan") ? plan : question) : nil,
             failure: s.failure)
         titled.workflow = s.workflow; titled.asks = s.asks
+        // `-squeak-demo-stuck`: the Telegram chat has had no word from the model for 14 minutes.
+        if s.key == "tg", ProcessInfo.processInfo.arguments.contains("-squeak-demo-stuck") {
+            titled.stalled = .init(on: "model", since: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-14 * 60)))
+        }
         // The demo's chats run on the models a real Mac names.
         switch s.key {
         case "pay": titled.model = "Opus 5.5 · 1M"; titled.effort = "Medium"; titled.modelId = "opus-5-5-1m"; titled.effortId = "medium"

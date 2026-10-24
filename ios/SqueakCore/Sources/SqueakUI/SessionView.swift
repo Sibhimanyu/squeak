@@ -156,6 +156,11 @@ struct SessionView: View {
                 if session.state == "error" {
                     FailureNotice(reason: Presentation.failureReason(session), canReply: Presentation.replyBlock(session) == nil)
                 }
+                if let stalled = session.stalled, session.state == "working" {
+                    StuckNotice(stalled: stalled, canStop: session.conductorSessionId != nil, stopping: model.isStopping(session.key)) {
+                        Task { await model.stop(session) }
+                    }
+                }
                 if !cards.isEmpty {
                     QueueStack(
                         cards: cards, agentName: Presentation.agentName(session.agent), problems: model.queueProblem,
@@ -341,6 +346,46 @@ private struct FailureNotice: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
         .padding(.horizontal, 16).padding(.bottom, 8)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A working chat with no word from the model for minutes: says what it waits on and for how long, and offers
+/// Conductor's own Stop, after which a reply runs the turn again. The Mac decides it is stuck; this only draws it.
+private struct StuckNotice: View {
+    let stalled: PhoneSnapshot.Session.Stalled
+    let canStop: Bool
+    let stopping: Bool
+    let stop: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            HStack(alignment: .center, spacing: 10) {
+                StatusDot(color: Theme.needsYou)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Seems stuck").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    Text(stalled.line(now: context.date)).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
+                    Text(canStop ? "Stop it, then reply to run the turn again." : "Stop it on your Mac, then try again.")
+                        .font(.footnote).foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 0)
+                if canStop {
+                    Button(action: stop) {
+                        if stopping { ProgressView().controlSize(.small) } else { Text("Stop").font(.subheadline.weight(.semibold)) }
+                    }
+                    .buttonStyle(.bordered).tint(Theme.ink)
+                    .frame(minHeight: 44)
+                    .disabled(stopping)
+                    .accessibilityLabel(stopping ? "Stopping" : "Stop the agent")
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(alignment: .leading) {
+                Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 10).padding(.leading, 4).accessibilityHidden(true)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+            .padding(.horizontal, 16).padding(.bottom, 8)
+        }
     }
 }
 

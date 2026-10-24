@@ -3398,3 +3398,17 @@ describe("RemoteBridge changing a chat's model", () => {
     expect(view).toContain('"effortId":"high"');
   });
 });
+
+describe("RemoteBridge a chat that seems stuck", () => {
+  it("tells the phone what it waits on and since when, only once it has waited long enough", async () => {
+    const f = fixture();
+    const since = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
+    await f.pair();
+    f.emit([session({ state: "working", waitingOn: "model", waitingSince: since(11), stateSource: "transcript" })]);
+    expect(JSON.stringify(f.bridge.phoneView())).toContain(`"stalled":{"on":"model","since":"${since(11)}"}`);
+    f.emit([session({ state: "working", waitingOn: "model", waitingSince: since(4), stateSource: "transcript" })]);
+    expect(JSON.stringify(f.bridge.phoneView())).not.toContain('"stalled"');
+    f.emit([session({ state: "working", waitingOn: "tool", waitingSince: since(40), stateSource: "transcript" })]);
+    expect(JSON.stringify(f.bridge.phoneView())).not.toContain('"stalled"');
+  });
+});
