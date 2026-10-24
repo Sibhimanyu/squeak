@@ -1070,6 +1070,7 @@ final class AppModel {
             if let m = change.muted { controls.muted = m }
             if let b = change.brightness { controls.brightness = b }
             if let f = change.fans { controls.fans?.choice = f; controls.fans?.mode = f }
+            if let held = change.screenAwake { controls.screenAwake = held }
             snapshot?.macControls = controls
             return nil
         }

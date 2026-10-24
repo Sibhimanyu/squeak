@@ -117,13 +117,21 @@ struct MacControlsView: View {
                 }
                 .frame(minHeight: 44)
             }
+            if let held = controls.screenAwake {
+                Toggle("Keep the screen on", isOn: Binding(get: { held }, set: { send(.screenAwake($0)) }))
+                    .tint(Theme.primaryFill)
+                    .frame(minHeight: 44)
+            }
+            Button("Wake the screen") { send(.wakeScreen) }
+                .frame(minHeight: 44)
+                .disabled(busy)
             Button("Turn the screen off") { send(.displaySleep) }
                 .frame(minHeight: 44)
                 .disabled(busy)
         } header: { Text("Display") } footer: {
             Text(controls.brightness == nil
-                 ? "Brightness shows while the Mac's lid is open."
-                 : "The built-in display. Any key or the trackpad wakes the screen.")
+                 ? "With the lid closed the screen stays dark; these work once it is open. Keep the screen on lasts until you turn it off or Squeak stops."
+                 : "Keep the screen on stops the display sleeping until you turn it off or Squeak stops. Your Mac's own sleep is the awake session's job.")
         }
     }
 

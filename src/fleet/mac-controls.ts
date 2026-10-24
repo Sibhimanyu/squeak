@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 
 import { logger } from "../utils/logger.js";
@@ -32,6 +32,8 @@ export type ControlChange =
   | { brightness: number }
   | { fans: FanMode }
   | { displaySleep: true }
+  | { wakeScreen: true }
+  | { screenAwake: boolean }
   | { open: string }
   | { quit: string }
   | { space: "left" | "right" }
@@ -66,6 +68,8 @@ export interface MacControlsState {
     available: boolean;
     rpm: number[];
   };
+  /** The display is held on (`caffeinate -d`) until turned off or Squeak stops. */
+  screenAwake: boolean;
   /** Apps with a Dock icon now; absent without the apps helper. */
   apps?: RunningApp[];
 }
@@ -92,6 +96,10 @@ export function readControlChange(value: unknown): ControlChange | null {
       return isFanMode(v) ? { fans: v } : null;
     case "displaySleep":
       return v === true ? { displaySleep: true } : null;
+    case "wakeScreen":
+      return v === true ? { wakeScreen: true } : null;
+    case "screenAwake":
+      return typeof v === "boolean" ? { screenAwake: v } : null;
     case "open":
       return typeof v === "string" && BUNDLE_ID.test(v) ? { open: v } : null;
     case "quit":
@@ -126,6 +134,10 @@ export interface ControlsSystem {
   brightness(): Promise<number | null>;
   setBrightness(percent: number): Promise<boolean>;
   displaySleep(): Promise<boolean>;
+  /** Counts as the user touching the Mac (`caffeinate -u`), which lights a sleeping display. */
+  wakeScreen(): Promise<boolean>;
+  /** Holds the display on (a `caffeinate -d` child that dies with the daemon), or lets it go. */
+  holdScreen(on: boolean): boolean;
   /** Null without the apps helper. */
   running(): Promise<RunningApp[] | null>;
   installed(): Promise<MacApp[]>;
@@ -138,8 +150,9 @@ export interface ControlsSystem {
 const INSTALLED_FRESH_MS = 10 * 60_000;
 
 export class MacControls {
-  private last: Omit<MacControlsState, "fans"> = { volume: null, muted: null, brightness: null };
+  private last: Omit<MacControlsState, "fans" | "screenAwake"> = { volume: null, muted: null, brightness: null };
   private installedCache: { at: number; apps: MacApp[] } | null = null;
+  private screenAwake = false;
 
   constructor(
     private readonly system: ControlsSystem,
@@ -151,6 +164,7 @@ export class MacControls {
     const heat = this.heat.state;
     return {
       ...this.last,
+      screenAwake: this.screenAwake,
       fans: { mode: heat.fanMode, choice: heat.fanChoice, available: heat.fanControl, rpm: heat.fansRpm },
     };
   }
@@ -216,6 +230,11 @@ export class MacControls {
     } else if ("brightness" in change) {
       ok = await this.system.setBrightness(change.brightness);
       if (!ok) return { ok: false, reason: "Brightness only changes while the Mac's lid is open." };
+    } else if ("wakeScreen" in change) {
+      ok = await this.system.wakeScreen();
+    } else if ("screenAwake" in change) {
+      ok = this.system.holdScreen(change.screenAwake);
+      if (ok) this.screenAwake = change.screenAwake;
     } else {
       ok = await this.system.displaySleep();
     }
@@ -224,6 +243,12 @@ export class MacControls {
     await this.refresh();
     this.onChange();
     return { ok: true, state: this.state };
+  }
+
+  /** Squeak is stopping: the display may sleep again. */
+  stop(): void {
+    if (this.screenAwake) this.system.holdScreen(false);
+    this.screenAwake = false;
   }
 }
 
@@ -250,7 +275,24 @@ export function macControlsSystem(
       return null;
     }
   };
+  let screenHold: ChildProcess | null = null;
   return {
+    async wakeScreen() {
+      return (await run("/usr/bin/caffeinate", ["-u", "-t", "2"])).ok;
+    },
+    holdScreen(on) {
+      if (!on) {
+        screenHold?.kill();
+        screenHold = null;
+        return true;
+      }
+      if (screenHold && screenHold.exitCode === null) return true;
+      // -w: it ends with the daemon, so a crash cannot leave the display held on for good.
+      screenHold = spawn("/usr/bin/caffeinate", ["-d", "-w", String(process.pid)], { stdio: "ignore" });
+      screenHold.on("error", () => (screenHold = null));
+      screenHold.unref();
+      return true;
+    },
     running: () => json<RunningApp[]>(["running"]),
     installed: async () => (await json<MacApp[]>(["installed"])) ?? [],
     // Ids only reach here after BUNDLE_ID and a membership check.

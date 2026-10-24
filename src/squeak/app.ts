@@ -567,6 +567,7 @@ export class SqueakApp {
     if (this.safetyTimer) clearInterval(this.safetyTimer);
     if (this.heatTimer) clearInterval(this.heatTimer);
     if (this.liveControlsTimer) clearInterval(this.liveControlsTimer);
+    this.controls.stop();
     await this.heat.stop().catch(() => undefined);
     if (this.projectIconsTimer) clearInterval(this.projectIconsTimer);
     await this.lidActions.stop().catch(() => undefined);

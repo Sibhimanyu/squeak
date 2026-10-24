@@ -70,6 +70,8 @@ describe("MacControls", () => {
       brightness: async () => 57,
       setBrightness: async (b) => (calls.push(`brightness ${b}`), options.brightnessWorks !== false),
       displaySleep: async () => (calls.push("displaySleep"), true),
+      wakeScreen: async () => (calls.push("wakeScreen"), true),
+      holdScreen: (on) => (calls.push(`holdScreen ${on}`), true),
       running: async () => [{ id: "com.apple.Safari", name: "Safari", active: true }],
       installed: async () => [
         { id: "com.apple.Safari", name: "Safari" },
@@ -140,5 +142,16 @@ describe("MacControls", () => {
     await t.controls.apply({ media: "playPause" });
     await t.controls.apply({ lock: true });
     expect(t.calls).toEqual(["key space-right", "key play-pause", "key lock"]);
+  });
+
+  it("wakes the screen, and holds it on until turned off or Squeak stops", async () => {
+    const t = setup();
+    await t.controls.apply({ wakeScreen: true });
+    expect(await t.controls.apply({ screenAwake: true })).toMatchObject({ ok: true, state: { screenAwake: true } });
+    t.controls.stop();
+    expect(t.controls.state.screenAwake).toBe(false);
+    expect(t.calls).toEqual(["wakeScreen", "holdScreen true", "holdScreen false"]);
+    expect(readControlChange({ screenAwake: "yes" })).toBeNull();
+    expect(readControlChange({ wakeScreen: false })).toBeNull();
   });
 });

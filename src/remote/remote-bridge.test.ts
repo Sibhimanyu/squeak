@@ -2270,6 +2270,7 @@ describe("RemoteBridge live controls from the phone", () => {
       volume: 40,
       muted: false,
       brightness: 57,
+      screenAwake: false,
       fans: { mode: "auto" as const, choice: "auto" as const, available: true, rpm: [2300, 2500] },
     };
     const apply = vi.fn(async () => ({ ok: true as const, state }));
