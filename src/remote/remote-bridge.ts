@@ -39,6 +39,7 @@ import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
 import { isStalled } from "../fleet/attention.js";
+import { resolveSetup } from "../fleet/chat-setup.js";
 import type { BackgroundTask } from "../fleet/background-work.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
 import type { WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../workflows/types.js";
@@ -1974,13 +1975,7 @@ export class RemoteBridge {
       this.log(device.name, "rejected", `setup: ${reason}`);
       return { write: true, result: { id, status: "refused", reason } };
     };
-    if (
-      command.v !== 1 ||
-      typeof command.sessionId !== "string" ||
-      typeof command.model !== "string" ||
-      (command.thinking !== undefined && typeof command.thinking !== "string") ||
-      (command.fast !== undefined && typeof command.fast !== "boolean")
-    ) {
+    if (command.v !== 1 || typeof command.sessionId !== "string") {
       return refuse("Not a request this Mac understands.");
     }
     const replier = this.deps.replier;
@@ -1991,40 +1986,20 @@ export class RemoteBridge {
     if (!session || session.closed === true) {
       return refuse("That chat isn't on your phone any more.");
     }
-    if (session.agent !== "claude" && session.agent !== "codex") {
-      return refuse("This chat's agent has no models to pick from.");
-    }
     let models: ChatModel[];
     try {
       models = this.deps.newChat?.models?.() ?? [];
     } catch {
       models = [];
     }
-    const offered = models.find((candidate) => candidate.id === command.model && candidate.agent === session.agent);
-    if (!offered) {
-      return refuse("That model isn't one this Mac offers for this chat's agent. Pick another.");
-    }
-    // The level: the one asked for, else the chat's own if this model takes it, else the model's default.
-    let thinking: string | undefined;
-    if (command.thinking !== undefined) {
-      if (!offered.levels.includes(command.thinking)) {
-        return refuse("That thinking level isn't available for that model.");
-      }
-      thinking = command.thinking;
-    } else if (session.effortId && offered.levels.includes(session.effortId)) {
-      thinking = session.effortId;
-    } else if (offered.defaultLevel && offered.levels.includes(offered.defaultLevel)) {
-      thinking = offered.defaultLevel;
-    } else {
-      thinking = offered.levels.at(-1);
-    }
-    const fastMode = command.fast ?? session.fast === true;
+    const setup = resolveSetup(models, session, command);
+    if (!setup.ok) return refuse(setup.reason);
     let outcome: { ok: true } | { ok: false; reason: string };
     try {
       outcome = await replier.setSetup(command.sessionId, {
-        model: offered.id,
-        ...(thinking ? { thinkingLevel: thinking } : {}),
-        fastMode,
+        model: setup.model,
+        ...(setup.thinkingLevel ? { thinkingLevel: setup.thinkingLevel } : {}),
+        fastMode: setup.fastMode,
       });
     } catch (error) {
       outcome = { ok: false, reason: error instanceof Error ? error.message : "Conductor didn't take that change." };
@@ -2033,7 +2008,7 @@ export class RemoteBridge {
       this.log(device.name, "refused", `setup: ${outcome.reason}`);
       return { write: true, result: { id, status: "refused", reason: outcome.reason } };
     }
-    this.log(device.name, "sent", `${command.sessionId.slice(0, 8)} now runs ${offered.label}`);
+    this.log(device.name, "sent", `${command.sessionId.slice(0, 8)} now runs ${setup.label}`);
     this.nudgePublish(1_000);
     return { write: true, result: { id, status: "sent" } };
   }

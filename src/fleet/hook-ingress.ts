@@ -90,6 +90,13 @@ export interface IngressControl {
   workspaces?(): unknown;
   /** Start a new chat in a workspace (validated by the implementation). */
   startChat?(body: { workspaceId?: unknown; agent?: unknown; text?: unknown }): Promise<unknown>;
+  /**
+   * A chat action from the Mac app: `stop` (Conductor's Stop), `setup` (`{ model, thinking?, fast? }`), `pr`
+   * (ask a resting chat to open a pull request). The models it may pick from are `GET /control/models`.
+   */
+  sessionAction?(sessionId: string, action: "stop" | "setup" | "pr", body: Record<string, unknown>): Promise<unknown>;
+  /** The models a chat can run, as Conductor's picker lists them. */
+  chatModels?(): unknown;
   /** Repositories a new workspace can be made in. */
   workspaceRepos?(): unknown;
   /** `{ action: "archive", workspaceId }` or `{ action: "create", repoId }`, through Conductor's relay. */
@@ -421,6 +428,24 @@ export class HookIngressServer {
       return;
     }
 
+    if ((request.url ?? "").split("?")[0] === "/control/models") {
+      request.resume();
+      if (request.method !== "GET" || !control.chatModels) {
+        respond(
+          response,
+          control.chatModels ? 405 : 503,
+          control.chatModels ? "method not allowed" : "models unavailable",
+        );
+        return;
+      }
+      try {
+        respondJson(response, 200, { models: control.chatModels() });
+      } catch {
+        respond(response, 500, "unavailable");
+      }
+      return;
+    }
+
     if ((request.url ?? "").split("?")[0] === "/control/power/rule") {
       request.resume();
       const rule = control.powerRule?.() ?? null;
@@ -612,7 +637,7 @@ export class HookIngressServer {
 
     // A Conductor chat id, or the fleet key of a terminal agent (`claude-transcript:<uuid>`).
     const match =
-      /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity|transcript|question|answer)$/.exec(
+      /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity|transcript|question|answer|stop|setup|pr)$/.exec(
         (request.url ?? "").split("?")[0] ?? "",
       );
     if (!match) {
@@ -623,8 +648,51 @@ export class HookIngressServer {
     const [, sessionId, action] = match as unknown as [
       string,
       string,
-      "message" | "reply" | "activity" | "transcript" | "question" | "answer",
+      "message" | "reply" | "activity" | "transcript" | "question" | "answer" | "stop" | "setup" | "pr",
     ];
+
+    if ((action === "stop" || action === "setup" || action === "pr") && request.method === "POST") {
+      const run = control.sessionAction;
+      if (!run) {
+        respond(response, 503, "chat actions unavailable");
+        request.resume();
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) return;
+        let parsed: Record<string, unknown>;
+        try {
+          const value: unknown = JSON.parse(body || "{}");
+          if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("not an object");
+          parsed = value as Record<string, unknown>;
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        run(sessionId, action, parsed)
+          .then((outcome) => respondJson(response, 200, outcome))
+          .catch((error: unknown) => {
+            logger.warn("control chat action failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            respond(response, 500, "chat action failed");
+          });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
 
     if (action === "question" && request.method === "GET") {
       request.resume();
