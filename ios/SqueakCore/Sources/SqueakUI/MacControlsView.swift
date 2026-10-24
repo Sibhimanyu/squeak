@@ -44,6 +44,13 @@ struct MacControlsView: View {
             if let problem {
                 Section { Text(problem).foregroundStyle(Theme.muted) }
             }
+            Section {
+                LabeledContent("Connection", value: model.controlsLive ? "Same Wi-Fi · live" : "Through the cloud")
+            } footer: {
+                Text(model.controlsLive
+                     ? "On the same Wi-Fi, sliders move your Mac as you drag, and changes on the Mac show here within a few seconds."
+                     : "Through the cloud a change goes when you let go. On the same Wi-Fi as your Mac, the controls are live.")
+            }
         }
         .navigationTitle("Mac controls")
         .navigationBarTitleDisplayMode(.inline)
@@ -66,7 +73,7 @@ struct MacControlsView: View {
             if let current = controls.volume {
                 HStack(spacing: 12) {
                     Image(systemName: "speaker.fill").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    Slider(value: Binding(get: { volume ?? Double(current) }, set: { volume = $0 }), in: 0...100, step: 1) { editing in
+                    Slider(value: Binding(get: { volume ?? Double(current) }, set: { volume = $0; model.changeControlLive(.volume(Int($0))) }), in: 0...100, step: 1) { editing in
                         if !editing, let volume { send(.volume(Int(volume))) }
                     }
                     .tint(Theme.primaryFill)
@@ -90,7 +97,7 @@ struct MacControlsView: View {
             if let current = controls.brightness {
                 HStack(spacing: 12) {
                     Image(systemName: "sun.min").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    Slider(value: Binding(get: { brightness ?? Double(current) }, set: { brightness = $0 }), in: 0...100, step: 1) { editing in
+                    Slider(value: Binding(get: { brightness ?? Double(current) }, set: { brightness = $0; model.changeControlLive(.brightness(Int($0))) }), in: 0...100, step: 1) { editing in
                         if !editing, let brightness { send(.brightness(Int(brightness))) }
                     }
                     .tint(Theme.primaryFill)

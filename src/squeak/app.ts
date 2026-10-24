@@ -145,6 +145,8 @@ export class SqueakApp {
   /** Temperatures and fans while an awake session runs (fleet/heat.ts). */
   private readonly heat: HeatGovernor;
   private heatTimer: NodeJS.Timeout | null = null;
+  /** Volume and brightness every 2 s while a phone is on the direct path, so a Mac-side change shows live. */
+  private liveControlsTimer: NodeJS.Timeout | null = null;
   /** Volume, brightness and fans from the phone's Mac controls page (fleet/mac-controls.ts). */
   private readonly controls: MacControls;
   /** The Mac's last battery/heat/lid reading, for the phone; refreshed once a minute. */
@@ -491,6 +493,10 @@ export class SqueakApp {
     // Heat is looked at every 15 s, but acted on only during an awake session.
     this.heatTimer = setInterval(() => void this.checkHeat(), HEAT_CHECK_MS);
     this.heatTimer.unref?.();
+    this.liveControlsTimer = setInterval(() => {
+      if (this.localChannel?.hasPhone() && this.remote?.isPhoneOpen()) void this.controls.refresh();
+    }, 2_000);
+    this.liveControlsTimer.unref?.();
     // Conductor's repository icons, read now and every few minutes (they change when someone sets one).
     void this.refreshProjectIcons();
     this.projectIconsTimer = setInterval(() => void this.refreshProjectIcons(), 5 * 60_000);
@@ -554,6 +560,7 @@ export class SqueakApp {
     if (this.lidRuleTimer) clearInterval(this.lidRuleTimer);
     if (this.safetyTimer) clearInterval(this.safetyTimer);
     if (this.heatTimer) clearInterval(this.heatTimer);
+    if (this.liveControlsTimer) clearInterval(this.liveControlsTimer);
     await this.heat.stop().catch(() => undefined);
     if (this.projectIconsTimer) clearInterval(this.projectIconsTimer);
     await this.lidActions.stop().catch(() => undefined);

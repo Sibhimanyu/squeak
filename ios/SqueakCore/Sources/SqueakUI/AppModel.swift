@@ -1086,6 +1086,34 @@ final class AppModel {
         }
     }
 
+    @ObservationIgnored private var liveSending = false
+    @ObservationIgnored private var livePending: ControlsCommand.Change?
+
+    /// Whether a slider can move the Mac as it moves: only on the direct same-Wi-Fi path, where a command is
+    /// one local request. Through the cloud each one is a database round trip, so it waits for the release.
+    var controlsLive: Bool { route == .local && !demo }
+
+    /// A slider moving on the direct path: the newest value only, one command at a time, without waiting for
+    /// the Mac's answer (the release still sends through `changeControl`, which does).
+    func changeControlLive(_ change: ControlsCommand.Change) {
+        guard controlsLive, let channel else { return }
+        if liveSending { livePending = change; return }
+        liveSending = true
+        let signer = signer
+        Task { [weak self] in
+            var next: ControlsCommand.Change? = change
+            while let current = next {
+                if let (id, document) = try? channel.controlsDocument(current, signer: signer) {
+                    try? await channel.send(document, id: id)
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+                next = self?.livePending
+                self?.livePending = nil
+            }
+            self?.liveSending = false
+        }
+    }
+
     enum HotspotChange { case configure(ssid: String, password: String?, enabled: Bool), join, leave }
 
     /// Sets up hotspot failover, or switches the Mac's network now. Face ID first: it changes how the

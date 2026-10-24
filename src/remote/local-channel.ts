@@ -215,6 +215,11 @@ export class LocalChannelServer {
   }
 
   /** What the phone's sealed view says about this path; null when nothing is being served. */
+  /** Whether a paired phone holds a stream on the direct path now (every stream passed the HMAC check). */
+  hasPhone(): boolean {
+    return this.streams.size > 0;
+  }
+
   endpoint(): LocalEndpoint | null {
     const resolved = this.sync();
     const port = this.port;
