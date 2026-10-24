@@ -10,12 +10,17 @@ function fake(front: { id: string; name: string } | null) {
   const system: TabsSystem = {
     front: async () => front,
     hands: vi.fn(async (request) =>
-      request.action === "select" && request.title !== tabs[request.index ?? -1]?.title
-        ? { ok: false as const, reason: "That tab moved or closed. The list has been read again." }
-        : { ok: true as const, tabs },
+      request.bundleId === "com.conductor.app"
+        ? { ok: true as const, tabs: [], conductor: { workspaceId: "w2", sessionId: "chat-0002" } }
+        : request.action === "select" && request.title !== tabs[request.index ?? -1]?.title
+          ? { ok: false as const, reason: "That tab moved or closed. The list has been read again." }
+          : { ok: true as const, tabs },
     ),
     showChat: vi.fn(async () => null),
-    conductor: () => [{ id: "w1", name: "squeak · main", chats: [{ id: "chat-0001", title: "Fans", working: false }] }],
+    conductor: () => [
+      { id: "w1", name: "squeak · main", repo: "squeak", chats: [{ id: "chat-0001", title: "Fans", working: false }] },
+      { id: "w2", name: "farm · arm", repo: "farm", chats: [{ id: "chat-0002", title: "Timer", working: true }] },
+    ],
     chat: (id) => (id === "chat-0001" ? { workspaceId: "w1", title: "Fans" } : null),
   };
   return { tabs: new WindowTabs(system), system };
@@ -30,9 +35,17 @@ describe("WindowTabs", () => {
     });
     expect(await fake({ id: "com.conductor.app", name: "Conductor" }).tabs.list()).toMatchObject({
       kind: "conductor",
-      workspaces: [{ name: "squeak · main", chats: [{ id: "chat-0001" }] }],
+      workspaces: [{ name: "farm · arm" }, { name: "squeak · main", chats: [{ id: "chat-0001" }] }],
     });
     expect(await fake(null).tabs.list()).toMatchObject({ kind: "none" });
+    // The workspace and chat on screen come first and are marked.
+    const conductor = await fake({ id: "com.conductor.app", name: "Conductor" }).tabs.list();
+    expect(conductor.workspaces?.[0]).toMatchObject({
+      id: "w2",
+      current: true,
+      chats: [{ id: "chat-0002", current: true }],
+    });
+    expect(conductor.workspaces?.[1]).not.toHaveProperty("current");
   });
 
   it("presses a tab only while it still has the title the phone saw", async () => {

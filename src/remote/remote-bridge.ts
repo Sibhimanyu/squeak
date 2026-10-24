@@ -538,7 +538,8 @@ export interface RemoteBridgeDependencies {
     apply(
       change: ControlChange,
     ): Promise<
-      { ok: true; state: MacControlsState; apps?: MacApp[]; tabs?: FrontTabs } | { ok: false; reason: string }
+      | { ok: true; state: MacControlsState; apps?: MacApp[]; tabs?: FrontTabs; icons?: Record<string, string> }
+      | { ok: false; reason: string }
     >;
   };
   hotspot?: {
@@ -2404,6 +2405,7 @@ export class RemoteBridge {
         status: "sent",
         ...(outcome.apps ? { apps: outcome.apps } : {}),
         ...(outcome.tabs ? { tabs: outcome.tabs } : {}),
+        ...(outcome.icons ? { icons: outcome.icons } : {}),
       },
     };
   }

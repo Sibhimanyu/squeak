@@ -1128,6 +1128,9 @@ public struct ControlsCommand: Codable, Equatable, Sendable {
         public var listApps: Bool?
         /// The front app's tabs (Conductor: its workspaces and chats), answered in the result.
         public var listTabs: Bool?
+        /// The icons of these apps (bundle ids, at most 12), answered in the result as base64 PNGs.
+        public var appIcons: [String]?
+        public static func appIcons(_ ids: [String]) -> Change { Change(appIcons: Array(ids.prefix(12))) }
         public var selectTab: SelectTab?
         public var showChat: ShowChat?
         public struct SelectTab: Codable, Equatable, Sendable {
@@ -1221,6 +1224,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var apps: [PhoneSnapshot.MacApp]? = nil
     /// For a controls `listTabs`, `selectTab` or `showChat`: the front app's tabs as they are now.
     public var tabs: FrontTabs? = nil
+    /// For a controls `appIcons`: bundle id → base64 PNG.
+    public var icons: [String: String]? = nil
     /// For a `stats` request: detailed usage over the range asked for.
     public var stats: UsageStatsView? = nil
 
@@ -1249,11 +1254,17 @@ public struct FrontTabs: Codable, Equatable, Sendable {
         public let id: String
         public let title: String
         public let working: Bool
+        /// On screen in Conductor now.
+        public let current: Bool?
     }
     public struct Workspace: Codable, Equatable, Sendable, Identifiable {
         public let id: String
         /// "repo · branch".
         public let name: String
+        /// The repo alone, for its project icon.
+        public let repo: String?
+        /// On screen in Conductor now.
+        public let current: Bool?
         public let chats: [Chat]
     }
     public let app: App?
