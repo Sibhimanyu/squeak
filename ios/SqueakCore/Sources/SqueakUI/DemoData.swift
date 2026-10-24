@@ -94,6 +94,16 @@ enum DemoData {
                 ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-plan") ? plan : question) : nil,
             failure: s.failure)
         titled.workflow = s.workflow; titled.asks = s.asks
+        // The Telegram chat has two workers out and a test run beside its turn.
+        if s.key == "tg" {
+            let ago = { (minutes: Double) in ISO8601DateFormatter().string(from: Date().addingTimeInterval(-minutes * 60)) }
+            titled.background = [
+                .init(id: "t1", kind: "agent", label: "Find every caller of splitMarkdown", status: "done", background: true,
+                      startedAt: ago(9), endedAt: ago(4), summary: "Agent \"Find every caller of splitMarkdown\" finished"),
+                .init(id: "t2", kind: "agent", label: "Check tables in Telegram's HTML", status: "running", background: true, startedAt: ago(6)),
+                .init(id: "t3", kind: "shell", label: "Run the whole suite", status: "running", background: true, startedAt: ago(2)),
+            ]
+        }
         // `-squeak-demo-stuck`: the Telegram chat has had no word from the model for 14 minutes.
         if s.key == "tg", ProcessInfo.processInfo.arguments.contains("-squeak-demo-stuck") {
             titled.stalled = .init(on: "model", since: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-14 * 60)))

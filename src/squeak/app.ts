@@ -40,6 +40,7 @@ import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { closeChat } from "../fleet/close-chat.js";
 import { readActivity } from "../fleet/activity.js";
+import { BackgroundWorkReader } from "../fleet/background-work.js";
 import { parseChoices } from "../fleet/choices.js";
 import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
@@ -135,6 +136,7 @@ export class SqueakApp {
   private readonly assistant: FleetAssistant;
   /** Claude's plan limits, as the assistant's own `claude` runs last reported them. */
   private readonly claudeLimits: ClaudeLimitsStore;
+  private readonly backgroundWork = new BackgroundWorkReader();
   private readonly claudeRefresher: ClaudeLimitsRefresher;
   /** Keeps the Mac awake while an agent works, and while plugged in (SQUEAK_CAFFEINATE). */
   private readonly caffeinator: Caffeinator;
@@ -361,6 +363,8 @@ export class SqueakApp {
             onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
             activity: (session) =>
               session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null,
+            background: (session) =>
+              session.transcriptPath ? this.backgroundWork.read(session.transcriptPath, Date.now()) : [],
             // A question's prompts, or a plan waiting on approval with its text (the phone's plan card).
             question: (session) =>
               session.agent === "claude" && session.transcriptPath ? readPendingAsk(session.transcriptPath) : null,

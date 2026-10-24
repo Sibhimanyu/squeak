@@ -39,6 +39,7 @@ import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
 import { isStalled } from "../fleet/attention.js";
+import type { BackgroundTask } from "../fleet/background-work.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
 import type { WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../workflows/types.js";
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
@@ -169,6 +170,18 @@ export interface AttachCommand {
  * same provider), its thinking level, and fast mode. Absent level or fast: the chat keeps what it has,
  * or the model's default level when its current one does not apply.
  */
+/** One subagent or background shell, as the phone draws it. */
+export interface PhoneBackgroundTask {
+  id: string;
+  kind: "agent" | "shell";
+  label: string;
+  status: "running" | "done" | "failed" | "stopped";
+  background?: true;
+  startedAt?: string;
+  endedAt?: string;
+  summary?: string;
+}
+
 export interface SetupCommand {
   v: 1;
   kind: "setup";
@@ -534,6 +547,8 @@ export interface RemoteBridgeDependencies {
    * phone shows only the last message, as before.
    */
   activity?: ((session: FleetSession) => Activity | null) | null;
+  /** A working Claude chat's subagents and background shells (fleet/background-work.ts). Absent: none shown. */
+  background?: ((session: FleetSession) => BackgroundTask[]) | null;
   /** Workspaces a phone may start a chat in, and the way to start one. */
   newChat?: RemoteChatStarter | null;
   /** Renames a Conductor chat (its title in Conductor's own database). Absent: renames are refused. */
@@ -2883,6 +2898,9 @@ export class RemoteBridge {
       message: text,
       choices: message?.choices ?? null,
       activity: session.state === "working" ? this.activityFor(session) : null,
+      // Subagents and background shells while the chat works: what each is, and whether it still runs. Absent
+      // when there are none; older phones ignore it.
+      ...this.backgroundFor(session),
       // Working but no word from the model (or only API retries) for long enough that it seems stuck: what it
       // waits on and since when, so the phone can say so and offer Stop. Absent otherwise; older phones ignore it.
       ...(isStalled(session, this.now()) && session.waitingSince
@@ -2981,6 +2999,31 @@ export class RemoteBridge {
   }
 
   /** Read once per step: the key moves with the session's activity. */
+  private backgroundFor(session: FleetSession): { background?: PhoneBackgroundTask[] } {
+    if (session.state !== "working" || session.agent !== "claude" || !this.deps.background) return {};
+    try {
+      const tasks = this.deps.background(session);
+      if (tasks.length === 0) return {};
+      return {
+        background: tasks.map((task) => ({
+          id: task.id,
+          kind: task.kind,
+          label: task.label,
+          status: task.status,
+          ...(task.background ? { background: true } : {}),
+          ...(task.startedAt ? { startedAt: task.startedAt } : {}),
+          ...(task.endedAt ? { endedAt: task.endedAt } : {}),
+          ...(task.summary ? { summary: task.summary } : {}),
+        })),
+      };
+    } catch (error) {
+      logger.debug("could not read background work for the phone", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {};
+    }
+  }
+
   private activityFor(session: FleetSession): PhoneActivity | null {
     const read = this.deps.activity;
     if (!read) {
