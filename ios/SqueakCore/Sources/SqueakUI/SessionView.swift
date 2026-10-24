@@ -927,6 +927,16 @@ struct PlanCard: View {
     @State private var sending = false
     @State private var result: (delivered: Bool, line: String)?
     @FocusState private var noteFocused: Bool
+    /// When set (the Needs you card), the send's state is reported up to the card's top status line
+    /// instead of being printed here.
+    var report: Binding<NeedsYou.Receipt?>? = nil
+
+    private var receipt: NeedsYou.Receipt? {
+        if sending { return .init(phase: .sending, line: "Sending…", sendId: nil, summary: nil) }
+        guard let result else { return nil }
+        return result.delivered ? .init(phase: .sent, line: result.line, sendId: nil, summary: result.line)
+            : .init(phase: .failed, line: result.line, sendId: nil, summary: nil)
+    }
 
     private var canAnswer: Bool { session.question?.toolUseId != nil && session.conductorSessionId != nil }
 
@@ -937,7 +947,7 @@ struct PlanCard: View {
                 .padding(14)
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
-            if let result, result.delivered {
+            if let result, result.delivered, report == nil {
                 Label { Text(result.line) } icon: { Lucide(.check, size: 14, color: Theme.muted) }
                     .font(.footnote).foregroundStyle(Theme.muted)
             } else if canAnswer {
@@ -969,7 +979,7 @@ struct PlanCard: View {
                         .disabled(sending)
                     }
                 }
-                if let result, !result.delivered, !result.line.isEmpty {
+                if let result, !result.delivered, !result.line.isEmpty, report == nil {
                     Text(result.line).font(.footnote).foregroundStyle(Theme.muted)
                 }
             } else {
@@ -978,6 +988,7 @@ struct PlanCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: receipt) { _, new in report?.wrappedValue = new }
     }
 
     private func send(approve: Bool) {
@@ -1004,6 +1015,16 @@ struct QuestionCard: View {
     @State private var otherOpen: Set<Int> = []
     @State private var sending = false
     @State private var result: (delivered: Bool, line: String)?
+    @State private var summary: String?
+    /// When set (the Needs you card), the send's state is reported up to the card's top status line.
+    var report: Binding<NeedsYou.Receipt?>? = nil
+
+    private var receipt: NeedsYou.Receipt? {
+        if sending { return .init(phase: .sending, line: "Sending…", sendId: nil, summary: nil) }
+        guard let result else { return nil }
+        return result.delivered ? .init(phase: .sent, line: result.line, sendId: nil, summary: summary)
+            : .init(phase: .failed, line: result.line, sendId: nil, summary: nil)
+    }
 
     /// The Mac names the pending call only once it can take answers; until then the card is to read.
     private var canAnswer: Bool { question.toolUseId != nil && session?.conductorSessionId != nil }
@@ -1037,6 +1058,7 @@ struct QuestionCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .disabled(sending || answered)
+        .onChange(of: receipt) { _, new in report?.wrappedValue = new }
     }
 
     private func optionRow(_ option: PhoneSnapshot.Question.Prompt.Option, prompt: PhoneSnapshot.Question.Prompt, index: Int) -> some View {
@@ -1115,6 +1137,9 @@ struct QuestionCard: View {
                                 other: (other[i] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : other[i])
                         }
                         sending = true
+                        summary = NeedsYou.clip(question.questions.indices.flatMap { i in
+                            Array(picked[i] ?? []).sorted() + [(other[i] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)].filter { !$0.isEmpty }
+                        }.joined(separator: ", "))
                         Task {
                             let outcome = await model.answer(answers, to: session)
                             sending = false
@@ -1133,7 +1158,7 @@ struct QuestionCard: View {
                     .disabled(!complete || sending)
                 }
                 if let result {
-                    Text(result.line).font(.footnote).foregroundStyle(result.delivered ? Theme.muted : Theme.needsYou)
+                    if report == nil { Text(result.line).font(.footnote).foregroundStyle(result.delivered ? Theme.muted : Theme.needsYou) }
                 } else {
                     Text("Goes to \(agentName) in Conductor. If Conductor can't take it directly, Squeak stops the question and sends your answer as a message.")
                         .font(.footnote).foregroundStyle(Theme.muted)
@@ -1219,6 +1244,8 @@ struct OptionsView: View {
     let choices: PhoneSnapshot.Choices
     let details: [String: String]
     let disabled: Bool
+    /// The text of the option being sent right now: it shows a spinner and the others dim.
+    var sending: String? = nil
     let onPick: (String) -> Void
 
     var body: some View {
@@ -1232,10 +1259,14 @@ struct OptionsView: View {
                 let split = Presentation.splitOption(option.title)
                 let detail = split.detail ?? details[option.letter]
                 let recommended = option.letter == choices.recommended
+                let isSending = sending != nil && sending == option.sent
                 Button { onPick(option.sent) } label: {
                     HStack(alignment: .top, spacing: 12) {
-                        Text(option.letter).font(.body.weight(.bold)).frame(width: 32, height: 32)
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.lineStrong))
+                        Group {
+                            if isSending { ProgressView() } else { Text(option.letter).font(.body.weight(.bold)) }
+                        }
+                        .frame(width: 32, height: 32)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.lineStrong))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(split.title).font(.body.weight(.semibold)).multilineTextAlignment(.leading)
                             if let detail {
@@ -1254,9 +1285,9 @@ struct OptionsView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(disabled)
-                .opacity(disabled ? 0.55 : 1)
+                .opacity(disabled && !isSending ? 0.55 : 1)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(option.letter): \(split.title)\(detail.map { ". \($0)" } ?? "")\(recommended ? ", recommended" : "")")
+                .accessibilityLabel("\(isSending ? "Sending. " : "")\(option.letter): \(split.title)\(detail.map { ". \($0)" } ?? "")\(recommended ? ", recommended" : "")")
                 .accessibilityHint("Sends \(option.letter) to your Mac")
                 .accessibilityAddTraits(.isButton)
             }

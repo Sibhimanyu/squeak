@@ -164,4 +164,49 @@ enum NeedsYou {
         case .sent, .queued, .steered, .read: return .sent
         }
     }
+
+    /// The status line at the top of a card: where the answer stands, in one place for every control.
+    struct Receipt: Equatable {
+        enum Phase: Equatable { case sending, sent, failed }
+        let phase: Phase
+        /// "Sending…", the failure's own words.
+        let line: String
+        /// Only a failed send from the outbox has one: Send again and Edit act on it.
+        let sendId: UUID?
+        /// What was sent, clipped to one line.
+        let summary: String?
+
+        /// What the card shows: once sent the body collapses to this under the header.
+        var display: String {
+            guard phase == .sent else { return line }
+            guard let summary, !summary.isEmpty else { return "Sent" }
+            return "Sent · \(summary)"
+        }
+        /// A sent card keeps only the header and this line, until the Mac says the chat no longer needs you.
+        var collapsesBody: Bool { phase == .sent }
+    }
+
+    /// One line, whitespace folded, at most `limit` characters with an ellipsis.
+    static func clip(_ text: String, to limit: Int = 60) -> String {
+        let flat = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard flat.count > limit else { return flat }
+        return String(flat.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    /// The receipt for the answer sent from this card (outbox), nil when nothing was sent for this turn.
+    static func receipt(of sends: [ChatSend], for session: PhoneSnapshot.Session) -> Receipt? {
+        let summary = sends.last(where: { $0.answersTurn == session.turnId }).map { clip($0.text) }
+        switch outcome(of: sends, for: session) {
+        case .none: return nil
+        case .sending: return Receipt(phase: .sending, line: "Sending…", sendId: nil, summary: summary)
+        case .sent: return Receipt(phase: .sent, line: "Sent · waiting for the agent", sendId: nil, summary: summary)
+        case .failed(let line, let id): return Receipt(phase: .failed, line: line, sendId: id, summary: summary)
+        }
+    }
+
+    /// The text of the send in flight for this turn, so the tapped option can show the spinner.
+    static func sendingText(of sends: [ChatSend], for session: PhoneSnapshot.Session) -> String? {
+        guard outcome(of: sends, for: session) == .sending else { return nil }
+        return sends.last(where: { $0.answersTurn == session.turnId })?.text
+    }
 }

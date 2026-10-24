@@ -636,6 +636,10 @@ interaction on the phone and in Telegram.
 - The recommended option is marked with the word **recommended** in `muted`
   (Telegram: `★` on the letter button). It is *not* pre-selected or coloured —
   the choice stays the user's.
+- On the phone's Needs you page the card carries no red edge or dot (the tab
+  already says it): the header reads `project · branch · age`, and the status
+  line (sending, `Sent · <what>`, or the failure, the only red) sits directly
+  under it; a sent card collapses to header plus that line.
 - After a tap the card collapses to a receipt: `✓ Sent B in Conductor` (or
   `in the background`, with the reason). A receipt is not tappable again.
 - Options that could cause irreversible effects are not special-cased
