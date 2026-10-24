@@ -24,6 +24,7 @@ let (hotspotId, hotspotDocument) = try channel.hotspotDocument(
     action: .configure, ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true, signer: signer, now: madeAt)
 let (lidId, lidDocument) = try channel.lidActionsDocument(.init(mute: false, freezeApps: true), signer: signer, now: madeAt)
 let (controlsId, controlsDocument) = try channel.controlsDocument(.fans("60"), signer: signer, now: madeAt)
+let (statsId, statsDocument) = try channel.statsDocument(range: "30d", signer: signer, now: madeAt)
 let (imageId, imageDocument) = try channel.imageDocument(sessionId: "s1", source: "/w/.context/shot.png", signer: signer, now: madeAt)
 let (diffId, diffDocument) = try channel.diffDocument(sessionId: "s1", file: 0, signer: signer, now: madeAt)
 let (stopId, stopDocument) = try channel.stopDocument(to: session, signer: signer, now: madeAt)
@@ -84,6 +85,9 @@ let fixture: [String: Any] = [
     // A live control from the Mac controls page: fans to 60%.
     "controlsCommandId": controlsId,
     "controlsCommand": ["box": controlsDocument.box, "sig": controlsDocument.sig!, "device": controlsDocument.device!],
+    // Detailed usage for the last 30 days.
+    "statsCommandId": statsId,
+    "statsCommand": ["box": statsDocument.box, "sig": statsDocument.sig!, "device": statsDocument.device!],
     // An image chat s1's agent showed.
     "imageCommandId": imageId,
     "imageCommand": ["box": imageDocument.box, "sig": imageDocument.sig!, "device": imageDocument.device!],

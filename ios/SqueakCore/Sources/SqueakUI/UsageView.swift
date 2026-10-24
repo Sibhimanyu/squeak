@@ -13,6 +13,8 @@ struct UsageView: View {
     @State private var refreshing = false
     @State private var refreshNote: String?
     @State private var refreshedOnOpen = false
+    /// `-squeak-usage-details` (screenshots only) opens Details.
+    @State private var showingDetails = ProcessInfo.processInfo.arguments.contains("-squeak-usage-details")
 
     var body: some View {
         NavigationStack {
@@ -21,6 +23,22 @@ struct UsageView: View {
                     if let snapshot = model.snapshot, let usage = snapshot.usage {
                         claude(usage.claude)
                         codex(usage.codex)
+                        if snapshot.usageStats == true || model.demo {
+                            NavigationLink { UsageDetailsView() } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Details").font(.headline)
+                                        Text("Tokens, cost, models, streaks and projects").font(.footnote).foregroundStyle(Theme.muted)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
+                                }
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("usage-details")
+                        }
                     } else {
                         Text(model.snapshot == nil
                             ? "Waiting for your Mac."
@@ -35,6 +53,7 @@ struct UsageView: View {
             }
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Usage")
+            .navigationDestination(isPresented: $showingDetails) { UsageDetailsView() }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

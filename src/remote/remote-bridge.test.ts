@@ -2279,6 +2279,65 @@ describe("RemoteBridge awake session from the phone", () => {
   });
 });
 
+describe("RemoteBridge detailed usage for the phone", () => {
+  async function statsT(offered = true) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-stats-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    const stats = vi.fn(async (range: string) => ({ range, totals: { tokens: 42 } }) as never);
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      ...(offered ? { stats } : {}),
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const phone = device();
+    await store.set(`channels/${payload.c}/pairing/iphone-1`, {
+      box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }),
+    });
+    await bridge.tick();
+    await bridge.approve("iphone-1");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    const command = (range: unknown) => {
+      const box = seal(payload.k, {
+        v: 1,
+        kind: "stats",
+        range,
+        nonce: crypto.randomBytes(16).toString("hex"),
+        expiresAt: NOW + 60_000,
+      });
+      return { box, sig: phone.sign(box), device: "iphone-1" };
+    };
+    return { bridge, config, command, stats };
+  }
+
+  it("answers one range in the result, and only says in the view that it can", async () => {
+    const t = await statsT();
+    expect(t.bridge.phoneView()).toMatchObject({ usageStats: true });
+    const verdict = await t.bridge.handleCommand(t.config, "s1", t.command("30d"));
+    expect(verdict.result).toEqual({ id: "s1", status: "sent", stats: { range: "30d", totals: { tokens: 42 } } });
+    expect(JSON.stringify(t.bridge.phoneView())).not.toContain('"tokens":42');
+    for (const [i, bad] of ["1y", 30, null, { range: "7d" }].entries()) {
+      const refused = await t.bridge.handleCommand(t.config, `b${i}`, t.command(bad));
+      expect(refused.result).toMatchObject({ status: "refused" });
+    }
+    expect(t.stats).toHaveBeenCalledTimes(1);
+    t.bridge.stop();
+  });
+
+  it("a Mac without it refuses and leaves it out of the view", async () => {
+    const t = await statsT(false);
+    expect(t.bridge.phoneView()).not.toHaveProperty("usageStats");
+    expect((await t.bridge.handleCommand(t.config, "n1", t.command("7d"))).result).toMatchObject({ status: "refused" });
+    t.bridge.stop();
+  });
+});
+
 describe("RemoteBridge live controls from the phone", () => {
   async function controlsT(options: { offered?: boolean } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-controls-"));

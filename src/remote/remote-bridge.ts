@@ -3,6 +3,7 @@ import type { LidActionSettings } from "../fleet/lid-actions.js";
 import type { AwakeRules } from "../fleet/power-monitor.js";
 import type { HotspotState } from "../fleet/hotspot.js";
 import { readControlChange, type ControlChange, type MacApp, type MacControlsState } from "../fleet/mac-controls.js";
+import type { StatsRange, UsageStatsView } from "../fleet/usage-stats.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -384,6 +385,20 @@ export interface ControlsCommand {
   expiresAt: number;
 }
 
+/**
+ * A signed ask for detailed usage (fleet/usage-stats.ts) over one range. It
+ * reads only the Mac's own totals and reaches no agent; the answer travels in
+ * the command's result, never in the published view.
+ */
+export interface StatsCommand {
+  v: 1;
+  kind: "stats";
+  range: unknown;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
 /** The settings of a lidActions command if every key is known and every value a boolean; else null. */
 export function readLidActionsChange(value: unknown): Partial<LidActionSettings> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -502,6 +517,8 @@ export interface RemoteBridgeDependencies {
    * Hotspot failover (fleet/hotspot.ts): its state for the phone, and the
    * way to set it up, switch now, or switch back. Absent: phones hide it.
    */
+  /** Detailed usage over a range (fleet/usage-stats.ts). Absent: phones hide Usage › Details. */
+  stats?: (range: StatsRange) => Promise<UsageStatsView>;
   /** Live controls (fleet/mac-controls.ts): their state for the phone, and one change at a time. Absent: phones hide the page. */
   controls?: {
     state(): MacControlsState;
@@ -1408,6 +1425,9 @@ export class RemoteBridge {
     if (kind === "awake") {
       return this.handleAwake(device, id, command as unknown as AwakeCommand);
     }
+    if (kind === "stats") {
+      return this.handleStats(device, id, command as unknown as StatsCommand);
+    }
     if (kind === "controls") {
       return this.handleControls(device, id, command as unknown as ControlsCommand);
     }
@@ -2301,6 +2321,29 @@ export class RemoteBridge {
     return { write: true, result: { id, status: "sent" } };
   }
 
+  /** Detailed usage for one range, answered in the result. Signature, freshness and nonce have already held. */
+  private async handleStats(
+    device: PairedDevice,
+    id: string,
+    command: StatsCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `stats: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (!this.deps.stats || command.v !== 1) return refuse("This Mac can't show detailed usage.", "not available");
+    const range = command.range;
+    if (range !== "7d" && range !== "30d" && range !== "all")
+      return refuse("Not a range this Mac understands.", "bad range");
+    try {
+      const stats = await this.deps.stats(range);
+      this.log(device.name, "sent", `stats ${range}`);
+      return { write: true, result: { id, status: "sent", stats } };
+    } catch {
+      return refuse("Your Mac couldn't read its usage just now.", "failed");
+    }
+  }
+
   /** One live control. Signature, freshness and nonce have already held; the change is read strictly here. */
   private async handleControls(
     device: PairedDevice,
@@ -2561,6 +2604,8 @@ export class RemoteBridge {
       ...this.phoneAwake(),
       // Hotspot failover: name, switch, whether the Mac is on it, the last switch. Never the password.
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
+      // Usage › Details is offered: the numbers themselves come only in a `stats` command's answer.
+      ...(this.deps.stats ? { usageStats: true } : {}),
       // Volume, brightness, fans: what the phone's Mac controls page draws. Absent: the page is hidden.
       ...(this.deps.controls ? { macControls: this.deps.controls.state() } : {}),
       // Where this Mac listens on the local network, for the direct path; absent when it does not.

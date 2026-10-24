@@ -46,6 +46,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   lidActionsCommand: { box: string; sig: string; device: string };
   controlsCommandId: string;
   controlsCommand: { box: string; sig: string; device: string };
+  statsCommandId: string;
+  statsCommand: { box: string; sig: string; device: string };
   workflowChooseCommandId: string;
   workflowChooseCommand: { box: string; sig: string; device: string };
   workflowMoreCommandId: string;
@@ -81,6 +83,7 @@ function bridge(turn: string) {
   const hotspotRequests: unknown[] = [];
   const awakeRequests: unknown[] = [];
   const controlChanges: unknown[] = [];
+  const statsRanges: unknown[] = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string; split?: unknown }> = [];
   const answers: Array<[string, unknown]> = [];
   const acts: Array<[string, unknown]> = [];
@@ -137,6 +140,10 @@ function bridge(turn: string) {
         acts.push([projectDir, action]);
         return { ok: true, actionId: "sq1", said: "Sent" };
       },
+    },
+    stats: async (range: unknown) => {
+      statsRanges.push(range);
+      return { range } as never;
     },
     controls: {
       state: () => ({
@@ -234,6 +241,7 @@ function bridge(turn: string) {
     hotspotRequests,
     awakeRequests,
     controlChanges,
+    statsRanges,
     acts,
     pictures,
     written,
@@ -326,6 +334,13 @@ describe("a reply made on the iPhone", () => {
     const verdict = await remote.handleCommand(config, fixture.lidActionsCommandId, fixture.lidActionsCommand);
     expect(verdict.result).toEqual({ id: fixture.lidActionsCommandId, status: "sent" });
     expect(awakeRequests).toEqual([{ action: "lid-actions", settings: { mute: false, freezeApps: true } }]);
+  });
+
+  it("answers detailed usage when the phone signs a stats request", async () => {
+    const { remote, config, statsRanges } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.statsCommandId, fixture.statsCommand);
+    expect(verdict.result).toEqual({ id: fixture.statsCommandId, status: "sent", stats: { range: "30d" } });
+    expect(statsRanges).toEqual(["30d"]);
   });
 
   it("sets the fans when the phone signs a controls request", async () => {

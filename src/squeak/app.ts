@@ -30,6 +30,7 @@ import {
   macHeatSystem,
 } from "../fleet/heat.js";
 import { MacControls, macControlsSystem } from "../fleet/mac-controls.js";
+import { UsageStats } from "../fleet/usage-stats.js";
 import { POWER_SUDOERS_PATH, PowerMode, powerSudoersRule, powerSystem } from "../fleet/power-mode.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
@@ -151,6 +152,8 @@ export class SqueakApp {
   private heatTimer: NodeJS.Timeout | null = null;
   /** Volume and brightness every 2 s while a phone is on the direct path, so a Mac-side change shows live. */
   private liveControlsTimer: NodeJS.Timeout | null = null;
+  /** Detailed usage for the phone's Usage › Details (fleet/usage-stats.ts). */
+  private readonly usageStats: UsageStats;
   /** Volume, brightness and fans from the phone's Mac controls page (fleet/mac-controls.ts). */
   private readonly controls: MacControls;
   /** Automatic, Low Power or High Power from the phone (fleet/power-mode.ts). */
@@ -220,6 +223,7 @@ export class SqueakApp {
       () => this.remote?.changed(),
       this.energy,
     );
+    this.usageStats = new UsageStats({ cachePath: path.join(config.supportDir, "usage-stats.json") });
     this.lidActions = new LidActions({
       settingsPath: path.join(config.supportDir, "awake-settings.json"),
       journalPath: path.join(config.supportDir, "lid-actions.json"),
@@ -341,6 +345,7 @@ export class SqueakApp {
             claudeLimits: () => this.claudeLimits?.latest() ?? null,
             // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
             refreshUsage: () => this.claudeRefresher.refresh(),
+            stats: (range) => this.usageStats.view(range),
             controls: {
               state: () => this.controls.state,
               apply: (change) => this.controls.apply(change),
@@ -520,6 +525,8 @@ export class SqueakApp {
     await this.lidActions.recover();
     await this.heat.recover();
     void this.controls.refresh();
+    // The first read of every transcript (seconds, once; then only changed files), off the start's path.
+    setTimeout(() => void this.usageStats.scan(), 30_000).unref?.();
     void this.energy.refresh(true);
     await this.hotspot.start().catch((error: unknown) =>
       logger.warn("hotspot failover failed to start", {
