@@ -143,6 +143,7 @@ function bridge(turn: string) {
         volume: 40,
         muted: false,
         brightness: null,
+        screenAwake: false,
         fans: { mode: "auto" as const, choice: "auto" as const, available: true, rpm: [] },
       }),
       apply: async (change: unknown) => {
@@ -153,6 +154,7 @@ function bridge(turn: string) {
             volume: 40,
             muted: false,
             brightness: null,
+            screenAwake: false,
             fans: { mode: "60" as const, choice: "60" as const, available: true, rpm: [] },
           },
         };

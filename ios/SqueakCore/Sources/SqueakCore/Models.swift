@@ -334,10 +334,13 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Nil with the lid closed: only the built-in display's brightness is controlled.
         public var brightness: Int?
         public var fans: Fans?
+        /// The display is held on from the phone; nil from an older Mac.
+        public var screenAwake: Bool?
         /// The apps with a Dock icon now; nil from a Mac without the apps helper.
         public var apps: [MacApp]?
-        public init(volume: Int? = nil, muted: Bool? = nil, brightness: Int? = nil, fans: Fans? = nil, apps: [MacApp]? = nil) {
-            self.volume = volume; self.muted = muted; self.brightness = brightness; self.fans = fans; self.apps = apps
+        public init(volume: Int? = nil, muted: Bool? = nil, brightness: Int? = nil, fans: Fans? = nil, screenAwake: Bool? = nil, apps: [MacApp]? = nil) {
+            self.volume = volume; self.muted = muted; self.brightness = brightness; self.fans = fans
+            self.screenAwake = screenAwake; self.apps = apps
         }
     }
 
@@ -1045,6 +1048,11 @@ public struct ControlsCommand: Codable, Equatable, Sendable {
         /// "auto", "40", "60", "80" or "max".
         public var fans: String?
         public var displaySleep: Bool?
+        public var wakeScreen: Bool?
+        /// Hold the display on until turned off (or Squeak stops).
+        public var screenAwake: Bool?
+        public static var wakeScreen: Change { Change(wakeScreen: true) }
+        public static func screenAwake(_ on: Bool) -> Change { Change(screenAwake: on) }
         /// A bundle id: open (or bring to the front), or quit.
         public var open: String?
         public var quit: String?
