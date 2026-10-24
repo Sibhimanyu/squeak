@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.32
+
+- In a chat, scrolling up shows a round button above the composer that takes you back to the newest
+  message in one click (or ⌘↓). It says "New" when a message arrived while you were reading.
+
 ## 2.1.31
 
 - Settings, Keep awake has two modes, Lid open and Lid closed, each with its own switches that it

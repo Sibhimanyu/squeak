@@ -360,6 +360,8 @@ struct SessionDetail: View {
     @State private var tab: DetailTab = .chat
     @State private var focusToken = 0
     @State private var atBottom = false
+    /// Something arrived while you were reading further up: the jump button says "New".
+    @State private var newBelow = false
     @State private var contentHeight: CGFloat = 0
     /// The long queue/steer explanation shows until the first message sent mid-turn; a short line after.
     @AppStorage("queueSteerExplained") private var queueSteerExplained = false
@@ -489,11 +491,13 @@ struct SessionDetail: View {
                     .padding(.bottom, Space.l)
                     .frame(maxWidth: .infinity)
                 }
-                .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+                // The jump button floats just above the composer and takes no room, so nothing moves when it shows.
+                .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar.overlay(alignment: .top) { jumpButton(proxy) } }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows.map(\.id))
                 .onChange(of: rows.last?.id) { _, _ in
-                    if atBottom || model.messages.last?.role == .user { scrollDown(proxy) }
+                    if atBottom || model.messages.last?.role == .user { scrollDown(proxy) } else { newBelow = true }
                 }
+                .onChange(of: atBottom) { _, now in if now { newBelow = false } }
                 .onChange(of: model.messages.last?.state) { _, _ in
                     if atBottom { scrollDown(proxy) }
                 }
@@ -525,6 +529,37 @@ struct SessionDetail: View {
         guard sendBlock == nil, model.isConnected else { return }
         let key = session.key
         Task { _ = await model.send(c.letter, to: key) }
+    }
+
+    /// Back to the newest message in one click (or ⌘↓): a round button while the end of the chat is out of view, a
+    /// "New" pill when something arrived meanwhile.
+    private func jumpButton(_ proxy: ScrollViewProxy) -> some View {
+        ZStack {
+            if !atBottom, !rows.isEmpty {
+                Button {
+                    newBelow = false
+                    scrollDown(proxy)
+                } label: {
+                    HStack(spacing: 6) {
+                        Lucide(.chevronDown, size: 14, color: Theme.ink)
+                        if newBelow { Text("New").font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.ink) }
+                    }
+                    .padding(.horizontal, newBelow ? 12 : 0)
+                    .frame(minWidth: 32, minHeight: 32)
+                    .background(Theme.surfaceRaised, in: Capsule())
+                    .overlay(Capsule().stroke(Theme.line))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Jump to the newest message (⌘↓)")
+                .accessibilityLabel(newBelow ? "New messages. Jump to the newest" : "Jump to the newest message")
+                .keyboardShortcut(.downArrow, modifiers: [.command])
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+        }
+        .offset(y: -44)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: atBottom)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: newBelow)
     }
 
     private func scrollDown(_ proxy: ScrollViewProxy) {
