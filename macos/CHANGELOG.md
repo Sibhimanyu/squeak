@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.29
+
+- Squeak for iPhone's Mac controls can now bring apps to the front, open and quit them, switch desktops,
+  play, pause and skip music, and lock your Mac. Squeak carries a small helper for the app list.
+
 ## 2.1.28
 
 - Fan control now offers fixed speeds too (40%, 60%, 80%, full), which you can pick from the Mac controls
