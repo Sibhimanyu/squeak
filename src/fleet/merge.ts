@@ -95,6 +95,8 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     ...(conductor?.model ? { model: conductor.model } : {}),
     ...(conductor?.effort ? { effort: conductor.effort } : {}),
     ...(conductor?.fast ? { fast: true } : {}),
+    ...(conductor?.modelId ? { modelId: conductor.modelId } : {}),
+    ...(conductor?.effortId ? { effortId: conductor.effortId } : {}),
     baseRef: conductor?.baseRef ?? base.baseRef,
     // Only the transcript observer can ever have this; Conductor does not.
     costUsd: base.costUsd,

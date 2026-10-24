@@ -96,9 +96,11 @@ enum DemoData {
         titled.workflow = s.workflow; titled.asks = s.asks
         // The demo's chats run on the models a real Mac names.
         switch s.key {
-        case "pay": titled.model = "Opus 5.5 · 1M"; titled.effort = "Medium"
-        case "search": titled.model = "GPT 5.5"; titled.effort = "High"
-        case "tg": titled.model = "Opus 5.5 · 1M"; titled.effort = "Extra high"; titled.fast = true
+        case "pay": titled.model = "Opus 5.5 · 1M"; titled.effort = "Medium"; titled.modelId = "opus-5-5-1m"; titled.effortId = "medium"
+        case "search": titled.model = "GPT 5.5"; titled.effort = "High"; titled.modelId = "gpt-5.5"; titled.effortId = "high"
+        case "tg":
+            titled.model = "Opus 5.5 · 1M"; titled.effort = "Extra high"; titled.fast = true
+            titled.modelId = "opus-5-5-1m"; titled.effortId = "xhigh"
         default: break
         }
         return titled

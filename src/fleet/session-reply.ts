@@ -137,6 +137,12 @@ export interface ConductorRelaySender {
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
   /** Conductor's Stop for the chat's running turn. */
   stopTurn?(workspaceId: string, sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** A chat's model, thinking level and fast mode, as Conductor's picker sets them. */
+  setSetup?(
+    workspaceId: string,
+    sessionId: string,
+    setup: { agent: "claude" | "codex"; model: string; thinkingLevel?: string; fastMode: boolean },
+  ): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 export interface ConductorReplierDependencies {
@@ -480,6 +486,41 @@ export class ConductorReplier {
     }
     logger.info("conductor relay stop failed", { sessionId, reason: result.reason });
     return { ok: false, reason: `Conductor didn't stop it (${result.reason}).` };
+  }
+
+  /**
+   * Change what a chat runs: its model (the caller has checked it is one Conductor offers for this
+   * chat's agent), thinking level and fast mode. Not while a turn runs: Conductor's process holds the
+   * chat's settings for that turn, and a change halfway through would say one thing and run another.
+   */
+  async setSetup(
+    sessionId: string,
+    setup: { model: string; thinkingLevel?: string; fastMode: boolean },
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const relay = this.deps.relay;
+    if (!relay?.isReady() || !relay.setSetup) {
+      return { ok: false, reason: "Conductor's relay isn't connected, so this Mac can't change the model from here." };
+    }
+    const session = this.deps.registry.getSessionById(sessionId);
+    if (!session) {
+      return { ok: false, reason: "That chat no longer exists in Conductor." };
+    }
+    if (session.agentType !== "claude" && session.agentType !== "codex") {
+      return { ok: false, reason: "This chat's agent has no models to pick from." };
+    }
+    if (
+      isInFlight(session.status) ||
+      session.status === "needs_user_input" ||
+      session.status === "needs_plan_response"
+    ) {
+      return { ok: false, reason: "The agent is mid-turn. Change the model once this turn ends, or stop it first." };
+    }
+    const result = await relay.setSetup(session.workspaceId, sessionId, { agent: session.agentType, ...setup });
+    if (result.ok) {
+      return result;
+    }
+    logger.info("conductor relay setup change failed", { sessionId, reason: result.reason });
+    return { ok: false, reason: `Conductor didn't take that change (${result.reason}).` };
   }
 
   /** Whether Conductor recorded `text` as a user message in this chat since `sinceIso`. */

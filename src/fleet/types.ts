@@ -132,6 +132,12 @@ export interface ObservedSession {
   effort?: string | null;
   /** Fast mode is on for the chat. Absent when off or unknown. */
   fast?: boolean;
+  /**
+   * The same as Conductor stores it (`opus-5-5-1m`, `high`), for a picker that changes it; absent when
+   * Conductor stores no model for the chat.
+   */
+  modelId?: string;
+  effortId?: string;
 }
 
 /** A session after the monitor has merged observers, hooks, and liveness. */

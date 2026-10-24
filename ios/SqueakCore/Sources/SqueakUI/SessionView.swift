@@ -173,14 +173,8 @@ struct SessionView: View {
                 }
                 // A film's call is answered on its card; a chat box under it would only say it can't send.
                 if session.workflow == nil {
-                    if let line = session.setupLine {
-                        // The chat's model and thinking level, as the Mac names them: muted, no state colour.
-                        Text(line)
-                            .font(.caption).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 20).padding(.top, 6)
-                            .accessibilityLabel(session.setupAccessibilityLabel ?? line)
-                            .accessibilityIdentifier("chat-setup")
+                    if let line = model.pendingSetupLine(session) ?? session.setupLine {
+                        SetupLine(session: session, line: line)
                     }
                     Composer(
                         session: session, agentName: Presentation.agentName(session.agent),
@@ -1486,4 +1480,83 @@ enum ReadingPlace {
     }
 }
 
+
+/// The chat's model and thinking level, as the Mac names them: muted, no state colour. Where the Mac can change
+/// them it is a menu: the models it offers for this chat's own agent, the chosen model's thinking levels and fast
+/// mode, each applied as it is picked, the way Conductor's own picker works. Not while a turn runs.
+private struct SetupLine: View {
+    @Environment(AppModel.self) private var model
+    let session: PhoneSnapshot.Session
+    let line: String
+
+    /// Mid-turn, working or waiting on you: the Mac refuses a change until the turn ends.
+    private var midTurn: Bool { ["working", "awaiting_approval", "awaiting_input"].contains(session.state) }
+
+    var body: some View {
+        let models = model.setupModels(for: session)
+        let current = models.first { $0.id == session.modelId }
+        Group {
+            if models.isEmpty {
+                label(changeable: false)
+            } else {
+                Menu {
+                    Section("Model") {
+                        ForEach(models) { option in
+                            Button { pick(option, thinking: nil, fast: nil) } label: {
+                                if option.id == session.modelId { Label(option.label, systemImage: "checkmark") } else { Text(option.label) }
+                            }
+                        }
+                    }
+                    if let current, !current.levels.isEmpty {
+                        Section("Thinking") {
+                            ForEach(current.levels, id: \.self) { level in
+                                Button { pick(current, thinking: level, fast: nil) } label: {
+                                    let name = Self.levelName(level)
+                                    if level == session.effortId { Label(name, systemImage: "checkmark") } else { Text(name) }
+                                }
+                            }
+                        }
+                    }
+                    if let current, session.agent == "claude" {
+                        Section {
+                            Button { pick(current, thinking: nil, fast: session.fast != true) } label: {
+                                if session.fast == true { Label("Fast mode", systemImage: "checkmark") } else { Text("Fast mode") }
+                            }
+                        }
+                    }
+                } label: {
+                    label(changeable: true)
+                }
+                .disabled(midTurn)
+            }
+        }
+        .padding(.horizontal, 20).padding(.top, 6)
+        .accessibilityIdentifier("chat-setup")
+    }
+
+    private func label(changeable: Bool) -> some View {
+        HStack(spacing: 4) {
+            Text(line).font(.caption).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
+            if changeable && !midTurn {
+                Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: changeable ? 28 : nil)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(session.setupAccessibilityLabel ?? line)
+        .accessibilityHint(changeable ? (midTurn ? "Can be changed once this turn ends." : "Changes the model or thinking level.") : "")
+    }
+
+    private func pick(_ option: PhoneSnapshot.ChatModel, thinking: String?, fast: Bool?) {
+        Task { await model.changeSetup(session, model: option, thinking: thinking, fast: fast) }
+    }
+
+    private static func levelName(_ level: String) -> String {
+        let words = ChatPresets.levelName(level)
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+}
 #endif

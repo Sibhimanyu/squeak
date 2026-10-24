@@ -152,6 +152,24 @@ export class ConductorRelayService {
     }
   }
 
+  /** A chat's new model, thinking level and fast mode, through Conductor's own picker route. */
+  async setSetup(
+    workspaceId: string,
+    sessionId: string,
+    setup: { agent: "claude" | "codex"; model: string; thinkingLevel?: string; fastMode: boolean },
+  ): Promise<QueueActionResult> {
+    const client = this.client;
+    if (!client) return { ok: false, reason: "relay not connected" };
+    try {
+      const res = await client.updateSetup({ workspaceLocalId: workspaceId, sessionId, ...setup });
+      if (res.status >= 200 && res.status < 300) return { ok: true };
+      return { ok: false, reason: `relay HTTP ${res.status}` };
+    } catch (e) {
+      this.client = undefined;
+      return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   /**
    * The queue is read again here for the message's revision and the queue's
    * generation: the caller (and the phone behind it) never supplies either,

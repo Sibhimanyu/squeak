@@ -167,3 +167,32 @@ describe("PhoneClient startChat", () => {
     expect(asked).toHaveLength(1);
   });
 });
+
+describe("PhoneClient updateSetup", () => {
+  it("re-registers the chat with overwriteMetadata, as Conductor's own picker does", async () => {
+    const { client, asked } = scripted([{ status: 200, body: { updatedAt: "x", session: {} } }]);
+    const res = await client.updateSetup({
+      workspaceLocalId: "ws",
+      sessionId: "s1",
+      agent: "claude",
+      model: "opus-5-5",
+      thinkingLevel: "high",
+      fastMode: true,
+    });
+    expect(res.status).toBe(200);
+    expect(asked).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        target: "/workspaces/ws/sessions/register",
+        body: {
+          sessionId: "s1",
+          agentType: "claude",
+          model: "opus-5-5",
+          thinkingLevel: "high",
+          fastMode: true,
+          overwriteMetadata: true,
+        },
+      }),
+    ]);
+  });
+});

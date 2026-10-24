@@ -29,6 +29,8 @@ let (statsId, statsDocument) = try channel.statsDocument(range: "30d", agent: "c
 let (imageId, imageDocument) = try channel.imageDocument(sessionId: "s1", source: "/w/.context/shot.png", signer: signer, now: madeAt)
 let (diffId, diffDocument) = try channel.diffDocument(sessionId: "s1", file: 0, signer: signer, now: madeAt)
 let (stopId, stopDocument) = try channel.stopDocument(to: session, signer: signer, now: madeAt)
+let (setupId, setupDocument) = try channel.setupDocument(
+    to: session, model: "opus-5-5-1m", thinking: "high", fast: nil, signer: signer, now: madeAt)
 let (startId, startDocument) = try channel.startDocument(workspaceId: "w1", agent: .codex, text: "Add a timer", signer: signer, now: madeAt)
 let (splitStartId, splitStartDocument) = try channel.startDocument(
     workspaceId: "w1", agent: .claude, text: "Add a timer",
@@ -101,6 +103,9 @@ let fixture: [String: Any] = [
     // Stop the chat's turn (turn-1).
     "stopCommandId": stopId,
     "stopCommand": ["box": stopDocument.box, "sig": stopDocument.sig!, "device": stopDocument.device!],
+    // Chat s1 to Opus 5.5 · 1M at high thinking, fast mode left as it is.
+    "setupCommandId": setupId,
+    "setupCommand": ["box": setupDocument.box, "sig": setupDocument.sig!, "device": setupDocument.device!],
     "promoteCommandId": promoteId,
     "promoteCommand": ["box": promoteDocument.box, "sig": promoteDocument.sig!, "device": promoteDocument.device!],
     // A new chat in workspace w1 with codex: "Add a timer".

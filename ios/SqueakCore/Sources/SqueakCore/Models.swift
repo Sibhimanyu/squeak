@@ -107,6 +107,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var model: String? = nil
         public var effort: String? = nil
         public var fast: Bool? = nil
+        /// The same as Conductor stores them ("opus-5-5-1m", "high"), so a picker starts on what the chat runs.
+        /// Only from a Mac that can change them (`setup`), and only for a Conductor chat with a model.
+        public var modelId: String? = nil
+        public var effortId: String? = nil
         public var id: String { key }
 
         /// "Opus 5.5 · 1M · Medium · Fast", the chat's setup on one muted line; nil when the Mac sent none.
@@ -982,6 +986,20 @@ public struct RenameCommand: Codable, Equatable, Sendable {
     public let kind: String
     public let sessionId: String
     public let title: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// Change what a Conductor chat runs: a model the Mac offers for the chat's own agent, its thinking level and
+/// fast mode. Absent level or fast: the Mac keeps what the chat has. Refused while a turn runs.
+public struct SetupCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let sessionId: String
+    public let model: String
+    public let thinking: String?
+    public let fast: Bool?
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
