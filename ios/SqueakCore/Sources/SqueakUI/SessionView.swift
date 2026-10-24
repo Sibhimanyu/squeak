@@ -225,8 +225,9 @@ extension EnvironmentValues {
 }
 
 /// A chat's scroll view, as chat apps do it (and as iOS 18 lets SwiftUI do it): it starts at the bottom and,
-/// while it is at the bottom, stays pinned there as content grows. Scroll up to read and it lets go, shows a
-/// "New" pill if something arrives, and picks up again when you scroll back down or send.
+/// while it is at the bottom, stays pinned there as content grows. Scroll up to read and it lets go: a round
+/// button takes you back down in one tap once you are more than a screenful's worth away (a "New" pill when
+/// something arrived meanwhile), and it picks up again when you scroll back down or send.
 ///
 /// What it avoids, each a source of the jitter this replaced: deciding "am I at the bottom" from a view
 /// appearing and disappearing (it flipped as the chat grew), scrolling to the end on every streamed step,
@@ -247,6 +248,8 @@ private struct FollowingScroll<Content: View>: View {
     /// A finger is on the scroll view or it is coasting from one. Not a scroll this view ran itself (`.animating`).
     @State private var dragging = false
     @State private var newBelow = false
+    /// Far enough up that getting back down is a chore: the jump button shows.
+    @State private var farFromBottom = false
 
     var body: some View {
         ScrollView { content.environment(\.holdChatScroll, { following = false }) }
@@ -255,6 +258,12 @@ private struct FollowingScroll<Content: View>: View {
             // Growth keeps the bottom while following; reading further up it leaves your text where it is.
             .defaultScrollAnchor(following ? .bottom : .top, for: .sizeChanges)
             .scrollDismissesKeyboard(.interactively)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                // Most of a screen below what you see: a little scroll to reread a line shows no button.
+                geometry.contentSize.height - geometry.visibleRect.maxY > geometry.containerSize.height * 0.6
+            } action: { _, far in
+                farFromBottom = far
+            }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentSize.height - geometry.visibleRect.maxY < 32
             } action: { _, near in
@@ -280,29 +289,36 @@ private struct FollowingScroll<Content: View>: View {
                 newBelow = false
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
             }
-            .overlay(alignment: .bottom) {
-                if newBelow, !following {
+            .overlay(alignment: .bottom) { jumpButton }
+    }
+
+    /// Back to the newest message in one tap: a round button, or a "New" pill when something arrived meanwhile.
+    private var jumpButton: some View {
+        ZStack {
+                if !following, newBelow || farFromBottom {
                     Button {
                         newBelow = false
                         following = true
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
                     } label: {
                         HStack(spacing: 6) {
-                            Lucide(.chevronDown, size: 14, color: Theme.ink)
-                            Text("New").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
+                            Lucide(.chevronDown, size: 16, color: Theme.ink)
+                            if newBelow { Text("New").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink) }
                         }
-                        .padding(.horizontal, 14).frame(minHeight: 36)
+                        .padding(.horizontal, newBelow ? 14 : 0)
+                        .frame(minWidth: 40, minHeight: 40)
                         .background(Theme.surfaceRaised, in: Capsule())
                         .overlay(Capsule().stroke(Theme.line))
-                        .frame(minHeight: 44)
+                        .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .padding(.bottom, 8)
-                    .accessibilityLabel("Jump to the newest message")
-                    .transition(.opacity)
+                    .accessibilityLabel(newBelow ? "New messages. Jump to the newest" : "Jump to the newest message")
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }
-            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: !following && (newBelow || farFromBottom))
     }
 }
 
