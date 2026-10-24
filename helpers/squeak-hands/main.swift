@@ -719,6 +719,18 @@ case "tabs":
     // tab, only if the tab at that index still has the title the phone saw. Never types, never reads a page.
     struct TabsRequest: Decodable { let bundleId: String; let action: String; let index: Int?; let title: String? }
     let resultPath = args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json"
+    // Conductor: which workspace and chat are on screen, from its window's route (the tabs are its own).
+    if let data = FileManager.default.contents(atPath: outPath),
+       let request = try? JSONDecoder().decode(TabsRequest.self, from: data), request.bundleId == conductorBundleId {
+        guard let running = conductorProcess(), let conductor = ConductorWindow(pid: running.processIdentifier),
+              waitFor(3, { conductor.webArea != nil })
+        else { write(["ok": true, "tabs": [] as [Any]], to: resultPath); exit(0) }
+        var shown: [String: Any] = [:]
+        if let workspace = conductor.workspaceId { shown["workspaceId"] = workspace }
+        if let session = conductor.sessionId { shown["sessionId"] = session }
+        write(["ok": true, "tabs": [] as [Any], "conductor": shown], to: resultPath)
+        exit(0)
+    }
     guard let data = FileManager.default.contents(atPath: outPath),
           let request = try? JSONDecoder().decode(TabsRequest.self, from: data),
           let running = NSRunningApplication.runningApplications(withBundleIdentifier: request.bundleId)

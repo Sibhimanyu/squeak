@@ -45,6 +45,7 @@ export type ControlChange =
   | { media: "playPause" | "next" | "previous" }
   | { lock: true }
   | { listApps: true }
+  | { appIcons: string[] }
   | { listTabs: true }
   | { selectTab: { index: number; title: string } }
   | { showChat: { sessionId: string } };
@@ -162,6 +163,13 @@ export function readControlChange(value: unknown): ControlChange | null {
       return v === true ? { listApps: true } : null;
     case "listTabs":
       return v === true ? { listTabs: true } : null;
+    case "appIcons":
+      return Array.isArray(v) &&
+        v.length > 0 &&
+        v.length <= 12 &&
+        v.every((id) => typeof id === "string" && BUNDLE_ID.test(id))
+        ? { appIcons: v as string[] }
+        : null;
     case "selectTab": {
       const tab = readSelectTab(v);
       return tab ? { selectTab: tab } : null;
@@ -201,6 +209,8 @@ export interface ControlsSystem {
   /** Null without the apps helper. */
   running(): Promise<RunningApp[] | null>;
   installed(): Promise<MacApp[]>;
+  /** Each app's icon as a base64 PNG; apps it cannot find are left out. */
+  icons(ids: string[]): Promise<Record<string, string>>;
   openApp(id: string): Promise<boolean>;
   quitApp(id: string): Promise<boolean>;
   /** One of Squeak Hands' fixed system-key actions; a reason when it could not. */
@@ -223,6 +233,8 @@ export class MacControls {
   >();
   private installedCache: { at: number; apps: MacApp[] } | null = null;
   private screenAwake = false;
+  /** App icons do not change while Squeak runs: drawn once each. */
+  private readonly iconCache = new Map<string, string>();
 
   constructor(
     private readonly system: ControlsSystem,
@@ -303,7 +315,10 @@ export class MacControls {
 
   async apply(
     change: ControlChange,
-  ): Promise<{ ok: true; state: MacControlsState; apps?: MacApp[]; tabs?: FrontTabs } | { ok: false; reason: string }> {
+  ): Promise<
+    | { ok: true; state: MacControlsState; apps?: MacApp[]; tabs?: FrontTabs; icons?: Record<string, string> }
+    | { ok: false; reason: string }
+  > {
     if ("listTabs" in change || "selectTab" in change || "showChat" in change) {
       if (!this.tabs) return { ok: false, reason: "This Mac can't switch tabs from a phone." };
       if ("listTabs" in change) return { ok: true, state: this.state, tabs: await this.tabs.list() };
@@ -315,6 +330,17 @@ export class MacControls {
       logger.info("mac control", { change: Object.keys(change)[0] });
       void this.refresh();
       return { ok: true, state: this.state, tabs: outcome.tabs };
+    }
+    if ("appIcons" in change) {
+      const missing = change.appIcons.filter((id) => !this.iconCache.has(id));
+      if (missing.length) {
+        const drawn = await this.system.icons(missing).catch(() => ({}) as Record<string, string>);
+        for (const [id, png] of Object.entries(drawn)) this.iconCache.set(id, png);
+      }
+      const icons = Object.fromEntries(
+        change.appIcons.flatMap((id) => (this.iconCache.has(id) ? [[id, this.iconCache.get(id)!]] : [])),
+      );
+      return { ok: true, state: this.state, icons };
     }
     if ("listApps" in change) {
       return { ok: true, state: this.state, apps: await this.installed(true) };
@@ -424,6 +450,19 @@ export function macControlsSystem(
       return out.ok ? parseAudioPlaying(out.stdout) : null;
     },
     running: () => json<RunningApp[]>(["running"]),
+    // Every copy in turn: an older bundled helper has no icons mode, a newer one in the support folder may.
+    async icons(ids) {
+      for (const file of appsHelpers.filter((f) => fs.existsSync(f))) {
+        const out = await run(file, ["icons", ...ids]);
+        if (!out.ok) continue;
+        try {
+          return JSON.parse(out.stdout) as Record<string, string>;
+        } catch {
+          continue;
+        }
+      }
+      return {};
+    },
     installed: async () => (await json<MacApp[]>(["installed"])) ?? [],
     // Ids only reach here after BUNDLE_ID and a membership check.
     openApp: async (id) => (await run("/usr/bin/open", ["-b", id])).ok,

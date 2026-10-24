@@ -238,6 +238,7 @@ export class SqueakApp {
           return workspaces.map((w) => ({
             id: w.id,
             name: [w.repoName, w.branch].filter(Boolean).join(" · "),
+            ...(w.repoName ? { repo: w.repoName } : {}),
             chats: chats
               .filter((chat) => chat.workspaceId === w.id)
               .map((chat) => ({

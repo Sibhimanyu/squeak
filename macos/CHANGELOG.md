@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.33
+
+- Squeak for iPhone's Mac controls show your apps with their real icons, and the controls for whichever
+  app is in front: Conductor's workspaces and chats, or a browser's tabs. Squeak's app helper now
+  draws those icons.
+
 ## 2.1.32
 
 - In a chat, scrolling up shows a round button above the composer that takes you back to the newest

@@ -103,6 +103,10 @@ describe("MacControls", () => {
         { id: "com.apple.Safari", name: "Safari" },
         { id: "com.apple.Notes", name: "Notes" },
       ],
+      icons: async (ids) => (
+        calls.push(`icons ${ids.join(",")}`),
+        Object.fromEntries(ids.filter((id) => id !== "com.none").map((id) => [id, "PNG"]))
+      ),
       openApp: async (id) => (calls.push(`open ${id}`), true),
       quitApp: async (id) => (calls.push(`quit ${id}`), true),
       systemKey: async (action) => (calls.push(`key ${action}`), null),
@@ -122,6 +126,19 @@ describe("MacControls", () => {
       state: { volume: 25, brightness: 57, fans: { mode: "auto", available: true } },
     });
     expect(t.onChange).toHaveBeenCalled();
+  });
+
+  it("draws each app's icon once, and leaves out what it cannot find", async () => {
+    const t = setup();
+    expect(await t.controls.apply({ appIcons: ["com.apple.Safari", "com.none"] })).toMatchObject({
+      ok: true,
+      icons: { "com.apple.Safari": "PNG" },
+    });
+    await t.controls.apply({ appIcons: ["com.apple.Safari"] });
+    expect(t.calls.filter((c) => c.startsWith("icons"))).toEqual(["icons com.apple.Safari,com.none"]);
+    expect(readControlChange({ appIcons: [] })).toBeNull();
+    expect(readControlChange({ appIcons: Array(13).fill("com.a") })).toBeNull();
+    expect(readControlChange({ appIcons: ["../x"] })).toBeNull();
   });
 
   it("sends fans through heat, so heat can still raise them", async () => {

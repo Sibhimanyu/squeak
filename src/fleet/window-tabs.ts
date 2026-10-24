@@ -24,7 +24,11 @@ export interface ConductorPlace {
   id: string;
   /** "repo · branch". */
   name: string;
-  chats: Array<{ id: string; title: string; working: boolean }>;
+  /** The repo alone: the phone draws its project icon from it. */
+  repo?: string;
+  /** On screen in Conductor now (read from its window's route, so only when that window is on this desktop). */
+  current?: boolean;
+  chats: Array<{ id: string; title: string; working: boolean; current?: boolean }>;
 }
 
 export interface FrontTabs {
@@ -45,7 +49,10 @@ export interface TabsSystem {
     action: "list" | "select";
     index?: number;
     title?: string;
-  }): Promise<{ ok: true; tabs: WindowTab[] } | { ok: false; reason: string }>;
+  }): Promise<
+    | { ok: true; tabs: WindowTab[]; conductor?: { workspaceId?: string; sessionId?: string } }
+    | { ok: false; reason: string }
+  >;
   /** Squeak Hands' `show-chat` mode. A reason when it could not. */
   showChat(request: { workspaceId: string; sessionId: string; sessionTitle: string | null }): Promise<string | null>;
   /** Conductor's recent workspaces with their open chats. */
@@ -81,7 +88,18 @@ export class WindowTabs {
   async list(): Promise<FrontTabs> {
     const app = await this.system.front().catch(() => null);
     if (!app) return { app: null, kind: "none", note: "No app is in front on your Mac." };
-    if (app.id === CONDUCTOR_BUNDLE_ID) return { app, kind: "conductor", workspaces: this.system.conductor() };
+    if (app.id === CONDUCTOR_BUNDLE_ID) {
+      const shown = await this.system.hands({ bundleId: app.id, action: "list" }).catch(() => null);
+      const on = shown?.ok ? shown.conductor : undefined;
+      const workspaces = this.system.conductor().map((w) => ({
+        ...w,
+        ...(on?.workspaceId === w.id ? { current: true } : {}),
+        chats: w.chats.map((chat) => (on?.sessionId === chat.id ? { ...chat, current: true } : chat)),
+      }));
+      // The one on screen first: it is where you are, and what you most likely switch within.
+      workspaces.sort((a, b) => Number(b.current === true) - Number(a.current === true));
+      return { app, kind: "conductor", workspaces };
+    }
     const answer = await this.system.hands({ bundleId: app.id, action: "list" });
     if (!answer.ok) return { app, kind: "none", note: answer.reason };
     return answer.tabs.length
@@ -153,7 +171,15 @@ export function macTabsSystem(deps: {
         return { ok: false, reason: HANDS_WORDS[error] ?? "Squeak Hands couldn't read that window." };
       }
       const tabs = Array.isArray(result.tabs) ? (result.tabs as WindowTab[]) : [];
-      return { ok: true, tabs };
+      const shown = result.conductor as { workspaceId?: unknown; sessionId?: unknown } | undefined;
+      const conductor =
+        shown && typeof shown === "object"
+          ? {
+              ...(typeof shown.workspaceId === "string" ? { workspaceId: shown.workspaceId } : {}),
+              ...(typeof shown.sessionId === "string" ? { sessionId: shown.sessionId } : {}),
+            }
+          : undefined;
+      return { ok: true, tabs, ...(conductor ? { conductor } : {}) };
     },
     async showChat(request) {
       const answer = await hands("show-chat", request);

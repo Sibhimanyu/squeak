@@ -1136,6 +1136,38 @@ final class AppModel {
     }
 
     /// The Mac's installed apps for the app picker, asked for when it opens; the reason when they could not be.
+    /// Mac apps' icons, by bundle id: asked for once each and kept on this phone (they don't change).
+    private(set) var appIcons: [String: UIImage] = [:]
+    @ObservationIgnored private var iconsAsked: Set<String> = []
+
+    private static var iconFolder: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("mac-app-icons", isDirectory: true)
+    }
+
+    /// Loads what this phone already has, then asks the Mac for the rest.
+    func loadAppIcons(_ ids: [String]) async {
+        var missing: [String] = []
+        for id in ids where appIcons[id] == nil && !iconsAsked.contains(id) {
+            let file = Self.iconFolder.appendingPathComponent("\(id).png")
+            if let data = try? Data(contentsOf: file), let image = UIImage(data: data) { appIcons[id] = image } else { missing.append(id) }
+        }
+        guard !missing.isEmpty, !demo, let channel else { return }
+        iconsAsked.formUnion(missing)
+        do {
+            let (id, document) = try channel.controlsDocument(.appIcons(missing), signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel), result.sent, let icons = result.icons else { return }
+            try? FileManager.default.createDirectory(at: Self.iconFolder, withIntermediateDirectories: true)
+            for (app, base64) in icons {
+                guard let data = Data(base64Encoded: base64), let image = UIImage(data: data) else { continue }
+                appIcons[app] = image
+                try? data.write(to: Self.iconFolder.appendingPathComponent("\(app).png"))
+            }
+        } catch {
+            iconsAsked.subtract(missing)
+        }
+    }
+
     /// The front app's tabs, read, or changed (a tab pressed, a Conductor chat opened) and read again.
     func frontTabs(_ change: ControlsCommand.Change = .listTabs) async -> (tabs: FrontTabs?, problem: String?) {
         if demo { return (DemoData.frontTabs, nil) }
