@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.2.0
+
+- Scrolling up in a chat loads earlier messages as you go, so long chats open fast and still reach all the
+  way back.
+- A message you sent no longer sticks to the end of a finished chat once its answer has arrived.
+- Each message can show "Read by" and "Turn ended" receipts, so you can see that the agent picked it up
+  and when its turn finished.
+- Answering from your laptop keeps Squeak in sync: what you type in Conductor or the terminal shows up in
+  the chat right away.
+- A chat opens at its newest message more reliably.
+
 ## 2.1.34
 
 - A Conductor chat's model line, under its title, is now a menu: switch to another model from the same
