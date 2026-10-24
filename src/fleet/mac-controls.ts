@@ -102,9 +102,26 @@ export const MAX_APPS = 6;
  * An app that keeps an output stream open while silent reads as playing, which is the best this can say.
  */
 export function parseAudioPlaying(output: string): boolean {
+  return audioOutPids(output).length > 0;
+}
+
+/** The pids "Created for PID" names on coreaudiod's audio-out assertions (0 when an entry names none). */
+export function audioOutPids(output: string): number[] {
   return output
     .split(/\n(?=\s*pid \d+\()/)
-    .some((entry) => /^\s*pid \d+\(coreaudiod\)/.test(entry) && /Resources:[^\n]*\baudio-out\b/.test(entry));
+    .filter((entry) => /^\s*pid \d+\(coreaudiod\)/.test(entry) && /Resources:[^\n]*\baudio-out\b/.test(entry))
+    .map((entry) => Number(/Created for PID:\s*(\d+)/.exec(entry)?.[1] ?? 0));
+}
+
+/**
+ * Apps whose sound the media keys control. Browsers are left out on purpose: Chrome keeps an output stream open
+ * while silent (seen on a real Mac), which showed the media keys with nothing playing.
+ */
+const MEDIA_PLAYER_PATHS =
+  /\/(Music|Spotify|VLC|IINA|Podcasts|TV|QuickTime Player|Safari|Swinsian|Doppler|Vox|Tidal|Plexamp|Amazon Music|YouTube Music)\.app\//;
+
+export function isMediaPlayerPath(command: string): boolean {
+  return MEDIA_PLAYER_PATHS.test(command);
 }
 
 /** The apps worth a tile: in front first, then by when they were last seen in front, then the rest in the helper's order. */
@@ -447,7 +464,11 @@ export function macControlsSystem(
     },
     async mediaPlaying() {
       const out = await run("/usr/bin/pmset", ["-g", "assertions"]);
-      return out.ok ? parseAudioPlaying(out.stdout) : null;
+      if (!out.ok) return null;
+      const pids = audioOutPids(out.stdout).filter((pid) => pid > 0);
+      if (pids.length === 0) return false;
+      const ps = await run("/bin/ps", ["-o", "command=", "-p", pids.join(",")]);
+      return ps.ok ? ps.stdout.split("\n").some(isMediaPlayerPath) : null;
     },
     running: () => json<RunningApp[]>(["running"]),
     // Every copy in turn: an older bundled helper has no icons mode, a newer one in the support folder may.
