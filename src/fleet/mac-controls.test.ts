@@ -4,6 +4,8 @@ import type { HeatState } from "./heat.js";
 import {
   type ControlsSystem,
   MacControls,
+  audioOutPids,
+  isMediaPlayerPath,
   parseAudioPlaying,
   parseVolumeSettings,
   rankApps,
@@ -236,6 +238,15 @@ describe("audio playing and app ranking", () => {
     expect(parseAudioPlaying(sample("audio-out BuiltInSpeakerDevice"))).toBe(true);
     expect(parseAudioPlaying(sample("audio-in BuiltInMicrophoneDevice"))).toBe(false);
     expect(parseAudioPlaying("Assertion status system-wide:\n   PreventSystemSleep 0\n")).toBe(false);
+  });
+  it("names the process behind the stream and counts only media players, not a browser's silent stream", () => {
+    expect(audioOutPids(sample("audio-out BuiltInSpeakerDevice"))).toEqual([29571]);
+    expect(audioOutPids(sample("audio-in BuiltInMicrophoneDevice"))).toEqual([]);
+    expect(isMediaPlayerPath("/Applications/Spotify.app/Contents/MacOS/Spotify")).toBe(true);
+    expect(isMediaPlayerPath("/Applications/Google Chrome.app/Contents/Frameworks/Helpers/Google Chrome Helper")).toBe(
+      false,
+    );
+    expect(isMediaPlayerPath("/Applications/Trident.app/Contents/MacOS/Trident")).toBe(false);
   });
 
   it("ranks the front app, then the most recent, and caps the list", () => {
