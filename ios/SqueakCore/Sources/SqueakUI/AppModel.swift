@@ -69,6 +69,13 @@ final class AppModel {
     /// file protection, no backup, 30 chats, gone on unpair). A chat opened again, even after a relaunch, shows it
     /// in its first frame, so the history arriving a moment later does not push everything down.
     private(set) var lastHistory: [String: [LiveTurn.HistoryEntry]] = [:]
+    /// The same per chat with where its older pages go on (`ChatHistoryState`): the live push of the newest eight
+    /// merges over the tail, pages asked for land in front. `lastHistory` is always its `entries`.
+    @ObservationIgnored private var historyStates: [String: ChatHistoryState] = [:]
+    /// Where each chat's request for earlier messages stands. One at a time per chat.
+    private(set) var earlierLoad: [String: EarlierPaging.Load] = [:]
+    /// When older messages last landed above a chat's first one: the chat keeps the reader's place.
+    private(set) var earlierPrependedAt: [String: Date] = [:]
     /// Nil in the demo, which must neither read nor write the real cache.
     @ObservationIgnored private let historyStore: HistoryStore?
     /// Sends not settled yet, kept across relaunches (`OutboxStore`). Nil in the demo.
@@ -132,7 +139,10 @@ final class AppModel {
         demo = ProcessInfo.processInfo.arguments.contains("-squeak-demo")
         signer = demo ? SoftwareSigner() : KeyStore.signer()
         historyStore = demo ? nil : HistoryStore()
-        if let historyStore { lastHistory = historyStore.all() }
+        if let historyStore {
+            historyStates = historyStore.states()
+            lastHistory = historyStates.mapValues(\.entries)
+        }
         outboxStore = demo ? nil : OutboxStore()
         if let outboxStore { outbox = Self.restore(outboxStore.all()) }
         if demo {
@@ -244,6 +254,9 @@ final class AppModel {
         liveTask = nil
         liveTurns = [:]
         lastHistory = [:]
+        historyStates = [:]
+        earlierLoad = [:]
+        earlierPrependedAt = [:]
         historyStore?.clear()
         outboxStore?.clear()
         outbox = [:]
@@ -391,8 +404,9 @@ final class AppModel {
                 if self.liveTurns[key] != turn {
                     self.liveTurns[key] = turn
                     if let history = turn?.history, !history.isEmpty {
-                        self.lastHistory[key] = history
-                        self.historyStore?.record(history, for: key)
+                        var state = self.historyStates[key] ?? ChatHistoryState()
+                        state.mergeLatest(history)
+                        self.setHistory(state, for: key)
                     }
                     self.noteQueue(turn, for: key)
                     self.rebuild()
@@ -403,6 +417,63 @@ final class AppModel {
 
     func refresh() async {
         await tick()
+    }
+
+    /* ---------- earlier messages ---------- */
+
+    private func setHistory(_ state: ChatHistoryState, for key: String) {
+        guard historyStates[key] != state else { return }
+        historyStates[key] = state
+        lastHistory[key] = state.entries
+        historyStore?.record(state, for: key)
+        if outbox[key] != nil { persistOutbox() }
+    }
+
+    /// What sits above the chat's first message: a sentinel, a spinner, "Start of chat" or a retry.
+    func earlierRow(for session: PhoneSnapshot.Session) -> EarlierPaging.Row {
+        EarlierPaging.row(available: earlierAvailable(session), state: historyStates[session.key], load: earlierLoad[session.key] ?? .idle)
+    }
+
+    private func earlierAvailable(_ session: PhoneSnapshot.Session) -> Bool {
+        EarlierPaging.available(session: session, streamed: liveAvailable && verbose, demo: demo)
+    }
+
+    /// True while older messages have only just landed: the scroll view uses it to keep the reader's place.
+    func justPrepended(_ key: String, now: Date = Date()) -> Bool {
+        earlierPrependedAt[key].map { now.timeIntervalSince($0) < 2 } ?? false
+    }
+
+    /// Ask the Mac for the next older page of a chat. Read-only, so no Face ID, and asking again after an unclear
+    /// failure is safe. `manual`: a tap or a pull, which may go again after a failure.
+    func loadEarlier(_ session: PhoneSnapshot.Session, manual: Bool = false) async {
+        let key = session.key
+        let state = historyStates[key]
+        guard EarlierPaging.shouldFetch(available: earlierAvailable(session), state: state, load: earlierLoad[key] ?? .idle, manual: manual),
+              let state, let channel else { return }
+        earlierLoad[key] = .loading
+        let before = state.cursor
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.historyDocument(key: key, before: before, n: 12, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel), result.sent,
+                  result.doc == LiveTurn.historyPageDoc(for: key, before: before),
+                  let page = try await channel.historyPage(key: key, before: before),
+                  EarlierPaging.matches(page, key: key, before: before) else {
+                earlierLoad[key] = .failed
+                return
+            }
+            var next = historyStates[key] ?? state
+            next.prepend(page)
+            earlierPrependedAt[key] = Date()
+            earlierLoad[key] = .idle
+            setHistory(next, for: key)
+            rebuild()
+        } catch {
+            earlierLoad[key] = .failed
+        }
     }
 
     @ObservationIgnored private var ticking = false
@@ -685,6 +756,11 @@ final class AppModel {
 
     /// What is kept: sends not delivered. A "Sending…" that survived a relaunch is unknown, not in flight.
     private func persistOutbox() {
+        // Settled failures go by age, and the chat's history proves or disproves an unconfirmed one.
+        for (key, sends) in outbox {
+            let kept = OutboxPolicy.prune(sends, history: lastHistory[key])
+            if kept != sends { outbox[key] = kept.isEmpty ? nil : kept }
+        }
         guard let outboxStore else { return }
         var entries: [OutboxStore.Entry] = []
         for (key, sends) in outbox {

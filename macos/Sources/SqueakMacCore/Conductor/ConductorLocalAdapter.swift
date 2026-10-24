@@ -194,7 +194,14 @@ public struct ConductorLocalAdapter: HostAdapter {
     }
 
     public func transcript(for session: HostSession, limit: Int) async throws -> [ChatMessage] {
-        try registry.transcript(sessionId: sessionId(of: session), limit: limit).messages
+        try await transcriptPage(for: session, limit: limit, before: nil).messages
+    }
+
+    public func transcriptPage(for session: HostSession, limit: Int, before: String?) async throws -> TranscriptPage {
+        let cursor: Int64? = before.flatMap { Int64($0) }
+        if before != nil, cursor == nil { return TranscriptPage(messages: [], nextBefore: nil) }
+        let page = try registry.transcriptPage(sessionId: sessionId(of: session), limit: limit, before: cursor)
+        return TranscriptPage(messages: page.messages, nextBefore: page.nextBefore.map(String.init))
     }
 
     public func activity(for session: HostSession) async throws -> [ActivityStep] {

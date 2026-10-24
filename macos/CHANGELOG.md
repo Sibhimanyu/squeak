@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.34
+
+- A Conductor chat's model line, under its title, is now a menu: switch to another model from the same
+  provider, change the thinking level, or turn fast mode on. Conductor's own window shows the change.
+- A working chat shows its subagents and background shells above the composer, each with how long it
+  has run and how it ended, and says "Seems stuck" with a Stop button when the model has gone quiet.
+- The … button beside Open in Conductor opens a pull request or archives the chat's workspace, and
+  New chat can make a new workspace in any of your repositories.
+
 ## 2.1.33
 
 - Squeak for iPhone's Mac controls show your apps with their real icons, and the controls for whichever

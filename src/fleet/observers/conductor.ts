@@ -67,6 +67,7 @@ export class ConductorObserver {
       branch: row.branch ?? row.directoryName,
       title: row.title,
       state,
+      ...(row.status === "waiting" && state === "working" ? { conductorWaiting: true } : {}),
       detail: state === "awaiting_input" ? (row.pendingQuestion ?? null) : null,
       lastActivityAt,
       transcriptPath: null,

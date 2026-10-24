@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionMessageRecord } from "../types.js";
-import { buildTranscript } from "./transcript.js";
+import { buildTranscript, parseCursor, readTranscript, type TranscriptRowSource } from "./transcript.js";
 
 function assistant(id: string, turnId: string, blocks: unknown[], type = "assistant"): SessionMessageRecord {
   return {
@@ -105,5 +105,91 @@ describe("buildTranscript", () => {
 
   it("is incomplete when the scan hit its cap", () => {
     expect(buildTranscript(rows, { limit: 40, scanRows: rows.length }).complete).toBe(false);
+  });
+});
+
+describe("readTranscript (paging by rowid)", () => {
+  const toolRow = (n: number): SessionMessageRecord => ({
+    role: "assistant",
+    content: JSON.stringify({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", input: {} }] },
+    }),
+    sentAt: null,
+    turnId: "t",
+    model: null,
+    id: `tool-${n}`,
+  });
+  const text = (role: "user" | "assistant", body: string): SessionMessageRecord =>
+    role === "user"
+      ? { role, content: body, sentAt: null, turnId: "t", model: null }
+      : assistant("x", "t", [{ type: "text", text: body }]);
+
+  /** Oldest first; rowids are 1-based positions. */
+  function source(all: SessionMessageRecord[]): TranscriptRowSource & { reads: number[] } {
+    const reads: number[] = [];
+    return {
+      reads,
+      listSessionMessagesPage(_session, before, limit) {
+        reads.push(limit);
+        const upto = before === null ? all.length : before - 1;
+        const out: SessionMessageRecord[] = [];
+        for (let rowid = upto; rowid >= 1 && out.length < limit; rowid -= 1) {
+          out.push({ ...all[rowid - 1]!, cursor: String(rowid) });
+        }
+        return out;
+      },
+    };
+  }
+
+  const longTurn = () => [
+    text("user", "first prompt"),
+    text("assistant", "first answer"),
+    text("user", "the long task"),
+    ...Array.from({ length: 700 }, (_, n) => toolRow(n)),
+    text("assistant", "done at last"),
+  ];
+
+  it("reaches the prompt of a 700-row turn that a fixed 600-row window hides", () => {
+    const result = readTranscript(source(longTurn()), "s", { limit: 3 });
+    expect(result.messages.map((message) => message.text)).toEqual(["first answer", "the long task", "done at last"]);
+    expect(result.messages[1]!.workBefore).toBeUndefined();
+    expect(result.messages[2]!.workBefore).toBe(700);
+    expect(result.nextBefore).toBe("2");
+    expect(result.complete).toBe(false);
+  });
+
+  it("pages back with the cursor without repeating or skipping a message, then says complete", () => {
+    const src = source(longTurn());
+    const first = readTranscript(src, "s", { limit: 2 });
+    expect(first.messages.map((m) => m.text)).toEqual(["the long task", "done at last"]);
+    const second = readTranscript(src, "s", { limit: 2, before: Number(first.nextBefore) });
+    expect(second.messages.map((m) => m.text)).toEqual(["first prompt", "first answer"]);
+    expect(second.complete).toBe(true);
+    expect(second.nextBefore).toBeNull();
+  });
+
+  it("is complete when the whole chat fits the page", () => {
+    const result = readTranscript(source([text("user", "hi"), text("assistant", "hello")]), "s", { limit: 40 });
+    expect(result).toMatchObject({ complete: true, nextBefore: null });
+    expect(result.messages).toHaveLength(2);
+    expect(readTranscript(source([]), "s", { limit: 5 })).toEqual({ messages: [], complete: true, nextBefore: null });
+  });
+
+  it("reads a small first chunk, then bigger ones, and stops once it has enough", () => {
+    const src = source(longTurn());
+    readTranscript(src, "s", { limit: 3 });
+    expect(src.reads[0]).toBe(200);
+    expect(src.reads.slice(1).every((size) => size === 2000)).toBe(true);
+    expect(src.reads.length).toBe(2);
+  });
+
+  it("validates a cursor strictly", () => {
+    expect(parseCursor(null)).toBeNull();
+    expect(parseCursor("")).toBeNull();
+    expect(parseCursor("42")).toBe(42);
+    for (const bad of ["0", "-1", "1.5", "12a", " 1", "1e3", "0x10", "99999999999999999"]) {
+      expect(parseCursor(bad)).toBe("invalid");
+    }
   });
 });

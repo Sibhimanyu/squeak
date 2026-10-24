@@ -341,6 +341,28 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed, read-only document asking for one page of a chat's earlier messages (`HistoryPage`).
+    public func historyDocument(key sessionKey: String, before: String?, n: Int = 12, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = HistoryCommand(
+            v: 1, kind: "history", key: sessionKey, before: before, n: n,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// The page the Mac left for `historyDocument`, or nil when it is not there (or is not for this chat and cursor).
+    public func historyPage(key sessionKey: String, before: String?) async throws -> HistoryPage? {
+        let doc = LiveTurn.historyPageDoc(for: sessionKey, before: before)
+        guard let document = try await store.get(path("live", doc)) else { return nil }
+        let page = try ChannelCrypto.open(HistoryPage.self, box: document.box, key: pairing.k)
+        return page.key == sessionKey && page.before == before ? page : nil
+    }
+
     /// The signed document asking for what a film's card plays.
     public func mediaDocument(sessionKey: String, source: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
         var nonce = Data(count: 16)

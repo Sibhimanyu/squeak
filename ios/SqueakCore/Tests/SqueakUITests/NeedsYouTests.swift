@@ -116,4 +116,27 @@ final class NeedsYouTests: XCTestCase {
         let unsure = send(.notConfirmed, turn: "t1")
         if case .failed(let line, _) = NeedsYou.outcome(of: [unsure], for: session) { XCTAssertTrue(line.hasPrefix("Couldn't confirm")) } else { XCTFail("unconfirmed is not sent") }
     }
+
+    func testReceiptAndSendingText() {
+        let session = chat("a", "finished", message: "Q?", asks: "Q?", turn: "t1")
+        func send(_ status: ChatSend.Status, _ text: String = "B") -> ChatSend { .init(text: text, date: Date(), answersTurn: "t1", status: status) }
+        XCTAssertNil(NeedsYou.receipt(of: [], for: session))
+        XCTAssertNil(NeedsYou.sendingText(of: [], for: session))
+        XCTAssertEqual(NeedsYou.sendingText(of: [send(.sending)], for: session), "B")
+        XCTAssertNil(NeedsYou.sendingText(of: [send(.sent)], for: session))
+        XCTAssertEqual(NeedsYou.receipt(of: [send(.sending)], for: session)?.display, "Sending…")
+        let sent = NeedsYou.receipt(of: [send(.sent, "  do\nit  ")], for: session)
+        XCTAssertEqual(sent?.display, "Sent · do it")
+        XCTAssertEqual(sent?.collapsesBody, true)
+        let failed = send(.refused("nope"))
+        let receipt = NeedsYou.receipt(of: [failed], for: session)
+        XCTAssertEqual(receipt?.phase, .failed)
+        XCTAssertEqual(receipt?.sendId, failed.id)
+        XCTAssertEqual(receipt?.collapsesBody, false)
+    }
+
+    func testClipFoldsAndCuts() {
+        XCTAssertEqual(NeedsYou.clip("a   b\nc"), "a b c")
+        XCTAssertEqual(NeedsYou.clip(String(repeating: "x", count: 100), to: 10), "xxxxxxxxxx…")
+    }
 }

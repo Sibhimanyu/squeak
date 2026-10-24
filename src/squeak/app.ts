@@ -523,7 +523,7 @@ export class SqueakApp {
         const rule = sudoersRule(os.userInfo().username);
         return rule ? { path: SUDOERS_PATH, rule } : null;
       },
-      transcript: (target, limit) => this.router.transcript(target, limit),
+      transcript: (target, limit, before) => this.router.transcript(target, limit, before),
       activity: (key) => {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
         if (!session?.transcriptPath) return { steps: [], total: 0 };
@@ -534,15 +534,20 @@ export class SqueakApp {
       },
       chatModels: () => listChatModels(config.conductorDbPath),
       sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),
-      reply: (target, text, mode) =>
-        this.router.send(
+      reply: async (target, text, mode, answersTurn) => {
+        // A client that names the turn it answered is refused once the chat has moved on (answered on the laptop).
+        if (typeof answersTurn === "string" && this.router.lastTurnId(target) !== answersTurn) {
+          return { status: "refused", reason: "That chat has moved on, so nothing was sent." };
+        }
+        return this.router.send(
           target,
           text,
           (message) => {
             logger.warn("reply from the Mac app failed", { target, message });
           },
           { mode: mode ?? "queue" },
-        ),
+        );
+      },
     });
 
     this.claudeLimits = new ClaudeLimitsStore(path.join(config.supportDir, "claude-limits.json"));

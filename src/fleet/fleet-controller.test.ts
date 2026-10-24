@@ -114,8 +114,9 @@ async function fixture(
   };
 
   const sends: Array<{ sessionId: string; text: string }> = [];
+  const turn = { text: options.lastText === undefined ? DECISION : options.lastText };
   const replier: FleetReplier = {
-    lastTurnText: () => (options.lastText === undefined ? DECISION : options.lastText),
+    lastTurnText: () => turn.text,
     send: async (sessionId, text) => {
       sends.push({ sessionId, text });
       return options.outcome ?? { status: "started", via: "conductor" };
@@ -140,7 +141,7 @@ async function fixture(
     await new Promise((resolve) => setTimeout(resolve, 0));
   };
 
-  return { controller, store, telegram, monitor, sent, sends, pushFinish };
+  return { controller, store, telegram, monitor, sent, sends, pushFinish, turn, sessions };
 }
 
 const location = { chatId: 42, messageThreadId: null };
@@ -183,6 +184,42 @@ describe("FleetController replies", () => {
       [expect.objectContaining({ text: "✓ Sent B in Conductor" })],
     ]);
     expect(monitor.refresh).toHaveBeenCalled();
+  });
+
+  it("refuses a letter tapped after the chat moved on and strips the card's buttons", async () => {
+    const { controller, telegram, sends, turn, sent, pushFinish } = await fixture();
+    await pushFinish();
+    const pick = sent[0]!.keyboard!.flat().find((button) => button.text === "B")!;
+    turn.text = null; // answered on the laptop: the chat is working again
+
+    const result = await controller.handleCallback(location, callbackData(pick), 100);
+
+    expect(sends).toEqual([]);
+    expect(result.notice).toContain("moved on");
+    expect(telegram.editMessageReplyMarkup).toHaveBeenCalledWith(42, 100, []);
+  });
+
+  it("refuses a swipe-reply to a card whose turn has moved on", async () => {
+    const { controller, sends, turn, sent, pushFinish } = await fixture();
+    await pushFinish();
+    turn.text = "A different question?";
+
+    expect(await controller.handleReplyMessage(location, 100, "B")).toBe(true);
+
+    expect(sends).toEqual([]);
+    expect(sent.at(-1)!.text).toContain("moved on");
+  });
+
+  it("strips the buttons of a card whose session left the waiting states", async () => {
+    const { controller, telegram, sessions, store, pushFinish } = await fixture();
+    await pushFinish();
+    expect(store.listLiveCards()).toHaveLength(1);
+    sessions[0]!.state = "working";
+
+    await (controller as unknown as { stripSettledCards(s: unknown): Promise<void> }).stripSettledCards({ sessions });
+
+    expect(telegram.editMessageReplyMarkup).toHaveBeenCalledWith(42, 100, []);
+    expect(store.listLiveCards()).toHaveLength(0);
   });
 
   it("says why when a tapped letter cannot be delivered", async () => {

@@ -24,6 +24,28 @@ public enum ChatTimeline {
         }
     }
 
+    /// What the transcript says happened to your latest message once it is in it: the agent has it
+    /// ("Read by Claude"), then the turn it started has ended ("Turn ended"). Earlier messages carry none:
+    /// their line would only repeat down the chat.
+    public enum Receipt: Sendable, Equatable {
+        case read
+        case turnEnded
+
+        public func line(agent: String) -> String {
+            switch self {
+            case .read: "Read by \(agent)"
+            case .turnEnded: "Turn ended"
+            }
+        }
+    }
+
+    /// The receipt for the newest user message, when it is a send of ours the transcript shows.
+    public static func receipt(messages: [ChatMessage], state: SessionState) -> (id: String, receipt: Receipt)? {
+        guard let i = messages.lastIndex(where: { $0.role == .user }), messages[i].state == .confirmed else { return nil }
+        let answered = messages[(i + 1)...].contains { $0.role == .assistant }
+        return (messages[i].id, answered && state != .working ? .turnEnded : .read)
+    }
+
     /// A send that went out within this long and has had no reply yet still counts as "starting",
     /// even if the session has not said `working` yet.
     public static let startingWindow: TimeInterval = 180

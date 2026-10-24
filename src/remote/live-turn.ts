@@ -82,6 +82,8 @@ export interface LiveHistory {
 }
 
 export interface HistoryEntry {
+  /** The chat row's rowid as a string: a stable id for the entry (the last message of a run). Absent when unknown. */
+  id?: string;
   role: "user" | "assistant";
   text: string;
   at: string | null;
@@ -99,9 +101,34 @@ export function condenseHistory(
   max = HISTORY_MESSAGES,
   chars = HISTORY_CHARS,
 ): HistoryEntry[] {
+  return condenseRuns(messages, chars).entries.slice(-max);
+}
+
+/**
+ * The same condensing, for one page of an earlier history: the newest `max` entries, and the cursor of the
+ * first message behind the oldest of them, so the next page starts exactly before it. `hasMore` is true when
+ * entries were cut here.
+ */
+export function condenseHistoryPage(
+  messages: TranscriptMessage[],
+  max: number,
+  chars = HISTORY_CHARS,
+): { entries: HistoryEntry[]; oldestCursor: string | null; hasMore: boolean } {
+  const { entries, firsts } = condenseRuns(messages, chars);
+  const start = Math.max(0, entries.length - max);
+  return { entries: entries.slice(start), oldestCursor: firsts[start] ?? null, hasMore: start > 0 };
+}
+
+function condenseRuns(
+  messages: TranscriptMessage[],
+  chars: number,
+): { entries: HistoryEntry[]; firsts: Array<string | null> } {
   const kept: HistoryEntry[] = [];
+  // The cursor of the first message of each entry's run, parallel to `kept`.
+  const firsts: Array<string | null> = [];
   for (const message of messages) {
     const entry: HistoryEntry = {
+      ...(message.cursor ? { id: message.cursor } : {}),
       role: message.role,
       text: message.text.length > chars ? `${message.text.slice(0, chars - 1).trimEnd()}…` : message.text,
       at: message.at,
@@ -120,9 +147,10 @@ export function condenseHistory(
       kept[kept.length - 1] = entry;
     } else {
       kept.push(entry);
+      firsts.push(message.cursor ?? null);
     }
   }
-  return kept.slice(-max);
+  return { entries: kept, firsts };
 }
 
 export interface LiveTurnDependencies {
@@ -148,6 +176,11 @@ export interface LiveTurnDependencies {
 /** The history document's id beside the turn's. */
 export function liveHistoryHandle(handle: string): string {
   return `${handle}-h`;
+}
+
+/** The `live` document id of one page of earlier history: the chat's handle, `-h`, then the page's cursor or `latest`. */
+export function historyPageDoc(sessionKey: string, before: string | null): string {
+  return `${liveHandle(sessionKey)}-h${before ?? "latest"}`;
 }
 
 /** A session key as a document id: fixed length, no `:` or `/`, and not the key itself. */

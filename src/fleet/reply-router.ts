@@ -26,8 +26,9 @@ function isFleetKey(target: string): boolean {
 
 interface ConductorSide {
   lastTurnText(conductorSessionId: string): string | null;
+  lastTurnId?(conductorSessionId: string): string | null;
   lastTurnError?(conductorSessionId: string): string | null;
-  transcript(conductorSessionId: string, limit: number): TranscriptResult;
+  transcript(conductorSessionId: string, limit: number, before?: number | null): TranscriptResult;
   send(
     conductorSessionId: string,
     text: string,
@@ -67,21 +68,36 @@ export class FleetReplyRouter implements FleetReplier {
     return session && this.deps.terminal?.canReply(session) ? this.deps.terminal.lastTurnText(session) : null;
   }
 
+  /**
+   * The newest turn's id, for refusing an answer to a turn that has moved on.
+   * A Conductor chat reads its database; a terminal agent its transcript.
+   */
+  lastTurnId(target: string): string | null {
+    if (!isFleetKey(target)) {
+      return this.deps.conductor.lastTurnId?.(target) ?? null;
+    }
+    const session = this.resolve(target);
+    if (session?.conductorSessionId) {
+      return this.deps.conductor.lastTurnId?.(session.conductorSessionId) ?? null;
+    }
+    return session && this.deps.terminal?.canReply(session) ? this.deps.terminal.lastTurnId(session) : null;
+  }
+
   /** Why a Conductor chat's newest turn failed. Terminal agents have no such record. */
   lastTurnError(target: string): string | null {
     return isFleetKey(target) ? null : (this.deps.conductor.lastTurnError?.(target) ?? null);
   }
 
   /** Readable history. Terminal agents have no cheap reader yet, so they get none. */
-  transcript(target: string, limit: number): TranscriptResult {
+  transcript(target: string, limit: number, before?: number | null): TranscriptResult {
     if (!isFleetKey(target)) {
-      return this.deps.conductor.transcript(target, limit);
+      return this.deps.conductor.transcript(target, limit, before);
     }
     const session = this.resolve(target);
     if (session?.conductorSessionId) {
-      return this.deps.conductor.transcript(session.conductorSessionId, limit);
+      return this.deps.conductor.transcript(session.conductorSessionId, limit, before);
     }
-    return { messages: [], complete: false };
+    return { messages: [], complete: false, nextBefore: null };
   }
 
   async send(

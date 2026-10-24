@@ -73,8 +73,14 @@ public struct SessionMessageRecord: Hashable, Sendable {
     public var sentAt: String?
     public var turnId: String?
     public var model: String?
+    /// The row's rowid; set by the paged read only.
+    public var cursor: Int64?
 
-    public init(id: String? = nil, role: String, content: String, sentAt: String? = nil, turnId: String? = nil, model: String? = nil) {
+    public init(
+        id: String? = nil, role: String, content: String, sentAt: String? = nil, turnId: String? = nil, model: String? = nil,
+        cursor: Int64? = nil
+    ) {
+        self.cursor = cursor
         self.id = id
         self.role = role
         self.content = content
@@ -177,6 +183,7 @@ public struct ConductorRegistry: Sendable {
     func pendingQuestion(sessionId: String) -> String? {
         let sql = """
             SELECT CASE
+              WHEN role = 'user' AND content NOT LIKE '{"type":%' THEN '{"type":"human"}'
               WHEN content LIKE '{"type":"assistant"%' AND (
                    content LIKE '%"name":"mcp__conductor__AskUserQuestion"%'
                 OR content LIKE '%"name":"AskUserQuestion"%'
@@ -186,7 +193,7 @@ public struct ConductorRegistry: Sendable {
               ELSE NULL
             END AS body
             FROM (
-              SELECT rowid, content FROM session_messages
+              SELECT rowid, role, content FROM session_messages
               WHERE session_id = ? ORDER BY rowid DESC LIMIT 12
             )
             ORDER BY rowid DESC
@@ -196,6 +203,8 @@ public struct ConductorRegistry: Sendable {
         for row in rows {
             guard let body = row["body"]?.string else { continue }
             if body.hasPrefix(#"{"type":"result""#) || body.hasPrefix(#"{"type":"error""#) { return nil }
+            // A typed answer (on the laptop): real human rows are role "user" with plain text.
+            if body.hasPrefix(#"{"type":"human""#) { return nil }
             if body.hasPrefix(#"{"type":"user""#) {
                 // A human message after the question: the turn moved on without it.
                 if !body.contains(#""type":"tool_result""#) && !body.contains("<task-notification>") { return nil }
@@ -207,6 +216,27 @@ public struct ConductorRegistry: Sendable {
             }
         }
         return nil
+    }
+
+    /// A page of a chat's rows by rowid, newest first, strictly below `before` (nil: from the newest).
+    /// rowid is unique, so a page never repeats or skips a row the way a timestamp tie could.
+    public func listSessionMessagesPage(sessionId: String, before: Int64?, limit: Int) throws -> [SessionMessageRecord] {
+        let sql = """
+            SELECT rowid as cursor, id, role, content, sent_at as sentAt, turn_id as turnId, model
+            FROM session_messages
+            WHERE session_id = ?
+              AND cancelled_at IS NULL
+              AND (? IS NULL OR rowid < ?)
+            ORDER BY rowid DESC
+            LIMIT ?
+            """
+        let bound: SQLValue = before.map { .int($0) } ?? .null
+        return try database.query(sql, [.text(sessionId), bound, bound, .int(Int64(limit))]).compactMap { row in
+            guard let role = row["role"]?.string, let content = row["content"]?.string else { return nil }
+            return SessionMessageRecord(
+                id: row["id"]?.string, role: role, content: content, sentAt: row["sentAt"]?.string,
+                turnId: row["turnId"]?.string, model: row["model"]?.string, cursor: row["cursor"]?.int)
+        }
     }
 
     /// Newest first. Ordered by `datetime()` so both timestamp spellings sort by

@@ -573,3 +573,26 @@ than a minute off the Mac's is refused locally and stays on the cloud.
 `LocalChannelServer` on 127.0.0.1, the real phone code): pairing through the "cloud", then a reply's round trip in
 62 ms, a steer's 62 ms, a start's 4 ms and a usage refresh's 8 ms with the cloud seeing none of those commands; then the
 Mac's local server is stopped and the phone's next reply goes through the cloud, once.
+
+## Earlier messages, page by page (2026-10-24)
+
+Reading a chat's history is paged by SQLite rowid, newest first, in chunks (200 rows, then 2000) until enough
+messages turn up, so a turn of hundreds of tool rows no longer hides its own prompt. A message carries
+`cursor` (its rowid, a string); a result carries `nextBefore` (string or null) and `complete`.
+
+- **Mac route:** `GET /control/session/<id>/transcript?limit=N&before=<cursor>` returns
+  `{ messages: [{ id, cursor?, role, text, at, turnId, workBefore? }], complete, nextBefore }`. `before` is digits
+  only (a positive integer); anything else is a 400. Token-gated, no CORS, like the other control routes.
+- **Phone command (signed, read-only):** `{ v: 1, kind: "history", key, before?: "<cursor>", n?: 1...12,
+  nonce, expiresAt }`. It runs through `handleCommand` (device signature, expiry, nonce) but has no turn check, since
+  it changes nothing. `key` must be a session the Mac shows the phone (active, or in Recent with a Conductor chat);
+  `n` above 12 is clamped. One page at a time per chat. Needs a streaming store (the Realtime Database), like the
+  live turn. The result is `{ id, status: "sent", doc }`, or `refused`.
+- **Answer document:** `live/<handle>-h<before|latest>` (`historyPageDoc(key, before)`; `handle` is `liveHandle(key)`),
+  sealed like every live document: `{ v: 1, key, before, entries: HistoryEntry[], nextBefore, complete, seq }`. An
+  entry is `{ id?, role, text, at, workBefore? }` (`id` is the rowid of the entry's last message, text clipped to
+  2000). `nextBefore` is what to send as the next `before`. The document is deleted after 30 minutes with the media
+  chunks (`remote-media.json` ledger, also swept at start). The direct path serves it unchanged.
+- **Phone view:** each session may carry `lastUser: { text, at }` (the newest user message, 200 characters), so an
+  answer typed at the laptop shows while the chat is closed on the phone. A `steer` reply is refused while the chat
+  waits on a question or plan in Conductor.

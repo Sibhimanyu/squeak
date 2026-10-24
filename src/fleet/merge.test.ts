@@ -206,6 +206,16 @@ describe("applyHookEvents", () => {
     expect(applyHookEvents(sessions, new Map([["agent-1", hookEvent()]]))[0]?.state).toBe("awaiting_approval");
   });
 
+  it("clears a blocked state when PostToolUse or PermissionDenied arrives after the approval was answered", () => {
+    const sessions = mergeObservations([
+      observed({ key: "k", source: "claude-transcript", state: "awaiting_approval" }),
+    ]);
+    for (const event of ["PostToolUse", "PermissionDenied"] as const) {
+      const applied = applyHookEvents(sessions, new Map([["agent-1", hookEvent({ event, message: null })]]));
+      expect(applied[0]?.state).toBe("working");
+    }
+  });
+
   it("still takes Stop for a session outside Conductor", () => {
     const sessions = mergeObservations([observed({ key: "k", source: "claude-transcript", state: "working" })]);
     expect(applyHookEvents(sessions, new Map([["agent-1", hookEvent({ event: "Stop" })]]))[0]?.state).toBe("finished");

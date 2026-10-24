@@ -38,9 +38,6 @@ struct NeedsYouPage: View {
                                 }
                             }
                         }
-                    } else {
-                        Text("That's everything waiting on you. \(NeedsYou.hint(all)).")
-                            .font(.footnote).foregroundStyle(Theme.muted).padding(.top, 4).padding(.horizontal, 4)
                     }
                 }
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
@@ -66,7 +63,8 @@ struct NeedsYouPage: View {
     }
 }
 
-/// A chat that needs you, whole. The only red is the left edge and the dot (§3.3); the words carry the state.
+/// A chat that needs you, whole. No red mark here: the page is the Needs you tab, so an edge or a dot
+/// would only repeat it. Red stays for a failed send.
 struct DecisionCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -74,14 +72,39 @@ struct DecisionCard: View {
     var prominent = false
     let onOpen: () -> Void
     @State private var showingFull = false
+    /// The question and plan controls report their send here; a reply or an option goes through the outbox.
+    @State private var answered: NeedsYou.Receipt?
 
     var body: some View {
         let card = NeedsYou.card(for: session)
         let agent = Presentation.agentName(session.agent)
-        let outcome = NeedsYou.outcome(of: model.outbox[session.key] ?? [], for: session)
-        let locked = outcome == .sending || outcome == .sent
+        let sends = model.outbox[session.key] ?? []
+        let receipt = NeedsYou.receipt(of: sends, for: session) ?? answered
+        let locked = receipt?.phase == .sending || receipt?.phase == .sent
+        let sendingText = NeedsYou.sendingText(of: sends, for: session)
         VStack(alignment: .leading, spacing: prominent ? 16 : 14) {
             header(card)
+            if let receipt { ReceiptLine(receipt: receipt, session: session) }
+            if receipt?.collapsesBody != true {
+                content(card, agent: agent, locked: locked, sendingText: sendingText, sending: receipt?.phase == .sending)
+            }
+        }
+        .padding(prominent ? 20 : 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.line))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: receipt)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Question first, then what the agent said, then the controls.
+    @ViewBuilder
+    private func content(_ card: NeedsYou.Card, agent: String, locked: Bool, sendingText: String?, sending: Bool) -> some View {
+        Group {
+            if let heading = card.heading {
+                Text(heading).font(prominent ? .title2.weight(.semibold) : .title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
+            }
             if let context = card.context {
                 VStack(alignment: .leading, spacing: 8) {
                     MessageText(markdown: showingFull ? (card.full ?? context) : context, style: .squeak)
@@ -96,23 +119,10 @@ struct DecisionCard: View {
                     }
                 }
             }
-            if let heading = card.heading {
-                Text(heading).font(prominent ? .title2.weight(.semibold) : .title3.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
-            }
             ForEach(Array(card.controls.enumerated()), id: \.offset) { _, control in
-                controlView(control, agent: agent, locked: locked)
+                controlView(control, agent: agent, locked: locked, sendingText: sendingText, sending: sending)
             }
-            if let line = outcome.line { receipt(outcome, line: line) }
         }
-        .padding(prominent ? 20 : 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.line))
-        .overlay(alignment: .leading) {
-            Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 16).padding(.leading, 4).accessibilityHidden(true)
-        }
-        .accessibilityElement(children: .contain)
     }
 
     private func header(_ card: NeedsYou.Card) -> some View {
@@ -120,11 +130,8 @@ struct DecisionCard: View {
             ProjectMark(name: Presentation.projectName(session), size: prominent ? 40 : 34, folder: true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(Presentation.displayTitle(session)).font(.headline).lineLimit(2)
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Circle().fill(Theme.needsYou).frame(width: 8, height: 8).accessibilityHidden(true)
-                    Text("\(card.stateWord) · \(Presentation.subtitle(session)) · \(Age.describe(session.lastActivityAt))")
-                        .font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2)
-                }
+                Text("\(Presentation.subtitle(session)) · \(Age.describe(session.lastActivityAt))")
+                    .font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2)
             }
             Spacer(minLength: 0)
         }
@@ -134,21 +141,21 @@ struct DecisionCard: View {
     }
 
     @ViewBuilder
-    private func controlView(_ control: NeedsYou.Control, agent: String, locked: Bool) -> some View {
+    private func controlView(_ control: NeedsYou.Control, agent: String, locked: Bool, sendingText: String?, sending: Bool) -> some View {
         switch control {
         case .choices:
             if let choices = session.choices {
                 let reading = Presentation.read(message: session.message ?? "", choices: choices)
                 // The card's heading is the question: the options come without a second copy of it.
                 OptionsView(choices: .init(question: nil, options: choices.options, recommended: choices.recommended),
-                            details: reading.details, disabled: locked) { letter in
+                            details: reading.details, disabled: locked, sending: sendingText) { letter in
                     Task { await model.send(letter, to: session) }
                 }
             }
         case .answerQuestion:
-            if let question = session.question { QuestionCard(question: question, agentName: agent, session: session) }
+            if let question = session.question { QuestionCard(question: question, agentName: agent, session: session, report: $answered) }
         case .plan:
-            if let plan = session.question?.plan { PlanCard(plan: plan, agentName: agent, session: session) }
+            if let plan = session.question?.plan { PlanCard(plan: plan, agentName: agent, session: session, report: $answered) }
         case .approvalNote:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Lucide(.info, size: 14, color: Theme.muted).accessibilityHidden(true)
@@ -156,7 +163,7 @@ struct DecisionCard: View {
                     .font(.subheadline).foregroundStyle(Theme.muted)
             }
         case .reply:
-            InlineReply(session: session, agentName: agent, locked: locked)
+            InlineReply(session: session, agentName: agent, locked: locked, sending: sending)
         case .openChat:
             Button(action: onOpen) {
                 HStack(spacing: 6) {
@@ -169,21 +176,28 @@ struct DecisionCard: View {
             .accessibilityHint("Opens the whole conversation")
         }
     }
+}
 
-    @ViewBuilder
-    private func receipt(_ outcome: NeedsYou.Outcome, line: String) -> some View {
-        let failed: Bool = { if case .failed = outcome { true } else { false } }()
+/// The one status line at the top of a card (sending, sent, failed), with Send again and Edit when a send
+/// failed. Shared by every control on the card.
+struct ReceiptLine: View {
+    let receipt: NeedsYou.Receipt
+    let session: PhoneSnapshot.Session
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                switch outcome {
+                switch receipt.phase {
                 case .sending: ProgressView().controlSize(.small)
                 case .sent: Lucide(.check, size: 14, color: Theme.muted).accessibilityHidden(true)
-                default: EmptyView()
+                case .failed: EmptyView()
                 }
-                Text(line).font(.footnote).foregroundStyle(failed ? Theme.error : Theme.muted)
+                Text(receipt.display).font(.footnote).lineLimit(receipt.phase == .failed ? nil : 1)
+                    .foregroundStyle(receipt.phase == .failed ? Theme.error : Theme.muted)
             }
-            if case .failed(_, let id) = outcome { FailedSendActions(sendId: id, session: session) }
+            if receipt.phase == .failed, let id = receipt.sendId { FailedSendActions(sendId: id, session: session) }
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -194,6 +208,7 @@ private struct InlineReply: View {
     let session: PhoneSnapshot.Session
     let agentName: String
     let locked: Bool
+    var sending = false
     @State private var draft = ""
     /// Bumped on each clear, so the field is rebuilt and cannot keep text of its own.
     @State private var generation = 0
@@ -211,12 +226,14 @@ private struct InlineReply: View {
                 .disabled(locked)
                 .accessibilityLabel("Reply to \(Presentation.displayTitle(session))")
             Button(action: send) {
-                Lucide(.arrowUp, size: 20, color: empty || locked ? Theme.muted : Theme.primaryText)
-                    .frame(width: 48, height: 48)
+                Group {
+                    if sending { ProgressView() } else { Lucide(.arrowUp, size: 20, color: empty || locked ? Theme.muted : Theme.primaryText) }
+                }
+                .frame(width: 48, height: 48)
                     .background(empty || locked ? Theme.surfaceRaised : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 12))
             }
             .buttonStyle(.plain).disabled(empty || locked)
-            .accessibilityLabel("Send reply")
+            .accessibilityLabel(sending ? "Sending reply" : "Send reply")
         }
         .onChange(of: model.restoredDraft[session.key]) { _, text in
             guard let text else { return }
@@ -255,7 +272,7 @@ private struct CompactDecisionRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(Presentation.displayTitle(session)).font(.headline).lineLimit(1)
                     Text(card.heading ?? Presentation.ask(session)).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2)
-                    Text("\(card.stateWord) · \(Age.describe(session.lastActivityAt))").font(.footnote).foregroundStyle(Theme.subtle)
+                    Text("\(Presentation.subtitle(session)) · \(Age.describe(session.lastActivityAt))").font(.footnote).foregroundStyle(Theme.subtle).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 Lucide(.chevronDown, size: 16, color: Theme.subtle).accessibilityHidden(true)
@@ -264,13 +281,11 @@ private struct CompactDecisionRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
-            .overlay(alignment: .leading) {
-                Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 12).padding(.leading, 3).accessibilityHidden(true)
-            }
             .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(Presentation.displayTitle(session)), \(card.stateWord), \(card.heading ?? Presentation.ask(session)), \(Age.spoken(session.lastActivityAt))")
         .accessibilityHint("Opens the decision here")
     }
 }

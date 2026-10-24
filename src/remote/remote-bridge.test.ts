@@ -32,6 +32,7 @@ import {
   type StartCommand,
 } from "./remote-bridge.js";
 import { open, pairingCode, seal } from "./remote-crypto.js";
+import { historyPageDoc } from "./live-turn.js";
 
 const NOW = Date.parse("2026-09-25T03:00:00.000Z");
 
@@ -127,6 +128,14 @@ function fixture(
     failure?: string | null;
     /** A store that streams, like the Realtime Database. */
     streaming?: boolean;
+    /** The replier's paged transcript reader. */
+    transcript?: (
+      sessionId: string,
+      limit: number,
+      before?: number | null,
+    ) => { messages: TranscriptMessage[]; nextBefore?: string | null };
+    /** The session as the snapshot shows it. */
+    session?: Partial<FleetSession>;
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
@@ -142,6 +151,7 @@ function fixture(
       sends.push({ sessionId, text });
       return options.outcome ?? ({ status: "started", via: "conductor" } as ReplyOutcome);
     }),
+    ...(options.transcript ? { transcript: options.transcript } : {}),
     ...(options.stopOutcome === "none"
       ? {}
       : {
@@ -167,8 +177,8 @@ function fixture(
         }),
   };
   let snapshot = {
-    sessions: [session()],
-    active: [session()],
+    sessions: [session(options.session)],
+    active: [session(options.session)],
     attention: [],
     generatedAt: "",
     codexUsage: null,
@@ -344,6 +354,19 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const historyCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "history",
+      key: "claude-transcript:s1",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const hotspotCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
     const body = {
       v: 1,
@@ -411,6 +434,7 @@ function fixture(
     attachCommand,
     diffCommand,
     imageCommand,
+    historyCommand,
     hotspotCommand,
     workflowCommand,
     mediaCommand,
@@ -715,6 +739,140 @@ describe("RemoteBridge image", () => {
     await bare.store.set(`${bare.channel}/commands/c1`, bare.imageCommand());
     await bare.bridge.tick();
     expect(bare.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't send images to a phone." });
+  });
+});
+
+describe("RemoteBridge history pages", () => {
+  const messages = (count: number): TranscriptMessage[] =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `m${index}`,
+      cursor: String(100 + index),
+      role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      text: `message ${index}`,
+      at: null,
+      turnId: null,
+    }));
+  function withHistory(total = 30) {
+    const calls: Array<{ limit: number; before: number | null | undefined }> = [];
+    const f = fixture({
+      streaming: true,
+      transcript: (_id, limit, before) => {
+        calls.push({ limit, before });
+        const all = messages(total).filter((m) => before == null || Number(m.cursor) < before);
+        const page = all.slice(-limit);
+        return { messages: page, nextBefore: all.length > limit ? page[0]!.cursor! : null };
+      },
+    });
+    const page = (id: string) => {
+      const doc = [...f.store.docs.entries()].find(([key]) => key.includes("/live/") && key.endsWith(id));
+      return doc ? open<Record<string, unknown>>(f.payload.k, doc[1].box) : null;
+    };
+    return { f, calls, page };
+  }
+
+  it("answers with a sealed live document of up to 12 entries and the cursor to go further back", async () => {
+    const { f, page } = withHistory();
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/h1`, f.historyCommand({ n: 99 }));
+    await f.bridge.tick();
+    const result = f.result("h1") as { status: string; doc: string };
+    expect(result.status).toBe("sent");
+    expect(result.doc).toBe(historyPageDoc("claude-transcript:s1", null));
+    const first = page(result.doc) as { entries: Array<{ id: string }>; nextBefore: string; complete: boolean };
+    expect(first.entries).toHaveLength(12);
+    expect(first.entries.at(-1)!.id).toBe("129");
+    expect(first.complete).toBe(false);
+    expect(first.nextBefore).toBe(first.entries[0]!.id);
+
+    await f.store.set(`${f.channel}/commands/h2`, f.historyCommand({ before: first.nextBefore, n: 12 }));
+    await f.bridge.tick();
+    const second = page((f.result("h2") as { doc: string }).doc) as { entries: unknown[]; nextBefore: string | null };
+    expect(second.entries).toHaveLength(12);
+    await f.store.set(`${f.channel}/commands/h3`, f.historyCommand({ before: "106", n: 12 }));
+    await f.bridge.tick();
+    const last = page((f.result("h3") as { doc: string }).doc) as { complete: boolean; nextBefore: string | null };
+    expect(last).toMatchObject({ complete: true, nextBefore: null });
+  });
+
+  it("never runs on a bad signature, an expired or replayed command, or a key the phone is not shown", async () => {
+    const { f, calls } = withHistory();
+    await f.pair();
+    const stranger = device();
+    await f.store.set(`${f.channel}/commands/b1`, f.historyCommand({}, stranger));
+    await f.bridge.tick();
+    expect(f.result("b1")).toBeNull();
+    await f.store.set(`${f.channel}/commands/b2`, f.historyCommand({ expiresAt: NOW - 1 }));
+    await f.bridge.tick();
+    expect(f.result("b2")).toMatchObject({ status: "refused" });
+    const replay = f.historyCommand({ nonce: "n".repeat(20) });
+    await f.store.set(`${f.channel}/commands/b3`, replay);
+    await f.bridge.tick();
+    expect(f.result("b3")).toMatchObject({ status: "sent" });
+    await f.store.set(`${f.channel}/commands/b4`, f.historyCommand({ nonce: "n".repeat(20) }));
+    await f.bridge.tick();
+    expect(f.result("b4")).toMatchObject({ status: "refused", reason: "That reply was already received." });
+    await f.store.set(`${f.channel}/commands/b5`, f.historyCommand({ key: "claude-transcript:elsewhere" }));
+    await f.bridge.tick();
+    expect(f.result("b5")).toMatchObject({ status: "refused", reason: "That chat isn't on your phone any more." });
+    await f.store.set(`${f.channel}/commands/b6`, f.historyCommand({ before: "12abc" }));
+    await f.bridge.tick();
+    expect(f.result("b6")).toMatchObject({ status: "refused" });
+    // The phone view's own lastUser reads (limit 4) are not history pages.
+    expect(calls.filter((call) => call.limit === 60)).toHaveLength(1);
+  });
+
+  it("clamps n to 12 and deletes the page with the media after 30 minutes", async () => {
+    const { f } = withHistory(100);
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/h1`, f.historyCommand({ n: 500 }));
+    await f.bridge.tick();
+    const doc = (f.result("h1") as { doc: string }).doc;
+    expect(f.store.docs.has(`${f.channel}/live/${doc}`)).toBe(true);
+    f.advance(MEDIA_TTL_MS + 1000);
+    await f.bridge.tick();
+    expect(f.store.docs.has(`${f.channel}/live/${doc}`)).toBe(false);
+  });
+
+  it("refuses a Mac whose store cannot stream", async () => {
+    const f = fixture({ transcript: () => ({ messages: [] }) });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/h1`, f.historyCommand());
+    await f.bridge.tick();
+    expect(f.result("h1")).toMatchObject({ status: "refused" });
+  });
+});
+
+describe("RemoteBridge steer and lastUser", () => {
+  it("refuses a steer while the chat waits on a question, and sends one otherwise", async () => {
+    const waiting = fixture({ session: { state: "awaiting_input" } });
+    await waiting.pair();
+    await waiting.store.set(
+      `${waiting.channel}/commands/c1`,
+      waiting.command({ mode: "steer", answersTurn: "turn-1" }),
+    );
+    await waiting.bridge.tick();
+    expect(waiting.result("c1")).toMatchObject({ status: "refused" });
+    expect(waiting.sends).toHaveLength(0);
+  });
+
+  it("carries the newest user message, clipped to 200 characters, on each phone session", async () => {
+    const f = fixture({
+      transcript: () => ({
+        messages: [
+          { id: "a", role: "user", text: "old", at: null, turnId: null },
+          { id: "b", role: "user", text: "x".repeat(500), at: "2026-09-25T02:00:00.000Z", turnId: null },
+          { id: "c", role: "assistant", text: "answer", at: null, turnId: null },
+        ],
+      }),
+    });
+    await f.pair();
+    await f.bridge.tick();
+    const view = open<{ sessions: Array<{ lastUser?: { text: string; at: string } }> }>(
+      f.payload.k,
+      f.store.docs.get(`${f.channel}/state/snapshot`)!.box,
+    );
+    expect(view.sessions[0]!.lastUser!.text).toHaveLength(200);
+    expect(view.sessions[0]!.lastUser!.at).toBe("2026-09-25T02:00:00.000Z");
   });
 });
 

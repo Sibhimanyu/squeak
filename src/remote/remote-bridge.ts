@@ -35,7 +35,7 @@ import type { Activity } from "../fleet/activity.js";
 import type { DiffFile, WorkspaceDiff } from "../fleet/diff-view.js";
 import type { PhoneImageResult } from "./phone-image.js";
 import type { PhoneMediaResult } from "./phone-media.js";
-import type { TranscriptMessage } from "../fleet/transcript.js";
+import { parseCursor, type TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
 import { isStalled } from "../fleet/attention.js";
@@ -49,7 +49,15 @@ import type { ChannelDoc } from "./firestore-rest.js";
 import type { ChatModel } from "../fleet/chat-models.js";
 import { checkWorkSplit, describeSplit, SPLIT_WORKERS, type SplitWorker, type WorkSplit } from "../fleet/work-split.js";
 import { PhoneAttachments } from "../fleet/phone-attachments.js";
-import { condenseHistory, LIVE_STEP_CHARS, LIVE_STEPS, liveHistoryHandle, LiveTurnPublisher } from "./live-turn.js";
+import {
+  condenseHistory,
+  condenseHistoryPage,
+  historyPageDoc,
+  LIVE_STEP_CHARS,
+  LIVE_STEPS,
+  liveHistoryHandle,
+  LiveTurnPublisher,
+} from "./live-turn.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
 
 /**
@@ -333,6 +341,8 @@ export const MEDIA_CHUNK_BYTES = 384 * 1024;
 /** One chunk's write: ~700 KB, which a slow uplink (measured 28 KB/s behind a proxy) needs ~25 s for. */
 export const MEDIA_CHUNK_TIMEOUT_MS = 90_000;
 /** How long chunks stay in the channel before the Mac deletes them. */
+/** The newest user message a phone session row carries. */
+export const LAST_USER_CHARS = 200;
 export const MEDIA_TTL_MS = 30 * 60_000;
 
 /** What shows a workflow's card and takes its answers (workflows/rasanai/provider.ts). */
@@ -348,6 +358,28 @@ export interface RemoteDiffReader {
   readSummary(dir: string, baseRef: string | null): Promise<WorkspaceDiff | null>;
   readFilePatch(dir: string, baseRef: string | null, file: DiffFile): Promise<string | null>;
 }
+
+/**
+ * A signed, read-only request for one page of a chat's earlier messages. Same envelope as every command
+ * (device signature, expiry, nonce), but no turn to match: it changes nothing. The Mac answers in a `live`
+ * document (`historyPageDoc`) the phone reads, and the result names it.
+ */
+export interface HistoryCommand {
+  v: 1;
+  kind: "history";
+  /** A session key the phone is shown. */
+  key: string;
+  /** A cursor from an earlier page (`nextBefore`, or an entry's `id`): digits only. Absent: the newest page. */
+  before?: string;
+  /** Entries wanted, 1 to HISTORY_PAGE_MAX; more is clamped. */
+  n?: number;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/** The most entries one history page holds. */
+export const HISTORY_PAGE_MAX = 12;
 
 export interface QueueCommand {
   v: 1;
@@ -533,7 +565,11 @@ export interface RemoteReplier {
     action: QueueAction,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
   /** The chat's readable messages, oldest first, for the phone's history above the turn. */
-  transcript?(sessionId: string, limit: number): { messages: TranscriptMessage[] };
+  transcript?(
+    sessionId: string,
+    limit: number,
+    before?: number | null,
+  ): { messages: TranscriptMessage[]; nextBefore?: string | null };
   /** Conductor's Stop for a working chat. Absent: a phone's Stop is refused. */
   stopTurn?(sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>;
   /** A chat's model, thinking level and fast mode. Absent: a phone's change is refused. */
@@ -781,6 +817,9 @@ export class RemoteBridge {
   private readonly questionCache = new Map<string, PhoneQuestion | null>();
   private readonly answerLimit = new AnswerRateLimit();
   /** Media in the channel now, by phone copy, so watching again reuses the upload. */
+  /** Chats whose earlier-messages page is being read now: one at a time each. */
+  private readonly lastUserCache = new Map<string, { text: string; at: string | null } | null>();
+  private readonly historyBusy = new Set<string>();
   private readonly mediaUploads = new Map<string, { media: Record<string, unknown>; expiresAt: number }>();
   /** Devices with an upload under way: one at a time each. */
   private readonly mediaBusy = new Set<string>();
@@ -1522,6 +1561,9 @@ export class RemoteBridge {
     if (kind === "usage") {
       return this.handleUsage(device, id, command as unknown as UsageCommand);
     }
+    if (kind === "history") {
+      return this.handleHistory(config, device, id, command as unknown as HistoryCommand, now);
+    }
     if (kind === "queue") {
       return this.handleQueue(device, id, command as unknown as QueueCommand);
     }
@@ -1583,6 +1625,11 @@ export class RemoteBridge {
     const text = command.text.trim();
     if (!text || text.length > 20_000) {
       return refuse("There is nothing to send.");
+    }
+
+    // A steer goes into a running turn; a chat holding a question open in Conductor takes no message at all.
+    if (command.mode === "steer" && this.shownSession(command.sessionId)?.state === "awaiting_input") {
+      return refuse("That chat is waiting on a question. Answer it there.");
     }
 
     // 4. Still answering the question the phone was looking at.
@@ -2153,6 +2200,78 @@ export class RemoteBridge {
   }
 
   /**
+   * One page of a chat's earlier messages, written to a `live` document. Signature, freshness and nonce have
+   * already held. Read-only, so no turn is matched; the key must be a Conductor chat the phone is shown
+   * (the Mac's own snapshot, never the phone's copy). One page at a time per chat.
+   */
+  private async handleHistory(
+    config: RemoteConfig,
+    device: PairedDevice,
+    id: string,
+    command: HistoryCommand,
+    now: number,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `history: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (command.v !== 1 || typeof command.key !== "string" || command.key.length > 200) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (command.before !== undefined && typeof command.before !== "string") {
+      return refuse("Not a request this Mac understands.");
+    }
+    const before = parseCursor(command.before);
+    if (before === "invalid") {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (command.n !== undefined && (typeof command.n !== "number" || !Number.isFinite(command.n))) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const wanted = Math.min(HISTORY_PAGE_MAX, Math.max(1, Math.floor(command.n ?? HISTORY_PAGE_MAX)));
+    const read = this.deps.replier.transcript;
+    if (!read || !this.deps.store.watch) {
+      return refuse("This Mac can't send earlier messages to a phone.");
+    }
+    const conductorSessionId = this.watchableSession(command.key)?.session.conductorSessionId;
+    if (!conductorSessionId) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    if (this.historyBusy.has(command.key)) {
+      return refuse("Still reading this chat's earlier messages. Try again in a moment.");
+    }
+    this.historyBusy.add(command.key);
+    try {
+      // More raw messages than entries: a run of agent messages condenses to one entry.
+      const page = read.call(this.deps.replier, conductorSessionId, wanted * 5, before);
+      const condensed = condenseHistoryPage(page.messages, wanted);
+      const nextBefore = condensed.hasMore ? condensed.oldestCursor : (page.nextBefore ?? null);
+      const doc = historyPageDoc(command.key, command.before ?? null);
+      const path = this.channel(config, "live", doc);
+      await this.deps.store.set(path, {
+        box: this.sealForPhone(config, {
+          v: 1,
+          key: command.key,
+          before: command.before ?? null,
+          entries: condensed.entries,
+          nextBefore,
+          complete: nextBefore === null,
+          seq: this.nextSeq(),
+        }),
+        at: this.now(),
+      });
+      this.rememberMedia([path], now + MEDIA_TTL_MS);
+      this.log(device.name, "sent", `earlier messages of ${conductorSessionId.slice(0, 8)}`);
+      return { write: true, result: { id, status: "sent", doc } };
+    } catch (error) {
+      logger.warn("history page failed", { error: error instanceof Error ? error.message : String(error) });
+      return refuse("This Mac couldn't read that chat.");
+    } finally {
+      this.historyBusy.delete(command.key);
+    }
+  }
+
+  /**
    * An image the chat's agent showed. Signature, freshness and nonce have
    * already held. The source must be named in the chat's own messages (so a
    * phone cannot ask for any path it likes), and phone-image.ts then keeps it
@@ -2437,7 +2556,9 @@ export class RemoteBridge {
       return Array.isArray(parsed)
         ? parsed.filter(
             (entry): entry is { doc: string; expiresAt: number } =>
-              typeof entry?.doc === "string" && entry.doc.includes("/media/") && typeof entry.expiresAt === "number",
+              typeof entry?.doc === "string" &&
+              (entry.doc.includes("/media/") || entry.doc.includes("/live/")) &&
+              typeof entry.expiresAt === "number",
           )
         : [];
     } catch {
@@ -2989,6 +3110,9 @@ export class RemoteBridge {
       ...(session.modelId ? { modelId: session.modelId } : {}),
       ...(session.effortId ? { effortId: session.effortId } : {}),
       turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
+      // The newest thing you typed, so an answer given at the laptop shows even when the chat is closed here.
+      // Older phones ignore it.
+      ...(conductorSessionId ? this.lastUserFor(conductorSessionId, session.lastActivityAt) : {}),
       message: text,
       choices: message?.choices ?? null,
       activity: session.state === "working" ? this.activityFor(session) : null,
@@ -3176,6 +3300,37 @@ export class RemoteBridge {
     }
     this.failureCache.set(key, value);
     return value;
+  }
+
+  /** `{ lastUser }` for a chat, read once per change of its activity; nothing when it can't be read or has none. */
+  private lastUserFor(sessionId: string, activity: string): { lastUser?: { text: string; at: string | null } } {
+    const read = this.deps.replier.transcript;
+    if (!read) {
+      return {};
+    }
+    const key = `${sessionId}|${activity}`;
+    let value = this.lastUserCache.get(key);
+    if (value === undefined) {
+      value = null;
+      try {
+        const messages = read.call(this.deps.replier, sessionId, 4).messages;
+        const user = [...messages].reverse().find((message) => message.role === "user");
+        if (user) {
+          value = {
+            text:
+              user.text.length > LAST_USER_CHARS ? `${user.text.slice(0, LAST_USER_CHARS - 1).trimEnd()}…` : user.text,
+            at: user.at,
+          };
+        }
+      } catch {
+        value = null;
+      }
+      if (this.lastUserCache.size > 200) {
+        this.lastUserCache.clear();
+      }
+      this.lastUserCache.set(key, value);
+    }
+    return value ? { lastUser: value } : {};
   }
 
   private message(sessionId: string, activity: string): { text: string | null; choices: ParsedChoices | null } {

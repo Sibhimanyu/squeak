@@ -9,6 +9,8 @@ import {
   sortAttention,
 } from "./attention.js";
 import type { FleetStore } from "./fleet-store.js";
+import { BackgroundWorkReader } from "./background-work.js";
+import { resolveWaiting } from "./waiting-resolve.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent, stateFromHookEvent } from "./hook-protocol.js";
 import { Coalescer, realTimers, realWatchDeps, watchFiles } from "./change-watcher.js";
@@ -153,6 +155,8 @@ export class FleetMonitor {
   private refreshing = false;
   private refreshQueued = false;
   private stopped = false;
+
+  private readonly backgroundWork = new BackgroundWorkReader();
 
   constructor(deps: FleetMonitorDependencies, options: FleetMonitorOptions = {}) {
     this.deps = deps;
@@ -324,6 +328,16 @@ export class FleetMonitor {
     }
   }
 
+  /** A `waiting` Conductor chat whose only background work is an old shell is finished (waiting-resolve.ts). */
+  private resolveWaitingSessions(sessions: FleetSession[]): FleetSession[] {
+    const nowMs = this.now();
+    return sessions.map((session) =>
+      session.conductorWaiting && session.transcriptPath
+        ? resolveWaiting(session, this.backgroundWork.read(session.transcriptPath, nowMs), nowMs)
+        : session,
+    );
+  }
+
   private async buildSnapshot(): Promise<FleetSnapshot> {
     const observedAt = new Date(this.now()).toISOString();
 
@@ -337,7 +351,10 @@ export class FleetMonitor {
     const processes = await this.deps.liveness.observe();
     const sessions = this.annotateAsks(
       this.annotateWorkflows(
-        applyLiveness(applyHookEvents(mergeObservations(observations), this.hookEvents), processes),
+        applyLiveness(
+          applyHookEvents(this.resolveWaitingSessions(mergeObservations(observations)), this.hookEvents),
+          processes,
+        ),
       ),
     );
 

@@ -363,6 +363,14 @@ struct SessionDetail: View {
     /// Something arrived while you were reading further up: the jump button says "New".
     @State private var newBelow = false
     @State private var contentHeight: CGFloat = 0
+    /// True until the newest end of the chat has been on screen once: while it is, every change in the
+    /// content's height (lazy rows being measured) puts the view back on the newest message, so a chat opens
+    /// on its end, not wherever the estimated heights landed.
+    @State private var settling = true
+    @State private var stackHeight: CGFloat = 0
+    /// The message that was first before an earlier page was asked for: kept in place when the page lands.
+    @State private var keepAnchor: String?
+    @State private var topVisible = false
     /// The long queue/steer explanation shows until the first message sent mid-turn; a short line after.
     @AppStorage("queueSteerExplained") private var queueSteerExplained = false
 
@@ -370,6 +378,10 @@ struct SessionDetail: View {
     private var rows: [ChatTimeline.Row] {
         ChatTimeline.rows(messages: model.messages, state: session.state, activity: model.activity)
     }
+    private var receipt: (id: String, receipt: ChatTimeline.Receipt)? {
+        ChatTimeline.receipt(messages: model.messages, state: session.state)
+    }
+    private var firstMessageID: String? { model.messages.first?.id }
     private var isWorking: Bool { ChatTimeline.isWorking(messages: model.messages, state: session.state) }
     private var spring: Animation? { reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86) }
 
@@ -472,13 +484,17 @@ struct SessionDetail: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 26) {
+                        EarlierRow(paging: model.paging, onLoad: { requestEarlier() })
+                            .onAppear { topVisible = true; if !settling { requestEarlier() } }
+                            .onDisappear { topVisible = false }
                         ForEach(rows) { row in
                             switch row {
                             case .message(let m, let muted):
                                 MessageView(
                                     message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
                                     layout: !muted && m.id == needsYouMessageID && model.askDisplay(for: session.key) == nil ? ChoiceLayout.make(m.text) : nil,
-                                    canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted
+                                    canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
+                                    receipt: receipt?.id == m.id ? receipt?.receipt : nil
                                 )
                                 .id(m.id)
                             case .working(let label):
@@ -505,6 +521,14 @@ struct SessionDetail: View {
                     .padding(.top, Space.xl)
                     .padding(.bottom, Space.l)
                     .frame(maxWidth: .infinity)
+                    .background(GeometryReader { Color.clear.preference(key: ConversationHeightKey.self, value: $0.size.height) })
+                }
+                .defaultScrollAnchor(.bottom)
+                .onPreferenceChange(ConversationHeightKey.self) { height in
+                    stackHeight = height
+                    // Rows are measured as they appear: until the end has been reached, stay on it, and after an
+                    // earlier page lands, stay on the message that was first.
+                    if let anchor = keepAnchor { proxy.scrollTo(anchor, anchor: .top) } else if settling { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
                 // The jump button floats just above the composer and takes no room, so nothing moves when it shows.
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar.overlay(alignment: .top) { jumpButton(proxy) } }
@@ -512,16 +536,36 @@ struct SessionDetail: View {
                 .onChange(of: rows.last?.id) { _, _ in
                     if atBottom || model.messages.last?.role == .user { scrollDown(proxy) } else { newBelow = true }
                 }
-                .onChange(of: atBottom) { _, now in if now { newBelow = false } }
+                .onChange(of: atBottom) { _, now in
+                    if now { newBelow = false; settling = false }
+                }
                 .onChange(of: model.messages.last?.state) { _, _ in
                     if atBottom { scrollDown(proxy) }
                 }
-                .onAppear {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { proxy.scrollTo("bottom", anchor: .bottom) }
+                .onChange(of: firstMessageID) { _, _ in
+                    // An earlier page landed in front: put the reader back on the message they were at.
+                    if let anchor = keepAnchor { proxy.scrollTo(anchor, anchor: .top) }
                 }
+                .onChange(of: model.paging.loading) { _, loading in
+                    // Still at the top after a page (a short one): the next page is wanted too.
+                    if !loading, topVisible, !settling, model.paging.error == nil, keepAnchor == nil { requestEarlier() }
+                }
+                .task(id: keepAnchor) {
+                    // The anchor only has to hold while the new rows are measured.
+                    guard keepAnchor != nil else { return }
+                    try? await Task.sleep(for: .milliseconds(700))
+                    if !Task.isCancelled, !model.paging.loading { keepAnchor = nil }
+                }
+                .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             }
         }
+    }
+
+    /// Asks for the next older page, remembering where the reader is so the page lands above them.
+    private func requestEarlier() {
+        guard model.paging.canLoad else { return }
+        keepAnchor = model.messages.first?.id
+        model.loadEarlier()
     }
 
     private func note(_ symbol: LucideName, _ title: String, _ message: String) -> some View {
@@ -543,7 +587,7 @@ struct SessionDetail: View {
     private func choose(_ c: ChoiceCard) {
         guard sendBlock == nil, model.isConnected else { return }
         let key = session.key
-        Task { _ = await model.send(c.letter, to: key) }
+        Task { _ = await model.send(c.letter, to: key, answering: true) }
     }
 
     /// Back to the newest message in one click (or ⌘↓): a round button while the end of the chat is out of view, a
@@ -796,6 +840,8 @@ struct MessageView: View {
     var onChoose: (ChoiceCard) -> Void = { _ in }
     /// The previous turn's agent message while a new one is being worked on.
     var muted = false
+    /// What the transcript says about your latest message ("Read by Claude", "Turn ended").
+    var receipt: ChatTimeline.Receipt?
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -822,7 +868,7 @@ struct MessageView: View {
                 .padding(.horizontal, 14).padding(.vertical, 11)
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
-            if let status = DeliveryText(message: message, agent: agentName, agentWorking: agentWorking) { delivery(status) }
+            if let status = DeliveryText(message: message, agent: agentName, agentWorking: agentWorking, receipt: receipt) { delivery(status) }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
@@ -933,8 +979,15 @@ struct DeliveryText {
     var offersOpen = false
     var offersReuse = false
 
-    init?(message: ChatMessage, agent: String, agentWorking: Bool) {
-        guard let state = message.state, let line = message.deliveryLine(agent: agent, agentWorking: agentWorking) else { return nil }
+    init?(message: ChatMessage, agent: String, agentWorking: Bool, receipt: ChatTimeline.Receipt? = nil) {
+        guard let state = message.state else { return nil }
+        // In the transcript: the receipt says it (only the newest one of yours has it); nothing otherwise.
+        if state == .confirmed {
+            guard let receipt else { return nil }
+            text = receipt.line(agent: agent)
+            return
+        }
+        guard let line = message.deliveryLine(agent: agent, agentWorking: agentWorking) else { return nil }
         text = line
         switch state {
         case .uncertain: offersOpen = true
@@ -953,6 +1006,38 @@ private struct SendLabel: View {
     }
 }
 
+
+private struct ConversationHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// The top of the conversation: "Load earlier messages" while there are some (it loads by itself when
+/// scrolled to), a spinner while a page is read, a retry when it failed, "Start of chat" at the end.
+struct EarlierRow: View {
+    let paging: EarlierPaging
+    var onLoad: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if paging.loading {
+                ProgressView().controlSize(.small)
+                Text("Loading earlier messages…").font(Typo.meta).foregroundStyle(Theme.muted)
+            } else if let error = paging.error {
+                Text(verbatim: error).font(Typo.meta).foregroundStyle(Theme.error)
+                Button("Try again", action: onLoad).buttonStyle(.plain).font(Typo.meta.weight(.medium))
+            } else if paging.reachedStart {
+                Text("Start of chat").font(Typo.meta).foregroundStyle(Theme.subtle)
+            } else {
+                Button("Load earlier messages", action: onLoad).buttonStyle(.plain)
+                    .font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 20)
+        .accessibilityElement(children: .combine)
+    }
+}
 
 /// The agent at work, directly under what you sent: its name, a pulsing dot (still under Reduce
 /// Motion) and the live step ("Running tests…", "Starting…" before the first).

@@ -121,6 +121,8 @@ export interface ObservedSession {
    * Waited since `lastActivityAt` of the transcript observation.
    */
   waitingOn?: "model" | "api" | "tool" | null;
+  /** Conductor says `waiting`: the turn ended, background work it started is alive. Still `working` by default. */
+  conductorWaiting?: boolean;
   /** When the transcript's last entry was written, which `waitingOn` has waited since. */
   waitingSince?: string | null;
   /**
@@ -153,6 +155,8 @@ export interface FleetSession extends ObservedSession {
    * While it says working, nothing else may call the turn finished.
    */
   conductorState?: FleetState | null;
+  /** The transcript's own state, kept only for a `conductorWaiting` chat (see `resolveWaiting`). */
+  transcriptState?: FleetState;
   /**
    * Set when the session is directing a product that is waiting on the
    * human for one of its own calls (src/workflows/: RasanAI's pick a

@@ -74,12 +74,19 @@ describe("stateFromHookEvent", () => {
   });
 
   it("ignores events that say nothing about state", () => {
-    expect(stateFromHookEvent(event({ event: "PostToolUse" }))).toBeNull();
+    expect(stateFromHookEvent(event({ event: "SessionStart" }))).toBeNull();
   });
 
   it("recognises the end of a session", () => {
     expect(isSessionEndEvent(event({ event: "SessionEnd" }))).toBe(true);
     expect(isSessionEndEvent(event({ event: "Stop" }))).toBe(false);
+  });
+});
+
+describe("answered approvals", () => {
+  it("PostToolUse and PermissionDenied clear a blocked state to working", () => {
+    expect(stateFromHookEvent(event({ event: "PostToolUse" }))).toBe("working");
+    expect(stateFromHookEvent(event({ event: "PermissionDenied" }))).toBe("working");
   });
 });
 

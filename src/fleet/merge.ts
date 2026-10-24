@@ -106,6 +106,8 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     git: null,
     stateSource: stateOwner?.source === "conductor" ? "conductor" : "transcript",
     conductorState: conductor?.state ?? null,
+    ...(conductor?.conductorWaiting ? { conductorWaiting: true } : {}),
+    ...(conductor?.conductorWaiting && transcript ? { transcriptState: transcript.state } : {}),
   };
 }
 

@@ -56,6 +56,8 @@ final class AppModel {
     // MARK: Selection and conversation
     private(set) var selected: SessionKey?
     private(set) var messages: [ChatMessage] = []
+    /// How far back the open chat has been read, for the row at the top of the conversation.
+    private(set) var paging = EarlierPaging()
     private(set) var activity: [ActivityStep] = []
     /// The open Conductor chat's model, stuck state, workspace and background work, from the daemon (ChatActions.swift).
     var chatExtras: ChatExtras?
@@ -208,6 +210,8 @@ final class AppModel {
             knownMessages[key] = all
             if key == selected {
                 messages = all
+                let state = await broker.paging(for: key)
+                if state != paging { paging = state }
                 selectedLoadedAt = Date()
                 markSelectedDisplayed()
             }
@@ -576,6 +580,7 @@ final class AppModel {
         openURL = nil
         draft = ""
         messages = key.map { knownMessages[$0] ?? [] } ?? []
+        paging = EarlierPaging()
         if demoMode {
             if let key { messages = DemoData.transcript(for: key); activity = DemoData.activity(for: key) }
             return
@@ -589,12 +594,20 @@ final class AppModel {
             self.messages = await broker.messages(for: key)
             let started = Date()
             await broker.refreshTranscript()
+            if self.selected == key { self.paging = await broker.paging(for: key) }
             // Only a transcript read while the source answers counts as what the window shows.
             if self.selected == key, self.transcriptIsLive {
                 self.selectedLoadedAt = started
                 self.markSelectedDisplayed()
             }
         }
+    }
+
+    /// Reads the next older page of the open chat. The broker puts it in front of what is loaded and says so
+    /// through `messagesChanged`; one read at a time, a failure stays on the row for a retry.
+    func loadEarlier() {
+        guard let key = selected, !demoMode, paging.canLoad else { return }
+        Task { [broker] in await broker.loadEarlier(for: key) }
     }
 
     func selectIndex(_ i: Int) {
@@ -924,14 +937,17 @@ final class AppModel {
 
     // MARK: Sending (only ever on an explicit user action)
 
-    func send(_ text: String, to key: SessionKey, mode: SendMode = .queue) async -> SendResult? {
+    /// `answering`: the text answers what the agent last said (a lettered option), so a host that checks is
+    /// told which turn, and refuses it once the chat has moved on.
+    func send(_ text: String, to key: SessionKey, mode: SendMode = .queue, answering: Bool = false) async -> SendResult? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         if demoMode { return .notSent(reason: "Demo data: nothing is sent.") }
         lastUsed = key
         defaults.set(key.stringValue, forKey: "lastUsed")
         if key == selected { draftTask?.cancel(); draft = "" }
-        let result = await broker.send(trimmed, to: key, mode: mode)
+        let turn = answering ? await broker.currentTurnId(for: key) : nil
+        let result = await broker.send(trimmed, to: key, mode: mode, answersTurn: turn)
         switch result {
         case .accepted(let via, let delivery, _): AppLog.info("send accepted via \(via), \(delivery?.rawValue ?? "sent")")
         case .refused: AppLog.info("send refused")

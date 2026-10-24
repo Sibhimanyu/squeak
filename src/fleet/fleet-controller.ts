@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { TelegramClient } from "../telegram/client.js";
 import { isTelegramMessageNotModifiedError } from "../telegram/client.js";
 import type { TelegramConversationTarget, TelegramInlineKeyboard } from "../types.js";
@@ -28,6 +30,11 @@ const SNOOZE_MS = 60 * 60 * 1000;
 /** Paging through a diff should not re-shell git for every tap. */
 const DIFF_CACHE_TTL_MS = 60_000;
 
+/** Which turn a card was about: a short hash of the agent's message. Same rule as Cliq's. */
+function turnStamp(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
 /**
  * What the controller needs from a replier; narrow so tests can fake it.
  * `target` is `replyTargetFor(session)`: a Conductor chat's id, or a fleet
@@ -35,6 +42,8 @@ const DIFF_CACHE_TTL_MS = 60_000;
  */
 export interface FleetReplier {
   lastTurnText(target: string): string | null;
+  /** The newest turn's id where one exists; stands in for the text when a turn has none yet. */
+  lastTurnId?(target: string): string | null;
   send(target: string, text: string, onFailed: ReplyFailureHandler, options?: ReplyOptions): Promise<ReplyOutcome>;
   /** Whether a session outside Conductor can be answered at all. Absent: only Conductor chats can. */
   canReply?(session: FleetSession): boolean;
@@ -264,6 +273,9 @@ export class FleetController {
         if (!session || !this.canAnswer(session) || !letter || !/^[A-H]$/.test(letter)) {
           return { handled: true, notice: "That session cannot be replied to from here." };
         }
+        if (messageId !== null && (await this.cardMovedOn(location, session, messageId))) {
+          return { handled: true, notice: "That chat has moved on since this card, so I sent nothing." };
+        }
         return this.sendChoice(location, session, letter, messageId);
       }
       case "full": {
@@ -303,6 +315,10 @@ export class FleetController {
     if (!replier || !target) {
       return false;
     }
+    if (target.turn !== null && this.turnOf(target.target) !== target.turn) {
+      await this.send(location, `**${target.label}** has moved on since that card, so I sent nothing.`);
+      return true;
+    }
     const outcome = await replier.send(target.target, text, this.failureNotifier(location, target.label));
     if (outcome.status === "refused" || outcome.status === "unconfirmed") {
       await this.send(location, outcome.reason);
@@ -311,6 +327,70 @@ export class FleetController {
     this.afterReplyStarted();
     await this.send(location, deliveredText(`Sent to **${target.label}**`, outcome));
     return true;
+  }
+
+  /** Which turn a card is about: the newest message's text, else the turn id; "none" when the chat has neither. */
+  private turnOf(target: string): string {
+    const replier = this.deps.replier;
+    const text = replier?.lastTurnText(target) ?? null;
+    if (text) {
+      return turnStamp(text);
+    }
+    const id = replier?.lastTurnId?.(target) ?? null;
+    return id ? `id:${id}` : "none";
+  }
+
+  /** A card's button was tapped after the chat moved on (answered on the laptop): strip its buttons. */
+  private async cardMovedOn(
+    location: TelegramConversationTarget,
+    session: FleetSession,
+    messageId: number,
+  ): Promise<boolean> {
+    const card = this.deps.store.getReplyTarget(location.chatId, messageId);
+    if (!card || card.turn === null || this.turnOf(replyTargetFor(session)) === card.turn) {
+      return false;
+    }
+    await this.stripButtons(location.chatId, messageId);
+    return true;
+  }
+
+  private async stripButtons(chatId: number, messageId: number): Promise<void> {
+    this.deps.store.markCardSettled(chatId, messageId);
+    try {
+      await this.tg().editMessageReplyMarkup(chatId, messageId, []);
+    } catch (error) {
+      logger.debug("could not strip a settled card", { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /**
+   * A question answered on the laptop leaves its card's buttons live on the
+   * phone. Once the session is no longer waiting on, or finished with, the
+   * turn the card was about, take the buttons off.
+   */
+  private async stripSettledCards(snapshot: FleetSnapshot): Promise<void> {
+    if (!this.deps.telegram || !this.deps.replier) {
+      return;
+    }
+    const waiting = new Set(["awaiting_input", "awaiting_approval", "finished"]);
+    const stamps = new Map<string, string>();
+    for (const card of this.deps.store.listLiveCards()) {
+      const session = snapshot.sessions.find(
+        (candidate) => candidate.conductorSessionId === card.target || candidate.key === card.target,
+      );
+      let settled = !session || !waiting.has(session.state);
+      if (!settled && card.turn !== null) {
+        let stamp = stamps.get(card.target);
+        if (stamp === undefined) {
+          stamp = this.turnOf(card.target);
+          stamps.set(card.target, stamp);
+        }
+        settled = stamp !== card.turn;
+      }
+      if (settled) {
+        await this.stripButtons(card.chatId, card.messageId);
+      }
+    }
   }
 
   /**
@@ -334,6 +414,9 @@ export class FleetController {
       return { handled: true, notice: outcome.reason };
     }
     this.afterReplyStarted();
+    if (messageId !== null) {
+      this.deps.store.markCardSettled(location.chatId, messageId);
+    }
 
     const where =
       outcome.via === "conductor"
@@ -370,7 +453,9 @@ export class FleetController {
         messageThreadId: location.messageThreadId,
       });
       if (messageId !== null) {
-        this.deps.store.setReplyTarget(location.chatId, messageId, replyTargetFor(session), label);
+        this.deps.store.setReplyTarget(location.chatId, messageId, replyTargetFor(session), label, {
+          turn: this.turnOf(replyTargetFor(session)),
+        });
       }
     } catch (error) {
       logger.warn("fleet reply prompt failed", { error: error instanceof Error ? error.message : String(error) });
@@ -405,7 +490,10 @@ export class FleetController {
     }
     const messageId = await this.send(location, `**${cardLabel(session)}**\n\n${text}`, keyboard);
     if (messageId !== null) {
-      this.deps.store.setReplyTarget(location.chatId, messageId, replyTargetFor(session), cardLabel(session));
+      this.deps.store.setReplyTarget(location.chatId, messageId, replyTargetFor(session), cardLabel(session), {
+        turn: this.turnOf(replyTargetFor(session)),
+        buttons: Boolean(choices),
+      });
     }
   }
 
@@ -565,6 +653,9 @@ export class FleetController {
     if (!this.deps.telegram) {
       return;
     }
+    await this.stripSettledCards(snapshot).catch((error) => {
+      logger.debug("settled card strip failed", { error: error instanceof Error ? error.message : String(error) });
+    });
     const text = renderRadar(snapshot, this.now());
     const keyboard = radarKeyboard(snapshot, (key) => this.deps.store.handleFor(key));
 
@@ -628,6 +719,7 @@ export class FleetController {
             messageId,
             replyTargetFor(item.session),
             cardLabel(item.session),
+            { turn: this.turnOf(replyTargetFor(item.session)), buttons: true },
           );
         }
       }

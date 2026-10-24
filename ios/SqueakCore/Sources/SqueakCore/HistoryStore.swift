@@ -9,11 +9,16 @@ import Foundation
 /// Writes are coalesced: a streaming turn that changes every frame touches the disk at most once a second.
 public final class HistoryStore: @unchecked Sendable {
     public static let maxChats = 30
+    /// Entries kept per chat on disk (the newest); memory holds more while the app runs.
+    public static let maxEntries = 200
 
     struct Chat: Codable, Equatable {
         var key: String
         var at: Double
         var history: [LiveTurn.HistoryEntry]
+        /// Where the older pages go on from, and whether the chat's start is held. Absent in an older file.
+        var nextBefore: String? = nil
+        var complete: Bool? = nil
     }
     struct File: Codable { var v = 1; var chats: [Chat] }
 
@@ -40,15 +45,33 @@ public final class HistoryStore: @unchecked Sendable {
         return Dictionary(chats.map { ($0.key, $0.history) }, uniquingKeysWith: { a, _ in a })
     }
 
+    /// Everything stored with its paging state, for seeding the in-memory cache at launch.
+    public func states() -> [String: ChatHistoryState] {
+        lock.lock(); defer { lock.unlock() }
+        return Dictionary(chats.map { ($0.key, ChatHistoryState(entries: $0.history, nextBefore: $0.nextBefore, complete: $0.complete ?? false)) },
+                          uniquingKeysWith: { a, _ in a })
+    }
+
     /// Remember a chat's history. Empty history and an unchanged one are ignored.
     public func record(_ history: [LiveTurn.HistoryEntry], for key: String, now: Date = Date()) {
-        guard !history.isEmpty else { return }
+        record(ChatHistoryState(entries: history), for: key, now: now)
+    }
+
+    /// Remember a chat's history and where its older pages go on. Only the newest `maxEntries` reach the disk,
+    /// and the cursor moves to match, so a dropped older part can be asked for again.
+    public func record(_ state: ChatHistoryState, for key: String, now: Date = Date()) {
+        guard !state.entries.isEmpty else { return }
+        var state = state
+        state.trimTo(Self.maxEntries)
+        let history = state.entries
         lock.lock()
         if let i = chats.firstIndex(where: { $0.key == key }) {
-            if chats[i].history == history { lock.unlock(); return }
+            if chats[i].history == history, chats[i].nextBefore == state.nextBefore, (chats[i].complete ?? false) == state.complete {
+                lock.unlock(); return
+            }
             chats.remove(at: i)
         }
-        chats.insert(Chat(key: key, at: now.timeIntervalSince1970, history: history), at: 0)
+        chats.insert(Chat(key: key, at: now.timeIntervalSince1970, history: history, nextBefore: state.nextBefore, complete: state.complete), at: 0)
         if chats.count > Self.maxChats { chats.removeLast(chats.count - Self.maxChats) }
         lock.unlock()
         schedule()
