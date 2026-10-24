@@ -195,6 +195,8 @@ private struct InlineReply: View {
     let agentName: String
     let locked: Bool
     @State private var draft = ""
+    /// Bumped on each clear, so the field is rebuilt and cannot keep text of its own.
+    @State private var generation = 0
     @FocusState private var focused: Bool
 
     private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -202,7 +204,7 @@ private struct InlineReply: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("Reply to \(agentName)…", text: $draft, axis: .vertical)
-                .lineLimit(1...4).focused($focused)
+                .lineLimit(1...4).id(generation).focused($focused)
                 .padding(.horizontal, 14).padding(.vertical, 12).frame(minHeight: 48)
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(focused ? Theme.ink : Theme.line, lineWidth: focused ? 1.5 : 1))
@@ -225,11 +227,18 @@ private struct InlineReply: View {
 
     private func send() {
         let text = draft
-        draft = ""; focused = false
+        // Empty at the tap; again on the next run loop, when the keyboard commits what it still holds.
+        draft = ""; focused = false; generation += 1
+        DispatchQueue.main.async { draft = "" }
         Task {
-            guard let current = model.session(session.key) else { draft = DraftPolicy.restoring(text, into: draft); return }
-            if await !model.send(text, to: current) { draft = DraftPolicy.restoring(text, into: draft) }
+            guard let current = model.session(session.key) else { giveBack(text); return }
+            if await !model.send(text, to: current) { giveBack(text) }
         }
+    }
+
+    private func giveBack(_ text: String) {
+        draft = DraftPolicy.restoring(text, into: draft)
+        generation += 1
     }
 }
 
