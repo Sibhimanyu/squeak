@@ -170,6 +170,29 @@ export interface AttachCommand {
  * same provider), its thinking level, and fast mode. Absent level or fast: the chat keeps what it has,
  * or the model's default level when its current one does not apply.
  */
+export interface RemoteWorkspaceActions {
+  repos(): Array<{ id: string; name: string }>;
+  archive(workspaceId: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+  create(repoId: string): Promise<{ ok: true; workspaceId?: string } | { ok: false; reason: string }>;
+  /** The text that asks a chat in this workspace to open a pull request; null when there is no such workspace. */
+  prPrompt(workspaceId: string): string | null;
+}
+
+/** Archive a workspace, make one in a repository, or ask a chat to open a pull request. */
+export interface WorkspaceCommand {
+  v: 1;
+  kind: "workspace";
+  action: "archive" | "create" | "createPr";
+  workspaceId?: string;
+  repoId?: string;
+  /** For createPr: the chat to ask, and the turn the phone saw. */
+  sessionId?: string;
+  answersTurn?: string | null;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
 /** One subagent or background shell, as the phone draws it. */
 export interface PhoneBackgroundTask {
   id: string;
@@ -547,6 +570,11 @@ export interface RemoteBridgeDependencies {
    * phone shows only the last message, as before.
    */
   activity?: ((session: FleetSession) => Activity | null) | null;
+  /**
+   * Workspace actions (fleet/workspace-actions.ts): archive one, make one in a repository, and the prompt that
+   * asks a chat to open a pull request. Absent: the phone offers none of them.
+   */
+  workspaceActions?: RemoteWorkspaceActions | null;
   /** A working Claude chat's subagents and background shells (fleet/background-work.ts). Absent: none shown. */
   background?: ((session: FleetSession) => BackgroundTask[]) | null;
   /** Workspaces a phone may start a chat in, and the way to start one. */
@@ -1508,6 +1536,9 @@ export class RemoteBridge {
     if (kind === "attach") {
       return this.handleAttach(device, id, command as unknown as AttachCommand);
     }
+    if (kind === "workspace") {
+      return this.handleWorkspace(device, id, command as unknown as WorkspaceCommand);
+    }
     if (kind === "setup") {
       return this.handleSetup(device, id, command as unknown as SetupCommand);
     }
@@ -1845,6 +1876,89 @@ export class RemoteBridge {
       return { write: true, result: { id, status: "sent", ref: outcome.ref } };
     }
     return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
+   * A workspace action. Signature, freshness and nonce have already held. Archive names a workspace the phone is
+   * shown (in its New chat list, or holding a chat it shows); create names a repository the Mac lists; a PR
+   * prompt goes to a resting Conductor chat the phone shows, on the turn it saw, through the same replier as a
+   * reply. The checks on the workspace itself (no chat working, nothing uncommitted) are the action's own.
+   */
+  private async handleWorkspace(
+    device: PairedDevice,
+    id: string,
+    command: WorkspaceCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `workspace: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const actions = this.deps.workspaceActions;
+    if (command.v !== 1 || !["archive", "create", "createPr"].includes(command.action)) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (!actions) return refuse("This Mac can't do that from a phone.");
+    if (command.action === "create") {
+      if (typeof command.repoId !== "string") return refuse("Not a request this Mac understands.");
+      if (!actions.repos().some((repo) => repo.id === command.repoId)) {
+        return refuse("That repository isn't in Conductor any more.");
+      }
+      const outcome = await actions.create(command.repoId).catch((error: unknown) => ({
+        ok: false as const,
+        reason: error instanceof Error ? error.message : "Conductor didn't make the workspace.",
+      }));
+      if (!outcome.ok) return refuse(outcome.reason);
+      this.log(device.name, "sent", "made a workspace");
+      this.nudgePublish(500);
+      return {
+        write: true,
+        result: { id, status: "sent", ...(outcome.workspaceId ? { workspaceId: outcome.workspaceId } : {}) },
+      };
+    }
+    if (command.action === "archive") {
+      const workspaceId = command.workspaceId;
+      if (typeof workspaceId !== "string") return refuse("Not a request this Mac understands.");
+      const snapshot = this.deps.snapshot();
+      const shown =
+        this.phoneWorkspaces().some((workspace) => workspace.id === workspaceId) ||
+        snapshot.active.some((session) => session.conductorWorkspaceId === workspaceId);
+      if (!shown) return refuse("That workspace isn't on your phone any more.");
+      const outcome = await actions.archive(workspaceId).catch((error: unknown) => ({
+        ok: false as const,
+        reason: error instanceof Error ? error.message : "Conductor didn't archive it.",
+      }));
+      if (!outcome.ok) return refuse(outcome.reason);
+      this.log(device.name, "sent", `archived ${workspaceId.slice(0, 8)}`);
+      this.nudgePublish(500);
+      return { write: true, result: { id, status: "sent" } };
+    }
+    // createPr
+    const turn = command.answersTurn ?? null;
+    if (typeof command.sessionId !== "string" || (turn !== null && typeof turn !== "string")) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const session = this.shownSession(command.sessionId);
+    if (!session || session.closed === true || !session.conductorWorkspaceId) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    if (["working", "awaiting_approval", "awaiting_input"].includes(session.state)) {
+      return refuse("The agent is mid-turn. Ask for the PR once it has finished.");
+    }
+    if (turn !== this.deps.replier.lastTurnId(command.sessionId)) {
+      return refuse("That chat has moved on since your phone last looked. Check it and try again.");
+    }
+    const text = actions.prPrompt(session.conductorWorkspaceId);
+    if (!text) return refuse("That workspace isn't in Conductor any more.");
+    const outcome = await this.deps.replier.send(command.sessionId, text, (message) => {
+      this.log(device.name, "refused", `the PR request failed: ${message}`);
+    });
+    if (outcome.status === "refused") return refuse(outcome.reason);
+    if (outcome.status === "unconfirmed") {
+      this.log(device.name, "refused", `unconfirmed: ${outcome.reason}`);
+      return { write: true, result: { id, status: "unconfirmed", reason: outcome.reason } };
+    }
+    this.log(device.name, "sent", `asked ${command.sessionId.slice(0, 8)} for a PR`);
+    return { write: true, result: { id, status: "sent", via: outcome.via } };
   }
 
   /**
@@ -2769,6 +2883,9 @@ export class RemoteBridge {
       ...this.phoneLocal(),
       // Where a phone may start a chat; absent when this Mac can't (phones then hide the button).
       ...(this.deps.newChat ? { workspaces: this.phoneWorkspaces() } : {}),
+      // Repositories a new workspace can be made in; its presence says this Mac archives and makes workspaces and
+      // asks for PRs. Older phones ignore it.
+      ...this.phoneRepos(),
       ...this.phoneProjectIcons(),
       ...this.phoneChatModels(),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
@@ -2891,6 +3008,8 @@ export class RemoteBridge {
       ...(session.model ? { model: session.model } : {}),
       ...(session.effort ? { effort: session.effort } : {}),
       ...(session.fast ? { fast: true } : {}),
+      // The chat's Conductor workspace, for the phone's Archive workspace and Open a PR; older phones ignore it.
+      ...(session.conductorWorkspaceId ? { workspaceId: session.conductorWorkspaceId } : {}),
       // The same as Conductor stores them, so the phone's picker starts on what the chat runs; older phones ignore them.
       ...(session.modelId ? { modelId: session.modelId } : {}),
       ...(session.effortId ? { effortId: session.effortId } : {}),
@@ -2978,6 +3097,16 @@ export class RemoteBridge {
       return models.length > 0
         ? { chatModels: models, ...(models.some((m) => m.agent === "claude") ? { chatWorkers: SPLIT_WORKERS } : {}) }
         : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private phoneRepos(): { repos?: Array<{ id: string; name: string }> } {
+    const actions = this.deps.workspaceActions;
+    if (!actions) return {};
+    try {
+      return { repos: actions.repos().slice(0, 30) };
     } catch {
       return {};
     }

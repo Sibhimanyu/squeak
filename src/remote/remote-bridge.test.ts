@@ -3447,3 +3447,81 @@ describe("RemoteBridge background work", () => {
     expect(JSON.stringify(f.bridge.phoneView())).not.toContain("Audit the relay");
   });
 });
+
+describe("RemoteBridge workspace actions", () => {
+  function withActions(overrides: Partial<NonNullable<RemoteBridgeDependencies["workspaceActions"]>> = {}) {
+    const f = fixture({ newChat: chatStarter().starter });
+    const actions = {
+      repos: vi.fn(() => [{ id: "r1", name: "farm" }]),
+      archive: vi.fn(async () => ({ ok: true as const })),
+      create: vi.fn(async () => ({ ok: true as const, workspaceId: "w-new" })),
+      prPrompt: vi.fn(() => "Open a pull request."),
+      ...overrides,
+    };
+    (f.bridge as unknown as { deps: RemoteBridgeDependencies }).deps.workspaceActions = actions;
+    const command = (overrides: Record<string, unknown>) =>
+      f.stopCommand({ kind: "workspace", answersTurn: undefined, sessionId: undefined, ...overrides });
+    return { f, actions, command };
+  }
+
+  it("makes a workspace in a listed repository and says its id", async () => {
+    const { f, actions, command } = withActions();
+    await f.pair();
+    expect(JSON.stringify(f.bridge.phoneView())).toContain('"repos":[{"id":"r1","name":"farm"}]');
+    await f.store.set(`${f.channel}/commands/w1`, command({ action: "create", repoId: "r1" }));
+    await f.bridge.tick();
+    expect(f.result("w1")).toEqual({ id: "w1", status: "sent", workspaceId: "w-new" });
+    await f.store.set(`${f.channel}/commands/w2`, command({ action: "create", repoId: "r9" }));
+    await f.bridge.tick();
+    expect(f.result("w2")).toMatchObject({ status: "refused", reason: "That repository isn't in Conductor any more." });
+    expect(vi.mocked(actions.create).mock.calls).toEqual([["r1"]]);
+  });
+
+  it("archives only a workspace the phone is shown, and passes the action's refusal back", async () => {
+    const { f, actions, command } = withActions({
+      archive: vi.fn(async () => ({ ok: false as const, reason: "That workspace has 2 uncommitted changes." })),
+    });
+    f.emit([session({ conductorWorkspaceId: "w1" } as Partial<FleetSession>)]);
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/a1`, command({ action: "archive", workspaceId: "w-elsewhere" }));
+    await f.bridge.tick();
+    expect(f.result("a1")).toMatchObject({ status: "refused", reason: "That workspace isn't on your phone any more." });
+    await f.store.set(`${f.channel}/commands/a2`, command({ action: "archive", workspaceId: "w1" }));
+    await f.bridge.tick();
+    expect(f.result("a2")).toMatchObject({ status: "refused", reason: "That workspace has 2 uncommitted changes." });
+    expect(vi.mocked(actions.archive).mock.calls).toEqual([["w1"]]);
+  });
+
+  it("asks a resting chat for a PR on the turn the phone saw, and not one mid-turn", async () => {
+    const { f, command } = withActions();
+    f.emit([session({ conductorWorkspaceId: "w1" } as Partial<FleetSession>)]);
+    await f.pair();
+    await f.store.set(
+      `${f.channel}/commands/p1`,
+      command({ action: "createPr", sessionId: "s1", answersTurn: "turn-1" }),
+    );
+    await f.bridge.tick();
+    expect(f.result("p1")).toMatchObject({ status: "sent" });
+    expect(f.sends).toEqual([{ sessionId: "s1", text: "Open a pull request." }]);
+    await f.store.set(`${f.channel}/commands/p2`, command({ action: "createPr", sessionId: "s1", answersTurn: "old" }));
+    await f.bridge.tick();
+    expect(f.result("p2")).toMatchObject({ status: "refused" });
+    f.emit([session({ conductorWorkspaceId: "w1", state: "working" } as Partial<FleetSession>)]);
+    await f.store.set(
+      `${f.channel}/commands/p3`,
+      command({ action: "createPr", sessionId: "s1", answersTurn: "turn-1" }),
+    );
+    await f.bridge.tick();
+    expect(f.result("p3")).toMatchObject({ status: "refused", reason: expect.stringMatching(/mid-turn/) });
+    expect(f.sends).toHaveLength(1);
+  });
+
+  it("is refused by a Mac without workspace actions", async () => {
+    const f = fixture();
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/x1`, f.stopCommand({ kind: "workspace", action: "create", repoId: "r1" }));
+    await f.bridge.tick();
+    expect(f.result("x1")).toMatchObject({ status: "refused", reason: "This Mac can't do that from a phone." });
+    expect(JSON.stringify(f.bridge.phoneView())).not.toContain('"repos"');
+  });
+});

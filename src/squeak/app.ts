@@ -46,7 +46,14 @@ import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
 import { listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
-import { workspaceControl } from "../fleet/workspace-actions.js";
+import {
+  archiveWorkspace,
+  createPrPrompt,
+  createWorkspace,
+  listWorkspaceRepos,
+  readWorkspace,
+  workspaceControl,
+} from "../fleet/workspace-actions.js";
 import { listChatModels } from "../fleet/chat-models.js";
 import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "../fleet/project-icons.js";
 import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
@@ -420,6 +427,28 @@ export class SqueakApp {
                   sessionId,
                 ),
             },
+            workspaceActions: (() => {
+              const deps = { conductorDbPath: config.conductorDbPath, relay: this.conductorRelay };
+              // The phone view is built on every publish; the repository list changes about never.
+              let repos: { at: number; list: Array<{ id: string; name: string }> } | null = null;
+              return {
+                repos: () => {
+                  if (!repos || Date.now() - repos.at > 60_000) {
+                    repos = {
+                      at: Date.now(),
+                      list: listWorkspaceRepos(config.conductorDbPath).map(({ id, name }) => ({ id, name })),
+                    };
+                  }
+                  return repos.list;
+                },
+                archive: (workspaceId: string) => archiveWorkspace(deps, workspaceId),
+                create: (repoId: string) => createWorkspace(deps, repoId),
+                prPrompt: (workspaceId: string) => {
+                  const workspace = readWorkspace(config.conductorDbPath, workspaceId);
+                  return workspace ? createPrPrompt(workspace) : null;
+                },
+              };
+            })(),
             newChat: {
               workspaces: () => listNewChatWorkspaces(config.conductorDbPath, 20),
               models: () => listChatModels(config.conductorDbPath),

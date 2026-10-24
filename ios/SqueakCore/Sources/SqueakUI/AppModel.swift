@@ -1553,6 +1553,68 @@ final class AppModel {
         }
     }
 
+    /* ---------- workspaces ---------- */
+
+    /// Whether this Mac archives and makes workspaces and asks chats for PRs (it lists repositories when it does).
+    var workspaceActions: Bool { snapshot?.repos != nil || demo }
+
+    /// The chat whose workspace the archive dialog is asking about: set by the chat's menu, read at the root.
+    var archiveTarget: PhoneSnapshot.Session?
+
+    private func workspaceCommand(action: String, workspaceId: String? = nil, repoId: String? = nil,
+                                  session: PhoneSnapshot.Session? = nil) async -> (CommandResult?, String?) {
+        guard let channel else { return (nil, "Not connected to your Mac.") }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.workspaceDocument(action: action, workspaceId: workspaceId, repoId: repoId, session: session, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel, within: 45) else { return (nil, "Your Mac didn't answer. Is Squeak running?") }
+            return result.sent ? (result, nil) : (nil, result.reason ?? "Your Mac refused that.")
+        } catch {
+            return (nil, "Couldn't reach your Mac.")
+        }
+    }
+
+    /// Archives the chat's workspace in Conductor (its chats stop; the branch stays). Nil when the Mac did it.
+    func archiveWorkspace(of session: PhoneSnapshot.Session) async -> String? {
+        if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
+        guard let workspaceId = session.workspaceId else { return "Only a Conductor chat's workspace can be archived." }
+        let place = Presentation.split(label: session.label).repo ?? session.label
+        guard await confirmWithBiometrics(reason: "Archive the \(place) workspace") else { return "Face ID was cancelled." }
+        let (_, problem) = await workspaceCommand(action: "archive", workspaceId: workspaceId)
+        if problem == nil {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            await refresh()
+        }
+        return problem
+    }
+
+    /// Makes a workspace in a repository, branched from its default branch. Its id, or why not.
+    func createWorkspace(in repo: PhoneSnapshot.Repo) async -> (id: String?, problem: String?) {
+        if demo { try? await Task.sleep(for: .milliseconds(600)); return (nil, "Demo: no workspace is made.") }
+        let (result, problem) = await workspaceCommand(action: "create", repoId: repo.id)
+        if result != nil { await refresh() }
+        return (result?.workspaceId, problem)
+    }
+
+    /// Asks a resting chat to open a pull request (commit, push, `gh pr create` onto its target branch).
+    @discardableResult
+    func askForPullRequest(_ session: PhoneSnapshot.Session) async -> String? {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
+        let (_, problem) = await workspaceCommand(action: "createPr", session: session)
+        if let problem {
+            problemFor[session.key] = problem
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        } else {
+            problemFor[session.key] = nil
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
+        return problem
+    }
+
     /* ---------- hidden on this phone ---------- */
 
     /// Chats put away on this phone only, by when (seconds since 1970). The Mac and Conductor are untouched; a chat

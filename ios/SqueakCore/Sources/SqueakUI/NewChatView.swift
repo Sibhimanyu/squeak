@@ -431,7 +431,11 @@ private struct WorkspacePicker: View {
     @Binding var selection: String?
     let onPick: (PhoneSnapshot.Workspace) -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var model
     @State private var query = ""
+    /// The repository a new workspace is being made in, while the Mac makes it.
+    @State private var creating: String?
+    @State private var createProblem: String?
 
     private struct Group: Identifiable {
         let name: String
@@ -455,6 +459,17 @@ private struct WorkspacePicker: View {
     var body: some View {
         let groups = groups
         List {
+            if let repos = model.snapshot?.repos, !repos.isEmpty, query.isEmpty {
+                Section {
+                    ForEach(repos) { repo in newRow(repo) }
+                } header: {
+                    Text("New workspace").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                        .textCase(nil).accessibilityAddTraits(.isHeader)
+                } footer: {
+                    Text(createProblem ?? "A fresh branch from the repository's default branch, made by Conductor on your Mac.")
+                        .font(.footnote).foregroundStyle(createProblem == nil ? Theme.muted : Theme.error)
+                }
+            }
             ForEach(groups) { group in
                 Section {
                     ForEach(group.items) { workspace in row(workspace, project: group.name) }
@@ -476,6 +491,36 @@ private struct WorkspacePicker: View {
         .navigationTitle("Workspace")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search workspaces…")
+    }
+
+    private func newRow(_ repo: PhoneSnapshot.Repo) -> some View {
+        Button {
+            creating = repo.id
+            createProblem = nil
+            Task {
+                let (id, problem) = await model.createWorkspace(in: repo)
+                creating = nil
+                if let id {
+                    selection = id
+                    dismiss()
+                } else {
+                    createProblem = problem
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                ProjectMark(name: repo.name, size: 22, folder: true)
+                Text(repo.name).font(.body).lineLimit(1)
+                Spacer(minLength: 8)
+                if creating == repo.id { ProgressView().controlSize(.small) } else { Image(systemName: "plus").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted).accessibilityHidden(true) }
+            }
+            .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.ink)
+        .listRowBackground(Theme.surface)
+        .disabled(creating != nil)
+        .accessibilityLabel(creating == repo.id ? "Making a workspace in \(repo.name)" : "New workspace in \(repo.name)")
     }
 
     private func row(_ workspace: PhoneSnapshot.Workspace, project: String) -> some View {
