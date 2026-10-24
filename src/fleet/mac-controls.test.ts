@@ -10,6 +10,21 @@ describe("reading a control change", () => {
     expect(readControlChange({ muted: true })).toEqual({ muted: true });
     expect(readControlChange({ fans: "max" })).toEqual({ fans: "max" });
     expect(readControlChange({ displaySleep: true })).toEqual({ displaySleep: true });
+    expect(readControlChange({ open: "com.apple.Notes" })).toEqual({ open: "com.apple.Notes" });
+    expect(readControlChange({ space: "left" })).toEqual({ space: "left" });
+    expect(readControlChange({ media: "playPause" })).toEqual({ media: "playPause" });
+    for (const bad of [
+      { open: "-a Terminal" },
+      { open: "com.x; rm -rf ~" },
+      { open: "" },
+      { quit: "../x" },
+      { space: "up" },
+      { media: "stop" },
+      { lock: false },
+      { listApps: 1 },
+    ]) {
+      expect(readControlChange(bad)).toBeNull();
+    }
     for (const bad of [
       { volume: 101 },
       { volume: 1.5 },
@@ -55,6 +70,14 @@ describe("MacControls", () => {
       brightness: async () => 57,
       setBrightness: async (b) => (calls.push(`brightness ${b}`), options.brightnessWorks !== false),
       displaySleep: async () => (calls.push("displaySleep"), true),
+      running: async () => [{ id: "com.apple.Safari", name: "Safari", active: true }],
+      installed: async () => [
+        { id: "com.apple.Safari", name: "Safari" },
+        { id: "com.apple.Notes", name: "Notes" },
+      ],
+      openApp: async (id) => (calls.push(`open ${id}`), true),
+      quitApp: async (id) => (calls.push(`quit ${id}`), true),
+      systemKey: async (action) => (calls.push(`key ${action}`), null),
     };
     const heatState = { fanMode: "auto", fanChoice: "auto", fanControl: true, fansRpm: [2300] } as HeatState;
     const heat = { state: heatState, setFanChoice: vi.fn(async () => ({ ok: true as const })) };
@@ -86,5 +109,36 @@ describe("MacControls", () => {
       ok: false,
       reason: "Brightness only changes while the Mac's lid is open.",
     });
+  });
+
+  it("opens only an app the Mac has, and quits only one that runs", async () => {
+    const t = setup();
+    expect(await t.controls.apply({ open: "com.apple.Notes" })).toMatchObject({ ok: true });
+    expect(await t.controls.apply({ open: "com.evil.app" })).toEqual({
+      ok: false,
+      reason: "That app isn't on this Mac.",
+    });
+    expect(await t.controls.apply({ quit: "com.apple.Notes" })).toEqual({
+      ok: false,
+      reason: "That app isn't running.",
+    });
+    expect(await t.controls.apply({ quit: "com.apple.Safari" })).toMatchObject({ ok: true });
+    expect(t.calls).toEqual(["open com.apple.Notes", "quit com.apple.Safari"]);
+  });
+
+  it("answers the installed list only when asked, and keeps running apps in the state", async () => {
+    const t = setup();
+    const listed = await t.controls.apply({ listApps: true });
+    expect(listed).toMatchObject({ ok: true, apps: [{ id: "com.apple.Safari" }, { id: "com.apple.Notes" }] });
+    await t.controls.refresh();
+    expect(t.controls.state.apps).toEqual([{ id: "com.apple.Safari", name: "Safari", active: true }]);
+  });
+
+  it("turns desktops, media and lock into Squeak Hands' fixed actions", async () => {
+    const t = setup();
+    await t.controls.apply({ space: "right" });
+    await t.controls.apply({ media: "playPause" });
+    await t.controls.apply({ lock: true });
+    expect(t.calls).toEqual(["key space-right", "key play-pause", "key lock"]);
   });
 });

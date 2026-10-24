@@ -2340,6 +2340,16 @@ describe("RemoteBridge live controls from the phone", () => {
     t.bridge.stop();
   });
 
+  it("answers the installed apps in the command's result, never in the view", async () => {
+    const t = await controlsT();
+    const apps = [{ id: "com.apple.Notes", name: "Notes" }];
+    t.apply.mockResolvedValueOnce({ ok: true as const, state: t.state, apps } as never);
+    const verdict = await t.bridge.handleCommand(t.config, "l1", t.command({ listApps: true }));
+    expect(verdict.result).toEqual({ id: "l1", status: "sent", apps });
+    expect(JSON.stringify(t.bridge.phoneView())).not.toContain("com.apple.Notes");
+    t.bridge.stop();
+  });
+
   it("a Mac without controls refuses them and leaves them out of the view", async () => {
     const t = await controlsT({ offered: false });
     expect(t.bridge.phoneView()).not.toHaveProperty("macControls");

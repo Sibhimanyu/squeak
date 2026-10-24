@@ -103,5 +103,9 @@ final class MacControlsFormatTests: XCTestCase {
         XCTAssertEqual(json, #"{"fans":"60"}"#)
         XCTAssertEqual(ControlsCommand.Change.volume(140).volume, 100)
         XCTAssertEqual(String(decoding: try JSONEncoder().encode(ControlsCommand.Change.displaySleep), as: UTF8.self), #"{"displaySleep":true}"#)
+        XCTAssertEqual(String(decoding: try JSONEncoder().encode(ControlsCommand.Change.open("com.apple.Notes")), as: UTF8.self), #"{"open":"com.apple.Notes"}"#)
+        XCTAssertEqual(String(decoding: try JSONEncoder().encode(ControlsCommand.Change.space("left")), as: UTF8.self), #"{"space":"left"}"#)
+        let result = try JSONDecoder().decode(CommandResult.self, from: Data(#"{"status":"sent","apps":[{"id":"com.apple.Notes","name":"Notes"}]}"#.utf8))
+        XCTAssertEqual(result.apps, [.init(id: "com.apple.Notes", name: "Notes")])
     }
 }

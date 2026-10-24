@@ -39,6 +39,9 @@ fi
 # installer checks before the admin prompt.
 mkdir -p "$APP/Contents/Helpers"
 "$REPO/helpers/squeak-fans/build.sh" "$APP/Contents/Helpers" >/dev/null
+# squeak-apps (helpers/squeak-apps): the running and installed apps, and a polite quit, for the iPhone's
+# Mac controls page. No permission needed.
+"$REPO/helpers/squeak-apps/build.sh" "$APP/Contents/Helpers" >/dev/null
 
 # The brand's own duck files (DESIGN.md 6.1) and the menu-bar template; the app never redraws them.
 BRAND="$APP/Contents/Resources/brand"
@@ -105,6 +108,7 @@ for part in "$FW/XPCServices/Installer.xpc" "$FW/XPCServices/Downloader.xpc" "$F
 done
 codesign -s "$IDENTITY" --force "$APP/Contents/Frameworks/Sparkle.framework"
 codesign -s "$IDENTITY" --force --identifier com.squeak.fans "$APP/Contents/Helpers/squeak-fans"
+codesign -s "$IDENTITY" --force --identifier com.squeak.apps "$APP/Contents/Helpers/squeak-apps"
 codesign -s "$IDENTITY" --force "$APP"
 codesign --verify --deep --strict "$APP"
 

@@ -1086,6 +1086,21 @@ final class AppModel {
         }
     }
 
+    /// The Mac's installed apps for the app picker, asked for when it opens; the reason when they could not be.
+    func installedApps() async -> (apps: [PhoneSnapshot.MacApp], problem: String?) {
+        if demo { return (DemoData.installedApps, nil) }
+        guard let channel else { return ([], "Not connected to your Mac.") }
+        do {
+            let (id, document) = try channel.controlsDocument(.listApps, signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return ([], "Your Mac didn't answer. Is Squeak running?") }
+            guard result.sent else { return ([], result.reason ?? "Your Mac couldn't list its apps.") }
+            return (result.apps ?? [], nil)
+        } catch {
+            return ([], "Couldn't reach your Mac.")
+        }
+    }
+
     @ObservationIgnored private var liveSending = false
     @ObservationIgnored private var livePending: ControlsCommand.Change?
 

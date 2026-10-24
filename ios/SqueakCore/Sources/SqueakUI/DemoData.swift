@@ -7,6 +7,10 @@ import SqueakCore
 /// options and composer are live (a chat waiting inside Conductor cannot be
 /// answered from a phone, and the demo keeps to that rule).
 enum DemoData {
+    /// The demo Mac's app picker.
+    static let installedApps: [PhoneSnapshot.MacApp] = ["Calendar", "Conductor", "Mail", "Music", "Notes", "Safari", "Terminal", "Xcode"]
+        .map { .init(id: "com.demo.\($0.lowercased())", name: $0) }
+
     /// One answer with every kind of block, for the typesetting captures.
     static let richMessage = """
     ## Session isolation
@@ -278,7 +282,11 @@ enum DemoData {
         }
         // The Mac controls page: lid open (brightness shows), fan control set up.
         demo.macControls = .init(volume: 40, muted: false, brightness: args.contains("-squeak-demo-lid-closed") ? nil : 57,
-                                 fans: .init(mode: "auto", choice: "auto", available: true, rpm: [2300, 2500]))
+                                 fans: .init(mode: "auto", choice: "auto", available: true, rpm: [2300, 2500]),
+                                 apps: [.init(id: "com.conductor.app", name: "Conductor", active: true),
+                                        .init(id: "com.apple.Safari", name: "Safari", active: false),
+                                        .init(id: "com.apple.Terminal", name: "Terminal", active: false),
+                                        .init(id: "com.apple.Music", name: "Music", active: false)])
         demo.macHeat = .init(level: "ok", chip: 62, battery: 33, fansRpm: [2300, 2500], fansMax: false, fanControl: true)
         #if DEBUG
         demo.projectIcons = DemoIcons.byProject

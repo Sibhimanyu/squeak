@@ -2,7 +2,7 @@ import type { AwakeEnd, AwakeState } from "../fleet/awake-session.js";
 import type { LidActionSettings } from "../fleet/lid-actions.js";
 import type { AwakeRules } from "../fleet/power-monitor.js";
 import type { HotspotState } from "../fleet/hotspot.js";
-import { readControlChange, type ControlChange, type MacControlsState } from "../fleet/mac-controls.js";
+import { readControlChange, type ControlChange, type MacApp, type MacControlsState } from "../fleet/mac-controls.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -505,7 +505,9 @@ export interface RemoteBridgeDependencies {
   /** Live controls (fleet/mac-controls.ts): their state for the phone, and one change at a time. Absent: phones hide the page. */
   controls?: {
     state(): MacControlsState;
-    apply(change: ControlChange): Promise<{ ok: true; state: MacControlsState } | { ok: false; reason: string }>;
+    apply(
+      change: ControlChange,
+    ): Promise<{ ok: true; state: MacControlsState; apps?: MacApp[] } | { ok: false; reason: string }>;
   };
   hotspot?: {
     state(): HotspotState;
@@ -2323,7 +2325,8 @@ export class RemoteBridge {
     }
     this.nudgePublish(0);
     this.log(device.name, "sent", `controls ${Object.keys(change)[0]}`);
-    return { write: true, result: { id, status: "sent" } };
+    // The installed apps travel only in the answer to the phone that asked.
+    return { write: true, result: { id, status: "sent", ...(outcome.apps ? { apps: outcome.apps } : {}) } };
   }
 
   /** A keep-awake flip. Signature, freshness and nonce have already held. */

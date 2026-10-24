@@ -307,6 +307,15 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public init(port: Int, hosts: [String], tag: String) { self.port = port; self.hosts = hosts; self.tag = tag }
     }
 
+    public struct MacApp: Codable, Equatable, Sendable, Identifiable {
+        /// The bundle id.
+        public let id: String
+        public let name: String
+        /// Running apps only: whether it is in front.
+        public var active: Bool?
+        public init(id: String, name: String, active: Bool? = nil) { self.id = id; self.name = name; self.active = active }
+    }
+
     public struct MacControls: Codable, Equatable, Sendable {
         public struct Fans: Codable, Equatable, Sendable {
             /// What the fans are set to now: "auto", "40", "60", "80", "max" ("max" while warm whatever was picked).
@@ -325,8 +334,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Nil with the lid closed: only the built-in display's brightness is controlled.
         public var brightness: Int?
         public var fans: Fans?
-        public init(volume: Int? = nil, muted: Bool? = nil, brightness: Int? = nil, fans: Fans? = nil) {
-            self.volume = volume; self.muted = muted; self.brightness = brightness; self.fans = fans
+        /// The apps with a Dock icon now; nil from a Mac without the apps helper.
+        public var apps: [MacApp]?
+        public init(volume: Int? = nil, muted: Bool? = nil, brightness: Int? = nil, fans: Fans? = nil, apps: [MacApp]? = nil) {
+            self.volume = volume; self.muted = muted; self.brightness = brightness; self.fans = fans; self.apps = apps
         }
     }
 
@@ -1034,6 +1045,21 @@ public struct ControlsCommand: Codable, Equatable, Sendable {
         /// "auto", "40", "60", "80" or "max".
         public var fans: String?
         public var displaySleep: Bool?
+        /// A bundle id: open (or bring to the front), or quit.
+        public var open: String?
+        public var quit: String?
+        /// "left" or "right".
+        public var space: String?
+        /// "playPause", "next" or "previous".
+        public var media: String?
+        public var lock: Bool?
+        public var listApps: Bool?
+        public static func open(_ id: String) -> Change { Change(open: id) }
+        public static func quit(_ id: String) -> Change { Change(quit: id) }
+        public static func space(_ direction: String) -> Change { Change(space: direction) }
+        public static func media(_ key: String) -> Change { Change(media: key) }
+        public static var lock: Change { Change(lock: true) }
+        public static var listApps: Change { Change(listApps: true) }
         public static func volume(_ percent: Int) -> Change { Change(volume: min(100, max(0, percent))) }
         public static func muted(_ on: Bool) -> Change { Change(muted: on) }
         public static func brightness(_ percent: Int) -> Change { Change(brightness: min(100, max(0, percent))) }
@@ -1105,6 +1131,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var media: MediaRef? = nil
     /// For the last chunk of a photo: where the Mac saved it, relative to the chat's folder.
     public var ref: String? = nil
+    /// For a controls `listApps`: the apps installed on the Mac, by name.
+    public var apps: [PhoneSnapshot.MacApp]? = nil
 
     public var sent: Bool { status == "sent" }
     /// The Mac could not prove the message reached the chat (it may have): not sent, not refused.

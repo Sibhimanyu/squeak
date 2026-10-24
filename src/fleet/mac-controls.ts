@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 
 import { logger } from "../utils/logger.js";
+import { runHands } from "./conductor-ui.js";
 import { type FanMode, FANS_HELPER_PRIVILEGED, type HeatGovernor, isFanMode } from "./heat.js";
 
 /**
@@ -11,6 +12,14 @@ import { type FanMode, FANS_HELPER_PRIVILEGED, type HeatGovernor, isFanMode } fr
  * fans (through heat.ts, so heat can still raise them to full) and the
  * screen off now (`pmset displaysleepnow`). None needs root except the fans,
  * which go through the helper fan control installs.
+ *
+ * Apps (helpers/squeak-apps, no permission): the running ones are in the
+ * view; the installed list is asked for (`listApps`) and comes back in the
+ * command's result, since 6 KB in every published view would be waste. An app
+ * opens (`open -b`) only if it is installed or running, and quits only if it
+ * is running, by NSRunningApplication.terminate(), the Dock's own quit.
+ * Desktops, media keys and lock are six fixed actions of Squeak Hands'
+ * `system-key` mode, which holds the Accessibility grant posting keys needs.
  *
  * A phone sends one change per signed `controls` command; `readControlChange`
  * takes exactly one known key with a value of exactly the right type and
@@ -22,7 +31,25 @@ export type ControlChange =
   | { muted: boolean }
   | { brightness: number }
   | { fans: FanMode }
-  | { displaySleep: true };
+  | { displaySleep: true }
+  | { open: string }
+  | { quit: string }
+  | { space: "left" | "right" }
+  | { media: "playPause" | "next" | "previous" }
+  | { lock: true }
+  | { listApps: true };
+
+export interface MacApp {
+  id: string;
+  name: string;
+}
+
+export interface RunningApp extends MacApp {
+  active: boolean;
+}
+
+/** A bundle identifier: letters, digits, dots and dashes, nothing a command line could misread. */
+const BUNDLE_ID = /^[A-Za-z0-9][A-Za-z0-9.-]{0,154}$/;
 
 export interface MacControlsState {
   /** Output volume, 0–100; null when unread. */
@@ -39,6 +66,8 @@ export interface MacControlsState {
     available: boolean;
     rpm: number[];
   };
+  /** Apps with a Dock icon now; absent without the apps helper. */
+  apps?: RunningApp[];
 }
 
 const percent = (value: unknown): value is number =>
@@ -63,6 +92,18 @@ export function readControlChange(value: unknown): ControlChange | null {
       return isFanMode(v) ? { fans: v } : null;
     case "displaySleep":
       return v === true ? { displaySleep: true } : null;
+    case "open":
+      return typeof v === "string" && BUNDLE_ID.test(v) ? { open: v } : null;
+    case "quit":
+      return typeof v === "string" && BUNDLE_ID.test(v) ? { quit: v } : null;
+    case "space":
+      return v === "left" || v === "right" ? { space: v } : null;
+    case "media":
+      return v === "playPause" || v === "next" || v === "previous" ? { media: v } : null;
+    case "lock":
+      return v === true ? { lock: true } : null;
+    case "listApps":
+      return v === true ? { listApps: true } : null;
     default:
       return null;
   }
@@ -85,10 +126,20 @@ export interface ControlsSystem {
   brightness(): Promise<number | null>;
   setBrightness(percent: number): Promise<boolean>;
   displaySleep(): Promise<boolean>;
+  /** Null without the apps helper. */
+  running(): Promise<RunningApp[] | null>;
+  installed(): Promise<MacApp[]>;
+  openApp(id: string): Promise<boolean>;
+  quitApp(id: string): Promise<boolean>;
+  /** One of Squeak Hands' fixed system-key actions; a reason when it could not. */
+  systemKey(action: "space-left" | "space-right" | "play-pause" | "next" | "previous" | "lock"): Promise<string | null>;
 }
+
+const INSTALLED_FRESH_MS = 10 * 60_000;
 
 export class MacControls {
   private last: Omit<MacControlsState, "fans"> = { volume: null, muted: null, brightness: null };
+  private installedCache: { at: number; apps: MacApp[] } | null = null;
 
   constructor(
     private readonly system: ControlsSystem,
@@ -106,20 +157,55 @@ export class MacControls {
 
   /** Reads volume and brightness again; tells `onChange` when they moved. */
   async refresh(): Promise<void> {
-    const [volume, brightness] = await Promise.all([
+    const [volume, brightness, apps] = await Promise.all([
       this.system.volume().catch(() => ({ volume: null, muted: null })),
       this.system.brightness().catch(() => null),
+      this.system.running().catch(() => null),
     ]);
-    const next = { ...volume, brightness };
+    const next = { ...volume, brightness, ...(apps ? { apps } : {}) };
     if (JSON.stringify(next) !== JSON.stringify(this.last)) {
       this.last = next;
       this.onChange();
     }
   }
 
-  async apply(change: ControlChange): Promise<{ ok: true; state: MacControlsState } | { ok: false; reason: string }> {
+  private async installed(fresh = false): Promise<MacApp[]> {
+    if (!fresh && this.installedCache && Date.now() - this.installedCache.at < INSTALLED_FRESH_MS) {
+      return this.installedCache.apps;
+    }
+    const apps = await this.system.installed().catch(() => []);
+    this.installedCache = { at: Date.now(), apps };
+    return apps;
+  }
+
+  async apply(
+    change: ControlChange,
+  ): Promise<{ ok: true; state: MacControlsState; apps?: MacApp[] } | { ok: false; reason: string }> {
+    if ("listApps" in change) {
+      return { ok: true, state: this.state, apps: await this.installed(true) };
+    }
     let ok: boolean;
-    if ("fans" in change) {
+    if ("open" in change) {
+      const running = (await this.system.running().catch(() => null)) ?? [];
+      const known =
+        running.some((app) => app.id === change.open) || (await this.installed()).some((app) => app.id === change.open);
+      if (!known) return { ok: false, reason: "That app isn't on this Mac." };
+      ok = await this.system.openApp(change.open);
+    } else if ("quit" in change) {
+      const running = (await this.system.running().catch(() => null)) ?? [];
+      if (!running.some((app) => app.id === change.quit)) return { ok: false, reason: "That app isn't running." };
+      ok = await this.system.quitApp(change.quit);
+    } else if ("space" in change || "media" in change || "lock" in change) {
+      const action =
+        "space" in change
+          ? (`space-${change.space}` as const)
+          : "media" in change
+            ? ({ playPause: "play-pause", next: "next", previous: "previous" } as const)[change.media]
+            : ("lock" as const);
+      const problem = await this.system.systemKey(action);
+      if (problem) return { ok: false, reason: problem };
+      ok = true;
+    } else if ("fans" in change) {
       const outcome = await this.heat.setFanChoice(change.fans);
       if (!outcome.ok) return outcome;
       ok = true;
@@ -147,9 +233,39 @@ const run = (file: string, args: string[]) =>
   );
 
 /** The real thing. `readHelpers`: where an unprivileged squeak-fans may be (heat.ts reads the same). */
-export function macControlsSystem(readHelpers: string[]): ControlsSystem {
+export function macControlsSystem(
+  readHelpers: string[],
+  appsHelpers: string[] = [],
+  handsAppPath: string | null = null,
+): ControlsSystem {
   const helper = () => [FANS_HELPER_PRIVILEGED, ...readHelpers].find((file) => fs.existsSync(file)) ?? null;
+  const apps = () => appsHelpers.find((file) => fs.existsSync(file)) ?? null;
+  const json = async <T>(args: string[]): Promise<T | null> => {
+    const file = apps();
+    if (!file) return null;
+    const out = await run(file, args);
+    try {
+      return out.ok ? (JSON.parse(out.stdout) as T) : null;
+    } catch {
+      return null;
+    }
+  };
   return {
+    running: () => json<RunningApp[]>(["running"]),
+    installed: async () => (await json<MacApp[]>(["installed"])) ?? [],
+    // Ids only reach here after BUNDLE_ID and a membership check.
+    openApp: async (id) => (await run("/usr/bin/open", ["-b", id])).ok,
+    quitApp: async (id) => (await json<{ ok?: boolean }>(["quit", id]))?.ok === true,
+    async systemKey(action) {
+      if (!handsAppPath) return "This Mac has no Squeak Hands to press keys with.";
+      const outcome = await runHands(handsAppPath, "system-key", { action });
+      if (outcome.status === "missing") return "Squeak Hands isn't installed on this Mac.";
+      if (outcome.status !== "result")
+        return "Squeak Hands didn't answer. Rebuild it with helpers/squeak-hands/build.sh.";
+      if (outcome.result.ok === true) return null;
+      if (outcome.result.error === "not-trusted") return "Squeak Hands needs Accessibility on this Mac to press keys.";
+      return "Squeak Hands couldn't do that. Rebuild it with helpers/squeak-hands/build.sh.";
+    },
     async volume() {
       const out = await run("/usr/bin/osascript", ["-e", "get volume settings"]);
       return out.ok ? parseVolumeSettings(out.stdout) : { volume: null, muted: null };

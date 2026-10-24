@@ -193,7 +193,13 @@ export class SqueakApp {
       "/Applications/Squeak.app/Contents/Helpers/squeak-fans",
       path.join(config.supportDir, "squeak-fans"),
     ];
-    this.controls = new MacControls(macControlsSystem(readers), this.heat, () => this.remote?.changed());
+    const appsHelpers = [
+      "/Applications/Squeak.app/Contents/Helpers/squeak-apps",
+      path.join(config.supportDir, "squeak-apps"),
+    ];
+    this.controls = new MacControls(macControlsSystem(readers, appsHelpers, config.handsAppPath), this.heat, () =>
+      this.remote?.changed(),
+    );
     this.lidActions = new LidActions({
       settingsPath: path.join(config.supportDir, "awake-settings.json"),
       journalPath: path.join(config.supportDir, "lid-actions.json"),

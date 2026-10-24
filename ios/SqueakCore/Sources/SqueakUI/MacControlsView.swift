@@ -28,6 +28,8 @@ struct MacControlsView: View {
     @State private var brightness: Double?
     @State private var problem: String?
     @State private var busy = false
+    @State private var quitting: PhoneSnapshot.MacApp?
+    @State private var confirmingLock = false
 
     private var controls: PhoneSnapshot.MacControls? { model.snapshot?.macControls }
 
@@ -39,6 +41,8 @@ struct MacControlsView: View {
             if let controls {
                 soundSection(controls)
                 displaySection(controls)
+                if let apps = controls.apps { appsSection(apps) }
+                keysSection
                 if let fans = controls.fans { fanSection(fans) }
             }
             if let problem {
@@ -52,6 +56,13 @@ struct MacControlsView: View {
                      : "Through the cloud a change goes when you let go. On the same Wi-Fi as your Mac, the controls are live.")
             }
         }
+        .confirmationDialog("Quit \(quitting?.name ?? "")?", isPresented: Binding(get: { quitting != nil }, set: { if !$0 { quitting = nil } }),
+                            titleVisibility: .visible) {
+            Button("Quit", role: .destructive) { if let app = quitting { send(.quit(app.id)) }; quitting = nil }
+        } message: { Text("If it has unsaved work, it asks on the Mac before it quits.") }
+        .confirmationDialog("Lock your Mac?", isPresented: $confirmingLock, titleVisibility: .visible) {
+            Button("Lock", role: .destructive) { send(.lock) }
+        } message: { Text("Its screen locks now. Your agents keep running.") }
         .navigationTitle("Mac controls")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -116,6 +127,60 @@ struct MacControlsView: View {
         }
     }
 
+    // MARK: Apps
+
+    private func appsSection(_ apps: [PhoneSnapshot.MacApp]) -> some View {
+        Section {
+            ForEach(apps) { app in
+                Button { send(.open(app.id)) } label: {
+                    HStack {
+                        Text(app.name).foregroundStyle(Theme.ink)
+                        Spacer(minLength: 8)
+                        if app.active == true { Text("In front").font(.footnote).foregroundStyle(Theme.muted) }
+                    }
+                }
+                .frame(minHeight: 44)
+                .swipeActions { Button("Quit", role: .destructive) { quitting = app } }
+                .contextMenu {
+                    Button("Bring to front", systemImage: "macwindow") { send(.open(app.id)) }
+                    Button("Quit", systemImage: "xmark.circle", role: .destructive) { quitting = app }
+                }
+                .accessibilityHint("Brings it to the front. Swipe or hold to quit it.")
+            }
+            NavigationLink { AppPickerView() } label: { Label("Open an app", systemImage: "plus.app") }
+                .frame(minHeight: 44)
+        } header: { Text("Apps") } footer: {
+            Text("Tap an app to bring it to the front, swipe to quit it.")
+        }
+    }
+
+    // MARK: Desktop, media, lock
+
+    private var keysSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                Button { send(.space("left")) } label: { Label("Previous", systemImage: "chevron.left").frame(maxWidth: .infinity, minHeight: 44) }
+                Button { send(.space("right")) } label: { Label("Next", systemImage: "chevron.right").frame(maxWidth: .infinity, minHeight: 44) }
+            }
+            .buttonStyle(.borderless)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Desktop")
+            HStack(spacing: 12) {
+                Button { send(.media("previous")) } label: { Image(systemName: "backward.fill").frame(maxWidth: .infinity, minHeight: 44) }
+                    .accessibilityLabel("Previous track")
+                Button { send(.media("playPause")) } label: { Image(systemName: "playpause.fill").frame(maxWidth: .infinity, minHeight: 44) }
+                    .accessibilityLabel("Play or pause")
+                Button { send(.media("next")) } label: { Image(systemName: "forward.fill").frame(maxWidth: .infinity, minHeight: 44) }
+                    .accessibilityLabel("Next track")
+            }
+            .buttonStyle(.borderless)
+            Button("Lock your Mac", role: .destructive) { confirmingLock = true }
+                .frame(minHeight: 44)
+        } header: { Text("Desktop and media") } footer: {
+            Text("Previous and Next move between your Mac's desktops (Control-arrow, on unless you turned it off in Keyboard Shortcuts). Media keys play, pause and skip in whatever is playing.")
+        }
+    }
+
     // MARK: Fans
 
     private func fanSection(_ fans: PhoneSnapshot.MacControls.Fans) -> some View {
@@ -133,6 +198,48 @@ struct MacControlsView: View {
         } header: { Text("Fans") } footer: {
             Text(MacControlsFormat.fanNote(fans)
                  ?? "Auto is macOS's own control. A speed you pick holds until you change it or Squeak stops; if the Mac warms up during an awake session, the fans go to full.")
+        }
+    }
+}
+/// Every app on the Mac, asked for when this opens (6 KB is too much to carry in every view), searchable.
+struct AppPickerView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var apps: [PhoneSnapshot.MacApp] = []
+    @State private var loading = true
+    @State private var problem: String?
+    @State private var search = ""
+
+    private var shown: [PhoneSnapshot.MacApp] {
+        search.isEmpty ? apps : apps.filter { $0.name.localizedCaseInsensitiveContains(search) }
+    }
+
+    var body: some View {
+        List {
+            if loading {
+                HStack(spacing: 8) { ProgressView(); Text("Asking your Mac…").foregroundStyle(Theme.muted) }
+            } else if let problem {
+                Text(problem).foregroundStyle(Theme.muted)
+            }
+            ForEach(shown) { app in
+                Button(app.name) {
+                    Task {
+                        problem = await model.changeControl(.open(app.id))
+                        if problem == nil { dismiss() }
+                    }
+                }
+                .foregroundStyle(Theme.ink)
+                .frame(minHeight: 44)
+            }
+        }
+        .searchable(text: $search, prompt: "Find an app")
+        .navigationTitle("Open an app")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            let (list, failure) = await model.installedApps()
+            apps = list
+            problem = failure
+            loading = false
         }
     }
 }
