@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.30
+
+- Squeak for iPhone's Mac controls can set your Mac's energy mode: Automatic, Low Power or High Power.
+  Low Power still turns on by itself when the Mac runs hot or the battery is low.
+
 ## 2.1.29
 
 - Squeak for iPhone's Mac controls can now bring apps to the front, open and quit them, switch desktops,
