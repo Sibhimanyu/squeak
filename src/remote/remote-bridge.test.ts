@@ -2303,11 +2303,12 @@ describe("RemoteBridge detailed usage for the phone", () => {
     await bridge.tick();
     await bridge.approve("iphone-1");
     const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
-    const command = (range: unknown) => {
+    const command = (range: unknown, agent?: unknown) => {
       const box = seal(payload.k, {
         v: 1,
         kind: "stats",
         range,
+        ...(agent === undefined ? {} : { agent }),
         nonce: crypto.randomBytes(16).toString("hex"),
         expiresAt: NOW + 60_000,
       });
@@ -2321,12 +2322,21 @@ describe("RemoteBridge detailed usage for the phone", () => {
     expect(t.bridge.phoneView()).toMatchObject({ usageStats: true });
     const verdict = await t.bridge.handleCommand(t.config, "s1", t.command("30d"));
     expect(verdict.result).toEqual({ id: "s1", status: "sent", stats: { range: "30d", totals: { tokens: 42 } } });
+    // An older phone names no agent: both together.
+    expect(t.stats).toHaveBeenLastCalledWith("30d", undefined);
     expect(JSON.stringify(t.bridge.phoneView())).not.toContain('"tokens":42');
+    // An agent, when named, must be one there is.
+    const named = await t.bridge.handleCommand(t.config, "a1", t.command("7d", "codex"));
+    expect(named.result).toMatchObject({ status: "sent" });
+    expect(t.stats).toHaveBeenLastCalledWith("7d", "codex");
+    expect((await t.bridge.handleCommand(t.config, "a2", t.command("7d", "gemini"))).result).toMatchObject({
+      status: "refused",
+    });
     for (const [i, bad] of ["1y", 30, null, { range: "7d" }].entries()) {
       const refused = await t.bridge.handleCommand(t.config, `b${i}`, t.command(bad));
       expect(refused.result).toMatchObject({ status: "refused" });
     }
-    expect(t.stats).toHaveBeenCalledTimes(1);
+    expect(t.stats).toHaveBeenCalledTimes(2);
     t.bridge.stop();
   });
 

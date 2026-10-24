@@ -218,4 +218,35 @@ describe("UsageStats", () => {
     // Removed files leave the numbers on the next read.
     expect((await again.view("7d")).totals.tokens).toBe(0);
   });
+
+  it("answers one agent, with how far back it goes and Claude Code's own record beside it", async () => {
+    const dir = tmp();
+    const claudeHome = path.join(dir, ".claude");
+    fs.mkdirSync(path.join(claudeHome, "projects", "p"), { recursive: true });
+    fs.writeFileSync(
+      path.join(claudeHome, "projects", "p", "s.jsonl"),
+      claudeLine("m1", new Date().toISOString(), { input_tokens: 1, output_tokens: 2 }),
+    );
+    fs.writeFileSync(path.join(claudeHome, "settings.json"), JSON.stringify({ cleanupPeriodDays: 90 }));
+    const today = localDate(Date.now());
+    fs.writeFileSync(
+      path.join(claudeHome, "stats-cache.json"),
+      JSON.stringify({
+        dailyModelTokens: [
+          { date: "2026-07-01", tokensByModel: { "claude-opus-5": 100 } },
+          { date: today, tokensByModel: { "claude-opus-5-5": 6, "claude-sonnet-5-5": 4 } },
+        ],
+        dailyActivity: [{ date: today, messageCount: 9, sessionCount: 1 }],
+      }),
+    );
+    const stats = new UsageStats({ cachePath: path.join(dir, "cache.json"), claudeHome, codexDirs: [] });
+    const claude = await stats.view("7d", "claude");
+    expect(claude).toMatchObject({ agent: "claude", since: today, keepDays: 90, totals: { tokens: 3 } });
+    expect(claude.keptFrom).toBe(localDate(Date.now() - 90 * 86_400_000));
+    expect(claude.claudeCodeRecord).toEqual({ tokens: 10, sessions: 1, messages: 9, since: today, through: today });
+    expect((await stats.view("all", "claude")).claudeCodeRecord?.tokens).toBe(110);
+    const codex = await stats.view("7d", "codex");
+    expect(codex).toMatchObject({ agent: "codex", since: null, totals: { tokens: 0 } });
+    expect(codex).not.toHaveProperty("claudeCodeRecord");
+  });
 });

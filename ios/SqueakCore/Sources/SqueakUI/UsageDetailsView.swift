@@ -7,21 +7,29 @@ import SwiftUI
 /// is computed on the phone beyond wording. Bars are ink, never a state colour (DESIGN.md §3.3).
 struct UsageDetailsView: View {
     @Environment(AppModel.self) private var model
+    /// `-squeak-usage-codex` and `-squeak-scrollend` are for screenshots only.
+    @State private var agent = ProcessInfo.processInfo.arguments.contains("-squeak-usage-codex") ? "codex" : "claude"
     @State private var range = "7d"
     @State private var stats: UsageStatsView?
     @State private var problem: String?
     @State private var loading = false
 
     private static let ranges = [("7d", "7 days"), ("30d", "30 days"), ("all", "All time")]
+    private static let agents = [("claude", "Claude"), ("codex", "Codex (ChatGPT)")]
 
     var body: some View {
+        ScrollViewReader { reader in
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
+                Picker("Agent", selection: $agent) {
+                    ForEach(Self.agents, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                .pickerStyle(.segmented)
                 Picker("Range", selection: $range) {
                     ForEach(Self.ranges, id: \.0) { Text($0.1).tag($0.0) }
                 }
                 .pickerStyle(.segmented)
-                if let stats {
+                if let stats, stats.agent == nil || stats.agent == agent {
                     if stats.pending > 0 {
                         Text("Your Mac is still reading \(stats.pending) files for the first time, so these will grow.")
                             .font(.footnote).foregroundStyle(Theme.muted)
@@ -31,29 +39,33 @@ struct UsageDetailsView: View {
                     if !stats.daily.isEmpty { daily(stats.daily, allTime: stats.range == "all") }
                     if !stats.models.isEmpty { models(stats.models) }
                     if !stats.projects.isEmpty { projects(stats.projects, total: stats.totals.tokens) }
+                    source(stats)
                 } else if loading {
                     HStack(spacing: 8) { ProgressView(); Text("Asking your Mac…").foregroundStyle(Theme.muted) }
                 }
                 if let problem { Text(problem).foregroundStyle(Theme.muted) }
-                Text("Counted from the agents' own files on your Mac, Claude and Codex both. The cost is an estimate for Claude at API rates; Codex isn't priced. Your plan's limits are on the Usage page.")
-                    .font(.footnote).foregroundStyle(Theme.muted)
+                Color.clear.frame(height: 1).id("end")
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onChange(of: stats) {
+            if ProcessInfo.processInfo.arguments.contains("-squeak-scrollend") { reader.scrollTo("end", anchor: .bottom) }
+        }
         }
         .background(Theme.bg.ignoresSafeArea())
         .foregroundStyle(Theme.ink)
         .navigationTitle("Details")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
-        .task(id: range) { await load() }
+        .task(id: "\(agent) \(range)") { await load() }
     }
 
     private func load() async {
         loading = true
-        let asked = range
-        let (answer, failure) = await model.usageStats(asked)
-        guard asked == range else { return }
+        let asked = (agent, range)
+        let (answer, failure) = await model.usageStats(asked.1, agent: asked.0)
+        guard asked == (agent, range) else { return }
         if let answer { stats = answer }
         problem = failure
         loading = false
@@ -64,7 +76,7 @@ struct UsageDetailsView: View {
     private func headline(_ s: UsageStatsView) -> some View {
         let tiles: [(String, String, String?)] = [
             ("Tokens", UsageStatsFormat.tokens(s.totals.tokens), nil),
-            ("Estimated cost", UsageStatsFormat.cost(s.totals.costUsd) ?? "Not priced", s.totals.costUsd == nil ? nil : "Claude, at API rates"),
+            ("Estimated cost", UsageStatsFormat.cost(s.totals.costUsd) ?? "Not priced", s.totals.costUsd == nil ? nil : "At API rates"),
             ("Sessions", "\(s.totals.sessions)", "\(UsageStatsFormat.tokens(s.totals.messages)) messages"),
             ("Active days", "\(s.activeDays)", nil),
             ("Current streak", UsageStatsFormat.days(s.currentStreak), "Longest \(UsageStatsFormat.days(s.longestStreak))"),
@@ -142,6 +154,27 @@ struct UsageDetailsView: View {
         return parsed.formatted(.dateTime.day().month(.abbreviated))
     }
 
+    // MARK: Where it comes from
+
+    private func source(_ s: UsageStatsView) -> some View {
+        section("Where this comes from") {
+            Text(UsageStatsFormat.source(s)).font(.footnote).foregroundStyle(Theme.muted)
+            if let record = s.claudeCodeRecord {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Claude Code's own count").font(.subheadline)
+                        Spacer()
+                        Text(UsageStatsFormat.tokens(record.tokens)).font(.subheadline.weight(.semibold)).monospacedDigit()
+                    }
+                    Text(UsageStatsFormat.recordNote(record)).font(.footnote).foregroundStyle(Theme.muted)
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Theme.surface))
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
     // MARK: Models and projects
 
     private func models(_ models: [UsageStatsView.Model]) -> some View {
@@ -150,7 +183,6 @@ struct UsageDetailsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(UsageStatsFormat.model(m.model)).font(.subheadline)
-                        Text(m.agent == "codex" ? "Codex" : "Claude").font(.caption).foregroundStyle(Theme.muted)
                         Spacer()
                         Text("\(Int((m.share * 100).rounded()))%").font(.subheadline.weight(.semibold)).monospacedDigit()
                     }
@@ -198,31 +230,57 @@ private extension ISO8601DateFormatter {
 }
 
 extension DemoData {
-    /// The demo Mac's detailed usage, for screenshots: shaped like a real week, built through the same decoder
-    /// as a real answer.
-    static func usageStats(_ range: String) -> UsageStatsView {
+    /// The demo Mac's detailed usage, for screenshots: shaped like a real week, one agent at a time, built
+    /// through the same decoder as a real answer.
+    static func usageStats(_ range: String, agent: String = "claude") -> UsageStatsView {
+        let codex = agent == "codex"
         let days = range == "7d" ? 7 : 30
         let formatter = ISO8601DateFormatter.localDay
+        let scale = codex ? 40_000 : 1_000_000
         let daily: [[String: Any]] = (0..<days).map { i in
             let date = Date().addingTimeInterval(Double(i - days + 1) * 86_400)
-            return ["date": formatter.string(from: date), "tokens": [180, 420, 260, 0, 610, 380, 520][i % 7] * 1_000_000]
+            return ["date": formatter.string(from: date), "tokens": [180, 420, 260, 0, 610, 380, 520][i % 7] * scale]
         }
         let total = daily.compactMap { $0["tokens"] as? Int }.reduce(0, +)
-        let json: [String: Any] = [
-            "range": range, "computedAt": ISO8601DateFormatter().string(from: Date()), "pending": 0,
-            "totals": ["tokens": total, "input": total / 400, "output": total / 250, "cacheRead": total * 96 / 100,
-                       "cacheWrite": total / 50, "messages": total / 210_000, "sessions": days * 26, "costUsd": Double(total) / 3_100_000],
-            "activeDays": daily.filter { ($0["tokens"] as? Int ?? 0) > 0 }.count, "currentStreak": 3, "longestStreak": 12,
-            "favoriteModel": "claude-opus-5-5", "peakHour": 11, "longestSession": ["minutes": 1044, "project": "squeak"],
-            "models": [
-                ["model": "claude-opus-5-5", "agent": "claude", "tokens": total * 62 / 100, "share": 0.62, "costUsd": Double(total) / 4_200_000],
-                ["model": "claude-sonnet-5-5", "agent": "claude", "tokens": total * 27 / 100, "share": 0.27, "costUsd": Double(total) / 11_000_000],
-                ["model": "gpt-6.1-sol", "agent": "codex", "tokens": total * 9 / 100, "share": 0.09],
-            ],
-            "daily": daily,
-            "projects": [["name": "squeak", "tokens": total * 6 / 10], ["name": "motion-graphics-skill", "tokens": total * 3 / 10],
-                         ["name": "greenroom", "tokens": total / 10]],
+        let ago = { (n: Double) in formatter.string(from: Date().addingTimeInterval(-n * 86_400)) }
+        let totals: [String: Any] = [
+            "tokens": total, "input": total / 400, "output": total / 250, "cacheRead": total * 96 / 100,
+            "cacheWrite": total / 50, "messages": total / 210_000, "sessions": days * (codex ? 4 : 26),
+            "costUsd": codex ? NSNull() : Double(total) / 3_100_000,
         ]
+        let codexModels: [[String: Any]] = [
+            ["model": "gpt-6.1-sol", "agent": "codex", "tokens": total * 7 / 10, "share": 0.7],
+            ["model": "gpt-5.6-terra", "agent": "codex", "tokens": total * 3 / 10, "share": 0.3],
+        ]
+        let claudeModels: [[String: Any]] = [
+            ["model": "claude-opus-5-5", "agent": "claude", "tokens": total * 68 / 100, "share": 0.68, "costUsd": Double(total) / 4_200_000],
+            ["model": "claude-sonnet-5-5", "agent": "claude", "tokens": total * 30 / 100, "share": 0.30, "costUsd": Double(total) / 11_000_000],
+            ["model": "claude-haiku-5-5", "agent": "claude", "tokens": total * 2 / 100, "share": 0.02, "costUsd": 1.2],
+        ]
+        let projects: [[String: Any]] = [
+            ["name": "squeak", "tokens": total * 6 / 10], ["name": "motion-graphics-skill", "tokens": total * 3 / 10],
+            ["name": "greenroom", "tokens": total / 10],
+        ]
+        let activeDays = daily.filter { ($0["tokens"] as? Int ?? 0) > 0 }.count
+        var json: [String: Any] = ["range": range, "agent": agent, "since": ago(codex ? 24 : 33)]
+        json["computedAt"] = ISO8601DateFormatter().string(from: Date())
+        json["pending"] = 0
+        json["totals"] = totals
+        json["activeDays"] = activeDays
+        json["currentStreak"] = 3
+        json["longestStreak"] = 12
+        json["favoriteModel"] = codex ? "gpt-6.1-sol" : "claude-opus-5-5"
+        json["peakHour"] = 11
+        json["longestSession"] = ["minutes": codex ? 96 : 1044, "project": "squeak"] as [String: Any]
+        json["models"] = codex ? codexModels : claudeModels
+        json["daily"] = daily
+        json["projects"] = projects
+        if !codex {
+            json["keepDays"] = 30
+            json["keptFrom"] = ago(30)
+            json["claudeCodeRecord"] = ["tokens": total * 2, "sessions": days * 24, "messages": total / 90_000,
+                                        "since": ago(115), "through": ago(0)]
+        }
         let data = try! JSONSerialization.data(withJSONObject: json)
         return try! JSONDecoder().decode(UsageStatsView.self, from: data)
     }

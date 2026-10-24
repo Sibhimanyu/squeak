@@ -42,9 +42,25 @@ public struct UsageStatsView: Codable, Equatable, Sendable {
         public let minutes: Int
         public let project: String?
     }
+    /// Claude Code's own record over the same range (what its `/stats` shows), for comparison.
+    public struct ClaudeCodeRecord: Codable, Equatable, Sendable {
+        public let tokens: Int
+        public let sessions: Int
+        public let messages: Int
+        public let since: String?
+        public let through: String?
+    }
 
     /// "7d", "30d" or "all".
     public let range: String
+    /// "claude" or "codex"; nil from a Mac that answered both together.
+    public let agent: String?
+    /// The earliest day with data for this agent; nil when none (or from an older Mac).
+    public let since: String?
+    /// Claude only: how many days Claude Code keeps a conversation's file, and from which day all are there.
+    public let keepDays: Int?
+    public let keptFrom: String?
+    public let claudeCodeRecord: ClaudeCodeRecord?
     public let computedAt: String
     /// Files the Mac is still reading for the first time; the numbers grow until 0.
     public let pending: Int
@@ -67,18 +83,20 @@ public struct StatsCommand: Codable, Equatable, Sendable {
     public let kind: String
     /// "7d", "30d" or "all".
     public let range: String
+    /// "claude" or "codex".
+    public let agent: String
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
 }
 
 extension Channel {
-    /// The signed document asking the Mac for detailed usage over `range`.
-    public func statsDocument(range: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+    /// The signed document asking the Mac for one agent's detailed usage over `range`.
+    public func statsDocument(range: String, agent: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = StatsCommand(
-            v: 1, kind: "stats", range: range,
+            v: 1, kind: "stats", range: range, agent: agent,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )
@@ -134,6 +152,34 @@ public enum UsageStatsFormat {
         let family = parts[1].prefix(1).uppercased() + parts[1].dropFirst()
         let version = parts.dropFirst(2).prefix(while: { $0.allSatisfy(\.isNumber) }).joined(separator: ".")
         return version.isEmpty ? family : "\(family) \(version)"
+    }
+
+    /// "2026-09-24" → "24 Sep"; nil stays nil.
+    public static func day(_ date: String?) -> String? {
+        guard let date else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_GB")
+        f.dateFormat = "yyyy-MM-dd"
+        guard let parsed = f.date(from: date) else { return nil }
+        f.dateFormat = "d MMM"
+        return f.string(from: parsed)
+    }
+
+    /// Where an agent's numbers come from and how far back they go, in one paragraph for the page.
+    public static func source(_ s: UsageStatsView) -> String {
+        if s.agent == "codex" {
+            let since = day(s.since).map { " Its logs go back to \($0)." } ?? ""
+            return "Counted from Codex's session logs on your Mac (~/.codex/sessions): the Codex CLI, Codex in the ChatGPT app, and Codex chats run from Conductor.\(since) Codex isn't priced here; your ChatGPT plan's limits are on the Usage page."
+        }
+        let keep = s.keepDays ?? 30
+        let from = day(s.keptFrom).map { " so All time here starts around \($0)" } ?? ""
+        return "Counted from Claude Code's conversation files on your Mac (~/.claude/projects): the Terminal, Conductor's chats and the Claude app's Code tab. Claude Code deletes each file after \(keep) days,\(from). Each message is counted once, which is what you're billed for; the cost is an estimate at API rates."
+    }
+
+    /// Why Claude Code's own number is bigger, in one sentence.
+    public static func recordNote(_ r: UsageStatsView.ClaudeCodeRecord) -> String {
+        let since = day(r.since).map { " since \($0)" } ?? ""
+        return "Claude Code's /stats counts \(tokens(r.tokens)) tokens\(since). It keeps its count after the files are deleted, but adds up every copy Claude saves of a message as it writes, about twice the tokens actually used."
     }
 
     /// "1 day", "12 days".

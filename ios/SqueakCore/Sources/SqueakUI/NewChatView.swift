@@ -3,10 +3,11 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
-/// "New chat": where it starts, which agent, which model and how hard it thinks, how the work is split
-/// across models, and the first message.
-/// The phone only offers what the Mac listed (the workspaces, and the models Conductor's own picker has);
-/// the Mac checks both again, and the command is signed on this phone behind Face ID, like a reply.
+/// "New chat": where, what to do, and one tap on how it works. The default screen is only what starts a
+/// chat: the workspace, the message (with photos) and Send, with three presets (Best, Balanced, Save
+/// usage) under it; the agent, model, thinking, who codes and runs, and plan first sit behind Customize.
+/// The phone only offers what the Mac listed (workspaces, models, workers); the Mac checks again, and
+/// the command is signed on this phone behind Face ID, like a reply. Presets live in `ChatPresets`.
 struct NewChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -14,15 +15,9 @@ struct NewChatView: View {
     let workspaces: [PhoneSnapshot.Workspace]
     @State private var workspaceId: String?
     @State private var agent = NewChatAgent.claude
-    @State private var modelId: String?
-    @State private var level: String?
-    @State private var showingAllModels = false
-    /// Which worker codes and which runs commands (nil: the chat's own model), and plan first.
-    @State private var code: String?
-    @State private var run: String?
-    @State private var planFirst = false
-    /// "Custom" was tapped: the two worker rows stay open even while they match a preset.
-    @State private var customSplit = false
+    @State private var setup = ChatSetup()
+    @State private var settled = false
+    @State private var customizing = false
     @State private var text = ""
     @State private var photos: [ChatPhoto] = []
     /// "Sending photo 1 of 2…" while they upload.
@@ -31,23 +26,22 @@ struct NewChatView: View {
     @State private var problem: String?
     @FocusState private var focused: Bool
 
+    private let store = ChatChoiceStore()
     static let maxCharacters = 20_000
-    /// Models shown before "More models": the favourites, or the first few.
-    private static let shortList = 4
 
-    /// `project` (a repo name) starts the chat in that project's first workspace, from its own page.
+    /// `project` (a repo name) starts the chat in that project's first workspace, from its own page;
+    /// otherwise the last workspace used, if the Mac still lists it.
     init(workspaces: [PhoneSnapshot.Workspace], project: String? = nil) {
         self.workspaces = workspaces
         let args = ProcessInfo.processInfo.arguments
-        let first = project.flatMap { name in workspaces.first { Presentation.split(label: $0.label).repo == name } } ?? workspaces.first
+        let remembered = ChatChoiceStore().lastWorkspace.flatMap { id in workspaces.first { $0.id == id } }
+        let first = project.flatMap { name in workspaces.first { Presentation.split(label: $0.label).repo == name } } ?? remembered ?? workspaces.first
         _workspaceId = State(initialValue: first?.id)
         _agent = State(initialValue: first?.agent ?? .claude)
         if args.contains("-squeak-newchat-filled") {
             _text = State(initialValue: "Add a retry with backoff to the payment webhook, and cover it with a test.")
         }
-        if args.contains("-squeak-newchat-split") {
-            _code = State(initialValue: "sonnet"); _run = State(initialValue: "haiku"); _planFirst = State(initialValue: true)
-        }
+        if args.contains("-squeak-newchat-customize") { _customizing = State(initialValue: true) }
         if args.contains("-squeak-newchat-error") {
             _problem = State(initialValue: "That workspace isn't available any more. Pick another.")
         }
@@ -58,69 +52,57 @@ struct NewChatView: View {
     private var tooLong: Bool { trimmed.count > Self.maxCharacters }
     private var canStart: Bool { workspace != nil && (!trimmed.isEmpty || !photos.isEmpty) && !tooLong && !sending }
 
-    /// The models for the chosen agent, favourites first as the Mac listed them. Empty from an older Mac.
-    private var models: [PhoneSnapshot.ChatModel] { (model.snapshot?.chatModels ?? []).filter { $0.agent == agent.rawValue } }
-    private var chosen: PhoneSnapshot.ChatModel? { models.first { $0.id == modelId } ?? models.first }
-    private var shownModels: [PhoneSnapshot.ChatModel] {
-        guard !showingAllModels, models.count > Self.shortList else { return models }
-        let favourites = models.filter(\.favorite)
-        let short = favourites.count >= 2 ? favourites : Array(models.prefix(Self.shortList))
-        // A chosen model outside the short list stays on screen.
-        if let chosen, !short.contains(where: { $0.id == chosen.id }) { return short + [chosen] }
-        return short
-    }
+    private var allModels: [PhoneSnapshot.ChatModel] { model.snapshot?.chatModels ?? [] }
+    /// The models a Claude chat can hand work to; empty from a Mac older than the split, which hides it.
+    private var workers: [PhoneSnapshot.SplitWorker] { model.snapshot?.chatWorkers ?? [] }
+    private var models: [PhoneSnapshot.ChatModel] { allModels.filter { $0.agent == agent.rawValue } }
+    private var chosen: PhoneSnapshot.ChatModel? { models.first { $0.id == setup.modelId } ?? models.first }
+    private var presets: [ChatPreset] { ChatPresets.available(agent: agent, models: allModels, workers: workers) }
+    private var kind: ChatPreset { ChatPresets.preset(of: setup, agent: agent, models: allModels, workers: workers) }
+    private var summary: String { ChatPresets.summary(of: setup, agent: agent, models: allModels, workers: workers) }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if workspaces.isEmpty {
-                        card { Text("Your Mac has no workspace to start a chat in. Create one in Conductor first.")
-                            .foregroundStyle(Theme.muted).padding(16) }
-                    } else {
-                        section("Where") { workspaceRow }
-                        section("Agent") { agentTiles }
-                        if !models.isEmpty {
-                            section("Model") { modelList }
-                            if let chosen, !chosen.levels.isEmpty {
-                                section("Thinking", footer: "More thinking is slower and uses more of your plan.") { levelChips(chosen) }
-                            }
-                        }
-                        if !workers.isEmpty { section("Split the work", footer: splitFooter) { splitCard } }
-                        section("First message", footer: messageFooter) { messageField }
-                        if let problem { problemRow(problem) }
-                    }
+            VStack(alignment: .leading, spacing: 12) {
+                if workspaces.isEmpty {
+                    card { Text("Your Mac has no workspace to start a chat in. Create one in Conductor first.")
+                        .foregroundStyle(Theme.muted).padding(16) }
+                    Spacer(minLength: 0)
+                } else {
+                    workspaceRow
+                    messageCard
+                    if let problem { problemRow(problem) }
                 }
-                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
             }
-            .scrollDismissesKeyboard(.interactively)
-            // The split screenshot opens at the bottom, where the section is.
-            .defaultScrollAnchor(ProcessInfo.processInfo.arguments.contains("-squeak-newchat-split") ? .bottom : .top)
+            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("New chat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .safeAreaInset(edge: .bottom) { if !workspaces.isEmpty { startBar } }
+            .safeAreaInset(edge: .bottom) { if !workspaces.isEmpty { bottomBar } }
             .interactiveDismissDisabled(sending)
-            .onAppear { settleChoice() }
-            .onChange(of: agent) { _, _ in modelId = nil; level = nil; code = nil; run = nil; customSplit = false; settleChoice() }
-            .onChange(of: model.snapshot?.chatModels) { _, _ in settleChoice() }
+            .sheet(isPresented: $customizing) {
+                CustomizeSheet(setup: $setup, agent: $agent, allModels: allModels, workers: workers)
+            }
+            .onAppear { settle() }
+            .task {
+                try? await Task.sleep(for: .milliseconds(350))
+                if !customizing { focused = true }
+            }
+            .onChange(of: agent) { _, new in
+                // Each agent has its own models: start from what was last used with it.
+                setup = store.restore(agent: new, models: allModels, workers: workers)
+            }
+            .onChange(of: setup) { _, new in
+                if settled { store.save(new, preset: kind, agent: agent) }
+            }
+            .onChange(of: workspaceId) { _, id in if let id { store.lastWorkspace = id } }
+            .onChange(of: model.snapshot?.chatModels) { _, _ in if !settled { settle() } }
         }
         .foregroundStyle(Theme.ink)
     }
 
     /* ---------- pieces ---------- */
-
-    private func section<Content: View>(_ title: String, footer: String? = nil, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted).padding(.leading, 4)
-                .accessibilityAddTraits(.isHeader)
-            card { content() }
-            if let footer {
-                Text(footer).font(.footnote).foregroundStyle(tooLong && title == "First message" ? Theme.error : Theme.muted).padding(.horizontal, 4)
-            }
-        }
-    }
 
     private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) { content() }
@@ -133,248 +115,49 @@ struct NewChatView: View {
         NavigationLink {
             WorkspacePicker(workspaces: workspaces, selection: $workspaceId) { picked in agent = picked.agent }
         } label: {
-            HStack(spacing: 12) {
-                if let workspace { ProjectMark(name: Presentation.split(label: workspace.label).repo ?? workspace.label, size: 32, folder: true) }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(workspace.map { Presentation.split(label: $0.label).repo ?? $0.label } ?? "Choose a workspace")
-                        .font(.headline).foregroundStyle(workspace == nil ? Theme.muted : Theme.ink).lineLimit(1)
-                    if let workspace, let branch = Presentation.split(label: workspace.label).repo == nil ? nil : Presentation.split(label: workspace.label).title as String? {
-                        Text(branch).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
+            card {
+                HStack(spacing: 12) {
+                    if let workspace { ProjectMark(name: Presentation.split(label: workspace.label).repo ?? workspace.label, size: 32, folder: true) }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(workspace.map { Presentation.split(label: $0.label).repo ?? $0.label } ?? "Choose a workspace")
+                            .font(.headline).foregroundStyle(workspace == nil ? Theme.muted : Theme.ink).lineLimit(1)
+                        if let workspace, Presentation.split(label: workspace.label).repo != nil {
+                            Text(Presentation.split(label: workspace.label).title).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
+                        }
                     }
+                    Spacer(minLength: 8)
+                    Lucide(.chevronRight, size: 16, color: Theme.subtle)
                 }
-                Spacer(minLength: 8)
-                Lucide(.chevronRight, size: 16, color: Theme.subtle)
+                .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 56).contentShape(Rectangle())
             }
-            .padding(14).frame(minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityHint("Choose another workspace")
     }
 
-    private var agentTiles: some View {
-        HStack(spacing: 10) {
-            ForEach(NewChatAgent.allCases, id: \.self) { option in
-                let selected = option == agent
-                Button { agent = option; UISelectionFeedbackGenerator().selectionChanged() } label: {
-                    HStack(spacing: 10) {
-                        Image(option == .claude ? "agent-claude" : "agent-codex", bundle: .module).resizable().scaledToFit().frame(width: 28, height: 28)
-                            .accessibilityHidden(true)
-                        Text(Presentation.agentName(option.rawValue)).font(.headline)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 12).frame(maxWidth: .infinity, minHeight: 52)
-                    .background(selected ? Theme.surfaceRaised : Color.clear, in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Theme.lineStrong : Theme.line, lineWidth: selected ? 1.5 : 1))
-                    .contentShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Presentation.agentName(option.rawValue))
-                .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-            }
-        }
-        .padding(10)
-    }
-
-    private var modelList: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(shownModels.enumerated()), id: \.element.id) { index, option in
-                if index > 0 { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14) }
-                Button { modelId = option.id; level = option.defaultLevel; UISelectionFeedbackGenerator().selectionChanged() } label: {
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(option.label).font(.body).foregroundStyle(Theme.ink).lineLimit(1)
-                            if option.favorite { Text("Favorite in Conductor").font(.caption).foregroundStyle(Theme.muted) }
-                        }
-                        Spacer(minLength: 8)
-                        if option.id == chosen?.id { Lucide(.check, size: 18, color: Theme.ink) }
-                    }
-                    .padding(.horizontal, 14).frame(minHeight: 48).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(option.label + (option.favorite ? ", favorite" : ""))
-                .accessibilityAddTraits(option.id == chosen?.id ? [.isButton, .isSelected] : .isButton)
-            }
-            if models.count > shownModels.count || showingAllModels && models.count > Self.shortList {
-                Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14)
-                Button { withAnimation(.easeOut(duration: 0.2)) { showingAllModels.toggle() } } label: {
-                    HStack {
-                        Text(showingAllModels ? "Fewer models" : "More models (\(models.count - shownModels.count))").font(.subheadline.weight(.medium))
-                        Spacer(minLength: 8)
-                        Lucide(showingAllModels ? .chevronUp : .chevronDown, size: 14, color: Theme.subtle)
-                    }
-                    .padding(.horizontal, 14).frame(minHeight: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func levelChips(_ chosen: PhoneSnapshot.ChatModel) -> some View {
-        HStack(spacing: 6) { chips(chosen) }
-            .padding(10)
-    }
-
-    @ViewBuilder
-    private func chips(_ chosen: PhoneSnapshot.ChatModel) -> some View {
-        ForEach(chosen.levels, id: \.self) { option in
-            let selected = option == (level ?? chosen.defaultLevel)
-            Button { level = option; UISelectionFeedbackGenerator().selectionChanged() } label: {
-                Text(Self.levelName(option, short: true)).font(.subheadline.weight(selected ? .semibold : .regular))
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .foregroundStyle(selected ? Theme.ink : Theme.muted)
-                    .padding(.horizontal, 4).frame(maxWidth: .infinity, minHeight: 44)
-                    .background(selected ? Theme.surfaceRaised : Color.clear, in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Theme.lineStrong : Theme.line, lineWidth: selected ? 1.5 : 1))
-                    .contentShape(RoundedRectangle(cornerRadius: 10))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Self.levelName(option))
-            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        }
-    }
-
-    /// "Extra high" in words, "X-high" where five chips share a row.
-    static func levelName(_ level: String, short: Bool = false) -> String {
-        switch level {
-        case "xhigh": short ? "X-high" : "Extra high"
-        default: level.prefix(1).uppercased() + level.dropFirst()
-        }
-    }
-
-    /* ---------- split the work ---------- */
-
-    /// The models a Claude chat can hand work to; empty from a Mac older than the split, which hides it.
-    private var workers: [PhoneSnapshot.SplitWorker] { model.snapshot?.chatWorkers ?? [] }
-    private var canDelegate: Bool { agent == .claude }
-
-    private enum SplitPreset: CaseIterable { case one, save, custom
-        var title: String {
-            switch self { case .one: "One model"; case .save: "Save usage"; case .custom: "Custom" }
-        }
-    }
-
-    private var preset: SplitPreset {
-        if customSplit { return .custom }
-        if code == nil && run == nil { return .one }
-        if code == "sonnet" && run == "haiku" { return .save }
-        return .custom
-    }
-
-    private var split: WorkSplit {
-        WorkSplit(code: canDelegate ? code : nil, run: canDelegate ? run : nil, planFirst: planFirst ? true : nil)
-    }
-
-    private func workerName(_ id: String?) -> String {
-        guard let id else { return "Same model" }
-        return workers.first { $0.id == id }?.label ?? id
-    }
-
-    private var plannerName: String { chosen?.label ?? Presentation.agentName(agent.rawValue) }
-
-    private var splitCard: some View {
-        VStack(spacing: 0) {
-            if canDelegate {
-                HStack(spacing: 6) {
-                    ForEach(SplitPreset.allCases, id: \.self) { option in
-                        presetChip(option)
-                    }
-                }
-                .padding(10)
-                if preset != .one {
-                    Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14)
-                    workerRow("Writes the code", selection: $code)
-                    Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14)
-                    workerRow("Runs tests and builds", selection: $run)
-                }
-                Rectangle().fill(Theme.line).frame(height: 1)
-            }
-            Toggle(isOn: $planFirst) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Plan first").font(.body)
-                    Text("Shows you the plan and waits for your go.").font(.caption).foregroundStyle(Theme.muted)
-                }
-            }
-            .tint(Theme.primaryFill)
-            .padding(.horizontal, 14).frame(minHeight: 52)
-        }
-    }
-
-    private func presetChip(_ option: SplitPreset) -> some View {
-        let selected = option == preset
-        return Button {
-            switch option {
-            case .one: code = nil; run = nil; customSplit = false
-            case .save: code = "sonnet"; run = "haiku"; customSplit = false
-            case .custom: customSplit = true; if code == nil && run == nil { code = "sonnet" }
-            }
-            UISelectionFeedbackGenerator().selectionChanged()
-        } label: {
-            Text(option.title).font(.subheadline.weight(selected ? .semibold : .regular))
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .foregroundStyle(selected ? Theme.ink : Theme.muted)
-                .padding(.horizontal, 4).frame(maxWidth: .infinity, minHeight: 44)
-                .background(selected ? Theme.surfaceRaised : Color.clear, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Theme.lineStrong : Theme.line, lineWidth: selected ? 1.5 : 1))
-                .contentShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(option.title)
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-    }
-
-    private func workerRow(_ title: String, selection: Binding<String?>) -> some View {
-        Menu {
-            Picker(title, selection: selection) {
-                Text("Same model (\(plannerName))").tag(String?.none)
-                ForEach(workers) { Text($0.label).tag(String?.some($0.id)) }
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Text(title).font(.body).foregroundStyle(Theme.ink)
-                Spacer(minLength: 8)
-                Text(workerName(selection.wrappedValue)).font(.body).foregroundStyle(Theme.muted).lineLimit(1)
-                Lucide(.chevronDown, size: 14, color: Theme.subtle)
-            }
-            .padding(.horizontal, 14).frame(minHeight: 48).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(title), \(workerName(selection.wrappedValue))")
-    }
-
-    private var splitFooter: String {
-        guard canDelegate else { return "A Codex chat can't hand work to other models yet." }
-        if code == nil && run == nil { return "\(plannerName) does everything." }
-        var parts = ["\(plannerName) plans and reviews"]
-        if let code { parts.append("\(workerName(code)) writes the code") }
-        if let run { parts.append("\(workerName(run)) runs tests and builds") }
-        return parts.joined(separator: "; ") + ". Small edits it still makes itself."
-    }
-
-    private var messageField: some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private var messageCard: some View {
+        card {
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text).focused($focused)
                     .pasteImages(into: $photos, focused: focused)
-                    .frame(minHeight: 140).scrollContentBackground(.hidden).padding(.horizontal, 10).padding(.vertical, 6)
+                    .scrollContentBackground(.hidden).padding(.horizontal, 10).padding(.vertical, 6)
                 if text.isEmpty {
                     Text("What should it do?").foregroundStyle(Theme.subtle)
                         .padding(.top, 14).padding(.leading, 15).allowsHitTesting(false)
                 }
             }
+            .frame(maxHeight: .infinity)
             if !photos.isEmpty { PhotoTray(photos: $photos, locked: sending).padding(.horizontal, 14).padding(.bottom, 4) }
             Rectangle().fill(Theme.line).frame(height: 1)
             HStack(spacing: 4) {
                 AttachButton(photos: $photos, height: 44).disabled(sending)
-                Text(photos.isEmpty ? "Add a photo" : "\(photos.count) of \(PhotoAttachment.maxPhotos)")
-                    .font(.footnote).foregroundStyle(Theme.muted)
+                Text(tooLong ? "Over the \(Self.maxCharacters)-character limit." : photos.isEmpty ? "Add a photo" : "\(photos.count) of \(PhotoAttachment.maxPhotos)")
+                    .font(.footnote).foregroundStyle(tooLong ? Theme.error : Theme.muted)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 6)
         }
-    }
-
-    private var messageFooter: String {
-        tooLong ? "That's over the \(Self.maxCharacters)-character limit." : "Signed on this iPhone and checked by your Mac."
+        .frame(minHeight: 150)
     }
 
     private func problemRow(_ message: String) -> some View {
@@ -387,51 +170,77 @@ struct NewChatView: View {
         }
     }
 
-    /// What will start, in one line, over the button: the choice is on screen before it is made.
-    private var summary: String {
-        var parts: [String] = []
-        if let chosen {
-            parts.append(chosen.label)
-            if !chosen.levels.isEmpty { parts.append("\(Self.levelName(level ?? chosen.defaultLevel ?? "medium").lowercased()) thinking") }
-        } else {
-            parts.append(Presentation.agentName(agent.rawValue))
-        }
-        if !workers.isEmpty {
-            if let code = split.code { parts.append("\(workerName(code)) codes") }
-            if let run = split.run { parts.append("\(workerName(run)) runs") }
-            if planFirst { parts.append("plan first") }
-        }
-        if let workspace { parts.append(Presentation.split(label: workspace.label).repo ?? workspace.label) }
-        return parts.joined(separator: " · ")
-    }
+    /* ---------- how it works ---------- */
 
-    private var startBar: some View {
-        VStack(spacing: 8) {
-            Text(summary).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.center)
-            Button { Task { await start() } } label: {
-                HStack(spacing: 8) {
-                    if sending { ProgressView().tint(Theme.primaryText) }
-                    Text(uploading ?? (sending ? "Starting…" : "Start chat")).font(.headline)
+    private var bottomBar: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Text("How it works").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                Button { focused = false; customizing = true } label: {
+                    HStack(spacing: 4) {
+                        Text("Customize").font(.subheadline.weight(.medium))
+                        Lucide(.chevronRight, size: 12, color: Theme.subtle)
+                    }
+                    .frame(minHeight: 44).contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.roundedRectangle(radius: 12))
-            .tint(Theme.primaryFill)
-            .foregroundStyle(Theme.primaryText)
-            .disabled(!canStart)
+            .padding(.bottom, -6)
+            if !presets.isEmpty {
+                HStack(spacing: 8) { ForEach(presets, id: \.self) { presetChip($0) } }
+            }
+            (presets.isEmpty || kind != .custom ? Text(summary) : Text(kind.title + "  ").fontWeight(.semibold).foregroundColor(Theme.ink) + Text(summary))
+                .font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            sendButton
         }
-        .padding(.horizontal, 20).padding(.vertical, 10)
+        .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 10)
         .background(Theme.bg)
     }
 
-    /// Keeps the model and level on something the Mac offers for the chosen agent.
-    private func settleChoice() {
-        guard let first = models.first(where: \.favorite) ?? models.first else { return }
-        let current = models.first { $0.id == modelId } ?? first
-        modelId = current.id
-        if let level, current.levels.contains(level) { return }
-        level = current.defaultLevel ?? current.levels.first
+    private func presetChip(_ option: ChatPreset) -> some View {
+        let selected = option == kind
+        return Button {
+            if let next = ChatPresets.setup(for: option, agent: agent, models: allModels, workers: workers) { setup = next }
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
+            Text(option.title).font(.subheadline.weight(selected ? .semibold : .regular))
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .foregroundStyle(selected ? Theme.ink : Theme.muted)
+                .padding(.horizontal, 4).frame(maxWidth: .infinity, minHeight: 48)
+                .background(selected ? Theme.surfaceRaised : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Theme.lineStrong : Theme.line, lineWidth: selected ? 1.5 : 1))
+                .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(option.title)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private var sendButton: some View {
+        Button { Task { await start() } } label: {
+            HStack(spacing: 8) {
+                if sending { ProgressView().tint(Theme.primaryText) }
+                Text(uploading ?? (sending ? "Starting…" : "Send")).font(.headline)
+            }
+            .frame(maxWidth: .infinity, minHeight: 52)
+        }
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.roundedRectangle(radius: 12))
+        .tint(Theme.primaryFill)
+        .foregroundStyle(Theme.primaryText)
+        .disabled(!canStart)
+    }
+
+    /// Starts from what was last used, kept on what the Mac offers; `-squeak-newchat-save` is a demo flag.
+    private func settle() {
+        guard !allModels.isEmpty || !settled else { return }
+        setup = store.restore(agent: agent, models: allModels, workers: workers)
+        if ProcessInfo.processInfo.arguments.contains("-squeak-newchat-save"),
+           let save = ChatPresets.setup(for: .save, agent: agent, models: allModels, workers: workers) { setup = save }
+        settled = true
     }
 
     private func start() async {
@@ -441,6 +250,9 @@ struct NewChatView: View {
         problem = nil
         // What is on screen is what is sent: the model and level, when the Mac listed any.
         let picked = chosen
+        let level = setup.level
+        let delegates = agent == .claude
+        let split = WorkSplit(code: delegates ? setup.code : nil, run: delegates ? setup.run : nil, planFirst: setup.planFirst ? true : nil)
         // Photos first, to the workspace's own folder; the message then names where each was saved.
         var message = trimmed
         if !photos.isEmpty {
@@ -469,6 +281,124 @@ struct NewChatView: View {
         case .cancelled: break
         case let .refused(reason): problem = reason
         }
+    }
+}
+
+/// Everything that is not "start": one line each, grouped, with a short description. Editing here makes
+/// the preset label read "Custom" by itself (the preset is derived from the setup).
+private struct CustomizeSheet: View {
+    @Binding var setup: ChatSetup
+    @Binding var agent: NewChatAgent
+    let allModels: [PhoneSnapshot.ChatModel]
+    let workers: [PhoneSnapshot.SplitWorker]
+    @Environment(\.dismiss) private var dismiss
+
+    private var models: [PhoneSnapshot.ChatModel] { allModels.filter { $0.agent == agent.rawValue } }
+    private var chosen: PhoneSnapshot.ChatModel? { models.first { $0.id == setup.modelId } ?? models.first }
+    private var kind: ChatPreset { ChatPresets.preset(of: setup, agent: agent, models: allModels, workers: workers) }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Picker("Agent", selection: $agent) {
+                        ForEach(NewChatAgent.allCases, id: \.self) { Text(Presentation.agentName($0.rawValue)).tag($0) }
+                    }
+                    .pickerStyle(.segmented).frame(minHeight: 44)
+                } header: { header("Agent") } footer: { footer("Which assistant does the work.") }
+                .listRowBackground(Theme.surface)
+
+                if !models.isEmpty {
+                    Section {
+                        menuRow("Model", value: chosen.map { ChatPresets.shortName($0.label) } ?? "") {
+                            Picker("Model", selection: Binding(get: { chosen?.id ?? "" }, set: pickModel)) {
+                                ForEach(models) { Text(ChatPresets.shortName($0.label) + ($0.label.contains("1M") ? " · 1M" : "")).tag($0.id) }
+                            }
+                        }
+                        if let chosen, !chosen.levels.isEmpty {
+                            Picker("Thinking", selection: Binding(get: { setup.level ?? chosen.defaultLevel ?? "" }, set: { setup.level = $0 })) {
+                                ForEach(chosen.levels, id: \.self) { Text(Self.levelName($0)).tag($0) }
+                            }
+                            .pickerStyle(.segmented).frame(minHeight: 44)
+                        }
+                    } header: { header("Model") } footer: { footer("More thinking is slower and uses more of your plan.") }
+                    .listRowBackground(Theme.surface)
+                }
+
+                if !workers.isEmpty {
+                    if agent == .claude {
+                        Section {
+                            workerRow("Writes the code", selection: $setup.code)
+                            workerRow("Runs tests and builds", selection: $setup.run)
+                        } header: { header("Split the work") } footer: {
+                            footer("The chat's model plans and reviews; cheaper ones do the typing.")
+                        }
+                        .listRowBackground(Theme.surface)
+                    }
+                    Section {
+                        Toggle(isOn: $setup.planFirst) { Text("Plan first").frame(minHeight: 44, alignment: .leading) }
+                            .tint(Theme.primaryFill)
+                    } header: { header("Before it changes anything") } footer: { footer("Shows you the plan and waits for your go.") }
+                    .listRowBackground(Theme.surface)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(14)
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg.ignoresSafeArea())
+            .navigationTitle(kind.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.fontWeight(.semibold) } }
+        }
+        .foregroundStyle(Theme.ink)
+        .presentationDetents([.large])
+    }
+
+    private func header(_ title: String) -> some View {
+        Text(title).font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted).textCase(nil)
+    }
+
+    private func footer(_ text: String) -> some View {
+        Text(text).font(.footnote).foregroundStyle(Theme.muted)
+    }
+
+    private func pickModel(_ id: String) {
+        guard let next = models.first(where: { $0.id == id }) else { return }
+        setup.modelId = id
+        if let level = setup.level, next.levels.contains(level) { return }
+        setup.level = next.defaultLevel ?? next.levels.first
+    }
+
+    private func workerName(_ id: String?) -> String {
+        guard let id else { return "Same model" }
+        return workers.first { $0.id == id }.map { ChatPresets.shortName($0.label) } ?? id
+    }
+
+    private func workerRow(_ title: String, selection: Binding<String?>) -> some View {
+        menuRow(title, value: workerName(selection.wrappedValue)) {
+            Picker(title, selection: selection) {
+                Text("Same model").tag(String?.none)
+                ForEach(workers) { Text(ChatPresets.shortName($0.label)).tag(String?.some($0.id)) }
+            }
+        }
+    }
+
+    private func menuRow<Options: View>(_ title: String, value: String, @ViewBuilder options: () -> Options) -> some View {
+        Menu { options() } label: {
+            HStack(spacing: 10) {
+                Text(title).foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                Text(value).foregroundStyle(Theme.muted).lineLimit(1)
+                Lucide(.chevronDown, size: 14, color: Theme.subtle)
+            }
+            .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(value)")
+    }
+
+    private static func levelName(_ level: String) -> String {
+        level == "xhigh" ? "X-high" : level.prefix(1).uppercased() + level.dropFirst()
     }
 }
 
