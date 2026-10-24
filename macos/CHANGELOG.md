@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.31
+
+- Settings, Keep awake has two modes, Lid open and Lid closed, each with its own switches that it
+  remembers. Lid open can keep the screen on (so the Mac doesn't lock), mute, use Low Power Mode and
+  pause chat apps for the whole session; Lid closed keeps its own set for when the lid shuts. A
+  lid-closed session goes back to the lid-open switches when you open the lid.
+
 ## 2.1.30
 
 - Squeak for iPhone's Mac controls can set your Mac's energy mode: Automatic, Low Power or High Power.
