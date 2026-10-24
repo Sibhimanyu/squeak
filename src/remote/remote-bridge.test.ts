@@ -2455,8 +2455,9 @@ describe("RemoteBridge lid actions from the phone", () => {
     });
     // What the daemon's applyAwake does with a lid-actions request.
     const apply = vi.fn((request: unknown) => {
-      const settings = (request as { action?: string; settings?: object }).settings;
-      lid.updateSettings(readLidActionSettings({ ...lid.settings, ...settings }));
+      const { settings, mode } = request as { action?: string; settings?: object; mode?: string };
+      if (mode === "open") lid.updateOpenSettings(settings as object);
+      else lid.updateSettings(readLidActionSettings({ ...lid.settings, ...settings }));
       return { ok: true as const, state: null };
     });
     const bridge = new RemoteBridge({
@@ -2472,6 +2473,7 @@ describe("RemoteBridge lid actions from the phone", () => {
               state: () => null,
               apply,
               lidActions: () => lid.settings,
+              openActions: () => lid.openSettings,
               rules: () => awakeRules({ lowPowerPercent: 35, endPercent: 8 }),
               lastEnd: () => ({ reason: "battery" as const, at: "2026-10-23T01:00:00.000Z", why: "Battery at 8%" }),
               sleepProblem: () => "Sleep is disabled.",
@@ -2512,13 +2514,52 @@ describe("RemoteBridge lid actions from the phone", () => {
     });
     const verdict = await t.bridge.handleCommand(t.config, "l1", t.command({ mute: false, freezeApps: true }));
     expect(verdict.result).toEqual({ id: "l1", status: "sent" });
-    expect(t.apply).toHaveBeenCalledWith({ action: "lid-actions", settings: { mute: false, freezeApps: true } });
+    expect(t.apply).toHaveBeenCalledWith({
+      action: "lid-actions",
+      mode: "closed",
+      settings: { mute: false, freezeApps: true },
+    });
     expect(t.lid.settings).toEqual({ displayOff: true, mute: false, lowPower: true, freezeApps: true });
     expect(t.bridge.phoneView().awakeLidActions).toEqual(t.lid.settings);
     expect(JSON.parse(fs.readFileSync(path.join(t.dir, "awake-settings.json"), "utf8"))).toMatchObject({
       mute: false,
       freezeApps: true,
     });
+    t.bridge.stop();
+  });
+
+  it("changes the lid-open switches with mode open, leaving the closed ones alone", async () => {
+    const t = await lidT();
+    expect(t.bridge.phoneView().awakeOpenActions).toEqual({
+      screenOn: false,
+      mute: false,
+      lowPower: false,
+      freezeApps: false,
+    });
+    const verdict = await t.bridge.handleCommand(t.config, "o1", t.command({ screenOn: true }, { mode: "open" }));
+    expect(verdict.result).toEqual({ id: "o1", status: "sent" });
+    expect(t.apply).toHaveBeenCalledWith({ action: "lid-actions", mode: "open", settings: { screenOn: true } });
+    expect(t.bridge.phoneView().awakeOpenActions).toMatchObject({ screenOn: true });
+    expect(t.bridge.phoneView().awakeLidActions).toMatchObject({ displayOff: true, mute: true });
+    t.bridge.stop();
+  });
+
+  it("refuses a switch that belongs to the other mode, and a mode it does not know", async () => {
+    const t = await lidT();
+    for (const [i, [settings, extra]] of [
+      [{ screenOn: true }, {}],
+      [{ screenOn: true }, { mode: "closed" }],
+      [{ displayOff: true }, { mode: "open" }],
+      [{ mute: true }, { mode: "half" }],
+    ].entries()) {
+      const verdict = await t.bridge.handleCommand(
+        t.config,
+        `m${i}`,
+        t.command(settings as Record<string, unknown>, extra as Record<string, unknown>),
+      );
+      expect(verdict.result).toMatchObject({ status: "refused" });
+    }
+    expect(t.apply).not.toHaveBeenCalled();
     t.bridge.stop();
   });
 

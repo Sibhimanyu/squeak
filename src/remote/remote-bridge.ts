@@ -1,5 +1,11 @@
 import type { AwakeEnd, AwakeState } from "../fleet/awake-session.js";
-import type { LidActionSettings } from "../fleet/lid-actions.js";
+import {
+  LID_ACTION_KEYS,
+  OPEN_ACTION_KEYS,
+  type AwakeMode,
+  type LidActionSettings,
+  type OpenActionSettings,
+} from "../fleet/lid-actions.js";
 import type { AwakeRules } from "../fleet/power-monitor.js";
 import type { HotspotState } from "../fleet/hotspot.js";
 import { readControlChange, type ControlChange, type MacApp, type MacControlsState } from "../fleet/mac-controls.js";
@@ -355,20 +361,20 @@ export interface AwakeCommand {
 }
 
 /**
- * A signed change to what the Mac does when its lid closes during a lid-closed
- * awake session (fleet/lid-actions.ts). `settings` holds one to four of the
- * four switches, booleans only. It reaches no agent and carries no text.
+ * A signed change to what the Mac does during an awake session (fleet/lid-actions.ts): with `mode`
+ * "closed" (or absent, as the first phones sent it) when its lid closes during a lid-closed session,
+ * with "open" while a session runs with the lid open. `settings` holds one to four of that mode's four
+ * switches, booleans only. It reaches no agent and carries no text.
  */
 export interface LidActionsCommand {
   v: 1;
   kind: "lidActions";
-  settings: Partial<LidActionSettings>;
+  mode?: AwakeMode;
+  settings: Partial<LidActionSettings> | Partial<OpenActionSettings>;
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
 }
-
-const LID_ACTION_KEYS: ReadonlyArray<keyof LidActionSettings> = ["displayOff", "mute", "lowPower", "freezeApps"];
 
 /**
  * A signed live control of the Mac from the phone's Mac controls page
@@ -400,17 +406,21 @@ export interface StatsCommand {
 }
 
 /** The settings of a lidActions command if every key is known and every value a boolean; else null. */
-export function readLidActionsChange(value: unknown): Partial<LidActionSettings> | null {
+export function readLidActionsChange(
+  value: unknown,
+  mode: AwakeMode = "closed",
+): Partial<LidActionSettings> | Partial<OpenActionSettings> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
+  const allowed: readonly string[] = mode === "open" ? OPEN_ACTION_KEYS : LID_ACTION_KEYS;
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record);
-  if (keys.length === 0 || keys.some((key) => !(LID_ACTION_KEYS as readonly string[]).includes(key))) {
+  if (keys.length === 0 || keys.some((key) => !allowed.includes(key))) {
     return null;
   }
-  const change: Partial<LidActionSettings> = {};
-  for (const key of LID_ACTION_KEYS) {
+  const change: Record<string, boolean> = {};
+  for (const key of allowed) {
     if (record[key] === undefined) continue;
     if (typeof record[key] !== "boolean") {
       return null;
@@ -537,6 +547,8 @@ export interface RemoteBridgeDependencies {
     lidReady?(): boolean;
     /** What a closed lid does (lid-actions.ts); a phone may change it with a `lidActions` command. */
     lidActions?(): LidActionSettings;
+    /** What a session does while the lid is open; its presence tells a phone this Mac has the two modes. */
+    openActions?(): OpenActionSettings;
     /** The effective safety floors, for the phone to draw. */
     rules?(): AwakeRules;
     /** How the last session ended, so the phone can say a safety rule did. */
@@ -2308,16 +2320,23 @@ export class RemoteBridge {
     if (!awake?.lidActions || command.v !== 1) {
       return refuse("This Mac can't change its lid settings from a phone.", "not available");
     }
-    const change = readLidActionsChange(command.settings);
+    if (command.mode !== undefined && command.mode !== "open" && command.mode !== "closed") {
+      return refuse("Not a lid setting this Mac understands.", "bad mode");
+    }
+    const mode = command.mode ?? "closed";
+    if (mode === "open" && !awake.openActions) {
+      return refuse("This Mac has no lid-open settings yet. Update Squeak on it.", "no open mode");
+    }
+    const change = readLidActionsChange(command.settings, mode);
     if (!change) {
       return refuse("Not a lid setting this Mac understands.", "bad settings");
     }
-    const outcome = await awake.apply({ action: "lid-actions", settings: change });
+    const outcome = await awake.apply({ action: "lid-actions", mode, settings: change });
     if (!outcome.ok) {
       return refuse(outcome.reason);
     }
     this.nudgePublish(0);
-    this.log(device.name, "sent", `lid actions ${Object.keys(change).join(", ")}`);
+    this.log(device.name, "sent", `${mode === "open" ? "lid-open" : "lid"} actions ${Object.keys(change).join(", ")}`);
     return { write: true, result: { id, status: "sent" } };
   }
 
@@ -2483,6 +2502,7 @@ export class RemoteBridge {
       JSON.stringify(view.macPower) +
       JSON.stringify(view.macHeat) +
       JSON.stringify(view.awakeLidActions) +
+      JSON.stringify(view.awakeOpenActions) +
       JSON.stringify(view.awakeRules) +
       JSON.stringify(view.awakeLastEnd) +
       JSON.stringify(view.awakeSleepProblem) +
@@ -2644,6 +2664,7 @@ export class RemoteBridge {
     macPower?: { percent: number | null; onBattery: boolean | null; watts: number | null; lidClosed: boolean | null };
     macHeat?: PhoneHeat;
     awakeLidActions?: LidActionSettings;
+    awakeOpenActions?: OpenActionSettings;
     awakeRules?: AwakeRules;
     awakeLastEnd?: AwakeEnd;
     awakeSleepProblem?: string;
@@ -2668,6 +2689,7 @@ export class RemoteBridge {
       // What a closed lid does, the safety floors, how the last session ended, a sleep problem; each
       // optional, and older phones ignore them.
       ...(awake.lidActions ? { awakeLidActions: awake.lidActions() } : {}),
+      ...(awake.openActions ? { awakeOpenActions: awake.openActions() } : {}),
       ...(awake.rules ? { awakeRules: awake.rules() } : {}),
       ...(awake.lastEnd?.() ? { awakeLastEnd: awake.lastEnd()! } : {}),
       ...(awake.sleepProblem?.() ? { awakeSleepProblem: awake.sleepProblem()! } : {}),

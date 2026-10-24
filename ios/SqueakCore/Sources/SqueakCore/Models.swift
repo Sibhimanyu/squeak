@@ -276,6 +276,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// What a closed lid does during a lid-closed session; this phone may change it (`lidActions` command).
     /// Optional: an older Mac omits it, and the phone then hides the group.
     public var awakeLidActions: LidActions? = nil
+    /// What a running session does while the lid is open; this phone may change it (`lidActions`, mode "open").
+    /// Optional: a Mac without the two modes omits it, and the phone then shows the lid-closed switches alone.
+    public var awakeOpenActions: OpenActions? = nil
     /// The Mac's effective safety floors. Optional: an older Mac omits it, and the phone says 40 and 10.
     public var awakeRules: AwakeRules? = nil
     /// How the last awake session ended, and a sleep problem that outlives a session. Optional.
@@ -410,6 +413,35 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public let last: Event?
         public init(configured: Bool, ssid: String?, enabled: Bool, onHotspot: Bool, last: Event? = nil) {
             self.configured = configured; self.ssid = ssid; self.enabled = enabled; self.onHotspot = onHotspot; self.last = last
+        }
+    }
+
+    /// The four things a running session does while the lid is open (src/fleet/lid-actions.ts). All off by default.
+    public struct OpenActions: Codable, Equatable, Sendable {
+        public var screenOn: Bool
+        public var mute: Bool
+        public var lowPower: Bool
+        public var freezeApps: Bool
+        public init(screenOn: Bool = false, mute: Bool = false, lowPower: Bool = false, freezeApps: Bool = false) {
+            self.screenOn = screenOn; self.mute = mute; self.lowPower = lowPower; self.freezeApps = freezeApps
+        }
+        public subscript(key: String) -> Bool {
+            get {
+                switch key {
+                case "screenOn": screenOn
+                case "mute": mute
+                case "lowPower": lowPower
+                default: freezeApps
+                }
+            }
+            set {
+                switch key {
+                case "screenOn": screenOn = newValue
+                case "mute": mute = newValue
+                case "lowPower": lowPower = newValue
+                default: freezeApps = newValue
+                }
+            }
         }
     }
 
@@ -1049,15 +1081,19 @@ public struct AwakeCommand: Codable, Equatable, Sendable {
 public struct LidActionsCommand: Codable, Equatable, Sendable {
     public struct Settings: Codable, Equatable, Sendable {
         public var displayOff: Bool?
+        /// Lid open only.
+        public var screenOn: Bool?
         public var mute: Bool?
         public var lowPower: Bool?
         public var freezeApps: Bool?
-        public init(displayOff: Bool? = nil, mute: Bool? = nil, lowPower: Bool? = nil, freezeApps: Bool? = nil) {
-            self.displayOff = displayOff; self.mute = mute; self.lowPower = lowPower; self.freezeApps = freezeApps
+        public init(displayOff: Bool? = nil, screenOn: Bool? = nil, mute: Bool? = nil, lowPower: Bool? = nil, freezeApps: Bool? = nil) {
+            self.displayOff = displayOff; self.screenOn = screenOn; self.mute = mute; self.lowPower = lowPower; self.freezeApps = freezeApps
         }
     }
     public let v: Int
     public let kind: String
+    /// "open" for the lid-open switches; nil (absent from the JSON, as the first phones sent it) for lid closed.
+    public var mode: String? = nil
     public let settings: Settings
     public let nonce: String
     /// Epoch milliseconds.

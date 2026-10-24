@@ -32,6 +32,13 @@ import { readClamshell, writeFileAtomic } from "./lid-sleep.js";
  * The lid must read closed twice in a row (a poll apart) before anything is
  * applied, and an unreadable lid changes nothing, so one odd ioreg answer
  * neither mutes the Mac nor wakes the apps.
+ *
+ * Two modes, each with its own saved switches: "closed" above, and "open",
+ * which applies for as long as any awake session runs with the lid open
+ * (screenOn holds the display on with `caffeinate -d`, the rest as above).
+ * A lid-closed session runs the open switches until the lid shuts, the
+ * closed ones while it is shut, and the open ones again when it opens. Each
+ * mode keeps its own switches, so changing one never touches the other.
  */
 
 export interface LidActionSettings {
@@ -47,6 +54,33 @@ export const DEFAULT_LID_ACTIONS: LidActionSettings = {
   lowPower: true,
   freezeApps: false,
 };
+
+/** What a running awake session does while the lid is open. All off by default: a session does nothing more. */
+export interface OpenActionSettings {
+  screenOn: boolean;
+  mute: boolean;
+  lowPower: boolean;
+  freezeApps: boolean;
+}
+
+export const DEFAULT_OPEN_ACTIONS: OpenActionSettings = {
+  screenOn: false,
+  mute: false,
+  lowPower: false,
+  freezeApps: false,
+};
+
+export type AwakeMode = "open" | "closed";
+
+export const OPEN_ACTION_KEYS: ReadonlyArray<keyof OpenActionSettings> = ["screenOn", "mute", "lowPower", "freezeApps"];
+export const LID_ACTION_KEYS: ReadonlyArray<keyof LidActionSettings> = ["displayOff", "mute", "lowPower", "freezeApps"];
+
+export function readOpenSettings(raw: unknown): OpenActionSettings {
+  const value = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+  const pick = (key: keyof OpenActionSettings) =>
+    typeof value[key] === "boolean" ? (value[key] as boolean) : DEFAULT_OPEN_ACTIONS[key];
+  return { screenOn: pick("screenOn"), mute: pick("mute"), lowPower: pick("lowPower"), freezeApps: pick("freezeApps") };
+}
 
 /** The app bundles a lid closing pauses, when freezeApps is on. */
 export const FREEZE_APPS = ["Slack", "WhatsApp", "Discord", "Telegram"] as const;
@@ -113,6 +147,8 @@ const defaultRun: Run = (command, args) =>
 type Signal = (pid: number, signal: "SIGSTOP" | "SIGCONT") => boolean | void;
 
 interface Journal {
+  /** Which mode's switches did this; absent in a journal from before the open mode (closed). */
+  mode?: AwakeMode;
   muted: boolean;
   frozen: FrozenProcess[];
   /** `kern.bootsessionuuid` when the apps were paused; null when unread. */
@@ -131,6 +167,10 @@ export interface LidActionsOptions {
   setLowPowerWanted: (wanted: boolean) => void;
   /** Whether a lid-closed session is in force now (sleep disabled). */
   lidSessionOn: () => boolean;
+  /** Whether any awake session runs; absent: only lid-closed sessions have actions (no open mode). */
+  sessionOn?: () => boolean;
+  /** Holds the display on, or lets it go (the open mode's screenOn). */
+  holdScreen?: (on: boolean) => void;
   run?: Run;
   /** Signals a pid; tests replace it. */
   signal?: Signal;
@@ -142,8 +182,9 @@ export class LidActions {
   private readonly run: Run;
   private readonly signal: Signal;
   private settingsValue: LidActionSettings;
-  /** Whether the actions are applied now (lid closed during a lid session). */
-  private applied = false;
+  private openValue: OpenActionSettings;
+  /** Which mode's actions are applied now, if any. */
+  private applied: AwakeMode | null = null;
   /** Consecutive polls that read the lid closed during a lid session. */
   private closedReads = 0;
   /** An undo left something in the journal (an unmute or a resume failed): retried each poll. */
@@ -170,22 +211,57 @@ export class LidActions {
     } catch {
       // Defaults.
     }
+    // The closed switches stay at the top level, where every earlier version kept them.
     this.settingsValue = readSettings(raw);
+    this.openValue = readOpenSettings((raw as { open?: unknown } | null)?.open);
   }
 
+  /** The lid-closed mode's switches. */
   get settings(): LidActionSettings {
     return { ...this.settingsValue };
   }
 
-  /** Whether the lid actions are in force now. */
+  /** The lid-open mode's switches. */
+  get openSettings(): OpenActionSettings {
+    return { ...this.openValue };
+  }
+
+  /** Whether the lid-closed actions are in force now. */
   get active(): boolean {
+    return this.applied === "closed";
+  }
+
+  /** Which mode's actions are in force now, if any. */
+  get mode(): AwakeMode | null {
     return this.applied;
   }
 
   updateSettings(change: Partial<LidActionSettings>): LidActionSettings {
     this.settingsValue = readSettings({ ...this.settingsValue, ...change });
-    fs.writeFileSync(this.options.settingsPath, JSON.stringify(this.settingsValue, null, 2) + "\n");
+    this.save();
+    if (this.applied === "closed") void this.queue(() => this.reapply("closed"));
     return this.settings;
+  }
+
+  updateOpenSettings(change: Partial<OpenActionSettings>): OpenActionSettings {
+    this.openValue = readOpenSettings({ ...this.openValue, ...change });
+    this.save();
+    if (this.applied === "open") void this.queue(() => this.reapply("open"));
+    return this.openSettings;
+  }
+
+  private save(): void {
+    writeFileAtomic(
+      this.options.settingsPath,
+      JSON.stringify({ ...this.settingsValue, open: this.openValue }, null, 2) + "\n",
+    );
+  }
+
+  /** A change to the switches of the mode in force: undo what it did, then do what it says now. */
+  private async reapply(mode: AwakeMode): Promise<void> {
+    if (this.applied !== mode) return;
+    await this.revert();
+    await this.apply(mode);
   }
 
   /** Watches the lid every few seconds while a lid session is on. */
@@ -200,27 +276,35 @@ export class LidActions {
     await this.queue(() => this.revert());
   }
 
-  /** One look at the lid: apply on close during a lid session, revert on open or when it ends. */
+  /**
+   * One look: the closed actions once the lid reads shut during a lid session, the open ones while a
+   * session runs with the lid open, none without a session.
+   */
   check(): Promise<void> {
     return this.queue(async () => {
-      const session = this.options.lidSessionOn();
-      const closed = session ? await this.lidClosed() : false;
+      const lidSession = this.options.lidSessionOn();
+      const session = lidSession || (this.options.sessionOn?.() ?? false);
+      const closed = lidSession ? await this.lidClosed() : false;
       if (closed === null) {
         // Unknown is not open: undoing here would wake the apps in a bag.
         return;
       }
+      let want: AwakeMode | null;
       if (closed) {
         this.closedReads += 1;
-        if (this.applied) {
-          if (this.settingsValue.displayOff) await this.run("/usr/bin/pmset", ["displaysleepnow"]);
-        } else if (this.closedReads >= CLOSED_READS) {
-          await this.apply();
-        }
+        // Until it has read shut twice, whatever is in force stays.
+        want = this.closedReads >= CLOSED_READS ? "closed" : this.applied;
+      } else {
+        this.closedReads = 0;
+        want = session && this.options.sessionOn ? "open" : null;
+      }
+      if (want === this.applied) {
+        if (want === "closed" && this.settingsValue.displayOff) await this.run("/usr/bin/pmset", ["displaysleepnow"]);
+        if (want === null && this.undoOwed) await this.undo(this.readJournal());
         return;
       }
-      this.closedReads = 0;
       if (this.applied) await this.revert();
-      else if (this.undoOwed) await this.undo(this.readJournal());
+      if (want) await this.apply(want);
     });
   }
 
@@ -237,9 +321,14 @@ export class LidActions {
         return;
       }
       const sameBoot = await this.sameBoot(journal.boot);
-      if (sameBoot && this.options.lidSessionOn() && (await this.lidClosed()) === true) {
+      if (
+        (journal.mode ?? "closed") === "closed" &&
+        sameBoot &&
+        this.options.lidSessionOn() &&
+        (await this.lidClosed()) === true
+      ) {
         logger.info("lid still closed in a resumed lid session: keeping the lid actions", { ...journal });
-        this.applied = true;
+        this.applied = "closed";
         this.closedReads = CLOSED_READS;
         if (this.settingsValue.lowPower) this.options.setLowPowerWanted(true);
         return;
@@ -261,11 +350,12 @@ export class LidActions {
     return result.ok ? readClamshell(result.stdout) : null;
   }
 
-  private async apply(): Promise<void> {
-    this.applied = true;
-    const settings = this.settingsValue;
-    logger.info("lid closed during a lid session", { ...settings });
-    const journal: Journal = { ...EMPTY };
+  private async apply(mode: AwakeMode): Promise<void> {
+    this.applied = mode;
+    const settings = mode === "closed" ? this.settingsValue : this.openValue;
+    if (mode === "closed") logger.info("lid closed during a lid session", { ...settings });
+    else logger.info("awake session with the lid open", { ...settings });
+    const journal: Journal = { ...EMPTY, mode };
     if (settings.mute && (await this.muted()) === false) {
       journal.muted = true;
       this.writeJournal(journal);
@@ -283,14 +373,17 @@ export class LidActions {
       for (const app of journal.frozen) this.signal(app.pid, "SIGSTOP");
     }
     if (settings.lowPower) this.options.setLowPowerWanted(true);
-    if (settings.displayOff) await this.run("/usr/bin/pmset", ["displaysleepnow"]);
+    if ("screenOn" in settings && settings.screenOn) this.options.holdScreen?.(true);
+    if ("displayOff" in settings && settings.displayOff) await this.run("/usr/bin/pmset", ["displaysleepnow"]);
   }
 
   private async revert(): Promise<void> {
     if (!this.applied) return;
-    this.applied = false;
-    this.closedReads = 0;
-    logger.info("lid open, or the lid session ended: undoing lid actions");
+    const mode = this.applied;
+    this.applied = null;
+    if (mode === "closed") logger.info("lid open, or the lid session ended: undoing lid actions");
+    else logger.info("lid-open actions over: undoing them");
+    this.options.holdScreen?.(false);
     this.options.setLowPowerWanted(false);
     await this.undo(this.readJournal());
   }
@@ -322,7 +415,7 @@ export class LidActions {
       const result = await this.run("/usr/bin/osascript", ["-e", "set volume without output muted"]);
       muted = !result.ok;
     }
-    const left: Journal = { muted, frozen: kept, boot: journal.boot };
+    const left: Journal = { ...(journal.mode ? { mode: journal.mode } : {}), muted, frozen: kept, boot: journal.boot };
     this.undoOwed = muted || kept.length > 0;
     if (this.undoOwed) logger.warn("some lid actions could not be undone; trying again", { ...left });
     this.writeJournal(left);
@@ -394,7 +487,12 @@ export class LidActions {
           frozen.push({ pid: pid as number, startedAt, path });
         }
       }
-      return { muted: raw.muted === true, frozen, boot: typeof raw.boot === "string" ? raw.boot : null };
+      return {
+        ...(raw.mode === "open" || raw.mode === "closed" ? { mode: raw.mode } : {}),
+        muted: raw.muted === true,
+        frozen,
+        boot: typeof raw.boot === "string" ? raw.boot : null,
+      };
     } catch {
       return { ...EMPTY };
     }

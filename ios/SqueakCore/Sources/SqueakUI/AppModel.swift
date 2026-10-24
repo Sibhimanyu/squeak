@@ -995,32 +995,57 @@ final class AppModel {
 
     /* ---------- what a closed lid does ---------- */
 
-    /// Switches this phone just flipped, shown until the Mac's own snapshot agrees or 20 seconds pass.
+    /// Switches this phone just flipped, by "<mode>.<key>", shown until the Mac's own snapshot agrees or 20 seconds pass.
     private var lidActionTaps: [String: (value: Bool, at: Date)] = [:]
     private var lidActionTick = 0
 
     /// Whether this Mac sends what a closed lid does (an older one does not, and the group is hidden).
     var lidActionsOffered: Bool { snapshot?.awakeLidActions != nil }
+    /// Whether this Mac has the two modes, lid open and lid closed, each with its own switches.
+    var awakeModesOffered: Bool { snapshot?.awakeOpenActions != nil }
 
-    /// The Mac's settings with this phone's unconfirmed taps laid over them.
+    /// The Mac's lid-closed settings with this phone's unconfirmed taps laid over them.
     var lidActions: PhoneSnapshot.LidActions? {
         _ = lidActionTick
         guard var actions = snapshot?.awakeLidActions else { return nil }
-        for (key, tap) in lidActionTaps where Date().timeIntervalSince(tap.at) < 20 { actions[key] = tap.value }
+        for (key, tap) in lidActionTaps where key.hasPrefix("closed.") && Date().timeIntervalSince(tap.at) < 20 {
+            actions[String(key.dropFirst("closed.".count))] = tap.value
+        }
         return actions
     }
 
-    /// Whether a flip is waiting on the Mac.
-    func lidActionPending(_ key: String) -> Bool {
+    /// The Mac's lid-open settings with this phone's unconfirmed taps laid over them.
+    var openActions: PhoneSnapshot.OpenActions? {
         _ = lidActionTick
-        guard let tap = lidActionTaps[key] else { return false }
-        return Date().timeIntervalSince(tap.at) < 20 && snapshot?.awakeLidActions?[key] != tap.value
+        guard var actions = snapshot?.awakeOpenActions else { return nil }
+        for (key, tap) in lidActionTaps where key.hasPrefix("open.") && Date().timeIntervalSince(tap.at) < 20 {
+            actions[String(key.dropFirst("open.".count))] = tap.value
+        }
+        return actions
     }
 
-    /// Turns one thing a closed lid does on or off. No Face ID: it is a Mac setting, reaches no agent and
-    /// carries no words. Returns a reason on failure, after putting the switch back.
-    func changeLidAction(_ key: String, _ on: Bool) async -> String? {
-        lidActionTaps[key] = (on, Date())
+    /// One switch of either mode, as shown.
+    func awakeSwitch(_ key: String, open: Bool) -> Bool {
+        open ? (openActions?[key] ?? false) : (lidActions?[key] ?? false)
+    }
+
+    private func macValue(_ key: String, open: Bool) -> Bool? {
+        open ? snapshot?.awakeOpenActions?[key] : snapshot?.awakeLidActions?[key]
+    }
+
+    /// Whether a flip is waiting on the Mac.
+    func lidActionPending(_ key: String, open: Bool = false) -> Bool {
+        _ = lidActionTick
+        guard let tap = lidActionTaps["\(open ? "open" : "closed").\(key)"] else { return false }
+        return Date().timeIntervalSince(tap.at) < 20 && macValue(key, open: open) != tap.value
+    }
+
+    /// Turns one switch of a mode on or off: what a closed lid does, or with `open` what a session does while the
+    /// lid is open. No Face ID: it is a Mac setting, reaches no agent and carries no words. Returns a reason on
+    /// failure, after putting the switch back.
+    func changeLidAction(_ key: String, _ on: Bool, open: Bool = false) async -> String? {
+        let tapKey = "\(open ? "open" : "closed").\(key)"
+        lidActionTaps[tapKey] = (on, Date())
         lidActionTick += 1
         let expire = { [weak self] in
             Task { @MainActor [weak self] in
@@ -1031,12 +1056,13 @@ final class AppModel {
         expire()
         if demo {
             // No Mac to ask: the demo keeps what was tapped.
-            if var current = snapshot?.awakeLidActions { current[key] = on; snapshot?.awakeLidActions = current }
-            lidActionTaps[key] = nil
+            if open, var current = snapshot?.awakeOpenActions { current[key] = on; snapshot?.awakeOpenActions = current }
+            if !open, var current = snapshot?.awakeLidActions { current[key] = on; snapshot?.awakeLidActions = current }
+            lidActionTaps[tapKey] = nil
             return nil
         }
         func fail(_ reason: String) -> String {
-            lidActionTaps[key] = nil
+            lidActionTaps[tapKey] = nil
             lidActionTick += 1
             return reason
         }
@@ -1044,12 +1070,13 @@ final class AppModel {
         var change = LidActionsCommand.Settings()
         switch key {
         case "displayOff": change.displayOff = on
+        case "screenOn": change.screenOn = on
         case "mute": change.mute = on
         case "lowPower": change.lowPower = on
         default: change.freezeApps = on
         }
         do {
-            let (id, document) = try channel.lidActionsDocument(change, signer: signer)
+            let (id, document) = try channel.lidActionsDocument(change, open: open, signer: signer)
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else { return fail("Your Mac didn't answer. Is Squeak running?") }
             guard result.sent else { return fail(result.reason ?? "Your Mac couldn't change that.") }

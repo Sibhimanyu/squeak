@@ -4,7 +4,14 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_LID_ACTIONS, LidActions, readProcesses, readSettings } from "./lid-actions.js";
+import {
+  DEFAULT_LID_ACTIONS,
+  DEFAULT_OPEN_ACTIONS,
+  LidActions,
+  readOpenSettings,
+  readProcesses,
+  readSettings,
+} from "./lid-actions.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -24,9 +31,11 @@ interface FakeProcess {
 function setup(
   options: {
     muted?: boolean;
-    settings?: Record<string, boolean>;
+    settings?: Record<string, unknown>;
     processes?: FakeProcess[];
     unmuteFails?: boolean;
+    /** With the lid-open mode: an awake session runs (lid-closed or not), and the display hold is watched. */
+    openMode?: boolean;
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-lid-actions-"));
@@ -35,7 +44,9 @@ function setup(
   if (options.settings) fs.writeFileSync(settingsPath, JSON.stringify(options.settings));
   const journalPath = path.join(dir, "lid-actions.json");
   let closed: boolean | null = false;
-  let lidOn = true;
+  let lidOn = !options.openMode;
+  let sessionOn = options.openMode ?? false;
+  const screen: boolean[] = [];
   let muted = options.muted ?? false;
   let unmuteFails = options.unmuteFails ?? false;
   let boot = "boot-A";
@@ -53,6 +64,7 @@ function setup(
     uid: 501,
     setLowPowerWanted: (wanted) => lowPower.push(wanted),
     lidSessionOn: () => lidOn,
+    ...(options.openMode ? { sessionOn: () => sessionOn || lidOn, holdScreen: (on: boolean) => screen.push(on) } : {}),
     run: async (command, args) => {
       calls.push([command.split("/").pop(), ...args].join(" "));
       if (command.endsWith("ioreg")) {
@@ -86,6 +98,9 @@ function setup(
     muted: () => muted,
     close: (value: boolean | null) => (closed = value),
     lidSession: (value: boolean) => (lidOn = value),
+    session: (value: boolean) => (sessionOn = value),
+    screen,
+    settingsPath,
     unmuteFails: (value: boolean) => (unmuteFails = value),
     reboot: () => (boot = "boot-B"),
     processes: (value: FakeProcess[]) => (processes = value),
@@ -191,6 +206,7 @@ describe("LidActions", () => {
     expect(t.calls).toContain("env TZ=UTC /bin/ps -U 501 -o pid=,stat=,lstart=,comm=");
     expect(t.signals).toEqual(["SIGSTOP:101", "SIGSTOP:102"]);
     expect(JSON.parse(fs.readFileSync(t.journalPath, "utf8"))).toEqual({
+      mode: "closed",
       muted: false,
       boot: "boot-A",
       frozen: [
@@ -278,6 +294,100 @@ describe("LidActions", () => {
     expect(readSettings({ mute: false, freezeApps: "yes" })).toEqual({ ...DEFAULT_LID_ACTIONS, mute: false });
     const t = setup();
     expect(t.actions.updateSettings({ freezeApps: true })).toMatchObject({ freezeApps: true, mute: true });
+  });
+});
+
+describe("LidActions, two modes", () => {
+  const open = { screenOn: true, mute: true, lowPower: false, freezeApps: false };
+
+  it("a session with the lid open does the lid-open switches, and undoes them when it ends", async () => {
+    const t = setup({ openMode: true, settings: { open } });
+    await t.actions.check();
+    expect(t.actions.mode).toBe("open");
+    expect(t.screen).toEqual([true]);
+    expect(t.muted()).toBe(true);
+    expect(t.lowPower).toEqual([]);
+    t.session(false);
+    await t.actions.check();
+    expect(t.actions.mode).toBeNull();
+    expect(t.screen.at(-1)).toBe(false);
+    expect(t.muted()).toBe(false);
+    expect(fs.existsSync(t.journalPath)).toBe(false);
+  });
+
+  it("does nothing more for a session when every lid-open switch is off, the default", async () => {
+    const t = setup({ openMode: true });
+    await t.actions.check();
+    expect(t.actions.mode).toBe("open");
+    expect(t.muted()).toBe(false);
+    expect(t.screen).toEqual([]);
+    expect(t.calls.some((call) => call.startsWith("osascript -e set volume"))).toBe(false);
+  });
+
+  it("a lid-closed session swaps to the closed switches when the lid shuts, and back when it opens", async () => {
+    const t = setup({
+      openMode: true,
+      settings: { displayOff: true, mute: true, lowPower: true, freezeApps: false, open: { ...open, mute: false } },
+    });
+    t.lidSession(true);
+    await t.actions.check();
+    expect(t.actions.mode).toBe("open");
+    expect(t.muted()).toBe(false);
+    await t.closeAndSettle();
+    expect(t.actions.mode).toBe("closed");
+    expect(t.actions.active).toBe(true);
+    expect(t.muted()).toBe(true);
+    expect(t.screen.at(-1)).toBe(false);
+    expect(t.lowPower.at(-1)).toBe(true);
+    t.close(false);
+    await t.actions.check();
+    expect(t.actions.mode).toBe("open");
+    // Lid open's own mute is off: the sound comes back.
+    expect(t.muted()).toBe(false);
+    expect(t.screen.at(-1)).toBe(true);
+    expect(t.lowPower.at(-1)).toBe(false);
+  });
+
+  it("each mode keeps its own switches, saved beside the other's", () => {
+    const t = setup({ openMode: true });
+    t.actions.updateSettings({ mute: false });
+    t.actions.updateOpenSettings({ mute: true, screenOn: true });
+    expect(t.actions.settings).toEqual({ ...DEFAULT_LID_ACTIONS, mute: false });
+    expect(t.actions.openSettings).toEqual({ ...DEFAULT_OPEN_ACTIONS, mute: true, screenOn: true });
+    const saved = JSON.parse(fs.readFileSync(t.settingsPath, "utf8")) as Record<string, unknown>;
+    // The closed switches stay at the top, where earlier versions read them.
+    expect(saved).toMatchObject({ mute: false, displayOff: true, open: { mute: true, screenOn: true } });
+    expect(readOpenSettings({ screenOn: "yes", mute: true })).toEqual({ ...DEFAULT_OPEN_ACTIONS, mute: true });
+  });
+
+  it("a change to the mode in force applies at once", async () => {
+    const t = setup({ openMode: true });
+    await t.actions.check();
+    expect(t.muted()).toBe(false);
+    t.actions.updateOpenSettings({ mute: true });
+    await t.actions.check();
+    expect(t.muted()).toBe(true);
+    // The other mode's change touches nothing now.
+    t.actions.updateSettings({ mute: false });
+    await t.actions.check();
+    expect(t.muted()).toBe(true);
+  });
+
+  it("a start after a crash undoes a lid-open journal rather than keeping it", async () => {
+    const t = setup({ openMode: true, settings: { open } });
+    await t.actions.check();
+    expect(t.muted()).toBe(true);
+    const again = new LidActions({
+      settingsPath: t.settingsPath,
+      journalPath: t.journalPath,
+      setLowPowerWanted: () => undefined,
+      lidSessionOn: () => false,
+      sessionOn: () => true,
+      run: async (command) => ({ ok: true, stdout: command.endsWith("sysctl") ? "boot-A\n" : "" }),
+      signal: () => undefined,
+    });
+    await again.recover();
+    expect(fs.existsSync(t.journalPath)).toBe(false);
   });
 });
 

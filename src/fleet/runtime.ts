@@ -2,7 +2,7 @@ import type { PowerState } from "./power-mode.js";
 import type { AwakeEnd, AwakeState } from "./awake-session.js";
 import type { HeatState } from "./heat.js";
 import type { HotspotState } from "./hotspot.js";
-import type { LidActionSettings } from "./lid-actions.js";
+import type { LidActionSettings, OpenActionSettings } from "./lid-actions.js";
 import type { AwakeRules } from "./power-monitor.js";
 
 /** The awake session as /state shows it (src/squeak/app.ts assembles it). */
@@ -11,6 +11,8 @@ export interface AwakeView {
   lidReady: boolean;
   lastEnd: AwakeEnd | null;
   lidActions: LidActionSettings;
+  /** What a session does while the lid is open; absent from a daemon without the open mode. */
+  openActions?: OpenActionSettings;
   lidClosedNow: boolean;
   /** Sleep left disabled outside any session (a restore owed, or not Squeak's); null when none. */
   sleepProblem?: string | null;
@@ -260,6 +262,7 @@ export function serializeState(
           awakeLastEnd: awake.lastEnd,
           // What a closed lid does, and whether it is doing it now.
           awakeLidActions: awake.lidActions,
+          ...(awake.openActions ? { awakeOpenActions: awake.openActions } : {}),
           awakeLidClosedNow: awake.lidClosedNow,
           // Sleep disabled with no session to show it, and what to do about it.
           awakeSleepProblem: awake.sleepProblem ?? null,

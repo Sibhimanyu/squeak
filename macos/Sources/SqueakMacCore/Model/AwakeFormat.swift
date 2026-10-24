@@ -145,6 +145,24 @@ public enum AwakeFormat {
         .init(key: "freezeApps", title: "Pause chat apps", detail: "Slack, WhatsApp, Discord and Telegram stop until the lid opens."),
     ]
 
+    /// What a running session does while the lid is open, in the order shown.
+    public static let openActionInfos: [LidActionInfo] = [
+        .init(key: "screenOn", title: "Keep the screen on", detail: "The display stays on, so the Mac doesn't lock while you're away."),
+        .init(key: "mute", title: "Mute the sound", detail: "Only if it wasn't muted already, and unmuted when the session ends."),
+        .init(key: "lowPower", title: "Use Low Power Mode", detail: "Saves battery for the whole session."),
+        .init(key: "freezeApps", title: "Pause chat apps", detail: "Slack, WhatsApp, Discord and Telegram stop until the session ends."),
+    ]
+
+    public static func value(_ key: String, in actions: DaemonOpenActions) -> Bool {
+        switch key {
+        case "screenOn": actions.screenOn
+        case "mute": actions.mute
+        case "lowPower": actions.lowPower
+        case "freezeApps": actions.freezeApps
+        default: false
+        }
+    }
+
     public static func value(_ key: String, in actions: DaemonLidActions) -> Bool {
         switch key {
         case "displayOff": actions.displayOff
