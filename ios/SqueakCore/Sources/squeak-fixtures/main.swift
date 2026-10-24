@@ -28,6 +28,9 @@ let (imageId, imageDocument) = try channel.imageDocument(sessionId: "s1", source
 let (diffId, diffDocument) = try channel.diffDocument(sessionId: "s1", file: 0, signer: signer, now: madeAt)
 let (stopId, stopDocument) = try channel.stopDocument(to: session, signer: signer, now: madeAt)
 let (startId, startDocument) = try channel.startDocument(workspaceId: "w1", agent: .codex, text: "Add a timer", signer: signer, now: madeAt)
+let (splitStartId, splitStartDocument) = try channel.startDocument(
+    workspaceId: "w1", agent: .claude, text: "Add a timer",
+    split: WorkSplit(code: "sonnet", run: "haiku", planFirst: true), signer: signer, now: madeAt)
 // ANSWER-CARD: an answer to question 0 of the pending call toolu_fixture in chat s1: "Red", plus its own words.
 let (answerId, answerDocument) = try channel.answerDocument(
     sessionId: "s1", toolUseId: "toolu_fixture",
@@ -95,6 +98,9 @@ let fixture: [String: Any] = [
     // A new chat in workspace w1 with codex: "Add a timer".
     "startCommandId": startId,
     "startCommand": ["box": startDocument.box, "sig": startDocument.sig!, "device": startDocument.device!],
+    // A new Claude chat in w1, split: Sonnet codes, Haiku runs, plan first.
+    "splitStartCommandId": splitStartId,
+    "splitStartCommand": ["box": splitStartDocument.box, "sig": splitStartDocument.sig!, "device": splitStartDocument.device!],
     // An answer to question 0 of toolu_fixture in s1: picked "Red", other "and a bit of blue".
     "answerCommandId": answerId,
     "answerCommand": ["box": answerDocument.box, "sig": answerDocument.sig!, "device": answerDocument.device!],

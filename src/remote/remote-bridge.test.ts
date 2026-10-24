@@ -1110,7 +1110,14 @@ const CHAT_MODELS = [
 ];
 
 function chatStarter(workspaces: NewChatWorkspace[] = [workspace("w1")], outcome?: StartChatOutcome) {
-  const starts: Array<{ workspaceId: string; agent: string; text: string; model?: string; thinking?: string }> = [];
+  const starts: Array<{
+    workspaceId: string;
+    agent: string;
+    text: string;
+    model?: string;
+    thinking?: string;
+    split?: unknown;
+  }> = [];
   const starter: RemoteChatStarter = {
     workspaces: vi.fn(() => workspaces),
     models: vi.fn(() => CHAT_MODELS),
@@ -1155,6 +1162,34 @@ describe("RemoteBridge starting a chat", () => {
     expect(await attempt({ model: "haiku-4-5", thinking: "low" }, "d")).toMatchObject({ status: "refused" });
     expect(await attempt({ thinking: "low" }, "e")).toMatchObject({ status: "refused" });
     expect(starts).toEqual([]);
+  });
+
+  it("starts a chat with the work split the phone chose, and refuses one this Mac does not offer", async () => {
+    const { starter, starts } = chatStarter();
+    const f = fixture({ newChat: starter });
+    await f.pair();
+    const attempt = async (overrides: Partial<StartCommand>, id: string) => {
+      await f.store.set(`${f.channel}/commands/${id}`, f.startCommand(overrides));
+      await f.bridge.tick();
+      f.advance(START_MIN_GAP_MS);
+      return f.result(id);
+    };
+    expect(await attempt({ split: { code: "gpt-5.5" } }, "a")).toMatchObject({ status: "refused" });
+    expect(await attempt({ agent: "codex", split: { run: "haiku" } }, "b")).toMatchObject({ status: "refused" });
+    expect(starts).toEqual([]);
+    expect(await attempt({ split: { code: "sonnet", run: "haiku", planFirst: true } }, "c")).toMatchObject({
+      status: "sent",
+    });
+    expect(starts[0]).toMatchObject({ split: { code: "sonnet", run: "haiku", planFirst: true } });
+    expect(await attempt({}, "d")).toMatchObject({ status: "sent" });
+    expect(starts[1]).not.toHaveProperty("split");
+  });
+
+  it("offers the worker models with Conductor's, only when there is a Claude model to plan on", () => {
+    const { starter } = chatStarter();
+    const view = fixture({ newChat: starter }).bridge.phoneView();
+    expect(view.chatWorkers?.map((worker) => worker.id)).toEqual(["sonnet", "haiku", "opus", "fable"]);
+    expect(fixture().bridge.phoneView()).not.toHaveProperty("chatWorkers");
   });
 
   it("starts a chat on Haiku, which takes no thinking level, with the model alone", async () => {

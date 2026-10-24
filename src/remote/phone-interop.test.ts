@@ -26,6 +26,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   steerCommand: { box: string; sig: string; device: string };
   startCommandId: string;
   startCommand: { box: string; sig: string; device: string };
+  splitStartCommandId: string;
+  splitStartCommand: { box: string; sig: string; device: string };
   answerCommandId: string;
   answerCommand: { box: string; sig: string; device: string };
   queuedCommandId: string;
@@ -79,7 +81,7 @@ function bridge(turn: string) {
   const hotspotRequests: unknown[] = [];
   const awakeRequests: unknown[] = [];
   const controlChanges: unknown[] = [];
-  const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
+  const starts: Array<{ workspaceId: string; agent: string; text: string; split?: unknown }> = [];
   const answers: Array<[string, unknown]> = [];
   const acts: Array<[string, unknown]> = [];
   const written: string[] = [];
@@ -268,6 +270,20 @@ describe("a reply made on the iPhone", () => {
     expect(verdict.result).toEqual({ id: fixture.startCommandId, status: "sent", sessionId: "new-1" });
     expect(starts).toEqual([{ workspaceId: "w1", agent: "codex", text: "Add a timer" }]);
     expect(sends).toEqual([]);
+  });
+
+  it("starts a split chat exactly as the phone signed it", async () => {
+    const { remote, config, starts } = bridge("turn-9");
+    const verdict = await remote.handleCommand(config, fixture.splitStartCommandId, fixture.splitStartCommand);
+    expect(verdict.result).toMatchObject({ status: "sent" });
+    expect(starts).toEqual([
+      {
+        workspaceId: "w1",
+        agent: "claude",
+        text: "Add a timer",
+        split: { code: "sonnet", run: "haiku", planFirst: true },
+      },
+    ]);
   });
 
   it("carries the phone's own message id for a queued reply", async () => {

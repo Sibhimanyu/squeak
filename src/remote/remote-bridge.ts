@@ -36,6 +36,7 @@ import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
 import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
 import type { ChannelDoc } from "./firestore-rest.js";
 import type { ChatModel } from "../fleet/chat-models.js";
+import { checkWorkSplit, describeSplit, SPLIT_WORKERS, type SplitWorker, type WorkSplit } from "../fleet/work-split.js";
 import { PhoneAttachments } from "../fleet/phone-attachments.js";
 import { condenseHistory, LIVE_STEP_CHARS, LIVE_STEPS, liveHistoryHandle, LiveTurnPublisher } from "./live-turn.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
@@ -311,6 +312,8 @@ export interface StartCommand {
   /** A model alias the Mac offered (`chatModels`), and a thinking level it takes. Absent: the workspace's usual. */
   model?: string;
   thinking?: string;
+  /** Which models code and run, and whether to plan first (fleet/work-split.ts). Absent: one model does it all. */
+  split?: WorkSplit;
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
@@ -464,6 +467,7 @@ export interface RemoteChatStarter {
     text: string;
     model?: string;
     thinking?: string;
+    split?: WorkSplit;
   }): Promise<StartChatOutcome>;
 }
 
@@ -1569,6 +1573,11 @@ export class RemoteBridge {
         ...(checked.thinking ? { thinking: checked.thinking } : {}),
       };
     }
+    const checkedSplit = checkWorkSplit(command.agent, command.split);
+    if (!checkedSplit.ok) {
+      return refuse(checkedSplit.reason);
+    }
+    const split = checkedSplit.split;
     const last = this.lastStartAt.get(device.id);
     if (last !== undefined && now - last < START_MIN_GAP_MS) {
       return refuse("You just started a chat. Wait a few seconds and try again.");
@@ -1576,7 +1585,13 @@ export class RemoteBridge {
     this.lastStartAt.set(device.id, now);
     let outcome: StartChatOutcome;
     try {
-      outcome = await starter.start({ workspaceId: workspace.id, agent: command.agent, text, ...chosenModel });
+      outcome = await starter.start({
+        workspaceId: workspace.id,
+        agent: command.agent,
+        text,
+        ...chosenModel,
+        ...(split ? { split } : {}),
+      });
     } catch (error) {
       outcome = { ok: false, reason: error instanceof Error ? error.message : "The chat could not be started." };
     }
@@ -1584,7 +1599,12 @@ export class RemoteBridge {
       this.log(device.name, "refused", `new chat in ${workspace.repoName} failed: ${outcome.reason}`);
       return { write: true, result: { id, status: "refused", reason: outcome.reason } };
     }
-    this.log(device.name, "sent", `new ${command.agent} chat in ${workspace.repoName} · ${workspace.branch}`);
+    const how = describeSplit(split);
+    this.log(
+      device.name,
+      "sent",
+      `new ${command.agent} chat in ${workspace.repoName} · ${workspace.branch}${how ? ` (${how})` : ""}`,
+    );
     return { write: true, result: { id, status: "sent", sessionId: outcome.sessionId } };
   }
 
@@ -2424,8 +2444,15 @@ export class RemoteBridge {
       JSON.stringify(view.macControls) +
       JSON.stringify(view.local) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
-    const { recent, recentMore, workspaces, projectIcons, chatModels, ...rest } = view;
-    const lists = JSON.stringify([recent, recentMore, workspaces ?? null, projectIcons ?? null, chatModels ?? null]);
+    const { recent, recentMore, workspaces, projectIcons, chatModels, chatWorkers, ...rest } = view;
+    const lists = JSON.stringify([
+      recent,
+      recentMore,
+      workspaces ?? null,
+      projectIcons ?? null,
+      chatModels ?? null,
+      chatWorkers ?? null,
+    ]);
     const kind = `${format.split ? "split" : "whole"}|${format.compress ? "z" : "plain"}|`;
     const serialized = kind + core + (format.split ? "" : lists);
     if (format.split) {
@@ -2440,6 +2467,7 @@ export class RemoteBridge {
           ...(workspaces ? { workspaces } : {}),
           ...(projectIcons ? { projectIcons } : {}),
           ...(chatModels ? { chatModels } : {}),
+          ...(chatWorkers ? { chatWorkers } : {}),
           seq: this.nextSeq(),
         };
         const box = this.sealForPhone(config, doc);
@@ -2497,7 +2525,7 @@ export class RemoteBridge {
 
   /** The phone's view in the split format: the snapshot and the recent document, each as published. */
   phoneViewParts() {
-    const { recent, recentMore, workspaces, projectIcons, chatModels, ...rest } = this.phoneView();
+    const { recent, recentMore, workspaces, projectIcons, chatModels, chatWorkers, ...rest } = this.phoneView();
     return {
       snapshot: { ...rest, split: true as const },
       recent: {
@@ -2507,6 +2535,7 @@ export class RemoteBridge {
         ...(workspaces ? { workspaces } : {}),
         ...(projectIcons ? { projectIcons } : {}),
         ...(chatModels ? { chatModels } : {}),
+        ...(chatWorkers ? { chatWorkers } : {}),
       },
     };
   }
@@ -2724,10 +2753,13 @@ export class RemoteBridge {
   }
 
   /** The models a new chat can start with, as Conductor's picker lists them; absent when this Mac cannot choose one. */
-  private phoneChatModels(): { chatModels?: ChatModel[] } {
+  private phoneChatModels(): { chatModels?: ChatModel[]; chatWorkers?: SplitWorker[] } {
     try {
       const models = this.deps.newChat?.models?.() ?? [];
-      return models.length > 0 ? { chatModels: models } : {};
+      // The workers say this Mac reads a start's `split`; a phone shows "Split the work" only with them.
+      return models.length > 0
+        ? { chatModels: models, ...(models.some((m) => m.agent === "claude") ? { chatWorkers: SPLIT_WORKERS } : {}) }
+        : {};
     } catch {
       return {};
     }

@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 
 import { conductorTimestampToIso } from "../adapters/conductor-registry.js";
 import { listChatModels, type ChatModel } from "./chat-models.js";
+import { agentMessageFor, checkWorkSplit } from "./work-split.js";
 
 /**
  * Starting a new Conductor chat from a Mac or phone surface: which workspaces
@@ -105,6 +106,8 @@ export interface ChatStarter {
     /** A model alias from `listChatModels`, and a thinking level it takes; both absent: the workspace's usual. */
     model?: string;
     thinking?: string;
+    /** What the agent receives instead of `text` (the work split in front of it); the chat shows `text`. */
+    agentText?: string;
   }): Promise<StartChatOutcome>;
 }
 
@@ -150,6 +153,8 @@ export function newChatControl(deps: { conductorDbPath: string; relay: ChatStart
       text?: unknown;
       model?: unknown;
       thinking?: unknown;
+      /** A `WorkSplit`: which models code and run, and whether to plan first. */
+      split?: unknown;
     }): Promise<StartChatOutcome> => {
       const text = typeof body.text === "string" ? body.text.trim() : "";
       if (!text) return { ok: false, reason: "Write a first message." };
@@ -181,12 +186,16 @@ export function newChatControl(deps: { conductorDbPath: string; relay: ChatStart
       }
       const chosen = checkChatModel(models, agent, body.model, body.thinking);
       if (!chosen.ok) return chosen;
+      const split = checkWorkSplit(agent, body.split);
+      if (!split.ok) return split;
+      const agentText = agentMessageFor(text, split.split);
       return deps.relay.startChat({
         workspaceId: workspace.id,
         agent,
         text,
         ...(chosen.model ? { model: chosen.model } : {}),
         ...(chosen.thinking ? { thinking: chosen.thinking } : {}),
+        ...(agentText ? { agentText } : {}),
       });
     },
   };

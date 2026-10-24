@@ -342,6 +342,30 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(command.agent, .codex)
     }
 
+    func testAStartSignsTheSplitInOnlyWhenSomethingIsSplit() throws {
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: Data(repeating: 7, count: 32).base64EncodedString(), n: "Mac")
+        let channel = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())
+        // "One model does it all" sends no split key, so an older Mac reads the same bytes as before.
+        let empty = try channel.startDocument(workspaceId: "w1", agent: .claude, text: "Hi", split: WorkSplit(planFirst: false), signer: SoftwareSigner())
+        XCTAssertNil(try ChannelCrypto.open([String: AnyJSON].self, box: empty.document.box, key: pairing.k)["split"])
+        let split = try channel.startDocument(
+            workspaceId: "w1", agent: .claude, text: "Hi", split: WorkSplit(code: "sonnet", planFirst: true), signer: SoftwareSigner())
+        let command = try ChannelCrypto.open(StartCommand.self, box: split.document.box, key: pairing.k)
+        XCTAssertEqual(command.split, WorkSplit(code: "sonnet", planFirst: true))
+        // An unchosen role is left out, not sent as null.
+        struct Keys: Decodable { let split: [String: AnyJSON] }
+        let raw = try ChannelCrypto.open(Keys.self, box: split.document.box, key: pairing.k)
+        XCTAssertEqual(Set(raw.split.keys), ["code", "planFirst"])
+    }
+
+    func testTheWorkersArriveWithTheRecentDocument() throws {
+        let json = #"{"v":1,"recent":[],"recentMore":false,"chatWorkers":[{"id":"sonnet","label":"Sonnet"}]}"#
+        let recent = try JSONDecoder().decode(PhoneRecent.self, from: Data(json.utf8))
+        XCTAssertEqual(recent.chatWorkers?.map(\.id), ["sonnet"])
+        let older = try JSONDecoder().decode(PhoneRecent.self, from: Data(#"{"v":1,"recent":[],"recentMore":false}"#.utf8))
+        XCTAssertNil(older.chatWorkers)
+    }
+
     func testARenameSignsTheChatAndTheNewNameIn() throws {
         let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: Data(repeating: 7, count: 32).base64EncodedString(), n: "Mac")
         let channel = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())

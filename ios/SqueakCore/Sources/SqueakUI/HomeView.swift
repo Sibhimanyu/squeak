@@ -43,6 +43,7 @@ struct HomeView: View {
     @State private var showingNewChat = ProcessInfo.processInfo.arguments.contains("-squeak-newchat")
         || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-filled")
         || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-error")
+        || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-split")
     @State private var showingUsage = ProcessInfo.processInfo.arguments.contains("-squeak-usage")
     /// The chat a swipe's Reply is answering, without opening it.
     @State private var quickReply: PhoneSnapshot.Session?

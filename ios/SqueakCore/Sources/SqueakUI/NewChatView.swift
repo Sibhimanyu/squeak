@@ -3,7 +3,8 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
-/// "New chat": where it starts, which agent, which model and how hard it thinks, and the first message.
+/// "New chat": where it starts, which agent, which model and how hard it thinks, how the work is split
+/// across models, and the first message.
 /// The phone only offers what the Mac listed (the workspaces, and the models Conductor's own picker has);
 /// the Mac checks both again, and the command is signed on this phone behind Face ID, like a reply.
 struct NewChatView: View {
@@ -16,6 +17,12 @@ struct NewChatView: View {
     @State private var modelId: String?
     @State private var level: String?
     @State private var showingAllModels = false
+    /// Which worker codes and which runs commands (nil: the chat's own model), and plan first.
+    @State private var code: String?
+    @State private var run: String?
+    @State private var planFirst = false
+    /// "Custom" was tapped: the two worker rows stay open even while they match a preset.
+    @State private var customSplit = false
     @State private var text = ""
     @State private var photos: [ChatPhoto] = []
     /// "Sending photo 1 of 2…" while they upload.
@@ -37,6 +44,9 @@ struct NewChatView: View {
         _agent = State(initialValue: first?.agent ?? .claude)
         if args.contains("-squeak-newchat-filled") {
             _text = State(initialValue: "Add a retry with backoff to the payment webhook, and cover it with a test.")
+        }
+        if args.contains("-squeak-newchat-split") {
+            _code = State(initialValue: "sonnet"); _run = State(initialValue: "haiku"); _planFirst = State(initialValue: true)
         }
         if args.contains("-squeak-newchat-error") {
             _problem = State(initialValue: "That workspace isn't available any more. Pick another.")
@@ -76,6 +86,7 @@ struct NewChatView: View {
                                 section("Thinking", footer: "More thinking is slower and uses more of your plan.") { levelChips(chosen) }
                             }
                         }
+                        if !workers.isEmpty { section("Split the work", footer: splitFooter) { splitCard } }
                         section("First message", footer: messageFooter) { messageField }
                         if let problem { problemRow(problem) }
                     }
@@ -83,6 +94,8 @@ struct NewChatView: View {
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
+            // The split screenshot opens at the bottom, where the section is.
+            .defaultScrollAnchor(ProcessInfo.processInfo.arguments.contains("-squeak-newchat-split") ? .bottom : .top)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("New chat")
             .navigationBarTitleDisplayMode(.inline)
@@ -90,7 +103,7 @@ struct NewChatView: View {
             .safeAreaInset(edge: .bottom) { if !workspaces.isEmpty { startBar } }
             .interactiveDismissDisabled(sending)
             .onAppear { settleChoice() }
-            .onChange(of: agent) { _, _ in modelId = nil; level = nil; settleChoice() }
+            .onChange(of: agent) { _, _ in modelId = nil; level = nil; code = nil; run = nil; customSplit = false; settleChoice() }
             .onChange(of: model.snapshot?.chatModels) { _, _ in settleChoice() }
         }
         .foregroundStyle(Theme.ink)
@@ -228,6 +241,115 @@ struct NewChatView: View {
         }
     }
 
+    /* ---------- split the work ---------- */
+
+    /// The models a Claude chat can hand work to; empty from a Mac older than the split, which hides it.
+    private var workers: [PhoneSnapshot.SplitWorker] { model.snapshot?.chatWorkers ?? [] }
+    private var canDelegate: Bool { agent == .claude }
+
+    private enum SplitPreset: CaseIterable { case one, save, custom
+        var title: String {
+            switch self { case .one: "One model"; case .save: "Save usage"; case .custom: "Custom" }
+        }
+    }
+
+    private var preset: SplitPreset {
+        if customSplit { return .custom }
+        if code == nil && run == nil { return .one }
+        if code == "sonnet" && run == "haiku" { return .save }
+        return .custom
+    }
+
+    private var split: WorkSplit {
+        WorkSplit(code: canDelegate ? code : nil, run: canDelegate ? run : nil, planFirst: planFirst ? true : nil)
+    }
+
+    private func workerName(_ id: String?) -> String {
+        guard let id else { return "Same model" }
+        return workers.first { $0.id == id }?.label ?? id
+    }
+
+    private var plannerName: String { chosen?.label ?? Presentation.agentName(agent.rawValue) }
+
+    private var splitCard: some View {
+        VStack(spacing: 0) {
+            if canDelegate {
+                HStack(spacing: 6) {
+                    ForEach(SplitPreset.allCases, id: \.self) { option in
+                        presetChip(option)
+                    }
+                }
+                .padding(10)
+                if preset != .one {
+                    Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14)
+                    workerRow("Writes the code", selection: $code)
+                    Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14)
+                    workerRow("Runs tests and builds", selection: $run)
+                }
+                Rectangle().fill(Theme.line).frame(height: 1)
+            }
+            Toggle(isOn: $planFirst) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Plan first").font(.body)
+                    Text("Shows you the plan and waits for your go.").font(.caption).foregroundStyle(Theme.muted)
+                }
+            }
+            .tint(Theme.primaryFill)
+            .padding(.horizontal, 14).frame(minHeight: 52)
+        }
+    }
+
+    private func presetChip(_ option: SplitPreset) -> some View {
+        let selected = option == preset
+        return Button {
+            switch option {
+            case .one: code = nil; run = nil; customSplit = false
+            case .save: code = "sonnet"; run = "haiku"; customSplit = false
+            case .custom: customSplit = true; if code == nil && run == nil { code = "sonnet" }
+            }
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
+            Text(option.title).font(.subheadline.weight(selected ? .semibold : .regular))
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .foregroundStyle(selected ? Theme.ink : Theme.muted)
+                .padding(.horizontal, 4).frame(maxWidth: .infinity, minHeight: 44)
+                .background(selected ? Theme.surfaceRaised : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Theme.lineStrong : Theme.line, lineWidth: selected ? 1.5 : 1))
+                .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(option.title)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private func workerRow(_ title: String, selection: Binding<String?>) -> some View {
+        Menu {
+            Picker(title, selection: selection) {
+                Text("Same model (\(plannerName))").tag(String?.none)
+                ForEach(workers) { Text($0.label).tag(String?.some($0.id)) }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Text(title).font(.body).foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                Text(workerName(selection.wrappedValue)).font(.body).foregroundStyle(Theme.muted).lineLimit(1)
+                Lucide(.chevronDown, size: 14, color: Theme.subtle)
+            }
+            .padding(.horizontal, 14).frame(minHeight: 48).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(workerName(selection.wrappedValue))")
+    }
+
+    private var splitFooter: String {
+        guard canDelegate else { return "A Codex chat can't hand work to other models yet." }
+        if code == nil && run == nil { return "\(plannerName) does everything." }
+        var parts = ["\(plannerName) plans and reviews"]
+        if let code { parts.append("\(workerName(code)) writes the code") }
+        if let run { parts.append("\(workerName(run)) runs tests and builds") }
+        return parts.joined(separator: "; ") + ". Small edits it still makes itself."
+    }
+
     private var messageField: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topLeading) {
@@ -274,13 +396,18 @@ struct NewChatView: View {
         } else {
             parts.append(Presentation.agentName(agent.rawValue))
         }
+        if !workers.isEmpty {
+            if let code = split.code { parts.append("\(workerName(code)) codes") }
+            if let run = split.run { parts.append("\(workerName(run)) runs") }
+            if planFirst { parts.append("plan first") }
+        }
         if let workspace { parts.append(Presentation.split(label: workspace.label).repo ?? workspace.label) }
         return parts.joined(separator: " · ")
     }
 
     private var startBar: some View {
         VStack(spacing: 8) {
-            Text(summary).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
+            Text(summary).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.center)
             Button { Task { await start() } } label: {
                 HStack(spacing: 8) {
                     if sending { ProgressView().tint(Theme.primaryText) }
@@ -333,7 +460,9 @@ struct NewChatView: View {
         }
         let result = await model.startChat(
             in: workspace, agent: agent, text: message,
-            model: picked?.id, thinking: picked.flatMap { $0.levels.isEmpty ? nil : (level ?? $0.defaultLevel) })
+            model: picked?.id, thinking: picked.flatMap { $0.levels.isEmpty ? nil : (level ?? $0.defaultLevel) },
+            // Only to a Mac that listed workers: an older one would start the chat without the split.
+            split: workers.isEmpty || split.isEmpty ? nil : split)
         sending = false
         switch result {
         case .started: dismiss()

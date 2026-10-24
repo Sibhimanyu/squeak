@@ -284,6 +284,8 @@ enum DemoData {
         demo.projectIcons = DemoIcons.byProject
         #endif
         demo.chatModels = chatModels
+        demo.chatWorkers = [.init(id: "sonnet", label: "Sonnet"), .init(id: "haiku", label: "Haiku"),
+                            .init(id: "opus", label: "Opus"), .init(id: "fable", label: "Fable")]
         return demo
     }
 

@@ -336,6 +336,11 @@ export class PhoneClient {
     /** A model alias and thinking level to start the chat with; absent: the workspace's usual. */
     model?: string;
     thinkingLevel?: string;
+    /**
+     * What the agent receives instead of `text` (Conductor's `agentMessage`); the chat shows `text`.
+     * Conductor 0.91.2's runtime hands the agent `agentMessage ?? message`.
+     */
+    agentText?: string;
   }): Promise<TunnelResponse> {
     const ws = `/workspaces/${encodeURIComponent(args.workspaceLocalId)}`;
     const base = `${ws}/sessions/${encodeURIComponent(args.sessionId)}/pending-messages`;
@@ -347,7 +352,7 @@ export class PhoneClient {
         headers: { "content-type": "application/json" },
         body: {
           messageId,
-          deliveryPayload: { message: args.text },
+          deliveryPayload: { message: args.text, ...(args.agentText ? { agentMessage: args.agentText } : {}) },
           config: { harness: args.agent, ...(args.model ? { model: args.model } : {}) },
           mode: "queue",
           expectedGeneration: generation,
