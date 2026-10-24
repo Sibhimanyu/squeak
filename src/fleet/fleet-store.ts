@@ -117,6 +117,16 @@ export class FleetStore {
         muted_until TEXT
       );
     `);
+    // Older databases: reply targets gain the turn a card was about and whether its buttons are live.
+    const columns = (this.db.prepare(`PRAGMA table_info(fleet_reply_target)`).all() as { name: string }[]).map(
+      (column) => column.name,
+    );
+    if (!columns.includes("turn")) {
+      this.db.exec(`ALTER TABLE fleet_reply_target ADD COLUMN turn TEXT`);
+    }
+    if (!columns.includes("buttons")) {
+      this.db.exec(`ALTER TABLE fleet_reply_target ADD COLUMN buttons INTEGER NOT NULL DEFAULT 0`);
+    }
   }
 
   close(): void {
@@ -226,28 +236,54 @@ export class FleetStore {
    * The column keeps its first name; every row written before terminals could
    * be answered holds a Conductor id, which is still a valid target.
    */
-  setReplyTarget(chatId: number, messageId: number, target: string, label: string): void {
+  setReplyTarget(
+    chatId: number,
+    messageId: number,
+    target: string,
+    label: string,
+    options: { turn?: string | null; buttons?: boolean } = {},
+  ): void {
     this.db
       .prepare(
-        `INSERT INTO fleet_reply_target (chat_id, message_id, conductor_session_id, label)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO fleet_reply_target (chat_id, message_id, conductor_session_id, label, turn, buttons)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(chat_id, message_id) DO UPDATE SET
            conductor_session_id = excluded.conductor_session_id,
-           label = excluded.label`,
+           label = excluded.label,
+           turn = excluded.turn,
+           buttons = excluded.buttons`,
       )
-      .run(chatId, messageId, target, label);
+      .run(chatId, messageId, target, label, options.turn ?? null, options.buttons ? 1 : 0);
     // A card nobody answered in a month is not coming back.
     this.db.prepare(`DELETE FROM fleet_reply_target WHERE created_at < datetime('now', '-30 days')`).run();
   }
 
-  getReplyTarget(chatId: number, messageId: number): { target: string; label: string } | null {
+  /** `turn` is the stamp of the turn the message was about; null for a row written before stamps (never checked). */
+  getReplyTarget(chatId: number, messageId: number): { target: string; label: string; turn: string | null } | null {
     const row = this.db
       .prepare(
-        `SELECT conductor_session_id as target, label
+        `SELECT conductor_session_id as target, label, turn
          FROM fleet_reply_target WHERE chat_id = ? AND message_id = ?`,
       )
-      .get(chatId, messageId) as { target: string; label: string } | undefined;
+      .get(chatId, messageId) as { target: string; label: string; turn: string | null } | undefined;
     return row ?? null;
+  }
+
+  /** Cards that still carry live buttons, newest day only: the ones to strip once their question is settled. */
+  listLiveCards(): { chatId: number; messageId: number; target: string; turn: string | null }[] {
+    return this.db
+      .prepare(
+        `SELECT chat_id as chatId, message_id as messageId, conductor_session_id as target, turn
+         FROM fleet_reply_target
+         WHERE buttons = 1 AND created_at > datetime('now', '-1 day')`,
+      )
+      .all() as { chatId: number; messageId: number; target: string; turn: string | null }[];
+  }
+
+  markCardSettled(chatId: number, messageId: number): void {
+    this.db
+      .prepare(`UPDATE fleet_reply_target SET buttons = 0 WHERE chat_id = ? AND message_id = ?`)
+      .run(chatId, messageId);
   }
 
   /**

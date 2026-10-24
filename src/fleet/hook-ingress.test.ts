@@ -259,16 +259,17 @@ describe("HookIngressServer control routes", () => {
   async function withControl() {
     const harness = await startServer();
     const server = servers.at(-1)!;
-    const replies: Array<{ id: string; text: string; mode?: string }> = [];
+    const replies: Array<{ id: string; text: string; mode?: string; answersTurn?: string | null }> = [];
     server.setControl({
       sessionMessage: (id) => ({ id, text: "A) yes\nB) no" }),
-      transcript: (id, limit) => ({
+      transcript: (id, limit, before) => ({
         messages: [{ id: "m1", role: "user", text: id, at: null, turnId: String(limit) }],
         complete: true,
+        ...(before ? { nextBefore: `got-${before}` } : {}),
       }),
       activity: (key) => ({ key, steps: [{ kind: "tool", text: "Run tests", at: null }], total: 1 }),
-      reply: async (id, text, mode) => {
-        replies.push({ id, text, ...(mode ? { mode } : {}) });
+      reply: async (id, text, mode, answersTurn) => {
+        replies.push({ id, text, ...(mode ? { mode } : {}), ...(answersTurn ? { answersTurn } : {}) });
         return { status: "started", via: "conductor" };
       },
     });
@@ -327,6 +328,11 @@ describe("HookIngressServer control routes", () => {
     expect(await limitOf("?limit=0")).toBe("40");
     expect(await limitOf("?limit=-3")).toBe("40");
     expect(await limitOf("?limit=abc")).toBe("40");
+    const paged = await fetch(`${base}/transcript?limit=5&before=123`, { headers: auth });
+    expect(((await paged.json()) as { nextBefore: string }).nextBefore).toBe("got-123");
+    for (const bad of ["abc", "-1", "0", "1.5", "12%20", "1e3"]) {
+      expect((await fetch(`${base}/transcript?before=${bad}`, { headers: auth })).status).toBe(400);
+    }
     expect((await fetch(`${base}/transcripts`, { headers: auth })).status).toBe(404);
     expect((await fetch(`${base}/transcript`, { method: "POST", headers: auth })).status).toBe(405);
   });
@@ -500,6 +506,24 @@ describe("HookIngressServer control routes", () => {
     const ok = await fetch(url, { headers: auth });
     expect(ok.headers.get("access-control-allow-origin")).toBeNull();
     expect(await ok.json()).toEqual(rule);
+  });
+
+  it("passes the turn a reply answers through, and rejects one that is not a string", async () => {
+    const { base, auth, replies } = await withControl();
+    const ok = await fetch(`${base}/reply`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ text: "B", answersTurn: "turn-7" }),
+    });
+    expect(ok.status).toBe(200);
+    expect(replies).toEqual([{ id: "abc-123", text: "B", answersTurn: "turn-7" }]);
+    const bad = await fetch(`${base}/reply`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ text: "B", answersTurn: 7 }),
+    });
+    expect(bad.status).toBe(400);
+    expect(replies).toHaveLength(1);
   });
 
   it("rejects an empty reply and an unknown route", async () => {

@@ -177,6 +177,7 @@ public struct ConductorRegistry: Sendable {
     func pendingQuestion(sessionId: String) -> String? {
         let sql = """
             SELECT CASE
+              WHEN role = 'user' AND content NOT LIKE '{"type":%' THEN '{"type":"human"}'
               WHEN content LIKE '{"type":"assistant"%' AND (
                    content LIKE '%"name":"mcp__conductor__AskUserQuestion"%'
                 OR content LIKE '%"name":"AskUserQuestion"%'
@@ -186,7 +187,7 @@ public struct ConductorRegistry: Sendable {
               ELSE NULL
             END AS body
             FROM (
-              SELECT rowid, content FROM session_messages
+              SELECT rowid, role, content FROM session_messages
               WHERE session_id = ? ORDER BY rowid DESC LIMIT 12
             )
             ORDER BY rowid DESC
@@ -196,6 +197,8 @@ public struct ConductorRegistry: Sendable {
         for row in rows {
             guard let body = row["body"]?.string else { continue }
             if body.hasPrefix(#"{"type":"result""#) || body.hasPrefix(#"{"type":"error""#) { return nil }
+            // A typed answer (on the laptop): real human rows are role "user" with plain text.
+            if body.hasPrefix(#"{"type":"human""#) { return nil }
             if body.hasPrefix(#"{"type":"user""#) {
                 // A human message after the question: the turn moved on without it.
                 if !body.contains(#""type":"tool_result""#) && !body.contains("<task-notification>") { return nil }

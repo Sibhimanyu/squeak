@@ -631,6 +631,10 @@ export class ConductorRegistryAdapter {
    * call with no tool_result after it and no turn end after it. Only the
    * newest rows are read (session_id index), and only rows that could matter
    * carry their body: a tool result's id sits in its first few hundred bytes.
+   * A human row (role "user", plain text) after the call also ends it: the
+   * question was answered somewhere else. The 12-row window can lose a call
+   * left open under more than 12 later rows (many worker notifications); it
+   * then reads as no question rather than a stale one.
    */
   private pendingQuestionFor(sessionId: string): string | null {
     let rows: Array<{ rowid: number; body: string | null }>;
@@ -639,6 +643,7 @@ export class ConductorRegistryAdapter {
         .prepare(
           `
             SELECT rowid, CASE
+              WHEN role = 'user' AND content NOT LIKE '{"type":%' THEN '{"type":"human"}'
               WHEN content LIKE '{"type":"assistant"%' AND (
                    content LIKE '%"name":"mcp__conductor__AskUserQuestion"%'
                 OR content LIKE '%"name":"AskUserQuestion"%'
@@ -648,7 +653,7 @@ export class ConductorRegistryAdapter {
               ELSE NULL
             END AS body
             FROM (
-              SELECT rowid, content FROM session_messages
+              SELECT rowid, role, content FROM session_messages
               WHERE session_id = ? ORDER BY rowid DESC LIMIT 12
             )
             ORDER BY rowid DESC
@@ -664,6 +669,10 @@ export class ConductorRegistryAdapter {
         continue;
       }
       if (row.body.startsWith('{"type":"result"') || row.body.startsWith('{"type":"error"')) {
+        return null;
+      }
+      if (row.body.startsWith('{"type":"human"')) {
+        // A typed answer (on the laptop): real human rows are role "user" with plain text.
         return null;
       }
       if (row.body.startsWith('{"type":"user"')) {
@@ -1358,5 +1367,34 @@ export class ConductorRegistryAdapter {
         `,
       )
       .all(sessionId, limit) as SessionMessageRecord[];
+  }
+
+  /**
+   * A page of a chat's rows by SQLite rowid, newest first, strictly below `before` (null: from the
+   * newest). Each row carries its rowid as `cursor` (a string), the stable position a client pages on.
+   * rowid is unique, so a page never repeats or skips a row the way a timestamp tie could.
+   */
+  listSessionMessagesPage(sessionId: string, before: number | null, limit: number): SessionMessageRecord[] {
+    const rows = this.db
+      .prepare(
+        `
+          SELECT
+            rowid as cursor,
+            id,
+            role,
+            content,
+            sent_at as sentAt,
+            turn_id as turnId,
+            model
+          FROM session_messages
+          WHERE session_id = ?
+            AND cancelled_at IS NULL
+            AND (? IS NULL OR rowid < ?)
+          ORDER BY rowid DESC
+          LIMIT ?
+        `,
+      )
+      .all(sessionId, before, before, limit) as Array<SessionMessageRecord & { cursor: number }>;
+    return rows.map((row) => ({ ...row, cursor: String(row.cursor) }));
   }
 }

@@ -554,6 +554,15 @@ struct PendingQuestionTests {
         #expect(byId["idle"]?.pendingQuestion == nil)
     }
 
+    @Test func aTypedAnswerAfterTheQuestionClearsIt() throws {
+        let f = try ConductorFixture()
+        try f.addSession("typed", status: "working")
+        try f.addMessage("typed", role: "assistant", content: tool("q1", "AskUserQuestion", ask), sentAt: iso(minutesAgo: 5))
+        try f.addMessage("typed", role: "user", content: "B please", sentAt: iso(minutesAgo: 4))
+        let list = try ConductorRegistry(database: f.database).listFleetSessions(limit: 50)
+        #expect(list.first { $0.id == "typed" }?.pendingQuestion == nil)
+    }
+
     @Test func adapterCarriesTheQuestionOntoTheBlockedSession() async throws {
         let f = try ConductorFixture()
         try f.addSession("s", status: "working")

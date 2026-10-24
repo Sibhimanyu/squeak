@@ -129,6 +129,23 @@ describe("installFleetHooks", () => {
     const settings = JSON.parse(fs.readFileSync(paths.claudeSettingsPath, "utf8")) as Record<string, unknown>;
     expect(settings.model).toBe("opus");
     expect(Object.keys(settings.hooks as object)).toContain("Notification");
+    expect(Object.keys(settings.hooks as object)).toEqual(expect.arrayContaining(["PostToolUse", "PermissionDenied"]));
+  });
+
+  it("adds the answered-approval events to an earlier install, keeping other tools' entries", () => {
+    const home = makeHome();
+    const paths = defaultHookInstallPaths(path.join(home, "support"), home);
+    fs.mkdirSync(path.dirname(paths.claudeSettingsPath), { recursive: true });
+    const other = { hooks: [{ type: "command", command: "other-tool" }] };
+    fs.writeFileSync(paths.claudeSettingsPath, JSON.stringify({ hooks: { PostToolUse: [other] } }));
+    installFleetHooks({ paths, port: 8477 });
+    installFleetHooks({ paths, port: 8477 });
+
+    const hooks = (
+      JSON.parse(fs.readFileSync(paths.claudeSettingsPath, "utf8")) as { hooks: Record<string, unknown[]> }
+    ).hooks;
+    expect(hooks.PostToolUse).toHaveLength(2);
+    expect(hooks.PermissionDenied).toHaveLength(1);
   });
 
   it("round-trips cleanly through uninstall", () => {

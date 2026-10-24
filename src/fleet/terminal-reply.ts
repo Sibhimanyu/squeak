@@ -126,6 +126,11 @@ export class TerminalReplier {
     return session.transcriptPath ? lastAgentMessage(session.agent, session.transcriptPath) : null;
   }
 
+  /** Changes whenever the agent's transcript gains a turn entry, so an answer typed in the terminal moves it on. */
+  lastTurnId(session: FleetSession): string | null {
+    return session.transcriptPath ? lastAgentTurnId(session.agent, session.transcriptPath) : null;
+  }
+
   /**
    * No failure callback: the turn runs in the terminal, not here, and the
    * fleet reports how it ends like any other.
@@ -272,6 +277,30 @@ function describeScreenError(error: TerminalHandsError): string {
 export function lastAgentMessage(agent: AgentKind, transcriptPath: string): string | null {
   const entries = parseJsonLines(readTailLines(transcriptPath));
   return agent === "claude" ? lastClaudeMessage(entries) : lastCodexMessage(entries);
+}
+
+/**
+ * The newest conversation entry's identity: Claude's last user/assistant
+ * entry (uuid, else timestamp), Codex's last response item (timestamp).
+ * Anything either agent writes after a question — an answer, a tool result,
+ * a new message — changes it; bookkeeping entries do not count.
+ */
+export function lastAgentTurnId(agent: AgentKind, transcriptPath: string): string | null {
+  const entries = parseJsonLines(readTailLines(transcriptPath));
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!;
+    const type = asString(entry.type);
+    if (agent === "claude") {
+      if ((type === "user" || type === "assistant") && entry.isSidechain !== true) {
+        const id = asString(entry.uuid) ?? asString(entry.timestamp);
+        if (id) return id;
+      }
+    } else if (type === "response_item") {
+      const id = asString(entry.timestamp);
+      if (id) return id;
+    }
+  }
+  return null;
 }
 
 function lastClaudeMessage(entries: Record<string, unknown>[]): string | null {

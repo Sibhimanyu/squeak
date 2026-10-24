@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { logger } from "../utils/logger.js";
 import { normalizeHookPayload } from "./hook-protocol.js";
+import { parseCursor } from "./transcript.js";
 import type { AgentKind, HookEvent } from "./types.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -34,8 +35,8 @@ export interface HookIngressOptions {
 export interface IngressControl {
   sessionMessage(replyTarget: string): unknown;
   /** A chat's readable history (user and assistant text only), oldest first. */
-  transcript?(replyTarget: string, limit: number): unknown;
-  reply(replyTarget: string, text: string, mode?: "queue" | "steer"): Promise<unknown>;
+  transcript?(replyTarget: string, limit: number, before?: number | null): unknown;
+  reply(replyTarget: string, text: string, mode?: "queue" | "steer", answersTurn?: string | null): Promise<unknown>;
   /**
    * The current turn of a session, step by step, by its fleet key. Token-gated
    * like the rest: thinking and tool calls are the session's content.
@@ -265,7 +266,7 @@ export class HookIngressServer {
    * `GET  /control/session/<replyTarget>/message`
    * `POST /control/session/<replyTarget>/reply` with `{ "text": "...", "mode"?: "queue" | "steer" }`
    * `GET  /control/session/<sessionKey>/activity`
-   * `GET  /control/session/<replyTarget>/transcript?limit=N`
+   * `GET  /control/session/<replyTarget>/transcript?limit=N&before=<cursor>`
    * `GET  /control/session/<conductorSessionId>/question`
    * `POST /control/session/<conductorSessionId>/answer` with `{ toolUseId, answers?, plan? }`
    *
@@ -766,9 +767,16 @@ export class HookIngressServer {
         respond(response, 503, "transcript unavailable");
         return;
       }
-      const rawLimit = new URL(request.url ?? "", "http://localhost").searchParams.get("limit");
+      const params = new URL(request.url ?? "", "http://localhost").searchParams;
+      const rawLimit = params.get("limit");
+      // `before` is a cursor from an earlier answer: digits only, anything else is refused, never guessed.
+      const before = parseCursor(params.get("before"));
+      if (before === "invalid") {
+        respond(response, 400, "bad cursor");
+        return;
+      }
       try {
-        respondJson(response, 200, control.transcript(sessionId, parseTranscriptLimit(rawLimit)));
+        respondJson(response, 200, control.transcript(sessionId, parseTranscriptLimit(rawLimit), before));
       } catch (error) {
         logger.warn("control transcript read failed", {
           error: error instanceof Error ? error.message : String(error),
@@ -810,10 +818,12 @@ export class HookIngressServer {
         }
         let text: unknown;
         let mode: unknown;
+        let answersTurn: unknown;
         try {
-          const parsed = JSON.parse(body || "{}") as { text?: unknown; mode?: unknown };
+          const parsed = JSON.parse(body || "{}") as { text?: unknown; mode?: unknown; answersTurn?: unknown };
           text = parsed.text;
           mode = parsed.mode;
+          answersTurn = parsed.answersTurn;
         } catch {
           respond(response, 400, "bad json");
           return;
@@ -826,8 +836,12 @@ export class HookIngressServer {
           respond(response, 400, "text required");
           return;
         }
+        if (answersTurn !== undefined && answersTurn !== null && typeof answersTurn !== "string") {
+          respond(response, 400, "answersTurn must be a string");
+          return;
+        }
         control
-          .reply(sessionId, text, mode)
+          .reply(sessionId, text, mode, answersTurn)
           .then((outcome) => respondJson(response, 200, outcome))
           .catch((error: unknown) => {
             logger.warn("control reply failed", { error: error instanceof Error ? error.message : String(error) });

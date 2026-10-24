@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ClaudeSessionFile, ProcessRow, TerminalProcessSources } from "./terminal-process.js";
 import {
   lastAgentMessage,
+  lastAgentTurnId,
   TerminalReplier,
   transcriptHasUserMessage,
   type ScreenRead,
@@ -386,6 +387,28 @@ describe("lastAgentMessage", () => {
     ]);
 
     expect(lastAgentMessage("claude", transcript)).toBeNull();
+  });
+});
+
+describe("lastAgentTurnId", () => {
+  it("moves on when the human answers in the terminal, ignoring bookkeeping entries", () => {
+    const asked = [...claudeTurn("first", "A) one\nB) two", "2026-09-25T13:00:00.000Z")].map((entry, index) => ({
+      ...(entry as object),
+      uuid: `u${index}`,
+    }));
+    const before = lastAgentTurnId("claude", writeTranscript(asked));
+    expect(before).not.toBeNull();
+    const withNoise = lastAgentTurnId("claude", writeTranscript([...asked, { type: "system", uuid: "noise" }]));
+    expect(withNoise).toBe(before);
+    const answered = lastAgentTurnId(
+      "claude",
+      writeTranscript([
+        ...asked,
+        { type: "user", uuid: "typed", timestamp: "2026-09-25T13:05:00.000Z", message: { content: "B" } },
+      ]),
+    );
+    expect(answered).toBe("typed");
+    expect(answered).not.toBe(before);
   });
 });
 

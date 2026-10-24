@@ -974,6 +974,10 @@ describe("ConductorRegistryAdapter", () => {
     }
     insertSession.run("idle", "ws", "idle", "claude", at, at);
     insertMessage.run("idle-0", "idle", "assistant", ask, at);
+    // Answered by typing on the laptop: a real human row is role "user" with plain text.
+    insertSession.run("typed", "ws", "working", "claude", at, at);
+    insertMessage.run("typed-0", "typed", "assistant", ask, at);
+    insertMessage.run("typed-1", "typed", "user", "B please", at);
 
     const byId = new Map(adapter.listFleetSessions(20).map((session) => [session.id, session]));
     expect(byId.get("pending")?.pendingQuestion).toBe("Which one? [A / B]");
@@ -983,5 +987,6 @@ describe("ConductorRegistryAdapter", () => {
     expect(byId.get("ended")?.pendingQuestion).toBeNull();
     expect(byId.get("malformed")?.pendingQuestion).toBeNull();
     expect(byId.get("idle")?.pendingQuestion).toBeNull();
+    expect(byId.get("typed")?.pendingQuestion).toBeNull();
   });
 });

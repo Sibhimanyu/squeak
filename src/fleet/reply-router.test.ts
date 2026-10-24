@@ -27,6 +27,7 @@ function harness(sessions: FleetSession[], terminalAnswers = true) {
   const terminal = {
     canReply: () => terminalAnswers,
     lastTurnText: (target: FleetSession) => `terminal text for ${target.key}`,
+    lastTurnId: (target: FleetSession) => `terminal turn for ${target.key}`,
     send: async (target: FleetSession, text: string): Promise<ReplyOutcome> => {
       calls.push(`terminal ${target.key} ${text}`);
       return { status: "started", via: "terminal" };
@@ -48,6 +49,12 @@ describe("FleetReplyRouter", () => {
     await router.send("c1", "B", () => undefined);
     expect(calls).toEqual(["conductor c1 B"]);
     expect(router.lastTurnText("c1")).toBe("conductor text for c1");
+  });
+
+  it("names the newest turn for a terminal agent, so a stale answer can be refused", () => {
+    const { router } = harness([session({})]);
+    expect(router.lastTurnId("claude-transcript:t1")).toBe("terminal turn for claude-transcript:t1");
+    expect(router.lastTurnId("claude-transcript:gone")).toBeNull();
   });
 
   it("sends a fleet key to the terminal", async () => {

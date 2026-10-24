@@ -62,6 +62,13 @@ export function stateFromHookEvent(event: HookEvent): FleetState | null {
       return isQuestionTool(event.toolName) ? "awaiting_input" : "working";
     case "UserPromptSubmit":
       return "working";
+    // The tool ran, or was refused: whatever it was blocked on was answered
+    // (at the keyboard too), so the agent is working again. Without these an
+    // approval answered on the laptop stayed "awaiting approval" until a
+    // transcript write.
+    case "PostToolUse":
+    case "PermissionDenied":
+      return "working";
     // A process starting is not a turn starting. Conductor starts (or
     // resumes) a chat's `claude` as soon as you open it or begin typing, and
     // each start fires SessionStart: read as "working", a chat nobody had

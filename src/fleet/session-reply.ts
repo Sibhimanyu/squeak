@@ -5,7 +5,7 @@ import { ConductorMirrorWriter, type MirrorFingerprints } from "../adapters/cond
 import { conductorTimestampToIso, type ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import type { CodexNotification, ConductorSessionRef, SupportedAgentType } from "../types.js";
 import { extractAssistantEnvelopeText, extractTurnError } from "../utils/conductor-envelope.js";
-import { buildTranscript, TRANSCRIPT_SCAN_ROWS, type TranscriptResult } from "./transcript.js";
+import { readTranscript, type TranscriptResult } from "./transcript.js";
 import { describeUiFailure, mayHaveSent, type ConductorUiSender } from "./conductor-ui.js";
 import { logger } from "../utils/logger.js";
 
@@ -240,12 +240,13 @@ export class ConductorReplier {
     return null;
   }
 
-  /** The chat's readable history, oldest first: user text and assistant prose only. */
-  transcript(sessionId: string, limit: number): TranscriptResult {
-    return buildTranscript(this.deps.registry.listSessionMessages(sessionId, TRANSCRIPT_SCAN_ROWS), {
-      limit,
-      scanRows: TRANSCRIPT_SCAN_ROWS,
-    });
+  /**
+   * The chat's readable history, oldest first: user text and assistant prose only. `before` is a cursor
+   * from an earlier result (`nextBefore`, or a message's `cursor`); only what precedes it is read. Rows
+   * are scanned by rowid in chunks until enough messages turn up, so a long turn's own prompt is reachable.
+   */
+  transcript(sessionId: string, limit: number, before?: number | null): TranscriptResult {
+    return readTranscript(this.deps.registry, sessionId, { limit, before: before ?? null });
   }
 
   /**

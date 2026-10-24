@@ -19,6 +19,10 @@ export const CLAUDE_HOOK_EVENTS = [
   // explicit one; `Notification` also covers idle-waiting-for-input.
   "PermissionRequest",
   "Notification",
+  // The answer to those: a tool that ran or a refused permission means the
+  // human answered (possibly on the laptop), so the blocked state clears.
+  "PostToolUse",
+  "PermissionDenied",
   "Stop",
   "SessionEnd",
 ] as const;

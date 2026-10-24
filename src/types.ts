@@ -55,6 +55,8 @@ export interface ConductorSessionRef {
 export interface SessionMessageRecord {
   /** Conductor's row id; absent on records built by hand. */
   id?: string;
+  /** The row's rowid as a string, set by the paged reader: where a client resumes. */
+  cursor?: string;
   role: "user" | "assistant";
   content: string;
   sentAt: string | null;
