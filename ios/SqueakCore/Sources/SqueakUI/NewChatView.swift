@@ -17,6 +17,9 @@ struct NewChatView: View {
     @State private var agent = NewChatAgent.claude
     @State private var setup = ChatSetup()
     @State private var settled = false
+    /// The message box takes the keyboard once, when the page opens; coming back from the workspace picker leaves
+    /// it alone, since a keyboard rising while the page slides back in was left covering Send.
+    @State private var focusedOnce = false
     @State private var customizing = false
     @State private var text = ""
     @State private var photos: [ChatPhoto] = []
@@ -72,6 +75,9 @@ struct NewChatView: View {
                     workspaceRow
                     messageCard
                     if let problem { problemRow(problem) }
+                    // Part of the page, not a strip pinned under it: the whole page shrinks to fit above the
+                    // keyboard, however and whenever the keyboard arrives, so Send and the choices stay in view.
+                    bottomBar.padding(.horizontal, -16)
                 }
             }
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
@@ -83,7 +89,6 @@ struct NewChatView: View {
             .navigationTitle("New chat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .safeAreaInset(edge: .bottom) { if !workspaces.isEmpty { bottomBar } }
             // Swiping down closes the page only when there is nothing to lose: not while typing (that swipe is for
             // the keyboard), not with a draft or photos, not while sending. Cancel always closes it.
             .interactiveDismissDisabled(sending || focused || !trimmed.isEmpty || !photos.isEmpty)
@@ -92,6 +97,8 @@ struct NewChatView: View {
             }
             .onAppear { settle() }
             .task {
+                guard !focusedOnce else { return }
+                focusedOnce = true
                 try? await Task.sleep(for: .milliseconds(350))
                 if !customizing { focused = true }
             }
@@ -211,7 +218,7 @@ struct NewChatView: View {
             sendButton
         }
         .animation(.easeOut(duration: 0.2), value: focused)
-        .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 10)
+        .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 2)
         .background(Theme.bg)
     }
 
