@@ -283,6 +283,7 @@ enum DemoData {
         // The Mac controls page: lid open (brightness shows), fan control set up.
         demo.macControls = .init(volume: 40, muted: false, brightness: args.contains("-squeak-demo-lid-closed") ? nil : 57,
                                  fans: .init(mode: "auto", choice: "auto", available: true, rpm: [2300, 2500]),
+                                 power: .init(mode: "auto", choice: "auto", available: ["auto", "low", "high"], ready: true),
                                  screenAwake: false,
                                  apps: [.init(id: "com.conductor.app", name: "Conductor", active: true),
                                         .init(id: "com.apple.Safari", name: "Safari", active: false),

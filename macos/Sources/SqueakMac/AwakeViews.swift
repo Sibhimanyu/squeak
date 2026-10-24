@@ -177,6 +177,7 @@ struct AwakeSettings: View {
                 actionsSection
                 safetySection
                 heatSection
+                powerSection
                 hotspotSection
             }
         }
@@ -311,6 +312,29 @@ struct AwakeSettings: View {
             }
         } header: { Text("Heat") } footer: {
             Footnote("During a session Squeak watches the chip and battery. When it warms up (battery 40°C, or the chip 90°C with the lid shut) it turns on Low Power Mode and moves your agents to the efficiency cores, so they keep going but slower. If the battery reaches 45°C for two minutes, it lets your Mac sleep. A closed bag still traps heat; fans help only a little there.")
+        }
+    }
+
+    // MARK: Energy mode
+
+    @ViewBuilder private var powerSection: some View {
+        if let power = model.power, !power.available.isEmpty {
+            Section {
+                if power.ready {
+                    StatusLine(dot: nil, text: "Energy mode ready",
+                               detail: power.mode.map { "Now \(DaemonPower.title($0))." + (power.overridden ? " Held on Low Power while your Mac is warm." : "") })
+                } else {
+                    StatusLine(dot: nil, text: "Energy mode not set up", detail: "Your iPhone can't change it until you set it up here.")
+                    HStack(spacing: Space.s) {
+                        if model.settingUpPower { ProgressView().controlSize(.small); Text("Waiting for your Mac password…").foregroundStyle(.secondary) }
+                        Spacer(minLength: 0)
+                        Button("Set up energy mode…") { Task { await model.setUpPower() } }
+                            .buttonStyle(SecondaryButtonStyle()).disabled(model.settingUpPower)
+                    }
+                }
+            } header: { Text("Energy mode") } footer: {
+                Footnote("Automatic, Low Power or High Power, picked in Mac controls on your iPhone. This allows exactly those three settings, nothing else. Heat and the battery rules still switch to Low Power when they need to, and your pick returns afterwards.")
+            }
         }
     }
 

@@ -2329,6 +2329,8 @@ describe("RemoteBridge live controls from the phone", () => {
     const verdict = await t.bridge.handleCommand(t.config, "c1", t.command({ fans: "60" }));
     expect(verdict.result).toEqual({ id: "c1", status: "sent" });
     expect(t.apply).toHaveBeenCalledWith({ fans: "60" });
+    await t.bridge.handleCommand(t.config, "p1", t.command({ power: "high" }));
+    expect(t.apply).toHaveBeenLastCalledWith({ power: "high" });
     await t.bridge.handleCommand(t.config, "c2", t.command({ volume: 25 }));
     expect(t.apply).toHaveBeenLastCalledWith({ volume: 25 });
     t.bridge.stop();
@@ -2342,6 +2344,9 @@ describe("RemoteBridge live controls from the phone", () => {
       { volume: "40; do shell script" },
       { brightness: -1 },
       { fans: "50" },
+      { power: "turbo" },
+      { power: 2 },
+      { power: "low", fans: "max" },
       { fans: "max", volume: 10 },
       { muted: "true" },
       { displaySleep: false },

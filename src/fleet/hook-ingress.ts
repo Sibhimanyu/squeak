@@ -54,6 +54,8 @@ export interface IngressControl {
    * Fan control's sudoers file and where its root-owned helper goes (fleet/heat.ts), for the Mac
    * app to install with an admin prompt; it copies the helper from its own bundle.
    */
+  /** The energy mode sudoers file (fleet/power-mode.ts), for the Mac app to install with an admin prompt. */
+  powerRule?(): { path: string; rule: string } | null;
   fanRule?(): { path: string; rule: string; helperPath: string } | null;
   /**
    * Starts, extends or ends an awake session (fleet/awake-session.ts,
@@ -353,6 +355,17 @@ export class HookIngressServer {
       request.on("error", () => {
         aborted = true;
       });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/power/rule") {
+      request.resume();
+      const rule = control.powerRule?.() ?? null;
+      if (!rule) {
+        respond(response, 503, "power rule unavailable");
+        return;
+      }
+      respondJson(response, 200, rule);
       return;
     }
 

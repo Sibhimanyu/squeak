@@ -11,6 +11,23 @@ enum MacControlsFormat {
         return fastest == 0 ? "Off" : "\(fastest.formatted(.number.locale(Locale(identifier: "en_US")))) rpm"
     }
 
+    /// Title for an energy mode.
+    static func powerTitle(_ mode: String) -> String {
+        switch mode { case "low": "Low Power"; case "high": "High Power"; default: "Automatic" }
+    }
+
+    /// The modes to offer, in order, only those this Mac lists.
+    static func powerModes(_ power: PhoneSnapshot.MacControls.Power) -> [String] {
+        ["auto", "low", "high"].filter { power.available.contains($0) }
+    }
+
+    /// One line under the picker: set-up first, then why the mode in use is not the pick.
+    static func powerNote(_ power: PhoneSnapshot.MacControls.Power) -> String? {
+        guard power.ready else { return "Set up on the Mac: Squeak › Settings › Keep awake." }
+        if power.overridden == true { return "On Low Power while your Mac is warm or its battery is low. Your pick returns after." }
+        return nil
+    }
+
     /// Why the fans are not at what was picked, or nil when they are.
     static func fanNote(_ fans: PhoneSnapshot.MacControls.Fans) -> String? {
         guard fans.available else { return "Set up fan control on the Mac first: Squeak › Settings › Keep awake." }
@@ -65,6 +82,7 @@ struct MacControlsView: View {
                     }
                     if controls.media?.playing == true { mediaCard }
                     if let fans = controls.fans { fansCard(fans) }
+                    if let power = controls.power, !power.available.isEmpty { powerCard(power) }
                     appsCard(controls.apps ?? [])
                 }
                 if let problem {
@@ -150,6 +168,34 @@ struct MacControlsView: View {
             .disabled(!fans.available)
             .accessibilityIdentifier("fan-mode")
             if let note = MacControlsFormat.fanNote(fans) {
+                Text(note).font(.footnote).foregroundStyle(Theme.muted)
+            }
+        }
+        .padding(14)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+    }
+
+    // MARK: Power
+
+    private func powerCard(_ power: PhoneSnapshot.MacControls.Power) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.fill").foregroundStyle(Theme.muted)
+                Text("Power").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                Spacer()
+                if let mode = power.mode, mode != (power.choice ?? mode) {
+                    Text("Now \(MacControlsFormat.powerTitle(mode))").font(.footnote).foregroundStyle(Theme.subtle)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            Picker("Power", selection: Binding(get: { power.choice ?? power.mode ?? "auto" }, set: { send(.power($0)) })) {
+                ForEach(MacControlsFormat.powerModes(power), id: \.self) { Text(MacControlsFormat.powerTitle($0)).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!power.ready)
+            .accessibilityIdentifier("power-mode")
+            if let note = MacControlsFormat.powerNote(power) {
                 Text(note).font(.footnote).foregroundStyle(Theme.muted)
             }
         }

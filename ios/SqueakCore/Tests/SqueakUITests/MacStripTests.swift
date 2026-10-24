@@ -98,6 +98,24 @@ final class MacControlsFormatTests: XCTestCase {
         XCTAssertNil(MacControlsFormat.fanNote(Fans(mode: "60", choice: "60", available: true, rpm: [])))
     }
 
+    func testPowerWords() throws {
+        typealias Power = PhoneSnapshot.MacControls.Power
+        let all = Power(mode: "auto", choice: "auto", available: ["auto", "low", "high"], ready: true)
+        XCTAssertEqual(MacControlsFormat.powerModes(all), ["auto", "low", "high"])
+        // High Power is offered only where the Mac lists it.
+        XCTAssertEqual(MacControlsFormat.powerModes(Power(available: ["auto", "low"], ready: true)), ["auto", "low"])
+        XCTAssertEqual(MacControlsFormat.powerTitle("high"), "High Power")
+        XCTAssertNil(MacControlsFormat.powerNote(all))
+        XCTAssertEqual(MacControlsFormat.powerNote(Power(available: ["auto"], ready: false)), "Set up on the Mac: Squeak › Settings › Keep awake.")
+        XCTAssertTrue(MacControlsFormat.powerNote(Power(mode: "low", choice: "high", available: ["auto", "low", "high"], ready: true, overridden: true))!.contains("returns"))
+        XCTAssertEqual(String(decoding: try JSONEncoder().encode(ControlsCommand.Change.power("high")), as: UTF8.self), #"{"power":"high"}"#)
+        // A Mac that sends no power block still decodes.
+        let old = try JSONDecoder().decode(PhoneSnapshot.MacControls.self, from: Data(#"{"volume":10}"#.utf8))
+        XCTAssertNil(old.power)
+        let decoded = try JSONDecoder().decode(PhoneSnapshot.MacControls.self, from: Data(#"{"power":{"mode":"high","choice":"high","available":["auto","low","high"],"ready":true}}"#.utf8))
+        XCTAssertEqual(decoded.power?.mode, "high")
+    }
+
     func testTheCommandCarriesExactlyOneControl() throws {
         let json = String(decoding: try JSONEncoder().encode(ControlsCommand.Change.fans("60")), as: UTF8.self)
         XCTAssertEqual(json, #"{"fans":"60"}"#)

@@ -1,3 +1,4 @@
+import type { PowerState } from "./power-mode.js";
 import type { AwakeEnd, AwakeState } from "./awake-session.js";
 import type { HeatState } from "./heat.js";
 import type { HotspotState } from "./hotspot.js";
@@ -19,6 +20,8 @@ export interface AwakeView {
   hotspot?: HotspotState;
   /** Temperatures, fans and what heat.ts is doing about them. */
   heat?: HeatState;
+  /** Energy mode (fleet/power-mode.ts); absent on a Mac with none. */
+  power?: PowerState | null;
 }
 import os from "node:os";
 import path from "node:path";
@@ -263,6 +266,7 @@ export function serializeState(
           ...(awake.rules ? { awakeRules: awake.rules } : {}),
           ...(awake.hotspot ? { hotspot: awake.hotspot } : {}),
           ...(awake.heat ? { heat: awake.heat } : {}),
+          ...(awake.power ? { power: awake.power } : {}),
         }
       : {}),
     active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),
