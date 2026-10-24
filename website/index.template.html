@@ -26,11 +26,9 @@
 <link rel="preload" href="./assets/fonts/figtree-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="./assets/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="./styles.css">
-<script>if(!matchMedia("(prefers-reduced-motion: reduce)").matches)document.documentElement.classList.add("ducks-pending")</script>
 <script src="./assets/vendor/gsap.min.js" defer></script>
 <script src="./assets/vendor/ScrollTrigger.min.js" defer></script>
 <script src="./assets/vendor/lenis.min.js" defer></script>
-<script src="./ducks.js" defer></script>
 <script src="./motion.js" defer></script>
 </head>
 <body>
@@ -48,7 +46,10 @@
     </nav>
 
     <div class="hero__head">
-      <h1 class="hero__title"><span class="hero__line">{{hero.line1}}</span> <span class="hero__line hero__line--mark"><span class="mark">{{hero.line2}}</span></span></h1>
+      <div class="hero__intro">
+        <p class="hero__kicker">{{hero.kicker}}</p>
+        <h1 class="hero__title"><span class="hero__line">{{hero.line1}}</span> <span class="hero__line hero__line--mark"><span class="mark">{{hero.line2}}</span></span></h1>
+      </div>
       <div class="hero__copy">
         <p class="hero__lede">{{hero.lede}}</p>
         <div class="actions">
@@ -60,41 +61,14 @@
     </div>
   </div>
 
-  <div class="stagewrap">
-    <div class="stage" data-stage role="group" aria-label="{{hero.stageLabel}}">
-      <p class="sr">{{hero.stageDescription}}</p>
-      <div class="stage__field" data-field>
-        <canvas aria-hidden="true" data-state="static"></canvas>
-        <div class="pile" aria-hidden="true">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:11%;--b:0%;--s:1;--r:-6deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:16%;--b:14%;--s:0.92;--r:8deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:41%;--b:0%;--s:1.08;--r:-4deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:46%;--b:14%;--s:0.85;--r:12deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:21%;--b:0%;--s:1.12;--r:-10deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:26%;--b:14%;--s:0.95;--r:5deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:51%;--b:0%;--s:1.02;--r:-12deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:56%;--b:14%;--s:0.88;--r:4deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:1%;--b:0%;--s:1.1;--r:9deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:6%;--b:14%;--s:0.9;--r:-6deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:31%;--b:0%;--s:1.05;--r:14deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:36%;--b:14%;--s:0.82;--r:-5deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:61%;--b:0%;--s:1.15;--r:8deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:66%;--b:14%;--s:0.96;--r:-8deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:21%;--b:28%;--s:0.86;--r:4deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:51%;--b:28%;--s:1.06;--r:-3deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:36%;--b:41%;--s:0.93;--r:10deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:26%;--b:54%;--s:1.0;--r:6deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:31%;--b:28%;--s:0.84;--r:-9deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:16%;--b:41%;--s:1.1;--r:3deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:61%;--b:28%;--s:0.9;--r:-7deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:46%;--b:41%;--s:1.04;--r:11deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:11%;--b:28%;--s:0.98;--r:-2deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:36%;--b:54%;--s:0.87;--r:7deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:41%;--b:28%;--s:1.12;--r:-11deg">
-          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:26%;--b:41%;--s:0.94;--r:2deg">
-        </div>
-      </div>
-      <figure class="agents" data-panel aria-label="{{hero.previewLabel}}">
+  <div class="wrap hero__product">
+    <div class="hero__signal" aria-hidden="true">
+      <p>{{hero.signalLabel}}</p>
+      <strong>{{hero.signalValue}}</strong>
+      <span>{{hero.signalNote}}</span>
+      <img src="./assets/duck-brand.svg" width="1000" height="862" alt="">
+    </div>
+    <figure class="agents" aria-label="{{hero.previewLabel}}">
         <img class="agents__perch" data-duck="mood" data-perch src="./assets/duck-needs_you.webp" width="240" height="240" alt="">
         <div class="agents__head"><span class="agents__title">{{hero.previewTitle}}</span><span class="agents__status">{{hero.previewStatus}}</span></div>
         <ul class="agents__list">
@@ -104,13 +78,7 @@
           <li class="row row--working"><span class="dot" aria-hidden="true"></span><span class="row__text"><b>{{sessions.squeak.name}}</b><span>{{sessions.squeak.working}}</span></span><span class="row__age">{{sessions.squeak.age}}</span></li>
         </ul>
         <figcaption class="agents__note">{{hero.previewNote}}</figcaption>
-      </figure>
-    </div>
-    <div class="marks" aria-hidden="true">
-      <span class="marks__plus" style="left:0">+</span><span class="marks__plus" style="left:33.333%">+</span>
-      <span class="marks__label" data-scroll-hint>{{hero.scrollHint}}</span>
-      <span class="marks__plus" style="left:66.666%">+</span><span class="marks__plus" style="left:100%">+</span>
-    </div>
+    </figure>
   </div>
 </header>
 

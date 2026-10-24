@@ -74,7 +74,7 @@ public struct LocalHTTPTransport: HTTPTransport {
     /// A local call that takes longer than this has failed: the cloud is the fallback.
     public static let requestSeconds: TimeInterval = 3
     /// A probe must answer within about a second.
-    public static let probeSeconds: TimeInterval = 1
+    public static let probeSeconds: TimeInterval = 2
 
     public func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         let (signed, nonce) = try signer.sign(request, timeout: timeout)

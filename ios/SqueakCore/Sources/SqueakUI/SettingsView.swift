@@ -59,6 +59,14 @@ struct ConnectionDetailsView: View {
     }
 }
 
+/// A section header with its icon: small, muted, like every section in Settings.
+private struct SettingsHeader: View {
+    let title: String
+    let icon: String
+    init(_ title: String, icon: String) { self.title = title; self.icon = icon }
+    var body: some View { Label(title, systemImage: icon) }
+}
+
 /// The gear: which Mac this phone is paired with, how it is doing, and unpairing.
 struct SettingsView: View {
     /// A tab of the app's own bar, not a sheet: there is nothing to dismiss.
@@ -90,65 +98,112 @@ struct SettingsView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     }
 
-    var body: some View {
-        NavigationStack {
-            Form {
-                if !model.hiddenHere.isEmpty {
-                    Section {
-                        Button("Show \(model.hiddenHere.count) hidden \(model.hiddenHere.count == 1 ? "chat" : "chats") again") { model.showHiddenAgain() }
-                            .frame(minHeight: 44)
-                    } header: { Text("Hidden on this iPhone") } footer: {
-                        Text("Hiding only tidies this iPhone. A hidden chat comes back by itself when it has news.")
+    // MARK: The Mac card
+
+    private var glance: (text: String, tint: Color)? {
+        guard let snapshot = model.snapshot else { return nil }
+        if case .silent = model.macLiveness() { return nil }
+        var parts: [String] = []
+        var tint = Theme.muted
+        if let until = model.awake?.until { parts.append("Awake · \(AppModel.awakeLeft(until)) left") }
+        else if model.awake != nil { parts.append("Awake") }
+        if let onBattery = snapshot.macPower?.onBattery { parts.append(onBattery ? "On battery" : "Plugged in") }
+        if snapshot.macPower?.lidClosed == true { parts.append("Lid closed") }
+        switch snapshot.macHeat?.level {
+        case "warm": parts.append("Running warm"); tint = Theme.needsYou
+        case "hot": parts.append("Running hot"); tint = Theme.needsYou
+        default: break
+        }
+        return parts.isEmpty ? nil : (parts.joined(separator: " · "), tint)
+    }
+
+    private var routePill: (text: String, color: Color) {
+        if case .silent = model.macLiveness() { return ("Offline", Theme.offline) }
+        guard model.snapshot != nil else { return ("Connecting", Theme.subtle) }
+        return model.route == .local ? ("Wi-Fi direct", Theme.working) : ("Cloud", Theme.working)
+    }
+
+    private var macCard: some View {
+        let pill = routePill
+        return HStack(spacing: 14) {
+            Image(systemName: "laptopcomputer").font(.title3).foregroundStyle(Theme.ink)
+                .frame(width: 44, height: 44)
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.line))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(model.snapshot?.mac ?? "Your Mac").font(.headline).lineLimit(1)
+                    HStack(spacing: 5) {
+                        StatusDot(color: pill.color)
+                        Text(pill.text).font(.caption.weight(.medium))
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Theme.surfaceRaised, in: Capsule())
+                }
+                if let glance {
+                    Text(glance.text).font(.subheadline).foregroundStyle(glance.tint).lineLimit(2)
+                } else if case .silent(let since) = model.macLiveness() {
+                    Text("Last heard \(Age.sync(since))").font(.subheadline).foregroundStyle(Theme.muted)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var macCardSection: some View {
+        Section {
+            TimelineView(.periodic(from: .now, by: 20)) { _ in
+                if model.snapshot?.macControls != nil {
+                    NavigationLink { MacControlsView() } label: { macCard }
+                        .accessibilityIdentifier("mac-controls")
+                        .accessibilityHint("Opens Mac controls")
+                } else {
+                    macCard
+                }
+            }
+            if let snapshot = model.snapshot, snapshot.workspaces == nil {
+                Text("New chats from this iPhone need a newer Squeak on your Mac. Update it and the button appears.")
+                    .font(.footnote).foregroundStyle(Theme.muted)
+            }
+            DisclosureGroup {
+                if let snapshot = model.snapshot {
+                    let stale = Self.lastKnown(model.macLiveness())
+                    if !model.demo { LabeledContent("Route", value: Connection.routeText(model.route)) }
+                    if let power = snapshot.macPower {
+                        if let percent = power.percent { LabeledContent("Battery", value: Self.battery(percent: percent, power: power) + stale) }
+                        if let closed = power.lidClosed { LabeledContent("Lid", value: (closed ? "Closed" : "Open") + stale) }
+                    }
+                    if let reading = snapshot.macHeat?.reading { LabeledContent("Heat", value: reading + stale) }
+                    LabeledContent("Last change", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")
+                    if model.awakeOffered {
+                        Text(AwakeFormat.safetySentence(snapshot.awakeRules)).font(.footnote).foregroundStyle(Theme.muted)
+                        if !model.awakeLidReady {
+                            Text("To keep it awake with the lid closed, set that up once in Squeak on your Mac, under Settings, Keep awake.")
+                                .font(.footnote).foregroundStyle(Theme.muted)
+                        }
                     }
                 }
-                if model.snapshot?.macControls != nil {
-                    Section {
-                        NavigationLink { MacControlsView() } label: {
-                            Label("Mac controls", systemImage: "slider.horizontal.3")
-                        }
-                        .frame(minHeight: 44)
-                        .accessibilityIdentifier("mac-controls")
-                    } footer: { Text("Volume, brightness, fans and the screen, live.") }
-                }
+                NavigationLink("Connection details") { ConnectionDetailsView() }
+            } label: {
+                Text("Details").font(.subheadline).foregroundStyle(Theme.muted)
+            }
+            .font(.subheadline)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+            Form {
+                macCardSection
                 if model.awakeOffered {
                     AwakeSection(problem: $awakeProblem)
                     if model.lidActionsOffered {
                         LidActionsSection(problem: $lidActionsProblem)
                     }
-                }
-                Section("Your Mac") {
-                    LabeledContent("Name", value: model.snapshot?.mac ?? "Not seen yet")
-                    TimelineView(.periodic(from: .now, by: 20)) { _ in
-                        let state = model.connection()
-                        LabeledContent("Status") {
-                            HStack(spacing: 7) { StatusDot(color: state.color); Text(state.text) }
-                        }
-                    }
-                    if !model.demo, model.snapshot != nil {
-                        LabeledContent("Route", value: Connection.routeText(model.route))
-                    }
-                    if let snapshot = model.snapshot {
-                        if snapshot.workspaces == nil {
-                            Text("New chats from this iPhone need a newer Squeak on your Mac. Update it and the button appears.")
-                                .font(.subheadline).foregroundStyle(Theme.muted)
-                        }
-                        if let power = snapshot.macPower {
-                            // A Mac that stopped answering left these behind: say they are its last word.
-                            let stale = Self.lastKnown(model.macLiveness())
-                            if let percent = power.percent {
-                                LabeledContent("Battery", value: Self.battery(percent: percent, power: power) + stale)
-                            }
-                            if let closed = power.lidClosed {
-                                LabeledContent("Lid", value: (closed ? "Closed" : "Open") + stale)
-                            }
-                        }
-                        if let heat = snapshot.macHeat, let reading = heat.reading {
-                            LabeledContent("Heat", value: reading + Self.lastKnown(model.macLiveness()))
-                        }
-                        LabeledContent("Last change", value: Age.describe(snapshot.generatedAt) == "now" ? "Just now" : "\(Age.describe(snapshot.generatedAt)) ago")
-                    }
-                    NavigationLink("Connection details") { ConnectionDetailsView() }
-                        .frame(minHeight: 44)
                 }
                 if let hotspot = model.snapshot?.hotspot {
                     HotspotSection(hotspot: hotspot)
@@ -157,32 +212,42 @@ struct SettingsView: View {
                     Toggle("Show thinking live", isOn: Bindable(model).verbose)
                         .tint(Theme.primaryFill)
                         .frame(minHeight: 44)
-                } header: { Text("Activity") } footer: {
+                } header: { SettingsHeader("Live", icon: "bolt.horizontal") } footer: {
                     Text(model.liveAvailable
                         ? "A working chat's steps show its whole turn as it happens, thinking included. Your Mac sends it only while that chat is open here, and deletes it when you leave."
                         : "Needs your Mac on Squeak's faster channel. Until then, a working chat shows its latest six steps.")
                 }
                 Section {
-                    Text("Replies are signed on this iPhone and checked by your Mac. Face ID is asked before the first one, and again after Squeak has been away for five minutes.")
-                        .font(.subheadline).foregroundStyle(Theme.muted)
-                } header: { Text("Security") }
-                if let openReport = screen.openReport {
-                    Section {
+                    if !model.hiddenHere.isEmpty {
+                        Button("Show \(model.hiddenHere.count) hidden \(model.hiddenHere.count == 1 ? "chat" : "chats") again") { model.showHiddenAgain() }
+                            .frame(minHeight: 44)
+                    }
+                    if let openReport = screen.openReport {
                         Button("Report a problem") {
                             // Close Settings first: the report sheet can't stack on this one.
                             dismiss()
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openReport() }
                         }
                         .frame(minHeight: 44)
-                    } header: { Text("Feedback") } footer: {
-                        Text("Tell us what's broken, confusing or could be better. A person reads every report.")
                     }
-                }
-                Section {
                     Button("Unpair this iPhone", role: .destructive) { confirmingUnpair = true }
                         .frame(minHeight: 44)
-                } footer: {
-                    if !version.isEmpty { Text("Squeak for iPhone \(version)") }
+                } header: { SettingsHeader("This iPhone", icon: "iphone") } footer: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Replies are signed on this iPhone and checked by your Mac. Face ID is asked before the first one, and again after Squeak has been away for five minutes.")
+                        if !model.hiddenHere.isEmpty {
+                            Text("Hiding only tidies this iPhone. A hidden chat comes back by itself when it has news.")
+                        }
+                        if !version.isEmpty { Text("Squeak for iPhone \(version)") }
+                    }
+                }
+                // Room for the floating tab bar, so the last footer is never under it.
+                Section { Color.clear.frame(height: 72).listRowBackground(Color.clear).id("settings-end") }
+            }
+            .onAppear {
+                // Screenshots only: `-squeak-settings-scroll` shows the bottom of the page.
+                if ProcessInfo.processInfo.arguments.contains("-squeak-settings-scroll") {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { proxy.scrollTo("settings-end", anchor: .bottom) }
                 }
             }
             .scrollContentBackground(.hidden)
@@ -196,6 +261,7 @@ struct SettingsView: View {
             } message: {
                 Text("It will stop seeing and answering your agents until you pair again.")
             }
+            }
         }
         .foregroundStyle(Theme.ink)
     }
@@ -206,6 +272,7 @@ private struct HotspotSection: View {
     @Environment(AppModel.self) private var model
     let hotspot: PhoneSnapshot.Hotspot
     @State private var editing = false
+    @State private var setupOpen = false
     @State private var ssid = ""
     @State private var password = ""
     @State private var enabled = true
@@ -228,6 +295,7 @@ private struct HotspotSection: View {
                 }
                 .frame(minHeight: 44)
             } else {
+                DisclosureGroup(hotspot.configured ? "Change name or password" : "Set up hotspot failover", isExpanded: Binding(get: { editing || setupOpen }, set: { if !editing { setupOpen = $0 } })) {
                 TextField("Hotspot name", text: $ssid).textInputAutocapitalization(.never).autocorrectionDisabled()
                     .frame(minHeight: 44)
                 SecureField("Hotspot password", text: $password).frame(minHeight: 44)
@@ -238,8 +306,9 @@ private struct HotspotSection: View {
                 .frame(minHeight: 44)
                 .disabled(busy || ssid.trimmingCharacters(in: .whitespaces).isEmpty || password.count < 8)
                 if editing { Button("Cancel") { editing = false }.frame(minHeight: 44) }
+                }
             }
-        } header: { Text("Hotspot") } footer: {
+        } header: { SettingsHeader("Hotspot failover", icon: "personalhotspot") } footer: {
             Text(problem ?? hotspot.last?.note ?? footer)
         }
     }
@@ -262,33 +331,51 @@ private struct HotspotSection: View {
     }
 }
 
-/// What the Mac does when its lid closes during a lid-closed session: four switches, each a signed change
+/// What the Mac does when its lid closes during a lid-closed session: four tiles, each a signed change
 /// to the Mac's own setting. Shown only for a Mac that sends them.
 private struct LidActionsSection: View {
     @Environment(AppModel.self) private var model
     @Binding var problem: String?
 
+    private static let tiles: [String: (icon: String, name: String)] = [
+        "displayOff": ("display", "Display off"),
+        "mute": ("speaker.slash", "Mute"),
+        "lowPower": ("battery.25percent", "Low Power"),
+        "freezeApps": ("pause.circle", "Pause chat apps"),
+    ]
+
     var body: some View {
         Section {
-            ForEach(AwakeFormat.lidActionInfos) { info in
-                Toggle(isOn: Binding(
-                    get: { model.lidActions?[info.key] ?? false },
-                    set: { on in Task { problem = await model.changeLidAction(info.key, on) } }
-                )) {
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(info.title)
-                            Text(info.detail).font(.footnote).foregroundStyle(Theme.muted)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(AwakeFormat.lidActionInfos) { info in
+                    let on = model.lidActions?[info.key] ?? false
+                    let tile = Self.tiles[info.key] ?? ("questionmark", info.title)
+                    Button { Task { problem = await model.changeLidAction(info.key, !on) } } label: {
+                        VStack(spacing: 8) {
+                            ZStack {
+                                Image(systemName: tile.icon).font(.title2).foregroundStyle(on ? Theme.primaryText : Theme.ink).opacity(model.lidActionPending(info.key) ? 0 : 1)
+                                if model.lidActionPending(info.key) { ProgressView() }
+                            }
+                            .frame(height: 28)
+                            Text(tile.name).font(.footnote.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
                         }
-                        if model.lidActionPending(info.key) { ProgressView() }
+                        .frame(maxWidth: .infinity, minHeight: 76)
+                        .foregroundStyle(on ? Theme.primaryText : Theme.ink)
+                        .background(on ? Theme.primaryFill : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(on ? Color.clear : Theme.line))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(info.title)
+                    .accessibilityValue(on ? "On" : "Off")
+                    .accessibilityHint(info.detail)
+                    .accessibilityAddTraits(.isToggle)
+                    .accessibilityIdentifier("lid-action-\(info.key)")
                 }
-                .tint(Theme.primaryFill)
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("lid-action-\(info.key)")
             }
-        } header: { Text("When the lid closes") } footer: {
-            Text(problem ?? "Only during a lid closed session. Each one is undone when the lid opens or the session ends.")
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+        } header: { SettingsHeader("When the lid closes", icon: "laptopcomputer") } footer: {
+            Text(problem ?? "Only in a lid closed session. Undone when the lid opens.")
         }
     }
 }
@@ -306,99 +393,129 @@ private struct AwakeSection: View {
 
     private static let durations: [(String, String, Int)] = [("1h", "1 hour", 60), ("2h", "2 hours", 120), ("4h", "4 hours", 240), ("8h", "8 hours", 480)]
 
+    @State private var chosenMinutes = 120
+    @State private var peakMinutes = 60
+    @State private var showingInfo = false
+
     var body: some View {
         Section {
             TimelineView(.periodic(from: .now, by: 15)) { _ in
-                HStack(spacing: 10) {
-                    if model.awake?.pending == true { ProgressView() } else { StatusDot(color: model.awake == nil ? Theme.idle : Theme.working) }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Keep Mac awake").font(.headline)
-                        Text(statusLine).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+                VStack(alignment: .leading, spacing: 14) {
+                    if let awake = model.awake { onCard(awake) } else { offCard }
+                    if let problem = model.snapshot?.awakeSleepProblem {
+                        HStack(alignment: .top, spacing: 10) {
+                            StatusDot(color: Theme.error).padding(.top, 5)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Sleep is still turned off").font(.subheadline.weight(.medium))
+                                Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+                            }
+                        }
                     }
-                    Spacer(minLength: 0)
                 }
-                .accessibilityElement(children: .combine)
+                .padding(.vertical, 6)
             }
-            .frame(minHeight: 44)
-            if let problem = model.snapshot?.awakeSleepProblem {
-                HStack(alignment: .top, spacing: 10) {
-                    StatusDot(color: Theme.error).padding(.top, 5)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Sleep is still turned off").font(.body)
-                        Text(problem).font(.footnote).foregroundStyle(Theme.muted)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 4).frame(minHeight: 44)
-                .accessibilityElement(children: .combine)
+        } header: {
+            HStack {
+                SettingsHeader("Keep awake", icon: "moon.zzz")
+                Spacer()
+                Button { showingInfo = true } label: { Image(systemName: "info.circle") }
+                    .accessibilityLabel("About keeping your Mac awake")
             }
-            if let awake = model.awake {
-                if let lid = awake.lid { lidRow(lid, problem: awake.lidProblem) }
-                if let safety = awake.safety {
-                    HStack(spacing: 10) {
-                        StatusDot(color: Theme.idle)
-                        Text(safety).font(.subheadline).foregroundStyle(Theme.muted)
-                        Spacer(minLength: 0)
-                    }
-                    .frame(minHeight: 44)
-                    .accessibilityElement(children: .combine)
-                }
-                if awake.until != nil {
-                    Button("Add 1 hour") { change(.extend(minutes: 60)) }
-                        .frame(minHeight: 44)
-                }
-                Button("End awake session", role: .destructive) { confirmingEnd = true }
-                    .frame(minHeight: 44)
-                    .confirmationDialog("Let your Mac sleep again?", isPresented: $confirmingEnd, titleVisibility: .visible) {
-                        Button("End awake session", role: .destructive) { change(.end) }
-                    }
-            } else {
-                if let ended = AwakeFormat.ended(model.snapshot?.awakeLastEnd) {
-                    Text(ended).font(.footnote).foregroundStyle(Theme.muted)
-                }
-                if model.awakeLidReady {
-                    Toggle(isOn: $withLid) {
-                        Text("With the lid closed")
-                        Text(withLid ? "Safe to close the lid. It always has an end." : "Closing the lid will sleep your Mac.")
-                            .font(.footnote).foregroundStyle(Theme.muted)
-                    }
-                    .tint(Theme.primaryFill)
-                    .frame(minHeight: 44)
-                }
-                Text("Keep it awake for").font(.subheadline).foregroundStyle(Theme.muted)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
-                    ForEach(Self.durations, id: \.0) { choice in
-                        Button(choice.0) { change(.start(minutes: choice.2, lid: lid)) }
-                            .buttonStyle(.bordered)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .accessibilityLabel("Keep awake for \(choice.1)")
-                    }
-                }
-                .tint(Theme.primaryFill)
-                HStack(spacing: 12) {
-                    DatePicker("Until", selection: $untilTime, displayedComponents: .hourAndMinute)
-                    Button("Start") { change(.start(minutes: Self.minutes(until: untilTime), lid: lid)) }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.primaryFill)
-                }
-                .frame(minHeight: 44)
-                // A lid-closed session always ends by itself.
-                if !lid {
-                    Button("Until I end it") { change(.start(minutes: nil)) }
-                        .tint(Theme.primaryFill)
-                        .frame(minHeight: 44)
+        } footer: {
+            Text(problem ?? "Stops your Mac sleeping so this iPhone can reach it.")
+        }
+        .alert("Keeping your Mac awake", isPresented: $showingInfo) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(footer) }
+    }
+
+    @ViewBuilder
+    private func onCard(_ awake: AppModel.AwakeStatus) -> some View {
+        let left = awake.until.map { max(0, $0.timeIntervalSinceNow / 60) }
+        HStack(spacing: 10) {
+            if awake.pending { ProgressView() } else { StatusDot(color: Theme.working, pulses: true, period: 2) }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(awake.pending ? "Starting…" : awake.until.map { "On until \($0.formatted(date: .omitted, time: .shortened))" } ?? "On until you end it")
+                    .font(.title3.weight(.semibold))
+                if let until = awake.until, !awake.pending {
+                    Text("\(Self.left(until)) left").font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
                 }
             }
-        } header: { Text("Keep Mac awake") } footer: {
-            Text(problem ?? footer)
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+        if let left {
+            ProgressView(value: min(1, left / Double(max(peakMinutes, Int(left.rounded(.up)), 1))))
+                .tint(Theme.working)
+                .onAppear { peakMinutes = max(peakMinutes, Int(left.rounded(.up))) }
+                .onChange(of: awake.until) { _, new in
+                    if let new { peakMinutes = max(Int((new.timeIntervalSinceNow / 60).rounded(.up)), 1) }
+                }
+        }
+        if let lid = awake.lid { lidRow(lid, problem: awake.lidProblem) }
+        if let safety = awake.safety {
+            Label(safety, systemImage: "shield").font(.footnote).foregroundStyle(Theme.muted)
+        }
+        HStack(spacing: 10) {
+            if awake.until != nil {
+                pill("+1 hour", icon: "plus") { change(.extend(minutes: 60)) }
+            }
+            pill("End", icon: "stop.fill", destructive: true) { confirmingEnd = true }
+        }
+        .confirmationDialog("Let your Mac sleep again?", isPresented: $confirmingEnd, titleVisibility: .visible) {
+            Button("End awake session", role: .destructive) { change(.end) }
         }
     }
 
-    private var statusLine: String {
-        guard let awake = model.awake else { return "Off. Your Mac sleeps as usual." }
-        if awake.pending { return "Starting…" }
-        guard let until = awake.until else { return "On until you end it" }
-        return "On until \(until.formatted(date: .omitted, time: .shortened)) · \(Self.left(until)) left"
+    private func pill(_ title: String, icon: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) { Image(systemName: icon); Text(title) }.font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .foregroundStyle(destructive ? Theme.needsYou : Theme.ink)
+                .background(Theme.surfaceRaised, in: Capsule())
+                .overlay(Capsule().stroke(destructive ? Theme.needsYou.opacity(0.5) : Theme.line))
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var offCard: some View {
+        if let ended = AwakeFormat.ended(model.snapshot?.awakeLastEnd) {
+            Text(ended).font(.footnote).foregroundStyle(Theme.muted)
+        }
+        HStack(spacing: 8) {
+            ForEach(Self.durations, id: \.0) { choice in
+                Button(choice.0) { chosenMinutes = choice.2 }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 40)
+                    .foregroundStyle(chosenMinutes == choice.2 ? Theme.primaryText : Theme.ink)
+                    .background(chosenMinutes == choice.2 ? Theme.primaryFill : Theme.surfaceRaised, in: Capsule())
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(choice.1)
+                    .accessibilityAddTraits(chosenMinutes == choice.2 ? .isSelected : [])
+            }
+        }
+        Button { change(.start(minutes: chosenMinutes, lid: lid)) } label: {
+            Label("Keep Mac awake", systemImage: "moon.zzz.fill").font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .foregroundStyle(Theme.primaryText)
+                .background(Theme.primaryFill, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        if model.awakeLidReady {
+            Toggle(isOn: $withLid) { Label("With the lid closed", systemImage: "laptopcomputer") .font(.subheadline) }
+                .tint(Theme.primaryFill)
+        }
+        DisclosureGroup {
+            HStack(spacing: 12) {
+                DatePicker("Until", selection: $untilTime, displayedComponents: .hourAndMinute)
+                Button("Start") { change(.start(minutes: Self.minutes(until: untilTime), lid: lid)) }
+                    .buttonStyle(.bordered).tint(Theme.primaryFill)
+            }
+            if !lid {
+                Button("Until I end it") { change(.start(minutes: nil)) }.tint(Theme.primaryFill)
+            }
+        } label: { Text("More options").font(.subheadline).foregroundStyle(Theme.muted) }
     }
 
     /// The lid-closed part of the session, as the Mac reports it: working on it, safe to close, or why not.

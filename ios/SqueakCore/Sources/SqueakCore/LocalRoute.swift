@@ -15,16 +15,19 @@ public protocol LocalDiscovery: Sendable {
 /// The rules for choosing a route, with no I/O so they can be tested by feeding them events and a clock.
 ///
 /// Local is preferred whenever a probe succeeds. Any failure of a real call, or two missed heartbeats, goes
-/// back to the cloud at once; from there local is probed again every 30 seconds, and at once when the network
-/// changes or the Mac's address becomes known.
+/// back to the cloud at once; from there local is probed again on a backoff (3, 6, 12, then every 30 seconds:
+/// a first look often loses to the Local Network prompt or a slow mDNS answer, and must not cost half a
+/// minute), and at once when the network changes, the app comes back on screen, or the Mac's address becomes known.
 public struct RouteMachine: Equatable, Sendable {
     public private(set) var route: ChannelRoute = .cloud
     public private(set) var endpoint: URL?
     public private(set) var nextProbeAt: Date = .distantPast
     public private(set) var nextHeartbeatAt: Date = .distantFuture
     var heartbeatMisses = 0
+    var probeFailures = 0
 
     public static let reprobeSeconds: TimeInterval = 30
+    static let backoffSeconds: [TimeInterval] = [3, 6, 12, 30]
     public static let heartbeatSeconds: TimeInterval = 5
     /// Consecutive missed heartbeats before a quiet local path is given up (a real call failing is enough on its own).
     static let heartbeatLimit = 2
@@ -35,12 +38,14 @@ public struct RouteMachine: Equatable, Sendable {
     public func shouldHeartbeat(now: Date) -> Bool { route == .local && now >= nextHeartbeatAt }
 
     public mutating func probeSucceeded(_ url: URL, now: Date) {
-        route = .local; endpoint = url; heartbeatMisses = 0
+        route = .local; endpoint = url; heartbeatMisses = 0; probeFailures = 0
         nextHeartbeatAt = now.addingTimeInterval(Self.heartbeatSeconds)
     }
 
     public mutating func probeFailed(now: Date) {
-        nextProbeAt = now.addingTimeInterval(Self.reprobeSeconds)
+        let step = min(probeFailures, Self.backoffSeconds.count - 1)
+        probeFailures += 1
+        nextProbeAt = now.addingTimeInterval(Self.backoffSeconds[step])
     }
 
     /// A get, set or delete (or a stream) on the local path failed or timed out.
@@ -58,24 +63,30 @@ public struct RouteMachine: Equatable, Sendable {
 
     /// Wi-Fi changed (or came back): what was reachable may not be, and what was not may be.
     public mutating func networkChanged(now: Date) {
-        route = .cloud; endpoint = nil; heartbeatMisses = 0
+        route = .cloud; endpoint = nil; heartbeatMisses = 0; probeFailures = 0
         nextProbeAt = now
         nextHeartbeatAt = .distantFuture
     }
 
     /// The app came back on screen: confirm a local route soon rather than trust one from before it left.
     public mutating func checkSoon(now: Date) {
-        if route == .local { nextHeartbeatAt = now }
+        if route == .local {
+            nextHeartbeatAt = now
+        } else {
+            // A cloud route from before the app left the screen: the Wi-Fi may have changed meanwhile.
+            probeFailures = 0
+            nextProbeAt = min(nextProbeAt, now)
+        }
     }
 
     /// A new address for the Mac: try it now, if the cloud is what is in use.
     public mutating func addressLearned(now: Date) {
-        if route == .cloud { nextProbeAt = min(nextProbeAt, now) }
+        if route == .cloud { probeFailures = 0; nextProbeAt = min(nextProbeAt, now) }
     }
 
     private mutating func demote(now: Date) {
-        route = .cloud; endpoint = nil; heartbeatMisses = 0
-        nextProbeAt = now.addingTimeInterval(Self.reprobeSeconds)
+        route = .cloud; endpoint = nil; heartbeatMisses = 0; probeFailures = 0
+        nextProbeAt = now.addingTimeInterval(Self.backoffSeconds[0] + 2)
         nextHeartbeatAt = .distantFuture
     }
 }

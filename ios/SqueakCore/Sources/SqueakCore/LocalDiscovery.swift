@@ -9,7 +9,7 @@ public struct BonjourDiscovery: LocalDiscovery {
     let browseSeconds: Double
     let resolveSeconds: Double
 
-    public init(browseSeconds: Double = 1.2, resolveSeconds: Double = 1.0) {
+    public init(browseSeconds: Double = 3.0, resolveSeconds: Double = 2.5) {
         self.browseSeconds = browseSeconds; self.resolveSeconds = resolveSeconds
     }
 

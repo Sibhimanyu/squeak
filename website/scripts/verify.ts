@@ -412,9 +412,43 @@ async function scenarioNoJs(browser: Browser): Promise<void> {
   }
 }
 
-// The Lusion pass: the duck pile stage, Lenis, the stage growing into the moment.
-async function scenarioLusion(browser: Browser): Promise<void> {
-  const area = "lusion pass";
+// Hero pass: the quiet product scene should keep the decision and the actual
+// session panel visible, without relying on a decorative simulation.
+async function scenarioHero(browser: Browser): Promise<void> {
+  const area = "hero pass";
+  {
+    const { context, page, log } = await newPage(browser, DESKTOP);
+    await loadPage(page, BASE_URL);
+    await page.waitForTimeout(900);
+    const info = (await page.evaluate(`(() => {
+      const rect = (selector) => document.querySelector(selector)?.getBoundingClientRect();
+      const hero = rect(".hero");
+      const product = rect(".hero__product");
+      const panel = rect(".hero__product .agents");
+      const cta = rect(".hero .btn--primary");
+      return { hero, product, panel, cta, canvas: Boolean(document.querySelector("[data-stage] canvas")), rows: document.querySelectorAll(".hero__product .agents .row").length, signal: document.querySelector(".hero__signal strong")?.textContent?.trim() };
+    })()`)) as { hero: DOMRect | null; product: DOMRect | null; panel: DOMRect | null; cta: DOMRect | null; canvas: boolean; rows: number; signal: string | undefined };
+    check(area, "desktop: product panel is rendered in the hero", Boolean(info.hero && info.product && info.panel && info.panel.width >= 340 && info.panel.height >= 300 && info.panel.top >= info.product.top && info.panel.bottom <= info.product.bottom + 1), JSON.stringify(info.panel));
+    check(area, "desktop: hero retains the primary download decision", Boolean(info.cta && info.cta.top >= 0 && info.cta.bottom <= DESKTOP.height), JSON.stringify(info.cta));
+    check(area, "desktop: signal is textual and the session list has four rows", info.signal === "01" && info.rows === 4, `signal=${info.signal} rows=${info.rows}`);
+    check(area, "desktop: no decorative physics canvas remains", !info.canvas);
+    check(area, "desktop: no console errors or failed requests", log.consoleIssues.length === 0 && log.failed.length === 0, [...log.consoleIssues, ...log.failed].join(" | "));
+    await shot(page, "new-desktop-hero");
+    await context.close();
+  }
+  {
+    const { context, page, log } = await newPage(browser, MOBILE);
+    await loadPage(page, BASE_URL);
+    const info = (await page.evaluate(`({ product: Boolean(document.querySelector(".hero__product")), panelRows: document.querySelectorAll(".hero__product .agents .row").length, overflow: document.documentElement.scrollWidth - window.innerWidth })`)) as { product: boolean; panelRows: number; overflow: number };
+    check(area, "mobile: the hero keeps the product scene and has no overflow", info.product && info.panelRows === 4 && info.overflow === 0, JSON.stringify(info));
+    check(area, "mobile: no console errors or failed requests", log.consoleIssues.length === 0 && log.failed.length === 0, [...log.consoleIssues, ...log.failed].join(" | "));
+    await shot(page, "new-mobile-hero");
+    await context.close();
+  }
+  return;
+
+  /* Retained below temporarily as a record of the superseded duck-pile test.
+     It is intentionally unreachable while the new focused hero is in use. */
   const stats = `(() => { const c = document.querySelector("[data-stage] canvas"); return c ? { state: c.getAttribute("data-state"), frames: Number(c.getAttribute("data-frames") || 0) } : null; })()`;
 
   // --- desktop: a live canvas, shifts, expansion, Lenis and anchors ---
@@ -433,7 +467,7 @@ async function scenarioLusion(browser: Browser): Promise<void> {
     const first = (await page.evaluate(stats)) as { state: string; frames: number } | null;
     await page.waitForTimeout(500);
     const second = (await page.evaluate(stats)) as { state: string; frames: number } | null;
-    check(area, "desktop: duck canvas present and animating on load", Boolean(first && second && second.frames > first.frames), `frames ${first?.frames} -> ${second?.frames}`);
+    check(area, "desktop: duck canvas present and animating on load", Boolean(first && second && second!.frames > first!.frames), `frames ${first?.frames} -> ${second?.frames}`);
     const dom = await page.evaluate(() => {
       const canvas = document.querySelector<HTMLCanvasElement>("[data-stage] canvas");
       const stage = document.querySelector<HTMLElement>("[data-stage]");
@@ -495,9 +529,9 @@ async function scenarioLusion(browser: Browser): Promise<void> {
       const b = st.getById("moment");
       return a && b ? { stageEnd: a.end, pinStart: b.start } : null;
     });
-    check(area, "stage expansion ends before the moment pin starts", Boolean(trig && trig.stageEnd < trig.pinStart - 100), JSON.stringify(trig));
+    check(area, "stage expansion ends before the moment pin starts", Boolean(trig && trig!.stageEnd < trig!.pinStart - 100), JSON.stringify(trig));
     if (trig) {
-      await page.evaluate((y) => window.scrollTo(0, y), Math.round(trig.stageEnd) + 4);
+      await page.evaluate((y) => window.scrollTo(0, y), Math.round(trig!.stageEnd) + 4);
       await page.waitForTimeout(1200);
       const clip = await page.evaluate(() => {
         const el = document.querySelector<HTMLElement>("[data-stage]")!;
@@ -537,7 +571,7 @@ async function scenarioLusion(browser: Browser): Promise<void> {
     await page.waitForTimeout(300);
     const b = (await page.evaluate(stats)) as { frames: number; state: string } | null;
     const count = await page.evaluate(() => document.querySelectorAll(".pile__duck").length);
-    check(area, "mobile: canvas ran (frames counted)", Boolean(b && b.frames > 0), `frames ${a?.frames} -> ${b?.frames} (${b?.state})`);
+    check(area, "mobile: canvas ran (frames counted)", Boolean(b && b!.frames > 0), `frames ${a?.frames} -> ${b?.frames} (${b?.state})`);
     check(area, "mobile: no console errors", log.consoleIssues.length === 0, log.consoleIssues.join(" | "));
     evidence.pileSprites = count;
     await context.close();
@@ -981,10 +1015,10 @@ async function main(): Promise<void> {
   const browser = await chromium.launch({ headless: true });
   try {
     if (WITH_BASELINE) await baselineCapture(browser);
-    if (process.argv.includes("--only=lusion")) {
-      await scenarioLusion(browser);
+    if (process.argv.includes("--only=hero")) {
+      await scenarioHero(browser);
       const bad = checks.filter((c) => !c.ok);
-      console.log(`\n${checks.length - bad.length}/${checks.length} lusion checks passed`);
+      console.log(`\n${checks.length - bad.length}/${checks.length} hero checks passed`);
       process.exit(bad.length ? 1 : 0);
     }
     await scenarioDesktop(browser);
@@ -996,7 +1030,7 @@ async function main(): Promise<void> {
     await scenarioDisclosures(browser);
     await scenarioPinFit(browser);
     await scenarioContrast(browser);
-    await scenarioLusion(browser);
+    await scenarioHero(browser);
     await staticChecks(browser);
   } finally {
     await browser.close();
