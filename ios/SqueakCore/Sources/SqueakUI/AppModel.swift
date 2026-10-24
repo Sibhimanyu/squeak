@@ -1121,11 +1121,11 @@ final class AppModel {
     }
 
     /// Detailed usage over a range (Usage › Details), asked for when the page opens or the range changes.
-    func usageStats(_ range: String) async -> (stats: UsageStatsView?, problem: String?) {
-        if demo { return (DemoData.usageStats(range), nil) }
+    func usageStats(_ range: String, agent: String) async -> (stats: UsageStatsView?, problem: String?) {
+        if demo { return (DemoData.usageStats(range, agent: agent), nil) }
         guard let channel else { return (nil, "Not connected to your Mac.") }
         do {
-            let (id, document) = try channel.statsDocument(range: range, signer: signer)
+            let (id, document) = try channel.statsDocument(range: range, agent: agent, signer: signer)
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else { return (nil, "Your Mac didn't answer. Is Squeak running?") }
             guard result.sent, let stats = result.stats else { return (nil, result.reason ?? "Your Mac couldn't read its usage.") }

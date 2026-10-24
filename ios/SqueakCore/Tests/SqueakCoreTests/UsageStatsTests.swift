@@ -36,5 +36,16 @@ final class UsageStatsTests: XCTestCase {
         XCTAssertEqual(UsageStatsFormat.model("claude-sonnet-5"), "Sonnet 5")
         XCTAssertEqual(UsageStatsFormat.model("gpt-6.1-sol"), "gpt-6.1-sol")
         XCTAssertEqual(UsageStatsFormat.days(1), "1 day")
+        XCTAssertEqual(UsageStatsFormat.day("2026-09-24"), "24 Sep")
+        XCTAssertNil(UsageStatsFormat.day(nil))
+    }
+
+    func testSourceSaysWhereAndHowFarBack() throws {
+        let claude = try JSONDecoder().decode(UsageStatsView.self, from: Data(#"{"range":"all","agent":"claude","since":"2026-07-01","keepDays":30,"keptFrom":"2026-09-24","claudeCodeRecord":{"tokens":45582279877,"sessions":453,"messages":245534,"since":"2026-07-01","through":"2026-10-22"},"computedAt":"x","pending":0,"totals":{"tokens":1,"input":1,"output":0,"cacheRead":0,"cacheWrite":0,"messages":1,"sessions":1,"costUsd":null},"activeDays":1,"currentStreak":1,"longestStreak":1,"favoriteModel":null,"peakHour":null,"longestSession":null,"models":[],"daily":[],"projects":[]}"#.utf8))
+        XCTAssertTrue(UsageStatsFormat.source(claude).contains("deletes each file after 30 days, so All time here starts around 24 Sep"))
+        XCTAssertTrue(UsageStatsFormat.recordNote(claude.claudeCodeRecord!).hasPrefix("Claude Code's /stats counts 45.6B tokens since 1 Jul."))
+        let codex = try JSONDecoder().decode(UsageStatsView.self, from: Data(#"{"range":"all","agent":"codex","since":"2026-09-30","computedAt":"x","pending":0,"totals":{"tokens":1,"input":1,"output":0,"cacheRead":0,"cacheWrite":0,"messages":1,"sessions":1,"costUsd":null},"activeDays":1,"currentStreak":1,"longestStreak":1,"favoriteModel":null,"peakHour":null,"longestSession":null,"models":[],"daily":[],"projects":[]}"#.utf8))
+        XCTAssertTrue(UsageStatsFormat.source(codex).contains("ChatGPT app"))
+        XCTAssertTrue(UsageStatsFormat.source(codex).contains("go back to 30 Sep"))
     }
 }

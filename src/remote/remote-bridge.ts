@@ -9,7 +9,7 @@ import {
 import type { AwakeRules } from "../fleet/power-monitor.js";
 import type { HotspotState } from "../fleet/hotspot.js";
 import { readControlChange, type ControlChange, type MacApp, type MacControlsState } from "../fleet/mac-controls.js";
-import type { StatsRange, UsageStatsView } from "../fleet/usage-stats.js";
+import type { StatsAgent, StatsRange, UsageStatsView } from "../fleet/usage-stats.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -400,6 +400,8 @@ export interface StatsCommand {
   v: 1;
   kind: "stats";
   range: unknown;
+  /** "claude" or "codex"; absent (an older phone): both together. */
+  agent?: unknown;
   nonce: string;
   /** Epoch ms. */
   expiresAt: number;
@@ -528,7 +530,7 @@ export interface RemoteBridgeDependencies {
    * way to set it up, switch now, or switch back. Absent: phones hide it.
    */
   /** Detailed usage over a range (fleet/usage-stats.ts). Absent: phones hide Usage › Details. */
-  stats?: (range: StatsRange) => Promise<UsageStatsView>;
+  stats?: (range: StatsRange, agent?: StatsAgent) => Promise<UsageStatsView>;
   /** Live controls (fleet/mac-controls.ts): their state for the phone, and one change at a time. Absent: phones hide the page. */
   controls?: {
     state(): MacControlsState;
@@ -2354,8 +2356,12 @@ export class RemoteBridge {
     const range = command.range;
     if (range !== "7d" && range !== "30d" && range !== "all")
       return refuse("Not a range this Mac understands.", "bad range");
+    const agent = command.agent;
+    if (agent !== undefined && agent !== "claude" && agent !== "codex") {
+      return refuse("Not an agent this Mac understands.", "bad agent");
+    }
     try {
-      const stats = await this.deps.stats(range);
+      const stats = await this.deps.stats(range, agent);
       this.log(device.name, "sent", `stats ${range}`);
       return { write: true, result: { id, status: "sent", stats } };
     } catch {

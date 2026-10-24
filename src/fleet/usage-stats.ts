@@ -28,7 +28,19 @@ import { estimateMessageCostUsd, normalizeModelId } from "./claude-pricing.js";
  *   `cached_input_tokens` is a part of `input_tokens`, not on top of it.
  * - Cost is Claude only (claude-pricing.ts); Codex has no price table here, and
  *   an unpriced model adds no dollars rather than a guess.
+ *
+ * Claude and Codex are answered separately (`agent`), each with where it came
+ * from and how far back that goes (`since`), because the two keep different
+ * histories: Claude Code deletes a conversation's file after `cleanupPeriodDays`
+ * (30 by default), Codex keeps its rollouts. So for Claude, "all time" means as
+ * far back as the files go, and the view also carries Claude Code's own record
+ * (`~/.claude/stats-cache.json`, what its `/stats` shows), which outlives the
+ * files but sums every streamed copy of a message: on 2026-10-21 it read
+ * 1.01 B where the files, counted once per message, read 484 M; its per-model
+ * figures for Haiku and Sonnet matched "every copy summed" to the token.
  */
+
+export type StatsAgent = "claude" | "codex";
 
 export type StatsRange = "7d" | "30d" | "all";
 
@@ -59,8 +71,27 @@ export interface FileSummary {
   hours: number[];
 }
 
+/** Claude Code's own record over the same range, for comparison (see the note above). */
+export interface ClaudeCodeRecord {
+  tokens: number;
+  sessions: number;
+  messages: number;
+  /** Its first and last day, local dates. */
+  since: string | null;
+  through: string | null;
+}
+
 export interface UsageStatsView {
   range: StatsRange;
+  /** Which agent these are; absent: both (a phone that did not say). */
+  agent?: StatsAgent;
+  /** The earliest day with data for this agent, a local date; null when none. */
+  since: string | null;
+  /** Claude Code's days of keeping a conversation's file (Claude only). */
+  keepDays?: number;
+  /** From this local date every conversation's file is still there (Claude only); before it, only a few. */
+  keptFrom?: string;
+  claudeCodeRecord?: ClaudeCodeRecord | null;
   computedAt: string;
   /** Files still being read for the first time; the numbers grow until 0. */
   pending: number;
@@ -287,7 +318,18 @@ function listJsonl(dir: string, depth = 6): string[] {
 }
 
 /** Everything summed for one range. Pure, so it is tested without files. */
-export function aggregate(summaries: FileSummary[], range: StatsRange, now: number, pending = 0): UsageStatsView {
+export function aggregate(
+  all: FileSummary[],
+  range: StatsRange,
+  now: number,
+  pending = 0,
+  agent?: StatsAgent,
+): UsageStatsView {
+  const summaries = agent ? all.filter((s) => s.agent === agent) : all;
+  const since = summaries.reduce<string | null>((first, s) => {
+    for (const date of Object.keys(s.days)) if (first === null || date < first) first = date;
+    return first;
+  }, null);
   const days = range === "7d" ? 7 : range === "30d" ? 30 : null;
   const first = days === null ? null : localDate(now - (days - 1) * 86_400_000);
   const inRange = (date: string) => first === null || date >= first;
@@ -360,6 +402,8 @@ export function aggregate(summaries: FileSummary[], range: StatsRange, now: numb
   const peak = hours.reduce((best, n, h) => (n > (hours[best] ?? 0) ? h : best), 0);
   return {
     range,
+    ...(agent ? { agent } : {}),
+    since,
     computedAt: new Date(now).toISOString(),
     pending,
     totals: {
@@ -403,6 +447,39 @@ export function streaks(sortedDates: string[], today: string): { current: number
   return { current, longest };
 }
 
+/** Claude Code's own record (`stats-cache.json`) summed over a range; null when it has none. */
+export function readClaudeCodeRecord(file: string, range: StatsRange, now: number): ClaudeCodeRecord | null {
+  let raw: {
+    dailyModelTokens?: Array<{ date?: unknown; tokensByModel?: Record<string, unknown> }>;
+    dailyActivity?: Array<{ date?: unknown; messageCount?: unknown; sessionCount?: unknown }>;
+  };
+  try {
+    raw = JSON.parse(fs.readFileSync(file, "utf8")) as typeof raw;
+  } catch {
+    return null;
+  }
+  const days = range === "7d" ? 7 : range === "30d" ? 30 : null;
+  const first = days === null ? null : localDate(now - (days - 1) * 86_400_000);
+  const inRange = (date: unknown): date is string => typeof date === "string" && (first === null || date >= first);
+  let tokens = 0;
+  let sessions = 0;
+  let messages = 0;
+  const dates: string[] = [];
+  for (const day of raw.dailyModelTokens ?? []) {
+    if (!inRange(day.date)) continue;
+    dates.push(day.date);
+    for (const n of Object.values(day.tokensByModel ?? {})) tokens += num(n);
+  }
+  for (const day of raw.dailyActivity ?? []) {
+    if (!inRange(day.date)) continue;
+    sessions += num(day.sessionCount);
+    messages += num(day.messageCount);
+  }
+  if (dates.length === 0 && tokens === 0) return null;
+  dates.sort();
+  return { tokens, sessions, messages, since: dates[0] ?? null, through: dates.at(-1) ?? null };
+}
+
 interface CacheFile {
   version: number;
   files: Record<string, { size: number; mtimeMs: number; summary: FileSummary | null }>;
@@ -411,6 +488,8 @@ interface CacheFile {
 export interface UsageStatsOptions {
   cachePath: string;
   claudeDirs?: string[];
+  /** Where Claude Code keeps settings.json and stats-cache.json. */
+  claudeHome?: string;
   codexDirs?: string[];
   now?: () => number;
 }
@@ -423,28 +502,54 @@ export class UsageStats {
   private scannedAt = Number.NEGATIVE_INFINITY;
   private readonly now: () => number;
   private readonly claudeDirs: string[];
+  private readonly claudeHome: string;
   private readonly codexDirs: string[];
 
   constructor(private readonly options: UsageStatsOptions) {
     this.now = options.now ?? Date.now;
     const home = os.homedir();
-    this.claudeDirs = options.claudeDirs ?? [
-      path.join(process.env.CLAUDE_CONFIG_DIR ?? path.join(home, ".claude"), "projects"),
-    ];
+    this.claudeHome = options.claudeHome ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(home, ".claude");
+    this.claudeDirs = options.claudeDirs ?? [path.join(this.claudeHome, "projects")];
     const codexHome = process.env.CODEX_HOME ?? path.join(home, ".codex");
     this.codexDirs = options.codexDirs ?? [path.join(codexHome, "sessions"), path.join(codexHome, "archived_sessions")];
     this.cache = this.load();
   }
 
   /** The numbers for a range. Reads changed files first, unless that ran in the last minute; never waits on a first full read. */
-  async view(range: StatsRange): Promise<UsageStatsView> {
+  async view(range: StatsRange, agent?: StatsAgent): Promise<UsageStatsView> {
     if (this.now() - this.scannedAt >= MIN_RECOMPUTE_MS) {
       const scan = this.scan();
       // A first read of gigabytes runs on; answer with what is known and how much is left.
       await Promise.race([scan, new Promise((resolve) => setTimeout(resolve, 8_000))]);
     }
     const summaries = Object.values(this.cache.files).flatMap((f) => (f.summary ? [f.summary] : []));
-    return aggregate(summaries, range, this.now(), this.pending);
+    const view = aggregate(summaries, range, this.now(), this.pending, agent);
+    if (agent !== "claude") return view;
+    const keepDays = this.keepDays();
+    return {
+      ...view,
+      keepDays,
+      keptFrom: localDate(this.now() - keepDays * 86_400_000),
+      claudeCodeRecord: this.claudeCodeRecord(range),
+    };
+  }
+
+  /** Claude Code's `cleanupPeriodDays`, from its settings; 30 when unset. */
+  private keepDays(): number {
+    try {
+      const settings = JSON.parse(fs.readFileSync(path.join(this.claudeHome, "settings.json"), "utf8")) as {
+        cleanupPeriodDays?: unknown;
+      };
+      return typeof settings.cleanupPeriodDays === "number" && settings.cleanupPeriodDays > 0
+        ? settings.cleanupPeriodDays
+        : 30;
+    } catch {
+      return 30;
+    }
+  }
+
+  private claudeCodeRecord(range: StatsRange): ClaudeCodeRecord | null {
+    return readClaudeCodeRecord(path.join(this.claudeHome, "stats-cache.json"), range, this.now());
   }
 
   /** Reads every new or changed file, one at a time; a second call joins the first. */

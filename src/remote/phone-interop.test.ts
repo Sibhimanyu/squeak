@@ -141,8 +141,8 @@ function bridge(turn: string) {
         return { ok: true, actionId: "sq1", said: "Sent" };
       },
     },
-    stats: async (range: unknown) => {
-      statsRanges.push(range);
+    stats: async (range: unknown, agent?: unknown) => {
+      statsRanges.push([range, agent]);
       return { range } as never;
     },
     controls: {
@@ -342,7 +342,7 @@ describe("a reply made on the iPhone", () => {
     const { remote, config, statsRanges } = bridge("turn-1");
     const verdict = await remote.handleCommand(config, fixture.statsCommandId, fixture.statsCommand);
     expect(verdict.result).toEqual({ id: fixture.statsCommandId, status: "sent", stats: { range: "30d" } });
-    expect(statsRanges).toEqual(["30d"]);
+    expect(statsRanges).toEqual([["30d", "codex"]]);
   });
 
   it("sets the fans when the phone signs a controls request", async () => {
