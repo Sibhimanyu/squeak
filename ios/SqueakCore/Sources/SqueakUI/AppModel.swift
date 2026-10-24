@@ -1136,6 +1136,21 @@ final class AppModel {
     }
 
     /// The Mac's installed apps for the app picker, asked for when it opens; the reason when they could not be.
+    /// The front app's tabs, read, or changed (a tab pressed, a Conductor chat opened) and read again.
+    func frontTabs(_ change: ControlsCommand.Change = .listTabs) async -> (tabs: FrontTabs?, problem: String?) {
+        if demo { return (DemoData.frontTabs, nil) }
+        guard let channel else { return (nil, "Not connected to your Mac.") }
+        do {
+            let (id, document) = try channel.controlsDocument(change, signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return (nil, "Your Mac didn't answer. Is Squeak running?") }
+            guard result.sent else { return (nil, result.reason ?? "Your Mac couldn't do that.") }
+            return (result.tabs, nil)
+        } catch {
+            return (nil, "Couldn't reach your Mac.")
+        }
+    }
+
     func installedApps() async -> (apps: [PhoneSnapshot.MacApp], problem: String?) {
         if demo { return (DemoData.installedApps, nil) }
         guard let channel else { return ([], "Not connected to your Mac.") }

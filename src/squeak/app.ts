@@ -31,6 +31,7 @@ import {
   macHeatSystem,
 } from "../fleet/heat.js";
 import { MacControls, macControlsSystem } from "../fleet/mac-controls.js";
+import { macTabsSystem, WindowTabs } from "../fleet/window-tabs.js";
 import { UsageStats } from "../fleet/usage-stats.js";
 import { POWER_SUDOERS_PATH, PowerMode, powerSudoersRule, powerSystem } from "../fleet/power-mode.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
@@ -222,12 +223,37 @@ export class SqueakApp {
       "/Applications/Squeak.app/Contents/Helpers/squeak-apps",
       path.join(config.supportDir, "squeak-apps"),
     ];
-    this.controls = new MacControls(
-      macControlsSystem(readers, appsHelpers, config.handsAppPath),
-      this.heat,
-      () => this.remote?.changed(),
-      this.energy,
+    const controlsSystem = macControlsSystem(readers, appsHelpers, config.handsAppPath);
+    // The front app's tabs: Conductor's workspaces and chats from its records, any other app's through Squeak Hands.
+    const tabs = new WindowTabs(
+      macTabsSystem({
+        handsAppPath: config.handsAppPath,
+        front: async () => {
+          const front = (await controlsSystem.running())?.find((app) => app.active);
+          return front ? { id: front.id, name: front.name } : null;
+        },
+        conductor: () => {
+          const workspaces = listNewChatWorkspaces(config.conductorDbPath, 8);
+          const chats = this.runtime.registry.openChatsIn(workspaces.map((w) => w.id));
+          return workspaces.map((w) => ({
+            id: w.id,
+            name: [w.repoName, w.branch].filter(Boolean).join(" · "),
+            chats: chats
+              .filter((chat) => chat.workspaceId === w.id)
+              .map((chat) => ({
+                id: chat.id,
+                title: chat.title && chat.title !== "Untitled" ? chat.title : "Untitled chat",
+                working: ["working", "waiting", "cancelling"].includes(chat.status ?? ""),
+              })),
+          }));
+        },
+        chat: (id) => {
+          const row = this.runtime.registry.sessionForClose(id);
+          return row ? { workspaceId: row.workspaceId, title: row.title } : null;
+        },
+      }),
     );
+    this.controls = new MacControls(controlsSystem, this.heat, () => this.remote?.changed(), this.energy, tabs);
     this.usageStats = new UsageStats({ cachePath: path.join(config.supportDir, "usage-stats.json") });
     this.lidActions = new LidActions({
       settingsPath: path.join(config.supportDir, "awake-settings.json"),

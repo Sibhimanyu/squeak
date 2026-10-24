@@ -633,7 +633,7 @@ let args = CommandLine.arguments
 let mode = args.count > 1 ? args[1] : "probe"
 let outPath = args.count > 2 ? args[2] : "/tmp/squeak-hands.json"
 // Where errors go: the probe writes to its only path, send to its second.
-let errorPath = (mode == "send" || mode == "close" || mode == "press" || mode == "choose-file" || mode == "system-key") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
+let errorPath = (mode == "send" || mode == "close" || mode == "press" || mode == "choose-file" || mode == "system-key" || mode == "tabs" || mode == "show-chat") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
 let terminalModes: Set<String> = ["terminal-read", "terminal-type"]
 let wifiModes: Set<String> = ["wifi-join", "wifi-location", "wifi-scan"]
 
@@ -712,6 +712,58 @@ case "system-key":
         exit(65)
     }
     write(["ok": true], to: resultPath)
+
+case "tabs":
+    // tabs <request.json> <result.json>: the tab strip of one app's front window (Chrome, Safari, Terminal,
+    // Finder: any native AXTabGroup), for the phone's Mac controls page. "list" reads it; "select" presses one
+    // tab, only if the tab at that index still has the title the phone saw. Never types, never reads a page.
+    struct TabsRequest: Decodable { let bundleId: String; let action: String; let index: Int?; let title: String? }
+    let resultPath = args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json"
+    guard let data = FileManager.default.contents(atPath: outPath),
+          let request = try? JSONDecoder().decode(TabsRequest.self, from: data),
+          let running = NSRunningApplication.runningApplications(withBundleIdentifier: request.bundleId)
+              .first(where: { $0.activationPolicy == .regular })
+    else {
+        write(["ok": false, "error": "not-running"], to: resultPath)
+        exit(3)
+    }
+    let app = AXUIElementCreateApplication(running.processIdentifier)
+    // Chromium builds its tree only for assistive tech that asks: Chrome answers AXEnhancedUserInterface,
+    // Electron apps AXManualAccessibility.
+    AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+    _ = waitFor(2) { !((attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []).isEmpty }
+    let focused = attr(app, kAXFocusedWindowAttribute)
+    let window: AXUIElement? = focused.map { $0 as! AXUIElement } ?? ((attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []).first
+    /// The window's tabs, searched shallowly and never inside a web page: Safari's and Chrome's are tab buttons
+    /// (`AXTabButton`) in their tab bar, Terminal's and Finder's radio buttons in an `AXTabGroup`.
+    func findTabs(_ el: AXUIElement, depth: Int = 0, inGroup: Bool = false) -> [AXUIElement] {
+        if depth > 10 || role(el) == "AXWebArea" { return [] }
+        let r = role(el)
+        if str(el, kAXSubroleAttribute) == "AXTabButton" || (inGroup && (r == "AXRadioButton" || r == "AXTab")) { return [el] }
+        return children(el).flatMap { findTabs($0, depth: depth + 1, inGroup: r == "AXTabGroup") }
+    }
+    guard let window else {
+        write(["ok": true, "tabs": [] as [Any]], to: resultPath)
+        exit(0)
+    }
+    let tabs = findTabs(window)
+    func title(_ tab: AXUIElement) -> String {
+        String((str(tab, kAXTitleAttribute) ?? str(tab, kAXDescriptionAttribute) ?? "").prefix(200))
+    }
+    if request.action == "select" {
+        guard let index = request.index, tabs.indices.contains(index), title(tabs[index]) == request.title else {
+            write(["ok": false, "error": "tab-moved"], to: resultPath)
+            exit(3)
+        }
+        running.activate()
+        AXUIElementPerformAction(tabs[index], kAXPressAction as CFString)
+        Thread.sleep(forTimeInterval: 0.3)
+    }
+    let listed: [[String: Any]] = tabs.enumerated().map { index, tab in
+        ["index": index, "title": title(tab), "selected": (attr(tab, kAXValueAttribute) as? NSNumber)?.boolValue == true]
+    }
+    write(["ok": true, "tabs": Array(listed.prefix(60))], to: resultPath)
 
 case "press":
     // press <request.json> <result.json>: press the one control whose title or
@@ -841,6 +893,31 @@ case "close":
     if let error = result.error { payload["error"] = error }
     if let detail = result.detail { payload["detail"] = detail }
     write(payload, to: resultPath)
+case "show-chat":
+    // show-chat <request.json> <result.json>: puts one Conductor chat on screen and leaves it there, for the phone's
+    // Mac controls page. The same openChat the reply and close paths use: the workspace by its sidebar route, the
+    // tab until the route names the session. Presses only links and tabs, never types.
+    let resultPath = args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json"
+    guard let data = FileManager.default.contents(atPath: outPath),
+          let request = try? JSONDecoder().decode(CloseRequest.self, from: data)
+    else {
+        write(["ok": false, "error": "bad-request"], to: resultPath)
+        exit(65)
+    }
+    if screenIsLocked() { write(["ok": false, "error": CloseError.locked.rawValue], to: resultPath); exit(3) }
+    guard let running = conductorProcess() else { write(["ok": false, "error": CloseError.notRunning.rawValue], to: resultPath); exit(3) }
+    guard let conductor = ConductorWindow(pid: running.processIdentifier), waitFor(5, { conductor.webArea != nil }) else {
+        write(["ok": false, "error": CloseError.noWindow.rawValue], to: resultPath); exit(3)
+    }
+    running.activate()
+    if let (error, detail) = openChat(conductor, workspaceId: request.workspaceId, sessionId: request.sessionId,
+                                      sessionTitle: request.sessionTitle) {
+        var payload: [String: Any] = ["ok": false, "error": error.rawValue]
+        if let detail { payload["detail"] = detail }
+        write(payload, to: resultPath)
+        exit(3)
+    }
+    write(["ok": conductor.sessionId == request.sessionId], to: resultPath)
 case "terminal-read", "terminal-type":
     // terminal-read|terminal-type <request.json> <result.json>
     runTerminal(mode: mode, requestPath: outPath, resultPath: args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json")
