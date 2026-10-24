@@ -46,6 +46,19 @@ export interface ConductorUiSender {
   send(request: UiSendRequest): Promise<UiSendResult>;
 }
 
+/** Closing a chat's tab through its own "Close tab", as a person would; Conductor then hides it itself. */
+export interface UiCloseRequest {
+  workspaceId: string;
+  sessionId: string;
+  sessionTitle: string | null;
+}
+
+export type UiCloseResult = { ok: true } | { ok: false; error: string; detail?: string };
+
+export interface ConductorUiCloser {
+  close(request: UiCloseRequest): Promise<UiCloseResult>;
+}
+
 /** True when the failure means the text may be in the chat already. */
 export function mayHaveSent(result: UiSendResult): boolean {
   return !result.ok && (result.error === "unconfirmed" || result.error === "helper-failed");
@@ -83,7 +96,7 @@ export const DEFAULT_HANDS_APP = path.join(
 
 const HELPER_TIMEOUT_MS = 30_000;
 
-export class SqueakHandsSender implements ConductorUiSender {
+export class SqueakHandsSender implements ConductorUiSender, ConductorUiCloser {
   private readonly appPath: string;
   /** One window, one pair of hands: sends never overlap. */
   private queue: Promise<unknown> = Promise.resolve();
@@ -96,6 +109,21 @@ export class SqueakHandsSender implements ConductorUiSender {
     const run = this.queue.then(() => this.run(request));
     this.queue = run.catch(() => undefined);
     return run;
+  }
+
+  close(request: UiCloseRequest): Promise<UiCloseResult> {
+    const run = this.queue.then(() => this.runClose(request));
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async runClose(request: UiCloseRequest): Promise<UiCloseResult> {
+    const outcome = await runHands(this.appPath, "close", request);
+    if (outcome.status === "missing") return { ok: false, error: "helper-missing" };
+    if (outcome.status === "no-result") return { ok: false, error: "helper-failed", detail: outcome.detail };
+    const parsed = outcome.result as { ok?: boolean; error?: string; detail?: string };
+    if (parsed.ok) return { ok: true };
+    return { ok: false, error: parsed.error ?? "helper-failed", ...(parsed.detail ? { detail: parsed.detail } : {}) };
   }
 
   private async run(request: UiSendRequest): Promise<UiSendResult> {

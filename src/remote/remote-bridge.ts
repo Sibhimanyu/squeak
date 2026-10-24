@@ -180,7 +180,7 @@ export interface CloseCommand {
 
 /** What a phone may close: a Conductor chat's tab, nothing else. */
 export interface RemoteCloser {
-  close(sessionId: string): "closed" | "busy" | "missing";
+  close(sessionId: string): Promise<"closed" | "busy" | "missing"> | "closed" | "busy" | "missing";
 }
 
 /** A photo is a few chunks, and a message a few photos: this many chunks a minute, per phone. */
@@ -1833,7 +1833,7 @@ export class RemoteBridge {
     }
     let outcome: "closed" | "busy" | "missing" = "missing";
     try {
-      outcome = closer.close(command.sessionId);
+      outcome = await closer.close(command.sessionId);
     } catch (error) {
       logger.debug("could not close a chat", { error: error instanceof Error ? error.message : String(error) });
     }

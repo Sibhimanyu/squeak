@@ -883,6 +883,14 @@ export class ConductorRegistryAdapter {
    * Closes a chat's tab in Conductor (`is_hidden`), as closing it there does; the chat and its history stay.
    * Never a chat that is running or waiting on someone: Conductor's own process holds it.
    */
+  /** What closing a chat needs to know: whether it is busy, and where its tab is. Null when no such chat. */
+  sessionForClose(sessionId: string): { status: string | null; workspaceId: string; title: string | null } | null {
+    const row = this.db
+      .prepare(`SELECT status, workspace_id AS workspaceId, title FROM sessions WHERE id = ?`)
+      .get(sessionId) as { status: string | null; workspaceId: string; title: string | null } | undefined;
+    return row ?? null;
+  }
+
   closeSession(sessionId: string): "closed" | "busy" | "missing" {
     const row = this.db.prepare(`SELECT status FROM sessions WHERE id = ?`).get(sessionId) as
       | { status: string | null }

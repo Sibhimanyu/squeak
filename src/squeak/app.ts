@@ -34,6 +34,7 @@ import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
+import { closeChat } from "../fleet/close-chat.js";
 import { readActivity } from "../fleet/activity.js";
 import { parseChoices } from "../fleet/choices.js";
 import { renderUsage } from "../fleet/radar.js";
@@ -116,6 +117,8 @@ export class SqueakApp {
   private readonly replier: ConductorReplier;
   /** The loopback relay into Conductor's composer; inert until set up. */
   private readonly conductorRelay: ConductorRelayService;
+  /** Squeak Hands, shared by sends and closes so they never drive Conductor's window at once. */
+  private readonly hands: SqueakHandsSender | null;
   /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
   private readonly router: FleetReplyRouter;
   private readonly remote: RemoteBridge | null;
@@ -229,6 +232,7 @@ export class SqueakApp {
       codexQuotaWarnPercent: config.codexQuotaWarnPercent,
     });
 
+    this.hands = config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null;
     this.conductorRelay = new ConductorRelayService({
       conductorDbPath: config.conductorDbPath,
       statePath: path.join(config.supportDir, "conductor-relay.json"),
@@ -238,7 +242,7 @@ export class SqueakApp {
       claude: new ClaudeCodeAdapter(config.claudeBin),
       codex: new CodexAppServerAdapter(config.codexBin),
       relay: this.conductorRelay,
-      ui: config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null,
+      ui: this.hands,
     });
     this.router = new FleetReplyRouter({
       conductor: this.replier,
@@ -343,7 +347,17 @@ export class SqueakApp {
             answerer: answers,
             projectIcons: () => this.projectIcons.current(),
             renamer: { rename: (sessionId, title) => this.runtime.registry.renameSession(sessionId, title) },
-            closer: { close: (sessionId) => this.runtime.registry.closeSession(sessionId) },
+            closer: {
+              close: (sessionId) =>
+                closeChat(
+                  {
+                    lookup: (id) => this.runtime.registry.sessionForClose(id),
+                    hide: (id) => this.runtime.registry.closeSession(id),
+                    ui: this.hands,
+                  },
+                  sessionId,
+                ),
+            },
             newChat: {
               workspaces: () => listNewChatWorkspaces(config.conductorDbPath, 20),
               models: () => listChatModels(config.conductorDbPath),
