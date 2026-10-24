@@ -31,6 +31,7 @@ struct ImageViewer: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .background(Color.black)
             .ignoresSafeArea()
             .offset(y: drag)
         }
@@ -81,7 +82,7 @@ final class ZoomScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecogni
         imageView = UIImageView(image: image)
         super.init(frame: .zero)
         delegate = self
-        backgroundColor = .clear
+        backgroundColor = .black
         showsHorizontalScrollIndicator = false; showsVerticalScrollIndicator = false
         contentInsetAdjustmentBehavior = .never
         minimumZoomScale = 1; maximumZoomScale = Self.maxZoom

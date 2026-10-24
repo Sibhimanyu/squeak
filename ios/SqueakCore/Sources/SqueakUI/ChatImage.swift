@@ -39,7 +39,7 @@ struct ChatImage: View {
                     ImageFitLayout(natural: image.size, maxHeight: UIScreen.main.bounds.height * ImageSizing.maxHeightFraction) {
                         Image(uiImage: image).resizable()
                             .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line, lineWidth: 0.5))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }

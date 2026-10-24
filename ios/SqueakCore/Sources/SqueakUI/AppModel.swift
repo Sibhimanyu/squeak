@@ -1238,8 +1238,6 @@ final class AppModel {
             let colors = [UIColor(red: 0.98, green: 0.78, blue: 0.2, alpha: 1).cgColor, UIColor(red: 0.2, green: 0.45, blue: 0.9, alpha: 1).cgColor]
             let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1])!
             ctx.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
-            ctx.cgContext.setStrokeColor(UIColor.white.cgColor); ctx.cgContext.setLineWidth(8)
-            ctx.cgContext.stroke(CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4))
             let label = "\(Int(size.width)) × \(Int(size.height))" as NSString
             let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.boldSystemFont(ofSize: size.width / 9), .foregroundColor: UIColor.white]
             let textSize = label.size(withAttributes: attrs)
