@@ -3412,3 +3412,38 @@ describe("RemoteBridge a chat that seems stuck", () => {
     expect(JSON.stringify(f.bridge.phoneView())).not.toContain('"stalled"');
   });
 });
+
+describe("RemoteBridge background work", () => {
+  it("lists a working Claude chat's subagents and shells, and nothing for a resting one", async () => {
+    const f = fixture();
+    (f.bridge as unknown as { deps: RemoteBridgeDependencies }).deps.background = () => [
+      {
+        id: "toolu_1",
+        kind: "agent",
+        label: "Audit the relay",
+        background: true,
+        status: "running",
+        startedAt: "2026-09-25T02:55:00.000Z",
+      },
+      {
+        id: "toolu_2",
+        kind: "shell",
+        label: "Run the suite",
+        background: true,
+        status: "done",
+        startedAt: "2026-09-25T02:50:00.000Z",
+        endedAt: "2026-09-25T02:58:00.000Z",
+        summary: "completed (exit code 0)",
+      },
+    ];
+    await f.pair();
+    f.emit([session({ state: "working" })]);
+    const view = JSON.stringify(f.bridge.phoneView());
+    expect(view).toContain(
+      '"background":[{"id":"toolu_1","kind":"agent","label":"Audit the relay","status":"running","background":true,"startedAt":"2026-09-25T02:55:00.000Z"}',
+    );
+    expect(view).toContain('"summary":"completed (exit code 0)"');
+    f.emit([session({ state: "finished" })]);
+    expect(JSON.stringify(f.bridge.phoneView())).not.toContain("Audit the relay");
+  });
+});

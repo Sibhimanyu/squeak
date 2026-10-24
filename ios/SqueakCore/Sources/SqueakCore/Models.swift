@@ -114,7 +114,39 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Working, but nothing from the model (or only API retries) for long enough that it seems stuck: what
         /// it waits on ("model" or "api") and since when. Only from a Mac new enough to send it.
         public var stalled: Stalled? = nil
+        /// While it works: the chat's subagents and background shells, running or just ended. Only from a Mac
+        /// new enough to send it, and only for a Claude chat.
+        public var background: [BackgroundTask]? = nil
         public var id: String { key }
+
+        public struct BackgroundTask: Codable, Equatable, Sendable, Identifiable {
+            public let id: String
+            /// "agent" or "shell".
+            public let kind: String
+            public let label: String
+            /// "running", "done", "failed" or "stopped".
+            public let status: String
+            /// Launched to run beside the turn, so the turn may end while it runs.
+            public let background: Bool?
+            public let startedAt: String?
+            public let endedAt: String?
+            public let summary: String?
+            public init(id: String, kind: String, label: String, status: String, background: Bool? = nil,
+                        startedAt: String? = nil, endedAt: String? = nil, summary: String? = nil) {
+                self.id = id; self.kind = kind; self.label = label; self.status = status; self.background = background
+                self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary
+            }
+
+            /// "4 min" running so far, or how long it ran; nil without a start.
+            public func duration(now: Date = Date()) -> String? {
+                guard let startedAt, let start = ISO8601DateFormatter.squeakParse(startedAt) else { return nil }
+                let end = endedAt.flatMap { ISO8601DateFormatter.squeakParse($0) } ?? now
+                let seconds = max(0, Int(end.timeIntervalSince(start)))
+                if seconds < 60 { return "\(seconds) s" }
+                let minutes = seconds / 60
+                return minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"
+            }
+        }
 
         public struct Stalled: Codable, Equatable, Sendable {
             public let on: String

@@ -156,6 +156,9 @@ struct SessionView: View {
                 if session.state == "error" {
                     FailureNotice(reason: Presentation.failureReason(session), canReply: Presentation.replyBlock(session) == nil)
                 }
+                if let tasks = session.background, !tasks.isEmpty, session.state == "working" {
+                    BackgroundStrip(tasks: tasks)
+                }
                 if let stalled = session.stalled, session.state == "working" {
                     StuckNotice(stalled: stalled, canStop: session.conductorSessionId != nil, stopping: model.isStopping(session.key)) {
                         Task { await model.stop(session) }
@@ -346,6 +349,95 @@ private struct FailureNotice: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
         .padding(.horizontal, 16).padding(.bottom, 8)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// The chat's subagents and background shells while it works: one line saying how many run, opening to a row
+/// each with what it is, how long it has run, and how it ended. Folded by default once there are more than two.
+private struct BackgroundStrip: View {
+    let tasks: [PhoneSnapshot.Session.BackgroundTask]
+    @State private var open: Bool?
+
+    private var running: Int { tasks.filter { $0.status == "running" }.count }
+    private var isOpen: Bool { open ?? (tasks.count <= 2) }
+
+    private var summary: String {
+        let agents = tasks.filter { $0.kind == "agent" }.count
+        let shells = tasks.count - agents
+        let what = [agents > 0 ? "\(agents) \(agents == 1 ? "subagent" : "subagents")" : nil,
+                    shells > 0 ? "\(shells) \(shells == 1 ? "shell" : "shells")" : nil].compactMap { $0 }.joined(separator: ", ")
+        return running == 0 ? "\(what) · all ended" : running == tasks.count ? "\(what) · running" : "\(what) · \(running) running"
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 15)) { context in
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { open = !isOpen }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.stack.3d.up").font(.footnote).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        Text(summary).font(.footnote.weight(.medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
+                            .rotationEffect(.degrees(isOpen ? 180 : 0)).accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, 14).frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Background work: \(summary)")
+                .accessibilityHint(isOpen ? "Hides the list." : "Shows each one.")
+                if isOpen {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(tasks) { task in
+                            Rectangle().fill(Theme.line).frame(height: 1)
+                            row(task, now: context.date)
+                        }
+                    }
+                }
+            }
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+            .padding(.horizontal, 16).padding(.bottom, 8)
+        }
+    }
+
+    private func row(_ task: PhoneSnapshot.Session.BackgroundTask, now: Date) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: task.kind == "agent" ? "person.2" : "terminal")
+                .font(.footnote).foregroundStyle(Theme.muted).frame(width: 18).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(task.label).font(.subheadline).foregroundStyle(Theme.ink).lineLimit(2)
+                // Claude Code's "Agent "…" finished" only repeats the label; a shell's exit code is worth a line.
+                if task.status != "running", let summary = task.summary, !summary.contains(task.label) || task.kind == "shell" {
+                    Text(summary).font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 8)
+            status(task, now: now)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func status(_ task: PhoneSnapshot.Session.BackgroundTask, now: Date) -> some View {
+        let time = task.duration(now: now)
+        switch task.status {
+        case "running":
+            HStack(spacing: 6) {
+                StatusDot(color: Theme.working)
+                if let time { Text(time).font(.caption.monospacedDigit()).foregroundStyle(Theme.muted) }
+            }
+        case "done":
+            Label(time ?? "done", systemImage: "checkmark").labelStyle(.titleAndIcon)
+                .font(.caption).foregroundStyle(Theme.muted)
+                .accessibilityLabel(time.map { "done after \($0)" } ?? "done")
+        case "failed":
+            Label("failed", systemImage: "xmark").font(.caption).foregroundStyle(Theme.error)
+        default:
+            Text("stopped").font(.caption).foregroundStyle(Theme.muted)
+        }
     }
 }
 
