@@ -46,6 +46,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   lidActionsCommand: { box: string; sig: string; device: string };
   controlsCommandId: string;
   controlsCommand: { box: string; sig: string; device: string };
+  tabCommandId: string;
+  tabCommand: { box: string; sig: string; device: string };
   statsCommandId: string;
   statsCommand: { box: string; sig: string; device: string };
   workflowChooseCommandId: string;
@@ -336,6 +338,13 @@ describe("a reply made on the iPhone", () => {
     expect(awakeRequests).toEqual([
       { action: "lid-actions", mode: "closed", settings: { mute: false, freezeApps: true } },
     ]);
+  });
+
+  it("presses a tab when the phone signs a selectTab control", async () => {
+    const { remote, config, controlChanges } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.tabCommandId, fixture.tabCommand);
+    expect(verdict.result).toMatchObject({ id: fixture.tabCommandId, status: "sent" });
+    expect(controlChanges).toEqual([{ selectTab: { index: 1, title: "Heresay" } }]);
   });
 
   it("answers detailed usage when the phone signs a stats request", async () => {

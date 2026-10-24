@@ -884,6 +884,31 @@ export class ConductorRegistryAdapter {
    * Never a chat that is running or waiting on someone: Conductor's own process holds it.
    */
   /** What closing a chat needs to know: whether it is busy, and where its tab is. Null when no such chat. */
+  /**
+   * The open chats (tabs) of some workspaces, newest first, for the phone's Mac controls page. `is_hidden` is
+   * a closed tab, so only the rest are listed.
+   */
+  openChatsIn(
+    workspaceIds: string[],
+    perWorkspace = 8,
+  ): Array<{ id: string; workspaceId: string; title: string | null; status: string | null }> {
+    if (workspaceIds.length === 0) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT id, workspace_id AS workspaceId, title, status FROM sessions
+          WHERE workspace_id IN (${workspaceIds.map(() => "?").join(",")})
+            AND IFNULL(is_hidden, 0) = 0
+          ORDER BY datetime(updated_at) DESC`,
+      )
+      .all(...workspaceIds) as Array<{ id: string; workspaceId: string; title: string | null; status: string | null }>;
+    const counts = new Map<string, number>();
+    return rows.filter((row) => {
+      const n = counts.get(row.workspaceId) ?? 0;
+      counts.set(row.workspaceId, n + 1);
+      return n < perWorkspace;
+    });
+  }
+
   sessionForClose(sessionId: string): { status: string | null; workspaceId: string; title: string | null } | null {
     const row = this.db
       .prepare(`SELECT status, workspace_id AS workspaceId, title FROM sessions WHERE id = ?`)

@@ -5,6 +5,7 @@ import { logger } from "../utils/logger.js";
 import { runHands } from "./conductor-ui.js";
 import { type FanMode, FANS_HELPER_PRIVILEGED, type HeatGovernor, isFanMode } from "./heat.js";
 import { isPowerChoice, type PowerChoice, type PowerMode, type PowerState } from "./power-mode.js";
+import { type FrontTabs, readSelectTab, readShowChat, type WindowTabs } from "./window-tabs.js";
 
 /**
  * Live controls for the Mac from the phone's Mac controls page: volume and
@@ -43,7 +44,10 @@ export type ControlChange =
   | { space: "left" | "right" }
   | { media: "playPause" | "next" | "previous" }
   | { lock: true }
-  | { listApps: true };
+  | { listApps: true }
+  | { listTabs: true }
+  | { selectTab: { index: number; title: string } }
+  | { showChat: { sessionId: string } };
 
 export interface MacApp {
   id: string;
@@ -156,6 +160,16 @@ export function readControlChange(value: unknown): ControlChange | null {
       return v === true ? { lock: true } : null;
     case "listApps":
       return v === true ? { listApps: true } : null;
+    case "listTabs":
+      return v === true ? { listTabs: true } : null;
+    case "selectTab": {
+      const tab = readSelectTab(v);
+      return tab ? { selectTab: tab } : null;
+    }
+    case "showChat": {
+      const chat = readShowChat(v);
+      return chat ? { showChat: chat } : null;
+    }
     default:
       return null;
   }
@@ -215,6 +229,8 @@ export class MacControls {
     private readonly heat: Pick<HeatGovernor, "state" | "setFanChoice">,
     private readonly onChange: () => void = () => undefined,
     private readonly power: Pick<PowerMode, "state" | "refresh" | "apply"> | null = null,
+    /** The front app's tabs (window-tabs.ts); absent: the page shows none. */
+    private readonly tabs: Pick<WindowTabs, "list" | "select" | "showChat"> | null = null,
   ) {}
 
   get state(): MacControlsState {
@@ -287,7 +303,19 @@ export class MacControls {
 
   async apply(
     change: ControlChange,
-  ): Promise<{ ok: true; state: MacControlsState; apps?: MacApp[] } | { ok: false; reason: string }> {
+  ): Promise<{ ok: true; state: MacControlsState; apps?: MacApp[]; tabs?: FrontTabs } | { ok: false; reason: string }> {
+    if ("listTabs" in change || "selectTab" in change || "showChat" in change) {
+      if (!this.tabs) return { ok: false, reason: "This Mac can't switch tabs from a phone." };
+      if ("listTabs" in change) return { ok: true, state: this.state, tabs: await this.tabs.list() };
+      const outcome =
+        "selectTab" in change
+          ? await this.tabs.select(change.selectTab)
+          : await this.tabs.showChat(change.showChat.sessionId);
+      if (!outcome.ok) return outcome;
+      logger.info("mac control", { change: Object.keys(change)[0] });
+      void this.refresh();
+      return { ok: true, state: this.state, tabs: outcome.tabs };
+    }
     if ("listApps" in change) {
       return { ok: true, state: this.state, apps: await this.installed(true) };
     }

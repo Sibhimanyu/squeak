@@ -22,6 +22,15 @@ describe("reading a control change", () => {
     expect(readControlChange({ displaySleep: true })).toEqual({ displaySleep: true });
     expect(readControlChange({ open: "com.apple.Notes" })).toEqual({ open: "com.apple.Notes" });
     expect(readControlChange({ space: "left" })).toEqual({ space: "left" });
+    expect(readControlChange({ listTabs: true })).toEqual({ listTabs: true });
+    expect(readControlChange({ selectTab: { index: 0, title: "GitHub" } })).toEqual({
+      selectTab: { index: 0, title: "GitHub" },
+    });
+    expect(readControlChange({ showChat: { sessionId: "chat-0001" } })).toEqual({
+      showChat: { sessionId: "chat-0001" },
+    });
+    expect(readControlChange({ selectTab: { index: "0", title: "x" } })).toBeNull();
+    expect(readControlChange({ showChat: { sessionId: "x; rm" } })).toBeNull();
     expect(readControlChange({ media: "playPause" })).toEqual({ media: "playPause" });
     for (const bad of [
       { open: "-a Terminal" },

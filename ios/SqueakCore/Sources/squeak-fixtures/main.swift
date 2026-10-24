@@ -24,6 +24,7 @@ let (hotspotId, hotspotDocument) = try channel.hotspotDocument(
     action: .configure, ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true, signer: signer, now: madeAt)
 let (lidId, lidDocument) = try channel.lidActionsDocument(.init(mute: false, freezeApps: true), signer: signer, now: madeAt)
 let (controlsId, controlsDocument) = try channel.controlsDocument(.fans("60"), signer: signer, now: madeAt)
+let (tabId, tabDocument) = try channel.controlsDocument(.selectTab(1, title: "Heresay"), signer: signer, now: madeAt)
 let (statsId, statsDocument) = try channel.statsDocument(range: "30d", agent: "codex", signer: signer, now: madeAt)
 let (imageId, imageDocument) = try channel.imageDocument(sessionId: "s1", source: "/w/.context/shot.png", signer: signer, now: madeAt)
 let (diffId, diffDocument) = try channel.diffDocument(sessionId: "s1", file: 0, signer: signer, now: madeAt)
@@ -85,6 +86,9 @@ let fixture: [String: Any] = [
     // A live control from the Mac controls page: fans to 60%.
     "controlsCommandId": controlsId,
     "controlsCommand": ["box": controlsDocument.box, "sig": controlsDocument.sig!, "device": controlsDocument.device!],
+    // The front app's second tab, as the phone saw it.
+    "tabCommandId": tabId,
+    "tabCommand": ["box": tabDocument.box, "sig": tabDocument.sig!, "device": tabDocument.device!],
     // Codex's detailed usage for the last 30 days.
     "statsCommandId": statsId,
     "statsCommand": ["box": statsDocument.box, "sig": statsDocument.sig!, "device": statsDocument.device!],

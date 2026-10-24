@@ -1126,6 +1126,19 @@ public struct ControlsCommand: Codable, Equatable, Sendable {
         public var media: String?
         public var lock: Bool?
         public var listApps: Bool?
+        /// The front app's tabs (Conductor: its workspaces and chats), answered in the result.
+        public var listTabs: Bool?
+        public var selectTab: SelectTab?
+        public var showChat: ShowChat?
+        public struct SelectTab: Codable, Equatable, Sendable {
+            public let index: Int
+            /// The title the phone saw: a tab that moved since is refused, not another one pressed.
+            public let title: String
+        }
+        public struct ShowChat: Codable, Equatable, Sendable { public let sessionId: String }
+        public static var listTabs: Change { Change(listTabs: true) }
+        public static func selectTab(_ index: Int, title: String) -> Change { Change(selectTab: SelectTab(index: index, title: title)) }
+        public static func showChat(_ sessionId: String) -> Change { Change(showChat: ShowChat(sessionId: sessionId)) }
         public static func open(_ id: String) -> Change { Change(open: id) }
         public static func quit(_ id: String) -> Change { Change(quit: id) }
         public static func space(_ direction: String) -> Change { Change(space: direction) }
@@ -1206,6 +1219,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var ref: String? = nil
     /// For a controls `listApps`: the apps installed on the Mac, by name.
     public var apps: [PhoneSnapshot.MacApp]? = nil
+    /// For a controls `listTabs`, `selectTab` or `showChat`: the front app's tabs as they are now.
+    public var tabs: FrontTabs? = nil
     /// For a `stats` request: detailed usage over the range asked for.
     public var stats: UsageStatsView? = nil
 
@@ -1219,4 +1234,33 @@ public struct CommandResult: Codable, Equatable, Sendable {
 public struct PairingAnswer: Codable, Equatable, Sendable {
     public let approved: Bool
     public let mac: String?
+}
+
+/// The front app's tabs (src/fleet/window-tabs.ts): a window's tab strip, or Conductor's workspaces and their chats.
+public struct FrontTabs: Codable, Equatable, Sendable {
+    public struct App: Codable, Equatable, Sendable { public let id: String; public let name: String }
+    public struct Tab: Codable, Equatable, Sendable, Identifiable {
+        public let index: Int
+        public let title: String
+        public let selected: Bool
+        public var id: String { "\(index) \(title)" }
+    }
+    public struct Chat: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        public let title: String
+        public let working: Bool
+    }
+    public struct Workspace: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        /// "repo · branch".
+        public let name: String
+        public let chats: [Chat]
+    }
+    public let app: App?
+    /// "conductor", "tabs" or "none".
+    public let kind: String
+    public let tabs: [Tab]?
+    public let workspaces: [Workspace]?
+    /// Why there is nothing to show; nil when there is.
+    public let note: String?
 }

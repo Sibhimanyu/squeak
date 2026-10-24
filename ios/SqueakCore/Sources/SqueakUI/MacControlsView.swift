@@ -3,6 +3,12 @@ import SwiftUI
 
 /// The words of the Mac controls page, kept apart so they can be tested on the Mac too.
 enum MacControlsFormat {
+    /// "Safari tabs", "Conductor chats", "Tabs".
+    static func tabsTitle(_ tabs: FrontTabs?) -> String {
+        guard let tabs, let app = tabs.app else { return "Tabs" }
+        return tabs.kind == "conductor" ? "\(app.name) chats" : "\(app.name) tabs"
+    }
+
     static let fanModes: [(mode: String, title: String)] = [("auto", "Auto"), ("40", "40%"), ("60", "60%"), ("80", "80%"), ("max", "Full")]
 
     /// "2,300 rpm" from the fastest fan, "Off" when stopped, nil when unread.
@@ -45,6 +51,9 @@ struct MacControlsView: View {
     @State private var quitting: PhoneSnapshot.MacApp?
     @State private var confirmingLock = false
     @State private var showingApps = false
+    @State private var frontTabs: FrontTabs?
+    @State private var tabsProblem: String?
+    @State private var tabsBusy = false
 
     private var controls: PhoneSnapshot.MacControls? { model.snapshot?.macControls }
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
@@ -80,6 +89,8 @@ struct MacControlsView: View {
                         Tile(title: "Lock", symbol: "lock.fill") { confirmingLock = true }
                         desktopsTile
                     }
+                    // Right under the tiles: what you switch most, in whichever app is in front.
+                    tabsCard
                     if controls.media?.playing == true { mediaCard }
                     if let fans = controls.fans { fansCard(fans) }
                     if let power = controls.power, !power.available.isEmpty { powerCard(power) }
@@ -103,6 +114,16 @@ struct MacControlsView: View {
         .sheet(isPresented: $showingApps) { NavigationStack { AppPickerView() }.presentationDetents([.large]) }
         .navigationTitle("Mac controls")
         .navigationBarTitleDisplayMode(.inline)
+        // The tabs follow whichever app is in front: read again when that changes.
+        .task(id: controls?.apps?.first(where: { $0.active == true })?.id ?? "") { await loadTabs() }
+    }
+
+    private func loadTabs(_ change: ControlsCommand.Change = .listTabs) async {
+        tabsBusy = true
+        let (answer, failure) = await model.frontTabs(change)
+        if let answer { frontTabs = answer }
+        tabsProblem = failure
+        tabsBusy = false
     }
 
     private func send(_ change: ControlsCommand.Change) {
@@ -239,6 +260,74 @@ struct MacControlsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+    }
+}
+
+extension MacControlsView {
+    // MARK: Tabs
+
+    /// The front app's tabs: a browser's or Terminal's tab strip, or Conductor's workspaces and their open chats.
+    var tabsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: frontTabs?.kind == "conductor" ? "rectangle.stack" : "square.on.square")
+                    .foregroundStyle(Theme.muted)
+                Text(MacControlsFormat.tabsTitle(frontTabs)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                Spacer()
+                Button { Task { await loadTabs() } } label: {
+                    if tabsBusy { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
+                }
+                .foregroundStyle(Theme.muted).frame(minWidth: 44, minHeight: 32)
+                .accessibilityLabel("Read the tabs again")
+            }
+            if let tabs = frontTabs?.tabs, !tabs.isEmpty {
+                ForEach(tabs) { tab in
+                    tabRow(tab.title, selected: tab.selected) { Task { await loadTabs(.selectTab(tab.index, title: tab.title)) } }
+                }
+            } else if let workspaces = frontTabs?.workspaces, !workspaces.isEmpty {
+                ForEach(workspaces) { workspace in
+                    Text(workspace.name).font(.caption).foregroundStyle(Theme.subtle).padding(.top, 4)
+                    ForEach(workspace.chats) { chat in
+                        tabRow(chat.title, working: chat.working) { Task { await loadTabs(.showChat(chat.id)) } }
+                    }
+                }
+            } else if let note = frontTabs?.note {
+                Text(note).font(.footnote).foregroundStyle(Theme.muted)
+            } else if frontTabs == nil, tabsBusy {
+                Text("Reading the front app's tabs…").font(.footnote).foregroundStyle(Theme.muted)
+            }
+            if let tabsProblem { Text(tabsProblem).font(.footnote).foregroundStyle(Theme.muted) }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+    }
+
+    private func tabRow(_ title: String, selected: Bool = false, working: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if working { Circle().fill(Theme.working).frame(width: 7, height: 7).accessibilityHidden(true) }
+                Text(title).font(.subheadline).lineLimit(1).foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                if selected { Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted) }
+            }
+            .padding(.horizontal, 12).frame(minHeight: 44)
+            .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Theme.lineStrong : Theme.line))
+            .contentShape(Rectangle())
+        }
+        .disabled(tabsBusy)
+        .accessibilityLabel(working ? "\(title), working" : title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+extension DemoData {
+    /// The demo Mac's front app, for screenshots: Safari with a few tabs.
+    static var frontTabs: FrontTabs {
+        let json = #"{"app":{"id":"com.apple.Safari","name":"Safari"},"kind":"tabs","tabs":[{"index":0,"title":"GitHub","selected":true},{"index":1,"title":"Squeak - Firebase console","selected":false},{"index":2,"title":"Claude Docs","selected":false},{"index":3,"title":"Heresay","selected":false}]}"#
+        return try! JSONDecoder().decode(FrontTabs.self, from: Data(json.utf8))
     }
 }
 

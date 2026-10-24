@@ -9,6 +9,7 @@ import {
 import type { AwakeRules } from "../fleet/power-monitor.js";
 import type { HotspotState } from "../fleet/hotspot.js";
 import { readControlChange, type ControlChange, type MacApp, type MacControlsState } from "../fleet/mac-controls.js";
+import type { FrontTabs } from "../fleet/window-tabs.js";
 import type { StatsAgent, StatsRange, UsageStatsView } from "../fleet/usage-stats.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -536,7 +537,9 @@ export interface RemoteBridgeDependencies {
     state(): MacControlsState;
     apply(
       change: ControlChange,
-    ): Promise<{ ok: true; state: MacControlsState; apps?: MacApp[] } | { ok: false; reason: string }>;
+    ): Promise<
+      { ok: true; state: MacControlsState; apps?: MacApp[]; tabs?: FrontTabs } | { ok: false; reason: string }
+    >;
   };
   hotspot?: {
     state(): HotspotState;
@@ -2394,7 +2397,15 @@ export class RemoteBridge {
     this.nudgePublish(0);
     this.log(device.name, "sent", `controls ${Object.keys(change)[0]}`);
     // The installed apps travel only in the answer to the phone that asked.
-    return { write: true, result: { id, status: "sent", ...(outcome.apps ? { apps: outcome.apps } : {}) } };
+    return {
+      write: true,
+      result: {
+        id,
+        status: "sent",
+        ...(outcome.apps ? { apps: outcome.apps } : {}),
+        ...(outcome.tabs ? { tabs: outcome.tabs } : {}),
+      },
+    };
   }
 
   /** A keep-awake flip. Signature, freshness and nonce have already held. */
