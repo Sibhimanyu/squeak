@@ -549,7 +549,7 @@ let args = CommandLine.arguments
 let mode = args.count > 1 ? args[1] : "probe"
 let outPath = args.count > 2 ? args[2] : "/tmp/squeak-hands.json"
 // Where errors go: the probe writes to its only path, send to its second.
-let errorPath = (mode == "send" || mode == "press" || mode == "choose-file") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
+let errorPath = (mode == "send" || mode == "press" || mode == "choose-file" || mode == "system-key") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
 let terminalModes: Set<String> = ["terminal-read", "terminal-type"]
 let wifiModes: Set<String> = ["wifi-join", "wifi-location", "wifi-scan"]
 
@@ -579,6 +579,56 @@ case "probe":
         dump(window, depth: 0, into: &nodes)
     }
     write(["ok": true, "nodes": nodes], to: outPath)
+case "system-key":
+    // system-key <request.json> <result.json>: one of six fixed system actions for the phone's Mac
+    // controls page (src/fleet/mac-controls.ts). Never a key the caller names: only these.
+    struct KeyRequest: Decodable { let action: String }
+    let resultPath = args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json"
+    guard let data = FileManager.default.contents(atPath: outPath),
+          let request = try? JSONDecoder().decode(KeyRequest.self, from: data)
+    else {
+        write(["ok": false, "error": "bad-request"], to: resultPath)
+        exit(65)
+    }
+    let source = CGEventSource(stateID: .hidSystemState)
+    /// Control-← / Control-→: Mission Control's "move a space", on by default.
+    func space(_ key: CGKeyCode) {
+        for down in [true, false] {
+            let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down)
+            event?.flags = .maskControl
+            event?.post(tap: .cghidEventTap)
+        }
+    }
+    /// A media key (NX_KEYTYPE_PLAY 16, NEXT 17, PREVIOUS 18), as the keyboard's own keys send it.
+    func media(_ key: Int) {
+        for down in [true, false] {
+            let flags = NSEvent.ModifierFlags(rawValue: down ? 0xa00 : 0xb00)
+            let data1 = (key << 16) | ((down ? 0xa : 0xb) << 8)
+            NSEvent.otherEvent(with: .systemDefined, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                               context: nil, subtype: 8, data1: data1, data2: -1)?.cgEvent?.post(tap: .cghidEventTap)
+        }
+    }
+    switch request.action {
+    case "space-left": space(123)
+    case "space-right": space(124)
+    case "play-pause": media(16)
+    case "next": media(17)
+    case "previous": media(18)
+    case "lock":
+        // What Control-Command-Q does: login.framework's own lock, the screen locks at once.
+        typealias Lock = @convention(c) () -> Int32
+        guard let handle = dlopen("/System/Library/PrivateFrameworks/login.framework/Versions/Current/login", RTLD_LAZY),
+              let symbol = dlsym(handle, "SACLockScreenImmediate") else {
+            write(["ok": false, "error": "no-lock"], to: resultPath)
+            exit(3)
+        }
+        _ = unsafeBitCast(symbol, to: Lock.self)()
+    default:
+        write(["ok": false, "error": "bad-request"], to: resultPath)
+        exit(65)
+    }
+    write(["ok": true], to: resultPath)
+
 case "press":
     // press <request.json> <result.json>: press the one control whose title or
     // description is exactly `match` (optionally inside `within`), wait, and
