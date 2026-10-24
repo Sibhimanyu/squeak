@@ -333,6 +333,10 @@ private struct HotspotSection: View {
 private struct LidActionsGroup: View {
     @Environment(AppModel.self) private var model
     @Binding var problem: String?
+    /// True: one quiet row (title, what is on, chevron) that opens the tiles; false: the tiles alone, for
+    /// inside another disclosure. Never persisted, so it is closed on every launch.
+    var folded = true
+    @State private var open = false
 
     private static let tiles: [String: (icon: String, name: String)] = [
         "displayOff": ("display", "Display off"),
@@ -341,10 +345,42 @@ private struct LidActionsGroup: View {
         "freezeApps": ("pause.circle", "Pause chat apps"),
     ]
 
+    private static let short: [String: String] = ["displayOff": "Display off", "mute": "mute", "lowPower": "Low Power", "freezeApps": "pause chat apps"]
+
+    private var summary: String {
+        let on = AwakeFormat.lidActionInfos.filter { model.lidActions?[$0.key] ?? false }.map { Self.short[$0.key] ?? $0.title }
+        return on.isEmpty ? "Nothing" : on.joined(separator: ", ")
+    }
+
     var body: some View {
+        if folded {
+            VStack(alignment: .leading, spacing: 0) {
+                Button { withAnimation(.easeInOut(duration: 0.2)) { open.toggle() } } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "laptopcomputer").font(.footnote).foregroundStyle(Theme.muted)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("When the lid closes").font(.subheadline)
+                            Text(summary).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
+                            .rotationEffect(.degrees(open ? 90 : 0))
+                    }
+                    .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
+                if open { tilesView.padding(.bottom, 4) }
+            }
+            .padding(.top, 2)
+            .overlay(alignment: .top) { Divider() }
+        } else {
+            tilesView
+        }
+    }
+
+    private var tilesView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("When the lid closes", systemImage: "laptopcomputer")
-                .font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                 ForEach(AwakeFormat.lidActionInfos) { info in
                     let on = model.lidActions?[info.key] ?? false
@@ -376,8 +412,6 @@ private struct LidActionsGroup: View {
             Text(problem ?? "Only in a lid closed session. Undone when the lid opens.")
                 .font(.footnote).foregroundStyle(Theme.muted)
         }
-        .padding(.top, 10)
-        .overlay(alignment: .top) { Divider() }
     }
 }
 
@@ -413,7 +447,7 @@ private struct AwakeSection: View {
                             }
                         }
                     }
-                    if model.lidActionsOffered { LidActionsGroup(problem: $lidProblem) }
+                    if model.lidActionsOffered && model.awake != nil { LidActionsGroup(problem: $lidProblem) }
                 }
                 .padding(.vertical, 6)
             }
@@ -517,6 +551,13 @@ private struct AwakeSection: View {
             }
             if !lid {
                 Button("Until I end it") { change(.start(minutes: nil)) }.tint(Theme.primaryFill)
+            }
+            if model.lidActionsOffered {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("When the lid closes", systemImage: "laptopcomputer")
+                        .font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
+                    LidActionsGroup(problem: $lidProblem, folded: false)
+                }
             }
         } label: { Text("More options").font(.subheadline).foregroundStyle(Theme.muted) }
     }
