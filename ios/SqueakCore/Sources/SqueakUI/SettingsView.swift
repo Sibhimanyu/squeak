@@ -67,6 +67,8 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.squeakScreen) private var screen
     @State private var confirmingUnpair = false
+    /// `-squeak-controls` (screenshots only) opens the Mac controls page.
+    @State private var showingControls = ProcessInfo.processInfo.arguments.contains("-squeak-controls")
     @State private var awakeProblem: String?
     @State private var lidActionsProblem: String?
 
@@ -98,6 +100,15 @@ struct SettingsView: View {
                     } header: { Text("Hidden on this iPhone") } footer: {
                         Text("Hiding only tidies this iPhone. A hidden chat comes back by itself when it has news.")
                     }
+                }
+                if model.snapshot?.macControls != nil {
+                    Section {
+                        NavigationLink { MacControlsView() } label: {
+                            Label("Mac controls", systemImage: "slider.horizontal.3")
+                        }
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("mac-controls")
+                    } footer: { Text("Volume, brightness, fans and the screen, live.") }
                 }
                 if model.awakeOffered {
                     AwakeSection(problem: $awakeProblem)
@@ -177,6 +188,7 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Settings")
+            .navigationDestination(isPresented: $showingControls) { MacControlsView() }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { if !inTab { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } } }
             .confirmationDialog("Unpair this iPhone?", isPresented: $confirmingUnpair, titleVisibility: .visible) {

@@ -42,6 +42,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   hotspotCommand: { box: string; sig: string; device: string };
   lidActionsCommandId: string;
   lidActionsCommand: { box: string; sig: string; device: string };
+  controlsCommandId: string;
+  controlsCommand: { box: string; sig: string; device: string };
   workflowChooseCommandId: string;
   workflowChooseCommand: { box: string; sig: string; device: string };
   workflowMoreCommandId: string;
@@ -76,6 +78,7 @@ function bridge(turn: string) {
   const stops: string[] = [];
   const hotspotRequests: unknown[] = [];
   const awakeRequests: unknown[] = [];
+  const controlChanges: unknown[] = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string }> = [];
   const answers: Array<[string, unknown]> = [];
   const acts: Array<[string, unknown]> = [];
@@ -131,6 +134,26 @@ function bridge(turn: string) {
       act: (projectDir, action) => {
         acts.push([projectDir, action]);
         return { ok: true, actionId: "sq1", said: "Sent" };
+      },
+    },
+    controls: {
+      state: () => ({
+        volume: 40,
+        muted: false,
+        brightness: null,
+        fans: { mode: "auto" as const, choice: "auto" as const, available: true, rpm: [] },
+      }),
+      apply: async (change: unknown) => {
+        controlChanges.push(change);
+        return {
+          ok: true as const,
+          state: {
+            volume: 40,
+            muted: false,
+            brightness: null,
+            fans: { mode: "60" as const, choice: "60" as const, available: true, rpm: [] },
+          },
+        };
       },
     },
     hotspot: {
@@ -206,6 +229,7 @@ function bridge(turn: string) {
     stops,
     hotspotRequests,
     awakeRequests,
+    controlChanges,
     acts,
     pictures,
     written,
@@ -284,6 +308,13 @@ describe("a reply made on the iPhone", () => {
     const verdict = await remote.handleCommand(config, fixture.lidActionsCommandId, fixture.lidActionsCommand);
     expect(verdict.result).toEqual({ id: fixture.lidActionsCommandId, status: "sent" });
     expect(awakeRequests).toEqual([{ action: "lid-actions", settings: { mute: false, freezeApps: true } }]);
+  });
+
+  it("sets the fans when the phone signs a controls request", async () => {
+    const { remote, config, controlChanges } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.controlsCommandId, fixture.controlsCommand);
+    expect(verdict.result).toEqual({ id: fixture.controlsCommandId, status: "sent" });
+    expect(controlChanges).toEqual([{ fans: "60" }]);
   });
 
   it("sends an image the chat showed when the phone signs an image request", async () => {

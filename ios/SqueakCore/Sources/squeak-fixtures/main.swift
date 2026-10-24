@@ -23,6 +23,7 @@ let (promoteId, promoteDocument) = try channel.queueDocument(
 let (hotspotId, hotspotDocument) = try channel.hotspotDocument(
     action: .configure, ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true, signer: signer, now: madeAt)
 let (lidId, lidDocument) = try channel.lidActionsDocument(.init(mute: false, freezeApps: true), signer: signer, now: madeAt)
+let (controlsId, controlsDocument) = try channel.controlsDocument(.fans("60"), signer: signer, now: madeAt)
 let (imageId, imageDocument) = try channel.imageDocument(sessionId: "s1", source: "/w/.context/shot.png", signer: signer, now: madeAt)
 let (diffId, diffDocument) = try channel.diffDocument(sessionId: "s1", file: 0, signer: signer, now: madeAt)
 let (stopId, stopDocument) = try channel.stopDocument(to: session, signer: signer, now: madeAt)
@@ -77,6 +78,9 @@ let fixture: [String: Any] = [
     // What a closed lid does: mute off, pause chat apps on.
     "lidActionsCommandId": lidId,
     "lidActionsCommand": ["box": lidDocument.box, "sig": lidDocument.sig!, "device": lidDocument.device!],
+    // A live control from the Mac controls page: fans to 60%.
+    "controlsCommandId": controlsId,
+    "controlsCommand": ["box": controlsDocument.box, "sig": controlsDocument.sig!, "device": controlsDocument.device!],
     // An image chat s1's agent showed.
     "imageCommandId": imageId,
     "imageCommand": ["box": imageDocument.box, "sig": imageDocument.sig!, "device": imageDocument.device!],

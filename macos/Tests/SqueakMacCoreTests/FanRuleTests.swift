@@ -6,9 +6,9 @@ import Testing
 struct FanRuleTests {
     // What src/fleet/heat.ts `fansSudoersRule` writes.
     let rule = """
-        # Squeak: fans to full while a Mac kept awake runs hot, and back to the system's control.
-        # Exactly these two commands of a root-owned helper. Remove this file to take it back.
-        sibhi ALL=(root) NOPASSWD: /Library/PrivilegedHelperTools/com.squeak.fans max, /Library/PrivilegedHelperTools/com.squeak.fans auto
+        # Squeak: the fans to full while a Mac kept awake runs hot, or the speed you pick, and back to the system's control.
+        # Exactly these five commands of a root-owned helper. Remove this file to take it back.
+        sibhi ALL=(root) NOPASSWD: /Library/PrivilegedHelperTools/com.squeak.fans max, /Library/PrivilegedHelperTools/com.squeak.fans 80, /Library/PrivilegedHelperTools/com.squeak.fans 60, /Library/PrivilegedHelperTools/com.squeak.fans 40, /Library/PrivilegedHelperTools/com.squeak.fans auto
 
         """
 

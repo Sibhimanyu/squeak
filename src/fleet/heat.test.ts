@@ -36,8 +36,8 @@ function fakeMac(options: { fanControl?: boolean; fansWork?: boolean } = {}) {
   const system: HeatSystem = {
     read: async () => ({ die, fans: [{ rpm: 2300, min: 2300, max: 7800, manual: false }] }),
     fanControl: async () => options.fanControl !== false,
-    setFans: async (max) => {
-      calls.push(max ? "fans max" : "fans auto");
+    setFans: async (mode) => {
+      calls.push(`fans ${mode}`);
       return options.fansWork !== false;
     },
     processes: async () => rows,
@@ -86,8 +86,9 @@ describe("reading heat", () => {
     expect(parseFansRead('{"die":43.0,"sensors":42,"fans":[{"rpm":0,"min":2317,"max":7826,"manual":false}]}')).toEqual({
       die: 43,
       fans: [{ rpm: 0, min: 2317, max: 7826, manual: false }],
+      brightness: null,
     });
-    expect(parseFansRead('{"die":null,"fans":[]}')).toEqual({ die: null, fans: [] });
+    expect(parseFansRead('{"die":null,"fans":[],"brightness":57}')).toEqual({ die: null, fans: [], brightness: 57 });
     expect(parseFansRead("not json")).toBeNull();
     expect(readBatteryTemperature('  "Temperature" = 3047\n')).toBe(30.5);
     expect(readBatteryTemperature('"VirtualTemperature" = 3150')).toBeNull();
@@ -102,8 +103,9 @@ describe("reading heat", () => {
   });
 
   it("builds a sudoers rule for exactly two commands, for a plain account name", () => {
+    const helper = "/Library/PrivilegedHelperTools/com.squeak.fans";
     expect(fansSudoersRule("sibhi")).toContain(
-      "sibhi ALL=(root) NOPASSWD: /Library/PrivilegedHelperTools/com.squeak.fans max, /Library/PrivilegedHelperTools/com.squeak.fans auto",
+      `sibhi ALL=(root) NOPASSWD: ${helper} max, ${helper} 80, ${helper} 60, ${helper} 40, ${helper} auto\n`,
     );
     expect(fansSudoersRule("ALL")).toBeNull();
     expect(fansSudoersRule("a b")).toBeNull();
@@ -227,5 +229,47 @@ describe("HeatGovernor", () => {
     fs.writeFileSync(journalPath, JSON.stringify({ fansMax: true, slowed: [] }));
     await heat.recover();
     expect(JSON.parse(fs.readFileSync(journalPath, "utf8"))).toMatchObject({ fansMax: true });
+  });
+
+  it("keeps the fans where you put them, raises them to full while warm, and back to your pick", async () => {
+    const mac = fakeMac();
+    const { heat, journalPath } = governor(mac);
+    expect(await heat.setFanChoice("60")).toEqual({ ok: true });
+    expect(mac.calls).toEqual(["fans 60"]);
+    expect(heat.state).toMatchObject({ fanMode: "60", fanChoice: "60", fansMax: false });
+    expect(JSON.parse(fs.readFileSync(journalPath, "utf8"))).toMatchObject({ fansMax: true });
+    // Outside a session nothing undoes a pick.
+    await heat.check({ battery: 33, lidClosed: false }, false);
+    expect(mac.calls).toEqual(["fans 60"]);
+    await looks(heat, 2, { battery: 41, lidClosed: true });
+    expect(mac.calls).toContain("fans max");
+    // Picking lower while warm changes the pick, not the fans.
+    await heat.setFanChoice("40");
+    expect(heat.state).toMatchObject({ fanMode: "max", fanChoice: "40" });
+    await looks(heat, 4, { battery: 35, lidClosed: true });
+    expect(heat.state).toMatchObject({ level: "ok", fanMode: "40" });
+    expect(mac.calls.at(-1)).toBe("fans 40");
+    // Stopping hands them back to the system.
+    await heat.stop();
+    expect(mac.calls.at(-1)).toBe("fans auto");
+    expect(fs.existsSync(journalPath)).toBe(false);
+  });
+
+  it("refuses a fan speed without fan control, but auto is always fine", async () => {
+    const mac = fakeMac({ fanControl: false });
+    const { heat } = governor(mac);
+    expect(await heat.setFanChoice("max")).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("Set up fan control"),
+    });
+    expect(await heat.setFanChoice("auto")).toEqual({ ok: true });
+    expect(mac.calls).toEqual([]);
+  });
+
+  it("keeps the old pick when the fans refuse a new one", async () => {
+    const mac = fakeMac({ fansWork: false });
+    const { heat } = governor(mac);
+    expect(await heat.setFanChoice("80")).toMatchObject({ ok: false });
+    expect(heat.state).toMatchObject({ fanMode: "auto", fanChoice: "auto" });
   });
 });

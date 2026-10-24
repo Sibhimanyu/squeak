@@ -276,6 +276,10 @@ enum DemoData {
         if args.contains("-squeak-demo-hotspot") {
             demo.hotspot = .init(configured: true, ssid: "Sibhi's iPhone", enabled: true, onHotspot: false)
         }
+        // The Mac controls page: lid open (brightness shows), fan control set up.
+        demo.macControls = .init(volume: 40, muted: false, brightness: args.contains("-squeak-demo-lid-closed") ? nil : 57,
+                                 fans: .init(mode: "auto", choice: "auto", available: true, rpm: [2300, 2500]))
+        demo.macHeat = .init(level: "ok", chip: 62, battery: 33, fansRpm: [2300, 2500], fansMax: false, fanControl: true)
         #if DEBUG
         demo.projectIcons = DemoIcons.byProject
         #endif

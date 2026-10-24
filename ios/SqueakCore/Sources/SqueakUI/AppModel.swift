@@ -1060,6 +1060,32 @@ final class AppModel {
         }
     }
 
+    /// One live control of the Mac (volume, mute, brightness, fans, screen off). No Face ID: it reaches no agent
+    /// and carries no words. Nil when the Mac took it, else a line to show.
+    func changeControl(_ change: ControlsCommand.Change) async -> String? {
+        if demo {
+            // No Mac to ask: the demo keeps what was set.
+            guard var controls = snapshot?.macControls else { return nil }
+            if let v = change.volume { controls.volume = v }
+            if let m = change.muted { controls.muted = m }
+            if let b = change.brightness { controls.brightness = b }
+            if let f = change.fans { controls.fans?.choice = f; controls.fans?.mode = f }
+            snapshot?.macControls = controls
+            return nil
+        }
+        guard let channel else { return "Not connected to your Mac." }
+        do {
+            let (id, document) = try channel.controlsDocument(change, signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return "Your Mac didn't answer. Is Squeak running?" }
+            guard result.sent else { return result.reason ?? "Your Mac couldn't change that." }
+            await refresh()
+            return nil
+        } catch {
+            return "Couldn't reach your Mac."
+        }
+    }
+
     enum HotspotChange { case configure(ssid: String, password: String?, enabled: Bool), join, leave }
 
     /// Sets up hotspot failover, or switches the Mac's network now. Face ID first: it changes how the
