@@ -76,11 +76,17 @@ struct NewChatView: View {
             }
             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
             .background(Theme.bg.ignoresSafeArea())
+            // A downward swipe while typing puts the keyboard away; it never closes the page (see below).
+            .simultaneousGesture(DragGesture(minimumDistance: 12).onEnded { drag in
+                if focused, drag.translation.height > 24, abs(drag.translation.height) > abs(drag.translation.width) { focused = false }
+            })
             .navigationTitle("New chat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .safeAreaInset(edge: .bottom) { if !workspaces.isEmpty { bottomBar } }
-            .interactiveDismissDisabled(sending)
+            // Swiping down closes the page only when there is nothing to lose: not while typing (that swipe is for
+            // the keyboard), not with a draft or photos, not while sending. Cancel always closes it.
+            .interactiveDismissDisabled(sending || focused || !trimmed.isEmpty || !photos.isEmpty)
             .sheet(isPresented: $customizing) {
                 CustomizeSheet(setup: $setup, agent: $agent, allModels: allModels, workers: workers)
             }
@@ -157,7 +163,9 @@ struct NewChatView: View {
             }
             .padding(.horizontal, 6)
         }
-        .frame(minHeight: 150)
+        // Smaller while the keyboard is up, so the choices and Send stay above it on every phone.
+        .frame(minHeight: focused ? 88 : 150)
+        .animation(.easeOut(duration: 0.2), value: focused)
     }
 
     private func problemRow(_ message: String) -> some View {
@@ -173,29 +181,36 @@ struct NewChatView: View {
     /* ---------- how it works ---------- */
 
     private var bottomBar: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Text("How it works").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 8)
-                Button { focused = false; customizing = true } label: {
-                    HStack(spacing: 4) {
-                        Text("Customize").font(.subheadline.weight(.medium))
-                        Lucide(.chevronRight, size: 12, color: Theme.subtle)
+        // While typing, only what you act on: the choices and Send. The heading and the summary come back with
+        // the keyboard gone, so nothing is pushed under it.
+        VStack(spacing: focused ? 8 : 10) {
+            if !focused {
+                HStack {
+                    Text("How it works").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 8)
+                    Button { focused = false; customizing = true } label: {
+                        HStack(spacing: 4) {
+                            Text("Customize").font(.subheadline.weight(.medium))
+                            Lucide(.chevronRight, size: 12, color: Theme.subtle)
+                        }
+                        .frame(minHeight: 44).contentShape(Rectangle())
                     }
-                    .frame(minHeight: 44).contentShape(Rectangle())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                .padding(.bottom, -6)
             }
-            .padding(.bottom, -6)
             if !presets.isEmpty {
                 HStack(spacing: 8) { ForEach(presets, id: \.self) { presetChip($0) } }
             }
-            (presets.isEmpty || kind != .custom ? Text(summary) : Text(kind.title + "  ").fontWeight(.semibold).foregroundColor(Theme.ink) + Text(summary))
-                .font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if !focused {
+                (presets.isEmpty || kind != .custom ? Text(summary) : Text(kind.title + "  ").fontWeight(.semibold).foregroundColor(Theme.ink) + Text(summary))
+                    .font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             sendButton
         }
+        .animation(.easeOut(duration: 0.2), value: focused)
         .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 10)
         .background(Theme.bg)
     }
