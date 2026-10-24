@@ -389,7 +389,7 @@ enum DemoData {
                       turnId: "t5", message: ProcessInfo.processInfo.arguments.contains("-squeak-demo-tail") ? String(richMessage[richMessage.range(of: "```ts")!.lowerBound...]) : ProcessInfo.processInfo.arguments.contains("-squeak-demo-tables") ? tablesMessage : richMessage, choices: nil),
                 .init(key: "copy", conductorSessionId: id(7), label: "storefront · checkout-copy", agent: "codex", state: "finished",
                       lastActivityAt: now(-7200), detail: "Reviewed the checkout copy.", git: nil, contextPercent: nil,
-                      turnId: "t6", message: "Reviewed the checkout copy. Three strings were tightened.\n\n![Checkout, before and after](</Users/demo/conductor/workspaces/storefront/oslo/.context/checkout.png>)\n\nThe button now says what it does.", choices: nil),
+                      turnId: "t6", message: "Reviewed the checkout copy. Three strings were tightened.\n\n![Checkout, mobile](</Users/demo/conductor/workspaces/storefront/oslo/.context/checkout-portrait.png>)\n\n![Checkout, desktop](</Users/demo/conductor/workspaces/storefront/oslo/.context/checkout-wide.png>)\n\nThe button now says what it does.", choices: nil),
                 .init(key: "idle", conductorSessionId: id(8), label: "compass · release-notes", agent: "claude", state: "idle",
                       lastActivityAt: now(-10800), detail: nil, git: nil, contextPercent: nil,
                       turnId: nil, message: nil, choices: nil),

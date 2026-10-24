@@ -1227,6 +1227,26 @@ final class AppModel {
     @ObservationIgnored private var images: [String: UIImage] = [:]
     @ObservationIgnored private var imageOrder: [String] = []
 
+    /// Demo pictures with a known shape (`-portrait` tall, `-wide` landscape), to see how a chat keeps it.
+    private static func demoPicture(_ source: String) -> UIImage? {
+        let size: CGSize
+        if source.contains("-portrait") { size = CGSize(width: 600, height: 1300) }
+        else if source.contains("-wide") { size = CGSize(width: 1600, height: 700) }
+        else { return nil }
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            let colors = [UIColor(red: 0.98, green: 0.78, blue: 0.2, alpha: 1).cgColor, UIColor(red: 0.2, green: 0.45, blue: 0.9, alpha: 1).cgColor]
+            let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1])!
+            ctx.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+            ctx.cgContext.setStrokeColor(UIColor.white.cgColor); ctx.cgContext.setLineWidth(8)
+            ctx.cgContext.stroke(CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4))
+            let label = "\(Int(size.width)) × \(Int(size.height))" as NSString
+            let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.boldSystemFont(ofSize: size.width / 9), .foregroundColor: UIColor.white]
+            let textSize = label.size(withAttributes: attrs)
+            label.draw(at: CGPoint(x: (size.width - textSize.width) / 2, y: (size.height - textSize.height) / 2), withAttributes: attrs)
+        }
+    }
+
     /// An image the chat's agent showed, from the Mac (read-only, so no Face ID). Kept in memory
     /// only, never written to the phone.
     func loadImage(_ session: PhoneSnapshot.Session, source: String) async -> ImageAnswer {
@@ -1234,6 +1254,7 @@ final class AppModel {
         if let hit = images[cacheKey] { return .image(hit) }
         if demo {
             try? await Task.sleep(for: .milliseconds(400))
+            if let shaped = Self.demoPicture(source) { return .image(shaped) }
             return UIImage(named: "duck-asleep", in: .module, with: nil).map(ImageAnswer.image) ?? .refused("No demo image.")
         }
         // A picture on a film's card is named by the session's key; a chat's, by its Conductor id.

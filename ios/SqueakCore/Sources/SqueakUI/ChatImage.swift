@@ -3,6 +3,20 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
+/// Gives its one child the picture's own shape: as wide as the space allows (never past the picture's own
+/// size), as tall as that makes it up to `maxHeight`. The container is the picture, with no padding around it.
+private struct ImageFitLayout: Layout {
+    let natural: CGSize
+    let maxHeight: CGFloat
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? natural.width
+        return ImageSizing.fit(natural: natural, maxWidth: width, maxHeight: maxHeight)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+    }
+}
+
 /// An image the agent put in its answer (`![alt](/…/shot.png)`), which lives on the Mac. It loads on
 /// a tap, never by itself: nothing leaves the Mac until you ask. Loaded, a tap opens it full screen.
 struct ChatImage: View {
@@ -22,15 +36,25 @@ struct ChatImage: View {
             switch phase {
             case let .loaded(image):
                 Button { viewing = true } label: {
+                    ImageFitLayout(natural: image.size, maxHeight: UIScreen.main.bounds.height * ImageSizing.maxHeightFraction) {
+                        Image(uiImage: image).resizable()
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contextMenu {
+                    Button { UIPasteboard.general.image = image } label: { Label("Copy", systemImage: "doc.on.doc") }
+                    ShareLink(item: Image(uiImage: image), preview: SharePreview(name, image: Image(uiImage: image))) {
+                        Label("Share or Save…", systemImage: "square.and.arrow.up")
+                    }
+                } preview: {
                     Image(uiImage: image).resizable().scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: 360, alignment: .leading)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(name)
                 .accessibilityHint("Opens the image full screen")
-                .fullScreenCover(isPresented: $viewing) { ImageViewer(image: image, title: name) }
+                .fullScreenCover(isPresented: $viewing) { ImageViewer(images: [image], title: name) }
             default:
                 Button { load() } label: { placeholder }
                     .buttonStyle(.plain)
@@ -69,41 +93,11 @@ struct ChatImage: View {
         phase = .loading
         Task {
             switch await model.loadImage(session, source: source) {
-            case let .image(image): phase = .loaded(image)
+            case let .image(image):
+                phase = .loaded(image)
+                // `-squeak-image-viewer`: open the first picture at once, for screenshots of the demo.
+                if source.contains("-portrait"), ProcessInfo.processInfo.arguments.contains("-squeak-image-viewer") { viewing = true }
             case let .refused(reason): phase = .failed(reason)
-            }
-        }
-    }
-}
-
-/// Full screen, black, pinch to zoom and double-tap to fill; Share saves or sends it.
-private struct ImageViewer: View {
-    @Environment(\.dismiss) private var dismiss
-    let image: UIImage
-    let title: String
-    @State private var scale: CGFloat = 1
-    @GestureState private var pinch: CGFloat = 1
-
-    var body: some View {
-        NavigationStack {
-            GeometryReader { proxy in
-                ScrollView([.horizontal, .vertical], showsIndicators: false) {
-                    Image(uiImage: image).resizable().scaledToFit()
-                        .frame(width: proxy.size.width * scale * pinch, height: proxy.size.height * scale * pinch)
-                }
-                .gesture(MagnifyGesture()
-                    .updating($pinch) { value, state, _ in state = value.magnification }
-                    .onEnded { value in scale = min(max(scale * value.magnification, 1), 6) })
-                .onTapGesture(count: 2) { scale = scale > 1 ? 1 : 2.5 }
-            }
-            .background(Color.black.ignoresSafeArea())
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                ToolbarItem(placement: .primaryAction) {
-                    ShareLink(item: Image(uiImage: image), preview: SharePreview(title, image: Image(uiImage: image)))
-                }
             }
         }
     }
