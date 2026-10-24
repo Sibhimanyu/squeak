@@ -57,6 +57,16 @@ final class AppModel {
     private(set) var selected: SessionKey?
     private(set) var messages: [ChatMessage] = []
     private(set) var activity: [ActivityStep] = []
+    /// The open Conductor chat's model, stuck state, workspace and background work, from the daemon (ChatActions.swift).
+    var chatExtras: ChatExtras?
+    /// The models a chat can switch to, read once a chat with a model is open.
+    var chatModels: [DaemonChatModel] = []
+    /// Repositories a new workspace can be made in; nil from a daemon that cannot make one.
+    var workspaceRepos: [DaemonRepo]?
+    /// Why the last chat action (model, Stop, PR, archive) did not happen; shown above the composer.
+    var chatNote: String?
+    /// A chat action is on its way.
+    var chatBusy = false
     private(set) var openURL: URL?
     private(set) var draft = ""
     /// The agent's last message for sessions that need you, so cards can show the question and options.

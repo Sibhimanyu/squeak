@@ -44,11 +44,21 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
     /// The question a finished session's last message closes on ("Want me to open a PR?"). Present means the
     /// agent waits on an answer: the daemon counts it as needing you, and so does this app. Nil from an older daemon.
     public var asks: String?
+    /// What the chat runs, named by the daemon ("Opus 5.5 · 1M", "Extra high"), and as Conductor stores it
+    /// (`opus-5-5-1m`, `xhigh`) for the model picker. Nil from an older daemon or a terminal agent.
+    public var model: String?
+    public var effort: String?
+    public var fast: Bool?
+    public var modelId: String?
+    public var effortId: String?
+    /// Working with no word from the model for long enough that it seems stuck. Nil otherwise.
+    public var stalled: DaemonStall?
 
     enum CodingKeys: String, CodingKey {
         case key, agent, origin, originLabel, source, state, title, repoName, branch, cwd
         case lastActivityAt, contextPercent, alive, conductorSessionId, conductorWorkspaceId
         case replyTarget, distinctTitle, costUsd, asks
+        case model, effort, fast, modelId, effortId, stalled
     }
 
     public init(from decoder: Decoder) throws {
@@ -76,6 +86,12 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
         distinctTitle = c.lenient(String.self, .distinctTitle)
         costUsd = c.lenient(Double.self, .costUsd)
         asks = DaemonSession.cleaned(c.lenient(String.self, .asks))
+        model = DaemonSession.cleaned(c.lenient(String.self, .model))
+        effort = DaemonSession.cleaned(c.lenient(String.self, .effort))
+        fast = c.lenient(Bool.self, .fast)
+        modelId = DaemonSession.cleaned(c.lenient(String.self, .modelId))
+        effortId = DaemonSession.cleaned(c.lenient(String.self, .effortId))
+        stalled = c.lenient(DaemonStall.self, .stalled)
     }
 
     private static func cleaned(_ s: String?) -> String? {
@@ -84,6 +100,97 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
     }
 
     public init(key: String) { self.key = key }
+}
+
+/// What a stuck chat waits on (`model` or `api`) and since when.
+public struct DaemonStall: Decodable, Sendable, Equatable {
+    public var on: String
+    public var since: Date?
+    public init(on: String, since: Date?) { self.on = on; self.since = since }
+    enum CodingKeys: String, CodingKey { case on, since }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        on = c.lenient(String.self, .on) ?? "model"
+        since = c.lenient(String.self, .since).flatMap(DaemonDate.parse)
+    }
+
+    /// "No response from the model for 14 min", the radar's words.
+    public func line(now: Date = Date()) -> String {
+        let minutes = since.map { max(1, Int(now.timeIntervalSince($0) / 60)) }
+        let age = minutes.map { $0 >= 60 ? "\($0 / 60) h \($0 % 60) min" : "\($0) min" } ?? "a while"
+        return on == "api" ? "Retrying API errors for \(age)" : "No response from the model for \(age)"
+    }
+}
+
+/// One subagent or background shell of a working Claude chat (the activity route's `background`).
+public struct DaemonBackgroundTask: Decodable, Sendable, Equatable, Identifiable {
+    public var id: String
+    /// "agent" or "shell".
+    public var kind: String
+    public var label: String
+    /// "running", "done", "failed" or "stopped".
+    public var status: String
+    public var startedAt: Date?
+    public var endedAt: Date?
+    public var summary: String?
+    public init(id: String, kind: String, label: String, status: String, startedAt: Date? = nil, endedAt: Date? = nil, summary: String? = nil) {
+        self.id = id; self.kind = kind; self.label = label; self.status = status
+        self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary
+    }
+    enum CodingKeys: String, CodingKey { case id, kind, label, status, startedAt, endedAt, summary }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.lenient(String.self, .id) ?? UUID().uuidString
+        kind = c.lenient(String.self, .kind) ?? "agent"
+        label = c.lenient(String.self, .label) ?? ""
+        status = c.lenient(String.self, .status) ?? "running"
+        startedAt = c.lenient(String.self, .startedAt).flatMap(DaemonDate.parse)
+        endedAt = c.lenient(String.self, .endedAt).flatMap(DaemonDate.parse)
+        summary = c.lenient(String.self, .summary)
+    }
+
+    /// "4 min" so far, or how long it ran.
+    public func duration(now: Date = Date()) -> String? {
+        guard let startedAt else { return nil }
+        let seconds = max(0, Int((endedAt ?? now).timeIntervalSince(startedAt)))
+        if seconds < 60 { return "\(seconds) s" }
+        let minutes = seconds / 60
+        return minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"
+    }
+}
+
+/// The models `GET /control/models` lists, skipping any this app cannot read.
+public struct DaemonChatModels: Decodable, Sendable {
+    public var models: [DaemonChatModel]
+    enum CodingKeys: String, CodingKey { case models }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        models = (c.lenient([Failable<DaemonChatModel>].self, .models) ?? []).compactMap(\.value)
+    }
+}
+
+/// A model Conductor's picker offers (`GET /control/models`).
+public struct DaemonChatModel: Decodable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var agent: String
+    public var label: String
+    public var levels: [String]
+    public var defaultLevel: String?
+    public init(id: String, agent: String, label: String, levels: [String], defaultLevel: String? = nil) {
+        self.id = id; self.agent = agent; self.label = label; self.levels = levels; self.defaultLevel = defaultLevel
+    }
+
+    /// "low" is "Low", "xhigh" is "Extra high".
+    public static func levelName(_ level: String) -> String {
+        level == "xhigh" ? "Extra high" : level.prefix(1).uppercased() + level.dropFirst()
+    }
+}
+
+/// A repository a new workspace can be made in (`GET /control/workspace-repos`).
+public struct DaemonRepo: Decodable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public init(id: String, name: String) { self.id = id; self.name = name }
 }
 
 /// Claude Code's plan limits as `/state` reports them (`claudeLimits`).
@@ -447,10 +554,13 @@ public struct DaemonActivity: Decodable, Sendable, Equatable {
         }
     }
     public var steps: [Step]
-    enum CodingKeys: String, CodingKey { case steps }
+    /// A Claude chat's subagents and background shells; empty from an older daemon.
+    public var background: [DaemonBackgroundTask]
+    enum CodingKeys: String, CodingKey { case steps, background }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         steps = (c.lenient([Failable<Step>].self, .steps) ?? []).compactMap(\.value)
+        background = (c.lenient([Failable<DaemonBackgroundTask>].self, .background) ?? []).compactMap(\.value)
     }
 }
 

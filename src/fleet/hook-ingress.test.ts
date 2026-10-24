@@ -587,3 +587,52 @@ describe("HookIngressServer answer routes", () => {
     expect((await fetch(`${base}/answer`, { headers: auth })).status).toBe(405);
   });
 });
+
+describe("HookIngressServer chat actions and workspaces", () => {
+  it("routes stop, setup and pr to the chat action, behind the token", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const calls: unknown[][] = [];
+    server.setControl({
+      sessionMessage: () => ({}),
+      reply: async () => ({ status: "started", via: "conductor" }),
+      sessionAction: async (id, action, body) => {
+        calls.push([id, action, body]);
+        return { ok: true };
+      },
+      chatModels: () => [{ id: "opus-5-5" }],
+      workspaceRepos: () => ({ repos: [{ id: "r1", name: "farm" }] }),
+      workspaceAction: async (body) => ({ ok: true, echoed: body.action }),
+    });
+    const url = (route: string) => `http://127.0.0.1:${harness.port}${route}`;
+    const auth = { "x-squeak-token": harness.token };
+    for (const action of ["stop", "setup", "pr"]) {
+      const response = await fetch(url(`/control/session/s-1/${action}`), {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify(action === "setup" ? { model: "opus-5-5" } : {}),
+      });
+      expect(await response.json()).toEqual({ ok: true });
+    }
+    expect(calls).toEqual([
+      ["s-1", "stop", {}],
+      ["s-1", "setup", { model: "opus-5-5" }],
+      ["s-1", "pr", {}],
+    ]);
+    expect(await (await fetch(url("/control/models"), { headers: auth })).json()).toEqual({
+      models: [{ id: "opus-5-5" }],
+    });
+    expect(await (await fetch(url("/control/workspace-repos"), { headers: auth })).json()).toEqual({
+      repos: [{ id: "r1", name: "farm" }],
+    });
+    const made = await fetch(url("/control/workspace-action"), {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ action: "create", repoId: "r1" }),
+    });
+    expect(await made.json()).toEqual({ ok: true, echoed: "create" });
+    const refused = await fetch(url("/control/session/s-1/stop"), { method: "POST", body: "{}" });
+    expect(refused.status).toBe(403);
+    expect(calls).toHaveLength(3);
+  });
+});

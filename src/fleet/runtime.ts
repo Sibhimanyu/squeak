@@ -39,6 +39,7 @@ import { FleetStore } from "./fleet-store.js";
 import { ClaudeCostReader } from "./claude-cost.js";
 import { GitStateReader } from "./git-state.js";
 import { HookIngressServer } from "./hook-ingress.js";
+import { isStalled } from "./attention.js";
 import { defaultHookInstallPaths } from "./hook-install.js";
 import { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
 import { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
@@ -196,6 +197,13 @@ function serializeSession(
     ...(session.model ? { model: session.model } : {}),
     ...(session.effort ? { effort: session.effort } : {}),
     ...(session.fast ? { fast: true } : {}),
+    // The same as Conductor stores them, for the Mac app's model picker.
+    ...(session.modelId ? { modelId: session.modelId } : {}),
+    ...(session.effortId ? { effortId: session.effortId } : {}),
+    // Working with no word from the model for long enough that it seems stuck (attention.ts decides).
+    ...(isStalled(session, Date.now()) && session.waitingSince
+      ? { stalled: { on: session.waitingOn === "api" ? "api" : "model", since: session.waitingSince } }
+      : {}),
     alive: session.alive,
     conductorSessionId: session.conductorSessionId,
     conductorWorkspaceId: session.conductorWorkspaceId ?? null,

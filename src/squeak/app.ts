@@ -41,6 +41,7 @@ import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { closeChat } from "../fleet/close-chat.js";
 import { readActivity } from "../fleet/activity.js";
 import { BackgroundWorkReader } from "../fleet/background-work.js";
+import { resolveSetup } from "../fleet/chat-setup.js";
 import { parseChoices } from "../fleet/choices.js";
 import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
@@ -525,8 +526,14 @@ export class SqueakApp {
       transcript: (target, limit) => this.router.transcript(target, limit),
       activity: (key) => {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
-        return session?.transcriptPath ? readActivity(session.agent, session.transcriptPath) : { steps: [], total: 0 };
+        if (!session?.transcriptPath) return { steps: [], total: 0 };
+        // Subagents and background shells ride along for a Claude chat (fleet/background-work.ts).
+        const background =
+          session.agent === "claude" ? this.backgroundWork.read(session.transcriptPath, Date.now()) : [];
+        return { ...readActivity(session.agent, session.transcriptPath), ...(background.length ? { background } : {}) };
       },
+      chatModels: () => listChatModels(config.conductorDbPath),
+      sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),
       reply: (target, text, mode) =>
         this.router.send(
           target,
@@ -699,6 +706,47 @@ export class SqueakApp {
   }
 
   /** Hotspot failover's one entry: the phone's signed command and the Mac app's control route both end here. */
+  /**
+   * The Mac app's chat actions: Conductor's Stop, a new model or thinking level (checked against the models this
+   * Mac offers for the chat's own agent, as the phone's are), and asking a resting chat to open a pull request.
+   */
+  private async chatAction(
+    sessionId: string,
+    action: "stop" | "setup" | "pr",
+    body: Record<string, unknown>,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const snapshot = this.runtime.monitor.snapshot;
+    const session = snapshot.sessions.find((candidate) => candidate.conductorSessionId === sessionId);
+    if (!session) return { ok: false, reason: "That chat isn't in Conductor any more." };
+    if (action === "stop") return this.replier.stopTurn(sessionId);
+    if (action === "setup") {
+      const setup = resolveSetup(listChatModels(this.config.conductorDbPath), session, {
+        model: body.model,
+        thinking: body.thinking,
+        fast: body.fast,
+      });
+      if (!setup.ok) return setup;
+      return this.replier.setSetup(sessionId, {
+        model: setup.model,
+        ...(setup.thinkingLevel ? { thinkingLevel: setup.thinkingLevel } : {}),
+        fastMode: setup.fastMode,
+      });
+    }
+    if (["working", "awaiting_approval", "awaiting_input"].includes(session.state)) {
+      return { ok: false, reason: "The agent is mid-turn. Ask for the PR once it has finished." };
+    }
+    const workspace = session.conductorWorkspaceId
+      ? readWorkspace(this.config.conductorDbPath, session.conductorWorkspaceId)
+      : null;
+    if (!workspace) return { ok: false, reason: "That chat's workspace isn't in Conductor any more." };
+    const outcome = await this.router.send(sessionId, createPrPrompt(workspace), (message) => {
+      logger.warn("PR request from the Mac app failed", { sessionId, message });
+    });
+    return outcome.status === "refused" || outcome.status === "unconfirmed"
+      ? { ok: false, reason: outcome.reason }
+      : { ok: true };
+  }
+
   private async applyHotspot(request: unknown) {
     const parsed = readHotspotRequest(request);
     return parsed
