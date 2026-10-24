@@ -46,6 +46,7 @@ import { renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
 import { listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
+import { workspaceControl } from "../fleet/workspace-actions.js";
 import { listChatModels } from "../fleet/chat-models.js";
 import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "../fleet/project-icons.js";
 import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
@@ -466,6 +467,7 @@ export class SqueakApp {
         }
       },
       ...newChatControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }),
+      ...workspaceControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }),
       ...channelsControl(this.telegramStatus, () => ({
         cliqOneWay: Boolean(config.cliqWebhookUrl),
         cliqTwoWay: Boolean(config.cliqTwoWay),
