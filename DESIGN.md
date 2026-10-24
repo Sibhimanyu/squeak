@@ -584,10 +584,10 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   chat's or workspace's own `.context/attachments/<id>/` and the message names the path on a
   `[Image: …]` line the agent reads. In the chat those lines are a "Photo" or "2 photos" pill, never
   text. Where a photo is written is the Mac's own record of the folder, never anything the phone says.
-- **A chat screen hides the tab bar.** It opens at the newest message and follows what arrives only while
-  you are at the bottom; read further up and it lets go, with a "New" pill to come back.
 - **A chat screen hides the tab bar.** Its composer sits at the bottom, and the
-  bar floats over it. And it never goes blank while the Mac moves a chat
+  bar floats over it. It opens at the newest message and follows what arrives only while
+  you are at the bottom; read further up and it lets go, with a "New" pill to come back.
+  And it never goes blank while the Mac moves a chat
   between the active and recent lists (the two reach the phone separately): the
   phone keeps its last view of the chat for 90 s.
 - **The phone's own bottom bar** (standalone app only): **Home** (the cards by
@@ -651,8 +651,18 @@ A single text field with the target named in its placeholder: *"Message for
 orchard · irrigation"*. Send is the only primary button. The composer stays;
 each sent message carries one delivery line (sent / queued / steered / not
 sent), which becomes **Read by Claude** once the agent has it: its turn
-started from it, the turn shows the steer, or it left Conductor's queue.
-"Sent" only ever means the Mac has it. It never sends to a session the user did not explicitly pick.
+started from it, the turn shows the steer, or it left Conductor's queue. If the
+turn then ends with no answer after it (an error, a stop), the line becomes
+**Turn ended**, the final state. A steer's line carries its time: *Steered at
+14:05 · Read by Claude*. "Sent" only ever means the Mac has it. A sent bubble
+never takes more than about 85% of the width.
+
+An answer from before the one being worked on keeps full-contrast text (it is
+never faded to say "old"): a small muted **Previous answer** caption sits above
+it and a hairline (`line`) closes it before what follows. At the larger text
+sizes (from XXL) the stack under the chat (notices, queue, background work,
+setup line, composer) is capped at 40% of the screen and scrolls, and each
+queued message's Steer now and ⋯ sit under its text. It never sends to a session the user did not explicitly pick.
 
 While the agent works and nothing is typed, the button is **Stop** (a
 needs-you-red square on `surface-raised`, Conductor's own Stop; the working

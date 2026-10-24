@@ -267,7 +267,7 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertEqual(rows, [
             .agent(text: "Earlier answer", atISO: previous.atISO, muted: true),
             .folded(id: "part-0", steps: [TurnStep(kind: "tool", text: "Read a.ts")]),
-            .steer(id: steer.id.uuidString, text: "Keep the fallback", line: "Read by Claude"),
+            .steer(id: steer.id.uuidString, text: "Keep the fallback", line: ChatSend.Status.read(agent: "Claude").steerLine(at: steer.date)),
             .working(label: "Editing a file…", steps: [TurnStep(kind: "tool", text: "Edit a.ts")]),
         ])
     }
@@ -286,7 +286,7 @@ final class ChatTimelineTests: XCTestCase {
     func testASteerTypedOnTheMacStillShowsWhereItLanded() {
         let live = liveTurn(steps: [.init(kind: "you", text: "From the Mac"), .init(kind: "tool", text: "Edit a.ts")])
         let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [], live: live, now: now)
-        XCTAssertEqual(rows.first, .steer(id: "you-0", text: "From the Mac", line: "Read by Claude"))
+        XCTAssertEqual(rows.first, .steer(id: "you-0", text: "From the Mac", line: "Steered · Read by Claude"))
     }
 
     func testClippedReportsStillMatchTheSteer() {
@@ -319,7 +319,20 @@ final class ChatTimelineTests: XCTestCase {
         let steer = ChatSend(text: "Use the timer", date: now.addingTimeInterval(-3), answersTurn: "t1", status: .steered, mode: .steer)
         let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [steer],
                                      live: liveTurn(steps: [.init(kind: "tool", text: "Read a.ts")]), now: now)
-        XCTAssertTrue(rows.contains(.steer(id: steer.id.uuidString, text: "Use the timer", line: "Steered into the current turn")))
+        XCTAssertTrue(rows.contains(.steer(id: steer.id.uuidString, text: "Use the timer", line: ChatSend.Status.steered.steerLine(at: steer.date))))
+    }
+
+    func testSteerLineCarriesItsTime() {
+        let at = Date(timeIntervalSince1970: 1_700_000_000)
+        let clock = at.formatted(date: .omitted, time: .shortened)
+        XCTAssertEqual(ChatSend.Status.steered.steerLine(at: at), "Steered at \(clock)")
+        XCTAssertEqual(ChatSend.Status.read(agent: "Claude").steerLine(at: at), "Steered at \(clock) · Read by Claude")
+        XCTAssertEqual(ChatSend.Status.turnEnded.steerLine(at: at), "Steered at \(clock) · Turn ended")
+        // Typed on the Mac: no time of its own.
+        XCTAssertEqual(ChatSend.Status.read(agent: "Codex").steerLine(at: nil), "Steered · Read by Codex")
+        // Not landed yet or refused: the ordinary line.
+        XCTAssertEqual(ChatSend.Status.sending.steerLine(at: at), "Sending…")
+        XCTAssertEqual(ChatSend.Status.refused("busy").steerLine(at: at), ChatSend.Status.refused("busy").line)
     }
 
     func testReadLine() {

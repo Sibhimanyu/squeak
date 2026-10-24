@@ -166,7 +166,7 @@ struct SessionView: View {
         }
         .background(Theme.bg.ignoresSafeArea())
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
+            BottomStack {
                 if session.state == "error" {
                     FailureNotice(reason: Presentation.failureReason(session), canReply: Presentation.replyBlock(session) == nil)
                 }
@@ -227,6 +227,30 @@ struct SessionView: View {
         guard case .working(_, let steps)? = rows.last else { return 0 }
         return steps.count * 1_000 + (steps.last?.text.count ?? 0) % 1_000
     }
+}
+
+/// What sits under the chat (notices, queue, background work, setup line, composer). At large text sizes it would
+/// fill most of the screen and truncate, so from `.xxLarge` up its height is capped at 40% of the screen and it
+/// scrolls; at the normal sizes it is the plain stack it always was.
+private struct BottomStack<Content: View>: View {
+    @ViewBuilder var content: Content
+    @Environment(\.dynamicTypeSize) private var size
+    @State private var measured: CGFloat = 0
+
+    var body: some View {
+        if size >= .xxLarge {
+            ScrollView {
+                VStack(spacing: 0) { content }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measured = $0 }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: min(measured, BottomStack.cap))
+        } else {
+            VStack(spacing: 0) { content }
+        }
+    }
+
+    static var cap: CGFloat { UIScreen.main.bounds.height * 0.4 }
 }
 
 private struct HoldChatScrollKey: EnvironmentKey {
@@ -408,7 +432,7 @@ private struct BackgroundStrip: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "square.stack.3d.up").font(.footnote).foregroundStyle(Theme.muted).accessibilityHidden(true)
-                        Text(summary).font(.footnote.weight(.medium)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Text(summary).font(.footnote.weight(.medium)).foregroundStyle(Theme.ink).multilineTextAlignment(.leading)
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
                             .rotationEffect(.degrees(isOpen ? 180 : 0)).accessibilityHidden(true)
@@ -644,6 +668,8 @@ private struct ChatRows: View {
                     .equatable()
                     // Images in the answer load from the Mac on a tap.
                     .environment(\.messageImage, { alt, source in AnyView(ChatImage(alt: alt, source: source, session: session)) })
+                    // A hairline closes the previous answer before what comes next.
+                    if muted { Rectangle().fill(Theme.line).frame(height: 1).accessibilityHidden(true) }
                     // What the turn left on disk, a tap from its diff.
                     if !muted, session.state != "working", let git = session.git, session.conductorSessionId != nil {
                         Button { showingDiff = true } label: {
@@ -666,23 +692,17 @@ private struct ChatRows: View {
                     if fromUser {
                         SentBubble(text: text, date: atISO.flatMap(Age.date), line: nil)
                     } else {
-                        AgentMessage(agentName: agentName, text: text, atISO: atISO ?? "", muted: true, choices: nil, disabled: true) { _ in }
+                        AgentMessage(agentName: agentName, text: text, atISO: atISO ?? "", muted: false, choices: nil, disabled: true) { _ in }
                             .equatable()
                     }
                 case .worked(_, let steps):
-                    HStack(spacing: 6) {
-                        Lucide(.clipboardList, size: 14, color: Theme.muted).accessibilityHidden(true)
-                        Text(steps == 1 ? "Worked · 1 step" : "Worked · \(steps) steps").font(.subheadline).foregroundStyle(Theme.muted)
-                        Spacer(minLength: 0)
-                    }
-                    .frame(minHeight: 28)
-                    .accessibilityElement(children: .combine)
+                    WorkedNote(steps: steps)
                 case .working(let label, let steps):
                     // After a steer the live part is its own count; "the latest 3 of 7" would count the folded parts too.
                     WorkingRow(agentName: agentName, label: stopping ? "Stopping…" : label, steps: steps, total: parted ? steps.count : total, live: live, open: $stepsOpen)
                         .transition(.opacity)
                 case .empty(let text):
-                    Text(text).foregroundStyle(Theme.muted)
+                    EmptyChat(text: text, loading: model.lastHistory[session.key] == nil)
                 }
             }
             if let workflow = session.workflow {
@@ -699,6 +719,63 @@ private struct ChatRows: View {
         .sheet(isPresented: $showingDiff) { DiffView(session: session) }
         // No implicit animation on rows arriving: in a chat pinned to its bottom, content that slides while the
         // scroll view is also adjusting itself put two lines of text on top of each other for a moment.
+    }
+}
+
+/// A chat with nothing in it. While its history has not arrived yet it is a short skeleton (a few grey bars where
+/// messages will be) for up to 6 seconds; after that, or once the history is in, it is DESIGN.md §8.7's empty state:
+/// the resting duck and a sentence saying what is true.
+private struct EmptyChat: View {
+    let text: String
+    let loading: Bool
+    @State private var gaveUp = false
+    @ScaledMetric(relativeTo: .body) private var duck: CGFloat = 72
+
+    var body: some View {
+        if loading, !gaveUp {
+            VStack(alignment: .leading, spacing: 14) {
+                bar(0.35, height: 14)
+                bar(0.9, height: 44)
+                bar(0.6, height: 14)
+                bar(0.8, height: 44)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Loading messages")
+            .task { try? await Task.sleep(for: .seconds(6)); gaveUp = true }
+        } else {
+            VStack(spacing: 12) {
+                Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: duck, height: duck).accessibilityHidden(true)
+                Text(text).font(.subheadline).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func bar(_ fraction: CGFloat, height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceRaised)
+            .frame(height: height)
+            .containerRelativeFrame(.horizontal) { width, _ in width * fraction }
+    }
+}
+
+/// "Worked · N steps" with nothing to open (the steps are not on this phone): a check and plain text, so it
+/// does not read as the folded row beside it, which has a clipboard, a chevron and a tap.
+private struct WorkedNote: View {
+    let steps: Int
+    @ScaledMetric(relativeTo: .subheadline) private var glyph: CGFloat = 14
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Lucide(.check, size: glyph, color: Theme.subtle)
+            Text(steps == 1 ? "Worked · 1 step" : "Worked · \(steps) steps").font(.subheadline).foregroundStyle(Theme.muted)
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 28)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isStaticText)
     }
 }
 
@@ -721,6 +798,8 @@ private struct AgentMessage: View, Equatable {
     var body: some View {
         let reading = Presentation.read(message: text, choices: choices)
         VStack(alignment: .leading, spacing: 10) {
+            // An answer from before the one being worked on: said in words, at full contrast, never by fading it.
+            if muted { Text("Previous answer").font(.footnote.weight(.medium)).foregroundStyle(Theme.muted) }
             HStack(spacing: 6) {
                 Text(agentName).font(.subheadline.weight(.semibold))
                 Text(Age.clock(atISO)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
@@ -741,8 +820,7 @@ private struct AgentMessage: View, Equatable {
             }
             if !reading.after.isEmpty { MessageText(markdown: reading.after.joined(separator: "\n\n"), style: .squeak) }
         }
-        .opacity(muted ? 0.62 : 1)
-        .accessibilityLabel(muted ? "Previous message" : "")
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -760,6 +838,7 @@ struct WorkingRow: View {
     @Binding var open: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.holdChatScroll) private var hold
+    @ScaledMetric(relativeTo: .subheadline) private var chevron: CGFloat = 14
 
     init(agentName: String, label: String, steps: [TurnStep] = [], total: Int = 0, live: Bool = false, open: Binding<Bool> = .constant(false)) {
         self.agentName = agentName; self.label = label; self.steps = steps; self.total = total; self.live = live; _open = open
@@ -777,18 +856,20 @@ struct WorkingRow: View {
                     StatusDot(color: Theme.working, pulses: true, period: 1.6)
                     Text(agentName).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                     Text("·").foregroundStyle(Theme.subtle)
-                    Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2)
                     if !steps.isEmpty {
                         Spacer(minLength: 4)
-                        Lucide(open ? .chevronUp : .chevronDown, size: 14, color: Theme.muted)
+                        Lucide(open ? .chevronUp : .chevronDown, size: chevron, color: Theme.muted)
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(steps.isEmpty && !open)
+            // Nothing to open yet ("Starting…"): not tappable, but not greyed either, as .disabled would do.
+            .allowsHitTesting(!(steps.isEmpty && !open))
             .accessibilityLabel("\(agentName) is working: \(label)")
+            .accessibilityValue(steps.isEmpty ? "" : open ? "Expanded" : "Collapsed")
             .accessibilityHint(steps.isEmpty ? "" : open ? "Hides the steps" : "Shows the steps of this turn")
             if open, !steps.isEmpty {
                 // Opened to read: thinking and notes whole, tool calls one line each.
@@ -821,12 +902,14 @@ private struct LiveBox: View {
     /// The position of `steps[0]` in the whole turn, so a step keeps its identity as new ones arrive.
     let first: Int
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .footnote) private var glyph: CGFloat = 13
+    @ScaledMetric(relativeTo: .footnote) private var lineHeight: CGFloat = 20
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(steps.enumerated()), id: \.offset) { offset, step in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Lucide(StepList.icon(step.kind), size: 13, color: Theme.muted).frame(width: 16).accessibilityHidden(true)
+                    Lucide(StepList.icon(step.kind), size: glyph, color: Theme.muted).frame(width: glyph + 3).accessibilityHidden(true)
                     Text(step.text.replacingOccurrences(of: "\n", with: " "))
                         .font(.footnote).foregroundStyle(offset == steps.count - 1 ? Theme.ink : Theme.muted)
                         .italic(step.kind == "thinking")
@@ -837,7 +920,7 @@ private struct LiveBox: View {
                 .id(first + offset)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: CGFloat(WorkingRow.boxLines) * 20, alignment: .bottomLeading)
+        .frame(maxWidth: .infinity, minHeight: CGFloat(WorkingRow.boxLines) * lineHeight, alignment: .bottomLeading)
         .padding(.horizontal, 12).padding(.vertical, 10)
         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
@@ -854,6 +937,7 @@ private struct FoldedSteps: View {
     @Binding var open: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.holdChatScroll) private var hold
+    @ScaledMetric(relativeTo: .subheadline) private var glyph: CGFloat = 14
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -862,16 +946,17 @@ private struct FoldedSteps: View {
                 withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Lucide(.clipboardList, size: 14, color: Theme.muted).accessibilityHidden(true)
+                    Lucide(.clipboardList, size: glyph, color: Theme.muted).accessibilityHidden(true)
                     Text(steps.count == 1 ? "Worked · 1 step" : "Worked · \(steps.count) steps")
-                        .font(.subheadline).foregroundStyle(Theme.muted)
-                    Lucide(open ? .chevronUp : .chevronDown, size: 12, color: Theme.subtle)
+                        .font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
+                    Lucide(open ? .chevronUp : .chevronDown, size: glyph - 2, color: Theme.muted)
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityValue(open ? "Expanded" : "Collapsed")
             .accessibilityHint(open ? "Hides these steps" : "Shows these steps")
             if open {
                 StepList(steps: steps, total: steps.count, live: false, readable: true)
@@ -944,11 +1029,16 @@ private struct QueueCard: View {
     let onSteer: (ChatQueue.Card) -> Void
     let onEdit: (ChatQueue.Card) -> Void
     let onDelete: (ChatQueue.Card) -> Void
+    @Environment(\.dynamicTypeSize) private var size
+
+    /// From `.xxLarge` the actions sit under the text, so the text keeps the card's whole width.
+    private var stacked: Bool { size >= .xxLarge }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0)) : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+        layout {
             VStack(alignment: .leading, spacing: 2) {
-                Text(card.text).font(.subheadline).foregroundStyle(Theme.ink).lineLimit(2)
+                Text(card.text).font(.subheadline).foregroundStyle(Theme.ink).lineLimit(stacked ? 3 : 2)
                 if let problem {
                     Text(problem).font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
                 } else if card.pending {
@@ -960,27 +1050,31 @@ private struct QueueCard: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, stacked && card.actionable ? 10 : 0)
             if card.actionable {
-                Button { onSteer(card) } label: {
-                    Text("Steer now").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
-                        .padding(.horizontal, 10).frame(minHeight: 32)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
-                }
-                .buttonStyle(.plain)
-                .frame(minHeight: 44)
-                .accessibilityHint("Sends it into the turn in progress")
-                Menu {
-                    Button { onEdit(card) } label: { Label("Edit", systemImage: "pencil") }
-                    Button(role: .destructive) { onDelete(card) } label: { Label("Delete", systemImage: "trash") }
-                } label: {
-                    Lucide(.ellipsis, size: 18, label: "More for this queued message", color: Theme.muted)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+                HStack(spacing: 8) {
+                    Button { onSteer(card) } label: {
+                        Text("Steer now").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 10).frame(minHeight: 32)
+                            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minHeight: 44)
+                    .accessibilityHint("Sends it into the turn in progress")
+                    Menu {
+                        Button { onEdit(card) } label: { Label("Edit", systemImage: "pencil") }
+                        Button(role: .destructive) { onDelete(card) } label: { Label("Delete", systemImage: "trash") }
+                    } label: {
+                        Lucide(.ellipsis, size: 18, label: "More for this queued message", color: Theme.muted)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
                 }
             }
         }
-        .padding(.leading, 12).padding(.trailing, card.actionable ? 0 : 12).padding(.vertical, card.actionable ? 0 : 10)
+        .padding(.leading, 12).padding(.trailing, card.actionable ? (stacked ? 12 : 0) : 12).padding(.vertical, card.actionable ? 0 : 10)
         .frame(minHeight: 48)
         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
@@ -1285,6 +1379,8 @@ struct SentBubble: View, Equatable {
             // Exactly one muted line per message this phone sent.
             if let line { Text(line).font(.footnote).foregroundStyle(failed ? Theme.error : Theme.muted).multilineTextAlignment(.trailing) }
         }
+        // A sent message never runs the whole width: about 85% of it, the rest left to the agent's side.
+        .padding(.leading, UIScreen.main.bounds.width * 0.1)
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("You\(date.map { ", \($0.formatted(date: .omitted, time: .shortened))" } ?? ""): \(text)\(line.map { ". \($0)" } ?? "")")
@@ -1507,6 +1603,8 @@ struct Composer: View {
         }
     }
 
+    @ScaledMetric(relativeTo: .body) private var stopGlyph: CGFloat = 12
+
     private var sendDisabled: Bool { block != nil || empty || uploading != nil }
 
     /// Send is the one primary control: the prominent glass button filled
@@ -1523,15 +1621,17 @@ struct Composer: View {
                 }
             } label: {
                 RoundedRectangle(cornerRadius: 3).fill(stopping ? Theme.muted : Theme.needsYou)
-                    .frame(width: 12, height: 12)
+                    .frame(width: stopGlyph, height: stopGlyph)
                     .frame(width: Self.control, height: Self.control)
                     .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             }
             .buttonStyle(.plain)
             .disabled(stopping)
-            .accessibilityLabel(stopping ? "Stopping" : "Stop \(agentName)")
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .accessibilityLabel(stopping ? "Stopping \(agentName)" : "Stop \(agentName)")
             .accessibilityHint("Stops the turn in progress, as Stop does in Conductor")
+            .accessibilityAddTraits(.isButton)
         } else if working {
             Menu {
                 Button { send(.steer) } label: {
@@ -1792,7 +1892,7 @@ private struct SetupLine: View {
 
     private func label(changeable: Bool) -> some View {
         HStack(spacing: 4) {
-            Text(line).font(.caption).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
+            Text(line).font(.caption).foregroundStyle(Theme.muted).multilineTextAlignment(.leading)
             if changeable && !midTurn {
                 Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(Theme.muted)
                     .accessibilityHidden(true)

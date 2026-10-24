@@ -39,6 +39,19 @@ struct ChatSend: Identifiable, Equatable {
             }
         }
 
+        /// The line under a steer: when it went into the turn (the phone's own clock) and whether the agent has
+        /// it. A steer typed on the Mac has no time of its own here, so it says only what happened.
+        /// Anything that is not a landed steer (sending, refused) keeps its ordinary line.
+        func steerLine(at date: Date?) -> String {
+            let head = "Steered" + (date.map { " at " + $0.formatted(date: .omitted, time: .shortened) } ?? "")
+            switch self {
+            case .steered: return head
+            case .read(let agent): return "\(head) · Read by \(agent)"
+            case .turnEnded: return "\(head) · Turn ended"
+            default: return line
+            }
+        }
+
         /// The Mac's reason as a sentence of its own.
         static func sentence(_ why: String) -> String {
             let t = why.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -522,23 +535,23 @@ enum ChatTimeline {
             let early = unmatched.filter { s in (s.status == .steered || s.status == .read(agent: agentName)) && !yous.contains { same($0, s.text) } }
             // The work the feed no longer holds is counted, so a steer never follows the old prompt with nothing between.
             if !early.isEmpty, total > steps.count { rows.append(.worked(id: "part-hidden", steps: total - steps.count)) }
-            rows += early.map { .steer(id: $0.id.uuidString, text: $0.text, line: $0.status.line) }
+            rows += early.map { .steer(id: $0.id.uuidString, text: $0.text, line: $0.status.steerLine(at: $0.date)) }
             unmatched.removeAll { s in early.contains { $0.id == s.id } }
         }
         for (i, you) in yous.enumerated() {
             if !segments[i].isEmpty { rows.append(.folded(id: "part-\(i)", steps: segments[i])) }
             if let mine = unmatched.firstIndex(where: { same(you, $0.text) }) {
                 let s = unmatched.remove(at: mine)
-                rows.append(.steer(id: s.id.uuidString, text: s.text, line: s.status.line))
+                rows.append(.steer(id: s.id.uuidString, text: s.text, line: s.status.steerLine(at: s.date)))
             } else {
                 // Typed on the Mac: in the transcript, so the agent has it.
-                rows.append(.steer(id: "you-\(i)", text: you, line: ChatSend.Status.read(agent: agentName).line))
+                rows.append(.steer(id: "you-\(i)", text: you, line: ChatSend.Status.read(agent: agentName).steerLine(at: nil)))
             }
         }
         var live = segments[segments.count - 1]
         if !unmatched.isEmpty {
             if !live.isEmpty { rows.append(.folded(id: "part-\(yous.count)", steps: live)) }
-            rows += unmatched.map { .steer(id: $0.id.uuidString, text: $0.text, line: $0.status.line) }
+            rows += unmatched.map { .steer(id: $0.id.uuidString, text: $0.text, line: $0.status.steerLine(at: $0.date)) }
             live = []
         }
         let steered = !yous.isEmpty || !unmatched.isEmpty
