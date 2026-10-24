@@ -86,3 +86,22 @@ final class MacStripTests: XCTestCase {
                        ["Mac not answering", "Last heard 3m ago"])
     }
 }
+
+final class MacControlsFormatTests: XCTestCase {
+    func testFanWords() {
+        XCTAssertEqual(MacControlsFormat.fanSpeed([2300, 2512]), "2,512 rpm")
+        XCTAssertEqual(MacControlsFormat.fanSpeed([0, 0]), "Off")
+        XCTAssertNil(MacControlsFormat.fanSpeed([]))
+        typealias Fans = PhoneSnapshot.MacControls.Fans
+        XCTAssertTrue(MacControlsFormat.fanNote(Fans(mode: "auto", choice: "auto", available: false, rpm: []))!.contains("Set up fan control"))
+        XCTAssertTrue(MacControlsFormat.fanNote(Fans(mode: "max", choice: "40", available: true, rpm: []))!.contains("while your Mac is warm"))
+        XCTAssertNil(MacControlsFormat.fanNote(Fans(mode: "60", choice: "60", available: true, rpm: [])))
+    }
+
+    func testTheCommandCarriesExactlyOneControl() throws {
+        let json = String(decoding: try JSONEncoder().encode(ControlsCommand.Change.fans("60")), as: UTF8.self)
+        XCTAssertEqual(json, #"{"fans":"60"}"#)
+        XCTAssertEqual(ControlsCommand.Change.volume(140).volume, 100)
+        XCTAssertEqual(String(decoding: try JSONEncoder().encode(ControlsCommand.Change.displaySleep), as: UTF8.self), #"{"displaySleep":true}"#)
+    }
+}

@@ -2226,6 +2226,94 @@ describe("RemoteBridge awake session from the phone", () => {
   });
 });
 
+describe("RemoteBridge live controls from the phone", () => {
+  async function controlsT(options: { offered?: boolean } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-controls-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    const state = {
+      volume: 40,
+      muted: false,
+      brightness: 57,
+      fans: { mode: "auto" as const, choice: "auto" as const, available: true, rpm: [2300, 2500] },
+    };
+    const apply = vi.fn(async () => ({ ok: true as const, state }));
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      ...(options.offered === false ? {} : { controls: { state: () => state, apply } }),
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const phone = device();
+    await store.set(`channels/${payload.c}/pairing/iphone-1`, {
+      box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }),
+    });
+    await bridge.tick();
+    await bridge.approve("iphone-1");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    const command = (change: unknown, signer = phone) => {
+      const box = seal(payload.k, {
+        v: 1,
+        kind: "controls",
+        change,
+        nonce: crypto.randomBytes(16).toString("hex"),
+        expiresAt: NOW + 60_000,
+      });
+      return { box, sig: signer.sign(box), device: "iphone-1" };
+    };
+    return { bridge, config, command, apply, state };
+  }
+
+  it("shows the controls and applies one signed change", async () => {
+    const t = await controlsT();
+    expect(t.bridge.phoneView().macControls).toEqual(t.state);
+    const verdict = await t.bridge.handleCommand(t.config, "c1", t.command({ fans: "60" }));
+    expect(verdict.result).toEqual({ id: "c1", status: "sent" });
+    expect(t.apply).toHaveBeenCalledWith({ fans: "60" });
+    await t.bridge.handleCommand(t.config, "c2", t.command({ volume: 25 }));
+    expect(t.apply).toHaveBeenLastCalledWith({ volume: 25 });
+    t.bridge.stop();
+  });
+
+  it("refuses anything but one known control with an exact value, and a forged signature", async () => {
+    const t = await controlsT();
+    for (const [i, change] of [
+      { volume: 101 },
+      { volume: 4.5 },
+      { volume: "40; do shell script" },
+      { brightness: -1 },
+      { fans: "50" },
+      { fans: "max", volume: 10 },
+      { muted: "true" },
+      { displaySleep: false },
+      { shell: "ls" },
+      {},
+      [],
+      null,
+    ].entries()) {
+      const verdict = await t.bridge.handleCommand(t.config, `b${i}`, t.command(change));
+      expect(verdict.result).toMatchObject({ status: "refused" });
+    }
+    const forged = await t.bridge.handleCommand(t.config, "f1", t.command({ muted: true }, device()));
+    expect(forged.write).toBe(false);
+    expect(t.apply).not.toHaveBeenCalled();
+    t.bridge.stop();
+  });
+
+  it("a Mac without controls refuses them and leaves them out of the view", async () => {
+    const t = await controlsT({ offered: false });
+    expect(t.bridge.phoneView()).not.toHaveProperty("macControls");
+    const verdict = await t.bridge.handleCommand(t.config, "n1", t.command({ muted: true }));
+    expect(verdict.result).toMatchObject({ status: "refused" });
+    t.bridge.stop();
+  });
+});
+
 describe("RemoteBridge lid actions from the phone", () => {
   async function lidT(options: { offered?: boolean } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-lid-"));

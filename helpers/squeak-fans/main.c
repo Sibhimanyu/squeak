@@ -1,17 +1,23 @@
 // squeak-fans: the Mac's temperatures and fans, for src/fleet/heat.ts.
 //
-//   squeak-fans read   one line of JSON: the hottest die sensor, every fan's speed and mode. No root.
-//   squeak-fans max    every fan to its maximum speed (root).
-//   squeak-fans auto   every fan back to the system's control (root).
+//   squeak-fans read            one line of JSON: the hottest die sensor, every fan's speed and mode,
+//                               and the built-in display's brightness. No root.
+//   squeak-fans max|80|60|40    every fan to full, or that share of the way from its minimum to its
+//                               maximum (root).
+//   squeak-fans auto            every fan back to the system's control (root).
+//   squeak-fans brightness N    the built-in display's brightness, 0–100. No root.
 //
 // It takes nothing else: no options, no files, no environment. That matters because
 // the Mac app installs it root-owned in /Library/PrivilegedHelperTools and a sudoers
-// rule lets the daemon run exactly `max` and `auto` without a password.
+// rule lets the daemon run exactly the five fan commands without a password.
 //
 // Temperatures come from IOHIDEventSystemClient (what Stats and iStat Menus read),
 // fans from the SMC: FNum, F<n>Ac/Mn/Mx, and F<n>md (0 system, 1 manual) with
 // F<n>Tg as the target, the keys Macs Fan Control writes on Apple silicon.
+#include <ApplicationServices/ApplicationServices.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <dlfcn.h>
+#include <stdlib.h>
 #include <IOKit/IOKitLib.h>
 #include <stdio.h>
 #include <string.h>
@@ -157,6 +163,48 @@ static double hottestDie(int *count) {
     return hottest;
 }
 
+// DisplayServices (private, what the brightness keys use): no root, and only the built-in panel.
+typedef int (*BrightnessGet)(CGDirectDisplayID, float *);
+typedef int (*BrightnessSet)(CGDirectDisplayID, float);
+static void *displayServices(void) {
+    static void *handle;
+    if (!handle) handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_LAZY);
+    return handle;
+}
+
+/// The built-in display while it is on, or 0 (lid closed, or a desktop).
+static CGDirectDisplayID builtinDisplay(void) {
+    CGDirectDisplayID displays[16];
+    uint32_t count = 0;
+    if (CGGetOnlineDisplayList(16, displays, &count) != kCGErrorSuccess) return 0;
+    for (uint32_t i = 0; i < count; i++) if (CGDisplayIsBuiltin(displays[i]) && CGDisplayIsActive(displays[i])) return displays[i];
+    return 0;
+}
+
+static int getBrightness(void) {
+    CGDirectDisplayID display = builtinDisplay();
+    BrightnessGet get = displayServices() ? (BrightnessGet)dlsym(displayServices(), "DisplayServicesGetBrightness") : NULL;
+    float value;
+    if (!display || !get || get(display, &value) != 0) return -1;
+    return (int)(value * 100 + 0.5);
+}
+
+static int setBrightness(int percent) {
+    CGDirectDisplayID display = builtinDisplay();
+    BrightnessSet set = displayServices() ? (BrightnessSet)dlsym(displayServices(), "DisplayServicesSetBrightness") : NULL;
+    if (!display || !set) return -1;
+    return set(display, percent / 100.0f) == 0 ? 0 : -1;
+}
+
+/// "max", "80", "60", "40" as a share of the range; -1 for anything else.
+static double fanShare(const char *mode) {
+    if (strcmp(mode, "max") == 0) return 1.0;
+    if (strcmp(mode, "80") == 0) return 0.8;
+    if (strcmp(mode, "60") == 0) return 0.6;
+    if (strcmp(mode, "40") == 0) return 0.4;
+    return -1;
+}
+
 static int openSmc(void) {
     io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"));
     if (!service) return -1;
@@ -166,7 +214,15 @@ static int openSmc(void) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 2) { fprintf(stderr, "usage: squeak-fans read|max|auto\n"); return 64; }
+    const char *usage = "usage: squeak-fans read|auto|max|80|60|40|brightness <0-100>\n";
+    if (argc == 3 && strcmp(argv[1], "brightness") == 0) {
+        char *end;
+        long percent = strtol(argv[2], &end, 10);
+        if (*argv[2] == '\0' || *end != '\0' || percent < 0 || percent > 100) { fputs(usage, stderr); return 64; }
+        if (setBrightness((int)percent)) { fprintf(stderr, "no built-in display to set\n"); return 69; }
+        return 0;
+    }
+    if (argc != 2) { fputs(usage, stderr); return 64; }
     const char *mode = argv[1];
     int smcOpen = openSmc() == 0;
     int fans = smcOpen ? fanCount() : 0;
@@ -182,19 +238,25 @@ int main(int argc, char **argv) {
             printf("%s{\"rpm\":%.0f,\"min\":%.0f,\"max\":%.0f,\"manual\":%s}", i ? "," : "", readFloat(ac), readFloat(mn),
                    readFloat(mx), fanMode(i) == 1 ? "true" : "false");
         }
-        printf("]}\n");
+        int brightness = getBrightness();
+        printf("],\"brightness\":");
+        if (brightness < 0) printf("null"); else printf("%d", brightness);
+        printf("}\n");
         return 0;
     }
-    int toMax = strcmp(mode, "max") == 0;
-    if (!toMax && strcmp(mode, "auto") != 0) { fprintf(stderr, "usage: squeak-fans read|max|auto\n"); return 64; }
+    double share = fanShare(mode);
+    if (share < 0 && strcmp(mode, "auto") != 0) { fputs(usage, stderr); return 64; }
     if (geteuid() != 0) { fprintf(stderr, "squeak-fans %s needs root\n", mode); return 77; }
     if (!smcOpen || fans == 0) { fprintf(stderr, "no fans\n"); return 69; }
     int failed = 0;
     for (int i = 0; i < fans; i++) {
-        char mx[5];
+        char mn[5], mx[5];
+        snprintf(mn, sizeof mn, "F%dMn", i);
         snprintf(mx, sizeof mx, "F%dMx", i);
-        double max = readFloat(mx);
-        if (setFan(i, toMax ? (max > 0 ? max : 6000) : -1)) failed++;
+        double min = readFloat(mn), max = readFloat(mx);
+        if (max <= 0) max = 6000;
+        if (min < 0 || min > max) min = 0;
+        if (setFan(i, share < 0 ? -1 : min + (max - min) * share)) failed++;
     }
     if (failed) { fprintf(stderr, "%d of %d fans refused\n", failed, fans); return 70; }
     return 0;

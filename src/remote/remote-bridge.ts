@@ -2,6 +2,7 @@ import type { AwakeEnd, AwakeState } from "../fleet/awake-session.js";
 import type { LidActionSettings } from "../fleet/lid-actions.js";
 import type { AwakeRules } from "../fleet/power-monitor.js";
 import type { HotspotState } from "../fleet/hotspot.js";
+import { readControlChange, type ControlChange, type MacControlsState } from "../fleet/mac-controls.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -365,6 +366,21 @@ export interface LidActionsCommand {
 
 const LID_ACTION_KEYS: ReadonlyArray<keyof LidActionSettings> = ["displayOff", "mute", "lowPower", "freezeApps"];
 
+/**
+ * A signed live control of the Mac from the phone's Mac controls page
+ * (fleet/mac-controls.ts): volume, mute, brightness, fans, screen off.
+ * `change` holds exactly one of them, checked by `readControlChange`. It
+ * reaches no agent and carries no text.
+ */
+export interface ControlsCommand {
+  v: 1;
+  kind: "controls";
+  change: Record<string, unknown>;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
 /** The settings of a lidActions command if every key is known and every value a boolean; else null. */
 export function readLidActionsChange(value: unknown): Partial<LidActionSettings> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -482,6 +498,11 @@ export interface RemoteBridgeDependencies {
    * Hotspot failover (fleet/hotspot.ts): its state for the phone, and the
    * way to set it up, switch now, or switch back. Absent: phones hide it.
    */
+  /** Live controls (fleet/mac-controls.ts): their state for the phone, and one change at a time. Absent: phones hide the page. */
+  controls?: {
+    state(): MacControlsState;
+    apply(change: ControlChange): Promise<{ ok: true; state: MacControlsState } | { ok: false; reason: string }>;
+  };
   hotspot?: {
     state(): HotspotState;
     apply(request: unknown): Promise<{ ok: true; state: HotspotState } | { ok: false; reason: string }>;
@@ -1149,6 +1170,11 @@ export class RemoteBridge {
     }
   }
 
+  /** Whether a phone is looking now (its presence within the window), so live readings are worth taking. */
+  isPhoneOpen(): boolean {
+    return this.phoneOpen();
+  }
+
   private phoneOpen(): boolean {
     return this.now() - this.phoneSeenAt < PRESENCE_WINDOW_MS;
   }
@@ -1375,6 +1401,9 @@ export class RemoteBridge {
     }
     if (kind === "awake") {
       return this.handleAwake(device, id, command as unknown as AwakeCommand);
+    }
+    if (kind === "controls") {
+      return this.handleControls(device, id, command as unknown as ControlsCommand);
     }
     if (kind === "lidActions") {
       return this.handleLidActions(device, id, command as unknown as LidActionsCommand);
@@ -2250,6 +2279,33 @@ export class RemoteBridge {
     return { write: true, result: { id, status: "sent" } };
   }
 
+  /** One live control. Signature, freshness and nonce have already held; the change is read strictly here. */
+  private async handleControls(
+    device: PairedDevice,
+    id: string,
+    command: ControlsCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `controls: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const controls = this.deps.controls;
+    if (!controls || command.v !== 1) {
+      return refuse("This Mac can't be controlled from a phone.", "not available");
+    }
+    const change = readControlChange(command.change);
+    if (!change) {
+      return refuse("Not a control this Mac understands.", "bad change");
+    }
+    const outcome = await controls.apply(change);
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.nudgePublish(0);
+    this.log(device.name, "sent", `controls ${Object.keys(change)[0]}`);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
   /** A keep-awake flip. Signature, freshness and nonce have already held. */
   private async handleAwake(
     device: PairedDevice,
@@ -2365,6 +2421,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeLastEnd) +
       JSON.stringify(view.awakeSleepProblem) +
       JSON.stringify(view.hotspot) +
+      JSON.stringify(view.macControls) +
       JSON.stringify(view.local) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
     const { recent, recentMore, workspaces, projectIcons, chatModels, ...rest } = view;
@@ -2472,6 +2529,8 @@ export class RemoteBridge {
       ...this.phoneAwake(),
       // Hotspot failover: name, switch, whether the Mac is on it, the last switch. Never the password.
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
+      // Volume, brightness, fans: what the phone's Mac controls page draws. Absent: the page is hidden.
+      ...(this.deps.controls ? { macControls: this.deps.controls.state() } : {}),
       // Where this Mac listens on the local network, for the direct path; absent when it does not.
       ...this.phoneLocal(),
       // Where a phone may start a chat; absent when this Mac can't (phones then hide the button).

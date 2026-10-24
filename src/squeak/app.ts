@@ -29,6 +29,7 @@ import {
   HeatGovernor,
   macHeatSystem,
 } from "../fleet/heat.js";
+import { MacControls, macControlsSystem } from "../fleet/mac-controls.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
@@ -144,6 +145,8 @@ export class SqueakApp {
   /** Temperatures and fans while an awake session runs (fleet/heat.ts). */
   private readonly heat: HeatGovernor;
   private heatTimer: NodeJS.Timeout | null = null;
+  /** Volume, brightness and fans from the phone's Mac controls page (fleet/mac-controls.ts). */
+  private readonly controls: MacControls;
   /** The Mac's last battery/heat/lid reading, for the phone; refreshed once a minute. */
   private power: PowerReading | null = null;
   private unwatchCaffeinate: (() => void) | null = null;
@@ -184,6 +187,11 @@ export class SqueakApp {
       notify: (text) => this.announce(text),
       onChange: () => this.remote?.changed(),
     });
+    const readers = [
+      "/Applications/Squeak.app/Contents/Helpers/squeak-fans",
+      path.join(config.supportDir, "squeak-fans"),
+    ];
+    this.controls = new MacControls(macControlsSystem(readers), this.heat, () => this.remote?.changed());
     this.lidActions = new LidActions({
       settingsPath: path.join(config.supportDir, "awake-settings.json"),
       journalPath: path.join(config.supportDir, "lid-actions.json"),
@@ -304,6 +312,10 @@ export class SqueakApp {
             claudeLimits: () => this.claudeLimits?.latest() ?? null,
             // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
             refreshUsage: () => this.claudeRefresher.refresh(),
+            controls: {
+              state: () => this.controls.state,
+              apply: (change) => this.controls.apply(change),
+            },
             hotspot: {
               state: () => this.hotspot.state,
               apply: (request) => this.applyHotspot(request),
@@ -463,6 +475,7 @@ export class SqueakApp {
     await this.awake.restore();
     await this.lidActions.recover();
     await this.heat.recover();
+    void this.controls.refresh();
     await this.hotspot.start().catch((error: unknown) =>
       logger.warn("hotspot failover failed to start", {
         error: error instanceof Error ? error.message : String(error),
@@ -624,6 +637,8 @@ export class SqueakApp {
   /** A session's look at heat; outside one, a look a minute only so surfaces have a reading. */
   private heatLooks = 0;
   private async checkHeat(now = false): Promise<void> {
+    // The controls page shows volume and brightness live while a phone looks.
+    if (this.remote?.isPhoneOpen()) void this.controls.refresh();
     const active = this.awake.active;
     if (!active && !now && this.heatLooks++ % 4 !== 0) return;
     const power = active ? await readPower() : this.power;

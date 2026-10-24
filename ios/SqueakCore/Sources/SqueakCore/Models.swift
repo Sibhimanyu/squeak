@@ -276,6 +276,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// Temperatures and fans while an awake session runs (src/fleet/heat.ts). Optional: older Macs,
     /// and any Mac outside a session, omit it.
     public var macHeat: MacHeat? = nil
+    /// Volume, brightness and fans for the Mac controls page (src/fleet/mac-controls.ts). Optional:
+    /// older Macs omit it, and the page is hidden.
+    public var macControls: MacControls? = nil
     /// Where this Mac listens on the local network, for the direct same-Wi-Fi path (docs/remote-channel.md).
     /// Optional: older Macs, and a Mac with the path off, omit it. A phone off that network just fails to
     /// connect and stays on the cloud.
@@ -292,6 +295,29 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// The non-identifying tag Bonjour carries (`LocalAuth.tag`).
         public let tag: String
         public init(port: Int, hosts: [String], tag: String) { self.port = port; self.hosts = hosts; self.tag = tag }
+    }
+
+    public struct MacControls: Codable, Equatable, Sendable {
+        public struct Fans: Codable, Equatable, Sendable {
+            /// What the fans are set to now: "auto", "40", "60", "80", "max" ("max" while warm whatever was picked).
+            public var mode: String
+            /// What was picked.
+            public var choice: String
+            /// Fan control is installed on the Mac, so a speed can be picked.
+            public var available: Bool
+            public var rpm: [Int]
+            public init(mode: String, choice: String, available: Bool, rpm: [Int]) {
+                self.mode = mode; self.choice = choice; self.available = available; self.rpm = rpm
+            }
+        }
+        public var volume: Int?
+        public var muted: Bool?
+        /// Nil with the lid closed: only the built-in display's brightness is controlled.
+        public var brightness: Int?
+        public var fans: Fans?
+        public init(volume: Int? = nil, muted: Bool? = nil, brightness: Int? = nil, fans: Fans? = nil) {
+            self.volume = volume; self.muted = muted; self.brightness = brightness; self.fans = fans
+        }
     }
 
     public struct MacHeat: Codable, Equatable, Sendable {
@@ -962,6 +988,30 @@ public struct LidActionsCommand: Codable, Equatable, Sendable {
     public let v: Int
     public let kind: String
     public let settings: Settings
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// One live control of the Mac (src/fleet/mac-controls.ts): exactly one of volume, mute, brightness, fans
+/// or screen off. The Mac takes exactly one key with an exact value, so build it with the static makers.
+public struct ControlsCommand: Codable, Equatable, Sendable {
+    public struct Change: Codable, Equatable, Sendable {
+        public var volume: Int?
+        public var muted: Bool?
+        public var brightness: Int?
+        /// "auto", "40", "60", "80" or "max".
+        public var fans: String?
+        public var displaySleep: Bool?
+        public static func volume(_ percent: Int) -> Change { Change(volume: min(100, max(0, percent))) }
+        public static func muted(_ on: Bool) -> Change { Change(muted: on) }
+        public static func brightness(_ percent: Int) -> Change { Change(brightness: min(100, max(0, percent))) }
+        public static func fans(_ mode: String) -> Change { Change(fans: mode) }
+        public static var displaySleep: Change { Change(displaySleep: true) }
+    }
+    public let v: Int
+    public let kind: String
+    public let change: Change
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

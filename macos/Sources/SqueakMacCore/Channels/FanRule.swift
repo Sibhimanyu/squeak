@@ -2,17 +2,18 @@ import Foundation
 
 /// Fan control for a Mac kept awake in a bag (`src/fleet/heat.ts`): the bundled `squeak-fans`
 /// helper copied root-owned to `/Library/PrivilegedHelperTools`, and a sudoers rule that lets the
-/// daemon run exactly its `max` and `auto` without a password. Installed together, with macOS's own
-/// admin prompt, the way `LidRule` is. Root-owned matters: a helper the user could rewrite would be a
+/// daemon run exactly its five fan commands without a password. Installed together, with macOS's own
+/// admin prompt, the way `LidRule` is. Five fixed settings (full, 80, 60, 40 per cent, back to the system), never
+/// an open-ended speed: the sudoers rule names each one. Root-owned matters: a helper the user could rewrite would be a
 /// way to root for anything running as them.
 public enum FanRule {
     public static let path = "/etc/sudoers.d/squeak-fans"
     public static let helperPath = "/Library/PrivilegedHelperTools/com.squeak.fans"
 
-    static var commands: [String] { ["\(helperPath) max", "\(helperPath) auto"] }
+    static var commands: [String] { ["max", "80", "60", "40", "auto"].map { "\(helperPath) \($0)" } }
 
     /// True only for the rule the daemon builds, for this user: comments, then one line granting
-    /// the two commands. Anything else is refused before the admin prompt.
+    /// the five commands. Anything else is refused before the admin prompt.
     public static func isExpected(_ rule: String, user: String) -> Bool {
         guard user.range(of: #"^[a-z_][a-z0-9_.-]{0,31}$"#, options: [.regularExpression, .caseInsensitive]) != nil,
               user.lowercased() != "all" else { return false }
@@ -67,7 +68,7 @@ public enum FanRule {
             ].joined(separator: " && ")
             let script = [
                 "on run argv",
-                #"do shell script "\#(commands)" with prompt "Squeak wants to run your Mac's fans at full speed when it gets hot while kept awake. This installs a small helper that can only do that, and put them back." with administrator privileges"#,
+                #"do shell script "\#(commands)" with prompt "Squeak wants to control your Mac's fans: full speed when it gets hot while kept awake, and the speed you pick on your iPhone. This installs a small helper that can only set the fans." with administrator privileges"#,
                 "end run",
             ]
             let result = try await run("/usr/bin/osascript", script.flatMap { ["-e", $0] } + [file.path, helper.path])

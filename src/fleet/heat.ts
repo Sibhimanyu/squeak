@@ -43,7 +43,15 @@ const FAN_CONTROL_RECHECK_MS = 5 * 60_000;
 /** The root-owned copy the Mac app installs; the only one sudo may run. */
 export const FANS_HELPER_PRIVILEGED = "/Library/PrivilegedHelperTools/com.squeak.fans";
 export const FANS_SUDOERS_PATH = "/etc/sudoers.d/squeak-fans";
-export const FANS_SUDOERS_COMMANDS = [`${FANS_HELPER_PRIVILEGED} max`, `${FANS_HELPER_PRIVILEGED} auto`] as const;
+/** The fans' settings: the system's control, or a share of the way from minimum to full. */
+export const FAN_MODES = ["auto", "40", "60", "80", "max"] as const;
+export type FanMode = (typeof FAN_MODES)[number];
+export function isFanMode(value: unknown): value is FanMode {
+  return typeof value === "string" && (FAN_MODES as readonly string[]).includes(value);
+}
+export const FANS_SUDOERS_COMMANDS = ["max", "80", "60", "40", "auto"].map(
+  (mode) => `${FANS_HELPER_PRIVILEGED} ${mode}`,
+);
 
 /** The whole sudoers file for the fan helper; null for a name that is not a plain account name. */
 export function fansSudoersRule(user: string): string | null {
@@ -51,8 +59,8 @@ export function fansSudoersRule(user: string): string | null {
     return null;
   }
   return [
-    "# Squeak: fans to full while a Mac kept awake runs hot, and back to the system's control.",
-    "# Exactly these two commands of a root-owned helper. Remove this file to take it back.",
+    "# Squeak: the fans to full while a Mac kept awake runs hot, or the speed you pick, and back to the system's control.",
+    "# Exactly these five commands of a root-owned helper. Remove this file to take it back.",
     `${user} ALL=(root) NOPASSWD: ${FANS_SUDOERS_COMMANDS.join(", ")}`,
     "",
   ].join("\n");
@@ -83,6 +91,10 @@ export interface HeatState {
   battery: number | null;
   fansRpm: number[];
   fansMax: boolean;
+  /** What the fans are set to now: the user's choice, or "max" while warm. */
+  fanMode: FanMode;
+  /** What the user picked (phone or Mac); "auto" until they do. */
+  fanChoice: FanMode;
   /** Fan control is installed (helper and rule). */
   fanControl: boolean;
   /** How many processes run on the efficiency cores for heat. */
@@ -92,9 +104,9 @@ export interface HeatState {
 }
 
 /** `squeak-fans read`'s line; null for anything else. */
-export function parseFansRead(output: string): { die: number | null; fans: Fan[] } | null {
+export function parseFansRead(output: string): { die: number | null; fans: Fan[]; brightness?: number | null } | null {
   try {
-    const raw = JSON.parse(output) as { die?: unknown; fans?: unknown };
+    const raw = JSON.parse(output) as { die?: unknown; fans?: unknown; brightness?: unknown };
     const die = typeof raw.die === "number" && raw.die > 0 && raw.die < 150 ? raw.die : null;
     const fans = Array.isArray(raw.fans)
       ? raw.fans.flatMap((fan: unknown) => {
@@ -104,7 +116,9 @@ export function parseFansRead(output: string): { die: number | null; fans: Fan[]
             : [];
         })
       : [];
-    return { die, fans };
+    const brightness =
+      typeof raw.brightness === "number" && raw.brightness >= 0 && raw.brightness <= 100 ? raw.brightness : null;
+    return { die, fans, brightness };
   } catch {
     return null;
   }
@@ -161,16 +175,17 @@ export function agentTree(rows: ProcessRow[], exclude: number[] = []): ProcessRo
 /** What the governor does to the Mac; the real one is `macHeatSystem`. */
 export interface HeatSystem {
   /** Die and fans from the helper; null without one. */
-  read(): Promise<{ die: number | null; fans: Fan[] } | null>;
+  read(): Promise<{ die: number | null; fans: Fan[]; brightness?: number | null } | null>;
   /** The privileged helper and its rule are installed. */
   fanControl(): Promise<boolean>;
-  setFans(max: boolean): Promise<boolean>;
+  setFans(mode: FanMode): Promise<boolean>;
   processes(): Promise<ProcessRow[]>;
   /** `taskpolicy -b` (true) or `-B` (false) for one pid; false when it is gone. */
   slow(pid: number, on: boolean): Promise<boolean>;
 }
 
 interface Journal {
+  /** The fans are not on the system's control (the name predates speeds; the backstop reads it). */
   fansMax: boolean;
   slowed: Array<{ pid: number; startedAt: string }>;
 }
@@ -198,7 +213,10 @@ export class HeatGovernor {
   private hotSince: number | null = null;
   private toldHot = false;
   private last: HeatReading | null = null;
-  private fansMax = false;
+  /** What the fans were last set to. */
+  private fanMode: FanMode = "auto";
+  /** What the user picked; heat only ever raises it, to "max". */
+  private fanChoice: FanMode = "auto";
   private fanControlInstalled = false;
   private fanControlCheckedAt = Number.NEGATIVE_INFINITY;
   private slowed = new Map<number, string>();
@@ -216,7 +234,9 @@ export class HeatGovernor {
       die: r?.die == null ? null : Math.round(r.die),
       battery: r?.battery == null ? null : Math.round(r.battery),
       fansRpm: (r?.fans ?? []).map((fan) => Math.round(fan.rpm / 100) * 100),
-      fansMax: this.fansMax,
+      fansMax: this.fanMode === "max",
+      fanMode: this.fanMode,
+      fanChoice: this.fanChoice,
       fanControl: this.fanControlInstalled,
       slowed: this.slowed.size,
       why: this.why(),
@@ -234,7 +254,7 @@ export class HeatGovernor {
       const journal = readJournal(this.options.journalPath);
       if (!journal) return;
       for (const entry of journal.slowed) this.slowed.set(entry.pid, entry.startedAt);
-      this.fansMax = journal.fansMax;
+      if (journal.fansMax) this.fanMode = "max";
       await this.relax();
       logger.info("heat: undid what the last run left", { slowed: journal.slowed.length, fans: journal.fansMax });
     });
@@ -274,7 +294,39 @@ export class HeatGovernor {
 
   /** Squeak is stopping: fans back to the system, agents to every core. */
   stop(): Promise<void> {
-    return this.serial(() => this.relax());
+    return this.serial(async () => {
+      this.fanChoice = "auto";
+      await this.relax();
+    });
+  }
+
+  /**
+   * The fans as the user picks them, from the phone or the Mac. While the Mac
+   * runs warm they stay on full whatever is picked, and go to the pick once it
+   * cools; the pick lasts until changed or Squeak stops.
+   */
+  async setFanChoice(mode: FanMode): Promise<{ ok: true } | { ok: false; reason: string }> {
+    let outcome: { ok: true } | { ok: false; reason: string } = { ok: true };
+    await this.serial(async () => {
+      if (this.now() - this.fanControlCheckedAt >= FAN_CONTROL_RECHECK_MS) {
+        this.fanControlCheckedAt = this.now();
+        this.fanControlInstalled = await this.options.system.fanControl().catch(() => false);
+      }
+      if (mode !== "auto" && !this.fanControlInstalled) {
+        outcome = { ok: false, reason: "Set up fan control on the Mac first: Squeak › Settings › Keep awake." };
+        return;
+      }
+      const before = this.fanChoice;
+      this.fanChoice = mode;
+      if (!(await this.applyFans(this.level === "ok" ? mode : "max"))) {
+        this.fanChoice = before;
+        outcome = { ok: false, reason: "The fans didn't take that setting." };
+        return;
+      }
+      logger.info("fans", { choice: mode });
+      this.options.onChange?.();
+    });
+    return outcome;
   }
 
   private async decide(r: HeatReading): Promise<void> {
@@ -345,18 +397,32 @@ export class HeatGovernor {
     // Gone processes leave the list.
     const alive = new Set(rows.map((row) => `${row.pid} ${row.startedAt}`));
     for (const [pid, startedAt] of this.slowed) if (!alive.has(`${pid} ${startedAt}`)) this.slowed.delete(pid);
-    if (!this.fansMax && this.fanControlInstalled) {
-      this.fansMax = true;
-      this.writeJournal();
-      if (!(await system.setFans(true).catch(() => false))) {
-        this.fansMax = false;
-        logger.warn("heat: the fans did not take full speed");
-      }
+    if (this.fanControlInstalled && !(await this.applyFans("max"))) {
+      logger.warn("heat: the fans did not take full speed");
     }
     this.writeJournal();
   }
 
-  /** Undoes everything: agents back to every core (the same process only), fans to the system. */
+  /** Sets the fans, journalled first; true when they took it (or already had it). */
+  private async applyFans(mode: FanMode): Promise<boolean> {
+    if (mode === this.fanMode) return true;
+    const before = this.fanMode;
+    if (mode !== "auto") {
+      // Before, so a crash mid-way still knows the fans need giving back.
+      this.fanMode = mode;
+      this.writeJournal();
+    }
+    if (await this.options.system.setFans(mode).catch(() => false)) {
+      this.fanMode = mode;
+      this.writeJournal();
+      return true;
+    }
+    this.fanMode = before;
+    this.writeJournal();
+    return false;
+  }
+
+  /** Undoes what heat did: agents back to every core (the same process only), fans to the user's pick. */
   private async relax(): Promise<void> {
     const system = this.options.system;
     if (this.slowed.size) {
@@ -367,9 +433,8 @@ export class HeatGovernor {
       }
       this.slowed.clear();
     }
-    if (this.fansMax) {
-      if (await system.setFans(false).catch(() => false)) this.fansMax = false;
-      else logger.warn("heat: could not give the fans back to the system; the backstop retries");
+    if (!(await this.applyFans(this.fanChoice))) {
+      logger.warn("heat: could not set the fans back; the backstop retries", { to: this.fanChoice });
     }
     this.writeJournal();
   }
@@ -377,7 +442,7 @@ export class HeatGovernor {
   private why(): string | null {
     if (this.level === "ok" || !this.last) return null;
     const parts = [this.level === "hot" ? "Running hot" : "Running warm", this.describe(this.last)];
-    if (this.fansMax) parts.push("fans on full");
+    if (this.fanMode === "max") parts.push("fans on full");
     if (this.slowed.size) parts.push("agents slowed");
     return parts.join(" · ");
   }
@@ -392,12 +457,12 @@ export class HeatGovernor {
   private writeJournal(): void {
     const file = this.options.journalPath;
     try {
-      if (!this.fansMax && this.slowed.size === 0) {
+      if (this.fanMode === "auto" && this.slowed.size === 0) {
         fs.rmSync(file, { force: true });
         return;
       }
       const journal: Journal = {
-        fansMax: this.fansMax,
+        fansMax: this.fanMode !== "auto",
         slowed: [...this.slowed].map(([pid, startedAt]) => ({ pid, startedAt })),
       };
       fs.writeFileSync(file, `${JSON.stringify(journal)}\n`, { mode: 0o600 });
@@ -453,8 +518,8 @@ export function macHeatSystem(readHelpers: string[]): HeatSystem {
       if (!fs.existsSync(FANS_HELPER_PRIVILEGED)) return false;
       return (await run("/usr/bin/sudo", ["-n", "-l", FANS_HELPER_PRIVILEGED, "max"])).ok;
     },
-    async setFans(max) {
-      return (await run("/usr/bin/sudo", ["-n", FANS_HELPER_PRIVILEGED, max ? "max" : "auto"])).ok;
+    async setFans(mode) {
+      return (await run("/usr/bin/sudo", ["-n", FANS_HELPER_PRIVILEGED, mode])).ok;
     },
     async processes() {
       const out = await run("/bin/ps", ["-axo", "pid=,ppid=,lstart=,comm="], { ...process.env, TZ: "UTC" });
