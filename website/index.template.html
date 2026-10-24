@@ -26,49 +26,80 @@
 <link rel="preload" href="./assets/fonts/figtree-700.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="./assets/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="./styles.css">
+<script>if(!matchMedia("(prefers-reduced-motion: reduce)").matches){var c=document.documentElement.classList;c.add("ducks-pending","hero-pending")}</script>
 <script src="./assets/vendor/gsap.min.js" defer></script>
 <script src="./assets/vendor/ScrollTrigger.min.js" defer></script>
+<script src="./assets/vendor/SplitText.min.js" defer></script>
+<script src="./assets/vendor/Flip.min.js" defer></script>
 <script src="./assets/vendor/lenis.min.js" defer></script>
+<script src="./webgl.js" defer></script>
+<script src="./ducks.js" defer></script>
 <script src="./motion.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#content">{{nav.skip}}</a>
 
 <header class="hero" id="top">
-  <div class="wrap hero__top">
-    <nav class="nav" aria-label="{{nav.mainLabel}}">
-      <a class="nav__brand" href="./" aria-label="{{nav.homeLabel}}"><img src="./assets/logo.svg" width="100" height="30" alt="{{nav.logoAlt}}"></a>
-      <ul class="nav__links">
-        <li><a href="{{nav.how_href}}">{{nav.how}}</a></li>
-        <li><a href="{{nav.mac_href}}">{{nav.mac}}</a></li>
-        <li><a class="nav__cta" href="{{nav.download_href}}" data-magnet>{{nav.download}}<span class="nav__dot" aria-hidden="true"></span></a></li>
-      </ul>
-    </nav>
-
-    <div class="hero__head">
-      <div class="hero__intro">
-        <p class="hero__kicker">{{hero.kicker}}</p>
-        <h1 class="hero__title"><span class="hero__line">{{hero.line1}}</span> <span class="hero__line hero__line--mark"><span class="mark">{{hero.line2}}</span></span></h1>
+  <div class="stage" data-stage>
+    <canvas class="stage__gl" data-gl aria-hidden="true"></canvas>
+    <div class="stage__field" data-field role="img" aria-label="{{hero.stageDescription}}">
+      <canvas aria-hidden="true" data-state="static"></canvas>
+      <div class="pile" aria-hidden="true">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:11%;--b:0%;--s:1;--r:-6deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:16%;--b:14%;--s:0.92;--r:8deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:41%;--b:0%;--s:1.08;--r:-4deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:46%;--b:14%;--s:0.85;--r:12deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:21%;--b:0%;--s:1.12;--r:-10deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:26%;--b:14%;--s:0.95;--r:5deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:51%;--b:0%;--s:1.02;--r:-12deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:56%;--b:14%;--s:0.88;--r:4deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:1%;--b:0%;--s:1.1;--r:9deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:6%;--b:14%;--s:0.9;--r:-6deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:31%;--b:0%;--s:1.05;--r:14deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:36%;--b:14%;--s:0.82;--r:-5deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:61%;--b:0%;--s:1.15;--r:8deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:66%;--b:14%;--s:0.96;--r:-8deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:21%;--b:28%;--s:0.86;--r:4deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:51%;--b:28%;--s:1.06;--r:-3deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:36%;--b:41%;--s:0.93;--r:10deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:26%;--b:54%;--s:1;--r:6deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:31%;--b:28%;--s:0.84;--r:-9deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:16%;--b:41%;--s:1.1;--r:3deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:61%;--b:28%;--s:0.9;--r:-7deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:46%;--b:41%;--s:1.04;--r:11deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:11%;--b:28%;--s:0.98;--r:-2deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:36%;--b:54%;--s:0.87;--r:7deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:41%;--b:28%;--s:1.12;--r:-11deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:26%;--b:41%;--s:0.94;--r:2deg">
       </div>
-      <div class="hero__copy">
-        <p class="hero__lede">{{hero.lede}}</p>
-        <div class="actions">
-          <a class="btn btn--primary" href="{{hero.ctaHref}}" download data-magnet>{{hero.cta}}</a>
-          <a class="btn btn--ghost" href="{{hero.secondaryHref}}">{{hero.secondary}}</a>
+    </div>
+
+    <div class="wrap hero__ui">
+      <nav class="nav" aria-label="{{nav.mainLabel}}">
+        <a class="nav__brand" href="./" aria-label="{{nav.homeLabel}}"><img src="./assets/logo-paper.svg" width="100" height="30" alt="{{nav.logoAlt}}"></a>
+        <ul class="nav__links">
+          <li><a href="{{nav.how_href}}">{{nav.how}}</a></li>
+          <li><a href="{{nav.mac_href}}">{{nav.mac}}</a></li>
+          <li><a class="nav__cta" href="{{nav.download_href}}" data-magnet>{{nav.download}}<span class="nav__dot" aria-hidden="true"></span></a></li>
+        </ul>
+      </nav>
+
+      <div class="hero__text" data-hero-text>
+        <p class="hero__kicker" data-hero-in>{{hero.kicker}}</p>
+        <h1 class="hero__title" data-hero-title><span class="hero__line">{{hero.line1}}</span> <span class="hero__line hero__line--mark"><span class="mark">{{hero.line2}}</span></span></h1>
+        <div class="hero__copy">
+          <p class="hero__lede" data-hero-in>{{hero.lede}}</p>
+          <div class="hero__cta" data-hero-in>
+            <div class="actions">
+              <a class="btn btn--primary" href="{{hero.ctaHref}}" download data-magnet>{{hero.cta}}</a>
+              <a class="btn btn--ghost" href="{{hero.secondaryHref}}">{{hero.secondary}}</a>
+            </div>
+            <p class="hero__meta">{{hero.meta}}</p>
+          </div>
         </div>
-        <p class="hero__meta">{{hero.meta}}</p>
       </div>
-    </div>
-  </div>
 
-  <div class="wrap hero__product">
-    <div class="hero__signal" aria-hidden="true">
-      <p>{{hero.signalLabel}}</p>
-      <strong>{{hero.signalValue}}</strong>
-      <span>{{hero.signalNote}}</span>
-      <img src="./assets/duck-brand.svg" width="1000" height="862" alt="">
-    </div>
-    <figure class="agents" aria-label="{{hero.previewLabel}}">
+      <figure class="agents" data-panel aria-label="{{hero.previewLabel}}">
         <img class="agents__perch" data-duck="mood" data-perch src="./assets/duck-needs_you.webp" width="240" height="240" alt="">
         <div class="agents__head"><span class="agents__title">{{hero.previewTitle}}</span><span class="agents__status">{{hero.previewStatus}}</span></div>
         <ul class="agents__list">
@@ -78,44 +109,62 @@
           <li class="row row--working"><span class="dot" aria-hidden="true"></span><span class="row__text"><b>{{sessions.squeak.name}}</b><span>{{sessions.squeak.working}}</span></span><span class="row__age">{{sessions.squeak.age}}</span></li>
         </ul>
         <figcaption class="agents__note">{{hero.previewNote}}</figcaption>
-    </figure>
+      </figure>
+    </div>
   </div>
 </header>
 
 <main id="content">
 
-<!-- 2. The moment: the single pinned beat on desktop -->
+<!-- 1. The moment: a pinned, scrubbed story. The copy is real text; the demo is a picture of it. -->
 <section class="moment" id="moment" aria-labelledby="moment-h">
-  <div class="moment__pin">
+  <div class="wrap moment__head">
+    <p class="kicker">{{moment.kicker}}</p>
+    <h2 id="moment-h">{{moment.heading}}</h2>
+    <p class="moment__intro">{{moment.intro}}</p>
+  </div>
+  <div class="moment__pin" data-moment>
     <div class="wrap moment__inner">
-      <header class="moment__head">
-        <p class="kicker">{{moment.kicker}}</p>
-        <h2 id="moment-h">{{moment.heading}}</h2>
-        <p class="moment__intro">{{moment.intro}}</p>
-      </header>
-
       <ol class="beats" aria-label="{{moment.stepsLabel}}">
         <li class="beat" data-beat="working">
-          <div class="beat__copy">
-            <p class="beat__step"><span>{{moment.beats.working.step}}</span>{{moment.beats.working.label}}</p>
-            <h3>{{moment.beats.working.title}}</h3>
-            <p>{{moment.beats.working.body}}</p>
+          <p class="beat__step"><span>{{moment.beats.working.step}}</span>{{moment.beats.working.label}}</p>
+          <h3>{{moment.beats.working.title}}</h3>
+          <p>{{moment.beats.working.body}}</p>
+        </li>
+        <li class="beat" data-beat="needs">
+          <p class="beat__step"><span>{{moment.beats.needs.step}}</span>{{moment.beats.needs.label}}</p>
+          <h3>{{moment.beats.needs.title}}</h3>
+          <p>{{moment.beats.needs.body}}</p>
+        </li>
+        <li class="beat" data-beat="choose">
+          <p class="beat__step"><span>{{moment.beats.choose.step}}</span>{{moment.beats.choose.label}}</p>
+          <h3>{{moment.beats.choose.title}}</h3>
+          <p>{{moment.beats.choose.body}}</p>
+        </li>
+        <li class="beat" data-beat="sent">
+          <p class="beat__step"><span>{{moment.beats.sent.step}}</span>{{moment.beats.sent.label}}</p>
+          <h3>{{moment.beats.sent.title}}</h3>
+          <p>{{moment.beats.sent.body}}</p>
+        </li>
+      </ol>
+
+      <div class="demo" data-demo data-mode="needs" aria-hidden="true">
+        <div class="demo__win">
+          <div class="demo__list">
+            <p class="window__title"><span>{{moment.panel.listTitle}}</span><em><span data-s="working">{{moment.beats.working.status}}</span><span data-s="needs">{{moment.beats.needs.status}}</span><span data-s="done">{{moment.statusDone}}</span></em></p>
+            <ul class="demo__rows" data-rows>
+              <li class="row" data-row="payment"><span class="dot"></span><span class="row__text"><b>{{sessions.payment.name}}</b><span data-s="working">{{sessions.payment.working}}</span><span data-s="needs">{{sessions.payment.needs}}</span><span data-s="done">{{sessions.payment.done}}</span></span></li>
+              <li class="row row--working" data-row="atlas"><span class="dot"></span><span class="row__text"><b>{{sessions.atlas.name}}</b><span>{{sessions.atlas.working}}</span></span></li>
+              <li class="row row--working" data-row="compass"><span class="dot"></span><span class="row__text"><b>{{sessions.compass.name}}</b><span>{{sessions.compass.working}}</span></span></li>
+              <li class="row row--working" data-row="squeak"><span class="dot"></span><span class="row__text"><b>{{sessions.squeak.name}}</b><span>{{sessions.squeak.working}}</span></span></li>
+            </ul>
           </div>
-          <div class="beat__visual" aria-hidden="true">
-            <div class="window">
-              <div class="window__list">
-                <p class="window__title"><span>{{moment.panel.listTitle}}</span><em>{{moment.beats.working.status}}</em></p>
-                <ul>
-                  <li class="row row--working"><span class="dot"></span><span class="row__text"><b>{{sessions.atlas.name}}</b><span>{{sessions.atlas.working}}</span></span></li>
-                  <li class="row row--working row--active"><span class="dot"></span><span class="row__text"><b>{{sessions.payment.name}}</b><span>{{sessions.payment.working}}</span></span></li>
-                  <li class="row row--working row--ctx"><span class="dot"></span><span class="row__text"><b>{{sessions.compass.name}}</b><span>{{sessions.compass.working}}</span></span></li>
-                  <li class="row row--working row--ctx"><span class="dot"></span><span class="row__text"><b>{{sessions.squeak.name}}</b><span>{{sessions.squeak.working}}</span></span></li>
-                </ul>
-              </div>
-              <div class="window__detail">
-                <p class="detail__name">{{sessions.payment.title}}</p>
-                <p class="detail__meta">{{moment.beats.working.detail.meta}}</p>
-                <p class="detail__state detail__state--working">{{moment.beats.working.detail.state}}</p>
+          <div class="demo__detail">
+            <p class="detail__name">{{sessions.payment.title}}</p>
+            <p class="detail__meta">{{moment.beats.needs.detail.meta}}</p>
+            <p class="detail__state"><span data-s="working">{{moment.beats.working.detail.state}}</span><span data-s="needs">{{moment.beats.needs.detail.state}}</span><span data-s="done">{{sessions.payment.done}}</span></p>
+            <div class="demo__panes">
+              <div class="pane pane--working" data-pane="working">
                 <p class="detail__h">{{moment.panel.stepsTitle}}</p>
                 <ul class="steps">
                   <li>{{moment.beats.working.detail.step1}}</li>
@@ -123,117 +172,44 @@
                   <li>{{moment.beats.working.detail.step3}}</li>
                 </ul>
               </div>
-            </div>
-            <img class="beat__duck" src="./assets/duck-working.webp" width="240" height="240" alt="" loading="lazy">
-          </div>
-        </li>
-
-        <li class="beat" data-beat="needs">
-          <div class="beat__copy">
-            <p class="beat__step"><span>{{moment.beats.needs.step}}</span>{{moment.beats.needs.label}}</p>
-            <h3>{{moment.beats.needs.title}}</h3>
-            <p>{{moment.beats.needs.body}}</p>
-          </div>
-          <div class="beat__visual" aria-hidden="true">
-            <div class="window">
-              <div class="window__list">
-                <p class="window__title"><span>{{moment.panel.listTitle}}</span><em>{{moment.beats.needs.status}}</em></p>
-                <ul>
-                  <li class="row row--needs row--active"><span class="dot"></span><span class="row__text"><b>{{sessions.payment.name}}</b><span>{{sessions.payment.needs}}</span></span></li>
-                  <li class="row row--working"><span class="dot"></span><span class="row__text"><b>{{sessions.atlas.name}}</b><span>{{sessions.atlas.working}}</span></span></li>
-                  <li class="row row--working row--ctx"><span class="dot"></span><span class="row__text"><b>{{sessions.compass.name}}</b><span>{{sessions.compass.working}}</span></span></li>
-                  <li class="row row--working row--ctx"><span class="dot"></span><span class="row__text"><b>{{sessions.squeak.name}}</b><span>{{sessions.squeak.working}}</span></span></li>
-                </ul>
-              </div>
-              <div class="window__detail">
-                <p class="detail__name">{{sessions.payment.title}}</p>
-                <p class="detail__meta">{{moment.beats.needs.detail.meta}}</p>
-                <p class="detail__state detail__state--needs">{{moment.beats.needs.detail.state}}</p>
+              <div class="pane pane--needs" data-pane="needs">
                 <p class="detail__message">{{moment.beats.needs.detail.message}}</p>
               </div>
-            </div>
-            <img class="beat__duck" src="./assets/duck-needs_you.webp" width="240" height="240" alt="" loading="lazy">
-          </div>
-        </li>
-
-        <li class="beat" data-beat="choose">
-          <div class="beat__copy">
-            <p class="beat__step"><span>{{moment.beats.choose.step}}</span>{{moment.beats.choose.label}}</p>
-            <h3>{{moment.beats.choose.title}}</h3>
-            <p>{{moment.beats.choose.body}}</p>
-          </div>
-          <div class="beat__visual" aria-hidden="true">
-            <div class="window">
-              <div class="window__list">
-                <p class="window__title"><span>{{moment.panel.listTitle}}</span><em>{{moment.beats.choose.status}}</em></p>
-                <ul>
-                  <li class="row row--needs row--active"><span class="dot"></span><span class="row__text"><b>{{sessions.payment.name}}</b><span>{{sessions.payment.needs}}</span></span></li>
-                  <li class="row row--working"><span class="dot"></span><span class="row__text"><b>{{sessions.atlas.name}}</b><span>{{sessions.atlas.working}}</span></span></li>
-                  <li class="row row--working row--ctx"><span class="dot"></span><span class="row__text"><b>{{sessions.compass.name}}</b><span>{{sessions.compass.working}}</span></span></li>
-                  <li class="row row--working row--ctx"><span class="dot"></span><span class="row__text"><b>{{sessions.squeak.name}}</b><span>{{sessions.squeak.working}}</span></span></li>
-                </ul>
-              </div>
-              <div class="window__detail">
-                <p class="detail__name">{{sessions.payment.title}}</p>
-                <p class="detail__meta">{{moment.beats.choose.detail.meta}}</p>
-                <p class="detail__question">{{moment.beats.choose.detail.question}}</p>
-                <div class="option option--chosen">
-                  <span class="option__key">A</span>
-                  <span class="option__text"><b>{{moment.beats.choose.detail.optionA}}</b><span>{{moment.beats.choose.detail.optionADetail}}</span></span>
-                  <span class="option__tag">{{moment.beats.choose.detail.recommended}}</span>
-                </div>
-                <div class="option">
-                  <span class="option__key">B</span>
-                  <span class="option__text"><b>{{moment.beats.choose.detail.optionB}}</b><span>{{moment.beats.choose.detail.optionBDetail}}</span></span>
-                </div>
-                <p class="detail__choice"><span class="chip">{{moment.beats.choose.detail.chosenTag}}</span><span>{{moment.beats.choose.detail.demoNote}}</span></p>
-              </div>
-            </div>
-            <img class="beat__duck" src="./assets/duck-needs_you.webp" width="240" height="240" alt="" loading="lazy">
-          </div>
-        </li>
-
-        <li class="beat" data-beat="sent">
-          <div class="beat__copy">
-            <p class="beat__step"><span>{{moment.beats.sent.step}}</span>{{moment.beats.sent.label}}</p>
-            <h3>{{moment.beats.sent.title}}</h3>
-            <p>{{moment.beats.sent.body}}</p>
-          </div>
-          <div class="beat__visual" aria-hidden="true">
-            <div class="window">
-              <div class="window__list">
-                <p class="window__title"><span>{{moment.panel.listTitle}}</span><em>{{moment.beats.sent.status}}</em></p>
-                <ul>
-                  <li class="row row--working row--active"><span class="dot"></span><span class="row__text"><b>{{sessions.payment.name}}</b><span>{{sessions.payment.working}}</span></span></li>
-                  <li class="row row--working"><span class="dot"></span><span class="row__text"><b>{{sessions.atlas.name}}</b><span>{{sessions.atlas.working}}</span></span></li>
-                  <li class="row row--working row--ctx"><span class="dot"></span><span class="row__text"><b>{{sessions.compass.name}}</b><span>{{sessions.compass.working}}</span></span></li>
-                  <li class="row row--working row--ctx"><span class="dot"></span><span class="row__text"><b>{{sessions.squeak.name}}</b><span>{{sessions.squeak.working}}</span></span></li>
-                </ul>
-              </div>
-              <div class="window__detail">
-                <p class="detail__name">{{sessions.payment.title}}</p>
-                <p class="detail__meta">{{moment.beats.sent.detail.meta}}</p>
-                <p class="detail__state detail__state--working">{{moment.beats.sent.detail.state}}</p>
+              <div class="pane pane--sent" data-pane="sent">
                 <p class="detail__receipt"><span class="tick"></span>{{moment.beats.sent.detail.receipt}}</p>
-                <p class="detail__h">{{moment.panel.stepsTitle}}</p>
                 <ul class="steps">
                   <li>{{moment.beats.sent.detail.step1}}</li>
                   <li>{{moment.beats.sent.detail.step2}}</li>
                 </ul>
               </div>
             </div>
-            <img class="beat__duck" src="./assets/duck-working.webp" width="240" height="240" alt="" loading="lazy">
+            <div class="card" data-card>
+              <p class="detail__question">{{moment.beats.choose.detail.question}}</p>
+              <div class="option option--chosen" data-opt="a">
+                <span class="option__key">A</span>
+                <span class="option__text"><b>{{moment.beats.choose.detail.optionA}}</b><span>{{moment.beats.choose.detail.optionADetail}}</span></span>
+                <span class="option__tag">{{moment.beats.choose.detail.recommended}}</span>
+              </div>
+              <div class="option" data-opt="b">
+                <span class="option__key">B</span>
+                <span class="option__text"><b>{{moment.beats.choose.detail.optionB}}</b><span>{{moment.beats.choose.detail.optionBDetail}}</span></span>
+              </div>
+            </div>
           </div>
-        </li>
-      </ol>
+        </div>
+        <p class="demo__foot"><span class="chip" data-chip>{{moment.beats.choose.detail.chosenTag}}</span><span>{{moment.beats.choose.detail.demoNote}}</span></p>
+        <img class="demo__duck" data-mood="working" src="./assets/duck-working.webp" width="240" height="240" alt="" loading="lazy">
+        <img class="demo__duck" data-mood="needs" src="./assets/duck-needs_you.webp" width="240" height="240" alt="" loading="lazy">
+        <img class="demo__duck" data-mood="done" src="./assets/duck-celebrating.webp" width="240" height="240" alt="" loading="lazy">
+      </div>
 
       <div class="rail" aria-hidden="true">
         <span class="rail__track"><span class="rail__fill"></span></span>
         <ol class="rail__steps">
-          <li class="rail__step"><span>{{moment.beats.working.step}}</span>{{moment.beats.working.label}}</li>
-          <li class="rail__step"><span>{{moment.beats.needs.step}}</span>{{moment.beats.needs.label}}</li>
-          <li class="rail__step"><span>{{moment.beats.choose.step}}</span>{{moment.beats.choose.label}}</li>
-          <li class="rail__step"><span>{{moment.beats.sent.step}}</span>{{moment.beats.sent.label}}</li>
+          <li class="rail__step"><span>{{moment.beats.working.step}}</span><i>{{moment.beats.working.label}}</i></li>
+          <li class="rail__step"><span>{{moment.beats.needs.step}}</span><i>{{moment.beats.needs.label}}</i></li>
+          <li class="rail__step"><span>{{moment.beats.choose.step}}</span><i>{{moment.beats.choose.label}}</i></li>
+          <li class="rail__step"><span>{{moment.beats.sent.step}}</span><i>{{moment.beats.sent.label}}</i></li>
         </ol>
       </div>
       <button class="replay" type="button" hidden>{{moment.replay}}</button>
@@ -241,7 +217,7 @@
   </div>
 </section>
 
-<!-- 3. The Mac app -->
+<!-- 2. The Mac app: a window that tilts flat as you arrive -->
 <section class="section mac" id="mac" aria-labelledby="mac-h">
   <div class="wrap">
     <header class="section__head">
@@ -249,88 +225,105 @@
       <h2 id="mac-h">{{mac.heading}}</h2>
       <p class="section__lede">{{mac.lede}}</p>
     </header>
-    <figure class="shot" data-reveal>
-      <img src="./assets/mac-decision.webp" width="1600" height="1066" alt="{{mac.imageAlt}}" loading="lazy">
-      <span class="pin pin--1" aria-hidden="true">{{mac.c1.n}}</span>
-      <span class="pin pin--2" aria-hidden="true">{{mac.c2.n}}</span>
-      <span class="pin pin--3" aria-hidden="true">{{mac.c3.n}}</span>
-    </figure>
+    <div class="mac__stage" data-mac>
+      <div class="mac__plane" data-plane>
+        <figure class="shot shot--b" aria-hidden="true" data-shot-b>
+          <img src="./assets/mac-activity.webp" width="1600" height="1066" alt="" loading="lazy">
+        </figure>
+        <figure class="shot shot--a" data-shot-a>
+          <img src="./assets/mac-decision.webp" width="1600" height="1066" alt="{{mac.imageAlt}}" loading="lazy">
+          <span class="pin pin--1" aria-hidden="true">{{mac.c1.n}}</span>
+          <span class="pin pin--2" aria-hidden="true">{{mac.c2.n}}</span>
+          <span class="pin pin--3" aria-hidden="true">{{mac.c3.n}}</span>
+        </figure>
+      </div>
+    </div>
     <p class="shot__link"><a class="textlink" href="{{mac.viewFullHref}}">{{mac.viewFull}}</a></p>
     <ol class="callouts" aria-label="{{mac.calloutsLabel}}">
-      <li data-reveal><span class="callouts__n" aria-hidden="true">{{mac.c1.n}}</span><h3>{{mac.c1.title}}</h3><p>{{mac.c1.body}}</p></li>
-      <li data-reveal><span class="callouts__n" aria-hidden="true">{{mac.c2.n}}</span><h3>{{mac.c2.title}}</h3><p>{{mac.c2.body}}</p></li>
-      <li data-reveal><span class="callouts__n" aria-hidden="true">{{mac.c3.n}}</span><h3>{{mac.c3.title}}</h3><p>{{mac.c3.body}}</p></li>
+      <li data-callout><span class="callouts__n" aria-hidden="true">{{mac.c1.n}}</span><h3>{{mac.c1.title}}</h3><p>{{mac.c1.body}}</p></li>
+      <li data-callout><span class="callouts__n" aria-hidden="true">{{mac.c2.n}}</span><h3>{{mac.c2.title}}</h3><p>{{mac.c2.body}}</p></li>
+      <li data-callout><span class="callouts__n" aria-hidden="true">{{mac.c3.n}}</span><h3>{{mac.c3.title}}</h3><p>{{mac.c3.body}}</p></li>
     </ol>
   </div>
 </section>
 
-<!-- 4. The duck -->
-<section class="section duck" id="duck" aria-labelledby="duck-h">
-  <div class="wrap">
-    <header class="section__head">
+<!-- 3. The duck: a strip you scroll through, each mood moving when it is centred -->
+<section class="duck" id="duck" aria-labelledby="duck-h">
+  <div class="duck__pin" data-duckscene>
+    <div class="wrap duck__head">
       <p class="kicker">{{duck.kicker}}</p>
       <h2 id="duck-h">{{duck.heading}}</h2>
       <p class="section__lede">{{duck.lede}}</p>
-    </header>
-    <ul class="moods" aria-label="{{duck.moodsLabel}}">
-      <li class="mood mood--working"><img src="./assets/duck-working.webp" width="240" height="240" alt="{{duck.working.alt}}" loading="lazy"><h3>{{duck.working.name}}</h3><p>{{duck.working.body}}</p></li>
-      <li class="mood mood--needs"><img src="./assets/duck-needs_you.webp" width="240" height="240" alt="{{duck.needs.alt}}" loading="lazy"><h3>{{duck.needs.name}}</h3><p>{{duck.needs.body}}</p></li>
-      <li class="mood mood--done"><img src="./assets/duck-celebrating.webp" width="240" height="240" alt="{{duck.done.alt}}" loading="lazy"><h3>{{duck.done.name}}</h3><p>{{duck.done.body}}</p></li>
-      <li class="mood mood--asleep"><img src="./assets/duck-asleep.webp" width="240" height="240" alt="{{duck.asleep.alt}}" loading="lazy"><h3>{{duck.asleep.name}}</h3><p>{{duck.asleep.body}}</p></li>
-    </ul>
-  </div>
-</section>
-
-<!-- 5. Away from the desk -->
-<section class="section away" id="away" aria-labelledby="away-h">
-  <div class="wrap away__grid">
-    <div class="away__devices">
-      <figure class="phone" data-reveal>
-        <img src="./assets/iphone-activity.webp" width="700" height="1522" alt="{{away.phoneAlt}}" loading="lazy">
-        <figcaption>{{away.phoneCaption}}</figcaption>
-      </figure>
-      <figure class="tg" role="group" aria-label="{{away.telegramLabel}}" data-reveal>
-        <p class="tg__from">{{away.telegram.from}}</p>
-        <div class="tg__msg">
-          <p class="tg__title"><span class="dot dot--needs" aria-hidden="true"></span><b>{{away.telegram.title}}</b></p>
-          <p class="tg__state">{{away.telegram.state}}</p>
-          <p>{{away.telegram.question}}</p>
-          <p class="tg__changed">{{away.telegram.changed}}</p>
-        </div>
-        <div class="tg__keys" aria-hidden="true">
-          <span>{{away.telegram.buttonA}}</span><span>{{away.telegram.buttonB}}</span>
-          <span>{{away.telegram.buttonReply}}</span><span>{{away.telegram.buttonFull}}</span>
-        </div>
-        <figcaption>{{away.telegram.caption}}</figcaption>
-      </figure>
     </div>
-    <div class="away__copy">
-      <p class="kicker">{{away.kicker}}</p>
-      <h2 id="away-h">{{away.heading}}</h2>
-      <p class="section__lede">{{away.lede}}</p>
-      <ul class="points">
-        <li data-reveal><h3>{{away.p1.title}}</h3><p>{{away.p1.body}}</p></li>
-        <li data-reveal><h3>{{away.p3.title}}</h3><p>{{away.p3.body}}</p></li>
+    <div class="duck__view">
+      <ul class="moods" aria-label="{{duck.moodsLabel}}" data-track>
+        <li class="mood mood--asleep" data-mood="asleep"><img src="./assets/duck-asleep.webp" width="240" height="240" alt="{{duck.asleep.alt}}" loading="lazy"><div class="mood__text"><h3>{{duck.asleep.name}}</h3><p>{{duck.asleep.body}}</p></div></li>
+        <li class="mood mood--working" data-mood="working"><img src="./assets/duck-working.webp" width="240" height="240" alt="{{duck.working.alt}}" loading="lazy"><div class="mood__text"><h3>{{duck.working.name}}</h3><p>{{duck.working.body}}</p></div></li>
+        <li class="mood mood--needs" data-mood="needs"><img src="./assets/duck-needs_you.webp" width="240" height="240" alt="{{duck.needs.alt}}" loading="lazy"><div class="mood__text"><h3>{{duck.needs.name}}</h3><p>{{duck.needs.body}}</p></div></li>
+        <li class="mood mood--done" data-mood="done"><img src="./assets/duck-celebrating.webp" width="240" height="240" alt="{{duck.done.alt}}" loading="lazy"><div class="mood__text"><h3>{{duck.done.name}}</h3><p>{{duck.done.body}}</p></div></li>
       </ul>
-      <p class="away__req">{{away.requirement}}</p>
-      <p class="away__link"><a class="textlink" href="{{away.linkHref}}">{{away.link}}</a> <span>{{away.linkNote}}</span></p>
     </div>
   </div>
 </section>
 
-<!-- 6. Trust and compatibility -->
-<section class="section trust" id="trust" aria-labelledby="trust-h">
+<!-- 4. Away from the desk: cards that stack and settle -->
+<section class="away" id="away" aria-labelledby="away-h">
+  <div class="away__pin" data-away>
+    <div class="wrap away__grid">
+      <div class="away__head">
+        <p class="kicker">{{away.kicker}}</p>
+        <h2 id="away-h">{{away.heading}}</h2>
+        <p class="section__lede">{{away.lede}}</p>
+      </div>
+      <div class="away__devices" data-stackwrap>
+        <div class="stack" data-stack>
+          <span class="stack__plate stack__plate--1" aria-hidden="true"></span>
+          <span class="stack__plate stack__plate--2" aria-hidden="true"></span>
+          <figure class="phone" data-phone>
+            <img src="./assets/iphone-activity.webp" width="700" height="1522" alt="{{away.phoneAlt}}" loading="lazy">
+            <figcaption>{{away.phoneCaption}}</figcaption>
+          </figure>
+          <figure class="tg" role="group" aria-label="{{away.telegramLabel}}" data-tg>
+            <p class="tg__from">{{away.telegram.from}}</p>
+            <div class="tg__msg">
+              <p class="tg__title"><span class="dot dot--needs" aria-hidden="true"></span><b>{{away.telegram.title}}</b></p>
+              <p class="tg__state">{{away.telegram.state}}</p>
+              <p>{{away.telegram.question}}</p>
+              <p class="tg__changed">{{away.telegram.changed}}</p>
+            </div>
+            <div class="tg__keys" aria-hidden="true">
+              <span>{{away.telegram.buttonA}}</span><span>{{away.telegram.buttonB}}</span>
+              <span>{{away.telegram.buttonReply}}</span><span>{{away.telegram.buttonFull}}</span>
+            </div>
+            <figcaption>{{away.telegram.caption}}</figcaption>
+          </figure>
+        </div>
+      </div>
+      <div class="away__more">
+        <ul class="points">
+          <li data-point><h3>{{away.p1.title}}</h3><p>{{away.p1.body}}</p></li>
+          <li data-point><h3>{{away.p3.title}}</h3><p>{{away.p3.body}}</p></li>
+        </ul>
+        <p class="away__req" data-point>{{away.requirement}}</p>
+        <p class="away__link" data-point><a class="textlink" href="{{away.linkHref}}">{{away.link}}</a> <span>{{away.linkNote}}</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. Trust: big statements, one line at a time -->
+<section class="trust" id="trust" aria-labelledby="trust-h">
   <div class="wrap">
-    <header class="section__head">
+    <header class="trust__head">
       <p class="kicker">{{trust.kicker}}</p>
-      <h2 id="trust-h">{{trust.heading}}</h2>
-      <p class="section__lede">{{trust.lede}}</p>
+      <h2 id="trust-h" data-lines>{{trust.heading}}</h2>
+      <p class="trust__lede">{{trust.lede}}</p>
     </header>
-    <ul class="assurances">
-      <li data-reveal><h3>{{trust.t1.title}}</h3><p>{{trust.t1.body}}</p></li>
-      <li data-reveal><h3>{{trust.t2.title}}</h3><p>{{trust.t2.body}}</p></li>
-      <li data-reveal><h3>{{trust.t3.title}}</h3><p>{{trust.t3.body}}</p></li>
-    </ul>
+    <ol class="assurances">
+      <li><h3 data-lines>{{trust.t1.title}}</h3><p>{{trust.t1.body}}</p></li>
+      <li><h3 data-lines>{{trust.t2.title}}</h3><p>{{trust.t2.body}}</p></li>
+      <li><h3 data-lines>{{trust.t3.title}}</h3><p>{{trust.t3.body}}</p></li>
+    </ol>
     <details class="more">
       <summary><span>{{trust.more.summary}}</span></summary>
       <div class="more__body">
@@ -339,39 +332,53 @@
           <li><h3>{{trust.more.d2.title}}</h3><p>{{trust.more.d2.body}}</p></li>
           <li><h3>{{trust.more.d3.title}}</h3><p>{{trust.more.d3.body}}</p></li>
         </ul>
-            <div class="table-wrap">
-              <table class="compat">
-                <caption>{{trust.table.caption}}</caption>
-                <thead>
-                  <tr><th scope="col">{{trust.table.colTool}}</th><th scope="col">{{trust.table.colWatch}}</th><th scope="col">{{trust.table.colReply}}</th></tr>
-                </thead>
-                <tbody>
-                  <tr><th scope="row">{{trust.table.r1.tool}}<small>{{trust.table.r1.note}}</small></th><td class="is-yes">{{trust.table.r1.watch}}</td><td class="is-yes">{{trust.table.r1.reply}}</td></tr>
-                  <tr><th scope="row">{{trust.table.r2.tool}}<small>{{trust.table.r2.note}}</small></th><td class="is-yes">{{trust.table.r2.watch}}</td><td class="is-yes">{{trust.table.r2.reply}}</td></tr>
-                  <tr><th scope="row">{{trust.table.r3.tool}}<small>{{trust.table.r3.note}}</small></th><td class="is-yes">{{trust.table.r3.watch}}</td><td>{{trust.table.r3.reply}}</td></tr>
-                  <tr><th scope="row">{{trust.table.r4.tool}}<small>{{trust.table.r4.note}}</small></th><td class="is-yes">{{trust.table.r4.watch}}</td><td>{{trust.table.r4.reply}}</td></tr>
-                  <tr><th scope="row">{{trust.table.r5.tool}}</th><td class="is-yes">{{trust.table.r5.watch}}</td><td>{{trust.table.r5.reply}}</td></tr>
-                </tbody>
-              </table>
-            </div>
+        <div class="table-wrap">
+          <table class="compat">
+            <caption>{{trust.table.caption}}</caption>
+            <thead>
+              <tr><th scope="col">{{trust.table.colTool}}</th><th scope="col">{{trust.table.colWatch}}</th><th scope="col">{{trust.table.colReply}}</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">{{trust.table.r1.tool}}<small>{{trust.table.r1.note}}</small></th><td class="is-yes">{{trust.table.r1.watch}}</td><td class="is-yes">{{trust.table.r1.reply}}</td></tr>
+              <tr><th scope="row">{{trust.table.r2.tool}}<small>{{trust.table.r2.note}}</small></th><td class="is-yes">{{trust.table.r2.watch}}</td><td class="is-yes">{{trust.table.r2.reply}}</td></tr>
+              <tr><th scope="row">{{trust.table.r3.tool}}<small>{{trust.table.r3.note}}</small></th><td class="is-yes">{{trust.table.r3.watch}}</td><td>{{trust.table.r3.reply}}</td></tr>
+              <tr><th scope="row">{{trust.table.r4.tool}}<small>{{trust.table.r4.note}}</small></th><td class="is-yes">{{trust.table.r4.watch}}</td><td>{{trust.table.r4.reply}}</td></tr>
+              <tr><th scope="row">{{trust.table.r5.tool}}</th><td class="is-yes">{{trust.table.r5.watch}}</td><td>{{trust.table.r5.reply}}</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </details>
-
   </div>
 </section>
 
-<!-- 7. Install -->
+<!-- 6. Install: Duck Yellow, with a small pile that pours in -->
 <section class="install" id="install" aria-labelledby="install-h">
   <div class="wrap install__grid">
     <div class="install__copy">
       <p class="kicker">{{install.kicker}}</p>
-      <h2 id="install-h">{{install.heading}}</h2>
+      <h2 id="install-h" data-lines>{{install.heading}}</h2>
       <p class="section__lede">{{install.lede}}</p>
       <div class="actions">
-        <a class="btn btn--primary" href="{{install.ctaHref}}" download>{{install.cta}}</a>
+        <a class="btn btn--primary" href="{{install.ctaHref}}" download data-magnet>{{install.cta}}</a>
         <a class="btn btn--ghost" href="{{install.releasesHref}}">{{install.releases}}</a>
       </div>
       <p class="install__meta">{{install.ctaFile}} · {{release.requirements}} · {{release.price}}</p>
+    </div>
+    <div class="pond" data-pond data-count="8" data-count-small="6" data-size="138" data-size-small="96" role="img" aria-label="{{install.pondDescription}}">
+      <div class="pond__field" data-field>
+        <canvas aria-hidden="true"></canvas>
+        <div class="pile" aria-hidden="true">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:3%;--b:0%;--s:1;--r:-6deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:27%;--b:0%;--s:1.05;--r:5deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:50%;--b:0%;--s:.95;--r:-9deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:72%;--b:0%;--s:1.1;--r:7deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:14%;--b:34%;--s:.95;--r:8deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:38%;--b:32%;--s:1;--r:-4deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:60%;--b:34%;--s:.9;--r:10deg">
+          <img class="pile__duck" data-duck="brand" src="./assets/duck-brand.svg" width="1000" height="862" alt="" style="--x:30%;--b:62%;--s:.92;--r:3deg">
+        </div>
+      </div>
     </div>
     <ol class="install__steps" aria-label="{{install.stepsLabel}}">
       <li><span class="step__n" aria-hidden="true">{{install.s1.n}}</span><h3>{{install.s1.title}}</h3><p>{{install.s1.body}}</p></li>

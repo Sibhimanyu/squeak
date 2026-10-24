@@ -3314,3 +3314,101 @@ describe("RemoteBridge media", () => {
     expect(polled.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't send films to a phone." });
   });
 });
+
+describe("RemoteBridge changing a chat's model", () => {
+  function setupFixture(outcome: { ok: true } | { ok: false; reason: string } = { ok: true }) {
+    const { starter } = chatStarter();
+    const f = fixture({ newChat: starter });
+    const setSetup = vi.fn<
+      (
+        sessionId: string,
+        setup: { model: string; thinkingLevel?: string; fastMode: boolean },
+      ) => Promise<typeof outcome>
+    >(async () => outcome);
+    Object.assign(f.replier, { setSetup });
+    const command = (overrides: Record<string, unknown>) =>
+      f.stopCommand({ kind: "setup", answersTurn: undefined, model: "opus-5-5-1m", ...overrides });
+    return { f, setSetup, command };
+  }
+
+  it("sets a model this Mac offers for the chat's own agent, keeping its level and fast mode", async () => {
+    const { f, setSetup, command } = setupFixture();
+    f.emit([session({ effortId: "high", fast: true })]);
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/m1`, command({}));
+    await f.bridge.tick();
+    expect(f.result("m1")).toEqual({ id: "m1", status: "sent" });
+    expect(setSetup.mock.calls).toEqual([["s1", { model: "opus-5-5-1m", thinkingLevel: "high", fastMode: true }]]);
+  });
+
+  it("takes a chosen level and fast mode, and falls back to a level the new model takes", async () => {
+    const { f, setSetup, command } = setupFixture();
+    f.emit([session({ effortId: "max" })]);
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/m1`, command({ thinking: "low", fast: true }));
+    await f.bridge.tick();
+    await f.store.set(`${f.channel}/commands/m2`, command({}));
+    await f.bridge.tick();
+    expect(setSetup.mock.calls.map((call) => call[1])).toEqual([
+      { model: "opus-5-5-1m", thinkingLevel: "low", fastMode: true },
+      { model: "opus-5-5-1m", thinkingLevel: "high", fastMode: false },
+    ]);
+  });
+
+  it("refuses another provider's model, an unknown level, a chat it doesn't show, and a malformed request", async () => {
+    const { f, setSetup, command } = setupFixture();
+    await f.pair();
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ model: "gpt-6.1-sol" }, "That model isn't one this Mac offers for this chat's agent. Pick another."],
+      [{ thinking: "max" }, "That thinking level isn't available for that model."],
+      [{ sessionId: "s-elsewhere" }, "That chat isn't on your phone any more."],
+      [{ fast: "yes" }, "Not a request this Mac understands."],
+    ];
+    for (const [index, [overrides, reason]] of cases.entries()) {
+      await f.store.set(`${f.channel}/commands/m${index}`, command(overrides));
+      await f.bridge.tick();
+      expect(f.result(`m${index}`)).toMatchObject({ status: "refused", reason });
+    }
+    expect(setSetup).not.toHaveBeenCalled();
+  });
+
+  it("passes Conductor's refusal back, and is refused by a Mac that cannot change it", async () => {
+    const { f, command } = setupFixture({ ok: false, reason: "The agent is working." });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/m1`, command({}));
+    await f.bridge.tick();
+    expect(f.result("m1")).toMatchObject({ status: "refused", reason: "The agent is working." });
+    const plain = fixture({ newChat: chatStarter().starter });
+    await plain.pair();
+    await plain.store.set(`${plain.channel}/commands/m1`, plain.stopCommand({ kind: "setup", model: "opus-5-5-1m" }));
+    await plain.bridge.tick();
+    expect(plain.result("m1")).toMatchObject({
+      status: "refused",
+      reason: "This Mac can't change a chat's model from a phone.",
+    });
+  });
+
+  it("tells the phone what the chat runs as Conductor stores it", async () => {
+    const { f } = setupFixture();
+    f.emit([session({ model: "Opus 5.5 · 1M", modelId: "opus-5-5-1m", effortId: "high" })]);
+    await f.pair();
+    await f.bridge.tick();
+    const view = JSON.stringify(f.bridge.phoneView());
+    expect(view).toContain('"modelId":"opus-5-5-1m"');
+    expect(view).toContain('"effortId":"high"');
+  });
+});
+
+describe("RemoteBridge a chat that seems stuck", () => {
+  it("tells the phone what it waits on and since when, only once it has waited long enough", async () => {
+    const f = fixture();
+    const since = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
+    await f.pair();
+    f.emit([session({ state: "working", waitingOn: "model", waitingSince: since(11), stateSource: "transcript" })]);
+    expect(JSON.stringify(f.bridge.phoneView())).toContain(`"stalled":{"on":"model","since":"${since(11)}"}`);
+    f.emit([session({ state: "working", waitingOn: "model", waitingSince: since(4), stateSource: "transcript" })]);
+    expect(JSON.stringify(f.bridge.phoneView())).not.toContain('"stalled"');
+    f.emit([session({ state: "working", waitingOn: "tool", waitingSince: since(40), stateSource: "transcript" })]);
+    expect(JSON.stringify(f.bridge.phoneView())).not.toContain('"stalled"');
+  });
+});

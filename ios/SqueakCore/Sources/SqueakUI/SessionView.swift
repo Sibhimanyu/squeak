@@ -156,6 +156,11 @@ struct SessionView: View {
                 if session.state == "error" {
                     FailureNotice(reason: Presentation.failureReason(session), canReply: Presentation.replyBlock(session) == nil)
                 }
+                if let stalled = session.stalled, session.state == "working" {
+                    StuckNotice(stalled: stalled, canStop: session.conductorSessionId != nil, stopping: model.isStopping(session.key)) {
+                        Task { await model.stop(session) }
+                    }
+                }
                 if !cards.isEmpty {
                     QueueStack(
                         cards: cards, agentName: Presentation.agentName(session.agent), problems: model.queueProblem,
@@ -173,14 +178,8 @@ struct SessionView: View {
                 }
                 // A film's call is answered on its card; a chat box under it would only say it can't send.
                 if session.workflow == nil {
-                    if let line = session.setupLine {
-                        // The chat's model and thinking level, as the Mac names them: muted, no state colour.
-                        Text(line)
-                            .font(.caption).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 20).padding(.top, 6)
-                            .accessibilityLabel(session.setupAccessibilityLabel ?? line)
-                            .accessibilityIdentifier("chat-setup")
+                    if let line = model.pendingSetupLine(session) ?? session.setupLine {
+                        SetupLine(session: session, line: line)
                     }
                     Composer(
                         session: session, agentName: Presentation.agentName(session.agent),
@@ -347,6 +346,46 @@ private struct FailureNotice: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
         .padding(.horizontal, 16).padding(.bottom, 8)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A working chat with no word from the model for minutes: says what it waits on and for how long, and offers
+/// Conductor's own Stop, after which a reply runs the turn again. The Mac decides it is stuck; this only draws it.
+private struct StuckNotice: View {
+    let stalled: PhoneSnapshot.Session.Stalled
+    let canStop: Bool
+    let stopping: Bool
+    let stop: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            HStack(alignment: .center, spacing: 10) {
+                StatusDot(color: Theme.needsYou)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Seems stuck").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    Text(stalled.line(now: context.date)).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
+                    Text(canStop ? "Stop it, then reply to run the turn again." : "Stop it on your Mac, then try again.")
+                        .font(.footnote).foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 0)
+                if canStop {
+                    Button(action: stop) {
+                        if stopping { ProgressView().controlSize(.small) } else { Text("Stop").font(.subheadline.weight(.semibold)) }
+                    }
+                    .buttonStyle(.bordered).tint(Theme.ink)
+                    .frame(minHeight: 44)
+                    .disabled(stopping)
+                    .accessibilityLabel(stopping ? "Stopping" : "Stop the agent")
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(alignment: .leading) {
+                Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 10).padding(.leading, 4).accessibilityHidden(true)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+            .padding(.horizontal, 16).padding(.bottom, 8)
+        }
     }
 }
 
@@ -1486,4 +1525,83 @@ enum ReadingPlace {
     }
 }
 
+
+/// The chat's model and thinking level, as the Mac names them: muted, no state colour. Where the Mac can change
+/// them it is a menu: the models it offers for this chat's own agent, the chosen model's thinking levels and fast
+/// mode, each applied as it is picked, the way Conductor's own picker works. Not while a turn runs.
+private struct SetupLine: View {
+    @Environment(AppModel.self) private var model
+    let session: PhoneSnapshot.Session
+    let line: String
+
+    /// Mid-turn, working or waiting on you: the Mac refuses a change until the turn ends.
+    private var midTurn: Bool { ["working", "awaiting_approval", "awaiting_input"].contains(session.state) }
+
+    var body: some View {
+        let models = model.setupModels(for: session)
+        let current = models.first { $0.id == session.modelId }
+        Group {
+            if models.isEmpty {
+                label(changeable: false)
+            } else {
+                Menu {
+                    Section("Model") {
+                        ForEach(models) { option in
+                            Button { pick(option, thinking: nil, fast: nil) } label: {
+                                if option.id == session.modelId { Label(option.label, systemImage: "checkmark") } else { Text(option.label) }
+                            }
+                        }
+                    }
+                    if let current, !current.levels.isEmpty {
+                        Section("Thinking") {
+                            ForEach(current.levels, id: \.self) { level in
+                                Button { pick(current, thinking: level, fast: nil) } label: {
+                                    let name = Self.levelName(level)
+                                    if level == session.effortId { Label(name, systemImage: "checkmark") } else { Text(name) }
+                                }
+                            }
+                        }
+                    }
+                    if let current, session.agent == "claude" {
+                        Section {
+                            Button { pick(current, thinking: nil, fast: session.fast != true) } label: {
+                                if session.fast == true { Label("Fast mode", systemImage: "checkmark") } else { Text("Fast mode") }
+                            }
+                        }
+                    }
+                } label: {
+                    label(changeable: true)
+                }
+                .disabled(midTurn)
+            }
+        }
+        .padding(.horizontal, 20).padding(.top, 6)
+        .accessibilityIdentifier("chat-setup")
+    }
+
+    private func label(changeable: Bool) -> some View {
+        HStack(spacing: 4) {
+            Text(line).font(.caption).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.tail)
+            if changeable && !midTurn {
+                Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: changeable ? 28 : nil)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(session.setupAccessibilityLabel ?? line)
+        .accessibilityHint(changeable ? (midTurn ? "Can be changed once this turn ends." : "Changes the model or thinking level.") : "")
+    }
+
+    private func pick(_ option: PhoneSnapshot.ChatModel, thinking: String?, fast: Bool?) {
+        Task { await model.changeSetup(session, model: option, thinking: thinking, fast: fast) }
+    }
+
+    private static func levelName(_ level: String) -> String {
+        let words = ChatPresets.levelName(level)
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+}
 #endif

@@ -461,6 +461,11 @@ Rules:
   switches sprite only, panels fade instead of scaling. All state must remain
   readable with zero motion.
 
+The marketing website (`website/`) is a brand surface, not the app. There
+motion may be expressive: scroll scenes, a WebGL backdrop, the duck pile.
+It is still never the only carrier of meaning, and every scene has a
+reduced-motion and no-JavaScript version that shows the same content still.
+
 ---
 
 ## 8. Components

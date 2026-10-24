@@ -496,6 +496,37 @@ describe("ConductorReplier stop", () => {
   });
 });
 
+describe("ConductorReplier setSetup", () => {
+  function setupFixture(status: SessionStatus, overrides: Partial<ConductorRelaySender> = {}) {
+    const calls: unknown[][] = [];
+    const relay: ConductorRelaySender = {
+      isReady: () => true,
+      send: async () => ({ ok: true }),
+      setSetup: async (workspaceId, sessionId, setup) => {
+        calls.push([workspaceId, sessionId, setup]);
+        return { ok: true };
+      },
+      ...overrides,
+    };
+    return { ...fixture(session({ status }), [], null, relay), calls };
+  }
+  const change = { model: "opus-5-5", thinkingLevel: "high", fastMode: false };
+
+  it("changes a resting chat through Conductor's picker route, naming its agent", async () => {
+    const { replier, calls } = setupFixture("idle");
+    expect(await replier.setSetup("s1", change)).toEqual({ ok: true });
+    expect(calls).toEqual([["w1", "s1", { agent: "claude", ...change }]]);
+  });
+
+  it("refuses while a turn runs, and without the relay", async () => {
+    const busy = setupFixture("working");
+    expect(await busy.replier.setSetup("s1", change)).toMatchObject({ ok: false, reason: /mid-turn/ });
+    expect(busy.calls).toEqual([]);
+    const down = setupFixture("idle", { isReady: () => false });
+    expect(await down.replier.setSetup("s1", change)).toMatchObject({ ok: false, reason: /relay isn't connected/ });
+  });
+});
+
 describe("ConductorReplier.lastTurnError", () => {
   const row = (content: object) =>
     ({

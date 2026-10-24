@@ -70,6 +70,8 @@ const content = {
     signalLabel: "Right now",
     signalValue: "01",
     signalNote: "needs your input",
+    stageDescription:
+      "Decoration: a pile of Squeak's rubber duck mascot drops into view and settles beside an example Squeak window. Moving a pointer over it nudges the ducks.",
   },
 
   sessions: {
@@ -79,6 +81,7 @@ const content = {
       agent: "claude",
       needs: "claude · needs an answer",
       working: "claude · working",
+      done: "claude · done",
       age: "2m",
     },
     atlas: {
@@ -109,6 +112,7 @@ const content = {
     stateLabel: "Example",
     stepsLabel: "The example in four steps",
     replay: "Replay example",
+    statusDone: "3 working · 1 done",
     panel: {
       listTitle: "Sessions",
       detailLabel: "Session detail",
@@ -186,6 +190,8 @@ const content = {
     viewFullHref: "./assets/mac-decision.webp",
     imageAlt:
       "The Squeak window. A sidebar lists filters and sources. Sessions are grouped as Needs you, Done, Working and Error. The open session, Payment retry logic in storefront · payment-retries, shows the agent's message and the question how temporary failures should be retried, with two answer rows, the first marked recommended, and a reply box.",
+    activityAlt:
+      "A second Squeak window behind the first, showing another session, squeak · telegram-formatting, with a finished answer and a reply box.",
     calloutsLabel: "What to notice in the window",
     c1: {
       n: "1",
@@ -337,6 +343,8 @@ const content = {
   install: {
     kicker: "06 / Install",
     heading: "Keep your agents in view.",
+    pondDescription:
+      "Decoration: a small pile of Squeak's rubber duck mascot pours into a box and settles. Moving a pointer over it nudges the ducks.",
     lede: `Squeak ${version} for Mac, as a disk image. It is free and ad-hoc signed rather than notarized, so macOS asks once before the first launch. After that, Squeak updates itself.`,
     cta: "Download for Mac",
     ctaHref: download,

@@ -15,7 +15,7 @@ const dist = join(site, "dist");
 const staging = join(site, "dist.building");
 
 const TOKEN = /\{\{\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\}\}/g;
-const COPIED_FILES = ["styles.css", "motion.js", "ducks.js", "scroll-score.json"];
+const COPIED_FILES = ["styles.css", "motion.js", "ducks.js", "webgl.js", "scroll-score.json"];
 
 export function escapeHtml(value: string): string {
   return value

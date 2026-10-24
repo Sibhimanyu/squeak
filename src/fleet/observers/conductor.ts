@@ -198,15 +198,21 @@ function isRetiredWorkspace(row: FleetRegistrySessionRef, now: number): boolean 
 }
 
 /** What the chat runs, for a Claude or Codex chat only: a picker alias for any other agent would read as noise. */
-function modelAndEffort(row: FleetRegistrySessionRef): Pick<ObservedSession, "model" | "effort" | "fast"> {
+function modelAndEffort(
+  row: FleetRegistrySessionRef,
+): Pick<ObservedSession, "model" | "effort" | "fast" | "modelId" | "effortId"> {
   if (row.agentType !== "claude" && row.agentType !== "codex") {
     return {};
   }
-  const model = row.model?.trim() ? modelLabel(row.model.trim()) : null;
-  const effort = row.effortLevel?.trim() ? levelLabel(row.effortLevel) : null;
+  const modelId = row.model?.trim() || null;
+  const effortId = row.effortLevel?.trim().toLowerCase() || null;
+  const model = modelId ? modelLabel(modelId) : null;
+  const effort = effortId ? levelLabel(effortId) : null;
   return {
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
     ...(row.fastMode ? { fast: true } : {}),
+    ...(modelId ? { modelId } : {}),
+    ...(effortId ? { effortId } : {}),
   };
 }

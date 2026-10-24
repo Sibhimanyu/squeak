@@ -38,6 +38,7 @@ import type { PhoneMediaResult } from "./phone-media.js";
 import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
+import { isStalled } from "../fleet/attention.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
 import type { WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../workflows/types.js";
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
@@ -163,6 +164,23 @@ export interface AttachCommand {
  * A signed new name for a Conductor chat: the same as renaming it in Conductor. Same envelope as a reply;
  * only a chat the phone is shown, and only a plain one-line name.
  */
+/**
+ * A signed request to change what a chat runs: a model Conductor offers for the chat's own agent (so the
+ * same provider), its thinking level, and fast mode. Absent level or fast: the chat keeps what it has,
+ * or the model's default level when its current one does not apply.
+ */
+export interface SetupCommand {
+  v: 1;
+  kind: "setup";
+  sessionId: string;
+  model: string;
+  thinking?: string;
+  fast?: boolean;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
 export interface RenameCommand {
   v: 1;
   kind: "rename";
@@ -481,6 +499,11 @@ export interface RemoteReplier {
   transcript?(sessionId: string, limit: number): { messages: TranscriptMessage[] };
   /** Conductor's Stop for a working chat. Absent: a phone's Stop is refused. */
   stopTurn?(sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** A chat's model, thinking level and fast mode. Absent: a phone's change is refused. */
+  setSetup?(
+    sessionId: string,
+    setup: { model: string; thinkingLevel?: string; fastMode: boolean },
+  ): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 /** Starting chats from a phone. Absent means this Mac does not offer it. */
@@ -1470,6 +1493,9 @@ export class RemoteBridge {
     if (kind === "attach") {
       return this.handleAttach(device, id, command as unknown as AttachCommand);
     }
+    if (kind === "setup") {
+      return this.handleSetup(device, id, command as unknown as SetupCommand);
+    }
     if (kind === "rename") {
       return this.handleRename(device, id, command as unknown as RenameCommand);
     }
@@ -1803,6 +1829,83 @@ export class RemoteBridge {
       this.log(device.name, "sent", "saved a photo");
       return { write: true, result: { id, status: "sent", ref: outcome.ref } };
     }
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
+   * A new model, thinking level or fast mode for a chat. Signature, freshness and nonce have already held.
+   * The model must be one this Mac offers for the chat's own agent, read again now, never the phone's list.
+   */
+  private async handleSetup(
+    device: PairedDevice,
+    id: string,
+    command: SetupCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `setup: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (
+      command.v !== 1 ||
+      typeof command.sessionId !== "string" ||
+      typeof command.model !== "string" ||
+      (command.thinking !== undefined && typeof command.thinking !== "string") ||
+      (command.fast !== undefined && typeof command.fast !== "boolean")
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const replier = this.deps.replier;
+    if (!replier.setSetup) {
+      return refuse("This Mac can't change a chat's model from a phone.");
+    }
+    const session = this.shownSession(command.sessionId);
+    if (!session || session.closed === true) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    if (session.agent !== "claude" && session.agent !== "codex") {
+      return refuse("This chat's agent has no models to pick from.");
+    }
+    let models: ChatModel[];
+    try {
+      models = this.deps.newChat?.models?.() ?? [];
+    } catch {
+      models = [];
+    }
+    const offered = models.find((candidate) => candidate.id === command.model && candidate.agent === session.agent);
+    if (!offered) {
+      return refuse("That model isn't one this Mac offers for this chat's agent. Pick another.");
+    }
+    // The level: the one asked for, else the chat's own if this model takes it, else the model's default.
+    let thinking: string | undefined;
+    if (command.thinking !== undefined) {
+      if (!offered.levels.includes(command.thinking)) {
+        return refuse("That thinking level isn't available for that model.");
+      }
+      thinking = command.thinking;
+    } else if (session.effortId && offered.levels.includes(session.effortId)) {
+      thinking = session.effortId;
+    } else if (offered.defaultLevel && offered.levels.includes(offered.defaultLevel)) {
+      thinking = offered.defaultLevel;
+    } else {
+      thinking = offered.levels.at(-1);
+    }
+    const fastMode = command.fast ?? session.fast === true;
+    let outcome: { ok: true } | { ok: false; reason: string };
+    try {
+      outcome = await replier.setSetup(command.sessionId, {
+        model: offered.id,
+        ...(thinking ? { thinkingLevel: thinking } : {}),
+        fastMode,
+      });
+    } catch (error) {
+      outcome = { ok: false, reason: error instanceof Error ? error.message : "Conductor didn't take that change." };
+    }
+    if (!outcome.ok) {
+      this.log(device.name, "refused", `setup: ${outcome.reason}`);
+      return { write: true, result: { id, status: "refused", reason: outcome.reason } };
+    }
+    this.log(device.name, "sent", `${command.sessionId.slice(0, 8)} now runs ${offered.label}`);
+    this.nudgePublish(1_000);
     return { write: true, result: { id, status: "sent" } };
   }
 
@@ -2773,10 +2876,18 @@ export class RemoteBridge {
       ...(session.model ? { model: session.model } : {}),
       ...(session.effort ? { effort: session.effort } : {}),
       ...(session.fast ? { fast: true } : {}),
+      // The same as Conductor stores them, so the phone's picker starts on what the chat runs; older phones ignore them.
+      ...(session.modelId ? { modelId: session.modelId } : {}),
+      ...(session.effortId ? { effortId: session.effortId } : {}),
       turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
       message: text,
       choices: message?.choices ?? null,
       activity: session.state === "working" ? this.activityFor(session) : null,
+      // Working but no word from the model (or only API retries) for long enough that it seems stuck: what it
+      // waits on and since when, so the phone can say so and offer Stop. Absent otherwise; older phones ignore it.
+      ...(isStalled(session, this.now()) && session.waitingSince
+        ? { stalled: { on: session.waitingOn === "api" ? "api" : "model", since: session.waitingSince } }
+        : {}),
       // A finished turn that closes on a question for you ("Want me to open a PR?"): the phone shows it as
       // needing you while the chat stays replyable. Absent otherwise; older phones ignore it and show "done".
       ...(session.state === "finished" && session.asks ? { asks: session.asks } : {}),

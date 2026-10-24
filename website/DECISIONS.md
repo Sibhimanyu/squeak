@@ -3,9 +3,11 @@
 Assumptions made while building, after the plan was approved.
 
 ## Structure
+> Parts of this file predate the 2026-10-24 redesign. Where a note below conflicts with "Redesign (2026-10-24)" at the end, the end wins; superseded notes are marked.
+
 - **One DOM for every width.** The four example states ("The moment") are four `li.beat` elements, each with its own copy and a small HTML replica of the Mac window. Without script, on narrow screens and with reduced motion they simply stack. On desktop, `motion.js` adds `html.js-pin`, which layers them in one grid cell and crossfades their children on a scrubbed, pinned timeline. Nothing is hidden by CSS unless that class is present.
 - **The pinned element is `.moment__pin`**, whose ancestors carry no transform, filter or contain. The pin runs 175% of the viewport; pin spacing is ScrollTrigger's own.
-- **Pin query:** width ≥ 900px, height ≥ 620px, motion allowed. Tablet (768–899) gets the stacked layout.
+- **Pin query:** width ≥ 900px, height ≥ 620px, motion allowed. Tablet (768–899) gets the stacked layout. *(Superseded 2026-10-24: pins now run on tablet and phones too, see Redesign.)*
 - **The example is non-interactive.** No control pretends to send anything. Beat 3 says "A person chooses A" and "Example only. Nothing is sent." The only button is "Replay example", which scrolls to the start of the pin when pressed.
 - **Demo panels are `aria-hidden`**; each beat's heading and paragraph carry the whole story, including the question and options.
 
@@ -45,6 +47,8 @@ Assumptions made while building, after the plan was approved.
 
 ## Lusion pass
 
+*(Re-introduced in the 2026-10-24 redesign: a live hero pile, now with a WebGL backdrop and an install pond; the "Superseded" note below describes an intermediate revision.)*
+
 > Superseded by the focused hero revision. The page now leads with a quiet
 > headline and primary download decision, followed by one real session-panel
 > composition. The decorative duck pile, canvas physics and stage expansion
@@ -66,3 +70,11 @@ Assumptions made while building, after the plan was approved.
 - **The Sessions panel is a solid collider** on every width (a duck's bill and tail stick out past its circles, so the rectangle is 20px wider on the left). The canvas now sits under the panel, so a duck can never be drawn over it. Only about 30% of the panel's width is a spawn target, so a few ducks land on its top edge rather than a tower.
 - **Desktop stage** is `flex: 1` between 420px and 560px of frame, so the stage top stays at 312px at 1440x900 (checked), and 26 ducks fill the heap.
 - **Under 900px** the stage is the panel's height plus 200px: the panel is flush to the frame's sides and bottom, and the heap sits across its full-width top edge (the field now spans the whole frame on every width). The static pile is the same picture, in the 200px above the panel.
+
+## Redesign (2026-10-24)
+- **Structure.** A hero (Ink stage: WebGL backdrop, a live duck pile, the session panel), then the pinned moment, the Mac window that tilts flat, the duck mood strip (pinned, horizontal), away from the desk (a stack of phone and Telegram cards, pinned), trust (lines rising out of masks, one `details`), and the install section with a small pond of ducks. Scripts: GSAP, ScrollTrigger, SplitText and Flip (vendored), Lenis, `webgl.js`, `ducks.js` (multi-instance: `[data-stage]` hero, `[data-pond]` install), `motion.js`.
+- **Mobile gets the same scroll experience.** Pins are no longer limited to 900px and up. `motion.js` builds each scene for a desktop and a phone variant (`gsap.matchMedia`); a scene is switched on (`js-moment`, `js-duck`, `js-away`) only after it measures to fit, and otherwise stays the stacked story. A touch phone's address bar changes only the height, which does not rebuild. Verified at 390x844 and 834x1112 (pin holds, no horizontal overflow, last state reached, released on scroll); a 360x600 phone falls back to the static story. Page length grew (about 10.5k px desktop, 11.3k px phone) and is evidence, not a budget.
+- **The moment** keeps four beats and an example with options A and B only, "Example only. Nothing is sent." and Replay (scrolls to the start of the pin). With no JS or reduced motion the four beats stack, readable and in order.
+- **WebGL backdrop** (`webgl.js`): one fragment shader behind the hero pile, decoration only, `aria-hidden`. It never runs under reduced motion, without WebGL, in a hidden tab or off screen; the flat Ink stage is the fallback. Capped at 1.5 device pixels, drawn at 60% scale, about 30 fps.
+- **Ducks.** Hero pile and install pond are live canvases (`data-state`, `data-frames`, `data-awake`) over a static `.pile` of the same sprites, which is the whole picture with no JS or reduced motion. The pond is held until it is about a third on screen, then pours in.
+- **Verify** was rewritten for this page (see README, Verification). Removed because the thing no longer exists: the old moment's `.beat__copy`, `[data-reveal]`, `js-pin`, the stage clip-path expansion, "no pin below 900px" and "no pin on mobile", Lenis-class and anchor probes of the old hero, the script-weight check, and the hard-coded release manifest (a real release changes the appcast, so the check now compares hashes before and after the run).

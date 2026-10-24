@@ -1451,6 +1451,59 @@ final class AppModel {
         return refusal
     }
 
+    /// A model change the Mac took that its next view has not shown yet: the chat's setup line shows this meanwhile.
+    private(set) var setupPending: [String: (line: String, at: Date)] = [:]
+
+    func pendingSetupLine(_ session: PhoneSnapshot.Session) -> String? {
+        guard let pending = setupPending[session.key], Date().timeIntervalSince(pending.at) < 15 else { return nil }
+        return pending.line
+    }
+
+    /// The models this chat can switch to: the Mac's list for the chat's own agent, so never another provider's.
+    /// Empty when the Mac cannot change a chat's model (it sends `modelId` only when it can).
+    func setupModels(for session: PhoneSnapshot.Session) -> [PhoneSnapshot.ChatModel] {
+        guard session.modelId != nil, session.conductorSessionId != nil else { return [] }
+        return (snapshot?.chatModels ?? []).filter { $0.agent == session.agent }
+    }
+
+    /// Changes what a chat runs, as Conductor's own picker does. Nil when the Mac did it, else why not.
+    @discardableResult
+    func changeSetup(_ session: PhoneSnapshot.Session, model chosen: PhoneSnapshot.ChatModel, thinking: String?, fast: Bool?) async -> String? {
+        let level = thinking ?? (session.effortId.flatMap { chosen.levels.contains($0) ? $0 : nil }) ?? chosen.defaultLevel
+        let line = [chosen.label, level.map { (name: String) -> String in let words = ChatPresets.levelName(name); return words.prefix(1).uppercased() + words.dropFirst() }, (fast ?? session.fast) == true ? "Fast" : nil]
+            .compactMap { $0 }.joined(separator: " · ")
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if demo {
+            try? await Task.sleep(for: .milliseconds(400))
+            setupPending[session.key] = (line, Date())
+            return nil
+        }
+        guard let channel else { return "Not connected to your Mac." }
+        let refusal: String?
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.setupDocument(to: session, model: chosen.id, thinking: thinking, fast: fast, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            if let result = try await awaitResult(id, on: channel) {
+                refusal = result.sent ? nil : (result.reason ?? "Your Mac refused that.")
+            } else {
+                refusal = "Your Mac didn't answer. Is Squeak running?"
+            }
+        } catch {
+            refusal = "Couldn't reach your Mac."
+        }
+        if let refusal {
+            problemFor[session.key] = refusal
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        } else {
+            problemFor[session.key] = nil
+            setupPending[session.key] = (line, Date())
+        }
+        return refusal
+    }
+
     /// The chat whose name is being edited: set by a row's menu or the chat's header, read by the one alert at the root.
     var renameTarget: PhoneSnapshot.Session?
 

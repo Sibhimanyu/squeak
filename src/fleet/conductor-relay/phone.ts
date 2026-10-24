@@ -322,6 +322,35 @@ export class PhoneClient {
   }
 
   /**
+   * Change an existing chat's model, thinking level and fast mode: `sessions/register` with
+   * `overwriteMetadata`, which Conductor's own picker uses (`syncSessionConfiguration`). Its handler runs
+   * `sessions.updateModelConfiguration` and marks the workspace changed, so the chat's picker shows it at
+   * once and the next turn runs with it.
+   */
+  updateSetup(args: {
+    workspaceLocalId: string;
+    sessionId: string;
+    agent: "claude" | "codex";
+    model: string;
+    thinkingLevel?: string;
+    fastMode: boolean;
+  }): Promise<TunnelResponse> {
+    return this.request({
+      method: "POST",
+      target: `/workspaces/${encodeURIComponent(args.workspaceLocalId)}/sessions/register`,
+      headers: { "content-type": "application/json" },
+      body: {
+        sessionId: args.sessionId,
+        agentType: args.agent,
+        model: args.model,
+        ...(args.thinkingLevel ? { thinkingLevel: args.thinkingLevel } : {}),
+        fastMode: args.fastMode,
+        overwriteMetadata: true,
+      },
+    });
+  }
+
+  /**
    * Start a NEW chat in an existing workspace by sending its first message
    * (spec §5.4: a send to an unknown session id creates it, agent type from
    * `config.harness`). Falls back to `sessions/register` first if the host

@@ -36,6 +36,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   promoteCommand: { box: string; sig: string; device: string };
   stopCommandId: string;
   stopCommand: { box: string; sig: string; device: string };
+  setupCommandId: string;
+  setupCommand: { box: string; sig: string; device: string };
   diffCommandId: string;
   diffCommand: { box: string; sig: string; device: string };
   imageCommandId: string;
@@ -82,6 +84,7 @@ function bridge(turn: string) {
   const sent: Array<ReplyOptions | undefined> = [];
   const queueActions: Array<[string, string, QueueAction]> = [];
   const stops: string[] = [];
+  const setups: unknown[][] = [];
   const hotspotRequests: unknown[] = [];
   const awakeRequests: unknown[] = [];
   const controlChanges: unknown[] = [];
@@ -122,6 +125,10 @@ function bridge(turn: string) {
       },
       stopTurn: async (sessionId) => {
         stops.push(sessionId);
+        return { ok: true };
+      },
+      setSetup: async (sessionId, setup) => {
+        setups.push([sessionId, setup]);
         return { ok: true };
       },
     },
@@ -202,7 +209,13 @@ function bridge(turn: string) {
       ({
         sessions: [],
         active: [
-          { key: "claude-transcript:s1", conductorSessionId: "s1", cwd: "/w", baseRef: null } as FleetSession,
+          {
+            key: "claude-transcript:s1",
+            agent: "claude",
+            conductorSessionId: "s1",
+            cwd: "/w",
+            baseRef: null,
+          } as FleetSession,
           {
             key: "claude-transcript:d1",
             conductorSessionId: null,
@@ -215,6 +228,15 @@ function bridge(turn: string) {
     newChat: {
       workspaces: () => [
         { id: "w1", repoName: "farm", branch: "arm", lastActivityAt: "", defaultAgent: "claude" as const },
+      ],
+      models: () => [
+        {
+          agent: "claude" as const,
+          id: "opus-5-5-1m",
+          label: "Opus 5.5 · 1M",
+          levels: ["low", "high"],
+          favorite: true,
+        },
       ],
       start: async (args) => {
         starts.push(args);
@@ -240,6 +262,7 @@ function bridge(turn: string) {
     queueActions,
     answers,
     stops,
+    setups,
     hotspotRequests,
     awakeRequests,
     controlChanges,
@@ -320,6 +343,13 @@ describe("a reply made on the iPhone", () => {
     expect(verdict.result).toEqual({ id: fixture.stopCommandId, status: "sent" });
     expect(stops).toEqual(["s1"]);
     expect(sends).toEqual([]);
+  });
+
+  it("changes a chat's model when the phone signs a setup request", async () => {
+    const { remote, config, setups } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.setupCommandId, fixture.setupCommand);
+    expect(verdict.result).toEqual({ id: fixture.setupCommandId, status: "sent" });
+    expect(setups).toEqual([["s1", { model: "opus-5-5-1m", thinkingLevel: "high", fastMode: false }]]);
   });
 
   it("sets up hotspot failover when the phone signs a hotspot request", async () => {

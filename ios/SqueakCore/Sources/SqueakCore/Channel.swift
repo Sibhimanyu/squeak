@@ -473,6 +473,27 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed document that changes a chat's model, thinking level or fast mode.
+    public func setupDocument(to session: PhoneSnapshot.Session, model: String, thinking: String?, fast: Bool?,
+                              signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+        guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = SetupCommand(
+            v: 1,
+            kind: "setup",
+            sessionId: sessionId,
+            model: model,
+            thinking: thinking,
+            fast: fast,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
     /// The signed document that closes a chat's tab in Conductor.
     public func closeDocument(to session: PhoneSnapshot.Session, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
         guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
