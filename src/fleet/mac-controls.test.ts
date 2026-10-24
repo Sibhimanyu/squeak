@@ -16,6 +16,9 @@ describe("reading a control change", () => {
     expect(readControlChange({ brightness: 100 })).toEqual({ brightness: 100 });
     expect(readControlChange({ muted: true })).toEqual({ muted: true });
     expect(readControlChange({ fans: "max" })).toEqual({ fans: "max" });
+    expect(readControlChange({ power: "auto" })).toEqual({ power: "auto" });
+    expect(readControlChange({ power: "low" })).toEqual({ power: "low" });
+    expect(readControlChange({ power: "high" })).toEqual({ power: "high" });
     expect(readControlChange({ displaySleep: true })).toEqual({ displaySleep: true });
     expect(readControlChange({ open: "com.apple.Notes" })).toEqual({ open: "com.apple.Notes" });
     expect(readControlChange({ space: "left" })).toEqual({ space: "left" });
@@ -37,6 +40,10 @@ describe("reading a control change", () => {
       { volume: 1.5 },
       { volume: "9" },
       { fans: "90" },
+      { power: "2" },
+      { power: 2 },
+      { power: "High" },
+      { power: "high", fans: "max" },
       { muted: 1 },
       { displaySleep: false },
       { x: 1 },

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 
 import { logger } from "../utils/logger.js";
+import { isPowerChoice, POWER_VALUE, type PowerChoice } from "./power-mode.js";
 
 /**
  * Keeping the Mac awake with the lid closed (todo.md, stay-awake plan item 2).
@@ -116,6 +117,12 @@ const defaultRun: Run = (command, args) =>
 export interface LidSleepOptions {
   /** Where a disable is recorded before it is made (`lid-journal.json`). */
   journalPath: string;
+  /**
+   * The energy mode the user picked on the phone (power-mode.ts), if any. While it is High Power,
+   * Squeak's Low Power Mode for heat or a safety rule goes through the `powermode` commands of that
+   * rule and returns to the pick after, since High Power is not something `lowpowermode 0` restores.
+   */
+  powerPick?: () => PowerChoice | null;
   run?: Run;
   wait?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -195,6 +202,9 @@ export class LidSleepGuard {
    * user's own setting, and Squeak must not turn it off later.
    */
   async lowPowerOn(until: number | null = null): Promise<boolean> {
+    if (this.options.powerPick?.() === "high") {
+      return this.lowPowerOverHigh(until);
+    }
     // The configured setting, not notifyutil's current state: the system can
     // show Low Power Mode on by itself (a low battery), and that reading
     // would make Squeak think the user's setting was off and later "restore"
@@ -217,17 +227,49 @@ export class LidSleepGuard {
     return true;
   }
 
+  /**
+   * Heat or a safety rule over a High Power pick: Low Power on both sources through the power rule's
+   * `powermode` commands (heat on the charger is High Power's to cool), journalled with where to go back to.
+   */
+  private async lowPowerOverHigh(until: number | null): Promise<boolean> {
+    this.updateJournal({ lowPower: true, restorePower: "high", until });
+    const result = await this.run(SUDO, ["-n", PMSET, "-a", "powermode", String(POWER_VALUE.low)]);
+    if (!result.ok) {
+      logger.warn("could not turn on Low Power Mode over High Power", { stderr: result.stderr.trim() });
+      const back = await this.run(SUDO, ["-n", PMSET, "-a", "powermode", String(POWER_VALUE.high)]);
+      if (back.ok) this.updateJournal({ lowPower: false, restorePower: null });
+      return false;
+    }
+    logger.info("Low Power Mode on over High Power for an awake session");
+    return true;
+  }
+
+  /** Whether Squeak holds Low Power Mode now (the journal says so). */
+  overrideActive(): boolean {
+    return this.readJournal().lowPower;
+  }
+
+  /** The user picked another energy mode while Low Power Mode is held: that is where it goes back to. */
+  setRestorePower(choice: PowerChoice): void {
+    if (this.readJournal().lowPower) this.updateJournal({ restorePower: choice });
+  }
+
   /** Turns Low Power Mode back off, only if Squeak turned it on. */
   async lowPowerOff(): Promise<void> {
-    if (!this.readJournal().lowPower) {
+    const journal = this.readJournal();
+    if (!journal.lowPower) {
       return;
     }
-    const result = await this.run(SUDO, ["-n", PMSET, "-b", "lowpowermode", "0"]);
+    // A pick (or High Power) goes back through the `powermode` commands; otherwise battery's own switch.
+    const back = journal.restorePower;
+    const result = back
+      ? await this.run(SUDO, ["-n", PMSET, "-a", "powermode", String(POWER_VALUE[back])])
+      : await this.run(SUDO, ["-n", PMSET, "-b", "lowpowermode", "0"]);
     if (!result.ok) {
       logger.warn("could not turn Low Power Mode off; will retry when Squeak starts", { stderr: result.stderr.trim() });
       return;
     }
-    this.updateJournal({ lowPower: false });
+    this.updateJournal({ lowPower: false, restorePower: null });
     logger.info("Low Power Mode off again");
   }
 
@@ -274,7 +316,7 @@ export class LidSleepGuard {
     try {
       text = fs.readFileSync(this.options.journalPath, "utf8");
     } catch {
-      return { sleepDisabled: false, lowPower: false, until: null };
+      return { sleepDisabled: false, lowPower: false, restorePower: null, until: null };
     }
     try {
       const raw = JSON.parse(text) as Record<string, unknown>;
@@ -282,13 +324,14 @@ export class LidSleepGuard {
         // The first journal held only { disabledSleepAt }.
         sleepDisabled: raw.sleepDisabled === true || typeof raw.disabledSleepAt === "number",
         lowPower: raw.lowPower === true,
+        restorePower: isPowerChoice(raw.restorePower) ? raw.restorePower : null,
         until: typeof raw.until === "number" ? raw.until : null,
       };
     } catch {
       // A journal exists but cannot be read: something was journalled, so
       // assume the worst for sleep and keep the file until a restore works.
       // Low Power Mode is left alone: without the entry it may be the user's.
-      return { sleepDisabled: true, lowPower: false, until: null };
+      return { sleepDisabled: true, lowPower: false, restorePower: null, until: null };
     }
   }
 
@@ -310,6 +353,8 @@ export class LidSleepGuard {
 interface Journal {
   sleepDisabled: boolean;
   lowPower: boolean;
+  /** Where Low Power Mode goes back to (an energy mode pick); null: battery's `lowpowermode 0`. */
+  restorePower: PowerChoice | null;
   /** When the owning session ends (epoch ms); null: until it is ended. */
   until: number | null;
 }

@@ -264,6 +264,35 @@ public struct DaemonHeat: Decodable, Sendable, Equatable {
     }
 }
 
+/// The Mac's energy mode as `/state` reports it (`power`, src/fleet/power-mode.ts); absent on a Mac with none.
+public struct DaemonPower: Decodable, Sendable, Equatable {
+    /// "auto", "low" or "high": what is in use now.
+    public var mode: String?
+    /// What was picked on the iPhone.
+    public var choice: String?
+    public var available: [String]
+    /// The rule a pick needs is installed.
+    public var ready: Bool
+    public var overridden: Bool
+    public init(mode: String? = nil, choice: String? = nil, available: [String] = [], ready: Bool = false, overridden: Bool = false) {
+        self.mode = mode; self.choice = choice; self.available = available; self.ready = ready; self.overridden = overridden
+    }
+    enum CodingKeys: String, CodingKey { case mode, choice, available, ready, overridden }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mode = c.lenient(String.self, .mode)
+        choice = c.lenient(String.self, .choice)
+        available = c.lenient([String].self, .available) ?? []
+        ready = c.lenient(Bool.self, .ready) ?? false
+        overridden = c.lenient(Bool.self, .overridden) ?? false
+    }
+
+    /// "Automatic", "Low Power" or "High Power".
+    public static func title(_ mode: String) -> String {
+        switch mode { case "low": "Low Power"; case "high": "High Power"; default: "Automatic" }
+    }
+}
+
 public struct DaemonState: Decodable, Sendable, Equatable {
     public var generatedAt: Date?
     public var sessions: [DaemonSession]
@@ -277,6 +306,8 @@ public struct DaemonState: Decodable, Sendable, Equatable {
     public var awakeLidReady = false
     public var hotspot: DaemonHotspot?
     public var heat: DaemonHeat?
+    /// The energy mode and whether its rule is installed; nil from an older daemon, or a Mac with none.
+    public var power: DaemonPower?
     /// What a closed lid does, whether the lid is closed now, how the last session ended, and a sleep
     /// problem that outlives a session. All optional: older daemons send none of them.
     public var awakeLidActions: DaemonLidActions?
@@ -287,7 +318,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
     public var awakeRules: DaemonAwakeRules?
 
     enum CodingKeys: String, CodingKey {
-        case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot, heat
+        case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot, heat, power
         case awakeLidActions, awakeLidClosedNow, awakeLastEnd, awakeSleepProblem, awakeRules
     }
 
@@ -315,6 +346,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
         awakeLidReady = c.lenient(Bool.self, .awakeLidReady) ?? false
         hotspot = c.lenient(DaemonHotspot.self, .hotspot)
         heat = c.lenient(DaemonHeat.self, .heat)
+        power = c.lenient(DaemonPower.self, .power)
         awakeLidActions = c.lenient(DaemonLidActions.self, .awakeLidActions)
         awakeLidClosedNow = c.lenient(Bool.self, .awakeLidClosedNow) ?? false
         awakeLastEnd = c.lenient(DaemonAwakeEnd.self, .awakeLastEnd)

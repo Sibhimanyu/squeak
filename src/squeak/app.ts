@@ -30,6 +30,7 @@ import {
   macHeatSystem,
 } from "../fleet/heat.js";
 import { MacControls, macControlsSystem } from "../fleet/mac-controls.js";
+import { POWER_SUDOERS_PATH, PowerMode, powerSudoersRule, powerSystem } from "../fleet/power-mode.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
@@ -152,6 +153,8 @@ export class SqueakApp {
   private liveControlsTimer: NodeJS.Timeout | null = null;
   /** Volume, brightness and fans from the phone's Mac controls page (fleet/mac-controls.ts). */
   private readonly controls: MacControls;
+  /** Automatic, Low Power or High Power from the phone (fleet/power-mode.ts). */
+  private readonly energy: PowerMode;
   /** The Mac's last battery/heat/lid reading, for the phone; refreshed once a minute. */
   private power: PowerReading | null = null;
   private unwatchCaffeinate: (() => void) | null = null;
@@ -161,10 +164,21 @@ export class SqueakApp {
   constructor(config: SqueakConfig) {
     this.config = config;
     this.caffeinator = new Caffeinator();
+    const lidGuard = new LidSleepGuard({
+      journalPath: path.join(config.supportDir, "lid-journal.json"),
+      // High Power picked on the phone: heat and safety rules go back to it, not to battery's switch.
+      powerPick: () => this.energy.pick,
+    });
+    this.energy = new PowerMode({
+      file: path.join(config.supportDir, "power-mode.json"),
+      system: powerSystem(),
+      override: lidGuard,
+      onChange: () => this.remote?.changed(),
+    });
     this.awake = new AwakeSession({
       path: path.join(config.supportDir, "keep-awake.json"),
       hold: (on) => this.caffeinator.setKeepAwake(on),
-      lid: new LidSleepGuard({ journalPath: path.join(config.supportDir, "lid-journal.json") }),
+      lid: lidGuard,
       onChange: () => this.remote?.changed(),
       onEnd: (end) => this.announceAwakeEnd(end),
       // Sleep left disabled (a failed restore, another tool's disable, a bit put back mid-session).
@@ -200,8 +214,11 @@ export class SqueakApp {
       "/Applications/Squeak.app/Contents/Helpers/squeak-apps",
       path.join(config.supportDir, "squeak-apps"),
     ];
-    this.controls = new MacControls(macControlsSystem(readers, appsHelpers, config.handsAppPath), this.heat, () =>
-      this.remote?.changed(),
+    this.controls = new MacControls(
+      macControlsSystem(readers, appsHelpers, config.handsAppPath),
+      this.heat,
+      () => this.remote?.changed(),
+      this.energy,
     );
     this.lidActions = new LidActions({
       settingsPath: path.join(config.supportDir, "awake-settings.json"),
@@ -422,6 +439,10 @@ export class SqueakApp {
         const rule = fansSudoersRule(os.userInfo().username);
         return rule ? { path: FANS_SUDOERS_PATH, rule, helperPath: FANS_HELPER_PRIVILEGED } : null;
       },
+      powerRule: () => {
+        const rule = powerSudoersRule(os.userInfo().username);
+        return rule ? { path: POWER_SUDOERS_PATH, rule } : null;
+      },
       lidRule: () => {
         const rule = sudoersRule(os.userInfo().username);
         return rule ? { path: SUDOERS_PATH, rule } : null;
@@ -454,6 +475,7 @@ export class SqueakApp {
       rules: awakeRules(config.awakeSafety),
       hotspot: this.hotspot.state,
       heat: this.heat.state,
+      power: this.energy.state,
     }));
     const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
       this.claudeLimits.record(limits),
@@ -498,6 +520,7 @@ export class SqueakApp {
     await this.lidActions.recover();
     await this.heat.recover();
     void this.controls.refresh();
+    void this.energy.refresh(true);
     await this.hotspot.start().catch((error: unknown) =>
       logger.warn("hotspot failover failed to start", {
         error: error instanceof Error ? error.message : String(error),
@@ -619,6 +642,11 @@ export class SqueakApp {
     if ((request as { action?: unknown } | null)?.action === "recheck-fans") {
       this.heat.recheckFanControl();
       await this.checkHeat(true);
+      return { ok: true as const, state: this.awake.state };
+    }
+    // The Mac app asks after installing the energy mode rule.
+    if ((request as { action?: unknown } | null)?.action === "recheck-power") {
+      await this.energy.refresh(true);
       return { ok: true as const, state: this.awake.state };
     }
     // The Mac app asks after installing or removing the lid rule.

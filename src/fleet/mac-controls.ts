@@ -4,14 +4,17 @@ import fs from "node:fs";
 import { logger } from "../utils/logger.js";
 import { runHands } from "./conductor-ui.js";
 import { type FanMode, FANS_HELPER_PRIVILEGED, type HeatGovernor, isFanMode } from "./heat.js";
+import { isPowerChoice, type PowerChoice, type PowerMode, type PowerState } from "./power-mode.js";
 
 /**
  * Live controls for the Mac from the phone's Mac controls page: volume and
  * mute (AppleScript's `set volume`), the built-in display's brightness
  * (helpers/squeak-fans, DisplayServices; only while the lid is open), the
  * fans (through heat.ts, so heat can still raise them to full) and the
- * screen off now (`pmset displaysleepnow`). None needs root except the fans,
- * which go through the helper fan control installs.
+ * screen off now (`pmset displaysleepnow`) and the energy mode (Automatic,
+ * Low Power, High Power: power-mode.ts). None needs root except the fans,
+ * which go through the helper fan control installs, and the energy mode, which
+ * goes through its own three-command sudoers rule.
  *
  * Apps (helpers/squeak-apps, no permission): the running ones are in the
  * view; the installed list is asked for (`listApps`) and comes back in the
@@ -31,6 +34,7 @@ export type ControlChange =
   | { muted: boolean }
   | { brightness: number }
   | { fans: FanMode }
+  | { power: PowerChoice }
   | { displaySleep: true }
   | { wakeScreen: true }
   | { screenAwake: boolean }
@@ -68,6 +72,11 @@ export interface MacControlsState {
     available: boolean;
     rpm: number[];
   };
+  /**
+   * Energy mode (power-mode.ts): what is in use, what was picked, what this Mac offers, and whether the Mac
+   * app has set up the rule that lets the pick apply. Absent on a Mac with no energy mode.
+   */
+  power?: PowerState;
   /** The display is held on (`caffeinate -d`) until turned off or Squeak stops. */
   screenAwake: boolean;
   /**
@@ -127,6 +136,8 @@ export function readControlChange(value: unknown): ControlChange | null {
       return typeof v === "boolean" ? { muted: v } : null;
     case "fans":
       return isFanMode(v) ? { fans: v } : null;
+    case "power":
+      return isPowerChoice(v) ? { power: v } : null;
     case "displaySleep":
       return v === true ? { displaySleep: true } : null;
     case "wakeScreen":
@@ -185,7 +196,11 @@ export interface ControlsSystem {
 const INSTALLED_FRESH_MS = 10 * 60_000;
 
 export class MacControls {
-  private last: Omit<MacControlsState, "fans" | "screenAwake"> = { volume: null, muted: null, brightness: null };
+  private last: Omit<MacControlsState, "fans" | "screenAwake" | "power"> = {
+    volume: null,
+    muted: null,
+    brightness: null,
+  };
   private readonly lastActive = new Map<string, number>();
   /** A slider's burst: one write at a time, the newest value next, so a drag ends at its last value. */
   private readonly sliders = new Map<
@@ -199,12 +214,15 @@ export class MacControls {
     private readonly system: ControlsSystem,
     private readonly heat: Pick<HeatGovernor, "state" | "setFanChoice">,
     private readonly onChange: () => void = () => undefined,
+    private readonly power: Pick<PowerMode, "state" | "refresh" | "apply"> | null = null,
   ) {}
 
   get state(): MacControlsState {
     const heat = this.heat.state;
+    const power = this.power?.state;
     return {
       ...this.last,
+      ...(power ? { power } : {}),
       screenAwake: this.screenAwake,
       fans: { mode: heat.fanMode, choice: heat.fanChoice, available: heat.fanControl, rpm: heat.fansRpm },
     };
@@ -212,6 +230,7 @@ export class MacControls {
 
   /** Reads volume and brightness again; tells `onChange` when they moved. */
   async refresh(): Promise<void> {
+    void this.power?.refresh().catch(() => undefined);
     const [volume, brightness, running, playing] = await Promise.all([
       this.system.volume().catch(() => ({ volume: null, muted: null })),
       this.system.brightness().catch(() => null),
@@ -295,6 +314,11 @@ export class MacControls {
       ok = true;
     } else if ("fans" in change) {
       const outcome = await this.heat.setFanChoice(change.fans);
+      if (!outcome.ok) return outcome;
+      ok = true;
+    } else if ("power" in change) {
+      if (!this.power) return { ok: false, reason: "This Mac has no energy mode to change." };
+      const outcome = await this.power.apply(change.power);
       if (!outcome.ok) return outcome;
       ok = true;
     } else if ("volume" in change) {

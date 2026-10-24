@@ -127,6 +127,21 @@ describe("the awake backstop script", { timeout: 30_000 }, () => {
     expect(late.journalLeft).toBe(false);
   });
 
+  it("returns Low Power Mode to an energy mode pick through the power rule's exact commands", () => {
+    for (const [pick, value] of [
+      ["high", 2],
+      ["low", 1],
+      ["auto", 0],
+    ] as const) {
+      const out = runScript({ sleepDisabled: false, lowPower: true, restorePower: pick, until: null }, false);
+      expect(out.sudo).toEqual([`-n /usr/bin/pmset -a powermode ${value}`]);
+      expect(out.journalLeft).toBe(false);
+    }
+    // Nonsense in the journal never reaches a command line.
+    const odd = runScript({ sleepDisabled: false, lowPower: true, restorePower: "9; reboot", until: null }, false);
+    expect(odd.sudo).toEqual(["-n /usr/bin/pmset -b lowpowermode 0"]);
+  });
+
   it("undoes everything when the daemon is not running, whatever the end", () => {
     const left = runScript({ sleepDisabled: true, lowPower: false, until: Date.now() + 3_600_000 }, false);
     expect(left.sudo).toEqual(["-n /usr/bin/pmset -a disablesleep 0"]);

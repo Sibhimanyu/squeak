@@ -140,7 +140,7 @@ struct SessionView: View {
         // A message that did not go through, taken back: its text returns to the field.
         .onChange(of: model.restoredDraft[key]) { _, text in
             guard let text else { return }
-            draft = draft.isEmpty ? text : draft + "\n" + text
+            draft = DraftPolicy.restoring(text, into: draft)
             composing = true
             model.draftRestored(for: key)
         }
@@ -163,7 +163,7 @@ struct SessionView: View {
                         onEdit: { card in
                             Task {
                                 guard let text = await model.removeQueued(card, in: session) else { return }
-                                draft = draft.isEmpty ? text : draft + "\n" + text
+                                draft = DraftPolicy.restoring(text, into: draft)
                                 composing = true
                             }
                         },
@@ -1133,6 +1133,8 @@ struct Composer: View {
     /// "Sending photo 1 of 2…" while they upload, and why one failed.
     @State private var uploading: String?
     @State private var uploadProblem: String?
+    /// Bumped on each clear, so the field is rebuilt and cannot keep text of its own.
+    @State private var generation = 0
 
     init(session: PhoneSnapshot.Session, agentName: String, working: Bool, block: String?, stopping: Bool = false,
          draft: Binding<String>, photos: Binding<[ChatPhoto]>, composing: FocusState<Bool>.Binding) {
@@ -1157,6 +1159,7 @@ struct Composer: View {
                 if block == nil, uploading == nil { AttachButton(photos: $photos, height: Self.control) }
                 TextField("Reply to \(agentName)…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
+                    .id(generation)
                     .focused(composing)
                     .disabled(block != nil)
                     .padding(.horizontal, 14).padding(.vertical, 12)
@@ -1176,50 +1179,62 @@ struct Composer: View {
     }
 
     private func send(_ mode: ReplyMode = .queue) {
-        if !photos.isEmpty { sendWithPhotos(mode); return }
         let text = draft
-        // Clear at once and keep the keyboard up; hand the text back if nothing was sent (Face ID declined).
-        draft = ""
-        // Again on the next turn of the run loop: tapping Send commits whatever the keyboard
-        // still holds (an autocorrection, an inline prediction, dictation), and that commit
-        // writes the old text back into the field just after the clear above.
-        DispatchQueue.main.async { draft = "" }
-        composing.wrappedValue = true
         let wasWorking = working
+        // The box empties now, and the empty box is saved now: a send is accepted the moment it is tapped, and
+        // neither a snapshot, leaving the chat nor the app being backgrounded (Face ID does that) may bring it back.
+        clearBox()
+        if !photos.isEmpty { sendWithPhotos(text, mode, wasWorking: wasWorking); return }
         Task {
             // The session as it is now, not as this view last drew it.
-            guard let session = model.session(key) else { draft = text; return }
+            guard let session = model.session(key) else { giveBack(text); return }
             let started = await model.send(text, to: session, mode: wasWorking ? mode : .queue)
-            if !started, draft.isEmpty { draft = text }
+            if !started { giveBack(text) }
             if started, wasWorking { explained = true }
         }
     }
 
-    /// The photos go to the Mac first, one by one; the message then names where each was saved. The field and the
-    /// tray stay as they are until it is sent, so a failed upload loses nothing.
-    private func sendWithPhotos(_ mode: ReplyMode) {
-        let text = draft
+    /// Empties the field for good. A vertical TextField that still holds the keyboard keeps its own copy of the
+    /// text through a binding reset (tapping Send commits an autocorrection or dictation back into it), so the
+    /// binding is cleared again on the next turn of the run loop and the field is rebuilt (`.id`), keeping focus.
+    private func clearBox() {
+        draft = ""
+        ReadingPlace.save(row: nil, draft: "", for: key)
+        generation += 1
+        DispatchQueue.main.async {
+            draft = ""
+            composing.wrappedValue = true
+        }
+    }
+
+    /// The send did not happen: the text goes back, so nothing is lost.
+    private func giveBack(_ text: String) {
+        draft = DraftPolicy.restoring(text, into: draft)
+        generation += 1
+    }
+
+    /// The photos go to the Mac first, one by one; the message then names where each was saved. The text has
+    /// already left the field; a failed upload gives it back and keeps the tray, so nothing is lost.
+    private func sendWithPhotos(_ text: String, _ mode: ReplyMode, wasWorking: Bool) {
         let sending = photos
-        let wasWorking = working
         uploadProblem = nil
         uploading = "Sending photo 1 of \(sending.count)…"
         Task {
-            guard let session = model.session(key) else { uploading = nil; return }
+            guard let session = model.session(key) else { uploading = nil; giveBack(text); return }
             let result = await model.upload(sending, to: .session(session)) { done, total in
                 uploading = "Sending photo \(min(done + 1, total)) of \(total)…"
             }
             uploading = nil
             switch result {
             case .failed(let why):
+                giveBack(text)
                 uploadProblem = why
             case .saved(let refs):
-                draft = ""
                 photos = []
-                composing.wrappedValue = true
                 let message = PhotoAttachment.compose(text, refs: refs)
                 let started = await model.send(message, to: session, mode: wasWorking ? mode : .queue)
                 if !started {
-                    draft = text
+                    giveBack(text)
                     uploadProblem = "The photos are on your Mac, but the message wasn't sent. Send it again."
                 }
             }
@@ -1443,20 +1458,15 @@ struct StepList: View {
 @MainActor
 enum ReadingPlace {
     private static var rows: [String: String] = [:]
-    private static let draftsKey = "squeak.drafts"
+    private static let drafts = DraftStore()
 
     static func row(for key: String) -> String? { rows[key] }
 
-    static func draft(for key: String) -> String {
-        (UserDefaults.standard.dictionary(forKey: draftsKey) as? [String: String])?[key] ?? ""
-    }
+    static func draft(for key: String) -> String { drafts.draft(for: key) }
 
     static func save(row: String?, draft: String, for key: String) {
         rows[key] = row
-        var drafts = (UserDefaults.standard.dictionary(forKey: draftsKey) as? [String: String]) ?? [:]
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { drafts[key] = nil } else { drafts[key] = draft }
-        UserDefaults.standard.set(drafts, forKey: draftsKey)
+        drafts.save(draft, for: key)
     }
 }
 

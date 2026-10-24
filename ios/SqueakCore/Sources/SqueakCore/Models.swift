@@ -329,11 +329,29 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
                 self.mode = mode; self.choice = choice; self.available = available; self.rpm = rpm
             }
         }
+        /// The Mac's energy mode (Automatic, Low Power, High Power).
+        public struct Power: Codable, Equatable, Sendable {
+            /// What is in use now: "auto", "low" or "high" ("low" while heat or a safety rule holds it); nil when unread.
+            public var mode: String?
+            /// What was picked; nil before the first pick.
+            public var choice: String?
+            /// What this Mac offers, so "high" shows only on a Mac that has High Power.
+            public var available: [String]
+            /// The Mac app has set up the rule a pick needs.
+            public var ready: Bool
+            /// Squeak holds Low Power Mode for heat or a safety rule; the pick returns after.
+            public var overridden: Bool?
+            public init(mode: String? = nil, choice: String? = nil, available: [String], ready: Bool, overridden: Bool? = nil) {
+                self.mode = mode; self.choice = choice; self.available = available; self.ready = ready; self.overridden = overridden
+            }
+        }
         public var volume: Int?
         public var muted: Bool?
         /// Nil with the lid closed: only the built-in display's brightness is controlled.
         public var brightness: Int?
         public var fans: Fans?
+        /// Energy mode; nil from an older Mac, or one with none.
+        public var power: Power?
         /// The display is held on from the phone; nil from an older Mac.
         public var screenAwake: Bool?
         /// The few running apps that matter, ranked by the Mac (in front first, at most six); nil from a Mac without the apps helper.
@@ -344,8 +362,8 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         }
         /// Whether the Mac is playing sound now, so media keys show only then; nil from an older Mac.
         public var media: Media?
-        public init(volume: Int? = nil, muted: Bool? = nil, brightness: Int? = nil, fans: Fans? = nil, screenAwake: Bool? = nil, apps: [MacApp]? = nil, media: Media? = nil) {
-            self.volume = volume; self.muted = muted; self.brightness = brightness; self.fans = fans
+        public init(volume: Int? = nil, muted: Bool? = nil, brightness: Int? = nil, fans: Fans? = nil, power: Power? = nil, screenAwake: Bool? = nil, apps: [MacApp]? = nil, media: Media? = nil) {
+            self.volume = volume; self.muted = muted; self.brightness = brightness; self.fans = fans; self.power = power
             self.screenAwake = screenAwake; self.apps = apps; self.media = media
         }
     }
@@ -1053,6 +1071,8 @@ public struct ControlsCommand: Codable, Equatable, Sendable {
         public var brightness: Int?
         /// "auto", "40", "60", "80" or "max".
         public var fans: String?
+        /// "auto", "low" or "high": the Mac's energy mode.
+        public var power: String?
         public var displaySleep: Bool?
         public var wakeScreen: Bool?
         /// Hold the display on until turned off (or Squeak stops).
@@ -1078,6 +1098,7 @@ public struct ControlsCommand: Codable, Equatable, Sendable {
         public static func muted(_ on: Bool) -> Change { Change(muted: on) }
         public static func brightness(_ percent: Int) -> Change { Change(brightness: min(100, max(0, percent))) }
         public static func fans(_ mode: String) -> Change { Change(fans: mode) }
+        public static func power(_ mode: String) -> Change { Change(power: mode) }
         public static var displaySleep: Change { Change(displaySleep: true) }
     }
     public let v: Int

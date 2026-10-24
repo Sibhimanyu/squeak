@@ -610,6 +610,9 @@ final class AppModel {
     private(set) var awakeLidReady = false
     private(set) var settingUpLid = false
     private(set) var settingUpFans = false
+    private(set) var settingUpPower = false
+    /// The Mac's energy mode, and whether its rule is in; nil from an older daemon or a Mac with none.
+    private(set) var power: DaemonPower?
     private(set) var heat: DaemonHeat?
     private(set) var hotspot: DaemonHotspot?
     /// What a closed lid does (nil from a daemon that does not say), and the rest of the daemon's awake report.
@@ -642,6 +645,7 @@ final class AppModel {
         if state.awakeLidReady != awakeLidReady { awakeLidReady = state.awakeLidReady }
         if state.hotspot != hotspot { hotspot = state.hotspot }
         if state.heat != heat { heat = state.heat }
+        if state.power != power { power = state.power }
         if state.awakeLidActions != awakeLidActions { awakeLidActions = state.awakeLidActions }
         if state.awakeLidClosedNow != awakeLidClosedNow { awakeLidClosedNow = state.awakeLidClosedNow }
         if state.awakeLastEnd != awakeLastEnd { awakeLastEnd = state.awakeLastEnd }
@@ -756,6 +760,27 @@ final class AppModel {
             awakeNote = awakeLidReady ? "Lid closed is ready. Start a session and your Mac stays awake with the lid shut." : "Installed, but Squeak can't use it yet. Try again in a moment."
         case .cancelled: awakeNote = nil
         case .failed(let reason): awakeNote = "Lid closed wasn't set up. \(reason)"
+        }
+    }
+
+    /// Installs the energy mode rule with macOS's admin prompt, once per Mac.
+    func setUpPower() async {
+        guard !settingUpPower, !demoMode else { return }
+        settingUpPower = true
+        defer { settingUpPower = false }
+        guard let rule = await client.powerRule() else {
+            awakeNote = "This version of the Squeak service can't set the energy mode. Update it first."
+            return
+        }
+        switch await PowerRule.install(rule) {
+        case .installed:
+            await client.recheckPower()
+            await readAwake()
+            awakeNote = power?.ready == true
+                ? "Energy mode is ready. Pick Automatic, Low Power or High Power from Mac controls on your iPhone."
+                : "Installed. Squeak picks it up within a few seconds."
+        case .cancelled: awakeNote = nil
+        case .failed(let reason): awakeNote = "Energy mode wasn't set up. \(reason)"
         }
     }
 

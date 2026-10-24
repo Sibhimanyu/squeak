@@ -200,10 +200,7 @@ struct SettingsView: View {
             Form {
                 macCardSection
                 if model.awakeOffered {
-                    AwakeSection(problem: $awakeProblem)
-                    if model.lidActionsOffered {
-                        LidActionsSection(problem: $lidActionsProblem)
-                    }
+                    AwakeSection(problem: $awakeProblem, lidProblem: $lidActionsProblem)
                 }
                 if let hotspot = model.snapshot?.hotspot {
                     HotspotSection(hotspot: hotspot)
@@ -332,8 +329,8 @@ private struct HotspotSection: View {
 }
 
 /// What the Mac does when its lid closes during a lid-closed session: four tiles, each a signed change
-/// to the Mac's own setting. Shown only for a Mac that sends them.
-private struct LidActionsSection: View {
+/// to the Mac's own setting. Shown only for a Mac that sends them. Nested inside Keep awake, under its card.
+private struct LidActionsGroup: View {
     @Environment(AppModel.self) private var model
     @Binding var problem: String?
 
@@ -345,24 +342,28 @@ private struct LidActionsSection: View {
     ]
 
     var body: some View {
-        Section {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("When the lid closes", systemImage: "laptopcomputer")
+                .font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                 ForEach(AwakeFormat.lidActionInfos) { info in
                     let on = model.lidActions?[info.key] ?? false
                     let tile = Self.tiles[info.key] ?? ("questionmark", info.title)
                     Button { Task { problem = await model.changeLidAction(info.key, !on) } } label: {
-                        VStack(spacing: 8) {
+                        HStack(spacing: 8) {
                             ZStack {
-                                Image(systemName: tile.icon).font(.title2).foregroundStyle(on ? Theme.primaryText : Theme.ink).opacity(model.lidActionPending(info.key) ? 0 : 1)
+                                Image(systemName: tile.icon).font(.body).opacity(model.lidActionPending(info.key) ? 0 : 1)
                                 if model.lidActionPending(info.key) { ProgressView() }
                             }
-                            .frame(height: 28)
+                            .frame(width: 24)
                             Text(tile.name).font(.footnote.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
+                            Spacer(minLength: 0)
                         }
-                        .frame(maxWidth: .infinity, minHeight: 76)
+                        .padding(.horizontal, 10)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .foregroundStyle(on ? Theme.primaryText : Theme.ink)
-                        .background(on ? Theme.primaryFill : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(on ? Color.clear : Theme.line))
+                        .background(on ? Theme.primaryFill : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(on ? Color.clear : Theme.line))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(info.title)
@@ -372,11 +373,11 @@ private struct LidActionsSection: View {
                     .accessibilityIdentifier("lid-action-\(info.key)")
                 }
             }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-        } header: { SettingsHeader("When the lid closes", icon: "laptopcomputer") } footer: {
             Text(problem ?? "Only in a lid closed session. Undone when the lid opens.")
+                .font(.footnote).foregroundStyle(Theme.muted)
         }
+        .padding(.top, 10)
+        .overlay(alignment: .top) { Divider() }
     }
 }
 
@@ -385,6 +386,7 @@ private struct LidActionsSection: View {
 private struct AwakeSection: View {
     @Environment(AppModel.self) private var model
     @Binding var problem: String?
+    @Binding var lidProblem: String?
     @State private var confirmingEnd = false
     @State private var untilTime = Date().addingTimeInterval(3 * 3600)
     /// On unless you turn it off, and remembered: a Mac you set to stay awake should stay awake with its lid shut.
@@ -411,6 +413,7 @@ private struct AwakeSection: View {
                             }
                         }
                     }
+                    if model.lidActionsOffered { LidActionsGroup(problem: $lidProblem) }
                 }
                 .padding(.vertical, 6)
             }

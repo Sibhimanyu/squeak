@@ -123,7 +123,13 @@ if [ "$running" = 1 ] && [ "$readable" = 1 ]; then
 fi
 ok=1
 if [ "$(field lowPower)" = "true" ]; then
-  "$SUDO" -n /usr/bin/pmset -b lowpowermode 0 || ok=0
+  # An energy mode pick (power-mode.ts) goes back to that mode, through the power rule's exact commands.
+  case "$(field restorePower)" in
+    high) "$SUDO" -n /usr/bin/pmset -a powermode 2 || ok=0 ;;
+    low) "$SUDO" -n /usr/bin/pmset -a powermode 1 || ok=0 ;;
+    auto) "$SUDO" -n /usr/bin/pmset -a powermode 0 || ok=0 ;;
+    *) "$SUDO" -n /usr/bin/pmset -b lowpowermode 0 || ok=0 ;;
+  esac
 fi
 if [ "$readable" = 0 ] || [ "$(field sleepDisabled)" = "true" ] || [ -n "$(field disabledSleepAt)" ]; then
   "$SUDO" -n /usr/bin/pmset -a disablesleep 0 || ok=0

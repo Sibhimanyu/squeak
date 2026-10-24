@@ -286,6 +286,20 @@ public struct DaemonClient: Sendable {
         return json["rule"] as? String
     }
 
+    /// The energy mode's sudoers text (`GET /control/power/rule`): exactly three `pmset -a powermode` commands.
+    /// Nil from a daemon without it, or one naming any other path than `PowerRule`'s.
+    public func powerRule() async -> String? {
+        guard let r = try? await get("/control/power/rule", token: true), (200..<300).contains(r.status),
+              let json = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any],
+              json["path"] as? String == PowerRule.path else { return nil }
+        return json["rule"] as? String
+    }
+
+    /// Asks the daemon to look for the energy mode rule again, right after it was installed.
+    public func recheckPower() async {
+        _ = try? await post("/control/keep-awake", body: Data(#"{"action":"recheck-power"}"#.utf8))
+    }
+
     /// Fan control's sudoers rule (`GET /control/heat/fan-rule`); nil from a daemon without it, or one
     /// naming any other path than `FanRule`'s.
     public func fanRule() async -> String? {
