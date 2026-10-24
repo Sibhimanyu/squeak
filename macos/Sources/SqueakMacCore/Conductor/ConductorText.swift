@@ -8,6 +8,12 @@ public enum ConductorText {
     /// Rows read to build a transcript; tool calls and results are most of them.
     public static let transcriptScanRows = 600
     public static let lastTurnScanRows = 200
+    /// Rows in the first read of a page: most chats keep their last messages within a couple of hundred.
+    public static let firstChunkRows = 200
+    /// Rows per read after that.
+    public static let chunkRows = 2_000
+    /// A chat is never scanned further than this in one request; the page then says it is not complete.
+    public static let maxScanRows = 40_000
 
     private static func parse(_ content: String) -> Any? {
         try? JSONSerialization.jsonObject(with: Data(content.utf8), options: [.fragmentsAllowed])
@@ -71,9 +77,50 @@ public enum ConductorText {
             kept.append(
                 ChatMessage(
                     id: row.id ?? "\(row.turnId ?? "row"):\(kept.count)", role: role, text: text,
-                    at: ConductorTime.date(row.sentAt), turnId: row.turnId))
+                    at: ConductorTime.date(row.sentAt), turnId: row.turnId, cursor: row.cursor.map(String.init)))
         }
         return (Array(kept.prefix(limit).reversed()), rows.count < scanRows && kept.count <= limit)
+    }
+
+    /// What the human or the agent said in a row, if anything.
+    static func messageText(_ row: SessionMessageRecord) -> String? {
+        switch row.role {
+        case "user": userText(row.content)
+        case "assistant": assistantText(row.content)
+        default: nil
+        }
+    }
+
+    /// A page of readable history: the newest `limit` messages strictly before `before` (nil: from the
+    /// newest), found by reading rows newest first in chunks (200, then 2000) until `limit + 1` messages
+    /// turned up or the chat runs out. A turn of hundreds of tool rows cannot hide its own prompt. `nextBefore`
+    /// is the cursor for what precedes the page (nil: nothing does).
+    public static func readPage(
+        before: Int64?, limit: Int, scanCap: Int = maxScanRows,
+        readRows: (_ before: Int64?, _ count: Int) throws -> [SessionMessageRecord]
+    ) rethrows -> (messages: [ChatMessage], nextBefore: Int64?, complete: Bool) {
+        var rows: [SessionMessageRecord] = []
+        var cursor = before
+        var texts = 0
+        var exhausted = false
+        while rows.count < scanCap {
+            let size = rows.isEmpty ? firstChunkRows : chunkRows
+            let chunk = try readRows(cursor, size)
+            texts += chunk.reduce(0) { $0 + (messageText($1) == nil ? 0 : 1) }
+            rows.append(contentsOf: chunk)
+            guard chunk.count >= size, let last = chunk.last?.cursor else { exhausted = true; break }
+            cursor = last
+            if texts > limit { break }
+        }
+        let built = buildTranscript(rows: rows, limit: limit)
+        var next: Int64?
+        if texts > limit, let oldest = built.messages.first?.cursor.flatMap(Int64.init) {
+            next = oldest
+        } else if !exhausted {
+            // Scan cap hit without enough messages: resume below everything read.
+            next = rows.last?.cursor
+        }
+        return (built.messages, next, next == nil)
     }
 
     /// The prose of the chat's latest turn: the newest text block of the newest
@@ -90,9 +137,18 @@ public enum ConductorText {
 }
 
 extension ConductorRegistry {
+    /// The newest `limit` messages (oldest first), with whether the whole chat is in them.
     public func transcript(sessionId: String, limit: Int) throws -> (messages: [ChatMessage], complete: Bool) {
-        ConductorText.buildTranscript(
-            rows: try listSessionMessages(sessionId: sessionId, limit: ConductorText.transcriptScanRows), limit: limit)
+        let page = try transcriptPage(sessionId: sessionId, limit: limit, before: nil)
+        return (page.messages, page.complete)
+    }
+
+    public func transcriptPage(sessionId: String, limit: Int, before: Int64?) throws
+        -> (messages: [ChatMessage], nextBefore: Int64?, complete: Bool)
+    {
+        try ConductorText.readPage(before: before, limit: limit) { cursor, count in
+            try listSessionMessagesPage(sessionId: sessionId, before: cursor, limit: count)
+        }
     }
 
     public func lastTurnText(sessionId: String) throws -> String? {

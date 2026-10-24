@@ -83,16 +83,31 @@ public struct ConductorDaemonAdapter: HostAdapter {
 
     public func transcript(for session: HostSession, limit: Int) async throws -> [ChatMessage] {
         guard let target = session.replyTarget else { return [] }
-        if let t = try await client.transcript(replyTarget: target, limit: limit) {
+        if let t = try await client.transcript(replyTarget: target, limit: limit, before: nil) {
             return t.messages.compactMap { m in
                 guard let role = MessageRole(rawValue: m.role) else { return nil }
-                return ChatMessage(id: m.id, role: role, text: m.text, at: m.at, turnId: m.turnId)
+                return ChatMessage(id: m.id, role: role, text: m.text, at: m.at, turnId: m.turnId, cursor: m.cursor)
             }
         }
         // Older daemon: only the last assistant turn is available.
         guard let last = try await client.lastMessage(replyTarget: target), !last.text.isEmpty else { return [] }
         let digest = SHA256.hash(data: Data(last.text.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
         return [ChatMessage(id: "last-\(digest)", role: .assistant, text: last.text, at: nil, turnId: nil)]
+    }
+
+    public func transcriptPage(for session: HostSession, limit: Int, before: String?) async throws -> TranscriptPage {
+        guard let target = session.replyTarget else { return TranscriptPage(messages: [], nextBefore: nil) }
+        guard let t = try await client.transcript(replyTarget: target, limit: limit, before: before) else {
+            // Older daemon: no paging, only the last turn.
+            guard before == nil else { return TranscriptPage(messages: [], nextBefore: nil) }
+            return TranscriptPage(messages: try await transcript(for: session, limit: limit), nextBefore: nil)
+        }
+        let messages = t.messages.compactMap { m -> ChatMessage? in
+            guard let role = MessageRole(rawValue: m.role) else { return nil }
+            return ChatMessage(id: m.id, role: role, text: m.text, at: m.at, turnId: m.turnId, cursor: m.cursor)
+        }
+        // A daemon that predates paging says `complete` and no cursor: nothing more to load unless it says so.
+        return TranscriptPage(messages: messages, nextBefore: t.complete ? nil : t.nextBefore)
     }
 
     public func activity(for session: HostSession) async throws -> [ActivityStep] {
@@ -106,9 +121,13 @@ public struct ConductorDaemonAdapter: HostAdapter {
     }
 
     public func send(_ text: String, to session: HostSession, clientId: UUID, mode: SendMode) async -> SendResult {
+        await send(text, to: session, clientId: clientId, mode: mode, answersTurn: nil)
+    }
+
+    public func send(_ text: String, to session: HostSession, clientId: UUID, mode: SendMode, answersTurn: String?) async -> SendResult {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .notSent(reason: "Nothing to send") }
         guard let target = session.replyTarget else { return .notSent(reason: "Squeak has no way to reply to this session") }
-        return await client.reply(replyTarget: target, text: text, mode: mode)
+        return await client.reply(replyTarget: target, text: text, mode: mode, answersTurn: answersTurn)
     }
 
     public func openInHostURL(for session: HostSession) -> URL? {

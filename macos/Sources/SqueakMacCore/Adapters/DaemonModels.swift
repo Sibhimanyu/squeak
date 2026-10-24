@@ -497,8 +497,10 @@ public struct DaemonTranscriptMessage: Decodable, Sendable, Equatable {
     public var text: String
     public var at: Date?
     public var turnId: String?
+    /// The row's position, as digits (the daemon sends a string).
+    public var cursor: String?
 
-    enum CodingKeys: String, CodingKey { case id, role, text, at, turnId }
+    enum CodingKeys: String, CodingKey { case id, role, text, at, turnId, cursor }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -511,19 +513,23 @@ public struct DaemonTranscriptMessage: Decodable, Sendable, Equatable {
             at = Date(timeIntervalSince1970: n > 10_000_000_000 ? n / 1000 : n)
         }
         turnId = c.lenient(String.self, .turnId)
+        cursor = c.lenient(String.self, .cursor) ?? c.lenient(Int64.self, .cursor).map(String.init)
     }
 }
 
 public struct DaemonTranscript: Decodable, Sendable, Equatable {
     public var messages: [DaemonTranscriptMessage]
     public var complete: Bool
+    /// Where the messages before these start; nil when none do (or the daemon cannot page).
+    public var nextBefore: String?
 
-    enum CodingKeys: String, CodingKey { case messages, complete }
+    enum CodingKeys: String, CodingKey { case messages, complete, nextBefore }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         messages = (c.lenient([Failable<DaemonTranscriptMessage>].self, .messages) ?? []).compactMap(\.value)
         complete = c.lenient(Bool.self, .complete) ?? false
+        nextBefore = c.lenient(String.self, .nextBefore) ?? c.lenient(Int64.self, .nextBefore).map(String.init)
     }
 }
 

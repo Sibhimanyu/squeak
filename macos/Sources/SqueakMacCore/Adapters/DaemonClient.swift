@@ -50,8 +50,11 @@ public struct DaemonClient: Sendable {
     }
 
     /// nil when the daemon predates the transcript route (404).
-    public func transcript(replyTarget: String, limit: Int) async throws -> DaemonTranscript? {
-        let r = try await get("/control/session/\(Self.encode(replyTarget))/transcript?limit=\(limit)", token: true)
+    public func transcript(replyTarget: String, limit: Int, before: String? = nil) async throws -> DaemonTranscript? {
+        // `before` is digits and nothing else; anything else is not sent.
+        var query = "limit=\(limit)"
+        if let before, !before.isEmpty, before.allSatisfy(\.isASCII), before.allSatisfy(\.isNumber) { query += "&before=\(before)" }
+        let r = try await get("/control/session/\(Self.encode(replyTarget))/transcript?\(query)", token: true)
         if r.status == 404 { return nil }
         try Self.check(r.status)
         return try decode(DaemonTranscript.self, r.body)
@@ -71,11 +74,13 @@ public struct DaemonClient: Sendable {
     }
 
     /// Maps every outcome to a `SendResult`; this never throws and never retries.
-    public func reply(replyTarget: String, text: String, mode: SendMode = .queue) async -> SendResult {
+    /// `answersTurn` names the turn this answers; the daemon refuses it once the chat has moved on.
+    public func reply(replyTarget: String, text: String, mode: SendMode = .queue, answersTurn: String? = nil) async -> SendResult {
         guard let token = tokenProvider() else { return .notSent(reason: "Squeak's access token was not found") }
         // A queued message carries no mode at all: the body is exactly what older daemons expect.
         var fields = ["text": text]
         if mode == .steer { fields["mode"] = mode.rawValue }
+        if let answersTurn, !answersTurn.isEmpty { fields["answersTurn"] = answersTurn }
         guard let body = try? JSONEncoder().encode(fields) else { return .notSent(reason: "Could not encode the message") }
         let request = HTTPRequest(
             method: "POST",

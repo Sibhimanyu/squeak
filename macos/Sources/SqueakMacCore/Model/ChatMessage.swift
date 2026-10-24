@@ -46,10 +46,14 @@ public struct ChatMessage: Hashable, Codable, Sendable, Identifiable {
     /// "Queued" / "Steered" line survives; nil on messages that never went through us.
     public var delivery: Delivery?
     public var deliveryNote: String?
+    /// The row's position in the host's table (Conductor's rowid, as digits): paging for what precedes
+    /// this message starts "before" it. Nil on messages we sent that the transcript has not shown, and on
+    /// hosts that cannot page.
+    public var cursor: String?
 
     public init(
         id: String, role: MessageRole, text: String, at: Date? = nil, turnId: String? = nil,
-        clientId: UUID? = nil, state: MessageState? = nil, inReplyTo: UUID? = nil
+        clientId: UUID? = nil, state: MessageState? = nil, inReplyTo: UUID? = nil, cursor: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -59,6 +63,7 @@ public struct ChatMessage: Hashable, Codable, Sendable, Identifiable {
         self.clientId = clientId
         self.state = state
         self.inReplyTo = inReplyTo
+        self.cursor = cursor
     }
 }
 

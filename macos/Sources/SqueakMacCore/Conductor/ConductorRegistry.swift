@@ -73,8 +73,14 @@ public struct SessionMessageRecord: Hashable, Sendable {
     public var sentAt: String?
     public var turnId: String?
     public var model: String?
+    /// The row's rowid; set by the paged read only.
+    public var cursor: Int64?
 
-    public init(id: String? = nil, role: String, content: String, sentAt: String? = nil, turnId: String? = nil, model: String? = nil) {
+    public init(
+        id: String? = nil, role: String, content: String, sentAt: String? = nil, turnId: String? = nil, model: String? = nil,
+        cursor: Int64? = nil
+    ) {
+        self.cursor = cursor
         self.id = id
         self.role = role
         self.content = content
@@ -210,6 +216,27 @@ public struct ConductorRegistry: Sendable {
             }
         }
         return nil
+    }
+
+    /// A page of a chat's rows by rowid, newest first, strictly below `before` (nil: from the newest).
+    /// rowid is unique, so a page never repeats or skips a row the way a timestamp tie could.
+    public func listSessionMessagesPage(sessionId: String, before: Int64?, limit: Int) throws -> [SessionMessageRecord] {
+        let sql = """
+            SELECT rowid as cursor, id, role, content, sent_at as sentAt, turn_id as turnId, model
+            FROM session_messages
+            WHERE session_id = ?
+              AND cancelled_at IS NULL
+              AND (? IS NULL OR rowid < ?)
+            ORDER BY rowid DESC
+            LIMIT ?
+            """
+        let bound: SQLValue = before.map { .int($0) } ?? .null
+        return try database.query(sql, [.text(sessionId), bound, bound, .int(Int64(limit))]).compactMap { row in
+            guard let role = row["role"]?.string, let content = row["content"]?.string else { return nil }
+            return SessionMessageRecord(
+                id: row["id"]?.string, role: role, content: content, sentAt: row["sentAt"]?.string,
+                turnId: row["turnId"]?.string, model: row["model"]?.string, cursor: row["cursor"]?.int)
+        }
     }
 
     /// Newest first. Ordered by `datetime()` so both timestamp spellings sort by
