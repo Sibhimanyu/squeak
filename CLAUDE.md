@@ -569,6 +569,7 @@ transcripts, and ranks them by what is blocked on the human.
   status minutes behind still loses, as a stale one should. Terminal
   sessions have no such referee and can still flicker "finished" on the
   radar between workers; they never push a finish, so it stays visual.
+- **A `waiting` Conductor chat is finished when only an old shell is left.** The observer keeps `waiting` as `conductorWaiting` (still state `working`); `resolveWaiting` (`waiting-resolve.ts`, run by the monitor with `BackgroundWorkReader` before hooks) makes it finished when the transcript's turn ended, no subagent runs and the newest running background shell began over 60 s ago (a dev server left up for preview), which also lets the Stop hook through; any subagent, a fresh shell, no task or no transcript stays `working`.
 - **"Seems stuck" is timed from the transcript's last entry, not the session's
   activity.** The Claude observer records what an unfinished turn waits on
   (`waitingOn`: a running tool, the model, or an API retry) and since when;
