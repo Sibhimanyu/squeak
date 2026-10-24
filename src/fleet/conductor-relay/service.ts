@@ -152,6 +152,42 @@ export class ConductorRelayService {
     }
   }
 
+  /** Archive a workspace through Conductor's own route. */
+  async archiveWorkspace(workspaceId: string): Promise<QueueActionResult> {
+    return this.call((client) => client.archiveWorkspace(workspaceId));
+  }
+
+  /** A new workspace through Conductor's own route; the id is the caller's. */
+  async createWorkspace(args: {
+    workspaceId: string;
+    repositoryId: string;
+    repoUrl: string;
+    baseBranch: string;
+  }): Promise<QueueActionResult> {
+    return this.call((client) => client.createWorkspace(args));
+  }
+
+  private async call(
+    run: (client: PhoneClient) => Promise<{ status: number; body: string }>,
+  ): Promise<QueueActionResult> {
+    const client = this.client;
+    if (!client) return { ok: false, reason: "relay not connected" };
+    try {
+      const res = await run(client);
+      if (res.status >= 200 && res.status < 300) return { ok: true };
+      let said = "";
+      try {
+        said = String((JSON.parse(res.body) as { userMessage?: unknown }).userMessage ?? "");
+      } catch {
+        said = "";
+      }
+      return { ok: false, reason: said ? `${said.slice(0, 160)}` : `relay HTTP ${res.status}` };
+    } catch (e) {
+      this.client = undefined;
+      return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   /** A chat's new model, thinking level and fast mode, through Conductor's own picker route. */
   async setSetup(
     workspaceId: string,

@@ -90,6 +90,10 @@ export interface IngressControl {
   workspaces?(): unknown;
   /** Start a new chat in a workspace (validated by the implementation). */
   startChat?(body: { workspaceId?: unknown; agent?: unknown; text?: unknown }): Promise<unknown>;
+  /** Repositories a new workspace can be made in. */
+  workspaceRepos?(): unknown;
+  /** `{ action: "archive", workspaceId }` or `{ action: "create", repoId }`, through Conductor's relay. */
+  workspaceAction?(body: Record<string, unknown>): Promise<unknown>;
 }
 
 export const TRANSCRIPT_DEFAULT_LIMIT = 40;
@@ -350,6 +354,65 @@ export class HookIngressServer {
           .catch((error: unknown) => {
             logger.warn("control new chat failed", { error: error instanceof Error ? error.message : String(error) });
             respond(response, 500, "new chat failed");
+          });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    const workspacePath = (request.url ?? "").split("?")[0];
+    if (workspacePath === "/control/workspace-repos" || workspacePath === "/control/workspace-action") {
+      const isList = workspacePath === "/control/workspace-repos";
+      if (request.method !== (isList ? "GET" : "POST")) {
+        respond(response, 405, "method not allowed");
+        request.resume();
+        return;
+      }
+      const run = isList ? null : control.workspaceAction;
+      if (isList ? !control.workspaceRepos : !run) {
+        respond(response, 503, "workspace actions unavailable");
+        request.resume();
+        return;
+      }
+      if (isList) {
+        request.resume();
+        try {
+          respondJson(response, 200, control.workspaceRepos!());
+        } catch {
+          respond(response, 500, "unavailable");
+        }
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) return;
+        let parsed: Record<string, unknown>;
+        try {
+          const value: unknown = JSON.parse(body || "{}");
+          if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("not an object");
+          parsed = value as Record<string, unknown>;
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        run!(parsed)
+          .then((outcome) => respondJson(response, 200, outcome))
+          .catch((error: unknown) => {
+            logger.warn("control workspace action failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            respond(response, 500, "workspace action failed");
           });
       });
       request.on("error", () => {

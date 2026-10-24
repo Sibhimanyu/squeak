@@ -321,6 +321,40 @@ export class PhoneClient {
     return res;
   }
 
+  /** Archive a workspace, as Conductor's Archive does (`POST /workspaces/:id/archive`). */
+  archiveWorkspace(workspaceLocalId: string): Promise<TunnelResponse> {
+    return this.request({
+      method: "POST",
+      target: `/workspaces/${encodeURIComponent(workspaceLocalId)}/archive`,
+      headers: { "content-type": "application/json" },
+      body: {},
+    });
+  }
+
+  /**
+   * A new workspace in a repository (`POST /workspaces`): the shape Conductor's remote clients send. The
+   * repository is picked by `machine.repositoryId` (Conductor only reads that field of `machine`); the client id
+   * becomes the workspace's id. Conductor names the branch itself, so `newBranchName` is left empty.
+   */
+  createWorkspace(args: {
+    workspaceId: string;
+    repositoryId: string;
+    repoUrl: string;
+    baseBranch: string;
+  }): Promise<TunnelResponse> {
+    return this.request({
+      method: "POST",
+      target: "/workspaces",
+      headers: { "content-type": "application/json" },
+      body: {
+        clientId: args.workspaceId,
+        repoUrl: args.repoUrl,
+        branchInfo: { baseBranch: args.baseBranch, newBranchName: "", baseBranchIsImplicitDefault: true },
+        machine: { machineId: "local", repositoryId: args.repositoryId },
+      },
+    });
+  }
+
   /**
    * Change an existing chat's model, thinking level and fast mode: `sessions/register` with
    * `overwriteMetadata`, which Conductor's own picker uses (`syncSessionConfiguration`). Its handler runs
