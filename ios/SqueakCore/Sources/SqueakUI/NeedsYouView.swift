@@ -218,7 +218,7 @@ private struct InlineReply: View {
         }
         .onChange(of: model.restoredDraft[session.key]) { _, text in
             guard let text else { return }
-            draft = draft.isEmpty ? text : draft + "\n" + text
+            draft = DraftPolicy.restoring(text, into: draft)
             model.draftRestored(for: session.key)
         }
     }
@@ -227,8 +227,8 @@ private struct InlineReply: View {
         let text = draft
         draft = ""; focused = false
         Task {
-            guard let current = model.session(session.key) else { draft = text; return }
-            if await !model.send(text, to: current), draft.isEmpty { draft = text }
+            guard let current = model.session(session.key) else { draft = DraftPolicy.restoring(text, into: draft); return }
+            if await !model.send(text, to: current) { draft = DraftPolicy.restoring(text, into: draft) }
         }
     }
 }
