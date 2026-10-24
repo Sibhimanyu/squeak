@@ -31,6 +31,7 @@ let (diffId, diffDocument) = try channel.diffDocument(sessionId: "s1", file: 0, 
 let (stopId, stopDocument) = try channel.stopDocument(to: session, signer: signer, now: madeAt)
 let (setupId, setupDocument) = try channel.setupDocument(
     to: session, model: "opus-5-5-1m", thinking: "high", fast: nil, signer: signer, now: madeAt)
+let (prId, prDocument) = try channel.workspaceDocument(action: "createPr", session: session, signer: signer, now: madeAt)
 let (startId, startDocument) = try channel.startDocument(workspaceId: "w1", agent: .codex, text: "Add a timer", signer: signer, now: madeAt)
 let (splitStartId, splitStartDocument) = try channel.startDocument(
     workspaceId: "w1", agent: .claude, text: "Add a timer",
@@ -106,6 +107,9 @@ let fixture: [String: Any] = [
     // Chat s1 to Opus 5.5 · 1M at high thinking, fast mode left as it is.
     "setupCommandId": setupId,
     "setupCommand": ["box": setupDocument.box, "sig": setupDocument.sig!, "device": setupDocument.device!],
+    // Ask chat s1 (on turn-1) to open a pull request.
+    "prCommandId": prId,
+    "prCommand": ["box": prDocument.box, "sig": prDocument.sig!, "device": prDocument.device!],
     "promoteCommandId": promoteId,
     "promoteCommand": ["box": promoteDocument.box, "sig": promoteDocument.sig!, "device": promoteDocument.device!],
     // A new chat in workspace w1 with codex: "Add a timer".

@@ -12,6 +12,8 @@ struct RenameAlert: ViewModifier {
     @State private var problem: String?
     @State private var closing: PhoneSnapshot.Session?
     @State private var closeProblem: String?
+    @State private var archiving: PhoneSnapshot.Session?
+    @State private var archiveProblem: String?
 
     func body(content: Content) -> some View {
         content
@@ -29,6 +31,22 @@ struct RenameAlert: ViewModifier {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Closing shuts its tab in Conductor on your Mac; the chat and its history stay. Hiding only tidies this iPhone, and the chat returns when it has news.")
+            }
+            .onChange(of: model.archiveTarget) { _, new in archiving = new }
+            .confirmationDialog("Archive this workspace?", isPresented: Binding(get: { archiving != nil }, set: { if !$0 { archiving = nil; model.archiveTarget = nil } }), titleVisibility: .visible) {
+                Button("Archive workspace", role: .destructive) {
+                    guard let session = archiving else { return }
+                    archiving = nil; model.archiveTarget = nil
+                    Task { archiveProblem = await model.archiveWorkspace(of: session) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Conductor stops its chats and removes the worktree from your Mac; the branch and its commits stay, and you can restore it in Conductor. Your Mac refuses while anything in it is uncommitted.")
+            }
+            .alert("Couldn't archive", isPresented: Binding(get: { archiveProblem != nil }, set: { if !$0 { archiveProblem = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(archiveProblem ?? "")
             }
             .alert("Couldn't close", isPresented: Binding(get: { closeProblem != nil }, set: { if !$0 { closeProblem = nil } })) {
                 Button("OK", role: .cancel) {}

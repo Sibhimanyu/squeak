@@ -114,6 +114,8 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Working, but nothing from the model (or only API retries) for long enough that it seems stuck: what
         /// it waits on ("model" or "api") and since when. Only from a Mac new enough to send it.
         public var stalled: Stalled? = nil
+        /// The chat's Conductor workspace. Only from a Mac new enough to send it.
+        public var workspaceId: String? = nil
         /// While it works: the chat's subagents and background shells, running or just ended. Only from a Mac
         /// new enough to send it, and only for a Claude chat.
         public var background: [BackgroundTask]? = nil
@@ -312,6 +314,15 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// The models a Claude chat can hand coding and commands to. Arrives in the recent document. Optional: a
     /// Mac older than the work split omits it, and the phone then hides "Split the work".
     public var chatWorkers: [SplitWorker]? = nil
+    /// Repositories a new workspace can be made in. Its presence says the Mac archives and makes workspaces and
+    /// asks a chat for a PR. Optional: an older Mac omits it, and the phone offers none of them.
+    public var repos: [Repo]? = nil
+
+    public struct Repo: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        public let name: String
+        public init(id: String, name: String) { self.id = id; self.name = name }
+    }
     /// Whether the Mac's awake session runs. Optional: a Mac without sessions omits it, and the phone hides them.
     public let keepAwake: Bool?
     /// When a timed awake session ends (ISO); absent for one that runs until ended, and from older Macs.
@@ -1040,6 +1051,21 @@ public struct RenameCommand: Codable, Equatable, Sendable {
     public let expiresAt: Int64
 }
 
+/// Archive a workspace, make one in a repository, or ask a resting chat to open a pull request.
+public struct WorkspaceCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    /// "archive", "create" or "createPr".
+    public let action: String
+    public let workspaceId: String?
+    public let repoId: String?
+    public let sessionId: String?
+    public let answersTurn: String?
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
 /// Change what a Conductor chat runs: a model the Mac offers for the chat's own agent, its thinking level and
 /// fast mode. Absent level or fast: the Mac keeps what the chat has. Refused while a turn runs.
 public struct SetupCommand: Codable, Equatable, Sendable {
@@ -1295,6 +1321,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var icons: [String: String]? = nil
     /// For a `stats` request: detailed usage over the range asked for.
     public var stats: UsageStatsView? = nil
+    /// For a workspace `create`: the new workspace's id, to start a chat in.
+    public var workspaceId: String? = nil
 
     public var sent: Bool { status == "sent" }
     /// The Mac could not prove the message reached the chat (it may have): not sent, not refused.

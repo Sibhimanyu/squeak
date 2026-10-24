@@ -94,6 +94,7 @@ enum DemoData {
                 ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-plan") ? plan : question) : nil,
             failure: s.failure)
         titled.workflow = s.workflow; titled.asks = s.asks
+        titled.workspaceId = "w-\(s.key)"
         // The Telegram chat has two workers out and a test run beside its turn.
         if s.key == "tg" {
             let ago = { (minutes: Double) in ISO8601DateFormatter().string(from: Date().addingTimeInterval(-minutes * 60)) }
@@ -311,6 +312,7 @@ enum DemoData {
         demo.projectIcons = DemoIcons.byProject
         #endif
         demo.chatModels = chatModels
+        demo.repos = [.init(id: "r-squeak", name: "squeak"), .init(id: "r-atlas", name: "atlas"), .init(id: "r-farm", name: "farm")]
         demo.awakeOpenActions = .init(screenOn: true, mute: false, lowPower: false, freezeApps: false)
         demo.chatWorkers = [.init(id: "sonnet", label: "Sonnet"), .init(id: "haiku", label: "Haiku"),
                             .init(id: "opus", label: "Opus"), .init(id: "fable", label: "Fable")]

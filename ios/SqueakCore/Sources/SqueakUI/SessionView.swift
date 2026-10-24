@@ -104,6 +104,17 @@ struct SessionView: View {
                             model.hideHere(session)
                             dismiss()
                         }
+                        if model.workspaceActions, session.conductorSessionId != nil, session.workspaceId != nil {
+                            let resting = !["working", "awaiting_approval", "awaiting_input"].contains(session.state)
+                            Section("Workspace") {
+                                Button("Open a pull request", systemImage: "arrow.triangle.pull") {
+                                    Task { await model.askForPullRequest(session) }
+                                }
+                                .disabled(!resting)
+                                Button("Archive workspace", systemImage: "archivebox", role: .destructive) { model.archiveTarget = session }
+                                    .disabled(!resting)
+                            }
+                        }
                     } label: { Lucide(.ellipsis, size: 20, label: "Chat options", color: Theme.muted) }
                 }
             }

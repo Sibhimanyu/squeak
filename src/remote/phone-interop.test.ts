@@ -36,6 +36,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   promoteCommand: { box: string; sig: string; device: string };
   stopCommandId: string;
   stopCommand: { box: string; sig: string; device: string };
+  prCommandId: string;
+  prCommand: { box: string; sig: string; device: string };
   setupCommandId: string;
   setupCommand: { box: string; sig: string; device: string };
   diffCommandId: string;
@@ -212,7 +214,9 @@ function bridge(turn: string) {
           {
             key: "claude-transcript:s1",
             agent: "claude",
+            state: "finished",
             conductorSessionId: "s1",
+            conductorWorkspaceId: "w1",
             cwd: "/w",
             baseRef: null,
           } as FleetSession,
@@ -343,6 +347,19 @@ describe("a reply made on the iPhone", () => {
     expect(verdict.result).toEqual({ id: fixture.stopCommandId, status: "sent" });
     expect(stops).toEqual(["s1"]);
     expect(sends).toEqual([]);
+  });
+
+  it("asks a chat for a PR when the phone signs a workspace createPr request", async () => {
+    const { remote, config, sends } = bridge("turn-1");
+    (remote as unknown as { deps: { workspaceActions: unknown } }).deps.workspaceActions = {
+      repos: () => [],
+      archive: async () => ({ ok: true }),
+      create: async () => ({ ok: true }),
+      prPrompt: (workspaceId: string) => `PR for ${workspaceId}`,
+    };
+    const verdict = await remote.handleCommand(config, fixture.prCommandId, fixture.prCommand);
+    expect(verdict.result).toMatchObject({ id: fixture.prCommandId, status: "sent" });
+    expect(sends.map((send) => send.slice(0, 2))).toEqual([["s1", "PR for w1"]]);
   });
 
   it("changes a chat's model when the phone signs a setup request", async () => {
