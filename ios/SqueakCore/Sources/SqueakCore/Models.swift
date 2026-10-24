@@ -286,6 +286,8 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// Temperatures and fans while an awake session runs (src/fleet/heat.ts). Optional: older Macs,
     /// and any Mac outside a session, omit it.
     public var macHeat: MacHeat? = nil
+    /// The Mac answers `stats` requests (Usage › Details). Optional: older Macs omit it.
+    public var usageStats: Bool? = nil
     /// Volume, brightness and fans for the Mac controls page (src/fleet/mac-controls.ts). Optional:
     /// older Macs omit it, and the page is hidden.
     public var macControls: MacControls? = nil
@@ -1168,6 +1170,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var ref: String? = nil
     /// For a controls `listApps`: the apps installed on the Mac, by name.
     public var apps: [PhoneSnapshot.MacApp]? = nil
+    /// For a `stats` request: detailed usage over the range asked for.
+    public var stats: UsageStatsView? = nil
 
     public var sent: Bool { status == "sent" }
     /// The Mac could not prove the message reached the chat (it may have): not sent, not refused.

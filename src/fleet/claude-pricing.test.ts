@@ -21,6 +21,9 @@ describe("rateForModel", () => {
     for (const model of [
       "claude-opus-5",
       "claude-sonnet-5",
+      // Every Sonnet 5.5 session here read "no cost" before 2026-10-24.
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
       "claude-haiku-4-5-20251001",
       "claude-fable-5-1",
       "claude-fable-5",

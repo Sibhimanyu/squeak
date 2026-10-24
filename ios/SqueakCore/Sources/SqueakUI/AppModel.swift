@@ -1093,6 +1093,21 @@ final class AppModel {
         }
     }
 
+    /// Detailed usage over a range (Usage › Details), asked for when the page opens or the range changes.
+    func usageStats(_ range: String) async -> (stats: UsageStatsView?, problem: String?) {
+        if demo { return (DemoData.usageStats(range), nil) }
+        guard let channel else { return (nil, "Not connected to your Mac.") }
+        do {
+            let (id, document) = try channel.statsDocument(range: range, signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return (nil, "Your Mac didn't answer. Is Squeak running?") }
+            guard result.sent, let stats = result.stats else { return (nil, result.reason ?? "Your Mac couldn't read its usage.") }
+            return (stats, nil)
+        } catch {
+            return (nil, "Couldn't reach your Mac.")
+        }
+    }
+
     /// The Mac's installed apps for the app picker, asked for when it opens; the reason when they could not be.
     func installedApps() async -> (apps: [PhoneSnapshot.MacApp], problem: String?) {
         if demo { return (DemoData.installedApps, nil) }

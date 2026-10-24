@@ -34,8 +34,13 @@ const RATES: Record<string, ModelRate> = {
   "claude-opus-4-8": { inputPerMTok: 5, outputPerMTok: 25 },
   "claude-opus-4-7": { inputPerMTok: 5, outputPerMTok: 25 },
   "claude-opus-4-6": { inputPerMTok: 5, outputPerMTok: 25 },
+  // Added 2026-10-24 from the claude-api skill's table (cached 2026-10-06): every Sonnet 5.5 session
+  // on this Mac read "no cost" until then. Its cache reads are $0.20, the usual 0.1x.
+  "claude-sonnet-5-5": { inputPerMTok: 2, outputPerMTok: 10 },
   "claude-sonnet-5": { inputPerMTok: 2, outputPerMTok: 10 },
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
+  // Prompts up to 100K tokens; beyond that $0.50 / $2.50, which a per-message estimate does not split out.
+  "claude-haiku-5-5": { inputPerMTok: 0.1, outputPerMTok: 0.5 },
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
   "claude-fable-5-1": { inputPerMTok: 10, outputPerMTok: 50, cacheReadPerMTok: 0.25 },
   "claude-mythos-5-1": { inputPerMTok: 10, outputPerMTok: 50 },
