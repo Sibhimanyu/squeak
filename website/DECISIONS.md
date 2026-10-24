@@ -44,6 +44,13 @@ Assumptions made while building, after the plan was approved.
 - The compatibility table is closed by default; it is one tap away and fully readable without JS.
 
 ## Lusion pass
+
+> Superseded by the focused hero revision. The page now leads with a quiet
+> headline and primary download decision, followed by one real session-panel
+> composition. The decorative duck pile, canvas physics and stage expansion
+> were removed; a single duck remains as a brand accent on the panel. The
+> verifier's hero pass checks that the product panel, textual signal and CTA
+> remain present at desktop and mobile sizes.
 - **Hero is a compact header block plus an inset Ink stage** (24px radius, frame margins on the page grid, `max(gutter, (100vw - wrap) / 2)`). At 1440x900 the stage starts at 312px and fills the rest of the screen (`.hero` is `min-height: 100svh`, the stage `flex: 1`, never under 420px). The HTML "Sessions" panel floats inside it as the product truth. The big perched hero duck is gone; the pile replaces it.
 - **The duck pile is a rule exception, on the planner's brief.** DESIGN.md 6.3 says one duck per screen and never as a pattern; the brief asks for a pile of approved ducks as the one touchable scene. Only existing files are used (`duck-brand.svg` mostly, three mood webps, the needs-you one perched on the panel's top edge beside the "1 needs you" row). Sprites are scaled, rotated and translated only. The webps are 240px, so they are drawn at 82% width to stay sharp at 2x.
 - **Physics is `ducks.js` (about 5 KB gzip), no library.** A duck is one rigid body of two or three circles, 120 Hz fixed step, sequential-impulse contacts with friction, low restitution (bounce only above 120 px/s), a small righting torque until a duck rests, walls at the frame, and the panel as a static rectangle. 20 ducks on desktop, 9 under 700px. The loop sleeps when everything is calm, pauses off screen (IntersectionObserver) and in a hidden tab, and wakes on the pointer (push within 120px scaled by pointer speed; a press hops nearby ducks). DPR is capped at 2. The canvas bleeds 24px past the side walls and below the floor so a tail or foot is not cut when the stage goes full-bleed. `data-state`, `data-frames` and `data-awake` on the canvas are read by `verify`.

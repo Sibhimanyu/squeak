@@ -52,6 +52,7 @@ const content = {
   },
 
   hero: {
+    kicker: "Your local agent desk",
     line1: "Your agents.",
     line2: "In view.",
     lede: "Squeak watches every Claude Code and Codex session on your Mac, shows which one needs you, and lets you answer from the Mac, your iPhone or Telegram.",
@@ -66,10 +67,9 @@ const content = {
     previewTitle: "Sessions",
     previewStatus: "1 needs you",
     previewNote: "Example sessions",
-    stageLabel: "A pile of rubber ducks beside an example Squeak window",
-    stageDescription:
-      "A heap of yellow rubber ducks that you can push around with the pointer, next to an example Squeak window listing four agent sessions. One of them needs you.",
-    scrollHint: "Scroll to explore",
+    signalLabel: "Right now",
+    signalValue: "01",
+    signalNote: "needs your input",
   },
 
   sessions: {

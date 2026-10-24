@@ -10,7 +10,7 @@ GSAP and ScrollTrigger vendored at a pinned version.
 | --- | --- | --- |
 | `index.template.html` | page | the markup; `{{dot.path}}` tokens are filled from content |
 | `src/content.ts` | page | all copy and links (default export) |
-| `styles.css`, `motion.js`, `ducks.js` | page | layout, the pinned "moment" sequence, the hero stage growth, and the duck-pile physics |
+| `styles.css`, `motion.js` | page | layout and the pinned "moment" sequence |
 | `scroll-score.json` | page | the scroll score the motion was built against |
 | `release.json` | tooling | the live Squeak release (from the appcast), imported by content |
 | `assets/` | tooling | optimised images, fonts, vendored GSAP, icons, social image |
@@ -41,7 +41,7 @@ Requirements: Node 22 or later. `npm run verify` needs the Playwright Chromium b
 - It writes `dist.building/` and only swaps it into `dist/` when every token resolved. A
   failed build leaves the last good `dist/` in place.
 - Tokens are HTML-escaped. No raw HTML is injected from content.
-- `styles.css`, `motion.js`, `ducks.js`, `scroll-score.json` and `assets/` are required; the build fails without them.
+- `styles.css`, `motion.js`, `scroll-score.json` and `assets/` are required; the build fails without them.
 - Paths are relative, so the same output serves at `/` and `/squeak/`.
 - DMG files are never copied into the site. Download links point at the canonical
   `https://sibhimanyu.github.io/squeak/download/<file>` URL from `release.json`.
