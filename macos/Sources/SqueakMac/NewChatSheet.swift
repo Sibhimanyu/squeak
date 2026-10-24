@@ -68,6 +68,28 @@ final class NewChatState {
         }
     }
 
+    /// A workspace is being made from the New workspace menu.
+    var makingWorkspace = false
+
+    /// Makes a workspace in a repository, then lists and selects it.
+    func createWorkspace(model: AppModel, repoId: String) {
+        guard !makingWorkspace else { return }
+        makingWorkspace = true
+        error = nil
+        Task { [weak self] in
+            let (id, problem) = await model.createWorkspace(repoId: repoId)
+            guard let self else { return }
+            if let id, case .success(let list) = await model.newChatWorkspaces() {
+                form.setWorkspaces(list)
+                form.query = ""
+                form.select(id)
+            } else {
+                error = problem ?? "Squeak made the workspace, but it isn't listed yet."
+            }
+            makingWorkspace = false
+        }
+    }
+
     func start(model: AppModel, close: @escaping () -> Void) {
         guard form.canStart, phase == .ready, let w = form.selected else { return }
         phase = .starting
@@ -121,7 +143,26 @@ struct NewChatSheet: View {
         @Bindable var state = state
         let busy = state.phase == .starting
         VStack(alignment: .leading, spacing: Space.s) {
-            Text("Workspace").font(Typo.label)
+            HStack {
+                Text("Workspace").font(Typo.label)
+                Spacer()
+                if let repos = model.workspaceRepos, !repos.isEmpty {
+                    if state.makingWorkspace {
+                        ProgressView().controlSize(.small)
+                        Text("Making a workspace…").font(Typo.meta).foregroundStyle(Theme.muted)
+                    } else {
+                        Menu("New workspace") {
+                            ForEach(repos) { repo in
+                                Button(repo.name) { state.createWorkspace(model: model, repoId: repo.id) }
+                            }
+                        }
+                        .menuStyle(.borderlessButton).fixedSize()
+                        .disabled(busy)
+                        .help("Make a fresh workspace in a repository, branched from its default branch")
+                    }
+                }
+            }
+            .task { if model.workspaceRepos == nil { await model.loadWorkspaceRepos() } }
             SearchField(text: $state.form.query, placeholder: "Search workspaces")
             workspaceList.disabled(busy)
         }

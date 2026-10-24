@@ -70,6 +70,45 @@ enum DemoData {
         I will not touch `conductor.db`.
         """)
 
+    // MARK: Chat extras (model, stuck, background work)
+
+    static let chatModels: [DaemonChatModel] = {
+        let claude = ["low", "medium", "high", "xhigh", "max"]
+        return [
+            DaemonChatModel(id: "opus-5-5-1m", agent: "claude", label: "Opus 5.5 · 1M", levels: claude, defaultLevel: "medium"),
+            DaemonChatModel(id: "sonnet-5-5-1m", agent: "claude", label: "Sonnet 5.5 · 1M", levels: claude, defaultLevel: "medium"),
+            DaemonChatModel(id: "haiku-5-5", agent: "claude", label: "Haiku 5.5", levels: []),
+            DaemonChatModel(id: "gpt-5.5", agent: "codex", label: "GPT 5.5", levels: ["low", "medium", "high", "xhigh"], defaultLevel: "high"),
+        ]
+    }()
+
+    static let repos = [DaemonRepo(id: "r1", name: "squeak"), DaemonRepo(id: "r2", name: "atlas"), DaemonRepo(id: "r3", name: "storefront")]
+
+    /// The Telegram chat runs Opus with two workers and a test run out (and seems stuck with
+    /// `SQUEAK_MAC_DEMO_STUCK=1`); the others name their model only.
+    static func chatExtras(for session: HostSession, now: Date = Date()) -> ChatExtras? {
+        guard let id = session.conductorSessionId else { return nil }
+        let ago = { (minutes: Double) in now.addingTimeInterval(-minutes * 60) }
+        switch id {
+        case "demo-3":
+            let stuck = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_STUCK"] == "1"
+            return ChatExtras(
+                agent: "claude", model: "Opus 5.5 · 1M", effort: "Extra high", fast: true, modelId: "opus-5-5-1m",
+                effortId: "xhigh", stalled: stuck ? DaemonStall(on: "model", since: ago(14)) : nil, workspaceId: "w-demo-3",
+                background: [
+                    DaemonBackgroundTask(id: "t1", kind: "agent", label: "Find every caller of splitMarkdown", status: "done",
+                                         startedAt: ago(9), endedAt: ago(4), summary: "Agent \"Find every caller of splitMarkdown\" finished"),
+                    DaemonBackgroundTask(id: "t2", kind: "agent", label: "Check tables in Telegram's HTML", status: "running", startedAt: ago(6)),
+                    DaemonBackgroundTask(id: "t3", kind: "shell", label: "Run the whole suite", status: "running", startedAt: ago(2)),
+                ])
+        case "demo-2":
+            return ChatExtras(agent: "codex", model: "GPT 5.5", effort: "High", modelId: "gpt-5.5", effortId: "high", workspaceId: "w-demo-2")
+        default:
+            return ChatExtras(agent: session.agent, model: "Sonnet 5.5 · 1M", effort: "Medium", modelId: "sonnet-5-5-1m",
+                              effortId: "medium", workspaceId: "w-\(id)")
+        }
+    }
+
     static func make(now: Date = Date()) -> Bundle {
         func s(_ id: String, _ provider: String, _ title: String, _ state: SessionState, min: Double, _ repo: String, _ branch: String, _ agent: String,
                approval: Bool = false) -> HostSession {
@@ -82,6 +121,8 @@ enum DemoData {
             return HostSession(
                 key: SessionKey(provider: provider, hostSessionId: id), title: title, repoName: repo, branch: branch,
                 agent: agent, state: state, lastActivityAt: now.addingTimeInterval(-min * 60), alive: true, replyTarget: id,
+                conductorWorkspaceId: provider == "conductor" ? "w-\(id)" : nil,
+                conductorSessionId: provider == "conductor" ? id : nil,
                 capabilities: caps, awaitingApproval: approval ? true : nil
             )
         }

@@ -387,6 +387,15 @@ struct SessionDetail: View {
         }
         .animation(spring, value: tab)
         .onAppear { focusToken += 1 }
+        // The chat's model, stuck state and background work, from the daemon, while the chat is on screen.
+        .task(id: session.key.stringValue) {
+            model.chatExtras = nil
+            model.chatNote = nil
+            while !Task.isCancelled {
+                await model.refreshChatExtras(session)
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
         .task(id: "\(session.key.stringValue)-\(isWorking)-\(tab.rawValue)") {
             guard isWorking || tab == .activity else { return }
             while !Task.isCancelled {
@@ -414,6 +423,9 @@ struct SessionDetail: View {
                 }
                 .pickerStyle(.segmented).labelsHidden().controlSize(.small).fixedSize()
                 .accessibilityLabel("Chat or activity")
+                if session.conductorSessionId != nil, model.workspaceRepos != nil {
+                    ChatActionsMenu(session: session)
+                }
                 if session.capabilities.openInHost.isSupported {
                     Button { model.openInHost() } label: {
                         Lucide(.externalLink, size: 14, color: Theme.ink)
@@ -427,6 +439,9 @@ struct SessionDetail: View {
             Text(verbatim: metaLine).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
                 .lineLimit(1).truncationMode(.middle)
                 .help(metaLine)
+            if let extras = model.chatExtras, session.conductorSessionId != nil {
+                ChatSetupLine(session: session, extras: extras)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 28).padding(.top, 6).padding(.bottom, 10)
@@ -572,6 +587,15 @@ struct SessionDetail: View {
 
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let extras = model.chatExtras, session.state == .working {
+                if let stall = extras.stalled {
+                    StuckCard(stall: stall) { Task { await model.stopChat(session) } }
+                }
+                if !extras.background.isEmpty { BackgroundStrip(extras: extras, crowded: extras.stalled != nil) }
+            }
+            if let note = model.chatNote {
+                Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.error).padding(.leading, 4)
+            }
             composer
             Text(verbatim: destinationNote).font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, 4)
                 .task(id: model.serviceDown(session)) {

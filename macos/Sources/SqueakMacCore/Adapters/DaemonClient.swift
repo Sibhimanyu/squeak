@@ -312,6 +312,48 @@ public struct DaemonClient: Sendable {
         return json["rule"] as? String
     }
 
+    // MARK: Chat and workspace actions
+
+    /// The models a chat can run, as Conductor's picker lists them; empty from an older daemon.
+    public func chatModels() async -> [DaemonChatModel] {
+        guard let r = try? await get("/control/models", token: true), r.status == 200,
+              let body = try? JSONDecoder().decode(DaemonChatModels.self, from: r.body) else { return [] }
+        return body.models
+    }
+
+    /// Repositories a new workspace can be made in; nil from a daemon that cannot make one.
+    public func workspaceRepos() async -> [DaemonRepo]? {
+        struct Body: Decodable { var repos: [DaemonRepo]? }
+        guard let r = try? await get("/control/workspace-repos", token: true), r.status == 200 else { return nil }
+        return (try? JSONDecoder().decode(Body.self, from: r.body))?.repos
+    }
+
+    /// Conductor's Stop (`stop`), a new model (`setup`: model, thinking?, fast?) or a PR request (`pr`) for a
+    /// Conductor chat. Nil when it worked, else why not, in words.
+    public func chatAction(sessionId: String, action: String, body: [String: any Sendable] = [:]) async -> String? {
+        await outcome("/control/session/\(Self.encode(sessionId))/\(action)", body: body).problem
+    }
+
+    /// Archive a workspace (`["action": "archive", "workspaceId": …]`) or make one (`["action": "create",
+    /// "repoId": …]`). The new workspace's id, or why not.
+    public func workspaceAction(_ body: [String: String]) async -> (workspaceId: String?, problem: String?) {
+        await outcome("/control/workspace-action", body: body, timeout: 45)
+    }
+
+    private func outcome(_ path: String, body: [String: any Sendable], timeout: TimeInterval = 20) async -> (workspaceId: String?, problem: String?) {
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return (nil, "Couldn't send that.") }
+        do {
+            let r = try await post(path, body: data, timeout: timeout)
+            if r.status == 401 || r.status == 403 { return (nil, "Squeak rejected the access token") }
+            if r.status == 404 || r.status == 503 { return (nil, "Update Squeak on this Mac to do that from here.") }
+            let reply = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any]
+            if reply?["ok"] as? Bool == true { return (reply?["workspaceId"] as? String, nil) }
+            return (nil, (reply?["reason"] as? String) ?? "Squeak couldn't do that.")
+        } catch {
+            return (nil, "Squeak isn't running.")
+        }
+    }
+
     /// Asks the daemon to look for fan control again, right after it was installed.
     public func recheckFans() async {
         _ = try? await post("/control/keep-awake", body: Data(#"{"action":"recheck-fans"}"#.utf8))
