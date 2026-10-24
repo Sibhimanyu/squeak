@@ -287,7 +287,8 @@ enum DemoData {
                                  apps: [.init(id: "com.conductor.app", name: "Conductor", active: true),
                                         .init(id: "com.apple.Safari", name: "Safari", active: false),
                                         .init(id: "com.apple.Terminal", name: "Terminal", active: false),
-                                        .init(id: "com.apple.Music", name: "Music", active: false)])
+                                        .init(id: "com.apple.Music", name: "Music", active: false)],
+                                 media: .init(playing: args.contains("-squeak-demo-playing")))
         demo.macHeat = .init(level: "ok", chip: 62, battery: 33, fansRpm: [2300, 2500], fansMax: false, fanControl: true)
         #if DEBUG
         demo.projectIcons = DemoIcons.byProject

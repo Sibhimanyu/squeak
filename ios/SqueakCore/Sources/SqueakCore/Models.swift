@@ -336,11 +336,17 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var fans: Fans?
         /// The display is held on from the phone; nil from an older Mac.
         public var screenAwake: Bool?
-        /// The apps with a Dock icon now; nil from a Mac without the apps helper.
+        /// The few running apps that matter, ranked by the Mac (in front first, at most six); nil from a Mac without the apps helper.
         public var apps: [MacApp]?
-        public init(volume: Int? = nil, muted: Bool? = nil, brightness: Int? = nil, fans: Fans? = nil, screenAwake: Bool? = nil, apps: [MacApp]? = nil) {
+        public struct Media: Codable, Equatable, Sendable {
+            public var playing: Bool
+            public init(playing: Bool) { self.playing = playing }
+        }
+        /// Whether the Mac is playing sound now, so media keys show only then; nil from an older Mac.
+        public var media: Media?
+        public init(volume: Int? = nil, muted: Bool? = nil, brightness: Int? = nil, fans: Fans? = nil, screenAwake: Bool? = nil, apps: [MacApp]? = nil, media: Media? = nil) {
             self.volume = volume; self.muted = muted; self.brightness = brightness; self.fans = fans
-            self.screenAwake = screenAwake; self.apps = apps
+            self.screenAwake = screenAwake; self.apps = apps; self.media = media
         }
     }
 

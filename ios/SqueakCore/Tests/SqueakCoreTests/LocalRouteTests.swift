@@ -22,11 +22,26 @@ final class RouteMachineTests: XCTestCase {
         XCTAssertTrue(machine.shouldHeartbeat(now: t0.addingTimeInterval(5)))
     }
 
-    func testAFailedProbeWaitsThirtySecondsToTryAgain() {
+    func testAFailedProbeBacksOffFromThreeSecondsToThirty() {
+        var machine = RouteMachine()
+        var at = t0
+        for wait in [3.0, 6.0, 12.0, 30.0, 30.0] {
+            machine.probeFailed(now: at)
+            XCTAssertFalse(machine.shouldProbe(now: at.addingTimeInterval(wait - 0.5)))
+            XCTAssertTrue(machine.shouldProbe(now: at.addingTimeInterval(wait)))
+            at = at.addingTimeInterval(wait)
+        }
+    }
+
+    func testComingBackOnScreenOnTheCloudProbesAtOnce() {
         var machine = RouteMachine()
         machine.probeFailed(now: t0)
-        XCTAssertFalse(machine.shouldProbe(now: t0.addingTimeInterval(29)))
-        XCTAssertTrue(machine.shouldProbe(now: t0.addingTimeInterval(30)))
+        machine.probeFailed(now: t0)
+        XCTAssertFalse(machine.shouldProbe(now: t0.addingTimeInterval(2)))
+        machine.checkSoon(now: t0.addingTimeInterval(2))
+        XCTAssertTrue(machine.shouldProbe(now: t0.addingTimeInterval(2)))
+        machine.probeFailed(now: t0.addingTimeInterval(2))
+        XCTAssertTrue(machine.shouldProbe(now: t0.addingTimeInterval(5)))
     }
 
     func testAnyFailedCallFallsBackAtOnceAndReprobesLater() {
@@ -35,8 +50,8 @@ final class RouteMachineTests: XCTestCase {
         machine.operationFailed(now: t0.addingTimeInterval(2))
         XCTAssertEqual(machine.route, .cloud)
         XCTAssertNil(machine.endpoint)
-        XCTAssertFalse(machine.shouldProbe(now: t0.addingTimeInterval(31)))
-        XCTAssertTrue(machine.shouldProbe(now: t0.addingTimeInterval(32)))
+        XCTAssertFalse(machine.shouldProbe(now: t0.addingTimeInterval(6)))
+        XCTAssertTrue(machine.shouldProbe(now: t0.addingTimeInterval(7)))
     }
 
     func testAFailedCallOnTheCloudChangesNothing() {
@@ -180,17 +195,17 @@ final class RoutedBackendTests: XCTestCase {
         XCTAssertEqual(probes.urls.first?.absoluteString, "http://192.168.1.20:5123/channels/\(channel)/state/alive.json")
     }
 
-    func testStaysOnTheCloudWhenNothingAnswersAndTriesAgainEveryThirtySeconds() async {
+    func testStaysOnTheCloudWhenNothingAnswersAndTriesAgainOnABackoff() async {
         discovery.found = [mac]
         probes.up = false
         await router.tick()
         let first = await router.route
         XCTAssertEqual(first, .cloud)
         XCTAssertEqual(discovery.calls, 1)
-        clock.advance(20)
+        clock.advance(2)
         await router.tick()
         XCTAssertEqual(discovery.calls, 1)
-        clock.advance(11)
+        clock.advance(1.5)
         probes.up = true
         await router.tick()
         XCTAssertEqual(discovery.calls, 2)

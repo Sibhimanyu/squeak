@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { HeatState } from "./heat.js";
-import { type ControlsSystem, MacControls, parseVolumeSettings, readControlChange } from "./mac-controls.js";
+import {
+  type ControlsSystem,
+  MacControls,
+  parseAudioPlaying,
+  parseVolumeSettings,
+  rankApps,
+  readControlChange,
+} from "./mac-controls.js";
 
 describe("reading a control change", () => {
   it("takes exactly one known key with an exact value", () => {
@@ -56,13 +63,15 @@ describe("reading a control change", () => {
 });
 
 describe("MacControls", () => {
-  function setup(options: { brightnessWorks?: boolean } = {}) {
+  function setup(options: { brightnessWorks?: boolean; playing?: boolean; slow?: () => Promise<void> } = {}) {
     const calls: string[] = [];
     let volume = 40;
+    const playing = options.playing ?? false;
     const system: ControlsSystem = {
       volume: async () => ({ volume, muted: false }),
       setVolume: async (v) => {
         calls.push(`volume ${v}`);
+        await options.slow?.();
         volume = v;
         return true;
       },
@@ -72,6 +81,7 @@ describe("MacControls", () => {
       displaySleep: async () => (calls.push("displaySleep"), true),
       wakeScreen: async () => (calls.push("wakeScreen"), true),
       holdScreen: (on) => (calls.push(`holdScreen ${on}`), true),
+      mediaPlaying: async () => playing,
       running: async () => [{ id: "com.apple.Safari", name: "Safari", active: true }],
       installed: async () => [
         { id: "com.apple.Safari", name: "Safari" },
@@ -153,5 +163,58 @@ describe("MacControls", () => {
     expect(t.calls).toEqual(["wakeScreen", "holdScreen true", "holdScreen false"]);
     expect(readControlChange({ screenAwake: "yes" })).toBeNull();
     expect(readControlChange({ wakeScreen: false })).toBeNull();
+  });
+
+  it("says whether sound is playing, only once it has been read", async () => {
+    const t = setup({ playing: true });
+    await t.controls.refresh();
+    expect(t.controls.state.media).toEqual({ playing: true });
+  });
+
+  it("collapses a burst of slider values to the newest, one write at a time", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let first = true;
+    const t = setup({
+      slow: async () => {
+        if (first) {
+          first = false;
+          await gate;
+        }
+      },
+    });
+    const all = [10, 20, 30, 40, 50].map((v) => t.controls.apply({ volume: v }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    release();
+    const outcomes = await Promise.all(all);
+    expect(t.calls).toEqual(["volume 10", "volume 50"]);
+    expect(outcomes.every((o) => o.ok)).toBe(true);
+  });
+});
+
+describe("audio playing and app ranking", () => {
+  const sample = (resources: string) => `Listed by owning process:
+   pid 428(coreaudiod): [0x1] 00:00:00 PreventUserIdleSystemSleep named: "com.apple.audio.BuiltInSpeakerDevice.context.preventuseridlesleep"
+\tCreated for PID: 29571.
+\tResources: ${resources}
+   pid 356(powerd): [0x2] 00:24:36 PreventUserIdleSystemSleep named: "Powerd - Prevent sleep while display is on"
+`;
+  it("reads coreaudiod's audio-out assertion, not a microphone or another owner", () => {
+    expect(parseAudioPlaying(sample("audio-out BuiltInSpeakerDevice"))).toBe(true);
+    expect(parseAudioPlaying(sample("audio-in BuiltInMicrophoneDevice"))).toBe(false);
+    expect(parseAudioPlaying("Assertion status system-wide:\n   PreventSystemSleep 0\n")).toBe(false);
+  });
+
+  it("ranks the front app, then the most recent, and caps the list", () => {
+    const apps = Array.from({ length: 9 }, (_, i) => ({ id: `a${i}`, name: `A${i}`, active: i === 5 }));
+    const ranked = rankApps(
+      apps,
+      new Map([
+        ["a7", 200],
+        ["a2", 100],
+      ]),
+      4,
+    );
+    expect(ranked.map((a) => a.id)).toEqual(["a5", "a7", "a2", "a0"]);
   });
 });

@@ -1075,6 +1075,11 @@ final class AppModel {
             return nil
         }
         guard let channel else { return "Not connected to your Mac." }
+        // A slider's last value goes after the live ones, never beside a stale one still on its way.
+        if change.volume != nil || change.brightness != nil {
+            livePending = nil
+            await sliderTask?.value
+        }
         do {
             let (id, document) = try channel.controlsDocument(change, signer: signer)
             try await channel.send(document, id: id)
@@ -1104,6 +1109,7 @@ final class AppModel {
 
     @ObservationIgnored private var liveSending = false
     @ObservationIgnored private var livePending: ControlsCommand.Change?
+    @ObservationIgnored private var sliderTask: Task<Void, Never>?
 
     /// Whether a slider can move the Mac as it moves: only on the direct same-Wi-Fi path, where a command is
     /// one local request. Through the cloud each one is a database round trip, so it waits for the release.
@@ -1116,13 +1122,13 @@ final class AppModel {
         if liveSending { livePending = change; return }
         liveSending = true
         let signer = signer
-        Task { [weak self] in
+        sliderTask = Task { [weak self] in
             var next: ControlsCommand.Change? = change
             while let current = next {
                 if let (id, document) = try? channel.controlsDocument(current, signer: signer) {
                     try? await channel.send(document, id: id)
                 }
-                try? await Task.sleep(for: .milliseconds(100))
+                try? await Task.sleep(for: .milliseconds(150))
                 next = self?.livePending
                 self?.livePending = nil
             }

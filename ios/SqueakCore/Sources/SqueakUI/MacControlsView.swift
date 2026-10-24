@@ -20,42 +20,61 @@ enum MacControlsFormat {
 }
 
 #if os(iOS)
-/// Live controls for the Mac: volume, brightness, fans, screen off. Each change is one signed command; the
-/// page shows what the Mac reports, with this phone's last change laid over it until the Mac confirms.
+/// A Control Center-style page for the Mac: two big sliders, a grid of tiles, media keys only while sound plays,
+/// the fans, and a short row of the apps that matter. The Mac decides what shows (`macControls`); this only draws.
 struct MacControlsView: View {
     @Environment(AppModel.self) private var model
-    @State private var volume: Double?
-    @State private var brightness: Double?
     @State private var problem: String?
-    @State private var busy = false
     @State private var quitting: PhoneSnapshot.MacApp?
     @State private var confirmingLock = false
+    @State private var showingApps = false
 
     private var controls: PhoneSnapshot.MacControls? { model.snapshot?.macControls }
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
     var body: some View {
-        Form {
-            if case .silent = model.macLiveness() {
-                Section { Text("Your Mac isn't answering, so these are its last readings and changes won't reach it.").foregroundStyle(Theme.muted) }
+        ScrollView {
+            VStack(spacing: 12) {
+                if case .silent = model.macLiveness() {
+                    Text("Your Mac isn't answering. Changes won't reach it.")
+                        .font(.footnote).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let controls {
+                    if let volume = controls.volume {
+                        ControlSlider(label: "Volume", symbol: controls.muted == true ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                                      reported: Double(volume),
+                                      live: { model.changeControlLive(.volume($0)) },
+                                      commit: { send(.volume($0)) })
+                    }
+                    if let brightness = controls.brightness {
+                        ControlSlider(label: "Brightness", symbol: "sun.max.fill", reported: Double(brightness),
+                                      live: { model.changeControlLive(.brightness($0)) },
+                                      commit: { send(.brightness($0)) })
+                    }
+                    LazyVGrid(columns: columns, spacing: 10) {
+                        if let muted = controls.muted {
+                            Tile(title: "Mute", symbol: muted ? "speaker.slash.fill" : "speaker.fill", on: muted) { send(.muted(!muted)) }
+                        }
+                        if let held = controls.screenAwake {
+                            Tile(title: "Screen on", symbol: "display", on: held) { send(.screenAwake(!held)) }
+                        }
+                        Tile(title: "Wake", symbol: "sun.max") { send(.wakeScreen) }
+                        Tile(title: "Screen off", symbol: "moon.fill") { send(.displaySleep) }
+                        Tile(title: "Lock", symbol: "lock.fill") { confirmingLock = true }
+                        desktopsTile
+                    }
+                    if controls.media?.playing == true { mediaCard }
+                    if let fans = controls.fans { fansCard(fans) }
+                    appsCard(controls.apps ?? [])
+                }
+                if let problem {
+                    Text(problem).font(.footnote).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            if let controls {
-                soundSection(controls)
-                displaySection(controls)
-                if let apps = controls.apps { appsSection(apps) }
-                keysSection
-                if let fans = controls.fans { fanSection(fans) }
-            }
-            if let problem {
-                Section { Text(problem).foregroundStyle(Theme.muted) }
-            }
-            Section {
-                LabeledContent("Connection", value: model.controlsLive ? "Same Wi-Fi · live" : "Through the cloud")
-            } footer: {
-                Text(model.controlsLive
-                     ? "On the same Wi-Fi, sliders move your Mac as you drag, and changes on the Mac show here within a few seconds."
-                     : "Through the cloud a change goes when you let go. On the same Wi-Fi as your Mac, the controls are live.")
-            }
+            .padding(16)
+            .animation(.easeOut(duration: 0.2), value: controls?.media?.playing)
         }
+        .background(Theme.bg.ignoresSafeArea())
         .confirmationDialog("Quit \(quitting?.name ?? "")?", isPresented: Binding(get: { quitting != nil }, set: { if !$0 { quitting = nil } }),
                             titleVisibility: .visible) {
             Button("Quit", role: .destructive) { if let app = quitting { send(.quit(app.id)) }; quitting = nil }
@@ -63,152 +82,244 @@ struct MacControlsView: View {
         .confirmationDialog("Lock your Mac?", isPresented: $confirmingLock, titleVisibility: .visible) {
             Button("Lock", role: .destructive) { send(.lock) }
         } message: { Text("Its screen locks now. Your agents keep running.") }
+        .sheet(isPresented: $showingApps) { NavigationStack { AppPickerView() }.presentationDetents([.large]) }
         .navigationTitle("Mac controls")
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private func send(_ change: ControlsCommand.Change) {
-        busy = true
-        Task {
-            problem = await model.changeControl(change)
-            busy = false
-            volume = nil
-            brightness = nil
+        Task { problem = await model.changeControl(change) }
+    }
+
+    // MARK: Tiles
+
+    private var desktopsTile: some View {
+        HStack(spacing: 0) {
+            Button { send(.space("left")) } label: { Image(systemName: "chevron.left").frame(maxWidth: .infinity, maxHeight: .infinity) }
+                .accessibilityLabel("Previous desktop")
+            Rectangle().fill(Theme.line).frame(width: 1).padding(.top, 24).padding(.bottom, 12)
+            Button { send(.space("right")) } label: { Image(systemName: "chevron.right").frame(maxWidth: .infinity, maxHeight: .infinity) }
+                .accessibilityLabel("Next desktop")
+        }
+        .font(.system(size: 18, weight: .semibold))
+        .foregroundStyle(Theme.ink)
+        .frame(height: 76)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+        .overlay(alignment: .top) {
+            Text("Desktops").font(.caption2).foregroundStyle(Theme.muted).padding(.top, 8).allowsHitTesting(false)
         }
     }
 
-    // MARK: Sound
-
-    private func soundSection(_ controls: PhoneSnapshot.MacControls) -> some View {
-        Section {
-            if let current = controls.volume {
-                HStack(spacing: 12) {
-                    Image(systemName: "speaker.fill").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    Slider(value: Binding(get: { volume ?? Double(current) }, set: { volume = $0; model.changeControlLive(.volume(Int($0))) }), in: 0...100, step: 1) { editing in
-                        if !editing, let volume { send(.volume(Int(volume))) }
-                    }
-                    .tint(Theme.primaryFill)
-                    .accessibilityLabel("Volume")
-                    Image(systemName: "speaker.wave.3.fill").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                }
-                .frame(minHeight: 44)
-            }
-            if let muted = controls.muted {
-                Toggle("Mute", isOn: Binding(get: { muted }, set: { send(.muted($0)) }))
-                    .tint(Theme.primaryFill)
-                    .frame(minHeight: 44)
-            }
-        } header: { Text("Sound") }
+    private var mediaCard: some View {
+        HStack(spacing: 0) {
+            mediaButton("backward.fill", "Previous track") { send(.media("previous")) }
+            mediaButton("playpause.fill", "Play or pause", big: true) { send(.media("playPause")) }
+            mediaButton("forward.fill", "Next track") { send(.media("next")) }
+        }
+        .frame(height: 64)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+        .transition(.opacity.combined(with: .scale(scale: 0.97)))
     }
 
-    // MARK: Display
-
-    private func displaySection(_ controls: PhoneSnapshot.MacControls) -> some View {
-        Section {
-            if let current = controls.brightness {
-                HStack(spacing: 12) {
-                    Image(systemName: "sun.min").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    Slider(value: Binding(get: { brightness ?? Double(current) }, set: { brightness = $0; model.changeControlLive(.brightness(Int($0))) }), in: 0...100, step: 1) { editing in
-                        if !editing, let brightness { send(.brightness(Int(brightness))) }
-                    }
-                    .tint(Theme.primaryFill)
-                    .accessibilityLabel("Brightness")
-                    Image(systemName: "sun.max.fill").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                }
-                .frame(minHeight: 44)
-            }
-            if let held = controls.screenAwake {
-                Toggle("Keep the screen on", isOn: Binding(get: { held }, set: { send(.screenAwake($0)) }))
-                    .tint(Theme.primaryFill)
-                    .frame(minHeight: 44)
-            }
-            Button("Wake the screen") { send(.wakeScreen) }
-                .frame(minHeight: 44)
-                .disabled(busy)
-            Button("Turn the screen off") { send(.displaySleep) }
-                .frame(minHeight: 44)
-                .disabled(busy)
-        } header: { Text("Display") } footer: {
-            Text(controls.brightness == nil
-                 ? "With the lid closed the screen stays dark; these work once it is open. Keep the screen on lasts until you turn it off or Squeak stops."
-                 : "Keep the screen on stops the display sleeping until you turn it off or Squeak stops. Your Mac's own sleep is the awake session's job.")
+    private func mediaButton(_ symbol: String, _ label: String, big: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: big ? 26 : 20, weight: .semibold))
+                .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         }
-    }
-
-    // MARK: Apps
-
-    private func appsSection(_ apps: [PhoneSnapshot.MacApp]) -> some View {
-        Section {
-            ForEach(apps) { app in
-                Button { send(.open(app.id)) } label: {
-                    HStack {
-                        Text(app.name).foregroundStyle(Theme.ink)
-                        Spacer(minLength: 8)
-                        if app.active == true { Text("In front").font(.footnote).foregroundStyle(Theme.muted) }
-                    }
-                }
-                .frame(minHeight: 44)
-                .swipeActions { Button("Quit", role: .destructive) { quitting = app } }
-                .contextMenu {
-                    Button("Bring to front", systemImage: "macwindow") { send(.open(app.id)) }
-                    Button("Quit", systemImage: "xmark.circle", role: .destructive) { quitting = app }
-                }
-                .accessibilityHint("Brings it to the front. Swipe or hold to quit it.")
-            }
-            NavigationLink { AppPickerView() } label: { Label("Open an app", systemImage: "plus.app") }
-                .frame(minHeight: 44)
-        } header: { Text("Apps") } footer: {
-            Text("Tap an app to bring it to the front, swipe to quit it.")
-        }
-    }
-
-    // MARK: Desktop, media, lock
-
-    private var keysSection: some View {
-        Section {
-            HStack(spacing: 12) {
-                Button { send(.space("left")) } label: { Label("Previous", systemImage: "chevron.left").frame(maxWidth: .infinity, minHeight: 44) }
-                Button { send(.space("right")) } label: { Label("Next", systemImage: "chevron.right").frame(maxWidth: .infinity, minHeight: 44) }
-            }
-            .buttonStyle(.borderless)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Desktop")
-            HStack(spacing: 12) {
-                Button { send(.media("previous")) } label: { Image(systemName: "backward.fill").frame(maxWidth: .infinity, minHeight: 44) }
-                    .accessibilityLabel("Previous track")
-                Button { send(.media("playPause")) } label: { Image(systemName: "playpause.fill").frame(maxWidth: .infinity, minHeight: 44) }
-                    .accessibilityLabel("Play or pause")
-                Button { send(.media("next")) } label: { Image(systemName: "forward.fill").frame(maxWidth: .infinity, minHeight: 44) }
-                    .accessibilityLabel("Next track")
-            }
-            .buttonStyle(.borderless)
-            Button("Lock your Mac", role: .destructive) { confirmingLock = true }
-                .frame(minHeight: 44)
-        } header: { Text("Desktop and media") } footer: {
-            Text("Previous and Next move between your Mac's desktops (Control-arrow, on unless you turned it off in Keyboard Shortcuts). Media keys play, pause and skip in whatever is playing.")
-        }
+        .foregroundStyle(Theme.ink)
+        .accessibilityLabel(label)
     }
 
     // MARK: Fans
 
-    private func fanSection(_ fans: PhoneSnapshot.MacControls.Fans) -> some View {
-        Section {
+    private func fansCard(_ fans: PhoneSnapshot.MacControls.Fans) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "fan.fill").foregroundStyle(Theme.muted)
+                Text("Fans").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                Spacer()
+                if let speed = MacControlsFormat.fanSpeed(fans.rpm) { Text(speed).font(.footnote).foregroundStyle(Theme.subtle) }
+            }
+            .accessibilityElement(children: .combine)
             Picker("Fans", selection: Binding(get: { fans.choice }, set: { send(.fans($0)) })) {
                 ForEach(MacControlsFormat.fanModes, id: \.mode) { Text($0.title).tag($0.mode) }
             }
             .pickerStyle(.segmented)
-            .disabled(!fans.available || busy)
-            .frame(minHeight: 44)
+            .disabled(!fans.available)
             .accessibilityIdentifier("fan-mode")
-            if let speed = MacControlsFormat.fanSpeed(fans.rpm) {
-                LabeledContent("Speed now", value: speed)
+            if let note = MacControlsFormat.fanNote(fans) {
+                Text(note).font(.footnote).foregroundStyle(Theme.muted)
             }
-        } header: { Text("Fans") } footer: {
-            Text(MacControlsFormat.fanNote(fans)
-                 ?? "Auto is macOS's own control. A speed you pick holds until you change it or Squeak stops; if the Mac warms up during an awake session, the fans go to full.")
+        }
+        .padding(14)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+    }
+
+    // MARK: Apps
+
+    private func appsCard(_ apps: [PhoneSnapshot.MacApp]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Apps").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+            FlowLayout(spacing: 8) {
+                ForEach(apps) { app in
+                    Button { send(.open(app.id)) } label: {
+                        HStack(spacing: 6) {
+                            if app.active == true { Circle().fill(Theme.working).frame(width: 7, height: 7).accessibilityHidden(true) }
+                            Text(app.name).font(.subheadline).lineLimit(1)
+                        }
+                        .foregroundStyle(Theme.ink)
+                        .padding(.horizontal, 12).frame(minHeight: 44)
+                        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
+                    }
+                    .contextMenu {
+                        Button("Bring to front", systemImage: "macwindow") { send(.open(app.id)) }
+                        Button("Quit", systemImage: "xmark.circle", role: .destructive) { quitting = app }
+                    }
+                    .accessibilityHint("Brings it to the front. Hold to quit it.")
+                }
+                Button { showingApps = true } label: {
+                    Label("More apps", systemImage: "ellipsis")
+                        .font(.subheadline).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 12).frame(minHeight: 44)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.lineStrong))
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+    }
+}
+
+/// One toggle or action as a square-ish tile: icon over a short label, filled with the primary fill while on.
+private struct Tile: View {
+    let title: String
+    let symbol: String
+    var on = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 20, weight: .semibold))
+                Text(title).font(.footnote.weight(.medium))
+            }
+            .foregroundStyle(on ? Theme.primaryText : Theme.ink)
+            .frame(maxWidth: .infinity, minHeight: 76)
+            .background(on ? Theme.primaryFill : Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Color.clear : Theme.line))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(on ? "On" : "")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// A rounded fill bar with its icon, like Control Center's. It moves with the finger at once (the value is local),
+/// tells the Mac at most every 150 ms while dragging and once more on release, and ignores what the Mac reports
+/// until the drag is over and 2 s have passed or the Mac has caught up, so a stale reading never snaps it back.
+private struct ControlSlider: View {
+    let label: String
+    let symbol: String
+    let reported: Double
+    let live: (Int) -> Void
+    let commit: (Int) -> Void
+    @State private var local: Double?
+    @State private var dragging = false
+    @State private var release: Task<Void, Never>?
+    @State private var lastLive = -1
+
+    private var value: Double { local ?? reported }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let fraction = min(max(value / 100, 0), 1)
+            ZStack(alignment: .leading) {
+                Theme.surface
+                Rectangle().fill(Theme.primaryFill)
+                    .frame(width: proxy.size.width * fraction)
+                    .animation(nil, value: value)
+                Image(systemName: symbol)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(fraction > 0.14 ? Theme.primaryText : Theme.muted)
+                    .padding(.leading, 20)
+                    .accessibilityHidden(true)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.line))
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { drag in
+                    release?.cancel()
+                    dragging = true
+                    let next = min(max(drag.location.x / max(proxy.size.width, 1) * 100, 0), 100)
+                    local = next.rounded()
+                    let whole = Int(next.rounded())
+                    if whole != lastLive { lastLive = whole; live(whole) }
+                }
+                .onEnded { _ in
+                    dragging = false
+                    lastLive = -1
+                    commit(Int(value.rounded()))
+                    release = Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        if !Task.isCancelled { local = nil }
+                    }
+                })
+        }
+        .frame(height: 64)
+        .onChange(of: reported) { _, new in
+            if !dragging, let local, abs(new - local) <= 1 { self.local = nil }
+        }
+        .accessibilityElement()
+        .accessibilityLabel(label)
+        .accessibilityValue("\(Int(value.rounded())) percent")
+        .accessibilityAdjustableAction { direction in
+            let step: Double = direction == .increment ? 5 : -5
+            let next = min(max(value + step, 0), 100)
+            local = next
+            commit(Int(next))
         }
     }
 }
+
+/// Chips that wrap onto as many lines as they need.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(proposal.width ?? 320, subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let laid = arrange(bounds.width, subviews)
+        for (subview, origin) in zip(subviews, laid.origins) {
+            subview.place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y), proposal: .unspecified)
+        }
+    }
+
+    private func arrange(_ width: CGFloat, _ subviews: Subviews) -> (size: CGSize, origins: [CGPoint]) {
+        var origins: [CGPoint] = []
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, widest: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width { x = 0; y += rowHeight + spacing; rowHeight = 0 }
+            origins.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            widest = max(widest, x - spacing)
+        }
+        return (CGSize(width: widest, height: y + rowHeight), origins)
+    }
+}
+
 /// Every app on the Mac, asked for when this opens (6 KB is too much to carry in every view), searchable.
 struct AppPickerView: View {
     @Environment(AppModel.self) private var model
