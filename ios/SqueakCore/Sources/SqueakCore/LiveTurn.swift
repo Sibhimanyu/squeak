@@ -34,6 +34,9 @@ public struct LiveTurn: Codable, Equatable, Sendable {
     public var history: [HistoryEntry]? = nil
 
     public struct HistoryEntry: Codable, Equatable, Sendable {
+        /// The rowid of the entry's last message on the Mac, as a string: what a page asks to go `before`.
+        /// Absent from an older Mac.
+        public let id: String?
         /// "user" or "assistant".
         public let role: String
         public let text: String
@@ -42,9 +45,17 @@ public struct LiveTurn: Codable, Equatable, Sendable {
         /// no words of its own. Absent when there was none, and from an older Mac.
         public let workBefore: Int?
 
-        public init(role: String, text: String, at: String? = nil, workBefore: Int? = nil) {
-            self.role = role; self.text = text; self.at = at; self.workBefore = workBefore
+        public init(role: String, text: String, at: String? = nil, workBefore: Int? = nil, id: String? = nil) {
+            self.role = role; self.text = text; self.at = at; self.workBefore = workBefore; self.id = id
         }
+
+        /// Whether two entries are the same message: by id when both have one, else by role, time and words.
+        public func isSame(as other: HistoryEntry) -> Bool {
+            if let a = id, let b = other.id { return a == b }
+            return role == other.role && at == other.at && text == other.text
+        }
+
+        public var date: Date? { at.flatMap(ISO8601DateFormatter.squeakParse) }
     }
 
     public struct QueuedMessage: Codable, Equatable, Sendable, Identifiable {
@@ -62,6 +73,11 @@ public struct LiveTurn: Codable, Equatable, Sendable {
                 history: [HistoryEntry]? = nil) {
         self.v = v; self.key = key; self.working = working; self.total = total; self.steps = steps; self.queue = queue
         self.history = history
+    }
+
+    /// The `live` document of one page of earlier history: the chat's handle, `-h`, then the cursor or `latest`.
+    public static func historyPageDoc(for sessionKey: String, before: String?) -> String {
+        handle(for: sessionKey) + "-h" + (before ?? "latest")
     }
 
     /// The document id for a session: the same as the Mac's `liveHandle`.
@@ -131,5 +147,88 @@ public enum MacLiveness: Equatable, Sendable {
         if now.timeIntervalSince(aliveAt) < answerWindow { return .answering }
         if let lookingSince, now.timeIntervalSince(lookingSince) < openGrace { return .checking }
         return .silent(since: aliveAt)
+    }
+}
+
+/// One page of a chat's earlier messages (`live/<handle>-h<before|latest>`), sealed like the live turn.
+public struct HistoryPage: Codable, Equatable, Sendable {
+    public let v: Int
+    public let key: String
+    public let before: String?
+    /// Oldest first, at most 12.
+    public let entries: [LiveTurn.HistoryEntry]
+    /// What to send as the next `before`; nil at the start of the chat.
+    public let nextBefore: String?
+    public let complete: Bool
+    public var seq: Int64? = nil
+
+    public init(v: Int = 1, key: String, before: String?, entries: [LiveTurn.HistoryEntry], nextBefore: String?, complete: Bool, seq: Int64? = nil) {
+        self.v = v; self.key = key; self.before = before; self.entries = entries
+        self.nextBefore = nextBefore; self.complete = complete; self.seq = seq
+    }
+}
+
+/// What the phone holds of one chat's history: the newest eight the Mac pushes live, and the older pages asked
+/// for since. Pure, so CI can test the merging: the live push lands over the tail instead of replacing it, and an
+/// older page lands in front without repeating anything.
+public struct ChatHistoryState: Codable, Equatable, Sendable {
+    /// In memory this many entries are kept per chat (the oldest go first); on disk `HistoryStore.maxEntries`.
+    public static let memoryCap = 1000
+
+    /// Oldest first.
+    public var entries: [LiveTurn.HistoryEntry]
+    /// The cursor for the next older page; nil when not known yet (only the live push is held).
+    public var nextBefore: String?
+    /// The oldest message of the chat is in `entries`.
+    public var complete: Bool
+
+    public init(entries: [LiveTurn.HistoryEntry] = [], nextBefore: String? = nil, complete: Bool = false) {
+        self.entries = entries; self.nextBefore = nextBefore; self.complete = complete
+    }
+
+    /// What to send as `before` for the next older page: the cursor the Mac gave, else the oldest entry's id,
+    /// else nil (the newest page, which the merge dedupes against what is held).
+    public var cursor: String? { complete ? nil : nextBefore ?? entries.first?.id }
+
+    /// The Mac's live push of the newest entries. Everything older that is held stays.
+    public mutating func mergeLatest(_ live: [LiveTurn.HistoryEntry]) {
+        guard !live.isEmpty else { return }
+        guard !entries.isEmpty else { entries = live; return }
+        if let i = entries.firstIndex(where: { $0.isSame(as: live[0]) }) {
+            entries = Array(entries[..<i]) + live
+        } else if let first = live[0].date {
+            // No overlap: keep what is strictly older than the push. An undated entry cannot be placed.
+            entries = entries.filter { ($0.date ?? .distantFuture) < first } + live
+        } else {
+            entries = live
+        }
+        trim()
+    }
+
+    /// An older page, from `HistoryPage`: it goes in front, minus what is already held.
+    public mutating func prepend(_ page: HistoryPage) {
+        let fresh = page.entries.filter { entry in !entries.contains { $0.isSame(as: entry) } }
+        entries = fresh + entries
+        nextBefore = page.nextBefore
+        complete = page.complete || page.nextBefore == nil
+        trim()
+    }
+
+    private mutating func trim() { trimTo(Self.memoryCap) }
+
+    /// Keeps the newest `limit` entries; the cursor moves to the oldest kept so the dropped ones can be fetched again.
+    public mutating func trimTo(_ limit: Int) {
+        guard entries.count > limit else { return }
+        entries.removeFirst(entries.count - limit)
+        if let id = entries.first?.id { nextBefore = id; complete = false }
+    }
+
+    /// The live push laid over what is held, without keeping either: what a chat shows.
+    public static func overlay(_ held: [LiveTurn.HistoryEntry]?, _ live: [LiveTurn.HistoryEntry]?) -> [LiveTurn.HistoryEntry]? {
+        guard let live, !live.isEmpty else { return held }
+        guard let held, !held.isEmpty else { return live }
+        var state = ChatHistoryState(entries: held)
+        state.mergeLatest(live)
+        return state.entries
     }
 }

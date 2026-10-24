@@ -134,12 +134,15 @@ struct SessionView: View {
             ChatRows(
                 rows: rows, session: session, sending: model.isSending(session.key), stopping: model.isStopping(session.key),
                 total: live?.working == true ? live?.total ?? 0 : session.activity?.total ?? 0, live: live?.working == true,
+                earlier: model.earlierRow(for: session),
                 stepsOpen: $stepsOpen, openParts: $openParts
             )
             .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 16)
             .frame(maxWidth: .infinity, alignment: .leading),
             sends: sends.count,
-            arrivals: "\(rows.last?.id ?? "")|\(stepCount(rows))"
+            arrivals: "\(rows.last?.id ?? "")|\(stepCount(rows))",
+            top: PrependAnchor.topID(rows), ids: rows.map(\.id), prepended: model.justPrepended(session.key),
+            onPull: { await model.loadEarlier(session, manual: true) }
         )
         .onDisappear { ReadingPlace.save(row: nil, draft: draft, for: key) }
         // A new turn starts folded: what was opened for the last one is not opened for this.
@@ -210,11 +213,13 @@ struct SessionView: View {
     /// The chat's scroll view: it opens at the newest message and follows what arrives while you are at the
     /// bottom (iOS 18's scroll APIs); on iOS 17 it opens at the bottom and the system keeps it there.
     @ViewBuilder
-    private func chatScroll<Rows: View>(_ rows: Rows, sends: Int, arrivals: String) -> some View {
+    private func chatScroll<Rows: View>(
+        _ rows: Rows, sends: Int, arrivals: String, top: String?, ids: [String], prepended: Bool, onPull: @escaping () async -> Void
+    ) -> some View {
         if #available(iOS 18, *) {
-            FollowingScroll(sends: sends, arrivals: arrivals) { rows }
+            FollowingScroll(sends: sends, arrivals: arrivals, top: top, ids: ids, prepended: prepended, onPull: onPull) { rows }
         } else {
-            ScrollView { rows }.defaultScrollAnchor(.bottom).scrollDismissesKeyboard(.interactively)
+            ScrollView { rows }.defaultScrollAnchor(.bottom).scrollDismissesKeyboard(.interactively).refreshable { await onPull() }
         }
     }
 
@@ -252,6 +257,13 @@ private struct FollowingScroll<Content: View>: View {
     let sends: Int
     /// What the end of the chat holds: a change is something arriving there.
     let arrivals: String
+    /// The first message row's id, every row's id, and whether older messages just landed above: the reader's
+    /// place is kept by scrolling back to the row that was first (`PrependAnchor`).
+    let top: String?
+    let ids: [String]
+    let prepended: Bool
+    /// Pull down at the top: ask for earlier messages.
+    let onPull: () async -> Void
     @ViewBuilder var content: Content
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -301,6 +313,14 @@ private struct FollowingScroll<Content: View>: View {
                 following = true
                 newBelow = false
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
+            }
+            .refreshable { await onPull() }
+            // Older messages landed above: the message that was first stays under the reader's eye. Not while
+            // following the bottom, where the growth above is out of sight anyway.
+            .onChange(of: top) { old, new in
+                guard let target = PrependAnchor.target(oldTop: old, newTop: new, ids: ids, prepended: prepended, following: following) else { return }
+                following = false
+                position.scrollTo(id: target, anchor: .top)
             }
             .overlay(alignment: .bottom) { jumpButton }
     }
@@ -525,6 +545,61 @@ private struct SessionHeader: View {
 
 /* ---------- chat ---------- */
 
+/// What sits above a chat's first message while older ones are paged in: a sentinel that asks when it comes on
+/// screen, a spinner, "Start of chat", or a row to tap when the last try failed (never silent).
+private struct EarlierRowView: View {
+    @Environment(AppModel.self) private var model
+    let row: EarlierPaging.Row
+    let session: PhoneSnapshot.Session
+    @State private var visible = false
+
+    var body: some View {
+        switch row {
+        case .none:
+            EmptyView()
+        case .sentinel:
+            sentinel
+        case .loading:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Loading earlier messages…").font(.subheadline).foregroundStyle(Theme.muted)
+            }
+            .frame(maxWidth: .infinity, minHeight: 36)
+            .accessibilityElement(children: .combine)
+        case .start:
+            Text("Start of chat").font(.footnote).foregroundStyle(Theme.subtle)
+                .frame(maxWidth: .infinity, minHeight: 28)
+        case .failed:
+            Button { Task { await model.loadEarlier(session, manual: true) } } label: {
+                Text("Couldn't load earlier messages. Try again.").font(.subheadline).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder private var sentinel: some View {
+        if #available(iOS 18, *) {
+            Color.clear.frame(height: 24)
+                .onScrollVisibilityChange(threshold: 0.1) { visible = $0 }
+                // A beat on screen, so the chat opening at its top for a frame before it jumps to the bottom asks for nothing.
+                // The request is its own task: this row is replaced by the spinner, which must not cancel it.
+                .task(id: visible) {
+                    guard visible else { return }
+                    try? await Task.sleep(for: .milliseconds(350))
+                    guard !Task.isCancelled else { return }
+                    let model = model, session = session
+                    Task { await model.loadEarlier(session) }
+                }
+        } else {
+            Button { Task { await model.loadEarlier(session, manual: true) } } label: {
+                Text("Load earlier messages").font(.subheadline).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
 /// The conversation's rows. Each row's view takes only its own values, so a new
 /// step redraws the live box and nothing above it.
 private struct ChatRows: View {
@@ -536,6 +611,7 @@ private struct ChatRows: View {
     let stopping: Bool
     let total: Int
     let live: Bool
+    let earlier: EarlierPaging.Row
     @Binding var stepsOpen: Bool
     @Binding var openParts: Set<String>
     @State private var showingDiff = ProcessInfo.processInfo.arguments.contains("-squeak-diff")
@@ -547,6 +623,7 @@ private struct ChatRows: View {
         let blocked = Presentation.replyBlock(session) != nil
         let parted = rows.contains { if case .steer = $0 { true } else { false } }
         VStack(alignment: .leading, spacing: 16) {
+            EarlierRowView(row: earlier, session: session)
             ForEach(rows) { row in
                 switch row {
                 case .sent(let message):

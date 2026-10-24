@@ -161,7 +161,7 @@ enum NeedsYou {
         switch send.status {
         case .sending: return .sending
         case .refused, .notConfirmed: return .failed(line: send.status.line, sendId: send.id)
-        case .sent, .queued, .steered, .read: return .sent
+        case .sent, .queued, .steered, .read, .turnEnded: return .sent
         }
     }
 

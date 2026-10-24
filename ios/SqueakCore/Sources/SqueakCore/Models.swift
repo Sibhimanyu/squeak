@@ -119,7 +119,16 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// While it works: the chat's subagents and background shells, running or just ended. Only from a Mac
         /// new enough to send it, and only for a Claude chat.
         public var background: [BackgroundTask]? = nil
+        /// The newest user message of the chat (clipped to 200 characters), so an answer typed at the laptop
+        /// shows while the chat is closed on the phone. Only from a Mac new enough to send it.
+        public var lastUser: LastUser? = nil
         public var id: String { key }
+
+        public struct LastUser: Codable, Equatable, Sendable {
+            public let text: String
+            public let at: String?
+            public init(text: String, at: String? = nil) { self.text = text; self.at = at }
+        }
 
         public struct BackgroundTask: Codable, Equatable, Sendable, Identifiable {
             public let id: String
@@ -1154,6 +1163,21 @@ public struct UsageCommand: Codable, Equatable, Sendable {
     public let expiresAt: Int64
 }
 
+/// A signed, read-only request for one page of a chat's earlier messages. No turn to match: it changes nothing,
+/// so asking again after an unclear failure is safe. The Mac answers in a `live` document (`HistoryPage`).
+public struct HistoryCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let key: String
+    /// A cursor from an earlier page (digits). Absent: the newest page.
+    public let before: String?
+    /// Entries wanted, 1 to 12.
+    public let n: Int?
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
 /// A signed flip of the Mac's "Keep Mac awake" switch. Reaches no agent.
 public struct AwakeCommand: Codable, Equatable, Sendable {
     public let v: Int
@@ -1323,6 +1347,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var stats: UsageStatsView? = nil
     /// For a workspace `create`: the new workspace's id, to start a chat in.
     public var workspaceId: String? = nil
+    /// For a `history` request: the `live` document that holds the page (`LiveTurn.historyPageDoc`).
+    public var doc: String? = nil
 
     public var sent: Bool { status == "sent" }
     /// The Mac could not prove the message reached the chat (it may have): not sent, not refused.

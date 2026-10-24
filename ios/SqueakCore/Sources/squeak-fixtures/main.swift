@@ -65,6 +65,7 @@ let (applyId, applyDocument) = try channel.workflowDocument(
     signer: signer, now: madeAt)
 let (mediaId, mediaDocument) = try channel.mediaDocument(
     sessionKey: "claude-transcript:d1", source: ".rasanai/run-1/animatic-mix.wav", signer: signer, now: madeAt)
+let (historyId, historyDocument) = try channel.historyDocument(key: "claude-transcript:d1", before: "4821", n: 12, signer: signer, now: madeAt)
 let fixture: [String: Any] = [
     "madeAt": Int64(madeAt.timeIntervalSince1970 * 1000),
     "key": key,
@@ -133,6 +134,9 @@ let fixture: [String: Any] = [
     "workflowNoteCommand": ["box": noteDocument.box, "sig": noteDocument.sig!, "device": noteDocument.device!],
     "workflowApplyCommandId": applyId,
     "workflowApplyCommand": ["box": applyDocument.box, "sig": applyDocument.sig!, "device": applyDocument.device!],
+    // The page of chat claude-transcript:d1 before message 4821, twelve entries.
+    "historyCommandId": historyId,
+    "historyCommand": ["box": historyDocument.box, "sig": historyDocument.sig!, "device": historyDocument.device!],
     "mediaCommandId": mediaId,
     "mediaCommand": ["box": mediaDocument.box, "sig": mediaDocument.sig!, "device": mediaDocument.device!],
     "workflowImageCommandId": posterId,
