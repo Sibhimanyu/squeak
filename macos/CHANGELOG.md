@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.28
+
+- Fan control now offers fixed speeds too (40%, 60%, 80%, full), which you can pick from the Mac controls
+  page in Squeak for iPhone, along with your Mac's volume, mute, brightness and screen off.
+
 ## 2.1.27
 
 - Settings, Keep awake has a Heat section: your Mac's chip and battery temperature and fan speed

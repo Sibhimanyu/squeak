@@ -522,6 +522,7 @@ public struct Channel: Sendable {
         text: String,
         model: String? = nil,
         thinking: String? = nil,
+        split: WorkSplit? = nil,
         signer: CommandSigner,
         now: Date = Date()
     ) throws -> (id: String, document: ChannelDocument) {
@@ -535,6 +536,7 @@ public struct Channel: Sendable {
             text: text,
             model: model,
             thinking: thinking,
+            split: split.flatMap { $0.isEmpty ? nil : $0 },
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

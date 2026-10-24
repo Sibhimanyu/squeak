@@ -139,6 +139,27 @@ describe("PhoneClient startChat", () => {
     expect((asked[2]!.body as { config: unknown }).config).toEqual({ harness: "claude", model: "opus-5-5-1m" });
   });
 
+  it("sends the agent's text as Conductor's agentMessage, so the chat shows what the person wrote", async () => {
+    const { client, asked } = scripted([
+      { status: 200, body: queueState(3) },
+      { status: 200, body: queueState(3) },
+    ]);
+    await client.startChat({ ...start, agentText: "[brief]\n\nHello" });
+    expect((asked[1]!.body as { deliveryPayload: unknown }).deliveryPayload).toEqual({
+      message: "Hello",
+      agentMessage: "[brief]\n\nHello",
+    });
+  });
+
+  it("sends no agentMessage when there is no split", async () => {
+    const { client, asked } = scripted([
+      { status: 200, body: queueState(3) },
+      { status: 200, body: queueState(3) },
+    ]);
+    await client.startChat(start);
+    expect((asked[1]!.body as { deliveryPayload: unknown }).deliveryPayload).toEqual({ message: "Hello" });
+  });
+
   it("stops when Conductor refuses to register the chat, and sends nothing", async () => {
     const { client, asked } = scripted([{ status: 400, body: { error: "bad model" } }]);
     const res = await client.startChat({ ...start, model: "nope" });

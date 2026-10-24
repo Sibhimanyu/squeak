@@ -229,6 +229,13 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         }
     }
 
+    /// A Claude model a chat can hand work to (the Agent tool's `model`: "sonnet", "haiku", …).
+    public struct SplitWorker: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        public let label: String
+        public init(id: String, label: String) { self.id = id; self.label = label }
+    }
+
     public let v: Int
     public let mac: String
     public let generatedAt: String
@@ -249,6 +256,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// The models a new chat can start with. Arrives in the recent document. Optional: older Macs omit it,
     /// and the phone then offers no model or thinking choice.
     public var chatModels: [ChatModel]? = nil
+    /// The models a Claude chat can hand coding and commands to. Arrives in the recent document. Optional: a
+    /// Mac older than the work split omits it, and the phone then hides "Split the work".
+    public var chatWorkers: [SplitWorker]? = nil
     /// Whether the Mac's awake session runs. Optional: a Mac without sessions omits it, and the phone hides them.
     public let keepAwake: Bool?
     /// When a timed awake session ends (ISO); absent for one that runs until ended, and from older Macs.
@@ -477,6 +487,8 @@ public struct PhoneRecent: Codable, Equatable, Sendable {
     public let projectIcons: [String: String]?
     /// The models a new chat can start with; absent when the Mac cannot choose one.
     public let chatModels: [PhoneSnapshot.ChatModel]?
+    /// The models a Claude chat can hand work to; absent from a Mac older than the work split.
+    public var chatWorkers: [PhoneSnapshot.SplitWorker]? = nil
 }
 
 extension PhoneSnapshot {
@@ -489,6 +501,7 @@ extension PhoneSnapshot {
         view.workspaces = recent?.workspaces
         view.projectIcons = recent?.projectIcons
         view.chatModels = recent?.chatModels
+        view.chatWorkers = recent?.chatWorkers
         return view
     }
 
@@ -943,9 +956,27 @@ public struct StartCommand: Codable, Equatable, Sendable {
     /// the signed JSON, which an older Mac accepts): the workspace's usual.
     public var model: String? = nil
     public var thinking: String? = nil
+    /// Which models code and run, and whether to plan first. Absent: one model does it all. Sent only to a
+    /// Mac that lists `chatWorkers`, since an older one would start the chat without it.
+    public var split: WorkSplit? = nil
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
+}
+
+/// How a new chat splits its work (WorkSplit on the Mac): the chat's own model plans, a worker codes, a
+/// worker runs the commands, and plan first holds every change until the person says go.
+public struct WorkSplit: Codable, Equatable, Sendable {
+    /// A `chatWorkers` id; nil: the chat's own model codes.
+    public var code: String?
+    /// A `chatWorkers` id; nil: the chat's own model runs the commands.
+    public var run: String?
+    public var planFirst: Bool?
+    public init(code: String? = nil, run: String? = nil, planFirst: Bool? = nil) {
+        self.code = code; self.run = run; self.planFirst = planFirst
+    }
+    /// Nothing split: sent as no split at all.
+    public var isEmpty: Bool { code == nil && run == nil && planFirst != true }
 }
 
 /// A signed request for a fresh Claude usage reading (the Mac's Refresh, from

@@ -73,6 +73,25 @@ describe("newChatControl", () => {
     await c.startChat({ workspaceId: "w-old", agent: "claude", text: "hi" });
     expect(r.calls[1]).toMatchObject({ agent: "claude" });
   });
+
+  it("hands the agent the work split in front of the message, and the chat the message alone", async () => {
+    const r = relay();
+    const c = newChatControl({ conductorDbPath: dbPath, relay: r });
+    expect(
+      await c.startChat({ workspaceId: "w-new", agent: "claude", text: "hi", split: { code: "nope" } }),
+    ).toMatchObject({ ok: false });
+    expect(
+      await c.startChat({ workspaceId: "w-new", agent: "codex", text: "hi", split: { code: "sonnet" } }),
+    ).toMatchObject({ ok: false });
+    expect(r.calls).toHaveLength(0);
+    await c.startChat({ workspaceId: "w-new", agent: "claude", text: "hi", split: { code: "sonnet", run: "haiku" } });
+    const call = r.calls[0] as { text: string; agentText: string };
+    expect(call.text).toBe("hi");
+    expect(call.agentText).toContain('model "sonnet"');
+    expect(call.agentText.endsWith("\n\nhi")).toBe(true);
+    await c.startChat({ workspaceId: "w-new", agent: "claude", text: "hi", split: {} });
+    expect(r.calls[1]).not.toHaveProperty("agentText");
+  });
 });
 
 describe("control routes", () => {

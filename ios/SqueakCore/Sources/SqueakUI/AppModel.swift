@@ -776,7 +776,7 @@ final class AppModel {
     /// Asks the Mac to start a chat in `workspace`. Face ID first, like a reply. On success the new chat
     /// is opened as soon as the snapshot has it (`SqueakRouter`), and the list shows "Starting…" until then.
     func startChat(in workspace: PhoneSnapshot.Workspace, agent: NewChatAgent, text: String,
-                   model: String? = nil, thinking: String? = nil) async -> StartResult {
+                   model: String? = nil, thinking: String? = nil, split: WorkSplit? = nil) async -> StartResult {
         guard await confirmWithBiometrics(reason: "Start a chat in \(workspace.label)") else { return .cancelled }
         if demo {
             try? await Task.sleep(for: .seconds(1))
@@ -803,7 +803,7 @@ final class AppModel {
         do {
             let signer = signer, workspaceId = workspace.id
             let (id, document) = try await Task.detached(priority: .userInitiated) {
-                try channel.startDocument(workspaceId: workspaceId, agent: agent, text: text, model: model, thinking: thinking, signer: signer)
+                try channel.startDocument(workspaceId: workspaceId, agent: agent, text: text, model: model, thinking: thinking, split: split, signer: signer)
             }.value
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else {
