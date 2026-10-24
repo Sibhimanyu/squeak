@@ -173,8 +173,9 @@ struct AwakeSettings: View {
                 }
             } else {
                 stateSection
+                if model.awakeOpenActions != nil { modeSection }
                 lidSection
-                actionsSection
+                if model.awakeOpenActions == nil { actionsSection }
                 safetySection
                 heatSection
                 powerSection
@@ -210,12 +211,12 @@ struct AwakeSettings: View {
                     ForEach(AwakeChoice.lengths, id: \.minutes) { Text($0.title).tag($0.minutes) }
                     if !lidOn { Text("Until I end it").tag(0) }
                 }
-                if model.awakeLidReady {
+                if model.awakeLidReady && model.awakeOpenActions == nil {
                     Toggle("With the lid closed", isOn: $withLid)
                 }
                 HStack {
                     Spacer(minLength: 0)
-                    Button("Keep Mac awake") {
+                    Button(model.awakeOpenActions == nil ? "Keep Mac awake" : lidOn ? "Keep awake, lid closed" : "Keep awake, lid open") {
                         let value = lidOn && minutes == 0 ? 120 : minutes
                         Task { await model.changeAwake("start", minutes: value == 0 ? nil : value, lid: lidOn) }
                     }
@@ -250,6 +251,56 @@ struct AwakeSettings: View {
             Footnote(model.awakeLidReady
                 ? "A hard, open surface keeps it coolest; in a bag, Squeak watches its heat (below). A lid closed session always has an end, and Squeak turns sleep back on when it ends or when Squeak quits."
                 : "A one-time setup that asks for your Mac password, so Squeak can switch sleep off for a session. Nothing else is changed.")
+        }
+    }
+
+    // MARK: Lid open | Lid closed
+
+    /// The tab shown: the running session's mode while one runs, else the one the next start uses.
+    private var shownLid: Bool { model.awake.map(\.lid) ?? withLid }
+
+    /// The two modes, each with its own switches, kept apart: changing one never touches the other. With
+    /// nothing running the tab picks the next session's mode; while one runs it switches the session, keeping its end.
+    private var modeSection: some View {
+        Section {
+            Picker("Mode", selection: Binding(get: { shownLid }, set: { closed in
+                withLid = closed
+                guard let awake = model.awake, awake.lid != closed else { return }
+                if closed && !model.awakeLidReady { return }
+                let left = AwakeRow.minutesLeft(awake.until)
+                Task { await model.changeAwake("start", minutes: left ?? (closed ? 120 : nil), lid: closed) }
+            })) {
+                Text("Lid open").tag(false)
+                Text("Lid closed").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            if shownLid {
+                ForEach(AwakeFormat.lidActionInfos) { info in
+                    Toggle(isOn: Binding(
+                        get: { model.awakeLidActions.map { AwakeFormat.value(info.key, in: $0) } ?? false },
+                        set: { on in Task { await model.setLidAction(info.key, on) } }
+                    )) {
+                        Text(info.title)
+                        Text(info.detail)
+                    }
+                }
+            } else {
+                ForEach(AwakeFormat.openActionInfos) { info in
+                    Toggle(isOn: Binding(
+                        get: { model.awakeOpenActions.map { AwakeFormat.value(info.key, in: $0) } ?? false },
+                        set: { on in Task { await model.setOpenAction(info.key, on) } }
+                    )) {
+                        Text(info.title)
+                        Text(info.detail)
+                    }
+                }
+            }
+        } header: { Text("Mode") } footer: {
+            Footnote(shownLid
+                ? (model.awakeLidReady ? "When the lid closes in a lid closed session. Each one is undone when the lid opens or the session ends."
+                                       : "Lid closed needs setting up once, below. These are saved for then.")
+                : "While a session runs with the lid open. Each one is undone when the session ends.")
         }
     }
 

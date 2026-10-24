@@ -171,6 +171,25 @@ public struct DaemonLidActions: Decodable, Sendable, Equatable {
     }
 }
 
+/// What a running session does while the lid is open (`awakeOpenActions`). All off by default.
+public struct DaemonOpenActions: Decodable, Sendable, Equatable {
+    public var screenOn: Bool
+    public var mute: Bool
+    public var lowPower: Bool
+    public var freezeApps: Bool
+    public init(screenOn: Bool = false, mute: Bool = false, lowPower: Bool = false, freezeApps: Bool = false) {
+        self.screenOn = screenOn; self.mute = mute; self.lowPower = lowPower; self.freezeApps = freezeApps
+    }
+    enum CodingKeys: String, CodingKey { case screenOn, mute, lowPower, freezeApps }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        screenOn = c.lenient(Bool.self, .screenOn) ?? false
+        mute = c.lenient(Bool.self, .mute) ?? false
+        lowPower = c.lenient(Bool.self, .lowPower) ?? false
+        freezeApps = c.lenient(Bool.self, .freezeApps) ?? false
+    }
+}
+
 /// The safety rules as the daemon applies them (`awakeRules`): the effective floors, never numbers a surface picks.
 public struct DaemonAwakeRules: Decodable, Sendable, Equatable {
     /// On battery at or below this percent: Low Power Mode.
@@ -311,6 +330,8 @@ public struct DaemonState: Decodable, Sendable, Equatable {
     /// What a closed lid does, whether the lid is closed now, how the last session ended, and a sleep
     /// problem that outlives a session. All optional: older daemons send none of them.
     public var awakeLidActions: DaemonLidActions?
+    /// What a session does with the lid open; nil from a daemon without the two modes.
+    public var awakeOpenActions: DaemonOpenActions?
     public var awakeLidClosedNow = false
     public var awakeLastEnd: DaemonAwakeEnd?
     public var awakeSleepProblem: String?
@@ -319,7 +340,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot, heat, power
-        case awakeLidActions, awakeLidClosedNow, awakeLastEnd, awakeSleepProblem, awakeRules
+        case awakeLidActions, awakeOpenActions, awakeLidClosedNow, awakeLastEnd, awakeSleepProblem, awakeRules
     }
 
     /// Both readings and today's estimated cost, for the usage screens.
@@ -348,6 +369,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
         heat = c.lenient(DaemonHeat.self, .heat)
         power = c.lenient(DaemonPower.self, .power)
         awakeLidActions = c.lenient(DaemonLidActions.self, .awakeLidActions)
+        awakeOpenActions = c.lenient(DaemonOpenActions.self, .awakeOpenActions)
         awakeLidClosedNow = c.lenient(Bool.self, .awakeLidClosedNow) ?? false
         awakeLastEnd = c.lenient(DaemonAwakeEnd.self, .awakeLastEnd)
         awakeSleepProblem = c.lenient(String.self, .awakeSleepProblem)

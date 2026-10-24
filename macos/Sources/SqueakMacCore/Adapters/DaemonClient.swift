@@ -239,8 +239,11 @@ public struct DaemonClient: Sendable {
 
     /// Changes what a closed lid does during a lid-closed session (`action: "lid-actions"`); only the
     /// keys given change. Nil when it worked, else a reason.
-    public func setLidActions(_ settings: [String: Bool]) async -> String? {
-        guard let data = try? JSONSerialization.data(withJSONObject: ["action": "lid-actions", "settings": settings]) else { return "Couldn't send that." }
+    /// Changes switches of one mode: lid closed (the default), or with `open` what a session does with the lid open.
+    public func setLidActions(_ settings: [String: Bool], open: Bool = false) async -> String? {
+        var body: [String: Any] = ["action": "lid-actions", "settings": settings]
+        if open { body["mode"] = "open" }
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return "Couldn't send that." }
         do {
             let r = try await post("/control/keep-awake", body: data)
             if (200..<300).contains(r.status) { return nil }

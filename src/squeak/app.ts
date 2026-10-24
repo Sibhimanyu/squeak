@@ -1,3 +1,4 @@
+import { spawn, type ChildProcess } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -16,7 +17,7 @@ import { applyAwakeAction, type AwakeEnd, AwakeSession, readAwakeAction } from "
 import { LidSleepGuard, SUDOERS_PATH, sudoersRule } from "../fleet/lid-sleep.js";
 import { ensureBackstop } from "../fleet/awake-backstop.js";
 import { awakeRules, readPower, type PowerReading } from "../fleet/power-monitor.js";
-import { LidActions, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
+import { LidActions, readOpenSettings, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
 import { preparePhoneMedia } from "../remote/phone-media.js";
@@ -182,7 +183,11 @@ export class SqueakApp {
       path: path.join(config.supportDir, "keep-awake.json"),
       hold: (on) => this.caffeinator.setKeepAwake(on),
       lid: lidGuard,
-      onChange: () => this.remote?.changed(),
+      onChange: () => {
+        this.remote?.changed();
+        // A session starting or ending changes which mode's actions apply; no need to wait for the poll.
+        void this.lidActions?.check();
+      },
       onEnd: (end) => this.announceAwakeEnd(end),
       // Sleep left disabled (a failed restore, another tool's disable, a bit put back mid-session).
       onWarning: (text) => this.announce(text),
@@ -229,6 +234,8 @@ export class SqueakApp {
       journalPath: path.join(config.supportDir, "lid-actions.json"),
       setLowPowerWanted: (wanted) => void this.awake.setLidLowPower(wanted),
       lidSessionOn: () => this.awake.state?.lidStatus === "on",
+      sessionOn: () => this.awake.active,
+      holdScreen: (on) => this.holdScreen(on),
     });
     this.telegram = config.botToken ? new TelegramClient(config.botToken) : null;
     const telegram = this.telegram;
@@ -361,6 +368,7 @@ export class SqueakApp {
               heat: () => phoneHeat(this.heat, this.awake.active),
               apply: (request) => this.applyAwake(request),
               lidActions: () => this.lidActions.settings,
+              openActions: () => this.lidActions.openSettings,
               rules: () => awakeRules(config.awakeSafety),
               lastEnd: () => this.awake.lastEnd,
               sleepProblem: () => this.awake.sleepProblem,
@@ -475,6 +483,7 @@ export class SqueakApp {
       lidReady: this.awake.lidReady,
       lastEnd: this.awake.lastEnd,
       lidActions: this.lidActions.settings,
+      openActions: this.lidActions.openSettings,
       lidClosedNow: this.lidActions.active,
       sleepProblem: this.awake.sleepProblem,
       rules: awakeRules(config.awakeSafety),
@@ -635,14 +644,39 @@ export class SqueakApp {
       : { ok: false as const, reason: "Not a hotspot request this Mac understands." };
   }
 
+  /** The lid-open mode's display hold: a `caffeinate -d` child that dies with the daemon, so it cannot outlive it. */
+  private screenHold: ChildProcess | null = null;
+  private holdScreen(on: boolean): void {
+    if (!on) {
+      this.screenHold?.kill();
+      this.screenHold = null;
+      return;
+    }
+    if (this.screenHold && this.screenHold.exitCode === null) return;
+    const child = spawn("/usr/bin/caffeinate", ["-d", "-w", String(process.pid)], { stdio: "ignore" });
+    child.on("error", () => {
+      if (this.screenHold === child) this.screenHold = null;
+    });
+    child.unref();
+    this.screenHold = child;
+  }
+
   private async applyAwake(request: unknown) {
     // What a closed lid does: { action: "lid-actions", settings: { mute: false, ... } }.
+    // Lid open's: { action: "lid-actions", mode: "open", settings: { screenOn: true } }.
     if ((request as { action?: unknown } | null)?.action === "lid-actions") {
-      const settings = (request as { settings?: unknown }).settings;
+      const { settings, mode } = request as { settings?: unknown; mode?: unknown };
       if (typeof settings !== "object" || settings === null) {
         return { ok: false as const, reason: "Expected settings." };
       }
-      this.lidActions.updateSettings(readLidActionSettings({ ...this.lidActions.settings, ...settings }));
+      if (mode !== undefined && mode !== "open" && mode !== "closed") {
+        return { ok: false as const, reason: "Mode must be open or closed." };
+      }
+      if (mode === "open") {
+        this.lidActions.updateOpenSettings(readOpenSettings({ ...this.lidActions.openSettings, ...settings }));
+      } else {
+        this.lidActions.updateSettings(readLidActionSettings({ ...this.lidActions.settings, ...settings }));
+      }
       return { ok: true as const, state: this.awake.state };
     }
     // The Mac app asks after installing fan control.

@@ -295,6 +295,7 @@ enum DemoData {
         demo.projectIcons = DemoIcons.byProject
         #endif
         demo.chatModels = chatModels
+        demo.awakeOpenActions = .init(screenOn: true, mute: false, lowPower: false, freezeApps: false)
         demo.chatWorkers = [.init(id: "sonnet", label: "Sonnet"), .init(id: "haiku", label: "Haiku"),
                             .init(id: "opus", label: "Opus"), .init(id: "fable", label: "Fable")]
         return demo

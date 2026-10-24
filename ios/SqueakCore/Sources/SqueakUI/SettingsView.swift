@@ -200,7 +200,7 @@ struct SettingsView: View {
             Form {
                 macCardSection
                 if model.awakeOffered {
-                    AwakeSection(problem: $awakeProblem, lidProblem: $lidActionsProblem)
+                    AwakeSection(problem: $awakeProblem, lidProblem: $lidActionsProblem).id("settings-awake")
                 }
                 if let hotspot = model.snapshot?.hotspot {
                     HotspotSection(hotspot: hotspot)
@@ -243,6 +243,9 @@ struct SettingsView: View {
             }
             .onAppear {
                 // Screenshots only: `-squeak-settings-scroll` shows the bottom of the page.
+                if ProcessInfo.processInfo.arguments.contains("-squeak-settings-awake") {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { proxy.scrollTo("settings-awake", anchor: .top) }
+                }
                 if ProcessInfo.processInfo.arguments.contains("-squeak-settings-scroll") {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { proxy.scrollTo("settings-end", anchor: .bottom) }
                 }
@@ -415,6 +418,40 @@ private struct LidActionsGroup: View {
     }
 }
 
+/// One mode's switches as plain toggles: what a session does with the lid open, or when it closes. Each is a signed
+/// change to the Mac's own setting, kept per mode, so changing one mode never touches the other.
+private struct AwakeModeSwitches: View {
+    @Environment(AppModel.self) private var model
+    let open: Bool
+    @Binding var problem: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(open ? AwakeFormat.openActionInfos : AwakeFormat.lidActionInfos) { info in
+                let on = model.awakeSwitch(info.key, open: open)
+                Toggle(isOn: Binding(get: { on }, set: { value in
+                    Task { problem = await model.changeLidAction(info.key, value, open: open) }
+                })) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 6) {
+                            Text(info.title).font(.subheadline)
+                            if model.lidActionPending(info.key, open: open) { ProgressView().controlSize(.mini) }
+                        }
+                        Text(info.detail).font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(Theme.primaryFill)
+                .frame(minHeight: 44)
+                .padding(.vertical, 4)
+                .accessibilityIdentifier("\(open ? "open" : "lid")-action-\(info.key)")
+            }
+            Text(problem ?? (open ? "While a session runs with the lid open. Undone when it ends."
+                                  : "When the lid closes in a lid closed session. Undone when it opens."))
+                .font(.footnote).foregroundStyle(Theme.muted).padding(.top, 2)
+        }
+    }
+}
+
 /// The Mac's awake session: what it is doing now, then a way to start one for a while, add time or end it.
 /// Everything shown is what the Mac reports; the phone only words it.
 private struct AwakeSection: View {
@@ -437,6 +474,12 @@ private struct AwakeSection: View {
         Section {
             TimelineView(.periodic(from: .now, by: 15)) { _ in
                 VStack(alignment: .leading, spacing: 14) {
+                    // Mode first, then its switches, then starting it: with nothing running the tabs lead.
+                    if model.awakeModesOffered && model.awake == nil {
+                        modeTabs
+                        AwakeModeSwitches(open: !shownLid, problem: $lidProblem)
+                        Divider()
+                    }
                     if let awake = model.awake { onCard(awake) } else { offCard }
                     if let problem = model.snapshot?.awakeSleepProblem {
                         HStack(alignment: .top, spacing: 10) {
@@ -447,7 +490,12 @@ private struct AwakeSection: View {
                             }
                         }
                     }
-                    if model.lidActionsOffered && model.awake != nil { LidActionsGroup(problem: $lidProblem) }
+                    if model.awakeModesOffered && model.awake != nil {
+                        modeTabs
+                        AwakeModeSwitches(open: !shownLid, problem: $lidProblem)
+                    } else if model.lidActionsOffered && model.awake != nil {
+                        LidActionsGroup(problem: $lidProblem)
+                    }
                 }
                 .padding(.vertical, 6)
             }
@@ -533,13 +581,14 @@ private struct AwakeSection: View {
             }
         }
         Button { change(.start(minutes: chosenMinutes, lid: lid)) } label: {
-            Label("Keep Mac awake", systemImage: "moon.zzz.fill").font(.headline)
+            Label(model.awakeModesOffered ? (lid ? "Keep awake, lid closed" : "Keep awake, lid open") : "Keep Mac awake",
+                  systemImage: "moon.zzz.fill").font(.headline)
                 .frame(maxWidth: .infinity, minHeight: 50)
                 .foregroundStyle(Theme.primaryText)
                 .background(Theme.primaryFill, in: Capsule())
         }
         .buttonStyle(.plain)
-        if model.awakeLidReady {
+        if model.awakeLidReady && !model.awakeModesOffered {
             Toggle(isOn: $withLid) { Label("With the lid closed", systemImage: "laptopcomputer") .font(.subheadline) }
                 .tint(Theme.primaryFill)
         }
@@ -552,7 +601,7 @@ private struct AwakeSection: View {
             if !lid {
                 Button("Until I end it") { change(.start(minutes: nil)) }.tint(Theme.primaryFill)
             }
-            if model.lidActionsOffered {
+            if model.lidActionsOffered && !model.awakeModesOffered {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("When the lid closes", systemImage: "laptopcomputer")
                         .font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
@@ -586,6 +635,36 @@ private struct AwakeSection: View {
     }
 
     private var lid: Bool { withLid && model.awakeLidReady }
+
+    /// The tab on screen: the running session's mode while one runs, else the one the next start uses.
+    private var shownLid: Bool {
+        if let awake = model.awake { return awake.lid != nil }
+        return withLid
+    }
+
+    /// Lid open | Lid closed. With nothing running it picks the next session's mode and shows that mode's
+    /// switches; while one runs it switches the session itself, keeping its end (a lid-closed session needs one).
+    private var modeTabs: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Mode", selection: Binding(get: { shownLid }, set: { closed in
+                withLid = closed
+                guard let awake = model.awake, (awake.lid != nil) != closed else { return }
+                let left = awake.until.map { max(1, Int(($0.timeIntervalSinceNow / 60).rounded(.up))) }
+                if closed && !model.awakeLidReady { return }
+                change(.start(minutes: left ?? (closed ? chosenMinutes : nil), lid: closed))
+            })) {
+                Label("Lid open", systemImage: "laptopcomputer").tag(false)
+                Label("Lid closed", systemImage: "laptopcomputer.slash").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("awake-mode")
+            if shownLid && !model.awakeLidReady {
+                Text("Lid closed needs setting up once in Squeak on your Mac, under Settings, Keep awake. Its switches are saved for then.")
+                    .font(.footnote).foregroundStyle(Theme.muted)
+            }
+        }
+        .padding(.top, 4)
+    }
 
     private var footer: String {
         let safety = AwakeFormat.safetySentence(model.snapshot?.awakeRules)

@@ -617,6 +617,8 @@ final class AppModel {
     private(set) var hotspot: DaemonHotspot?
     /// What a closed lid does (nil from a daemon that does not say), and the rest of the daemon's awake report.
     private(set) var awakeLidActions: DaemonLidActions?
+    /// What a session does with the lid open; nil from a daemon without the two modes.
+    private(set) var awakeOpenActions: DaemonOpenActions?
     private(set) var awakeLidClosedNow = false
     private(set) var awakeLastEnd: DaemonAwakeEnd?
     private(set) var awakeSleepProblem: String?
@@ -647,6 +649,7 @@ final class AppModel {
         if state.heat != heat { heat = state.heat }
         if state.power != power { power = state.power }
         if state.awakeLidActions != awakeLidActions { awakeLidActions = state.awakeLidActions }
+        if state.awakeOpenActions != awakeOpenActions { awakeOpenActions = state.awakeOpenActions }
         if state.awakeLidClosedNow != awakeLidClosedNow { awakeLidClosedNow = state.awakeLidClosedNow }
         if state.awakeLastEnd != awakeLastEnd { awakeLastEnd = state.awakeLastEnd }
         if state.awakeSleepProblem != awakeSleepProblem { awakeSleepProblem = state.awakeSleepProblem }
@@ -690,6 +693,33 @@ final class AppModel {
         await readAwake()
     }
 
+    /// Turns one thing a session does with the lid open on or off. Shown at once, then confirmed by the daemon.
+    func setOpenAction(_ key: String, _ on: Bool) async {
+        func set(_ a: inout DaemonOpenActions) {
+            switch key {
+            case "screenOn": a.screenOn = on
+            case "mute": a.mute = on
+            case "lowPower": a.lowPower = on
+            default: a.freezeApps = on
+            }
+        }
+        if demoMode {
+            var a = awakeOpenActions ?? DaemonOpenActions()
+            set(&a)
+            awakeOpenActions = a
+            return
+        }
+        let before = awakeOpenActions
+        if var a = awakeOpenActions { set(&a); awakeOpenActions = a }
+        if let problem = await client.setLidActions([key: on], open: true) {
+            awakeOpenActions = before
+            awakeNote = problem
+        } else {
+            awakeNote = nil
+        }
+        await readAwake()
+    }
+
     /// Turns one thing a closed lid does on or off. Shown at once, then confirmed by the daemon's next report.
     func setLidAction(_ key: String, _ on: Bool) async {
         if demoMode {
@@ -724,7 +754,8 @@ final class AppModel {
 
     /// Demo captures only: the awake state a screenshot should show.
     func installDemoAwake(
-        _ awake: DaemonAwake?, lidReady: Bool, actions: DaemonLidActions? = DaemonLidActions(), end: DaemonAwakeEnd? = nil,
+        _ awake: DaemonAwake?, lidReady: Bool, actions: DaemonLidActions? = DaemonLidActions(),
+        openActions: DaemonOpenActions? = DaemonOpenActions(screenOn: true), end: DaemonAwakeEnd? = nil,
         hotspot: DaemonHotspot? = nil, sleepProblem: String? = nil, rules: DaemonAwakeRules? = nil
     ) {
         guard demoMode else { return }
@@ -732,6 +763,7 @@ final class AppModel {
         self.awake = awake
         awakeLidReady = lidReady
         awakeLidActions = actions
+        awakeOpenActions = openActions
         awakeLastEnd = end
         self.hotspot = hotspot
         awakeSleepProblem = sleepProblem

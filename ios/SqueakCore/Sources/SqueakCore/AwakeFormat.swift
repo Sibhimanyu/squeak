@@ -15,6 +15,14 @@ public enum AwakeFormat {
         public var id: String { key }
     }
 
+    /// What a running session does while the lid is open, in the order they are shown.
+    public static let openActionInfos: [LidActionInfo] = [
+        .init(key: "screenOn", title: "Keep the screen on", detail: "The display stays on, so the Mac doesn't lock while you're away."),
+        .init(key: "mute", title: "Mute the sound", detail: "Only if it wasn't muted already, and unmuted when the session ends."),
+        .init(key: "lowPower", title: "Use Low Power Mode", detail: "Saves battery for the whole session."),
+        .init(key: "freezeApps", title: "Pause chat apps", detail: "Slack, WhatsApp, Discord and Telegram stop until the session ends."),
+    ]
+
     public static let lidActionInfos: [LidActionInfo] = [
         .init(key: "displayOff", title: "Turn off the display", detail: "The screen goes dark when the lid closes."),
         .init(key: "mute", title: "Mute the sound", detail: "Only if it wasn't muted already, and unmuted when the lid opens."),

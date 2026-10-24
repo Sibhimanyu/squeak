@@ -333,7 +333,9 @@ describe("a reply made on the iPhone", () => {
     const { remote, config, awakeRequests } = bridge("turn-1");
     const verdict = await remote.handleCommand(config, fixture.lidActionsCommandId, fixture.lidActionsCommand);
     expect(verdict.result).toEqual({ id: fixture.lidActionsCommandId, status: "sent" });
-    expect(awakeRequests).toEqual([{ action: "lid-actions", settings: { mute: false, freezeApps: true } }]);
+    expect(awakeRequests).toEqual([
+      { action: "lid-actions", mode: "closed", settings: { mute: false, freezeApps: true } },
+    ]);
   });
 
   it("answers detailed usage when the phone signs a stats request", async () => {
