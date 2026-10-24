@@ -189,6 +189,108 @@ func withClipboard<T>(_ text: String, _ body: () -> T) -> T {
     return result
 }
 
+/// Puts the chat on screen: its workspace, by id, then its tab. Tabs are labelled by title, which need
+/// not be unique, so each candidate is only trusted once the route names the session. Nil on success.
+/// `titledOnly`: try only tabs named `sessionTitle`, pressing nothing else (closing must not wander the tabs).
+func openChat(_ conductor: ConductorWindow, workspaceId: String, sessionId: String, sessionTitle: String?,
+              titledOnly: Bool = false) -> (SendError, String?)? {
+    // 1. The workspace, by id — sidebar links carry their route.
+    if conductor.workspaceId != workspaceId {
+        guard let window = conductor.window,
+              let link = findAll(window, { role($0) == "AXLink" && url($0)?.path.hasSuffix("/workspace/\(workspaceId)") == true }).first
+        else { return (.workspaceNotInSidebar, nil) }
+        AXUIElementPerformAction(link, kAXPressAction as CFString)
+        guard waitFor(4, { conductor.workspaceId == workspaceId }) else { return (.workspaceNotInSidebar, "did not navigate") }
+    }
+    // 2. The chat.
+    if conductor.sessionId != sessionId {
+        guard let window = conductor.window else { return (.noWindow, nil) }
+        let tabs = chatTabs(window)
+        let preferred = tabs.filter { str($0, kAXTitleAttribute) == "Close chat \(sessionTitle ?? "")" }
+        var reached = false
+        let others = titledOnly ? [] : tabs.filter { t in !preferred.contains { CFEqual($0, t) } }
+        for tab in preferred + others {
+            AXUIElementPerformAction(tab, kAXPressAction as CFString)
+            if waitFor(1.5, { conductor.sessionId == sessionId }) { reached = true; break }
+        }
+        guard reached else { return (.chatNotOpen, nil) }
+    }
+    return nil
+}
+
+/// Conductor's chat tabs: radio buttons whose accessible name is their close button's, "Close chat <title>".
+func chatTabs(_ window: AXUIElement) -> [AXUIElement] {
+    findAll(window) { role($0) == "AXRadioButton" && (str($0, kAXTitleAttribute) ?? "").hasPrefix("Close chat ") }
+}
+
+// MARK: - close
+
+/// Closes a chat's tab the way a person does: its tab's context menu, "Close tab". Conductor then hides
+/// the chat itself, in its window and its database. Only the tab the route proves is the chat is closed.
+enum CloseError: String {
+    case locked, notRunning = "conductor-not-running", noWindow = "no-window"
+    case workspaceNotInSidebar = "workspace-not-in-sidebar", chatNotOpen = "chat-not-open"
+    case noMenu = "no-menu", unconfirmed
+}
+
+struct CloseRequest: Decodable { let workspaceId: String; let sessionId: String; let sessionTitle: String? }
+
+func close(_ request: CloseRequest) -> (ok: Bool, error: String?, detail: String?) {
+    if screenIsLocked() { return (false, CloseError.locked.rawValue, nil) }
+    guard let running = conductorProcess() else { return (false, CloseError.notRunning.rawValue, nil) }
+    guard let conductor = ConductorWindow(pid: running.processIdentifier),
+          waitFor(5, { conductor.webArea != nil }) else { return (false, CloseError.noWindow.rawValue, nil) }
+
+    let previous = NSWorkspace.shared.frontmostApplication
+    running.activate()
+    defer { if let previous, previous.processIdentifier != running.processIdentifier { previous.activate() } }
+    // The chat the person was looking at: put back afterwards, whatever happened, unless it was this one.
+    let shownTitle = conductor.window.flatMap { window in
+        chatTabs(window).first { (attr($0, kAXValueAttribute) as? NSNumber)?.intValue == 1 }
+    }.flatMap { str($0, kAXTitleAttribute) }.map { String($0.dropFirst("Close chat ".count)) }
+    let shown = (workspace: conductor.workspaceId, session: conductor.sessionId)
+    defer {
+        if let workspace = shown.workspace, let session = shown.session, session != request.sessionId,
+           conductor.sessionId != session {
+            _ = openChat(conductor, workspaceId: workspace, sessionId: session, sessionTitle: shownTitle)
+        }
+    }
+
+    if let (error, detail) = openChat(conductor, workspaceId: request.workspaceId, sessionId: request.sessionId,
+                                      sessionTitle: request.sessionTitle, titledOnly: true) {
+        return (false, error.rawValue, detail)
+    }
+    // The selected tab is the one on screen, and the route has just named it.
+    guard let window = conductor.window,
+          let tab = chatTabs(window).first(where: { (attr($0, kAXValueAttribute) as? NSNumber)?.intValue == 1 })
+    else { return (false, CloseError.chatNotOpen.rawValue, "no selected tab") }
+    let tabsBefore = chatTabs(window).count
+    guard conductor.sessionId == request.sessionId else { return (false, CloseError.chatNotOpen.rawValue, "moved") }
+
+    AXUIElementPerformAction(tab, "AXShowMenu" as CFString)
+    var item: AXUIElement?
+    _ = waitFor(2) {
+        item = ((attr(conductor.app, kAXWindowsAttribute) as? [AXUIElement]) ?? []).flatMap { window in
+            findAll(window) { role($0) == "AXMenuItem" && (str($0, kAXTitleAttribute) ?? str($0, kAXDescriptionAttribute) ?? "").hasPrefix("Close tab") }
+        }.first
+        return item != nil
+    }
+    guard let item else {
+        postKey(running.processIdentifier, 53 /* escape */)
+        return (false, CloseError.noMenu.rawValue, nil)
+    }
+    // Re-check right before acting: the person may be clicking too.
+    guard conductor.sessionId == request.sessionId else {
+        postKey(running.processIdentifier, 53)
+        return (false, CloseError.chatNotOpen.rawValue, "moved before close")
+    }
+    AXUIElementPerformAction(item, kAXPressAction as CFString)
+    let closed = waitFor(3) {
+        conductor.sessionId != request.sessionId && (conductor.window.map { chatTabs($0).count } ?? 0) < tabsBefore
+    }
+    return closed ? (true, nil, nil) : (false, CloseError.unconfirmed.rawValue, nil)
+}
+
 func send(_ request: SendRequest) -> (ok: Bool, error: SendError?, detail: String?) {
     if screenIsLocked() { return (false, .locked, nil) }
     guard let running = conductorProcess() else {
@@ -209,27 +311,9 @@ func send(_ request: SendRequest) -> (ok: Bool, error: SendError?, detail: Strin
         if restoreFocus, let previous, previous.processIdentifier != running.processIdentifier { previous.activate() }
     }
 
-    // 1. The workspace, by id — sidebar links carry their route.
-    if conductor.workspaceId != request.workspaceId {
-        guard let window = conductor.window,
-              let link = findAll(window, { role($0) == "AXLink" && url($0)?.path.hasSuffix("/workspace/\(request.workspaceId)") == true }).first
-        else { return (false, .workspaceNotInSidebar, nil) }
-        AXUIElementPerformAction(link, kAXPressAction as CFString)
-        guard waitFor(4, { conductor.workspaceId == request.workspaceId }) else { return (false, .workspaceNotInSidebar, "did not navigate") }
-    }
-
-    // 2. The chat. Tabs are labelled by title, which need not be unique, so
-    //    each candidate is only trusted once the route names the session.
-    if conductor.sessionId != request.sessionId {
-        guard let window = conductor.window else { return (false, .noWindow, nil) }
-        let tabs = findAll(window) { role($0) == "AXRadioButton" && (str($0, kAXTitleAttribute) ?? "").hasPrefix("Close chat ") }
-        let preferred = tabs.filter { str($0, kAXTitleAttribute) == "Close chat \(request.sessionTitle ?? "")" }
-        var reached = false
-        for tab in preferred + tabs.filter({ t in !preferred.contains { CFEqual($0, t) } }) {
-            AXUIElementPerformAction(tab, kAXPressAction as CFString)
-            if waitFor(1.5, { conductor.sessionId == request.sessionId }) { reached = true; break }
-        }
-        guard reached else { return (false, .chatNotOpen, nil) }
+    if let (error, detail) = openChat(conductor, workspaceId: request.workspaceId, sessionId: request.sessionId,
+                                      sessionTitle: request.sessionTitle) {
+        return (false, error, detail)
     }
 
     if request.navigateOnly == true {
@@ -549,7 +633,7 @@ let args = CommandLine.arguments
 let mode = args.count > 1 ? args[1] : "probe"
 let outPath = args.count > 2 ? args[2] : "/tmp/squeak-hands.json"
 // Where errors go: the probe writes to its only path, send to its second.
-let errorPath = (mode == "send" || mode == "press" || mode == "choose-file" || mode == "system-key") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
+let errorPath = (mode == "send" || mode == "close" || mode == "press" || mode == "choose-file" || mode == "system-key") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
 let terminalModes: Set<String> = ["terminal-read", "terminal-type"]
 let wifiModes: Set<String> = ["wifi-join", "wifi-location", "wifi-scan"]
 
@@ -741,6 +825,20 @@ case "send":
     let result = send(request)
     var payload: [String: Any] = ["ok": result.ok]
     if let error = result.error { payload["error"] = error.rawValue }
+    if let detail = result.detail { payload["detail"] = detail }
+    write(payload, to: resultPath)
+case "close":
+    // close <request.json> <result.json>
+    let resultPath = args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json"
+    guard let data = FileManager.default.contents(atPath: outPath),
+          let request = try? JSONDecoder().decode(CloseRequest.self, from: data)
+    else {
+        write(["ok": false, "error": "bad-request"], to: resultPath)
+        exit(65)
+    }
+    let result = close(request)
+    var payload: [String: Any] = ["ok": result.ok]
+    if let error = result.error { payload["error"] = error }
     if let detail = result.detail { payload["detail"] = detail }
     write(payload, to: resultPath)
 case "terminal-read", "terminal-type":

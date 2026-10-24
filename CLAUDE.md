@@ -152,6 +152,11 @@ test for anything you fix is expected; the suite is fast.
     typed, and only then does the reply fall back to the background CLI. A
     possibly-sent message is confirmed against `session_messages`, never
     re-sent. It refuses to paste over an existing draft.
+- **Closing a chat from the phone closes its tab through Conductor's own "Close tab"** (`close-chat.ts`, Squeak
+  Hands `close`: the tab's `AXShowMenu`, then the menu item), because `is_hidden = 1` alone left the tab open in
+  Conductor's window — it does not reload. Only tabs titled like the chat are tried and the route must name it
+  before anything is pressed; the person's view is put back afterwards, success or not. The database write is the
+  fallback when the window cannot be driven, and the only step when the tab is not open.
 - **A terminal agent is answered by typing into its Terminal tab**, never by
   `claude -p --resume` beside it (the live TUI would carry on from a history
   that no longer matches the file) and never through Claude Code's peer socket

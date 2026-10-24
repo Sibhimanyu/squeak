@@ -886,6 +886,24 @@ describe("RemoteBridge close", () => {
     expect(closed).toEqual(["s1"]);
   });
 
+  it("waits for a closer that drives Conductor's window", async () => {
+    const closed: string[] = [];
+    const f = fixture({
+      closer: {
+        close: async (id) => {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          closed.push(id);
+          return "closed" as const;
+        },
+      },
+    });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, closeCommand(f));
+    await f.bridge.tick();
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent" });
+    expect(closed).toEqual(["s1"]);
+  });
+
   it("refuses a chat not shown, a busy chat, a missing one, and a Mac that cannot", async () => {
     const closed: string[] = [];
     const f = fixture({ closer: { close: (id) => (closed.push(id), "closed") } });
