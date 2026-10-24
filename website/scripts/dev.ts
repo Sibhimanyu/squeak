@@ -37,7 +37,20 @@ async function resolveFile(urlPath: string): Promise<string | null> {
   return info ? target : null;
 }
 
+// Live reload, dev only: pages served here get a tiny script that reloads them after each
+// successful rebuild. Nothing of this reaches dist/.
+const reloadClients = new Set<import("node:http").ServerResponse>();
+const RELOAD_SNIPPET =
+  '<script>new EventSource("/__reload").addEventListener("reload",()=>location.reload())</script>';
+
 const server = createServer(async (request, response) => {
+  if (request.url === "/__reload") {
+    response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+    response.write(": hi\n\n");
+    reloadClients.add(response);
+    request.on("close", () => reloadClients.delete(response));
+    return;
+  }
   const file = await resolveFile(request.url ?? "/");
   if (!file) {
     response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
@@ -45,7 +58,8 @@ const server = createServer(async (request, response) => {
     return;
   }
   try {
-    const body = await readFile(file);
+    let body: Buffer | string = await readFile(file);
+    if (extname(file) === ".html") body = body.toString("utf8").replace("</body>", `${RELOAD_SNIPPET}</body>`);
     response.writeHead(200, {
       "content-type": TYPES[extname(file)] ?? "application/octet-stream",
       "cache-control": "no-store",
@@ -66,7 +80,9 @@ function runBuild(): Promise<void> {
     return building;
   }
   building = execFileAsync(TSX, ["scripts/build.ts"], { cwd: site })
-    .then(() => undefined)
+    .then(() => {
+      for (const client of reloadClients) client.write("event: reload\ndata: 1\n\n");
+    })
     .catch((error: { stderr?: string; message: string }) => {
       console.error(`rebuild failed (still serving last good dist/): ${(error.stderr || error.message).trim()}`);
     })
@@ -81,7 +97,7 @@ function runBuild(): Promise<void> {
 }
 
 // Only the page's own sources; dist/ and node_modules/ are not watched.
-const WATCHED = /^(index\.template\.html|styles\.css|motion\.js|ducks\.js|scroll-score\.json|release\.json|src[\\/]|assets[\\/])/;
+const WATCHED = /^(index\.template\.html|styles\.css|motion\.js|ducks\.js|webgl\.js|scroll-score\.json|release\.json|src[\\/]|assets[\\/])/;
 let timer: NodeJS.Timeout | undefined;
 watch(site, { recursive: true }, (_event, name) => {
   if (!name || !WATCHED.test(String(name))) return;

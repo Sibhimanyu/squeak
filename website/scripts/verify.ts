@@ -51,7 +51,8 @@ type Log = { consoleIssues: string[]; failed: string[]; bytes: number };
 function instrument(page: Page): Log {
   const log: Log = { consoleIssues: [], failed: [], bytes: 0 };
   page.on("console", (message) => {
-    if (message.type() === "error" || message.type() === "warning") {
+    // Chromium's own GPU-driver performance notes (swiftshader, headless) are not page output.
+    if ((message.type() === "error" || message.type() === "warning") && !/GL Driver Message/.test(message.text())) {
       log.consoleIssues.push(`${message.type()}: ${message.text()}`);
     }
   });
@@ -70,13 +71,15 @@ function instrument(page: Page): Log {
 async function newPage(
   browser: Browser,
   viewport: Viewport,
-  options: { reducedMotion?: "reduce"; javaScript?: boolean } = {},
+  options: { reducedMotion?: "reduce"; javaScript?: boolean; touch?: boolean } = {},
 ): Promise<{ context: BrowserContext; page: Page; log: Log }> {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     deviceScaleFactor: 1,
     reducedMotion: options.reducedMotion ?? "no-preference",
     javaScriptEnabled: options.javaScript ?? true,
+    isMobile: options.touch ?? false,
+    hasTouch: options.touch ?? false,
   });
   const page = await context.newPage();
   return { context, page, log: instrument(page) };
@@ -136,39 +139,41 @@ async function loadPage(page: Page, url: string): Promise<void> {
 }
 
 const PIN_STATE_JS = () => {
-  const w = window as unknown as { ScrollTrigger?: { getAll(): Array<Record<string, unknown>> } };
+  const w = window as unknown as { ScrollTrigger?: { getAll(): Array<Record<string, unknown>>; getById(id: string): Record<string, number | boolean> | undefined } };
   const pin = document.querySelector<HTMLElement>(".moment__pin");
-  const pinTriggers = (w.ScrollTrigger?.getAll() ?? []).filter((t) => t.pin);
-  const main = pinTriggers[0] as Record<string, number | boolean> | undefined;
+  const all = w.ScrollTrigger?.getAll() ?? [];
+  const pinTriggers = all.filter((t) => t.pin);
+  const main = w.ScrollTrigger?.getById("moment");
   const beats = Array.from(document.querySelectorAll<HTMLElement>(".moment .beat"));
-  const visibleBeat = beats.findIndex((beat) => {
-    const copy = beat.querySelector<HTMLElement>(".beat__copy");
-    return copy ? Number(getComputedStyle(copy).opacity) > 0.5 : false;
-  });
+  const visibleBeat = beats.findIndex((beat) => Number(getComputedStyle(beat).opacity) > 0.5);
   const railOn = Array.from(document.querySelectorAll(".moment .rail__step")).findIndex((el) => el.classList.contains("is-on"));
   const replay = document.querySelector<HTMLButtonElement>(".moment .replay");
+  const demo = document.querySelector<HTMLElement>("[data-demo]");
   return {
-    jsPin: document.documentElement.classList.contains("js-pin"),
+    jsMoment: document.documentElement.classList.contains("js-moment"),
     spacer: Boolean(pin?.parentElement?.classList.contains("pin-spacer")),
+    spacers: document.querySelectorAll(".pin-spacer").length,
     pinTop: pin ? Math.round(pin.getBoundingClientRect().top * 10) / 10 : null,
-    pinPosition: pin ? getComputedStyle(pin).position : null,
     pinTriggers: pinTriggers.length,
+    pinIds: pinTriggers.map((t) => String(t.vars && (t.vars as Record<string, unknown>).id)).join(","),
     active: main ? Boolean(main.isActive) : false,
     start: main ? Math.round(Number(main.start)) : null,
     end: main ? Math.round(Number(main.end)) : null,
     progress: main ? Math.round(Number(main.progress) * 1000) / 1000 : null,
     visibleBeat,
     railOn,
-    picked: beats[2] ? beats[2].classList.contains("is-picked") : null,
+    picked: demo ? demo.classList.contains("is-picked") : null,
+    mode: demo ? demo.getAttribute("data-mode") : null,
     replayHidden: replay ? replay.hidden : null,
     scrollY: Math.round(window.scrollY),
     maxScroll: document.documentElement.scrollHeight - window.innerHeight,
+    overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
   };
 };
 type PinState = {
-  jsPin: boolean; spacer: boolean; pinTop: number | null; pinPosition: string | null; pinTriggers: number;
+  jsMoment: boolean; spacer: boolean; spacers: number; pinTop: number | null; pinTriggers: number; pinIds: string;
   active: boolean; start: number | null; end: number | null; progress: number | null; visibleBeat: number;
-  railOn: number; picked: boolean | null; replayHidden: boolean | null; scrollY: number; maxScroll: number;
+  railOn: number; picked: boolean | null; mode: string | null; replayHidden: boolean | null; scrollY: number; maxScroll: number; overflowX: number;
 };
 const pinState = (page: Page): Promise<PinState> => page.evaluate(PIN_STATE_JS) as Promise<PinState>;
 
@@ -190,6 +195,86 @@ async function depthSweep(page: Page, vp: Viewport, depths: number[]): Promise<{
     shots.push({ depth, scrollY, file });
   }
   return { overflow, shots };
+}
+
+// The moment's four states as stacked or pinned text, plus the demo's example rules.
+const MOMENT_STATIC_SRC = `(() => {
+  const beats = Array.from(document.querySelectorAll(".moment .beat")).map((beat) => {
+    const r = beat.getBoundingClientRect();
+    return { name: beat.getAttribute("data-beat"), opacity: Number(getComputedStyle(beat).opacity), top: Math.round(r.top + scrollY), left: Math.round(r.left), height: Math.round(r.height), text: (beat.querySelector("h3")?.textContent || "").trim().length + (beat.querySelector("p:last-child")?.textContent || "").trim().length };
+  });
+  const demo = document.querySelector("[data-demo]");
+  const opts = Array.from(document.querySelectorAll("[data-demo] .option")).map((o) => (o.querySelector(".option__key")?.textContent || "").trim());
+  const foot = document.querySelector("[data-demo] .demo__foot");
+  const footText = (foot?.textContent || "").replace(/\\s+/g, " ").trim();
+  const fr = foot ? foot.getBoundingClientRect() : null;
+  const cs = foot ? getComputedStyle(foot) : null;
+  return { beats: beats, opts: opts, footText: footText, footShown: Boolean(fr && fr.width > 0 && fr.height > 0 && cs.display !== "none" && cs.visibility !== "hidden" && Number(cs.opacity) > 0), demoHidden: demo ? demo.getAttribute("aria-hidden") : null };
+})()`;
+type MomentStatic = { beats: Array<{ name: string | null; opacity: number; top: number; left: number; height: number; text: number }>; opts: string[]; footText: string; footShown: boolean; demoHidden: string | null };
+
+// Evaluated as source text: the hero pile and the pond, as the page reports them.
+const PILE_SRC = `((sel) => {
+  const root = document.querySelector(sel);
+  if (!root) return null;
+  const field = root.querySelector("[data-field]") || root;
+  const fr = field.getBoundingClientRect();
+  const canvas = field.querySelector("canvas");
+  const pile = root.querySelector(".pile");
+  const pcs = pile ? getComputedStyle(pile) : null;
+  const shown = pile && pcs.display !== "none" && pcs.visibility !== "hidden" && Number(pcs.opacity) === 1;
+  const ducks = shown ? Array.from(root.querySelectorAll(".pile__duck")).filter((img) => {
+    const r = img.getBoundingClientRect();
+    return img.complete && img.naturalWidth > 0 && r.width > 24 && r.right > fr.left && r.left < fr.right && r.bottom > fr.top && r.top < fr.bottom;
+  }).length : 0;
+  const gl = root.querySelector("canvas[data-gl]");
+  return {
+    state: canvas ? canvas.getAttribute("data-state") : null,
+    frames: canvas && canvas.hasAttribute("data-frames") ? Number(canvas.getAttribute("data-frames")) : null,
+    awake: canvas && canvas.hasAttribute("data-awake") ? Number(canvas.getAttribute("data-awake")) : null,
+    canvasHidden: canvas ? canvas.getAttribute("aria-hidden") === "true" : null,
+    live: root.classList.contains("is-live"),
+    rootLive: document.documentElement.classList.contains("ducks-live"),
+    visibleDucks: ducks,
+    spriteCount: root.querySelectorAll(".pile__duck").length,
+    role: field.getAttribute("role") || root.getAttribute("role"),
+    label: (field.getAttribute("aria-label") || root.getAttribute("aria-label") || "").length,
+    gl: gl ? { hidden: gl.getAttribute("aria-hidden") === "true", live: gl.classList.contains("is-live"), opacity: Number(getComputedStyle(gl).opacity) } : null,
+    lenis: document.documentElement.classList.contains("lenis"),
+  };
+})`;
+type PileInfo = { state: string | null; frames: number | null; awake: number | null; canvasHidden: boolean | null; live: boolean; rootLive: boolean; visibleDucks: number; spriteCount: number; role: string | null; label: number; gl: { hidden: boolean; live: boolean; opacity: number } | null; lenis: boolean };
+const pile = (page: Page, selector: string): Promise<PileInfo | null> => page.evaluate(`${PILE_SRC}(${JSON.stringify(selector)})`) as Promise<PileInfo | null>;
+
+// Pins on a touch phone or a tablet: they must work or fall back to the stacked story, never overflow.
+async function momentProbe(page: Page, area: string, label: string): Promise<void> {
+  await scrollToY(page, 0);
+  const s0 = await pinState(page);
+  if (s0.jsMoment && s0.start !== null && s0.end !== null) {
+    const start = s0.start;
+    const range = s0.end - start;
+    const holds: Array<number | null> = [];
+    let overflow = 0;
+    for (const q of [0.25, 0.55, 0.85]) {
+      await scrollToY(page, start + range * q);
+      const s = await pinState(page);
+      holds.push(s.pinTop);
+      overflow = Math.max(overflow, s.overflowX);
+    }
+    check(area, `${label}: moment pin holds at top 0 and does not overflow`, s0.spacer && holds.every((h) => h !== null && Math.abs(h) <= 2) && overflow <= 0, `pinTop ${holds.join(" ")} overflow ${overflow}px range ${Math.round(range)}px`);
+    await scrollToY(page, start + range * 0.9);
+    const late = await pinState(page);
+    check(area, `${label}: late in the pin the example has reached its last state`, late.visibleBeat === 3 && late.picked === true, `beat=${late.visibleBeat} picked=${late.picked} mode=${late.mode}`);
+    await scrollToY(page, s0.maxScroll);
+    const end = await pinState(page);
+    check(area, `${label}: scrolling on escapes the pin and reaches the page end`, !end.active && end.pinTop !== null && end.pinTop < -1 && Math.abs(end.scrollY - end.maxScroll) <= 3, `active=${end.active} pinTop=${end.pinTop} scrollY=${end.scrollY}/${end.maxScroll}`);
+    evidence[`momentPin-${label}`] = { mode: "pinned", start, range, holds };
+  } else {
+    const m = (await page.evaluate(MOMENT_STATIC_SRC)) as MomentStatic;
+    const ordered = m.beats.every((b, i) => i === 0 || b.top > m.beats[i - 1].top || (b.top === m.beats[i - 1].top && b.left > m.beats[i - 1].left));
+    check(area, `${label}: moment fell back to the static story (all four beats readable, in order)`, m.beats.length === 4 && m.beats.every((b) => b.opacity === 1 && b.height > 0 && b.text > 40) && ordered && s0.pinTriggers >= 0, m.beats.map((b) => `${b.name}:${b.height}px`).join(" "));
+    evidence[`momentPin-${label}`] = { mode: "static fallback" };
+  }
 }
 
 async function scenarioDesktop(browser: Browser): Promise<void> {
@@ -215,48 +300,55 @@ async function scenarioDesktop(browser: Browser): Promise<void> {
   check(area, "no horizontal overflow at any depth", sweep.overflow <= 0, `max overflow ${sweep.overflow}px`);
   evidence.desktopDepths = sweep.shots;
 
-  // Pin: active from the top of the moment, holds while scrolling, and cannot be missed.
+  // Pins: the moment, the duck strip and the away stack each hold a spacer.
   await scrollToY(page, 0);
   const atStart = await pinState(page);
   const pinStart = atStart.start ?? 0;
   const pinEnd = atStart.end ?? 0;
   const range = pinEnd - pinStart;
-  check(area, "pin trigger exists and is pinned with spacer", atStart.pinTriggers >= 1 && atStart.jsPin && atStart.spacer, `triggers=${atStart.pinTriggers} js-pin=${atStart.jsPin} spacer=${atStart.spacer}`);
+  check(area, "moment pin exists with a spacer (js-moment on)", atStart.pinTriggers >= 1 && atStart.jsMoment && atStart.spacer, `triggers=${atStart.pinTriggers} [${atStart.pinIds}] js-moment=${atStart.jsMoment} spacers=${atStart.spacers}`);
+  evidence.pinsAtLoad = { triggers: atStart.pinTriggers, ids: atStart.pinIds, spacers: atStart.spacers };
 
-  const holds: Array<{ q: number; pinTop: number | null; position: string | null }> = [];
+  const holds: Array<{ q: number; pinTop: number | null }> = [];
   for (const q of [0.2, 0.5, 0.8]) {
     await scrollToY(page, pinStart + range * q);
     const s = await pinState(page);
-    holds.push({ q, pinTop: s.pinTop, position: s.pinPosition });
+    holds.push({ q, pinTop: s.pinTop });
   }
   check(area, "pin holds at top 0 while scrolling through its range", holds.every((h) => h.pinTop !== null && Math.abs(h.pinTop) <= 1), holds.map((h) => `${h.q}:${h.pinTop}`).join(" "));
-  evidence.pinHolds = holds;
   evidence.pinRange = { start: pinStart, end: pinEnd, range };
 
-  // Four progress points: each shows one beat, rail matches, and "chosen" lands at beat 3.
-  const states: Array<{ q: number; visibleBeat: number; railOn: number; picked: boolean | null; file: string }> = [];
-  for (const q of [0.1, 0.33, 0.6, 0.9]) {
+  // Four progress points: one beat each, rail matches, the choice (A) lands in beat 3.
+  const states: Array<{ q: number; visibleBeat: number; railOn: number; picked: boolean | null; mode: string | null; file: string }> = [];
+  for (const q of [0.1, 0.33, 0.66, 0.9]) {
     await scrollToY(page, pinStart + range * q);
     const s = await pinState(page);
     const file = await shot(page, `new-desktop-moment-${String(Math.round(q * 100)).padStart(2, "0")}`);
-    states.push({ q, visibleBeat: s.visibleBeat, railOn: s.railOn, picked: s.picked, file });
+    states.push({ q, visibleBeat: s.visibleBeat, railOn: s.railOn, picked: s.picked, mode: s.mode, file });
   }
   const expected = [0, 1, 2, 3];
-  check(area, "four progress points show beats 1-4 in order", states.every((st, i) => st.visibleBeat === expected[i] && st.railOn === expected[i]), states.map((st) => `${st.q}:beat${st.visibleBeat}/rail${st.railOn}`).join(" "));
-  check(area, "chosen reply lands at beat 3 (is-picked from 58%)", states[2]?.picked === true && states[1]?.picked === false, `at 0.33 picked=${states[1]?.picked}, at 0.6 picked=${states[2]?.picked}`);
+  check(area, "four progress points show beats 1-4 in order, rail in step", states.every((st, i) => st.visibleBeat === expected[i] && st.railOn === expected[i]), states.map((st) => `${st.q}:beat${st.visibleBeat}/rail${st.railOn}/${st.mode}`).join(" "));
+  check(area, "the example's data-mode follows the story (working, needs, needs, back to working)", states.map((st) => st.mode).join(",") === "working,needs,needs,working", states.map((st) => st.mode).join(","));
+  check(area, "chosen reply lands in beat 3 (is-picked from 62%)", states[2]?.picked === true && states[1]?.picked === false, `at 0.33 picked=${states[1]?.picked}, at 0.66 picked=${states[2]?.picked}`);
   evidence.momentStates = states;
+
+  // The example: options A and B only, with the "nothing is sent" note.
+  const ex = (await page.evaluate(MOMENT_STATIC_SRC)) as MomentStatic;
+  check(area, "example offers options A and B only", ex.opts.join(",") === "A,B", ex.opts.join(",") || "none");
+  check(area, "'Example only. Nothing is sent.' is visible", ex.footText.includes("Example only. Nothing is sent.") && ex.footShown, ex.footText);
+  check(area, "the example is aria-hidden and holds no control", ex.demoHidden === "true" && (await page.locator("[data-demo] a, [data-demo] button, [data-demo] input").count()) === 0, `aria-hidden=${ex.demoHidden}`);
 
   // Replay returns to the start of the pin.
   await scrollToY(page, pinStart + range * 0.6);
   const replayVisible = await page.locator(".moment .replay").isVisible();
   if (replayVisible) await page.locator(".moment .replay").click();
-  await page.waitForTimeout(1600);
+  await page.waitForTimeout(2000);
   const afterReplay = await pinState(page);
   check(area, "Replay scrolls back to the start of the example", replayVisible && Math.abs(afterReplay.scrollY - pinStart) <= 8, `visible=${replayVisible} scrollY=${afterReplay.scrollY} start=${pinStart}`);
 
   // End escapes the pin and reaches the install section and the page end.
   await page.keyboard.press("End");
-  await page.waitForTimeout(1600);
+  await page.waitForTimeout(2000);
   const atEnd = await pinState(page);
   const installInView = await page.evaluate(() => {
     const r = document.querySelector("#install")?.getBoundingClientRect();
@@ -265,8 +357,15 @@ async function scenarioDesktop(browser: Browser): Promise<void> {
   check(area, "End escapes the pin: released, page end reached", !atEnd.active && atEnd.pinTop !== null && atEnd.pinTop < -1 && Math.abs(atEnd.scrollY - atEnd.maxScroll) <= 2 && installInView, `active=${atEnd.active} pinTop=${atEnd.pinTop} scrollY=${atEnd.scrollY}/${atEnd.maxScroll} install-in-view=${installInView}`);
   evidence.afterEnd = atEnd;
 
-  // Diagnostic only, not a gate: wheel notches of 100 px from the top until the
-  // CLOSING install section is in view. Recorded as measured; the gate is the hero CTA.
+  // Install pond: in view at the page end, the pile pours (frames count) and settles.
+  const pond1 = await pile(page, "[data-pond]");
+  await page.waitForTimeout(900);
+  const pond2 = await pile(page, "[data-pond]");
+  check(area, "install pond pours in when in view (canvas live, frames counted)", Boolean(pond2 && pond2.live && pond2.frames !== null && pond2.frames > 0 && pond2.canvasHidden), `frames ${pond1?.frames} -> ${pond2?.frames} state=${pond2?.state} awake=${pond2?.awake}`);
+  check(area, "install pond canvas is aria-hidden; the pond has a text alternative", Boolean(pond2 && pond2.canvasHidden && pond2.role === "img" && pond2.label > 20), `role=${pond2?.role} label=${pond2?.label}`);
+  await shot(page, "new-desktop-pond");
+
+  // Diagnostic only: page length and wheel notches of 100 px to the closing section.
   await page.keyboard.press("Home");
   await page.waitForTimeout(800);
   let notches = 0;
@@ -290,16 +389,17 @@ async function scenarioDesktop(browser: Browser): Promise<void> {
   const broken = await page.evaluate(() => Array.from(document.images).filter((img) => !(img.complete && img.naturalWidth > 0)).map((img) => img.getAttribute("src")));
   check(area, "every image decoded after full sweep", broken.length === 0, broken.join(", ") || `${await page.evaluate(() => document.images.length)} images`);
 
-  // Resize cleanup: desktop -> mobile (pin removed, no spacer) -> desktop (one trigger).
+  // Resize round trip: pins are rebuilt, never duplicated, and restored.
   await scrollToY(page, pinStart + range * 0.5);
+  const before = await pinState(page);
   await page.setViewportSize(MOBILE);
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(1200);
   const mobileAfter = await pinState(page);
-  check(area, "resize to mobile removes the pin and its spacer", mobileAfter.pinTriggers === 0 && !mobileAfter.jsPin && !mobileAfter.spacer, `triggers=${mobileAfter.pinTriggers} js-pin=${mobileAfter.jsPin} spacer=${mobileAfter.spacer} position=${mobileAfter.pinPosition}`);
+  check(area, "resize to mobile rebuilds pins without leaking spacers", mobileAfter.spacers === mobileAfter.pinTriggers, `triggers=${mobileAfter.pinTriggers} [${mobileAfter.pinIds}] spacers=${mobileAfter.spacers} js-moment=${mobileAfter.jsMoment}`);
   await page.setViewportSize(DESKTOP);
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(1200);
   const backAgain = await pinState(page);
-  check(area, "resize back to desktop restores exactly one pin", backAgain.pinTriggers === 1 && backAgain.jsPin && backAgain.spacer, `triggers=${backAgain.pinTriggers}`);
+  check(area, "resize back to desktop restores exactly the same pins", backAgain.pinTriggers === before.pinTriggers && backAgain.spacers === backAgain.pinTriggers && backAgain.jsMoment, `triggers ${before.pinTriggers} -> ${backAgain.pinTriggers}, spacers=${backAgain.spacers}`);
 
   check(area, "no console errors or warnings", log.consoleIssues.length === 0, log.consoleIssues.join(" | "));
   check(area, "no failed requests or 4xx/5xx", log.failed.length === 0, log.failed.join(" | "));
@@ -314,9 +414,11 @@ async function scenarioTablet(browser: Browser): Promise<void> {
   const { context, page, log } = await newPage(browser, TABLET);
   await loadPage(page, BASE_URL);
   const sweep = await depthSweep(page, TABLET, [0, 0.5, 1]);
-  const s = await pinState(page);
   check(area, "no horizontal overflow", sweep.overflow <= 0, `max overflow ${sweep.overflow}px`);
-  check(area, "no pin below 900px wide (stacked states)", !s.jsPin && !s.spacer, `js-pin=${s.jsPin} spacer=${s.spacer}`);
+  const s = await pinState(page);
+  evidence.tabletPins = { triggers: s.pinTriggers, ids: s.pinIds, jsMoment: s.jsMoment };
+  check(area, "pins rebuilt cleanly (one spacer per pin)", s.spacers === s.pinTriggers, `triggers=${s.pinTriggers} [${s.pinIds}] spacers=${s.spacers}`);
+  await momentProbe(page, area, "tablet");
   check(area, "no console errors or warnings", log.consoleIssues.length === 0, log.consoleIssues.join(" | "));
   check(area, "no failed requests or 4xx/5xx", log.failed.length === 0, log.failed.join(" | "));
   evidence.tablet = sweep.shots;
@@ -325,24 +427,22 @@ async function scenarioTablet(browser: Browser): Promise<void> {
 
 async function scenarioMobile(browser: Browser): Promise<void> {
   const area = "mobile 390x844";
-  const { context, page, log } = await newPage(browser, MOBILE);
+  const { context, page, log } = await newPage(browser, MOBILE, { touch: true });
   await loadPage(page, BASE_URL);
   const sweep = await depthSweep(page, MOBILE, DEPTHS);
-  check(area, "no horizontal overflow at any depth", sweep.overflow <= 0, `max overflow ${sweep.overflow}px`);
+  check(area, "no horizontal overflow at any depth (touch device, pins on)", sweep.overflow <= 0, `max overflow ${sweep.overflow}px`);
   const s = await pinState(page);
-  check(area, "no pin on mobile (stacked readable states)", !s.jsPin && !s.spacer, `js-pin=${s.jsPin} spacer=${s.spacer}`);
+  evidence.mobilePins = { triggers: s.pinTriggers, ids: s.pinIds, jsMoment: s.jsMoment, pageHeight: await page.evaluate(() => document.documentElement.scrollHeight) };
+  check(area, "pins rebuilt cleanly (one spacer per pin)", s.spacers === s.pinTriggers, `triggers=${s.pinTriggers} [${s.pinIds}] spacers=${s.spacers} js-moment=${s.jsMoment}`);
+  await momentProbe(page, area, "mobile");
 
-  // Every beat's copy is visible and in order without JS-driven fades.
-  const beatInfo = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>(".moment .beat")).map((beat) => {
-    const copy = beat.querySelector<HTMLElement>(".beat__copy");
-    const r = beat.getBoundingClientRect();
-    return { beat: beat.dataset.beat ?? null, opacity: copy ? Number(getComputedStyle(copy).opacity) : null, top: Math.round(r.top + scrollY), height: Math.round(r.height), text: (copy?.textContent ?? "").trim().length };
-  }));
-  check(area, "all four beats present, readable and in order", beatInfo.length === 4 && beatInfo.every((b, i) => b.opacity === 1 && b.height > 0 && b.text > 40 && (i === 0 || b.top > beatInfo[i - 1].top)), beatInfo.map((b) => `${b.beat}:${b.height}px`).join(" "));
-  evidence.mobileBeats = beatInfo;
+  const m = (await page.evaluate(MOMENT_STATIC_SRC)) as MomentStatic;
+  check(area, "all four beats present with their copy", m.beats.length === 4 && m.beats.every((b) => b.text > 40), m.beats.map((b) => `${b.name}:${b.text}ch`).join(" "));
+  check(area, "example offers A and B only, with the 'nothing is sent' note", m.opts.join(",") === "A,B" && m.footText.includes("Example only. Nothing is sent."), `${m.opts.join(",")} / ${m.footText}`);
+  evidence.mobileBeats = m.beats;
 
   // Touch targets: every button and CTA at least 44 px in both directions.
-  const small = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>("a.btn, button")).filter((el) => {
+  const small = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>("a.btn, button, .nav__cta")).filter((el) => {
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0 && (r.width < 44 || r.height < 44);
   }).map((el) => `${el.tagName.toLowerCase()}.${el.className}: ${el.textContent?.trim().slice(0, 30)}`));
@@ -368,19 +468,37 @@ async function scenarioMobile(browser: Browser): Promise<void> {
   check(area, "no failed requests or 4xx/5xx", log.failed.length === 0, log.failed.join(" | "));
   evidence.mobileBytes = log.bytes;
   await context.close();
+
+  // A short phone: the moment either pins and fits, or stays the stacked story.
+  const short = await newPage(browser, { name: "short", width: 360, height: 600 }, { touch: true });
+  await loadPage(short.page, BASE_URL);
+  const sweepShort = await depthSweep(short.page, { name: "mobile-short", width: 360, height: 600 }, [0, 0.4, 0.8]);
+  check("mobile 360x600", "short phone: no horizontal overflow", sweepShort.overflow <= 0, `max overflow ${sweepShort.overflow}px`);
+  await momentProbe(short.page, "mobile 360x600", "short phone");
+  check("mobile 360x600", "no console errors or warnings", short.log.consoleIssues.length === 0, short.log.consoleIssues.join(" | "));
+  await short.context.close();
 }
 
 async function scenarioReducedMotion(browser: Browser): Promise<void> {
   const area = "reduced motion";
   const { context, page, log } = await newPage(browser, DESKTOP, { reducedMotion: "reduce" });
   await loadPage(page, BASE_URL);
+  await page.waitForTimeout(1500);
   await page.evaluate(() => window.scrollTo(0, 0));
   const s = await pinState(page);
-  check(area, "no pin, no spacer, no ScrollTrigger pin", !s.jsPin && !s.spacer && s.pinTriggers === 0, `triggers=${s.pinTriggers}`);
-  const reveals = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]")).map((el) => Number(getComputedStyle(el).opacity)));
-  check(area, "every reveal element is fully visible without motion", reveals.length > 0 && reveals.every((o) => o === 1), `${reveals.length} elements`);
-  const beatOpacity = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>(".moment .beat__copy")).map((el) => Number(getComputedStyle(el).opacity)));
-  check(area, "all four example states readable without motion", beatOpacity.length === 4 && beatOpacity.every((o) => o === 1), beatOpacity.join(","));
+  check(area, "no pin, no spacer, no ScrollTrigger pin, no Lenis", !s.jsMoment && s.spacers === 0 && s.pinTriggers === 0 && !(await page.evaluate(() => document.documentElement.classList.contains("lenis"))), `triggers=${s.pinTriggers} spacers=${s.spacers}`);
+  const m = (await page.evaluate(MOMENT_STATIC_SRC)) as MomentStatic;
+  check(area, "all four example states readable, stacked in order", m.beats.length === 4 && m.beats.every((b, i) => b.opacity === 1 && b.height > 0 && b.text > 40 && (i === 0 || b.top > m.beats[i - 1].top || (b.top === m.beats[i - 1].top && b.left > m.beats[i - 1].left))), m.beats.map((b) => b.opacity).join(","));
+  check(area, "options A and B and the 'nothing is sent' note present", m.opts.join(",") === "A,B" && m.footText.includes("Example only. Nothing is sent."), m.footText);
+  const hidden = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>("[data-hero-in], [data-hero-title], [data-lines], .assurances p, .install__steps li")).filter((el) => Number(getComputedStyle(el).opacity) < 1 || getComputedStyle(el).visibility === "hidden").map((el) => el.className || el.tagName));
+  check(area, "hero copy, headings and steps fully visible without motion", hidden.length === 0, hidden.join(", ") || "all visible");
+  const hero = await pile(page, "[data-stage]");
+  check(area, "hero shows the static pile (12+ ducks), no physics loop", Boolean(hero && hero.visibleDucks >= 12 && hero.state === "static" && hero.frames === null && !hero.rootLive), JSON.stringify(hero));
+  check(area, "WebGL backdrop is aria-hidden and not running", Boolean(hero && hero.gl && hero.gl.hidden && !hero.gl.live && hero.gl.opacity === 0), JSON.stringify(hero?.gl));
+  await page.evaluate(() => document.querySelector("#install")?.scrollIntoView());
+  await page.waitForTimeout(900);
+  const pond = await pile(page, "[data-pond]");
+  check(area, "install pond shows the static pile (6+ ducks), no physics", Boolean(pond && pond.visibleDucks >= 6 && !pond.live && pond.frames === null), JSON.stringify(pond));
   await shot(page, "new-reduced-motion-full", true);
   check(area, "no console errors or warnings", log.consoleIssues.length === 0, log.consoleIssues.join(" | "));
   await context.close();
@@ -391,108 +509,59 @@ async function scenarioNoJs(browser: Browser): Promise<void> {
   for (const vp of [DESKTOP, MOBILE]) {
     const { context, page, log } = await newPage(browser, vp, { javaScript: false });
     await page.goto(BASE_URL, { waitUntil: "load", timeout: 20000 });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(500);
+    const m = (await page.evaluate(MOMENT_STATIC_SRC)) as MomentStatic;
     const info = await page.evaluate(() => ({
-      beats: Array.from(document.querySelectorAll<HTMLElement>(".moment .beat")).map((beat) => {
-        const copy = beat.querySelector<HTMLElement>(".beat__copy");
-        return { visible: beat.getBoundingClientRect().height > 0, opacity: copy ? Number(getComputedStyle(copy).opacity) : null, text: (copy?.textContent ?? "").trim().length };
-      }),
-      reveals: Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]")).map((el) => Number(getComputedStyle(el).opacity)),
+      faded: Array.from(document.querySelectorAll<HTMLElement>("[data-hero-in], [data-hero-title], [data-lines], .assurances p, .install__steps li")).filter((el) => Number(getComputedStyle(el).opacity) < 1 || getComputedStyle(el).visibility === "hidden").length,
       replayHidden: (document.querySelector<HTMLButtonElement>(".moment .replay") ?? { hidden: true }).hidden,
-      jsPin: document.documentElement.classList.contains("js-pin"),
+      jsMoment: document.documentElement.classList.contains("js-moment"),
       sections: ["moment", "mac", "duck", "away", "trust", "install"].map((id) => Boolean(document.getElementById(id))),
     }));
+    const hero = await pile(page, "[data-stage]");
+    const pond = await pile(page, "[data-pond]");
     await shot(page, `new-nojs-${vp.name}-full`, true);
-    check(area, `${vp.name}: four example states present and visible`, info.beats.length === 4 && info.beats.every((b) => b.visible && b.opacity === 1 && b.text > 40), info.beats.map((b) => b.opacity).join(","));
-    check(area, `${vp.name}: every reveal element visible`, info.reveals.every((o) => o === 1), `${info.reveals.length} elements`);
+    check(area, `${vp.name}: four example states present, visible, in order`, m.beats.length === 4 && m.beats.every((b, i) => b.height > 0 && b.opacity === 1 && b.text > 40 && (i === 0 || b.top > m.beats[i - 1].top || (b.top === m.beats[i - 1].top && b.left > m.beats[i - 1].left))), m.beats.map((b) => b.opacity).join(","));
+    check(area, `${vp.name}: options A and B and the 'nothing is sent' note`, m.opts.join(",") === "A,B" && m.footText.includes("Example only. Nothing is sent."), m.footText);
+    check(area, `${vp.name}: hero copy and headings visible`, info.faded === 0, `${info.faded} faded`);
     check(area, `${vp.name}: all six sections present`, info.sections.every(Boolean), info.sections.join(","));
-    check(area, `${vp.name}: replay hidden and no js-pin without JS`, info.replayHidden && !info.jsPin, `replayHidden=${info.replayHidden}`);
+    check(area, `${vp.name}: static hero pile (${vp === DESKTOP ? 12 : 8}+ ducks) and static pond pile (6+)`, Boolean(hero && pond && hero.visibleDucks >= (vp === DESKTOP ? 12 : 8) && hero.state === "static" && pond.visibleDucks >= 6), `hero ${hero?.visibleDucks}/${hero?.state}, pond ${pond?.visibleDucks}`);
+    check(area, `${vp.name}: replay hidden and no js-moment without JS`, info.replayHidden && !info.jsMoment, `replayHidden=${info.replayHidden}`);
     check(area, `${vp.name}: no console errors`, log.consoleIssues.length === 0, log.consoleIssues.join(" | "));
     await context.close();
   }
 }
 
-// Hero pass: the quiet product scene should keep the decision and the actual
-// session panel visible, without relying on a decorative simulation.
+// Hero: a live duck pile (canvas with data-state/frames/awake), a backdrop that is decoration only.
 async function scenarioHero(browser: Browser): Promise<void> {
-  const area = "hero pass";
+  const area = "hero";
   {
     const { context, page, log } = await newPage(browser, DESKTOP);
-    await loadPage(page, BASE_URL);
-    await page.waitForTimeout(900);
-    const info = (await page.evaluate(`(() => {
-      const rect = (selector) => document.querySelector(selector)?.getBoundingClientRect();
-      const hero = rect(".hero");
-      const product = rect(".hero__product");
-      const panel = rect(".hero__product .agents");
-      const cta = rect(".hero .btn--primary");
-      return { hero, product, panel, cta, canvas: Boolean(document.querySelector("[data-stage] canvas")), rows: document.querySelectorAll(".hero__product .agents .row").length, signal: document.querySelector(".hero__signal strong")?.textContent?.trim() };
-    })()`)) as { hero: DOMRect | null; product: DOMRect | null; panel: DOMRect | null; cta: DOMRect | null; canvas: boolean; rows: number; signal: string | undefined };
-    check(area, "desktop: product panel is rendered in the hero", Boolean(info.hero && info.product && info.panel && info.panel.width >= 340 && info.panel.height >= 300 && info.panel.top >= info.product.top && info.panel.bottom <= info.product.bottom + 1), JSON.stringify(info.panel));
-    check(area, "desktop: hero retains the primary download decision", Boolean(info.cta && info.cta.top >= 0 && info.cta.bottom <= DESKTOP.height), JSON.stringify(info.cta));
-    check(area, "desktop: signal is textual and the session list has four rows", info.signal === "01" && info.rows === 4, `signal=${info.signal} rows=${info.rows}`);
-    check(area, "desktop: no decorative physics canvas remains", !info.canvas);
-    check(area, "desktop: no console errors or failed requests", log.consoleIssues.length === 0 && log.failed.length === 0, [...log.consoleIssues, ...log.failed].join(" | "));
-    await shot(page, "new-desktop-hero");
-    await context.close();
-  }
-  {
-    const { context, page, log } = await newPage(browser, MOBILE);
-    await loadPage(page, BASE_URL);
-    const info = (await page.evaluate(`({ product: Boolean(document.querySelector(".hero__product")), panelRows: document.querySelectorAll(".hero__product .agents .row").length, overflow: document.documentElement.scrollWidth - window.innerWidth })`)) as { product: boolean; panelRows: number; overflow: number };
-    check(area, "mobile: the hero keeps the product scene and has no overflow", info.product && info.panelRows === 4 && info.overflow === 0, JSON.stringify(info));
-    check(area, "mobile: no console errors or failed requests", log.consoleIssues.length === 0 && log.failed.length === 0, [...log.consoleIssues, ...log.failed].join(" | "));
-    await shot(page, "new-mobile-hero");
-    await context.close();
-  }
-  return;
-
-  /* Retained below temporarily as a record of the superseded duck-pile test.
-     It is intentionally unreachable while the new focused hero is in use. */
-  const stats = `(() => { const c = document.querySelector("[data-stage] canvas"); return c ? { state: c.getAttribute("data-state"), frames: Number(c.getAttribute("data-frames") || 0) } : null; })()`;
-
-  // --- desktop: a live canvas, shifts, expansion, Lenis and anchors ---
-  {
-    const { context, page, log } = await newPage(browser, DESKTOP);
-    await page.addInitScript(() => {
-      (window as unknown as { __cls: number }).__cls = 0;
-      new PerformanceObserver((list) => {
-        for (const entry of list.getEntries() as unknown as Array<{ value: number; hadRecentInput: boolean }>) {
-          if (!entry.hadRecentInput) (window as unknown as { __cls: number }).__cls += entry.value;
-        }
-      }).observe({ type: "layout-shift", buffered: true });
-    });
     await page.goto(BASE_URL, { waitUntil: "load", timeout: 20000 });
-    await page.waitForTimeout(300);
-    const first = (await page.evaluate(stats)) as { state: string; frames: number } | null;
     await page.waitForTimeout(500);
-    const second = (await page.evaluate(stats)) as { state: string; frames: number } | null;
-    check(area, "desktop: duck canvas present and animating on load", Boolean(first && second && second!.frames > first!.frames), `frames ${first?.frames} -> ${second?.frames}`);
-    const dom = await page.evaluate(() => {
-      const canvas = document.querySelector<HTMLCanvasElement>("[data-stage] canvas");
-      const stage = document.querySelector<HTMLElement>("[data-stage]");
-      const rect = stage?.getBoundingClientRect();
-      return {
-        hidden: canvas?.getAttribute("aria-hidden") === "true",
-        label: stage?.getAttribute("aria-label") ?? "",
-        description: (stage?.querySelector(".sr")?.textContent ?? "").trim().length,
-        stageTop: rect?.top ?? 9999,
-        ducks: document.querySelectorAll("[data-duck]").length,
-        live: document.documentElement.classList.contains("ducks-live"),
-      };
-    });
-    check(area, "canvas is aria-hidden and the stage has a text alternative", dom.hidden && dom.label.length > 10 && dom.description > 40, `label="${dom.label}"`);
-    check(area, "stage starts within 420px of the top at 1440x900", dom.stageTop <= 420, `top=${Math.round(dom.stageTop)}`);
-    check(area, "physics runs with the static pile hidden", dom.live && dom.ducks >= 14, `${dom.ducks} sprites`);
+    const first = await pile(page, "[data-stage]");
+    await page.waitForTimeout(700);
+    const second = await pile(page, "[data-stage]");
+    check(area, "desktop: duck pile canvas is live and counting frames", Boolean(first && second && second.frames !== null && first.frames !== null && second.frames > first.frames && second.rootLive && second.live), `frames ${first?.frames} -> ${second?.frames} state=${second?.state}`);
+    check(area, "desktop: canvas and WebGL canvas are aria-hidden; the field has a text alternative", Boolean(second && second.canvasHidden && second.gl?.hidden && second.role === "img" && second.label > 20), `role=${second?.role} label=${second?.label} gl=${JSON.stringify(second?.gl)}`);
+    check(area, "desktop: the pile has at least 20 sprites to draw", Boolean(second && second.spriteCount >= 20), `${second?.spriteCount} sprites`);
+    const panel = (await page.evaluate(`(() => { const p = document.querySelector(".hero .agents"); const r = p ? p.getBoundingClientRect() : null; return { rows: document.querySelectorAll(".hero .agents .row").length, w: r ? r.width : 0, right: r ? r.right : 0, vw: innerWidth }; })()`)) as { rows: number; w: number; right: number; vw: number };
+    check(area, "desktop: session panel has four rows and sits inside the window", panel.rows === 4 && panel.w >= 300 && panel.right <= panel.vw, JSON.stringify(panel));
+
+    // WebGL backdrop: where it can run it goes live; where it cannot, the Ink stage is the fallback.
+    await page.waitForTimeout(600);
+    const gl = await pile(page, "[data-stage]");
+    evidence.webgl = gl?.gl ?? null;
+    check(area, "desktop: WebGL backdrop is live or cleanly absent (never a half state)", Boolean(gl?.gl && ((gl.gl.live && gl.gl.opacity > 0) || (!gl.gl.live && gl.gl.opacity === 0))), JSON.stringify(gl?.gl));
 
     // settles and sleeps, then the pointer wakes it
     let asleep = false;
     for (let i = 0; i < 40 && !asleep; i += 1) {
       await page.waitForTimeout(250);
-      asleep = ((await page.evaluate(stats)) as { state: string }).state === "asleep";
+      asleep = (await pile(page, "[data-stage]"))?.state === "asleep";
     }
-    check(area, "the pile settles and the loop sleeps", asleep, asleep ? "asleep" : "still running after 10 s");
-    const before = ((await page.evaluate(stats)) as { frames: number }).frames;
+    const rest = await pile(page, "[data-stage]");
+    check(area, "desktop: the pile settles and the loop sleeps (data-awake 0)", asleep && rest?.awake === 0, `state=${rest?.state} awake=${rest?.awake}`);
+    const before = rest?.frames ?? 0;
     const box = await page.evaluate(() => {
       const r = document.querySelector("[data-stage] [data-field]")!.getBoundingClientRect();
       return { x: r.left, y: r.top, w: r.width, h: r.height };
@@ -500,102 +569,21 @@ async function scenarioHero(browser: Browser): Promise<void> {
     await page.mouse.move(box.x + box.w * 0.2, box.y + box.h * 0.85);
     await page.mouse.move(box.x + box.w * 0.5, box.y + box.h * 0.85, { steps: 12 });
     await page.waitForTimeout(400);
-    const after = (await page.evaluate(stats)) as { frames: number; state: string };
-    check(area, "pointer in the stage wakes the physics", after.frames > before, `frames ${before} -> ${after.frames}`);
-    const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
-    check(area, "no layout shift from the canvas (CLS)", cls < 0.02, `cls=${cls.toFixed(4)}`);
-
-    // Lenis and anchors
-    const lenisOn = await page.evaluate(() => document.documentElement.classList.contains("lenis") && typeof (window as unknown as { Lenis?: unknown }).Lenis === "function");
-    check(area, "Lenis is present and running", lenisOn);
-    for (const id of ["mac", "install"]) {
-      await page.evaluate(() => window.scrollTo(0, 0));
-      await page.waitForTimeout(300);
-      await page.evaluate((target) => (document.querySelector(`a[href="#${target}"]`) as HTMLElement | null)?.click(), id);
-      await settle(page, 4000);
-      await page.waitForTimeout(500);
-      const landed = await page.evaluate((target) => ({
-        top: document.getElementById(target)!.getBoundingClientRect().top,
-        atEnd: window.scrollY >= document.documentElement.scrollHeight - window.innerHeight - 2,
-      }), id);
-      // a section shorter than the screen at the very end of the page cannot reach the top; the end is the right answer there
-      check(area, `anchor #${id} still lands at the section`, Math.abs(landed.top) <= 40 || landed.atEnd, `top=${Math.round(landed.top)} atEnd=${landed.atEnd}`);
-    }
-
-    // stage growth finishes before the pin starts
-    const trig = await page.evaluate(() => {
-      const st = (window as unknown as { ScrollTrigger: { getById: (id: string) => { start: number; end: number } | undefined } }).ScrollTrigger;
-      const a = st.getById("stage");
-      const b = st.getById("moment");
-      return a && b ? { stageEnd: a.end, pinStart: b.start } : null;
-    });
-    check(area, "stage expansion ends before the moment pin starts", Boolean(trig && trig!.stageEnd < trig!.pinStart - 100), JSON.stringify(trig));
-    if (trig) {
-      await page.evaluate((y) => window.scrollTo(0, y), Math.round(trig!.stageEnd) + 4);
-      await page.waitForTimeout(1200);
-      const clip = await page.evaluate(() => {
-        const el = document.querySelector<HTMLElement>("[data-stage]")!;
-        const cs = getComputedStyle(el);
-        return { mx: cs.getPropertyValue("--mx").trim(), mb: cs.getPropertyValue("--mb").trim(), r: cs.getPropertyValue("--r").trim() };
-      });
-      check(area, "stage is full-bleed and square when the expansion ends", parseFloat(clip.mx) < 1 && parseFloat(clip.mb) < 1 && parseFloat(clip.r) < 1, JSON.stringify(clip));
-      await page.screenshot({ path: join(OUT, "new-desktop-stage-expanded.png") });
-    }
-
-    // transfer over a full scroll, and the added script weight
-    for (let y = 0; y < 9000; y += 800) {
-      await page.evaluate((to) => window.scrollTo(0, to), y);
-      await page.waitForTimeout(120);
-    }
-    const transfer = await page.evaluate(() => {
-      const nav = performance.getEntriesByType("navigation") as PerformanceNavigationTiming[];
-      const res = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
-      return (nav[0]?.encodedBodySize ?? 0) + res.reduce((sum, e) => sum + (e.encodedBodySize || 0), 0);
-    });
-    check(area, "page transfer after a full scroll stays under 1.1 MB", transfer < 1_100_000, `${transfer} bytes`);
-    check(area, "no console errors or failed requests", log.consoleIssues.length === 0 && log.failed.length === 0, [...log.consoleIssues, ...log.failed].join(" | "));
+    const after = await pile(page, "[data-stage]");
+    check(area, "desktop: pointer in the stage wakes the physics", Boolean(after && after.frames !== null && after.frames > before), `frames ${before} -> ${after?.frames}`);
+    check(area, "desktop: no console errors or failed requests", log.consoleIssues.length === 0 && log.failed.length === 0, [...log.consoleIssues, ...log.failed].join(" | "));
+    await shot(page, "new-desktop-hero");
     await context.close();
   }
-
-  // --- script weight: Lenis plus the physics, gzipped ---
-  const lenisGz = gzipSync(await readFile(join(DIST, "assets/vendor/lenis.min.js"))).length;
-  const ducksGz = gzipSync(await readFile(join(DIST, "ducks.js"))).length;
-  evidence.addedScriptGzip = { lenis: lenisGz, ducks: ducksGz, total: lenisGz + ducksGz };
-  check(area, "added JS (Lenis + physics) is at most 25 KB gzip", lenisGz + ducksGz <= 25_000, `lenis ${lenisGz} + ducks ${ducksGz} = ${lenisGz + ducksGz} bytes`);
-
-  // --- mobile: the canvas runs there too ---
   {
-    const { context, page, log } = await newPage(browser, MOBILE);
-    await loadPage(page, BASE_URL);
-    const a = (await page.evaluate(stats)) as { frames: number } | null;
-    await page.waitForTimeout(300);
-    const b = (await page.evaluate(stats)) as { frames: number; state: string } | null;
-    const count = await page.evaluate(() => document.querySelectorAll(".pile__duck").length);
-    check(area, "mobile: canvas ran (frames counted)", Boolean(b && b!.frames > 0), `frames ${a?.frames} -> ${b?.frames} (${b?.state})`);
-    check(area, "mobile: no console errors", log.consoleIssues.length === 0, log.consoleIssues.join(" | "));
-    evidence.pileSprites = count;
-    await context.close();
-  }
-
-  // --- reduced motion and no JavaScript: the static pile, never an empty frame ---
-  for (const mode of ["reduced motion", "no JavaScript"] as const) {
-    const { context, page, log } = await newPage(browser, DESKTOP, mode === "reduced motion" ? { reducedMotion: "reduce" } : { javaScript: false });
+    const { context, page, log } = await newPage(browser, MOBILE, { touch: true });
     await page.goto(BASE_URL, { waitUntil: "load", timeout: 20000 });
-    await page.waitForTimeout(3600); // past the pending-state fallback
-    const info = await page.evaluate(() => {
-      const field = document.querySelector("[data-stage] [data-field]")!.getBoundingClientRect();
-      const ducks = Array.from(document.querySelectorAll<HTMLImageElement>(".pile__duck")).filter((img) => {
-        const r = img.getBoundingClientRect();
-        const style = getComputedStyle(img.parentElement as HTMLElement);
-        return style.display !== "none" && Number(style.opacity) === 1 && img.complete && img.naturalWidth > 0 && r.width > 40 && r.right > field.left && r.left < field.right && r.bottom > field.top && r.top < field.bottom;
-      }).length;
-      const canvas = document.querySelector("[data-stage] canvas");
-      return { ducks, state: canvas?.getAttribute("data-state"), frames: canvas?.getAttribute("data-frames"), live: document.documentElement.classList.contains("ducks-live"), lenis: document.documentElement.classList.contains("lenis") };
-    });
-    check(area, `${mode}: a static pile of at least 12 ducks is visible in the stage`, info.ducks >= 12, `${info.ducks} visible`);
-    check(area, `${mode}: no physics loop and no Lenis`, !info.live && !info.frames && !info.lenis, JSON.stringify(info));
-    await shot(page, `new-${mode === "reduced motion" ? "reduced" : "nojs"}-stage`);
-    check(area, `${mode}: no console errors`, log.consoleIssues.length === 0, log.consoleIssues.join(" | "));
+    await page.waitForTimeout(900);
+    const info = await pile(page, "[data-stage]");
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    check(area, "mobile: duck pile canvas ran, hidden from assistive tech, no overflow", Boolean(info && info.frames !== null && info.frames > 0 && info.canvasHidden && info.gl?.hidden) && overflow <= 0, `frames=${info?.frames} state=${info?.state} overflow=${overflow}`);
+    check(area, "mobile: no console errors or failed requests", log.consoleIssues.length === 0 && log.failed.length === 0, [...log.consoleIssues, ...log.failed].join(" | "));
+    await shot(page, "new-mobile-hero");
     await context.close();
   }
 }
@@ -635,17 +623,11 @@ async function staticChecks(browser: Browser): Promise<void> {
   const cssRoute = await fetch(`${BASE_URL}squeak/styles.css`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
   check(area, "/squeak/styles.css resolves under the route", cssRoute?.status === 200, `status ${cssRoute?.status ?? "none"}`);
 
-  // The release folder is never changed by any of this: appcast and DMGs match the recorded manifest.
-  const manifestText = await readFile(join(site, "../.context/squeak-redesign/haiku-work/release-pages-manifest.sha256"), "utf8");
-  const manifestLines = manifestText.trim().split("\n").map((line) => line.split("  "));
-  const releaseRoot = resolve(site, "../.context/release-pages");
-  let releaseMismatch: string[] = [];
-  for (const [hash, rel] of manifestLines) {
-    if (!/^squeak\/(appcast\.xml|download\/.*\.dmg)$/.test(rel)) continue;
-    const current = createHash("sha256").update(await readFile(join(releaseRoot, rel))).digest("hex");
-    if (current !== hash) releaseMismatch.push(rel);
-  }
-  check(area, "appcast and every download DMG still match the recorded hashes", releaseMismatch.length === 0 && manifestLines.some(([, r]) => r.endsWith(".dmg")), releaseMismatch.join(", ") || `${manifestLines.filter(([, r]) => r.endsWith(".dmg") || r.endsWith("appcast.xml")).length} files`);
+  // The release folder is never changed by this run: appcast and DMGs hash the same as when it started.
+  // (A fixed manifest goes stale whenever a real release is published, so the snapshot is per run.)
+  const releaseAfter = await releaseHashes();
+  const releaseChanged = [...new Set([...releaseBefore.keys(), ...releaseAfter.keys()])].filter((rel) => releaseBefore.get(rel) !== releaseAfter.get(rel));
+  check(area, "appcast and every download DMG are untouched by this run", releaseChanged.length === 0 && releaseBefore.size > 0, releaseChanged.join(", ") || `${releaseBefore.size} files hashed before and after`);
   const titleOk = /<title>[^<]{10,}<\/title>/.test(html);
   const descOk = /<meta name="description" content="[^"]{50,}"/.test(html);
   check(area, "title and meta description present", titleOk && descOk);
@@ -689,7 +671,7 @@ async function staticChecks(browser: Browser): Promise<void> {
 async function scenarioPrimaryCta(browser: Browser): Promise<void> {
   for (const vp of [DESKTOP, TABLET, MOBILE]) {
     const area = `primary CTA ${vp.name} ${vp.width}x${vp.height}`;
-    const { context, page } = await newPage(browser, vp);
+    const { context, page } = await newPage(browser, vp, { touch: vp === MOBILE });
     await loadPage(page, BASE_URL);
     const cta = await page.evaluate(() => {
       const el = document.querySelector<HTMLAnchorElement>(".hero a.btn--primary");
@@ -733,7 +715,7 @@ async function scenarioPrimaryCta(browser: Browser): Promise<void> {
 async function scenarioDisclosures(browser: Browser): Promise<void> {
   for (const vp of [DESKTOP, MOBILE]) {
     const area = `disclosures ${vp.name}`;
-    const { context, page, log } = await newPage(browser, vp);
+    const { context, page, log } = await newPage(browser, vp, { touch: vp === MOBILE });
     await loadPage(page, BASE_URL);
     const count = await page.locator("details > summary").count();
     check(area, "page has native details/summary disclosures", count >= 1, `${count} found`);
@@ -778,7 +760,7 @@ async function scenarioDisclosures(browser: Browser): Promise<void> {
 const FIT_BOXES_SRC = `(() => {
   const vh = innerHeight;
   const out = [];
-  for (const sel of [".moment .beat[data-beat=choose] .beat__visual", ".moment .beat[data-beat=sent] .detail__receipt"]) {
+  for (const sel of [".moment .beats", ".moment [data-demo]", ".moment .rail"]) {
     const el = document.querySelector(sel);
     if (!el || getComputedStyle(el).display === "none") continue;
     const r = el.getBoundingClientRect();
@@ -787,15 +769,17 @@ const FIT_BOXES_SRC = `(() => {
   return out;
 })()`;
 
-// The signature pin must fit short and mid-width windows: the choice and receipt stay inside the viewport.
+// The signature pin must fit short and mid-width windows: copy, example and rail stay inside the viewport.
 async function scenarioPinFit(browser: Browser): Promise<void> {
   for (const vp of [{ name: "laptop", width: 1280, height: 720 }, { name: "small-desktop", width: 1024, height: 768 }]) {
     const area = `pin fit ${vp.name} ${vp.width}x${vp.height}`;
     const { context, page, log } = await newPage(browser, vp);
     await loadPage(page, BASE_URL);
     await scrollToY(page, 0);
-    const start = (await pinState(page)).start ?? 0;
-    const range = ((await pinState(page)).end ?? 0) - start;
+    const pinInfo = await pinState(page);
+    check(area, "moment pin is active at this size", pinInfo.jsMoment && pinInfo.pinTriggers >= 1, `js-moment=${pinInfo.jsMoment}`);
+    const start = pinInfo.start ?? 0;
+    const range = (pinInfo.end ?? 0) - start;
     const clipped: string[] = [];
     for (const q of [0.62, 0.92]) {
       await scrollToY(page, start + range * q);
@@ -804,7 +788,7 @@ async function scenarioPinFit(browser: Browser): Promise<void> {
         if (b && (b.top < 0 || b.bottom > b.vh)) clipped.push(`${b.sel} at ${q}: ${b.top}-${b.bottom} of ${b.vh}`);
       }
     }
-    check(area, "choice and receipt not clipped by the window at 62% and 92%", clipped.length === 0, clipped.join(" | ") || "inside viewport");
+    check(area, "copy, example and rail not clipped by the window at 62% and 92%", clipped.length === 0, clipped.join(" | ") || "inside viewport");
     await scrollToY(page, start + range * 0.5);
     await page.keyboard.press("End");
     await page.waitForTimeout(1400);
@@ -875,17 +859,18 @@ type ContrastRun = { text: string; ratio: number; size: number; bold: boolean; r
 async function scenarioContrast(browser: Browser): Promise<void> {
   for (const vp of [DESKTOP, MOBILE]) {
     const area = `contrast ${vp.name}`;
-    const { context, page } = await newPage(browser, vp);
+    const { context, page } = await newPage(browser, vp, { touch: vp === MOBILE });
     await loadPage(page, BASE_URL);
     const worst = new Map<string, ContrastRun>();
     let judged = 0;
     let skippedAtLeastOnce = 0;
     const samples: Array<() => Promise<unknown>> = DEPTHS.map((d) => () => scrollToFraction(page, d));
-    if (vp === DESKTOP) {
-      await scrollToY(page, 0);
-      const start = (await pinState(page)).start ?? 0;
-      const range = ((await pinState(page)).end ?? 0) - start;
-      for (const q of [0.1, 0.33, 0.6, 0.9]) samples.push(() => scrollToY(page, start + range * q));
+    await scrollToY(page, 0);
+    const pinAt = await pinState(page);
+    if (pinAt.jsMoment && pinAt.start !== null && pinAt.end !== null) {
+      const start = pinAt.start;
+      const range = pinAt.end - start;
+      for (const q of [0.1, 0.33, 0.66, 0.9]) samples.push(() => scrollToY(page, start + range * q));
     }
     for (const sample of samples) {
       await sample();
@@ -905,6 +890,18 @@ async function scenarioContrast(browser: Browser): Promise<void> {
     evidence[`contrast-${vp.name}`] = { runs: runs.length, failing: failing.length, lowest, samplesTaken: samples.length, largestSampleCount: judged, skippedInLastSample: skippedAtLeastOnce };
     await context.close();
   }
+}
+
+const RELEASE_ROOT = resolve(site, "../.context/release-pages");
+let releaseBefore = new Map<string, string>();
+async function releaseHashes(): Promise<Map<string, string>> {
+  const { readdir } = await import("node:fs/promises");
+  const out = new Map<string, string>();
+  const files: Array<[string, string]> = [["squeak/appcast.xml", join(RELEASE_ROOT, "squeak/appcast.xml")]];
+  const dir = join(RELEASE_ROOT, "squeak/download");
+  for (const name of await readdir(dir).catch(() => [] as string[])) if (name.endsWith(".dmg")) files.push([`squeak/download/${name}`, join(dir, name)]);
+  for (const [rel, file] of files) out.set(rel, createHash("sha256").update(await readFile(file).catch(() => Buffer.alloc(0))).digest("hex"));
+  return out;
 }
 
 async function dirTotals(dir: string): Promise<{ all: number; count: number }> {
@@ -994,7 +991,7 @@ async function baselineCapture(browser: Browser): Promise<void> {
 // Browser-side code must be plain JavaScript: no TypeScript syntax and no
 // esbuild-injected helpers (__name). Fail before any browser starts.
 function preflight(): void {
-  const sources: Record<string, string> = { PIN_STATE_JS: String(PIN_STATE_JS), FIT_BOXES_SRC, CONTRAST_SRC };
+  const sources: Record<string, string> = { PIN_STATE_JS: String(PIN_STATE_JS), FIT_BOXES_SRC, CONTRAST_SRC, MOMENT_STATIC_SRC, PILE_SRC };
   for (const [name, src] of Object.entries(sources)) {
     if (src.includes("__name")) throw new Error(`preflight: ${name} contains the __name helper`);
     try {
@@ -1007,6 +1004,7 @@ function preflight(): void {
 
 async function main(): Promise<void> {
   preflight();
+  releaseBefore = await releaseHashes();
   await mkdir(OUT, { recursive: true });
   const response = await fetch(BASE_URL, { signal: AbortSignal.timeout(3000) }).catch(() => null);
   if (!response?.ok) {
