@@ -35,6 +35,7 @@ import { open, pairingCode, seal } from "./remote-crypto.js";
 import { historyPageDoc, liveHandle } from "./live-turn.js";
 import { subagentFeedDoc } from "./subagent-feed.js";
 import type { SubagentActivity } from "../fleet/subagent-activity.js";
+import { defaultNotifySettings, NotifySettingsStore } from "../fleet/notify-settings.js";
 
 const NOW = Date.parse("2026-09-25T03:00:00.000Z");
 
@@ -3948,5 +3949,113 @@ describe("RemoteBridge subagent feed", () => {
     await settle();
     expect(t.feedDoc()!.box).toBe(before);
     t.bridge.stop();
+  });
+});
+
+describe("RemoteBridge notification settings from the phone", () => {
+  async function notifyT(options: { offered?: boolean } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-notify-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    const settings = new NotifySettingsStore(path.join(dir, "notify-settings.json"));
+    const view = () => ({ ...settings.snapshot(), channels: { telegram: true, cliq: true } });
+    const apply = vi.fn((request: unknown) => {
+      const outcome = settings.apply(request);
+      return outcome.ok ? { ok: true as const, state: view() } : outcome;
+    });
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      ...(options.offered === false ? {} : { notify: { state: view, apply } }),
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const phone = device();
+    await store.set(`channels/${payload.c}/pairing/iphone-1`, {
+      box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }),
+    });
+    await bridge.tick();
+    await bridge.approve("iphone-1");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    const command = (
+      fields: Record<string, unknown>,
+      signer = phone,
+      nonce = crypto.randomBytes(16).toString("hex"),
+    ) => {
+      const box = seal(payload.k, { v: 1, kind: "notify", nonce, expiresAt: NOW + 60_000, ...fields });
+      return { box, sig: signer.sign(box), device: "iphone-1" };
+    };
+    return { bridge, config, command, apply, settings };
+  }
+
+  it("shows the settings and applies one signed change", async () => {
+    const t = await notifyT();
+    expect(t.bridge.phoneView().notify).toEqual({
+      ...defaultNotifySettings(),
+      channels: { telegram: true, cliq: true },
+    });
+    const verdict = await t.bridge.handleCommand(
+      t.config,
+      "n1",
+      t.command({ channel: "cliq", change: { finished: "off" } }),
+    );
+    expect(verdict.result).toEqual({ id: "n1", status: "sent" });
+    expect(t.settings.settings.cliq.finished).toBe("off");
+    expect(t.settings.settings.telegram.finished).toBe("conductor");
+    expect(t.bridge.phoneView().notify).toMatchObject({ cliq: { finished: "off" } });
+    t.bridge.stop();
+  });
+
+  it("refuses every malformed change and changes nothing", async () => {
+    const t = await notifyT();
+    const bad: Record<string, unknown>[] = [
+      { channel: "cliq", change: { error: true } },
+      { channel: "cliq", change: { muted: "true" } },
+      { channel: "cliq", change: { muted: true, stalled: false } },
+      { channel: "cliq", change: {} },
+      { channel: "phone", change: { muted: true } },
+      { channel: 1, change: { muted: true } },
+      { change: { muted: true } },
+      { channel: "cliq" },
+      { channel: "cliq", change: { quiet: { from: "22:00", to: "22:00" } } },
+      { channel: "cliq", change: { muted: true }, extra: 1 },
+      { channel: "cliq", change: { muted: true }, v: 2 },
+    ];
+    for (const fields of bad) {
+      const verdict = await t.bridge.handleCommand(t.config, "x", t.command(fields));
+      expect(verdict.result).toMatchObject({ status: "refused" });
+    }
+    expect(t.settings.settings).toEqual(defaultNotifySettings());
+    t.bridge.stop();
+  });
+
+  it("refuses a replay, a stranger's signature, and a Mac without the setting", async () => {
+    const t = await notifyT();
+    const fields = { channel: "telegram", change: { muted: true } };
+    const nonce = "n".repeat(32);
+    expect((await t.bridge.handleCommand(t.config, "a", t.command(fields, undefined, nonce))).result).toMatchObject({
+      status: "sent",
+    });
+    expect((await t.bridge.handleCommand(t.config, "b", t.command(fields, undefined, nonce))).result).toMatchObject({
+      status: "refused",
+    });
+    const stranger = await t.bridge.handleCommand(
+      t.config,
+      "c",
+      t.command({ channel: "cliq", change: { muted: true } }, device()),
+    );
+    expect(stranger.write).toBe(false);
+    expect(t.settings.settings.cliq.muted).toBe(false);
+    t.bridge.stop();
+
+    const off = await notifyT({ offered: false });
+    expect(off.bridge.phoneView()).not.toHaveProperty("notify");
+    const verdict = await off.bridge.handleCommand(off.config, "d", off.command(fields));
+    expect(verdict.result).toMatchObject({ status: "refused" });
+    off.bridge.stop();
   });
 });

@@ -653,3 +653,54 @@ document. It is deleted when the phone sends `taskId: null`, leaves the chat, or
 returns `{ taskId, agentId, label, status, available, steps, total, startedAt, endedAt }` (steps clipped
 as the main feed's are); 404 for a task the session does not have. The existing `/activity` route's
 `background` items carry `agentId` and `hasSteps` too.
+
+## Notification settings (2026-10-25)
+
+What Telegram and Cliq may push, edited from the Mac app and the phone. It only filters pushes, per channel:
+a held-back card stays on the radar and in every app, and `/snooze` and `/radar` are untouched. Absent
+settings are today's behaviour exactly. Code: `src/fleet/notify-settings.ts` (`shouldPushTo` keeps
+`shouldPush` as the base rule and only narrows it, except `finished: "all"`), saved in
+`<support dir>/notify-settings.json` (0600, atomic write; unknown keys ignored on read). Only kinds that
+push today have a switch: errors and context pressure never push, so they have none.
+
+**Settings, per channel** (`telegram`, `cliq`), also the shape of the phone view's `notify`:
+
+```json
+{
+  "telegram": { "muted": false, "approval": true, "question": true, "stalled": true, "quota": true,
+                "finished": "conductor", "quiet": null },
+  "cliq":     { "muted": false, "approval": true, "question": true, "stalled": true, "quota": true,
+                "finished": "conductor", "quiet": { "from": "22:00", "to": "07:00" } },
+  "channels": { "telegram": true, "cliq": false }
+}
+```
+
+- `muted`: nothing is pushed to the channel, quota alerts included.
+- `approval`: a session blocked on an approval or a question. `question`: a finish that ends on a question.
+  `stalled`: a session that seems stuck. `quota`: the account-wide Codex quota alert.
+- `finished`: `"conductor"` (today: Conductor chats only), `"all"` (every agent's finish), `"off"`.
+- `quiet`: `{ "from": "HH:MM", "to": "HH:MM" }` 24 h, the Mac's local time, `from` inclusive, `to` exclusive,
+  may cross midnight; `from` and `to` must differ; `null` is none. Quiet hours hold back finishes, a finish
+  that ends on a question, and stalls. A blocked approval or question still pushes, and so does the quota
+  alert. A held-back push is dropped, not delayed.
+- `channels` (view only) says which channels this Mac has set up (`telegram`: a bot token; `cliq`: a webhook), so
+  a surface can grey out the other.
+
+**One change, strictly.** `change` holds exactly one key with its exact type: `muted`, `approval`, `question`,
+`stalled`, `quota` (booleans), `finished` (`"conductor" | "all" | "off"`), `quiet` (`{ from, to }` or `null`).
+Anything else (an unknown key, two keys, a string for a boolean, a bad clock time, an extra field) is refused.
+
+**Mac app route** (token-gated, no CORS header): `GET /control/notify` answers the object above;
+`POST /control/notify` with `{ "channel": "telegram" | "cliq", "change": { "<key>": value } }` (exactly those two
+keys) answers the object above after the change, or `400 { "error": "Not a notification setting this Mac understands." }`.
+
+**The phone command** (sealed like every command: `{ box, sig, device }`; same nonce, expiry and signature
+checks). Exactly these keys, no others:
+
+```json
+{ "v": 1, "kind": "notify", "channel": "cliq", "change": { "finished": "off" }, "nonce": "…", "expiresAt": 0 }
+```
+
+Result: `{ "id", "status": "sent" }`, or `{ "id", "status": "refused", "reason" }`. The phone view carries
+`notify` only on a Mac that offers it (older Macs omit it, so a phone hides the page); the view changes and the
+phone re-reads it. Both the route and the command end in the same `applyNotify`.

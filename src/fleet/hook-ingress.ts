@@ -79,6 +79,15 @@ export interface IngressControl {
    * back, or clear it. Answers its state, never the password.
    */
   hotspot?(request: unknown): Promise<{ ok: true; state: unknown } | { ok: false; reason: string }>;
+  /**
+   * What Telegram and Cliq may push (fleet/notify-settings.ts): `GET /control/notify` answers
+   * `{ telegram, cliq, channels: { telegram, cliq } }`; `POST` takes `{ channel, change }` (one key, strict)
+   * and answers the same. Token-gated, no CORS header.
+   */
+  notify?: {
+    read(): unknown;
+    apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
+  };
   /** Which channels are set up and healthy. Never carries a secret. */
   channels?(): unknown;
   /** Chats that messaged the Telegram bot without being allowed. */
@@ -608,6 +617,57 @@ export class HookIngressServer {
           });
           respond(response, 500, "refresh failed");
         });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/notify") {
+      const notify = control.notify;
+      if (request.method !== "GET" && request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!notify) {
+        request.resume();
+        respond(response, 503, "notification settings unavailable");
+        return;
+      }
+      if (request.method === "GET") {
+        request.resume();
+        respondJson(response, 200, notify.read());
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        const outcome = notify.apply(parsed);
+        if (!outcome.ok) {
+          respondJson(response, 400, { error: outcome.reason });
+          return;
+        }
+        respondJson(response, 200, outcome.state);
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
       return;
     }
 

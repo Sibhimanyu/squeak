@@ -213,6 +213,18 @@ struct SettingsView: View {
             ScrollViewReader { proxy in
             Form {
                 macCardSection
+                if let snapshot = model.snapshot {
+                    Section {
+                        if snapshot.notify != nil {
+                            NavigationLink { NotificationsView() } label: { Label("Notifications", systemImage: "bell") }
+                                .frame(minHeight: 44)
+                                .accessibilityIdentifier("notifications")
+                        } else {
+                            Text("New notification settings need a newer Squeak on your Mac.")
+                                .font(.footnote).foregroundStyle(Theme.muted)
+                        }
+                    }
+                }
                 if model.awakeOffered {
                     AwakeSection(problem: $awakeProblem, lidProblem: $lidActionsProblem).id("settings-awake")
                 }

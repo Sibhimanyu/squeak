@@ -175,3 +175,7 @@ seconds. `grep -i cliq ~/Library/Logs/squeak/squeak.log` shows any failure.
   cannot be edited from here); the turn check is what stops a second tap.
 - More than three lettered options do not fit as buttons (Cliq's five-button
   limit, less Reply and Full message); reply with the letter instead.
+
+## Notification settings
+
+Which cards and quota alerts reach Cliq (and, separately, Telegram) is set in `notify-settings.json`, edited from the Mac app and the phone: mute, approvals, questions, stalls, quota, finishes (Conductor / all / off) and quiet hours. The filter is applied in `CliqChannel` itself, after the monitor's own rules, so a muted card still shows on the radar. See `docs/remote-channel.md`, "Notification settings".

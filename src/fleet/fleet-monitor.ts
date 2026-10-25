@@ -174,6 +174,13 @@ export class FleetMonitor {
     this.watchDeps = options.watchDeps ?? realWatchDeps;
   }
 
+  /** Whether any channel wants finishes from every agent, not only Conductor's. Absent: none does. */
+  setWidenFinishes(widen: (() => boolean) | null): void {
+    this.widenFinishes = widen;
+  }
+
+  private widenFinishes: (() => boolean) | null = null;
+
   /** Where a finished session's last message is read from, to tell whether it ends on a question. */
   setLastMessageSource(read: ((session: FleetSession) => string | null) | null): void {
     this.deps.lastMessage = read;
@@ -410,7 +417,9 @@ export class FleetMonitor {
 
         // D2: only genuinely blocked sessions interrupt. Everything else waits
         // on the radar, where it costs the user nothing to not look.
-        if (!shouldPush(kind, session) || this.isMuted(session, observedAt)) {
+        // A channel set to "every finish" widens it; each channel then applies its own settings (notify-settings.ts).
+        const wide = (kind === "finished_unreviewed" || kind === "asked_question") && this.widenFinishes?.() === true;
+        if (!(wide || shouldPush(kind, session)) || this.isMuted(session, observedAt)) {
           continue;
         }
         // Active for a day, but a finish is news only for a few minutes.

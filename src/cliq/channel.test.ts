@@ -4,6 +4,7 @@ import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import type { AssistantAnswer } from "../fleet/assistant.js";
 import type { AttentionItem, FleetSession } from "../fleet/types.js";
 import { CliqChannel, turnStamp, type CliqInbound } from "./channel.js";
+import type { NotifyFilter } from "../fleet/notify-settings.js";
 import type { CliqButton } from "./client.js";
 import type { CliqInboxRecord } from "./inbox.js";
 
@@ -58,9 +59,15 @@ function record(overrides: Partial<CliqInboxRecord> = {}): CliqInboxRecord {
 }
 
 function setup(
-  options: { turn?: string | null; inbound?: boolean; ask?: (question: string) => Promise<AssistantAnswer> } = {},
+  options: {
+    turn?: string | null;
+    inbound?: boolean;
+    ask?: (question: string) => Promise<AssistantAnswer>;
+    notify?: NotifyFilter;
+  } = {},
 ) {
   let push: ((items: AttentionItem[]) => void) | null = null;
+  let quota: (() => void) | null = null;
   const cards = new Map<string, { target: string; label: string; turn: string }>();
   const pending = new Map<string, string>();
   let postCount = 0;
@@ -74,7 +81,10 @@ function setup(
       push = listener;
       return () => (push = null);
     }),
-    onQuotaAlert: vi.fn(() => () => undefined),
+    onQuotaAlert: vi.fn((listener: () => void) => {
+      quota = listener;
+      return () => undefined;
+    }),
     refresh: vi.fn(
       async () =>
         ({
@@ -121,6 +131,7 @@ function setup(
     monitor,
     store,
     inbound: options.inbound === false ? null : inbound,
+    notify: options.notify ?? null,
     now: () => now,
   });
   channel.listen();
@@ -133,6 +144,10 @@ function setup(
     records,
     cards,
     monitor,
+    quota: async () => {
+      quota?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    },
     setTurn: (next: string | null) => (turn = next),
     push: async (items: AttentionItem[]) => {
       push?.(items);
@@ -401,5 +416,17 @@ describe("CliqChannel with a streamed inbox", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("CliqChannel notification settings", () => {
+  it("holds back a card and a quota alert the settings refuse", async () => {
+    const t = setup({ notify: { item: (item) => item.kind === "blocked_approval", quota: () => false } });
+    await t.push([finished()]);
+    expect(t.webhook.post).not.toHaveBeenCalled();
+    await t.push([{ ...finished(), kind: "blocked_approval" }]);
+    expect(t.webhook.post).toHaveBeenCalledTimes(1);
+    await t.quota();
+    expect(t.webhook.post).toHaveBeenCalledTimes(1);
   });
 });

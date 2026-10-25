@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TelegramClient } from "../telegram/client.js";
 import type { TelegramInlineKeyboard, TelegramInlineKeyboardButton } from "../types.js";
-import { FleetController, type FleetReplier } from "./fleet-controller.js";
+import { FleetController, type FleetControllerDependencies, type FleetReplier } from "./fleet-controller.js";
 import type { FleetMonitor } from "./fleet-monitor.js";
 import { FleetStore } from "./fleet-store.js";
 import type { ReplyOutcome } from "./session-reply.js";
@@ -76,6 +76,7 @@ async function fixture(
     phoneLink?: (id: string) => string | null;
     session?: FleetSession;
     canReply?: (session: FleetSession) => boolean;
+    notify?: FleetControllerDependencies["notify"];
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-controller-"));
@@ -132,6 +133,7 @@ async function fixture(
     openConductorSession: null,
     replier,
     phoneLink: options.phoneLink ?? null,
+    notify: options.notify ?? null,
     fallbackChatIds: [42],
   });
   await controller.start();
@@ -352,5 +354,17 @@ describe("FleetController replies to a terminal agent", () => {
     await pushFinish("blocked_question");
 
     expect(sent[0]!.keyboard?.flat().some((button) => button.text === "Reply") ?? false).toBe(false);
+  });
+});
+
+describe("FleetController notification settings", () => {
+  it("holds back a push the settings refuse, and sends the rest", async () => {
+    const { sent, pushFinish } = await fixture({
+      notify: { item: (item) => item.kind !== "finished_unreviewed", quota: () => true },
+    });
+    await pushFinish("finished_unreviewed");
+    expect(sent).toEqual([]);
+    await pushFinish("blocked_approval");
+    expect(sent).toHaveLength(1);
   });
 });

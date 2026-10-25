@@ -147,6 +147,23 @@ public struct DaemonClient: Sendable {
         return try decode(ChannelsStatus.self, r.body)
     }
 
+    // MARK: Notification settings (nil means the daemon predates the route: 404)
+
+    public func notifySettings() async throws -> NotifySettings? {
+        let r = try await get("/control/notify", token: true)
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try decode(NotifySettings.self, r.body)
+    }
+
+    /// One change, one key. `.saved` carries the settings after it when the answer is readable.
+    public func changeNotify(_ channel: NotifyChannel, _ change: NotifyChange) async throws -> NotifyOutcome {
+        let r = try await post("/control/notify", body: change.requestBody(channel: channel))
+        if r.status == 404 { return .outdated }
+        try Self.check(r.status)
+        return .saved(try? JSONDecoder().decode(NotifySettings.self, from: r.body))
+    }
+
     public func telegramCandidates() async throws -> [TelegramCandidate]? {
         let r = try await get("/control/telegram/candidates", token: true)
         if r.status == 404 { return nil }

@@ -31,6 +31,12 @@ final class ChannelsModel {
     private(set) var remote: RemoteStatus?
     private(set) var remoteOutdated = false
 
+    // What each channel may push (nil until the daemon answers), and why a change did not stick.
+    private(set) var notify: NotifySettings?
+    private(set) var notifyOutdated = false
+    private(set) var notifyError: String?
+    @ObservationIgnored private var notifyInFlight = 0
+
     // What `.env` says (never the values of secrets).
     private(set) var tokenSet = false
     private(set) var webhookSet = false
@@ -116,7 +122,48 @@ final class ChannelsModel {
         } catch {
             daemonReachable = false
         }
+        await refreshNotify()
         await refreshRemote()
+    }
+
+    func refreshNotify() async {
+        if demo || notifyInFlight > 0 { return }
+        do {
+            let n = try await client.notifySettings()
+            guard notifyInFlight == 0 else { return }
+            notifyOutdated = n == nil
+            if let n { notify = n }
+        } catch {
+            // The service is off or busy: keep what is shown, the status line already says so.
+        }
+    }
+
+    /// One edit: shown at once, sent as one key, put back with a short reason if it fails, then re-read.
+    func setNotify(_ channel: NotifyChannel, _ change: NotifyChange) async {
+        notifyError = nil
+        guard change.isValid else { notifyError = NotifyText.sameTimes; return }
+        guard var settings = notify, let undo = settings.apply(change, to: channel) else { return }
+        notify = settings
+        if demo { return }
+        notifyInFlight += 1
+        var outcome: NotifyOutcome?
+        do {
+            outcome = try await client.changeNotify(channel, change)
+        } catch {
+            notifyError = NotifyText.failure(error)
+        }
+        notifyInFlight -= 1
+        switch outcome {
+        case .saved(let answered)?:
+            if notifyInFlight == 0, let answered { notify = answered }
+        case .outdated?:
+            notifyOutdated = true
+            notifyError = NotifyText.outdated
+            notify?.rollback(undo, on: channel)
+        case nil:
+            notify?.rollback(undo, on: channel)
+        }
+        await refreshNotify()
     }
 
     func refreshRemote() async {
@@ -388,6 +435,10 @@ final class ChannelsModel {
         channels = ChannelsStatus(
             telegram: .init(configured: true, polling: .ok, botUsername: "squeak_demo_bot", allowedChatIds: [5_550_101]),
             cliq: .init(oneWay: true, twoWay: false), phone: .init(enabled: true))
+        var cliqNotify = ChannelNotify()
+        cliqNotify.quiet = NotifyQuiet.standard
+        cliqNotify.finished = .all
+        notify = NotifySettings(telegram: ChannelNotify(), cliq: cliqNotify, telegramSetUp: true, cliqSetUp: true)
         remote = RemoteStatus(
             available: true, configured: true, phoneOpen: true, pairingOpen: true,
             devices: [.init(id: "d1", name: "Sibhi's iPhone", pairedAt: Date().addingTimeInterval(-86400 * 12))],
@@ -398,6 +449,7 @@ final class ChannelsModel {
             tokenSet = false; webhookSet = false; savedAllowed = []; allowed = []; chatNames = [:]
             ownerEmail = ""; ownerId = ""; savedEmail = ""; savedId = ""
             channels = ChannelsStatus()
+            notify = NotifySettings()
             remote = RemoteStatus(available: false)
         case "open":
             savedAllowed = []; allowed = []
