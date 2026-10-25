@@ -41,6 +41,7 @@ import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { closeChat } from "../fleet/close-chat.js";
 import { readActivity } from "../fleet/activity.js";
 import { BackgroundWorkReader } from "../fleet/background-work.js";
+import { SubagentActivityReader } from "../fleet/subagent-activity.js";
 import { resolveSetup } from "../fleet/chat-setup.js";
 import { parseChoices } from "../fleet/choices.js";
 import { renderUsage } from "../fleet/radar.js";
@@ -146,6 +147,7 @@ export class SqueakApp {
   /** Claude's plan limits, as the assistant's own `claude` runs last reported them. */
   private readonly claudeLimits: ClaudeLimitsStore;
   private readonly backgroundWork = new BackgroundWorkReader();
+  private readonly subagents = new SubagentActivityReader(this.backgroundWork);
   private readonly claudeRefresher: ClaudeLimitsRefresher;
   /** Keeps the Mac awake while an agent works, and while plugged in (SQUEAK_CAFFEINATE). */
   private readonly caffeinator: Caffeinator;
@@ -373,7 +375,11 @@ export class SqueakApp {
             activity: (session) =>
               session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null,
             background: (session) =>
-              session.transcriptPath ? this.backgroundWork.read(session.transcriptPath, Date.now()) : [],
+              session.transcriptPath ? this.subagents.tasks(session.transcriptPath, Date.now()) : [],
+            subagentActivity: (session, taskId, limit, stepChars) =>
+              session.agent === "claude" && session.transcriptPath
+                ? this.subagents.read(session.transcriptPath, taskId, Date.now(), { limit, stepChars })
+                : null,
             // A question's prompts, or a plan waiting on approval with its text (the phone's plan card).
             question: (session) =>
               session.agent === "claude" && session.transcriptPath ? readPendingAsk(session.transcriptPath) : null,
@@ -528,9 +534,13 @@ export class SqueakApp {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
         if (!session?.transcriptPath) return { steps: [], total: 0 };
         // Subagents and background shells ride along for a Claude chat (fleet/background-work.ts).
-        const background =
-          session.agent === "claude" ? this.backgroundWork.read(session.transcriptPath, Date.now()) : [];
+        const background = session.agent === "claude" ? this.subagents.tasks(session.transcriptPath, Date.now()) : [];
         return { ...readActivity(session.agent, session.transcriptPath), ...(background.length ? { background } : {}) };
+      },
+      subagentActivity: (key, taskId) => {
+        const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
+        if (session?.agent !== "claude" || !session.transcriptPath) return null;
+        return this.subagents.read(session.transcriptPath, taskId, Date.now());
       },
       chatModels: () => listChatModels(config.conductorDbPath),
       sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),

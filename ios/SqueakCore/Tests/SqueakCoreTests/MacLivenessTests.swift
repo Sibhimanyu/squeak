@@ -10,7 +10,10 @@ final class MacLivenessTests: XCTestCase {
     }
 
     func testARecentAnswerIsAnswering() {
-        XCTAssertEqual(MacLiveness.read(aliveAt: now.addingTimeInterval(-25), lookingSince: nil, now: now), .answering)
+        XCTAssertEqual(MacLiveness.read(aliveAt: now.addingTimeInterval(-24), lookingSince: nil, now: now), .answering)
+        XCTAssertEqual(MacLiveness.read(aliveAt: now.addingTimeInterval(-26), lookingSince: nil, now: now), .silent(since: now.addingTimeInterval(-26)))
+        XCTAssertEqual(MacLiveness.answerWindow, 25)
+        XCTAssertEqual(MacLiveness.pingEvery, 10)
     }
 
     func testAnOldAnswerJustAfterOpeningIsStillBeingChecked() {
@@ -21,9 +24,9 @@ final class MacLivenessTests: XCTestCase {
 
     func testNoAnswerAfterTheGraceIsASilentMac() {
         let old = now.addingTimeInterval(-37 * 60)
-        XCTAssertEqual(MacLiveness.read(aliveAt: old, lookingSince: now.addingTimeInterval(-45), now: now), .silent(since: old))
+        XCTAssertEqual(MacLiveness.read(aliveAt: old, lookingSince: now.addingTimeInterval(-20), now: now), .silent(since: old))
         // A Mac that answered while the phone was open, then slept.
-        let last = now.addingTimeInterval(-90)
+        let last = now.addingTimeInterval(-40)
         XCTAssertEqual(MacLiveness.read(aliveAt: last, lookingSince: now.addingTimeInterval(-600), now: now), .silent(since: last))
     }
 

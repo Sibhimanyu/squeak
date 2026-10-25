@@ -142,11 +142,20 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             public let startedAt: String?
             public let endedAt: String?
             public let summary: String?
+            /// The subagent's own id, and whether its steps can be read now (always true when present): a tap
+            /// target only then. Absent from an older Mac, from shells, and when the Mac cannot read them.
+            public let agentId: String?
+            public let hasSteps: Bool?
             public init(id: String, kind: String, label: String, status: String, background: Bool? = nil,
-                        startedAt: String? = nil, endedAt: String? = nil, summary: String? = nil) {
+                        startedAt: String? = nil, endedAt: String? = nil, summary: String? = nil,
+                        agentId: String? = nil, hasSteps: Bool? = nil) {
                 self.id = id; self.kind = kind; self.label = label; self.status = status; self.background = background
                 self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary
+                self.agentId = agentId; self.hasSteps = hasSteps
             }
+
+            /// Whether a tap can open this one's steps.
+            public var canOpenSteps: Bool { kind == "agent" && hasSteps == true }
 
             /// "4 min" running so far, or how long it ran; nil without a start.
             public func duration(now: Date = Date()) -> String? {
@@ -1176,6 +1185,57 @@ public struct HistoryCommand: Codable, Equatable, Sendable {
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
+}
+
+/// A signed request to follow one subagent of the open chat (`SubagentFeed`), or, with a nil `taskId`, to stop.
+/// Read-only. `taskId` is always encoded, as null when stopping: the Mac's key check is exact.
+public struct SubagentCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let key: String
+    public let taskId: String?
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+
+    public init(v: Int = 1, kind: String = "subagent", key: String, taskId: String?, nonce: String, expiresAt: Int64) {
+        self.v = v; self.kind = kind; self.key = key; self.taskId = taskId; self.nonce = nonce; self.expiresAt = expiresAt
+    }
+
+    private enum CodingKeys: String, CodingKey { case v, kind, key, taskId, nonce, expiresAt }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(v, forKey: .v); try c.encode(kind, forKey: .kind); try c.encode(key, forKey: .key)
+        try c.encode(taskId, forKey: .taskId) // null, not absent
+        try c.encode(nonce, forKey: .nonce); try c.encode(expiresAt, forKey: .expiresAt)
+    }
+}
+
+/// What one subagent is doing (`live/<handle>-s`, src/remote/subagent-feed.ts), sealed like the live turn.
+public struct SubagentFeed: Codable, Equatable, Sendable {
+    public let v: Int
+    public let key: String
+    public let taskId: String
+    public let agentId: String?
+    public let label: String
+    /// "running", "done", "failed" or "stopped".
+    public let status: String
+    /// False while its transcript is not readable yet; `steps` is then empty.
+    public let available: Bool
+    public let total: Int
+    /// The newest 50, oldest first.
+    public let steps: [LiveTurn.Step]
+    public var seq: Int64? = nil
+
+    public init(v: Int = 1, key: String, taskId: String, agentId: String? = nil, label: String, status: String,
+                available: Bool, total: Int, steps: [LiveTurn.Step], seq: Int64? = nil) {
+        self.v = v; self.key = key; self.taskId = taskId; self.agentId = agentId; self.label = label
+        self.status = status; self.available = available; self.total = total; self.steps = steps; self.seq = seq
+    }
+
+    /// The `live` document of a chat's subagent feed: the chat's handle, then `-s`.
+    public static func doc(for sessionKey: String) -> String { LiveTurn.handle(for: sessionKey) + "-s" }
 }
 
 /// A signed flip of the Mac's "Keep Mac awake" switch. Reaches no agent.

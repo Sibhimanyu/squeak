@@ -76,8 +76,7 @@ final class PresentationTests: XCTestCase {
         let now = Date()
         let json = #"{"v":1,"mac":"Mac","generatedAt":"2026-10-19T08:00:00Z","duck":{"blockedCount":0,"workingCount":0},"sessions":[]}"#
         let snapshot = try! JSONDecoder().decode(PhoneSnapshot.self, from: Data(json.utf8))
-        XCTAssertTrue(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now.addingTimeInterval(-10), now: now).healthy)
-        XCTAssertFalse(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now.addingTimeInterval(-120), now: now).healthy)
+        XCTAssertTrue(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now.addingTimeInterval(-10), mac: .answering, now: now).healthy)
         XCTAssertFalse(Connection.read(snapshot: snapshot, problem: "down", demo: false, lastFetch: now, now: now).healthy)
         XCTAssertFalse(Connection.read(snapshot: nil, problem: nil, demo: false, now: now).healthy)
     }
@@ -93,7 +92,7 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(asleep.text, "Mac not answering, maybe asleep · last heard 37m ago")
         XCTAssertTrue(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now, mac: .answering, now: now).healthy)
         XCTAssertTrue(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now, mac: .checking, now: now).healthy)
-        XCTAssertTrue(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now, mac: .unknown, now: now).healthy)
+        XCTAssertFalse(Connection.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: now, mac: .unknown, now: now).healthy)
     }
     #endif
 

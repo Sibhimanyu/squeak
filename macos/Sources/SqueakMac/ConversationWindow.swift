@@ -790,18 +790,7 @@ struct ActivityList: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(model.activity.enumerated()), id: \.offset) { i, step in
-                        HStack(alignment: .top, spacing: 12) {
-                            Lucide(Self.icon(step), size: 16, color: Theme.muted)
-                                .frame(width: 28, height: 28)
-                                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
-                            Text(verbatim: step.text).font(.body).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, 5)
-                            if let at = step.at {
-                                Text(at.formatted(date: .omitted, time: .standard)).font(Typo.body).monospacedDigit()
-                                    .foregroundStyle(Theme.subtle).padding(.top, 5)
-                            }
-                        }
-                        .padding(.vertical, 9)
+                        ActivityStepRow(step: step)
                         if i < model.activity.count - 1 { Divider().padding(.leading, 40) }
                     }
                 }
@@ -824,6 +813,27 @@ struct ActivityList: View {
             if l.hasPrefix("search") || l.hasPrefix("find") { return .search }
             return .wrench
         }
+    }
+}
+
+/// One step of an agent's turn: its icon, text and time. The Activity tab and a subagent's feed draw the same row.
+struct ActivityStepRow: View {
+    let step: ActivityStep
+    var compact = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: compact ? 8 : 12) {
+            Lucide(ActivityList.icon(step), size: compact ? 12 : 16, color: Theme.muted)
+                .frame(width: compact ? 22 : 28, height: compact ? 22 : 28)
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
+            Text(verbatim: step.text).font(compact ? Typo.body : .body).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, compact ? 2 : 5)
+            if let at = step.at {
+                Text(at.formatted(date: .omitted, time: .standard)).font(Typo.body).monospacedDigit()
+                    .foregroundStyle(Theme.subtle).padding(.top, compact ? 2 : 5)
+            }
+        }
+        .padding(.vertical, compact ? 6 : 9)
     }
 }
 

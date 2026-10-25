@@ -363,6 +363,46 @@ public struct Channel: Sendable {
         return page.key == sessionKey && page.before == before ? page : nil
     }
 
+    /// The signed, read-only document asking the Mac to follow one subagent of the open chat, or (nil) to stop.
+    public func subagentDocument(key sessionKey: String, taskId: String?, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = SubagentCommand(
+            key: sessionKey, taskId: taskId,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// The chat's subagent feed as it is written (through the shared stream on `live`); nil on Firestore. Yields nil
+    /// when the document goes. A feed for another chat is dropped.
+    public func subagentFeeds(for sessionKey: String) async -> AsyncStream<SubagentFeed?>? {
+        let name = SubagentFeed.doc(for: sessionKey)
+        guard let events = await store.events(in: "channels/\(pairing.c)/live", documents: [name]) else { return nil }
+        let key = pairing.k
+        return AsyncStream { continuation in
+            let task = Task {
+                for await event in events {
+                    guard case .document(let changed, let change) = event, changed == name else { continue }
+                    var feed: SubagentFeed?
+                    switch change {
+                    case .value(let document): feed = document.flatMap { try? ChannelCrypto.open(SubagentFeed.self, box: $0.box, key: key) }
+                    case .refetch:
+                        if let backend = Optional(await self.store), let document = try? await backend.get(self.path("live", name)) {
+                            feed = try? ChannelCrypto.open(SubagentFeed.self, box: document.box, key: key)
+                        }
+                    }
+                    continuation.yield(feed?.key == sessionKey ? feed : nil)
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     /// The signed document asking for what a film's card plays.
     public func mediaDocument(sessionKey: String, source: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
         var nonce = Data(count: 16)

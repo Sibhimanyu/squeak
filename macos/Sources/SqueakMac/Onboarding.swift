@@ -8,6 +8,8 @@ final class OnboardingController {
     static let shared = OnboardingController()
     private var window: NSWindow?
 
+    var isShowing: Bool { window?.isVisible ?? false }
+
     func showIfNeeded() {
         let model = AppModel.shared
         guard !model.onboardingDone, !model.captureMode else { return }

@@ -58,6 +58,8 @@ import {
   liveHistoryHandle,
   LiveTurnPublisher,
 } from "./live-turn.js";
+import { SubagentFeedPublisher, subagentFeedDoc } from "./subagent-feed.js";
+import { TASK_ID_PATTERN, type SubagentActivity } from "../fleet/subagent-activity.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
 
 /**
@@ -212,6 +214,9 @@ export interface PhoneBackgroundTask {
   startedAt?: string;
   endedAt?: string;
   summary?: string;
+  /** A subagent's own id, and whether its transcript can be read: the phone may then ask for its steps (`subagent` command). */
+  agentId?: string;
+  hasSteps?: true;
 }
 
 export interface SetupCommand {
@@ -377,6 +382,24 @@ export interface HistoryCommand {
   /** Epoch ms. */
   expiresAt: number;
 }
+
+/**
+ * A signed request for the steps of one Claude subagent of the chat the phone has open (docs/remote-channel.md,
+ * "Subagent feed"). Exactly these keys. `taskId` is the tool-use id of the subagent's Agent call, as the view's
+ * `background` lists it; `null` stops the feed. Changes nothing; the Mac answers in `live/<handle>-s`.
+ */
+export interface SubagentCommand {
+  v: 1;
+  kind: "subagent";
+  /** The session the phone has open (its presence names the same one). */
+  key: string;
+  taskId: string | null;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+const SUBAGENT_COMMAND_KEYS = new Set(["v", "kind", "key", "taskId", "nonce", "expiresAt"]);
 
 /** The most entries one history page holds. */
 export const HISTORY_PAGE_MAX = 12;
@@ -713,6 +736,13 @@ export interface RemoteBridgeDependencies {
    */
   liveActivity?: ((session: FleetSession, limit: number, stepChars: number) => Activity | null) | null;
   verbose?: boolean;
+  /**
+   * One subagent's steps (fleet/subagent-activity.ts) for the phone's subagent feed; null when the session has
+   * no such task. Same gates as `liveActivity`. Absent: the `subagent` command is refused.
+   */
+  subagentActivity?:
+    | ((session: FleetSession, taskId: string, limit: number, stepChars: number) => SubagentActivity | null)
+    | null;
   /** Reads a chat's diff for the phone's "what changed". Absent: refused. */
   diff?: RemoteDiffReader | null;
   /** Reads an image a chat's agent named, for the phone (phone-image.ts). Absent: refused. */
@@ -851,6 +881,7 @@ export class RemoteBridge {
   private readonly attachments = new PhoneAttachments();
   private readonly attachTimes = new Map<string, number[]>();
   private readonly live: LiveTurnPublisher | null;
+  private readonly subagentFeed: SubagentFeedPublisher | null;
   private lastSignature: string | null = null;
   private lastStepsSignature: string | null = null;
   private lastRecentSignature: string | null = null;
@@ -931,6 +962,31 @@ export class RemoteBridge {
               if (this.historyWritten) {
                 await this.deps.store.delete(this.channel(config, "live", liveHistoryHandle(handle)));
               }
+            }
+          },
+        })
+      : null;
+    const subagentActivity = deps.store.watch ? deps.subagentActivity : null;
+    this.subagentFeed = subagentActivity
+      ? new SubagentFeedPublisher({
+          read: (key, taskId) => {
+            const found = this.watchableSession(key);
+            return found?.active ? subagentActivity(found.session, taskId, LIVE_STEPS, LIVE_STEP_CHARS) : null;
+          },
+          seq: () => this.nextSeq(),
+          write: async (doc, feed) => {
+            const config = this.config;
+            if (config) {
+              await this.deps.store.set(this.channel(config, "live", doc), {
+                box: this.sealForPhone(config, feed),
+                at: this.now(),
+              });
+            }
+          },
+          clear: async (doc) => {
+            const config = this.config;
+            if (config) {
+              await this.deps.store.delete(this.channel(config, "live", doc));
             }
           },
         })
@@ -1035,6 +1091,7 @@ export class RemoteBridge {
   stop(): void {
     this.stopped = true;
     this.live?.stop();
+    this.subagentFeed?.stop();
     this.stopWatches();
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -1149,6 +1206,7 @@ export class RemoteBridge {
   reset(): void {
     // Before the config goes, so the live document can still be deleted.
     this.live?.stop();
+    this.subagentFeed?.stop();
     this.config = null;
     this.pending.clear();
     this.stopWatches();
@@ -1235,6 +1293,11 @@ export class RemoteBridge {
       this.hasPairedPhone() &&
       this.watchableSession(key) !== null;
     this.live?.watch(allowed ? key : null);
+    // The subagent feed lives only as long as the chat it was asked from stays open and watchable.
+    const sub = this.subagentFeed?.current();
+    if (sub && (!allowed || sub.key !== key)) {
+      this.subagentFeed?.watch(null);
+    }
   }
 
   /**
@@ -1563,6 +1626,9 @@ export class RemoteBridge {
     }
     if (kind === "history") {
       return this.handleHistory(config, device, id, command as unknown as HistoryCommand, now);
+    }
+    if (kind === "subagent") {
+      return this.handleSubagent(device, id, command as unknown as SubagentCommand);
     }
     if (kind === "queue") {
       return this.handleQueue(device, id, command as unknown as QueueCommand);
@@ -2269,6 +2335,58 @@ export class RemoteBridge {
     } finally {
       this.historyBusy.delete(command.key);
     }
+  }
+
+  /**
+   * Start, switch or stop the subagent feed. Signature, freshness and nonce have already held. Exact keys; the
+   * key must be the chat this phone's presence says is open and one it may watch (an active Claude chat, from
+   * the Mac's own snapshot); the task must be one of that chat's subagents as the Mac reads them now. Verbose
+   * must be allowed on this Mac. Read-only: nothing is changed on the Mac, and the document is deleted when
+   * the phone leaves.
+   */
+  private handleSubagent(
+    device: PairedDevice,
+    id: string,
+    command: SubagentCommand,
+  ): { write: boolean; result: Record<string, unknown> } {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `subagent: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const understood =
+      Object.keys(command).every((name) => SUBAGENT_COMMAND_KEYS.has(name)) &&
+      command.v === 1 &&
+      typeof command.key === "string" &&
+      command.key.length <= 200 &&
+      (command.taskId === null || (typeof command.taskId === "string" && TASK_ID_PATTERN.test(command.taskId)));
+    if (!understood) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const feed = this.subagentFeed;
+    if (!feed || this.deps.verbose === false) {
+      return refuse("This Mac isn't showing subagent steps on a phone.");
+    }
+    if (command.taskId === null) {
+      // Stopping is always allowed for the chat that started it, and harmless otherwise.
+      if (feed.current()?.key === command.key) feed.watch(null);
+      this.log(device.name, "sent", "subagent feed stopped");
+      return { write: true, result: { id, status: "sent" } };
+    }
+    const found = this.watchableSession(command.key);
+    if (
+      !found?.active ||
+      found.session.agent !== "claude" ||
+      command.key !== this.presenceWatching ||
+      !this.phoneOpen()
+    ) {
+      return refuse("Open that chat first.");
+    }
+    if (!this.deps.subagentActivity?.(found.session, command.taskId, 1, 1)) {
+      return refuse("That subagent isn't there any more.");
+    }
+    feed.watch({ key: command.key, taskId: command.taskId });
+    this.log(device.name, "sent", `steps of a subagent of ${command.key.slice(-8)}`);
+    return { write: true, result: { id, status: "sent", doc: subagentFeedDoc(command.key) } };
   }
 
   /**
@@ -3242,6 +3360,8 @@ export class RemoteBridge {
           ...(task.startedAt ? { startedAt: task.startedAt } : {}),
           ...(task.endedAt ? { endedAt: task.endedAt } : {}),
           ...(task.summary ? { summary: task.summary } : {}),
+          ...(task.agentId ? { agentId: task.agentId } : {}),
+          ...(task.hasSteps ? { hasSteps: true as const } : {}),
         })),
       };
     } catch (error) {

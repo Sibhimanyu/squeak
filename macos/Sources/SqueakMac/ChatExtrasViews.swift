@@ -117,6 +117,8 @@ struct BackgroundStrip: View {
     /// Something else sits above the composer too (the stuck card): start folded, the window is only so tall.
     var crowded = false
     @State private var open: Bool?
+    /// The subagent whose steps are showing under its row.
+    @State private var expanded: String?
 
     private var isOpen: Bool { open ?? (extras.background.count <= 2 && !crowded) }
 
@@ -138,16 +140,33 @@ struct BackgroundStrip: View {
                 if isOpen {
                     ForEach(extras.background) { task in
                         Divider()
-                        row(task, now: context.date)
+                        if task.canShowSteps, let key = extras.sessionKey {
+                            VStack(spacing: 0) {
+                                Button { expanded = expanded == task.id ? nil : task.id } label: {
+                                    row(task, now: context.date, expandable: true, isExpanded: expanded == task.id)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityHint(expanded == task.id ? "Hides the subagent's steps" : "Shows the subagent's steps")
+                                if expanded == task.id {
+                                    SubagentFeedView(sessionKey: key, task: task).transition(.opacity)
+                                }
+                            }
+                        } else {
+                            row(task, now: context.date)
+                        }
                     }
                 }
             }
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
             .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         }
+        .onAppear {
+            // Capture only: the demo's running subagent opens at once so a screenshot shows its steps.
+            if DemoData.opensSubagent, expanded == nil { open = true; expanded = extras.background.first { $0.canShowSteps && $0.status == "running" }?.id }
+        }
     }
 
-    private func row(_ task: DaemonBackgroundTask, now: Date) -> some View {
+    private func row(_ task: DaemonBackgroundTask, now: Date, expandable: Bool = false, isExpanded: Bool = false) -> some View {
         HStack(spacing: Space.s) {
             Image(systemName: task.kind == "agent" ? "person.2" : "terminal")
                 .font(.system(size: 11)).foregroundStyle(Theme.muted).frame(width: 16).accessibilityHidden(true)
@@ -172,8 +191,86 @@ struct BackgroundStrip: View {
             default:
                 Text("stopped").font(Typo.meta).foregroundStyle(Theme.muted)
             }
+            if expandable {
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.subtle)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0)).accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, Space.m).padding(.vertical, 7)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// One subagent's live steps under its row: the same step rows as the Activity tab, read from the daemon every
+/// 2 s only while it is open, so the feed alone refreshes and the window's scroll and draft stay as they are.
+struct SubagentFeedView: View {
+    let sessionKey: String
+    let task: DaemonBackgroundTask
+    @Environment(AppModel.self) private var model
+    @State private var result: Result<DaemonSubagentFeed?, any Error>?
+    @State private var shown: SubagentFeedPresentation?
+
+    private var presentation: SubagentFeedPresentation {
+        shown ?? SubagentFeedPresentation.make(result: nil, fallbackStatus: task.status)
+    }
+
+    var body: some View {
+        let p = presentation
+        VStack(alignment: .leading, spacing: Space.s) {
+            HStack(spacing: Space.s) {
+                if let chip = p.chip { StatusChip(text: chip, status: p.chipStatus) }
+                if let note = p.clippedNote { Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.muted) }
+                Spacer(minLength: 0)
+            }
+            if case .steps(let steps) = p.body {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
+                                ActivityStepRow(step: step, compact: true).id(i)
+                                if i < steps.count - 1 { Divider().padding(.leading, 30) }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+                    .onChange(of: steps.count) { _, n in if n > 0 { proxy.scrollTo(n - 1, anchor: .bottom) } }
+                    .onAppear { proxy.scrollTo(steps.count - 1, anchor: .bottom) }
+                }
+            } else if let message = p.message {
+                Text(verbatim: message).font(Typo.body).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, Space.m).padding(.vertical, Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.bg.opacity(0.5))
+        .task(id: task.id) {
+            while !Task.isCancelled {
+                let read = await model.subagentFeed(sessionKey: sessionKey, taskId: task.id)
+                let next = SubagentFeedPresentation.make(result: read, previous: shown, fallbackStatus: task.status)
+                if next != shown { shown = next }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+}
+
+/// "Running" / "Done" / "Failed" / "Stopped" as a quiet capsule in the state's own colour.
+struct StatusChip: View {
+    let text: String
+    let status: String?
+    private var color: Color {
+        switch status {
+        case "running": Theme.working
+        case "failed": Theme.error
+        default: Theme.muted
+        }
+    }
+    var body: some View {
+        Text(verbatim: text).font(Typo.meta.weight(.semibold)).foregroundStyle(color)
+            .padding(.horizontal, 8).padding(.vertical, 2)
+            .background(color.opacity(0.14), in: Capsule())
+            .accessibilityLabel("Status: \(text)")
     }
 }

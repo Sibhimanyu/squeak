@@ -268,6 +268,8 @@ describe("HookIngressServer control routes", () => {
         ...(before ? { nextBefore: `got-${before}` } : {}),
       }),
       activity: (key) => ({ key, steps: [{ kind: "tool", text: "Run tests", at: null }], total: 1 }),
+      subagentActivity: (key, taskId) =>
+        taskId === "toolu_known0001" ? { taskId, key, status: "running", steps: [], total: 0 } : null,
       reply: async (id, text, mode, answersTurn) => {
         replies.push({ id, text, ...(mode ? { mode } : {}), ...(answersTurn ? { answersTurn } : {}) });
         return { status: "started", via: "conductor" };
@@ -306,6 +308,27 @@ describe("HookIngressServer control routes", () => {
       total: 1,
     });
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("serves one subagent's activity only with the token, with no CORS header, and 404s an unknown one", async () => {
+    const { harness, auth } = await withControl();
+    const base = `http://127.0.0.1:${harness.port}/control/session/claude-transcript:t1/subagent`;
+    expect((await fetch(`${base}/toolu_known0001/activity`)).status).toBe(403);
+    const response = await fetch(`${base}/toolu_known0001/activity`, { headers: auth });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      taskId: "toolu_known0001",
+      key: "claude-transcript:t1",
+      status: "running",
+      steps: [],
+      total: 0,
+    });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect((await fetch(`${base}/toolu_other0002/activity`, { headers: auth })).status).toBe(404);
+    // A task id that is not a tool-use id never reaches the reader.
+    expect((await fetch(`${base}/..%2F..%2Fx/activity`, { headers: auth })).status).toBe(404);
+    expect((await fetch(`${base}/short/activity`, { headers: auth })).status).toBe(404);
+    expect((await fetch(`${base}/toolu_known0001/activity`, { method: "POST", headers: auth })).status).toBe(405);
   });
 
   it("serves a transcript only with the token, clamps the limit, and sends no CORS header", async () => {

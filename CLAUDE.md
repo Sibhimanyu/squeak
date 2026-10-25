@@ -86,6 +86,11 @@ then restarts the daemon. It does not touch the Mac app. If Squeak does not answ
 the previous `dist` and leaves the bad build at `dist.failed`. The iPhone app
 ships separately with `ios/scripts/release.sh`.
 
+**Squeak.app also owns the daemon for installs without a checkout** (`macos/scripts/embed-daemon.sh`
+bundles it; `DaemonManager` installs it to `~/Library/Application Support/squeak/daemon/<version>`, switches
+`current`, health-checks and rolls back). A launch agent whose plist runs a git checkout (this dev loop) is
+detected and left alone: the app never replaces or restarts it. `ship.sh` remains the way to update it.
+
 Rules:
 
 - **Never** run `npm run build` against the live checkout. It does `rm -rf dist`,

@@ -7,7 +7,7 @@ extension KeyedDecodingContainer {
     }
 }
 
-private struct Failable<T: Decodable>: Decodable {
+struct Failable<T: Decodable>: Decodable {
     let value: T?
     init(from decoder: Decoder) throws { value = try? T(from: decoder) }
 }
@@ -133,11 +133,16 @@ public struct DaemonBackgroundTask: Decodable, Sendable, Equatable, Identifiable
     public var startedAt: Date?
     public var endedAt: Date?
     public var summary: String?
-    public init(id: String, kind: String, label: String, status: String, startedAt: Date? = nil, endedAt: Date? = nil, summary: String? = nil) {
+    /// The subagent's own id and whether its transcript can be read now; absent from an older daemon.
+    public var agentId: String?
+    public var hasSteps: Bool?
+    public init(id: String, kind: String, label: String, status: String, startedAt: Date? = nil, endedAt: Date? = nil, summary: String? = nil,
+                agentId: String? = nil, hasSteps: Bool? = nil) {
         self.id = id; self.kind = kind; self.label = label; self.status = status
         self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary
+        self.agentId = agentId; self.hasSteps = hasSteps
     }
-    enum CodingKeys: String, CodingKey { case id, kind, label, status, startedAt, endedAt, summary }
+    enum CodingKeys: String, CodingKey { case id, kind, label, status, startedAt, endedAt, summary, agentId, hasSteps }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = c.lenient(String.self, .id) ?? UUID().uuidString
@@ -147,7 +152,12 @@ public struct DaemonBackgroundTask: Decodable, Sendable, Equatable, Identifiable
         startedAt = c.lenient(String.self, .startedAt).flatMap(DaemonDate.parse)
         endedAt = c.lenient(String.self, .endedAt).flatMap(DaemonDate.parse)
         summary = c.lenient(String.self, .summary)
+        agentId = c.lenient(String.self, .agentId)
+        hasSteps = c.lenient(Bool.self, .hasSteps)
     }
+
+    /// An agent whose steps the daemon can read: the row opens to them. Shells never do.
+    public var canShowSteps: Bool { kind == "agent" && hasSteps == true && SubagentFeedPresentation.isValidTaskId(id) }
 
     /// "4 min" so far, or how long it ran.
     public func duration(now: Date = Date()) -> String? {

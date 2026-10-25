@@ -32,6 +32,8 @@ final class AppModel {
     let demoMode: Bool
     /// Settings › Channels and › iPhone. Demo and capture runs never touch the real `.env` or daemon.
     @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
+    /// The background service Squeak installs and updates for installs without a checkout (DaemonManager.swift).
+    @ObservationIgnored lazy var daemon = DaemonManager(enabled: !(demoMode || captureMode))
     @ObservationIgnored var openConversationWindow: (() -> Void)?
     /// Closes the menu-bar panel; installed by its controller. Called before focus moves to a window.
     @ObservationIgnored var dismissMenuBar: (() -> Void)?
@@ -177,6 +179,7 @@ final class AppModel {
         AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")
         if demoMode { installDemo(); return }
         updater.start(enabled: !captureMode)
+        daemon.reconcileAtLaunch()
         Task { [weak self] in
             guard let self else { return }
             await broker.restoreFromCache()
@@ -184,6 +187,7 @@ final class AppModel {
             await broker.setMode(.background)
             await broker.start()
             await startDatabaseWatcher()
+            await restoreAfterUpdate()
         }
         Task { [weak self] in
             guard let self else { return }
@@ -1111,6 +1115,50 @@ final class AppModel {
     }
 
     // MARK: Updates
+
+    /// "Updated to 2.x", shown in the panel after a relaunch into a new version until dismissed.
+    private(set) var updateNote: String?
+
+    func dismissUpdateNote() { updateNote = nil }
+
+    /// Written as the app quits for an update: what is open, so the next launch can put it back.
+    /// The open chat's draft is saved with it (drafts live in the cache, not in the marker).
+    func saveUpdateRestore() {
+        guard !demoMode, !captureMode else { return }
+        if let selected { saveDraftNow(draft, for: selected) }
+        let window: UpdateRestoreMarker.Window
+        if settingsSection != nil { window = .settings }
+        else if NSApp.windows.contains(where: { ActivationPolicyController.isAppWindow($0) && $0.title == "Squeak" }) { window = .conversation }
+        else if OnboardingController.shared.isShowing { window = .welcome }
+        else { window = .none }
+        let marker = UpdateRestoreMarker(
+            fromVersion: Self.appVersion, window: window, session: selected?.stringValue,
+            settingsSection: settingsSection?.rawValue)
+        defaults.set(marker.encoded(), forKey: UpdateRestoreMarker.defaultsKey)
+    }
+
+    /// First launch of a new version: say so, and reopen what the update closed.
+    private func restoreAfterUpdate() async {
+        guard !captureMode else { return }
+        let current = Self.appVersion
+        let change = VersionChange.detect(lastRun: defaults.string(forKey: "lastRunVersion"), current: current)
+        defaults.set(current, forKey: "lastRunVersion")
+        let marker = UpdateRestoreMarker.decode(defaults.data(forKey: UpdateRestoreMarker.defaultsKey))
+        defaults.removeObject(forKey: UpdateRestoreMarker.defaultsKey)
+        guard case .updated = change else { return }
+        updateNote = "Updated to \(current)"
+        guard let marker = marker?.usable(currentVersion: current), marker.window != .none else { return }
+        if let raw = marker.session, let key = SessionKey(stringValue: raw) { select(key) }
+        // The window action is wired by the menu-bar label a moment after launch.
+        for _ in 0..<20 where openConversationWindow == nil { try? await Task.sleep(for: .milliseconds(100)) }
+        switch marker.window {
+        case .conversation: showConversationWindow()
+        case .settings: openSettings(marker.settingsSection.flatMap(SettingsSection.init(rawValue:)))
+        case .welcome: if !onboardingDone { OnboardingController.shared.show() }
+        case .none: break
+        }
+        AppLog.info("updates: restored \(marker.window.rawValue) after update from \(marker.fromVersion)")
+    }
 
     static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0-dev"

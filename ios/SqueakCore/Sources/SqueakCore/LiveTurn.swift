@@ -136,11 +136,13 @@ public enum MacLiveness: Equatable, Sendable {
     /// Asleep, off, or offline since this time.
     case silent(since: Date)
 
-    /// The phone pings every 20 s and the Mac answers within a few; a minute
-    /// with no answer is a Mac that is not there. `lookingSince` is when the
+    /// The phone pings every 10 s (`pingEvery`) and the Mac answers at most
+    /// 10 s apart; 25 s with no answer is a Mac that is not there. `lookingSince` is when the
     /// app came on screen: the answer on record then is from the last visit.
-    public static let answerWindow: TimeInterval = 60
-    public static let openGrace: TimeInterval = 30
+    public static let answerWindow: TimeInterval = 25
+    public static let openGrace: TimeInterval = 15
+    /// How often the phone pings while on screen. Pings, not snapshots, drive liveness: a quiet Mac writes no view.
+    public static let pingEvery: TimeInterval = 10
 
     public static func read(aliveAt: Date?, lookingSince: Date?, now: Date = Date()) -> MacLiveness {
         guard let aliveAt else { return .unknown }

@@ -339,10 +339,23 @@ private struct AboutSettings: View {
                 Section {
                     Toggle("Automatically check for updates", isOn: Binding(get: { model.updater.automaticallyChecks }, set: { model.updater.automaticallyChecks = $0 }))
                         .disabled(!model.updater.isActive)
+                    Toggle("Download and install updates automatically", isOn: Binding(get: { model.updater.automaticallyInstalls }, set: { model.updater.automaticallyInstalls = $0 }))
+                        .disabled(!model.updater.isActive)
+                    if let ready = model.updater.readyVersion {
+                        LabeledContent("Update \(ready) is ready") { Button("Restart to update") { model.updater.installNow() } }
+                    } else if let available = model.updater.availableVersion {
+                        LabeledContent("Update \(available) available") { Button("Install") { model.updater.checkForUpdates() } }
+                    }
+                    if let note = model.updateNote { Text(note).foregroundStyle(.secondary) }
                     Button("Check for updates…") { model.updater.checkForUpdates() }
                         .disabled(!model.updater.canCheck)
                 } footer: {
-                    SectionFootnote("Squeak checks once a day, and installs a new version for you when you quit or relaunch it. Nothing about your chats is sent.")
+                    SectionFootnote("Squeak checks once a day, and installs a new version for you when you quit or relaunch it, then reopens what you had open. Nothing about your chats is sent.")
+                }
+                Section {
+                    BackgroundServiceRow(daemon: model.daemon)
+                } footer: {
+                    SectionFootnote(BackgroundServiceRow.footnote(model.daemon.status))
                 }
                 Section {
                     Button(copied ? "Copied" : "Copy diagnostics") {

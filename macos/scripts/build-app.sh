@@ -6,7 +6,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
-VERSION="2.2.0"
+VERSION="2.3.0"
 # Sparkle compares CFBundleVersion, so it must only ever grow: 2.0.2 -> 20002, 2.1.0 -> 20100.
 # (A pre-release suffix is ignored; give a beta its own patch number if it must be offered.)
 IFS=. read -r V_MAJOR V_MINOR V_PATCH <<<"${VERSION%%-*}"
@@ -102,6 +102,9 @@ if [ -z "$IDENTITY" ] || [ "$IDENTITY" = "-" ]; then
 else
   echo "Signing with: $IDENTITY"
 fi
+# The daemon (Contents/Resources/daemon): compiled JS, production node_modules and a pinned Node,
+# so a Mac app update also updates the daemon (DaemonManager installs it outside the app).
+"$HERE/scripts/embed-daemon.sh" "$APP" "$IDENTITY"
 FW="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 for part in "$FW/XPCServices/Installer.xpc" "$FW/XPCServices/Downloader.xpc" "$FW/Autoupdate" "$FW/Updater.app"; do
   codesign -s "$IDENTITY" --force "$part"

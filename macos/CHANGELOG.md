@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.3.0
+
+- Updating is smoother: a banner says when an update is available or ready, "Restart to update" quits and
+  relaunches Squeak, and it reopens the window, chat and Settings page you had open with an "Updated to" note.
+- Updates can install automatically (Settings, About), including when you quit.
+- Squeak's background service now comes with the app. Install it once from Settings, About, Background
+  service; later app updates update it too, and it rolls back by itself if the new one does not start.
+- A background service you run from a source checkout is never touched.
+
 ## 2.2.0
 
 - Scrolling up in a chat loads earlier messages as you go, so long chats open fast and still reach all the

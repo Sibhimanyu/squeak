@@ -82,6 +82,29 @@ enum DemoData {
         ]
     }()
 
+    /// The running subagent's steps in the demo; `SQUEAK_MAC_DEMO_SUBAGENT=old` shows the older-daemon state.
+    static func subagentFeed(taskId: String, now: Date = Date()) -> DaemonSubagentFeed? {
+        if ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_SUBAGENT"] == "old" { return nil }
+        let t = { (s: Double) in now.addingTimeInterval(-s) }
+        typealias S = DaemonActivity.Step
+        func step(_ kind: String, _ text: String, _ at: Date) -> S {
+            try! JSONDecoder().decode(S.self, from: Data(
+                #"{"kind":"\#(kind)","text":"\#(text)","at":\#(at.timeIntervalSince1970)}"#.utf8))
+        }
+        return DaemonSubagentFeed(
+            taskId: taskId, agentId: "a1b2c3d4e5f60718", label: "Check tables in Telegram's HTML", status: "running", available: true,
+            steps: [
+                step("thinking", "Tables must stay inside a pre block or Telegram drops them", t(300)),
+                step("tool", "Read src/utils/tg-format.ts", t(260)),
+                step("tool", "Search renderTable in src", t(200)),
+                step("note", "Two callers pad cells by character count, not display width.", t(120)),
+                step("tool", "Read src/telegram/client.ts", t(60)),
+                step("tool", "Run npm test -- tg-format", t(10)),
+            ], total: 6, startedAt: t(360))
+    }
+
+    static var opensSubagent: Bool { ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_SUBAGENT"] == "open" }
+
     static let repos = [DaemonRepo(id: "r1", name: "squeak"), DaemonRepo(id: "r2", name: "atlas"), DaemonRepo(id: "r3", name: "storefront")]
 
     /// The Telegram chat runs Opus with two workers and a test run out (and seems stuck with
@@ -98,9 +121,10 @@ enum DemoData {
                 background: [
                     DaemonBackgroundTask(id: "t1", kind: "agent", label: "Find every caller of splitMarkdown", status: "done",
                                          startedAt: ago(9), endedAt: ago(4), summary: "Agent \"Find every caller of splitMarkdown\" finished"),
-                    DaemonBackgroundTask(id: "t2", kind: "agent", label: "Check tables in Telegram's HTML", status: "running", startedAt: ago(6)),
+                    DaemonBackgroundTask(id: "toolu_demo_t2", kind: "agent", label: "Check tables in Telegram's HTML", status: "running", startedAt: ago(6),
+                                         agentId: "a1b2c3d4e5f60718", hasSteps: true),
                     DaemonBackgroundTask(id: "t3", kind: "shell", label: "Run the whole suite", status: "running", startedAt: ago(2)),
-                ])
+                ], sessionKey: session.key.stringValue)
         case "demo-2":
             return ChatExtras(agent: "codex", model: "GPT 5.5", effort: "High", modelId: "gpt-5.5", effortId: "high", workspaceId: "w-demo-2")
         default:

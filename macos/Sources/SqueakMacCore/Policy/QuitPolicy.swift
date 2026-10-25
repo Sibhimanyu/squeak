@@ -20,6 +20,12 @@ public enum QuitPolicy {
         return hasAppWindows ? .closeWindows : .quit
     }
 
+    /// Whether a marker for the next launch should be written as the app quits: for an update's
+    /// quit, and for a plain quit while an update waits to install on it.
+    public static func shouldSaveRestore(decision: Decision, updating: Bool, installPending: Bool) -> Bool {
+        decision == .quit && (updating || installPending)
+    }
+
     /// Whether a `quit` Apple event's `kAEQuitReason` names logout, restart or shutdown.
     public static func isSystemQuitReason(_ reason: UInt32?) -> Bool {
         guard let reason else { return false }
