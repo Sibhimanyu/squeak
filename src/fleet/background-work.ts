@@ -28,7 +28,18 @@ export interface BackgroundTask {
   endedAt?: string | null;
   /** Claude Code's one-line summary of how it ended. */
   summary?: string;
+  /**
+   * A subagent's own id once its launch result has been read: `toolUseResult.agentId`, or the
+   * `agentId:` line of the result text. It names `<session>/subagents/agent-<agentId>.jsonl`
+   * (subagent-activity.ts). Absent for a shell, and for an agent whose launch is out of the tail.
+   */
+  agentId?: string;
+  /** Set by the surface that checked: the subagent's own transcript can be read. */
+  hasSteps?: boolean;
 }
+
+/** What Claude Code's agent ids look like (17 hex characters on a real machine); never a path. */
+export const AGENT_ID_PATTERN = /^[A-Za-z0-9]{6,40}$/;
 
 /** More than activity's tail: a shell started early in a busy turn must still be found. */
 const TAIL_BYTES = 1024 * 1024;
@@ -71,10 +82,15 @@ export function backgroundTasks(entries: Record<string, unknown>[], nowMs: numbe
     for (const block of blocks) {
       if (!block || asString(block.type) !== "tool_result") continue;
       const task = tasks.get(asString(block.tool_use_id) ?? "");
-      if (!task || task.background || task.status !== "running") continue;
+      if (!task) continue;
+      const launched = asRecord(entry.toolUseResult);
+      if (task.kind === "agent" && !task.agentId) {
+        const agentId = asString(launched?.agentId) ?? /\bagentId: ([A-Za-z0-9]+)/.exec(resultText(block))?.[1];
+        if (agentId && AGENT_ID_PATTERN.test(agentId)) task.agentId = agentId;
+      }
+      if (task.background || task.status !== "running") continue;
       // A subagent launches async unless told otherwise: its result only says it started, and a notification
       // ends it later. Only a foreground subagent's result is its end.
-      const launched = asRecord(entry.toolUseResult);
       if (launched?.isAsync === true || asString(launched?.status) === "async_launched" || launchedText(block)) {
         task.background = true;
         continue;
@@ -109,15 +125,17 @@ export function backgroundTasks(entries: Record<string, unknown>[], nowMs: numbe
     .slice(-MAX_TASKS);
 }
 
-function launchedText(block: Record<string, unknown>): boolean {
+function resultText(block: Record<string, unknown>): string {
   const content = block.content;
-  const text =
-    typeof content === "string"
-      ? content
-      : asArray(content)
-          .map((part) => asString(asRecord(part)?.text) ?? "")
-          .join("\n");
-  return text.startsWith("Async agent launched");
+  return typeof content === "string"
+    ? content
+    : asArray(content)
+        .map((part) => asString(asRecord(part)?.text) ?? "")
+        .join("\n");
+}
+
+function launchedText(block: Record<string, unknown>): boolean {
+  return resultText(block).startsWith("Async agent launched");
 }
 
 function label(kind: BackgroundKind, name: string, input: Record<string, unknown>): string {

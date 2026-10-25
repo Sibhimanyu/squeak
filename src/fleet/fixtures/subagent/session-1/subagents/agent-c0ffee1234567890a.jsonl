@@ -1,0 +1,1 @@
+{"isSidechain": true, "type": "assistant", "timestamp": "2026-01-01T10:00:06.000Z", "message": {"id": "c1", "role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "toolu_sub9", "name": "Grep", "input": {"pattern": "TODO"}}]}}

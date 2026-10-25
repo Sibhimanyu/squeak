@@ -58,7 +58,15 @@ export function readActivity(
 /** An assistant entry with one of these ends the turn; anything else (`tool_use`, null) leaves it open. */
 const CLAUDE_TURN_ENDS = new Set(["end_turn", "stop_sequence", "refusal"]);
 
-function claudeSteps(entries: Record<string, unknown>[], max: number): ActivityStep[] {
+/**
+ * A Claude transcript's steps. `sidechain` reads a subagent's own transcript, whose every entry is
+ * `isSidechain: true`; the main feed leaves such entries out.
+ */
+export function claudeSteps(
+  entries: Record<string, unknown>[],
+  max: number,
+  options: { sidechain?: boolean } = {},
+): ActivityStep[] {
   // Claude Code writes each block of a message as its own entry, all under
   // one message id, and may write a block again as it streams; a block is
   // keyed by what it is, so repeats collapse and distinct blocks stay.
@@ -67,7 +75,7 @@ function claudeSteps(entries: Record<string, unknown>[], max: number): ActivityS
   // inside it rather than the start of the next one.
   let open = false;
   for (const entry of entries) {
-    if (entry.isSidechain === true) {
+    if ((entry.isSidechain === true) !== (options.sidechain === true)) {
       continue;
     }
     const type = asString(entry.type);

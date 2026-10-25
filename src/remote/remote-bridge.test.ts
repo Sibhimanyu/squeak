@@ -32,7 +32,9 @@ import {
   type StartCommand,
 } from "./remote-bridge.js";
 import { open, pairingCode, seal } from "./remote-crypto.js";
-import { historyPageDoc } from "./live-turn.js";
+import { historyPageDoc, liveHandle } from "./live-turn.js";
+import { subagentFeedDoc } from "./subagent-feed.js";
+import type { SubagentActivity } from "../fleet/subagent-activity.js";
 
 const NOW = Date.parse("2026-09-25T03:00:00.000Z");
 
@@ -3606,6 +3608,41 @@ describe("RemoteBridge background work", () => {
   });
 });
 
+describe("RemoteBridge background work, subagent hints", () => {
+  it("carries a subagent's agentId and hasSteps, and omits hasSteps when false", async () => {
+    const f = fixture();
+    (f.bridge as unknown as { deps: RemoteBridgeDependencies }).deps.background = () => [
+      {
+        id: "toolu_1",
+        kind: "agent",
+        label: "A",
+        background: true,
+        status: "running",
+        startedAt: null,
+        agentId: "a1b2c3d4e5f607182",
+        hasSteps: true,
+      },
+      {
+        id: "toolu_2",
+        kind: "agent",
+        label: "B",
+        background: true,
+        status: "running",
+        startedAt: null,
+        agentId: "b9c8d7e6f5a403921",
+        hasSteps: false,
+      },
+    ];
+    await f.pair();
+    f.emit([session({ state: "working" })]);
+    const view = JSON.stringify(f.bridge.phoneView());
+    expect(view).toContain(
+      '"label":"A","status":"running","background":true,"agentId":"a1b2c3d4e5f607182","hasSteps":true}',
+    );
+    expect(view).toContain('"label":"B","status":"running","background":true,"agentId":"b9c8d7e6f5a403921"}');
+  });
+});
+
 describe("RemoteBridge workspace actions", () => {
   function withActions(overrides: Partial<NonNullable<RemoteBridgeDependencies["workspaceActions"]>> = {}) {
     const f = fixture({ newChat: chatStarter().starter });
@@ -3681,5 +3718,235 @@ describe("RemoteBridge workspace actions", () => {
     await f.bridge.tick();
     expect(f.result("x1")).toMatchObject({ status: "refused", reason: "This Mac can't do that from a phone." });
     expect(JSON.stringify(f.bridge.phoneView())).not.toContain('"repos"');
+  });
+});
+
+describe("RemoteBridge subagent feed", () => {
+  const KEY = "claude-transcript:s1";
+  const TASK = "toolu_AAAAAAAA1";
+
+  function harness(options: { verbose?: boolean; known?: string[]; enabled?: boolean } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-sub-"));
+    dirs.push(dir);
+    const store = new WatchingStore();
+    const now = NOW;
+    let active = [session({ key: KEY, state: "working" })];
+    let steps = [{ kind: "tool" as const, text: "Read radar.ts", at: null as string | null }];
+    const subagentActivity = vi.fn(
+      (_session: FleetSession, taskId: string, _limit: number, stepChars: number): SubagentActivity | null =>
+        (options.known ?? [TASK]).includes(taskId)
+          ? {
+              taskId,
+              agentId: "a1b2c3d4e5f607182",
+              label: "Survey the tests",
+              status: "running",
+              available: true,
+              steps: steps.map((step) => ({ ...step, text: step.text.slice(0, stepChars) })),
+              total: steps.length,
+              startedAt: null,
+              endedAt: null,
+            }
+          : null,
+    );
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: active, active, attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      liveActivity: () => ({ total: 0, steps: [] }),
+      ...(options.enabled === false ? {} : { subagentActivity }),
+      ...(options.verbose === undefined ? {} : { verbose: options.verbose }),
+      now: () => now,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const channel = `channels/${payload.c}`;
+    const phone = device();
+    const presence = (watching?: string) =>
+      store.set(`${channel}/state/presence`, {
+        box: seal(payload.k, { at: now, ...(watching ? { watching } : {}) }),
+      });
+    const command = (overrides: Record<string, unknown> = {}, signer = phone) => {
+      const body = {
+        v: 1,
+        kind: "subagent",
+        key: KEY,
+        taskId: TASK,
+        nonce: crypto.randomBytes(16).toString("hex"),
+        expiresAt: now + 60_000,
+        ...overrides,
+      };
+      const box = seal(payload.k, body);
+      return { box, sig: signer.sign(box), device: "iphone-1" };
+    };
+    const send = async (id: string, doc: ReturnType<typeof command>) => {
+      await store.set(`${channel}/commands/${id}`, doc);
+      await bridge.tick();
+      await settle();
+      const result = store.docs.get(`${channel}/results/${id}`);
+      return result ? open<Record<string, unknown>>(payload.k, result.box) : null;
+    };
+    const feedDoc = () => store.docs.get(`${channel}/live/${subagentFeedDoc(KEY)}`);
+    const pair = async () => {
+      await store.set(`${channel}/pairing/iphone-1`, {
+        box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }),
+      });
+      await bridge.tick();
+      await bridge.approve("iphone-1");
+    };
+    return {
+      bridge,
+      store,
+      payload,
+      channel,
+      presence,
+      command,
+      send,
+      feedDoc,
+      pair,
+      phone,
+      subagentActivity,
+      setActive: (next: FleetSession[]) => (active = next),
+      setSteps: (next: typeof steps) => (steps = next),
+    };
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  it("publishes the picked subagent's steps, sealed, and deletes them when the phone leaves the chat", async () => {
+    const t = harness();
+    await t.pair();
+    await t.presence(KEY);
+    await t.bridge.tick();
+    const result = await t.send("s1", t.command());
+    expect(result).toEqual({ id: "s1", status: "sent", doc: `${liveHandle(KEY)}-s` });
+    const feed = open<Record<string, unknown>>(t.payload.k, t.feedDoc()!.box);
+    expect(feed).toMatchObject({
+      v: 1,
+      key: KEY,
+      taskId: TASK,
+      agentId: "a1b2c3d4e5f607182",
+      label: "Survey the tests",
+      status: "running",
+      available: true,
+      total: 1,
+      steps: [{ kind: "tool", text: "Read radar.ts", at: null }],
+    });
+    expect(typeof feed.seq).toBe("number");
+    // The phone moves to another chat: the next pass deletes it.
+    await t.presence("claude-transcript:other");
+    await t.bridge.tick();
+    await settle();
+    expect(t.feedDoc()).toBeUndefined();
+    t.bridge.stop();
+  });
+
+  it("stops on a null taskId, and a stop from another chat changes nothing", async () => {
+    const t = harness();
+    await t.pair();
+    await t.presence(KEY);
+    await t.bridge.tick();
+    await t.send("s1", t.command());
+    expect(t.feedDoc()).toBeDefined();
+    expect(await t.send("s2", t.command({ key: "claude-transcript:other", taskId: null }))).toMatchObject({
+      status: "sent",
+    });
+    expect(t.feedDoc()).toBeDefined();
+    expect(await t.send("s3", t.command({ taskId: null }))).toMatchObject({ status: "sent" });
+    expect(t.feedDoc()).toBeUndefined();
+    t.bridge.stop();
+  });
+
+  it("refuses anything but exact keys, a strict task id, and a v of 1", async () => {
+    const t = harness();
+    await t.pair();
+    await t.presence(KEY);
+    await t.bridge.tick();
+    let n = 0;
+    for (const overrides of [
+      { extra: 1 },
+      { taskId: "../../etc/passwd" },
+      { taskId: "short" },
+      { taskId: 7 },
+      { taskId: undefined },
+      { key: 7 },
+      { v: 2 },
+    ]) {
+      const result = await t.send(`bad${n++}`, t.command(overrides));
+      expect(result, JSON.stringify(overrides)).toMatchObject({ status: "refused" });
+    }
+    expect(t.feedDoc()).toBeUndefined();
+    t.bridge.stop();
+  });
+
+  it("refuses a subagent the Mac does not see, a chat the phone does not have open, and a chat that is not active", async () => {
+    const t = harness({ known: [] });
+    await t.pair();
+    await t.presence(KEY);
+    await t.bridge.tick();
+    expect(await t.send("u1", t.command())).toMatchObject({ status: "refused" });
+
+    const known = harness();
+    await known.pair();
+    await known.presence("claude-transcript:other");
+    await known.bridge.tick();
+    expect(await known.send("o1", known.command())).toMatchObject({
+      status: "refused",
+      reason: "Open that chat first.",
+    });
+
+    const idle = harness();
+    await idle.pair();
+    await idle.presence(KEY);
+    await idle.bridge.tick();
+    idle.setActive([]);
+    expect(await idle.send("i1", idle.command())).toMatchObject({ status: "refused" });
+    for (const h of [t, known, idle]) {
+      expect(h.feedDoc()).toBeUndefined();
+      h.bridge.stop();
+    }
+  });
+
+  it("refuses when verbose is off on the Mac or the Mac has no subagent reader", async () => {
+    const off = harness({ verbose: false });
+    await off.pair();
+    await off.presence(KEY);
+    await off.bridge.tick();
+    expect(await off.send("v1", off.command())).toMatchObject({ status: "refused" });
+    const none = harness({ enabled: false });
+    await none.pair();
+    await none.presence(KEY);
+    await none.bridge.tick();
+    expect(await none.send("n1", none.command())).toMatchObject({ status: "refused" });
+    expect(off.feedDoc()).toBeUndefined();
+    expect(none.feedDoc()).toBeUndefined();
+    off.bridge.stop();
+    none.bridge.stop();
+  });
+
+  it("keeps every handleCommand check: a stranger's signature, a replayed nonce and an expired command do nothing", async () => {
+    const t = harness();
+    await t.pair();
+    await t.presence(KEY);
+    await t.bridge.tick();
+    expect(await t.send("x1", t.command({}, device()))).toBeNull();
+    expect(await t.send("x2", t.command({ expiresAt: NOW - 1 }))).toMatchObject({ status: "refused" });
+    const once = t.command();
+    expect(await t.send("x3", once)).toMatchObject({ status: "sent" });
+    expect(await t.send("x4", once)).toMatchObject({ status: "refused" });
+    t.bridge.stop();
+  });
+
+  it("is not written again when nothing changed", async () => {
+    const t = harness();
+    await t.pair();
+    await t.presence(KEY);
+    await t.bridge.tick();
+    await t.send("s1", t.command());
+    const before = t.feedDoc()!.box;
+    await t.bridge.tick();
+    await settle();
+    expect(t.feedDoc()!.box).toBe(before);
+    t.bridge.stop();
   });
 });

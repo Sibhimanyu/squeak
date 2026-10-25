@@ -101,7 +101,8 @@ enum DemoData {
             titled.background = [
                 .init(id: "t1", kind: "agent", label: "Find every caller of splitMarkdown", status: "done", background: true,
                       startedAt: ago(9), endedAt: ago(4), summary: "Agent \"Find every caller of splitMarkdown\" finished"),
-                .init(id: "t2", kind: "agent", label: "Check tables in Telegram's HTML", status: "running", background: true, startedAt: ago(6)),
+                .init(id: "t2", kind: "agent", label: "Check tables in Telegram's HTML", status: "running", background: true, startedAt: ago(6),
+                      agentId: "a1b2c3d4e5f607182", hasSteps: true),
                 .init(id: "t3", kind: "shell", label: "Run the whole suite", status: "running", background: true, startedAt: ago(2)),
             ]
         }

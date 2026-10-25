@@ -13,10 +13,13 @@ public struct ChatExtras: Sendable, Equatable {
     public var stalled: DaemonStall?
     public var workspaceId: String?
     public var background: [DaemonBackgroundTask]
+    /// The daemon's key for this chat, which its subagent routes are asked under.
+    public var sessionKey: String?
 
     public init(agent: String? = nil, model: String? = nil, effort: String? = nil, fast: Bool = false,
                 modelId: String? = nil, effortId: String? = nil, stalled: DaemonStall? = nil,
-                workspaceId: String? = nil, background: [DaemonBackgroundTask] = []) {
+                workspaceId: String? = nil, background: [DaemonBackgroundTask] = [], sessionKey: String? = nil) {
+        self.sessionKey = sessionKey
         self.agent = agent; self.model = model; self.effort = effort; self.fast = fast
         self.modelId = modelId; self.effortId = effortId; self.stalled = stalled
         self.workspaceId = workspaceId; self.background = background
@@ -25,7 +28,7 @@ public struct ChatExtras: Sendable, Equatable {
     public init(_ d: DaemonSession, background: [DaemonBackgroundTask] = []) {
         self.init(agent: d.agent, model: d.model, effort: d.effort, fast: d.fast == true, modelId: d.modelId,
                   effortId: d.effortId, stalled: d.state == "working" ? d.stalled : nil,
-                  workspaceId: d.conductorWorkspaceId, background: d.state == "working" ? background : [])
+                  workspaceId: d.conductorWorkspaceId, background: d.state == "working" ? background : [], sessionKey: d.key)
     }
 
     /// "Opus 5.5 · 1M · Extra high · Fast"; nil when the daemon named nothing.

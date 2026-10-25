@@ -20,6 +20,12 @@ extension AppModel {
         if workspaceRepos == nil { workspaceRepos = await client.workspaceRepos() }
     }
 
+    /// One subagent's steps, from the daemon; the demo's are fixed. A failure is returned, never thrown.
+    func subagentFeed(sessionKey: String, taskId: String) async -> Result<DaemonSubagentFeed?, any Error> {
+        if demoMode { return .success(DemoData.subagentFeed(taskId: taskId)) }
+        do { return .success(try await client.subagentActivity(sessionKey: sessionKey, taskId: taskId)) } catch { return .failure(error) }
+    }
+
     private func runChatAction(_ work: () async -> String?) async {
         guard !chatBusy else { return }
         chatBusy = true

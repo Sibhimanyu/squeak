@@ -145,6 +145,10 @@ struct SessionView: View {
             onPull: { await model.loadEarlier(session, manual: true) }
         )
         .onDisappear { ReadingPlace.save(row: nil, draft: draft, for: key) }
+        .sheet(item: Binding(get: { model.subagent?.key == session.key ? model.subagent : nil },
+                             set: { if $0 == nil { model.closeSubagent() } })) { watch in
+            SubagentSheet(watch: watch, unavailable: model.subagentUnavailable(session)) { model.closeSubagent() }
+        }
         // A new turn starts folded: what was opened for the last one is not opened for this.
         .onChange(of: session.turnId) { _, _ in openParts = [] }
         // A draft survives the app being closed from the background, not just going back.
@@ -171,7 +175,7 @@ struct SessionView: View {
                     FailureNotice(reason: Presentation.failureReason(session), canReply: Presentation.replyBlock(session) == nil)
                 }
                 if let tasks = session.background, !tasks.isEmpty, session.state == "working" {
-                    BackgroundStrip(tasks: tasks)
+                    BackgroundStrip(tasks: tasks, onOpen: { model.openSubagent($0, in: session) })
                 }
                 if let stalled = session.stalled, session.state == "working" {
                     StuckNotice(stalled: stalled, canStop: session.conductorSessionId != nil, stopping: model.isStopping(session.key)) {
@@ -411,6 +415,8 @@ private struct FailureNotice: View {
 /// each with what it is, how long it has run, and how it ended. Folded by default once there are more than two.
 private struct BackgroundStrip: View {
     let tasks: [PhoneSnapshot.Session.BackgroundTask]
+    /// A subagent whose steps can be read was tapped.
+    var onOpen: (PhoneSnapshot.Session.BackgroundTask) -> Void = { _ in }
     @State private var open: Bool?
 
     private var running: Int { tasks.filter { $0.status == "running" }.count }
@@ -457,7 +463,18 @@ private struct BackgroundStrip: View {
         }
     }
 
+    @ViewBuilder
     private func row(_ task: PhoneSnapshot.Session.BackgroundTask, now: Date) -> some View {
+        if task.canOpenSteps {
+            Button { onOpen(task) } label: { rowContent(task, now: now).contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows its steps.")
+        } else {
+            rowContent(task, now: now)
+        }
+    }
+
+    private func rowContent(_ task: PhoneSnapshot.Session.BackgroundTask, now: Date) -> some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: task.kind == "agent" ? "person.2" : "terminal")
                 .font(.footnote).foregroundStyle(Theme.muted).frame(width: 18).accessibilityHidden(true)
@@ -470,6 +487,10 @@ private struct BackgroundStrip: View {
             }
             Spacer(minLength: 8)
             status(task, now: now)
+            if task.canOpenSteps {
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.subtle)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .accessibilityElement(children: .combine)
@@ -1711,6 +1732,81 @@ private struct SendFace: ViewModifier {
     }
 }
 
+/// One subagent's steps, opened from the chat's background list: what the Mac reads from its transcript while
+/// this is open. Says why when there is nothing to show, rather than an empty screen.
+struct SubagentSheet: View {
+    let watch: AppModel.SubagentWatch
+    /// Why steps are not on offer on this phone or channel (verbose off, no stream); nil when they are.
+    let unavailable: String?
+    let close: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 8) {
+                        chip
+                        Spacer(minLength: 0)
+                    }
+                    content
+                }
+                .padding(.horizontal, 20).padding(.vertical, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background(Theme.bg.ignoresSafeArea())
+            .navigationTitle(watch.feed?.label ?? watch.task.label)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done", action: close) } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var status: String { watch.feed?.status ?? watch.task.status }
+
+    @ViewBuilder private var chip: some View {
+        let color: Color = status == "running" ? Theme.working : status == "failed" ? Theme.error : Theme.muted
+        HStack(spacing: 6) {
+            if status == "running" { StatusDot(color: Theme.working) }
+            Text(Self.statusWord(status)).font(.caption.weight(.medium)).foregroundStyle(color)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Theme.surfaceRaised, in: Capsule())
+        .accessibilityLabel("Subagent \(Self.statusWord(status))")
+    }
+
+    static func statusWord(_ status: String) -> String {
+        switch status {
+        case "running": return "Running"
+        case "done": return "Done"
+        case "failed": return "Failed"
+        default: return "Stopped"
+        }
+    }
+
+    /// The words for a state that has no steps to show; nil when there are steps.
+    static func explanation(for watch: AppModel.SubagentWatch, unavailable: String?) -> String? {
+        if let unavailable { return unavailable }
+        if case .refused(let reason) = watch.phase { return reason }
+        if watch.phase == .asking { return "Asking your Mac\u{2026}" }
+        guard let feed = watch.feed else { return "Waiting for the first steps\u{2026}" }
+        if !feed.available { return "Its steps can't be read yet. They show here as soon as the subagent writes them." }
+        if feed.steps.isEmpty { return "It hasn't taken a step yet." }
+        return nil
+    }
+
+    @ViewBuilder private var content: some View {
+        if let words = Self.explanation(for: watch, unavailable: unavailable) {
+            HStack(spacing: 10) {
+                if watch.phase == .asking || (watch.phase == .following && watch.feed == nil) { ProgressView() }
+                Text(words).font(.subheadline).foregroundStyle(Theme.muted)
+            }
+        } else if let feed = watch.feed {
+            StepList(steps: feed.steps.map { TurnStep(kind: $0.kind, text: $0.text) }, total: feed.total,
+                     live: status == "running", readable: true, scope: "subagent")
+        }
+    }
+}
+
 /// A working turn's steps: the newest six the snapshot carries, clipped, or the whole turn when it
 /// is streamed live (verbose, "Show thinking live").
 struct StepList: View {
@@ -1721,6 +1817,8 @@ struct StepList: View {
     /// Opened from the working row to read the turn: thinking, notes and steers start whole, tool
     /// calls one line. Elsewhere every step starts as one line.
     var readable = false
+    /// What the steps belong to, for the live line: "turn", or "subagent".
+    var scope = "turn"
 
     static func steps(session: PhoneSnapshot.Session, live: LiveTurn?) -> [Step] {
         if let live, !live.steps.isEmpty { return live.steps.map { Step(kind: $0.kind, text: $0.text) } }
@@ -1737,7 +1835,7 @@ struct StepList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if live {
-                Text(total > steps.count ? "Live · the latest \(steps.count) of \(total) steps" : "Live · every step of this turn")
+                Text(total > steps.count ? "Live · the latest \(steps.count) of \(total) steps" : "Live · every step of this \(scope)")
                     .font(.footnote).foregroundStyle(Theme.muted).padding(.bottom, 4)
             } else if total > steps.count {
                 Text("The latest \(steps.count) of \(total) steps this turn")

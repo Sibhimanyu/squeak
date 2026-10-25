@@ -73,6 +73,16 @@ public struct DaemonClient: Sendable {
         return try decode(DaemonActivity.self, r.body)
     }
 
+    /// One subagent's steps. nil when the daemon does not know the task or predates the route (404); a task id that
+    /// is not a plain id is never sent.
+    public func subagentActivity(sessionKey: String, taskId: String) async throws -> DaemonSubagentFeed? {
+        guard SubagentFeedPresentation.isValidTaskId(taskId) else { return nil }
+        let r = try await get("/control/session/\(Self.encode(sessionKey))/subagent/\(Self.encode(taskId))/activity", token: true)
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try decode(DaemonSubagentFeed.self, r.body)
+    }
+
     /// Maps every outcome to a `SendResult`; this never throws and never retries.
     /// `answersTurn` names the turn this answers; the daemon refuses it once the chat has moved on.
     public func reply(replyTarget: String, text: String, mode: SendMode = .queue, answersTurn: String? = nil) async -> SendResult {

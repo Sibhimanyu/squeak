@@ -42,6 +42,11 @@ export interface IngressControl {
    * like the rest: thinking and tool calls are the session's content.
    */
   activity?(sessionKey: string): unknown;
+  /**
+   * One Claude subagent's own steps (fleet/subagent-activity.ts), by the session's fleet key and the
+   * tool-use id of its Agent call. Null when the session has no such subagent. Token-gated.
+   */
+  subagentActivity?(sessionKey: string, taskId: string): unknown;
   /** The phone channel: status, pair, approve, reject, revoke, reset. */
   remote?(action: string, deviceId: string | null): Promise<unknown>;
   /**
@@ -266,6 +271,7 @@ export class HookIngressServer {
    * `GET  /control/session/<replyTarget>/message`
    * `POST /control/session/<replyTarget>/reply` with `{ "text": "...", "mode"?: "queue" | "steer" }`
    * `GET  /control/session/<sessionKey>/activity`
+   * `GET  /control/session/<sessionKey>/subagent/<toolUseId>/activity`
    * `GET  /control/session/<replyTarget>/transcript?limit=N&before=<cursor>`
    * `GET  /control/session/<conductorSessionId>/question`
    * `POST /control/session/<conductorSessionId>/answer` with `{ toolUseId, answers?, plan? }`
@@ -633,6 +639,35 @@ export class HookIngressServer {
           logger.warn("control channels failed", { error: error instanceof Error ? error.message : String(error) });
           respond(response, 500, "channels failed");
         });
+      return;
+    }
+
+    const subagent = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/subagent\/([A-Za-z0-9_-]{8,80})\/activity$/.exec(
+      (request.url ?? "").split("?")[0] ?? "",
+    );
+    if (subagent) {
+      request.resume();
+      if (request.method !== "GET") {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!control.subagentActivity) {
+        respond(response, 503, "subagent activity unavailable");
+        return;
+      }
+      try {
+        const read = control.subagentActivity(subagent[1]!, subagent[2]!);
+        if (read === null || read === undefined) {
+          respond(response, 404, "not found");
+        } else {
+          respondJson(response, 200, read);
+        }
+      } catch (error) {
+        logger.warn("control subagent activity read failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        respond(response, 500, "unavailable");
+      }
       return;
     }
 

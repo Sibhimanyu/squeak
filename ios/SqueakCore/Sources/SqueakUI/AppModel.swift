@@ -93,6 +93,19 @@ final class AppModel {
     /// The session open on screen.
     @ObservationIgnored private var watching: String?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
+    @ObservationIgnored private var subagentTask: Task<Void, Never>?
+
+    /// The subagent the phone is following in the open chat (`SubagentFeed`), what the Mac last said of it, and why
+    /// it could not be followed. Read-only on the Mac; stopped on leaving the chat, closing the sheet, backgrounding.
+    struct SubagentWatch: Equatable, Identifiable {
+        var id: String { task.id }
+        enum Phase: Equatable { case asking, following, refused(String) }
+        let key: String
+        let task: PhoneSnapshot.Session.BackgroundTask
+        var phase: Phase = .asking
+        var feed: SubagentFeed?
+    }
+    private(set) var subagent: SubagentWatch?
     /// Bumped by every view applied from the stream, so a slower full read
     /// that started before it cannot put an older view back on screen.
     @ObservationIgnored private var snapshotEpoch = 0
@@ -367,6 +380,7 @@ final class AppModel {
     static let streamedTickSeconds = Int(MacLiveness.pingEvery)
 
     func pause() {
+        closeSubagent()
         unlock.backgrounded()
         loop?.cancel()
         loop = nil
@@ -384,6 +398,7 @@ final class AppModel {
     /// The session on screen, or nil when none is. In verbose mode the Mac streams its turn.
     func watch(_ key: String?) {
         guard watching != key else { return }
+        closeSubagent()
         // A turn kept from an earlier visit is out of date by the time the chat is opened again.
         if let previous = watching { liveTurns[previous] = nil }
         watching = key
@@ -425,6 +440,94 @@ final class AppModel {
 
     func refresh() async {
         await tick()
+    }
+
+    /* ---------- a subagent's steps ---------- */
+
+    /// Why a subagent's steps are not on offer, in words: nil when they are. `verbose` is the phone's own
+    /// "Show thinking live"; `liveAvailable` false is a channel that cannot stream.
+    func subagentUnavailable(_ session: PhoneSnapshot.Session) -> String? {
+        if demo { return nil }
+        if !verbose { return "Turn on \u{201C}Show thinking live\u{201D} in Settings to read a subagent's steps." }
+        if !liveAvailable { return "This connection cannot stream a subagent's steps." }
+        return nil
+    }
+
+    /// Ask the Mac to follow `task` of the chat on screen, and read what it writes. Read-only: no Face ID.
+    func openSubagent(_ task: PhoneSnapshot.Session.BackgroundTask, in session: PhoneSnapshot.Session) {
+        guard task.canOpenSteps else { return }
+        subagentTask?.cancel()
+        let key = session.key
+        subagent = SubagentWatch(key: key, task: task)
+        if let reason = subagentUnavailable(session) { subagent?.phase = .refused(reason); return }
+        if demo {
+            subagent?.phase = .following
+            subagent?.feed = SubagentFeed(key: key, taskId: task.id, agentId: task.agentId, label: task.label, status: task.status,
+                available: true, total: 3, steps: [
+                    .init(kind: "thinking", text: "Looking for every caller before changing the signature."),
+                    .init(kind: "tool", text: "Searched for splitMarkdown"),
+                    .init(kind: "note", text: "Found four callers; two are in tests.")])
+            return
+        }
+        guard let channel, watching == key else {
+            subagent?.phase = .refused("Open the chat first.")
+            return
+        }
+        let taskId = task.id
+        subagentTask = Task { [weak self] in
+            do {
+                let signer = self?.signer
+                guard let signer else { return }
+                let (id, document) = try await Task.detached(priority: .userInitiated) {
+                    try channel.subagentDocument(key: key, taskId: taskId, signer: signer)
+                }.value
+                // Start reading before asking, so the first write is not missed.
+                let feeds = await channel.subagentFeeds(for: key)
+                try await channel.send(document, id: id)
+                guard let self, let result = try await self.awaitResult(id, on: channel), !Task.isCancelled else {
+                    self?.settleSubagent(taskId, key, .refused("The Mac didn't answer. Try again."))
+                    return
+                }
+                guard result.sent, result.doc == SubagentFeed.doc(for: key), let feeds else {
+                    self.settleSubagent(taskId, key, .refused(result.sent
+                        ? "This Mac can't show a subagent's steps."
+                        : (result.reason ?? "The Mac refused.")))
+                    return
+                }
+                self.settleSubagent(taskId, key, .following)
+                for await feed in feeds {
+                    if Task.isCancelled { break }
+                    guard let feed, feed.taskId == taskId, var current = self.subagent, current.task.id == taskId, current.key == key,
+                          !PhoneSnapshot.isStale(feed.seq, than: current.feed?.seq) else { continue }
+                    if current.feed != feed { current.feed = feed; self.subagent = current }
+                }
+            } catch {
+                self?.settleSubagent(taskId, key, .refused("Couldn't reach the Mac. Try again."))
+            }
+        }
+    }
+
+    private func settleSubagent(_ taskId: String, _ key: String, _ phase: SubagentWatch.Phase) {
+        guard subagent?.task.id == taskId, subagent?.key == key else { return }
+        subagent?.phase = phase
+    }
+
+    /// Stop following: ends the read, and tells the Mac to delete the document (best effort; presence lapsing
+    /// also ends it).
+    func closeSubagent() {
+        subagentTask?.cancel()
+        subagentTask = nil
+        guard let current = subagent else { return }
+        subagent = nil
+        guard !demo, let channel else { return }
+        let key = current.key
+        Task { [signer] in
+            guard let (id, document) = try? await Task.detached(priority: .utility, operation: {
+                try channel.subagentDocument(key: key, taskId: nil, signer: signer)
+            }).value else { return }
+            try? await channel.send(document, id: id)
+            Task { await channel.deleteResult(id) }
+        }
     }
 
     /* ---------- earlier messages ---------- */

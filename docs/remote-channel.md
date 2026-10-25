@@ -596,3 +596,60 @@ messages turn up, so a turn of hundreds of tool rows no longer hides its own pro
 - **Phone view:** each session may carry `lastUser: { text, at }` (the newest user message, 200 characters), so an
   answer typed at the laptop shows while the chat is closed on the phone. A `steer` reply is refused while the chat
   waits on a question or plan in Conductor.
+
+## Subagent feed (2026-10-25)
+
+What one Claude subagent of an open chat is doing, for a phone that tapped it. Same rules as the live turn
+(verbose gate, presence, sealed, one document, deleted on leaving), narrower: one subagent at a time.
+`src/remote/subagent-feed.ts`; the reader is `src/fleet/subagent-activity.ts`.
+
+**Where the steps come from.** Claude Code writes each subagent to
+`<project>/<session-id>/subagents/agent-<agentId>.jsonl` (entries like the main transcript, all
+`isSidechain: true`) and `agent-<agentId>.meta.json` with `toolUseId`. The parent's launch result names the
+same id (`toolUseResult.agentId`, also the `agentId:` line of the result text) for async and foreground
+agents. Verified on real transcripts; a meta file is the fallback. The reader accepts only
+`^[A-Za-z0-9]{6,40}$` agent ids and `^[A-Za-z0-9_-]{8,80}$` task ids, and the file must be a regular file
+inside that session's own `subagents` directory. Steps are labels (`describeClaudeTool`), never raw input.
+
+**The view.** Each `background` item of an agent may carry two new optional fields (older Macs omit them):
+
+```json
+{ "id": "toolu_01…", "kind": "agent", "label": "Survey the tests", "status": "running", "background": true,
+  "agentId": "a1b2c3d4e5f607182", "hasSteps": true }
+```
+
+`hasSteps` is present (always `true`) only when the subagent's transcript can be read now. A phone shows a
+tap target only then. A Mac whose `/state` reader or verbose is off never publishes the feed; the command is
+refused.
+
+**The command** (sealed like every command: `{ box, sig, device }`; same nonce, expiry, signature checks).
+Exactly these keys, no others:
+
+```json
+{ "v": 1, "kind": "subagent", "key": "<session key open on screen>", "taskId": "toolu_01…", "nonce": "…", "expiresAt": 0 }
+```
+
+`taskId: null` stops the feed. Otherwise the Mac refuses unless: verbose is allowed, the key is the chat the
+phone's presence `watching` names and the phone is open, that chat is an active Claude chat, and the task is
+one of its subagents as the Mac reads them right now. Result: `{ "id", "status": "sent", "doc": "<handle>-s" }`
+(a stop has no `doc`), or `{ "id", "status": "refused", "reason" }`.
+
+**The document** `live/<handle>-s` (`handle` is `liveHandle(key)`, so the doc is the live turn's id plus `-s`),
+sealed with the channel key, overwritten in place at most once a second and only when changed:
+
+```json
+{ "v": 1, "key": "<session key>", "taskId": "toolu_01…", "agentId": "a1b2c3d4e5f607182|null",
+  "label": "Survey the tests", "status": "running|done|failed|stopped", "available": true,
+  "total": 4, "steps": [ { "kind": "thinking|note|tool|background|you", "text": "…", "at": "ISO|null" } ],
+  "seq": 123 }
+```
+
+`steps` is the newest 50, oldest first, each text up to 4,000 characters; `total` is how many the subagent has
+had. `available: false` means its transcript is not readable yet (`steps` empty). A phone checks `taskId`
+against the one it picked and keeps the higher `seq`. Choosing another subagent of the same chat overwrites the
+document. It is deleted when the phone sends `taskId: null`, leaves the chat, or its presence lapses.
+
+**Mac HTTP:** `GET /control/session/<sessionKey>/subagent/<toolUseId>/activity` (token-gated, no CORS header)
+returns `{ taskId, agentId, label, status, available, steps, total, startedAt, endedAt }` (steps clipped
+as the main feed's are); 404 for a task the session does not have. The existing `/activity` route's
+`background` items carry `agentId` and `hasSteps` too.
