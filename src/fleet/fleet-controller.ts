@@ -20,6 +20,7 @@ import {
   renderRadar,
   sessionLabel,
 } from "./radar.js";
+import type { NotifyFilter } from "./notify-settings.js";
 import { replyTargetFor } from "./reply-router.js";
 import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "./session-reply.js";
 import type { AttentionItem, FleetSession } from "./types.js";
@@ -50,6 +51,8 @@ export interface FleetReplier {
 }
 
 export interface FleetControllerDependencies {
+  /** The user's notification settings for Telegram. Absent: every push goes, as before. */
+  notify?: NotifyFilter | null;
   /** Null when no bot token is set: the fleet still runs, nothing is sent to Telegram. */
   telegram: TelegramClient | null;
   store: FleetStore;
@@ -160,6 +163,9 @@ export class FleetController {
     usage: Parameters<Parameters<FleetMonitor["onQuotaAlert"]>[0]>[0],
     window: "primary" | "secondary",
   ): Promise<void> {
+    if (this.deps.notify && !this.deps.notify.quota()) {
+      return;
+    }
     const targets = this.pushTargets();
     if (targets.length === 0) {
       return;
@@ -690,7 +696,12 @@ export class FleetController {
     }
   }
 
-  private async pushAttention(items: AttentionItem[]): Promise<void> {
+  private async pushAttention(all: AttentionItem[]): Promise<void> {
+    // The card stays on the radar; only the push is held back (notify-settings.ts).
+    const items = this.deps.notify ? all.filter((item) => this.deps.notify!.item(item)) : all;
+    if (items.length === 0) {
+      return;
+    }
     const targets = this.pushTargets();
     if (targets.length === 0) {
       logger.debug("fleet push skipped: no radar anchored and no fallback chat");

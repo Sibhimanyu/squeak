@@ -1274,6 +1274,61 @@ final class AppModel {
         }
     }
 
+    /* ---------- notification settings ---------- */
+
+    /// Changes this phone just made, by "<channel>.<key>", shown until the Mac's own snapshot agrees or 20 seconds pass.
+    private var notifyTaps: [String: (change: NotifyChange, at: Date)] = [:]
+    private var notifyTick = 0
+
+    /// Whether this Mac sends notification settings (an older one does not, and the page is hidden).
+    var notifyOffered: Bool { snapshot?.notify != nil }
+
+    /// A channel's settings as shown: the Mac's, with this phone's unconfirmed changes laid over them.
+    func notifySettings(_ channel: String) -> NotifySettings.ChannelSettings? {
+        _ = notifyTick
+        guard var settings = snapshot?.notify?[channel] else { return nil }
+        for (key, tap) in notifyTaps where key.hasPrefix(channel + ".") && Date().timeIntervalSince(tap.at) < 20 {
+            tap.change.apply(to: &settings)
+        }
+        return settings
+    }
+
+    /// Changes one setting of "telegram" or "cliq". No Face ID: it is a Mac setting, reaches no agent and carries
+    /// no words. Shows the change at once; returns the Mac's reason on a refusal, after putting the old value back.
+    func changeNotify(_ channel: String, _ change: NotifyChange) async -> String? {
+        let tapKey = "\(channel).\(change.key)"
+        notifyTaps[tapKey] = (change, Date())
+        notifyTick += 1
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(21))
+            self?.notifyTick += 1
+        }
+        if demo {
+            if var settings = snapshot?.notify?[channel] {
+                change.apply(to: &settings)
+                snapshot?.notify?[channel] = settings
+            }
+            notifyTaps[tapKey] = nil
+            return nil
+        }
+        func fail(_ reason: String) -> String {
+            notifyTaps[tapKey] = nil
+            notifyTick += 1
+            return reason
+        }
+        guard let channelStore = self.channel else { return fail("Not connected to your Mac.") }
+        do {
+            let (id, document) = try channelStore.notifyDocument(channel: channel, change, signer: signer)
+            try await channelStore.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channelStore) else { return fail("Your Mac didn't answer. Is Squeak running?") }
+            guard result.sent else { return fail(result.reason ?? "Your Mac couldn't change that.") }
+            await refresh()
+            return nil
+        } catch {
+            return fail("Couldn't reach your Mac.")
+        }
+    }
+
     /// One live control of the Mac (volume, mute, brightness, fans, screen off). No Face ID: it reaches no agent
     /// and carries no words. Nil when the Mac took it, else a line to show.
     func changeControl(_ change: ControlsCommand.Change) async -> String? {

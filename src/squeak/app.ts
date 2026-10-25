@@ -21,6 +21,7 @@ import { LidActions, readOpenSettings, readSettings as readLidActionSettings } f
 import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
 import { preparePhoneMedia } from "../remote/phone-media.js";
+import { channelFilter, NotifySettingsStore, wantsAllFinishes } from "../fleet/notify-settings.js";
 import { HotspotFailover, macHotspotSystem, readHotspotRequest } from "../fleet/hotspot.js";
 import {
   FANS_HELPER_PRIVILEGED,
@@ -125,6 +126,8 @@ export class SqueakApp {
   private readonly config: SqueakConfig;
   private readonly telegram: TelegramClient | null;
   private readonly telegramStatus: TelegramStatus;
+  /** What Telegram and Cliq may push (notify-settings.json), edited from the Mac app and the phone. */
+  private readonly notifySettings: NotifySettingsStore;
   private readonly runtime: FleetRuntime;
   /** RasanAI films waiting on a call, answered the way RasanAI Studio does (src/workflows/rasanai/). */
   private readonly rasanai = new RasanaiProvider();
@@ -279,6 +282,7 @@ export class SqueakApp {
     });
     this.telegram = config.botToken ? new TelegramClient(config.botToken) : null;
     const telegram = this.telegram;
+    this.notifySettings = new NotifySettingsStore(path.join(config.supportDir, "notify-settings.json"));
     this.telegramStatus = new TelegramStatus({
       sender: telegram ? { sendMessage: (chatId, text) => telegram.sendMessage(chatId, text) } : null,
       allowedChatIds: config.allowedChatIds,
@@ -407,6 +411,10 @@ export class SqueakApp {
               state: () => this.hotspot.state,
               apply: (request) => this.applyHotspot(request),
             },
+            notify: {
+              state: () => this.notifyView(),
+              apply: (request) => this.applyNotify(request),
+            },
             awake: {
               state: () => this.awake.state,
               lidReady: () => this.awake.lidReady,
@@ -517,6 +525,7 @@ export class SqueakApp {
       awake: (request) => this.applyAwake(request),
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
+      notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
       fanRule: () => {
         const rule = fansSudoersRule(os.userInfo().username);
         return rule ? { path: FANS_SUDOERS_PATH, rule, helperPath: FANS_HELPER_PRIVILEGED } : null;
@@ -560,6 +569,7 @@ export class SqueakApp {
       },
     });
 
+    this.runtime.monitor.setWidenFinishes(() => wantsAllFinishes(this.notifySettings.settings));
     this.claudeLimits = new ClaudeLimitsStore(path.join(config.supportDir, "claude-limits.json"));
     this.runtime.setClaudeLimits(() => this.claudeLimits.latest());
     this.runtime.setAwake(() => ({
@@ -600,6 +610,7 @@ export class SqueakApp {
         this.remote?.hasPairedPhone() && config.remoteProjectId
           ? `https://${config.remoteProjectId}.web.app/open/#s=${encodeURIComponent(conductorSessionId)}`
           : null,
+      notify: channelFilter(this.notifySettings, "telegram"),
       fallbackChatIds: config.allowedChatIds ? Array.from(config.allowedChatIds) : [],
     });
   }
@@ -760,6 +771,20 @@ export class SqueakApp {
     return outcome.status === "refused" || outcome.status === "unconfirmed"
       ? { ok: false, reason: outcome.reason }
       : { ok: true };
+  }
+
+  /** The settings and which channels exist: what `GET /control/notify` and the phone's `notify` carry. */
+  private notifyView() {
+    return {
+      ...this.notifySettings.snapshot(),
+      channels: { telegram: Boolean(this.config.botToken), cliq: Boolean(this.config.cliqWebhookUrl) },
+    };
+  }
+
+  /** The one place a setting changes: the Mac app's route and the phone's signed `notify` command both end here. */
+  private applyNotify(request: unknown) {
+    const outcome = this.notifySettings.apply(request);
+    return outcome.ok ? { ok: true as const, state: this.notifyView() } : outcome;
   }
 
   private async applyHotspot(request: unknown) {
@@ -1024,6 +1049,7 @@ export class SqueakApp {
         monitor: this.runtime.monitor,
         store: this.runtime.store,
         claudeLimits: () => this.claudeLimits.latest(),
+        notify: channelFilter(this.notifySettings, "cliq"),
         inbound: twoWay
           ? {
               inbox: new CliqRelayInbox({

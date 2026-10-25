@@ -668,6 +668,11 @@ export interface RemoteBridgeDependencies {
       | { ok: false; reason: string }
     >;
   };
+  /** Notification settings (fleet/notify-settings.ts). Absent: phones hide the page, and a change is refused. */
+  notify?: {
+    state(): unknown;
+    apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
+  } | null;
   hotspot?: {
     state(): HotspotState;
     apply(request: unknown): Promise<{ ok: true; state: HotspotState } | { ok: false; reason: string }>;
@@ -1617,6 +1622,9 @@ export class RemoteBridge {
     }
     if (kind === "controls") {
       return this.handleControls(device, id, command as unknown as ControlsCommand);
+    }
+    if (kind === "notify") {
+      return this.handleNotify(device, id, command as unknown as Record<string, unknown>);
     }
     if (kind === "lidActions") {
       return this.handleLidActions(device, id, command as unknown as LidActionsCommand);
@@ -2819,6 +2827,38 @@ export class RemoteBridge {
     }
   }
 
+  /**
+   * A change to what Telegram or Cliq may push: `{ v: 1, kind: "notify", channel, change: { <one key>: value } }`.
+   * Signature, freshness and nonce have already held; the exact keys and types are read again in
+   * fleet/notify-settings.ts, and it ends in the same function as the Mac app's route.
+   */
+  private handleNotify(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): { write: boolean; result: Record<string, unknown> } {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `notify: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const notify = this.deps.notify;
+    if (!notify || command.v !== 1) {
+      return refuse("This Mac can't change notifications from a phone.", "not available");
+    }
+    // Exactly these keys: the envelope's own (kind, nonce, expiresAt) plus the request's.
+    const keys = Object.keys(command).sort().join(",");
+    if (keys !== "change,channel,expiresAt,kind,nonce,v") {
+      return refuse("Not a notification setting this Mac understands.", "bad keys");
+    }
+    const outcome = notify.apply({ channel: command.channel, change: command.change });
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.nudgePublish(0);
+    this.log(device.name, "sent", `notify ${String(command.channel)}`);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
   /** One live control. Signature, freshness and nonce have already held; the change is read strictly here. */
   private async handleControls(
     device: PairedDevice,
@@ -2972,6 +3012,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeLastEnd) +
       JSON.stringify(view.awakeSleepProblem) +
       JSON.stringify(view.hotspot) +
+      JSON.stringify(view.notify) +
       JSON.stringify(view.macControls) +
       JSON.stringify(view.local) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
@@ -3089,6 +3130,8 @@ export class RemoteBridge {
       ...this.phoneAwake(),
       // Hotspot failover: name, switch, whether the Mac is on it, the last switch. Never the password.
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
+      // What Telegram and Cliq may push, and which of them this Mac has. Absent: the page is hidden.
+      ...(this.deps.notify ? { notify: this.deps.notify.state() } : {}),
       // Usage › Details is offered: the numbers themselves come only in a `stats` command's answer.
       ...(this.deps.stats ? { usageStats: true } : {}),
       // Volume, brightness, fans: what the phone's Mac controls page draws. Absent: the page is hidden.

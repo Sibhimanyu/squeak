@@ -308,6 +308,10 @@ enum DemoData {
                                         .init(id: "com.apple.Terminal", name: "Terminal", active: false),
                                         .init(id: "com.apple.Music", name: "Music", active: false)],
                                  media: .init(playing: args.contains("-squeak-demo-playing")))
+        demo.notify = .init(
+            telegram: .init(),
+            cliq: .init(finished: "off", quiet: .init(from: "22:00", to: "07:00")),
+            channels: .init(telegram: true, cliq: true))
         demo.macHeat = .init(level: "ok", chip: 62, battery: 33, fansRpm: [2300, 2500], fansMax: false, fanControl: true)
         #if DEBUG
         demo.projectIcons = DemoIcons.byProject

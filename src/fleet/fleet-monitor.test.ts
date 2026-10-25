@@ -299,6 +299,16 @@ describe("FleetMonitor", () => {
     expect(harness.pushes).toHaveLength(0);
   });
 
+  it("pushes a terminal finish once a channel asks for every finish, and stays on the radar either way", async () => {
+    const harness = makeMonitor([observed({ state: "finished", detail: "Done." })]);
+    harness.monitor.setWidenFinishes(() => true);
+
+    const snapshot = await harness.monitor.refresh();
+
+    expect(snapshot.attention.map((entry) => entry.kind)).toEqual(["finished_unreviewed"]);
+    expect(harness.pushes.flat().map((entry) => entry.kind)).toEqual(["finished_unreviewed"]);
+  });
+
   it("says nothing about a session that finished long ago", async () => {
     // Only recently-finished work is active; the rest is an archive.
     const harness = makeMonitor([observed({ state: "finished", lastActivityAt: "2026-09-18T09:00:00.000Z" })]);

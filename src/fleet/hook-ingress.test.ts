@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { HookIngressServer } from "./hook-ingress.js";
+import { defaultNotifySettings, NotifySettingsStore } from "./notify-settings.js";
 import { renderHookScript } from "./hook-install.js";
 import type { HookEvent } from "./types.js";
 
@@ -514,6 +515,55 @@ describe("HookIngressServer control routes", () => {
     const failed = await fetch(url, { method: "POST", headers: auth, body });
     expect(failed.status).toBe(500);
     expect(await failed.text()).not.toContain("secret-pass");
+  });
+
+  it("reads and changes notification settings only with the token, strictly", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const store = new NotifySettingsStore(path.join(makeDir(), "notify-settings.json"));
+    const view = () => ({ ...store.snapshot(), channels: { telegram: true, cliq: false } });
+    const url = `http://127.0.0.1:${harness.port}/control/notify`;
+    const auth = { "x-squeak-token": harness.token };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(url, { headers: auth })).status).toBe(503);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      notify: {
+        read: view,
+        apply: (request) => {
+          const outcome = store.apply(request);
+          return outcome.ok ? { ok: true, state: view() } : outcome;
+        },
+      },
+    });
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(url, { method: "DELETE", headers: auth })).status).toBe(405);
+    const read = await fetch(url, { headers: auth });
+    expect(read.status).toBe(200);
+    expect(read.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await read.json()).toEqual({ ...defaultNotifySettings(), channels: { telegram: true, cliq: false } });
+    expect((await fetch(url, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
+    const post = (body: unknown) => fetch(url, { method: "POST", headers: auth, body: JSON.stringify(body) });
+    for (const bad of [
+      { channel: "telegram", change: { error: true } },
+      { channel: "telegram", change: { muted: "yes" } },
+      { channel: "telegram", change: { muted: true, stalled: false } },
+      { channel: "phone", change: { muted: true } },
+      { channel: "telegram", change: { muted: true }, extra: 1 },
+      { channel: "cliq", change: { quiet: { from: "25:00", to: "07:00" } } },
+    ]) {
+      const refused = await post(bad);
+      expect(refused.status).toBe(400);
+      expect(await refused.json()).toEqual({ error: "Not a notification setting this Mac understands." });
+    }
+    expect(store.settings).toEqual(defaultNotifySettings());
+    const ok = await post({ channel: "cliq", change: { finished: "off" } });
+    expect(ok.status).toBe(200);
+    const body = (await ok.json()) as { cliq: { finished: string }; telegram: { finished: string } };
+    expect(body.cliq.finished).toBe("off");
+    expect(body.telegram.finished).toBe("conductor");
   });
 
   it("serves fan control's sudoers rule only with the token, and 503 when none is wired", async () => {

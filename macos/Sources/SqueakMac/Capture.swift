@@ -158,7 +158,9 @@ enum CaptureRunner {
         sw.titlebarAppearsTransparent = true
         sw.titleVisibility = .hidden
         sw.contentView = NSHostingView(rootView: ConversationView().environment(model))
-        sw.setContentSize(NSSize(width: 1100, height: 720))
+        // SQUEAK_MAC_SETTINGS_HEIGHT: a taller window, for the longer Settings pages.
+        let settingsHeight = ProcessInfo.processInfo.environment["SQUEAK_MAC_SETTINGS_HEIGHT"].flatMap(Double.init) ?? 720
+        sw.setContentSize(NSSize(width: 1100, height: settingsHeight))
         sw.makeKeyAndOrderFront(nil)
         let only = ProcessInfo.processInfo.environment["SQUEAK_MAC_SETTINGS_TAB"].flatMap { SettingsSection(link: $0) }
         for section in SettingsSection.allCases where only == nil || only == section {

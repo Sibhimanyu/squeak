@@ -9,6 +9,7 @@ import { replyTargetFor } from "../fleet/reply-router.js";
 import type { AssistantAnswer } from "../fleet/assistant.js";
 import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { AttentionItem, FleetSession } from "../fleet/types.js";
+import type { NotifyFilter } from "../fleet/notify-settings.js";
 import { logger } from "../utils/logger.js";
 import { logCliqFailure, type CliqButton, type CliqWebhook } from "./client.js";
 import type { CliqInboxRecord, CliqRelayInbox } from "./inbox.js";
@@ -84,6 +85,8 @@ export interface CliqInbound {
 }
 
 export interface CliqChannelDependencies {
+  /** The user's notification settings for Cliq. Absent: every push goes, as before. */
+  notify?: NotifyFilter | null;
   webhook: Pick<CliqWebhook, "post">;
   monitor: Pick<FleetMonitor, "onPush" | "onQuotaAlert" | "refresh">;
   store: Pick<
@@ -157,6 +160,9 @@ export class CliqChannel {
         void this.pushAttention(items);
       }),
       this.deps.monitor.onQuotaAlert((usage, window) => {
+        if (this.deps.notify && !this.deps.notify.quota()) {
+          return;
+        }
         void this.post(renderQuotaAlert(usage, window, this.now()));
       }),
     );
@@ -427,7 +433,9 @@ ${quote(text)}`,
     this.deps.store.setCliqPending(id, text);
   }
 
-  private async pushAttention(items: AttentionItem[]): Promise<void> {
+  private async pushAttention(all: AttentionItem[]): Promise<void> {
+    // The card stays on the radar; only the push is held back (notify-settings.ts).
+    const items = this.deps.notify ? all.filter((item) => this.deps.notify!.item(item)) : all;
     const inbound = this.deps.inbound;
     for (const item of items) {
       const target = replyTargetFor(item.session);

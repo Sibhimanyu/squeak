@@ -64,6 +64,7 @@ struct TelegramSettings: View {
             telegramStatus
             telegramToken(m: $m)
             allowedChats
+            NotificationsSection(channel: .telegram)
             telegramActions
         }
         .formStyle(.grouped)
@@ -192,6 +193,7 @@ struct CliqSettings: View {
         Form {
             cliqConnection(m: $m)
             cliqOwner(m: $m)
+            NotificationsSection(channel: .cliq)
             twoWaySection
         }
         .formStyle(.grouped)

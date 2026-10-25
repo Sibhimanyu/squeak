@@ -376,6 +376,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// Volume, brightness and fans for the Mac controls page (src/fleet/mac-controls.ts). Optional:
     /// older Macs omit it, and the page is hidden.
     public var macControls: MacControls? = nil
+    /// What Telegram and Cliq may push (src/fleet/notify-settings.ts; `notify` command). Optional: an older Mac
+    /// omits it, and the phone hides the page.
+    public var notify: NotifySettings? = nil
     /// Where this Mac listens on the local network, for the direct same-Wi-Fi path (docs/remote-channel.md).
     /// Optional: older Macs, and a Mac with the path off, omit it. A phone off that network just fails to
     /// connect and stays on the cloud.
@@ -1463,5 +1466,183 @@ extension ISO8601DateFormatter {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+    }
+}
+
+/// What each channel may push, as the Mac's phone view carries it (docs/remote-channel.md, "Notification
+/// settings"). Every field is optional on the wire: a missing one reads as the Mac's default.
+public struct NotifySettings: Codable, Equatable, Sendable {
+    public struct Quiet: Codable, Equatable, Sendable {
+        /// "HH:MM", 24 h, the Mac's local time. `from` inclusive, `to` exclusive, may cross midnight.
+        public var from: String
+        public var to: String
+        public init(from: String, to: String) { self.from = from; self.to = to }
+    }
+
+    public struct ChannelSettings: Codable, Equatable, Sendable {
+        public var muted: Bool
+        public var approval: Bool
+        public var question: Bool
+        public var stalled: Bool
+        public var quota: Bool
+        /// "conductor", "all" or "off".
+        public var finished: String
+        public var quiet: Quiet?
+
+        public init(muted: Bool = false, approval: Bool = true, question: Bool = true, stalled: Bool = true,
+                    quota: Bool = true, finished: String = "conductor", quiet: Quiet? = nil) {
+            self.muted = muted; self.approval = approval; self.question = question; self.stalled = stalled
+            self.quota = quota; self.finished = finished; self.quiet = quiet
+        }
+
+        private enum CodingKeys: String, CodingKey { case muted, approval, question, stalled, quota, finished, quiet }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            muted = try c.decodeIfPresent(Bool.self, forKey: .muted) ?? false
+            approval = try c.decodeIfPresent(Bool.self, forKey: .approval) ?? true
+            question = try c.decodeIfPresent(Bool.self, forKey: .question) ?? true
+            stalled = try c.decodeIfPresent(Bool.self, forKey: .stalled) ?? true
+            quota = try c.decodeIfPresent(Bool.self, forKey: .quota) ?? true
+            finished = try c.decodeIfPresent(String.self, forKey: .finished) ?? "conductor"
+            quiet = try c.decodeIfPresent(Quiet.self, forKey: .quiet)
+        }
+    }
+
+    /// Which channels this Mac has set up (a bot token; a webhook). Absent: show both.
+    public struct Configured: Codable, Equatable, Sendable {
+        public var telegram: Bool?
+        public var cliq: Bool?
+        public init(telegram: Bool? = nil, cliq: Bool? = nil) { self.telegram = telegram; self.cliq = cliq }
+    }
+
+    public var telegram: ChannelSettings?
+    public var cliq: ChannelSettings?
+    public var channels: Configured?
+
+    public init(telegram: ChannelSettings? = nil, cliq: ChannelSettings? = nil, channels: Configured? = nil) {
+        self.telegram = telegram; self.cliq = cliq; self.channels = channels
+    }
+
+    /// "telegram" or "cliq".
+    public subscript(channel: String) -> ChannelSettings? {
+        get { channel == "telegram" ? telegram : channel == "cliq" ? cliq : nil }
+        set { if channel == "telegram" { telegram = newValue } else if channel == "cliq" { cliq = newValue } }
+    }
+
+    /// Whether the Mac has this channel set up; true when it does not say.
+    public func configured(_ channel: String) -> Bool {
+        (channel == "telegram" ? channels?.telegram : channels?.cliq) ?? true
+    }
+}
+
+/// One change to one channel, exactly one key with its exact type.
+public enum NotifyChange: Equatable, Sendable {
+    case muted(Bool), approval(Bool), question(Bool), stalled(Bool), quota(Bool)
+    /// "conductor", "all" or "off".
+    case finished(String)
+    /// nil turns quiet hours off (sent as an explicit `null`).
+    case quiet(NotifySettings.Quiet?)
+
+    /// The key the Mac reads.
+    public var key: String {
+        switch self {
+        case .muted: "muted"
+        case .approval: "approval"
+        case .question: "question"
+        case .stalled: "stalled"
+        case .quota: "quota"
+        case .finished: "finished"
+        case .quiet: "quiet"
+        }
+    }
+
+    /// Puts the change into a channel's settings.
+    public func apply(to settings: inout NotifySettings.ChannelSettings) {
+        switch self {
+        case .muted(let v): settings.muted = v
+        case .approval(let v): settings.approval = v
+        case .question(let v): settings.question = v
+        case .stalled(let v): settings.stalled = v
+        case .quota(let v): settings.quota = v
+        case .finished(let v): settings.finished = v
+        case .quiet(let v): settings.quiet = v
+        }
+    }
+}
+
+extension NotifyChange: Encodable {
+    private struct Key: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init(_ name: String) { stringValue = name }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    /// `{ "<key>": value }` and nothing else; `quiet(nil)` is `{ "quiet": null }`.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Key.self)
+        let k = Key(key)
+        switch self {
+        case .muted(let v), .approval(let v), .question(let v), .stalled(let v), .quota(let v): try c.encode(v, forKey: k)
+        case .finished(let v): try c.encode(v, forKey: k)
+        case .quiet(let v):
+            if let v { try c.encode(v, forKey: k) } else { try c.encodeNil(forKey: k) }
+        }
+    }
+}
+
+/// A signed change to what Telegram or Cliq may push. Reaches no agent. Exactly these keys, no others.
+public struct NotifyCommand: Encodable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    /// "telegram" or "cliq".
+    public let channel: String
+    public let change: NotifyChange
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// The words of the Notifications page, kept in the core so the Mac's tests can pin them.
+public enum NotifyFormat {
+    public static let channels: [(id: String, title: String)] = [("telegram", "Telegram"), ("cliq", "Cliq")]
+    public static let finishedModes: [(id: String, title: String)] = [("conductor", "Conductor chats"), ("all", "All agents"), ("off", "Off")]
+    public static let defaultQuiet = NotifySettings.Quiet(from: "22:00", to: "07:00")
+
+    public static let quietFootnote =
+        "Quiet hours hold back finishes, questions asked and stalls. A blocked approval and quota alerts still come through. What's held back is dropped, not sent later."
+
+    /// "22:00 to 07:00", or "Off".
+    public static func quietSummary(_ quiet: NotifySettings.Quiet?) -> String {
+        guard let quiet else { return "Off" }
+        return "\(quiet.from) to \(quiet.to)"
+    }
+
+    /// "HH:MM" to minutes after midnight; nil unless it is a valid 24 h clock time.
+    public static func minutes(_ clock: String) -> Int? {
+        let parts = clock.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[0].count == 2, parts[1].count == 2,
+              let h = Int(parts[0]), let m = Int(parts[1]), (0..<24).contains(h), (0..<60).contains(m) else { return nil }
+        return h * 60 + m
+    }
+
+    /// Minutes after midnight to "HH:MM".
+    public static func clock(minutes: Int) -> String {
+        let m = ((minutes % 1440) + 1440) % 1440
+        return String(format: "%02d:%02d", m / 60, m % 60)
+    }
+
+    /// Whether the Mac will take this window: two valid clock times that differ.
+    public static func isValid(_ quiet: NotifySettings.Quiet) -> Bool {
+        guard let a = minutes(quiet.from), let b = minutes(quiet.to) else { return false }
+        return a != b
+    }
+
+    /// Whether the window crosses midnight, for a hint under the pickers.
+    public static func crossesMidnight(_ quiet: NotifySettings.Quiet) -> Bool {
+        guard let a = minutes(quiet.from), let b = minutes(quiet.to) else { return false }
+        return b < a
     }
 }
