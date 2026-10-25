@@ -102,6 +102,9 @@ if [ -z "$IDENTITY" ] || [ "$IDENTITY" = "-" ]; then
 else
   echo "Signing with: $IDENTITY"
 fi
+# The daemon (Contents/Resources/daemon): compiled JS, production node_modules and a pinned Node,
+# so a Mac app update also updates the daemon (DaemonManager installs it outside the app).
+"$HERE/scripts/embed-daemon.sh" "$APP" "$IDENTITY"
 FW="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 for part in "$FW/XPCServices/Installer.xpc" "$FW/XPCServices/Downloader.xpc" "$FW/Autoupdate" "$FW/Updater.app"; do
   codesign -s "$IDENTITY" --force "$part"

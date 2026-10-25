@@ -149,6 +149,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updating: intent.updating, hasAppWindows: NSApp.windows.contains(where: ActivationPolicyController.isAppWindow))
         switch decision {
         case .quit:
+            if QuitPolicy.shouldSaveRestore(decision: decision, updating: intent.updating, installPending: intent.installPending) {
+                AppModel.shared.saveUpdateRestore()
+            }
             return .terminateNow
         case .closeWindows:
             intent.closeWindows()
@@ -167,6 +170,8 @@ final class QuitIntent {
     var explicitQuit = false
     /// Set by Sparkle just before it terminates the app to install an update.
     var updating = false
+    /// Set when Sparkle has an update staged that installs on the next real quit.
+    var installPending = false
 
     func quitCompletely() {
         explicitQuit = true

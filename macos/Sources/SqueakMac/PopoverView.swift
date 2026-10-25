@@ -181,10 +181,29 @@ struct PopoverView: View {
         .padding(.bottom, Space.xs)
     }
 
+    private func updateRow(_ text: String, action: String, perform: @escaping () -> Void) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+            Text(text).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+            Spacer(minLength: 0)
+            Button(action, action: perform).buttonStyle(.plain)
+                .font(.system(size: 11.5, weight: .medium)).foregroundStyle(Theme.ink)
+        }
+    }
+
     @ViewBuilder private var banners: some View {
         let showHelp = model.health != nil && model.connectionHelp != nil
-        if showHelp || model.launchOfferPending {
+        let updater = model.updater
+        let showUpdate = updater.readyVersion != nil || updater.availableVersion != nil || model.updateNote != nil
+        if showHelp || model.launchOfferPending || showUpdate {
             VStack(alignment: .leading, spacing: Space.s) {
+                if let ready = updater.readyVersion {
+                    updateRow("Update \(ready) is ready", action: "Restart to update") { updater.installNow() }
+                } else if let available = updater.availableVersion {
+                    updateRow("Update \(available) available", action: "Install") { dismissMenu(); updater.checkForUpdates() }
+                }
+                if let note = model.updateNote {
+                    updateRow(note, action: "Dismiss") { model.dismissUpdateNote() }
+                }
                 if showHelp, let help = model.connectionHelp {
                     HStack(alignment: .top, spacing: Space.s) {
                         Text(help).font(.system(size: 11.5)).foregroundStyle(Theme.muted).lineLimit(3)

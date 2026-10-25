@@ -382,3 +382,20 @@ Next steps:
 2. Exercise the untested UI: keyboard, hot key, notifications, onboarding.
 3. Cut over to the Swift relay (plan above) and add `RelayAdapter`.
 4. Sign with a Developer ID and notarize, if wider distribution is wanted.
+
+
+## The background service (daemon)
+
+The Node daemon ships inside the app: `build-app.sh` runs `scripts/embed-daemon.sh`, which puts the compiled
+JS (built in a temp dir, never the repo's `dist`), production `node_modules` and a pinned, SHA-256-checked
+Node 22 arm64 (cached in `macos/build/cache`; offline with no cache fails the build) in
+`Contents/Resources/daemon`, signs `node` (JIT entitlements) and the `.node` addon, writes `VERSION`
+(`<package version>+<git sha>`) and smoke-tests the bundled node against the CLI and better-sqlite3.
+
+At launch `DaemonManager` (`DaemonInstaller` plans, `LiveDaemonEffects` acts) decides:
+a launch agent that does not run from `~/Library/Application Support/squeak/daemon/` is a dev checkout and is never touched;
+no agent waits for **Settings › About › Background service › Install** (nothing is installed silently); an agent we
+own on an older build gets the new version copied beside it, the `current` symlink switched atomically,
+`launchctl kickstart -k`, a 20 s `GET /state` check and, if unhealthy, a rollback to the previous version
+(remembered in `daemon/failed-version` so the same build is not retried until Repair). The last two versions are kept.
+The daemon starts without a `.env` (Telegram off), so the install needs no setup first; channels are set up in Settings.
