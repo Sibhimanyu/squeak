@@ -114,6 +114,8 @@ final class AppModel {
     }
     @ObservationIgnored private var iconCache: [String: (length: Int, image: UIImage)] = [:]
     @ObservationIgnored private let pathMonitor = NWPathMonitor()
+    /// True while this iPhone has no usable network (NWPathMonitor unsatisfied). Outranks every other status.
+    private(set) var phoneOffline = false
     @ObservationIgnored private var lastPath: (satisfied: Bool, interfaces: [NWInterface.InterfaceType])?
     /// How many recent chats Home has asked for; "Show more" adds 20, up to the Mac's 50.
     private(set) var recentWanted = 10
@@ -165,7 +167,13 @@ final class AppModel {
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
             let interfaces = path.availableInterfaces.map(\.type)
-            Task { @MainActor [weak self] in self?.networkChanged(satisfied: satisfied, interfaces: interfaces) }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Back online: the Mac's last answer is from before the gap, so give it the open grace again.
+                if self.phoneOffline && satisfied { self.lookingSince = Date() }
+                self.phoneOffline = !satisfied
+                self.networkChanged(satisfied: satisfied, interfaces: interfaces)
+            }
         }
         pathMonitor.start(queue: .main)
     }
@@ -356,7 +364,7 @@ final class AppModel {
     /// this is most of what a finish waits for on the phone.
     static let pollSeconds = 2
     /// When streamed: presence must reach the Mac inside its 60s window.
-    static let streamedTickSeconds = 20
+    static let streamedTickSeconds = Int(MacLiveness.pingEvery)
 
     func pause() {
         unlock.backgrounded()
@@ -608,7 +616,7 @@ final class AppModel {
                 return
             }
             // Tell the Mac someone is looking, so it publishes and polls faster.
-            if Date().timeIntervalSince(lastPresence) > 20 {
+            if Date().timeIntervalSince(lastPresence) > MacLiveness.pingEvery {
                 try await channel.touchPresence(watching: presenceWatching, recent: recentAsk)
                 lastPresence = Date()
             }

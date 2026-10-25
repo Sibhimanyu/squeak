@@ -167,8 +167,13 @@ struct HomeView: View {
     /// In words only: ConnectionBar speaks up when the connection is not fine.
     private var summary: some View {
         TimelineView(.periodic(from: .now, by: 5)) { _ in
-            Text(subtitle).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
-                .accessibilityLabel("\(subtitle), \(model.connection().text)")
+            let state = model.connection()
+            HStack(spacing: 6) {
+                StatusDot(color: state.color)
+                Text(subtitle).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(subtitle), \(state.text)")
         }
     }
 
@@ -690,53 +695,39 @@ extension AppModel {
     /// The connection as the header, the bar and Settings show it.
     func connection(now: Date = Date()) -> Connection.State {
         Connection.read(snapshot: snapshot, problem: problem, demo: demo, lastFetch: lastFetch, mac: macLiveness(now: now),
+                        route: route, phoneOffline: phoneOffline && !demo, macAliveAt: macAliveAt,
                         streamDownSince: streamDownSince, now: now)
     }
 }
 
 enum Connection {
-    /// How the Mac is being reached, in words: "Connected · same Wi-Fi" on the direct path, "Connected · via cloud" otherwise.
-    static func routeText(_ route: ChannelRoute) -> String {
-        route == .local ? "Connected · same Wi-Fi" : "Connected · via cloud"
+    /// How the Mac is being reached, in words: "Connected · same Wi-Fi" / "Connected · via cloud" only while it answers.
+    static func routeText(_ route: ChannelRoute, mac: MacLiveness = .answering, now: Date = Date()) -> String {
+        ConnectionStatus.routeText(route, mac: mac, now: now)
     }
 
     struct State {
         let text: String
         let color: Color
-        /// Fine: the header's dot says so and no bar is shown.
+        /// Fine: no bar is shown; the header's dot still says so.
         var healthy = false
     }
 
+    static func color(_ tone: ConnectionStatus.Tone) -> Color {
+        switch tone {
+        case .connected: Theme.working
+        case .notConnected: Theme.offline
+        case .unverified, .neutral: Theme.subtle
+        }
+    }
+
     static func read(snapshot: PhoneSnapshot?, problem: String?, demo: Bool, lastFetch: Date? = nil,
-                     mac: MacLiveness = .unknown, streamDownSince: Date? = nil, now: Date = Date()) -> State {
-        if demo { return State(text: "Mac connected", color: Theme.working, healthy: true) }
-        guard let snapshot else {
-            return problem == nil
-                ? State(text: "Connecting to your Mac…", color: Theme.subtle)
-                : State(text: "Can't reach Squeak's server", color: Theme.offline)
-        }
-        if problem != nil { return State(text: "Can't reach Squeak's server. Showing the last view.", color: Theme.offline) }
-        // A blip is reconnected within a second or two; longer, the view on screen may be out of date, so say so.
-        if let down = streamDownSince, now.timeIntervalSince(down) > 5 {
-            return State(text: "Reconnecting… showing the view from \(Age.sync(lastFetch ?? down, now: now))", color: Theme.offline)
-        }
-        // The server answering says nothing about the Mac: asleep, it leaves its last view standing.
-        if case .silent(let since) = mac {
-            // During an awake session it is meant to be awake, so it is most likely offline: say how to fix that.
-            if let advice = MacStrip.offlineAdvice(awake: snapshot.keepAwake == true, hotspot: snapshot.hotspot) {
-                return State(text: "Mac offline · \(advice.short) · last heard \(Age.sync(since, now: now))", color: Theme.offline)
-            }
-            return State(text: "Mac not answering, maybe asleep · last heard \(Age.sync(since, now: now))", color: Theme.offline)
-        }
-        // "Synced" is when this phone last heard from the server, which is what
-        // it can honestly say. The Mac only writes a new view when something
-        // changed, so the view's own age is "last change", not staleness.
-        let synced = lastFetch.map { "Synced \(Age.sync($0, now: now))" } ?? "Mac connected"
-        let minutes = Age.minutes(snapshot.generatedAt, now: now) ?? 0
-        let change = minutes >= 2 ? " · last change \(Age.describe(snapshot.generatedAt, now: now)) ago" : ""
-        // Healthy while the phone heard from the server in the last minute (a streamed tick is 20s).
-        let fresh = lastFetch.map { now.timeIntervalSince($0) < 60 } ?? false
-        return State(text: synced + change, color: fresh ? Theme.working : Theme.subtle, healthy: fresh)
+                     mac: MacLiveness = .unknown, route: ChannelRoute = .cloud, phoneOffline: Bool = false,
+                     macAliveAt: Date? = nil, streamDownSince: Date? = nil, now: Date = Date()) -> State {
+        let status = ConnectionStatus.read(snapshot: snapshot, problem: problem, demo: demo, lastFetch: lastFetch, mac: mac,
+                                           route: route, phoneOffline: phoneOffline, macAliveAt: macAliveAt,
+                                           streamDownSince: streamDownSince, now: now)
+        return State(text: status.text, color: color(status.tone), healthy: status.healthy)
     }
 }
 

@@ -28,7 +28,7 @@ struct ConnectionDetailsView: View {
             Section {
                 let state = model.connection()
                 LabeledContent("Status") { HStack(spacing: 7) { StatusDot(color: state.color); Text(state.text) } }
-                if !model.demo { LabeledContent("Route", value: Connection.routeText(model.route)) }
+                if !model.demo { LabeledContent("Route", value: model.phoneOffline ? "No internet on this iPhone" : Connection.routeText(model.route, mac: model.macLiveness())) }
                 if let since = model.streamDownSince {
                     LabeledContent("Down since", value: Age.sync(since))
                 }
@@ -103,6 +103,7 @@ struct SettingsView: View {
     private var glance: (text: String, tint: Color)? {
         guard let snapshot = model.snapshot else { return nil }
         if case .silent = model.macLiveness() { return nil }
+        if model.phoneOffline && !model.demo { return nil }
         var parts: [String] = []
         var tint = Theme.muted
         if let until = model.awake?.until { parts.append("Awake · \(AppModel.awakeLeft(until)) left") }
@@ -117,10 +118,18 @@ struct SettingsView: View {
         return parts.isEmpty ? nil : (parts.joined(separator: " · "), tint)
     }
 
+    /// "Connected · same Wi-Fi" only while the Mac answers; otherwise "Not connected · last heard …".
+    private var routeValue: String {
+        if model.phoneOffline { return "No internet on this iPhone" }
+        return Connection.routeText(model.route, mac: model.macLiveness())
+    }
+
     private var routePill: (text: String, color: Color) {
-        if case .silent = model.macLiveness() { return ("Offline", Theme.offline) }
+        if model.phoneOffline && !model.demo { return ("Phone offline", Theme.offline) }
+        if case .silent = model.macLiveness() { return ("Mac offline", Theme.offline) }
         guard model.snapshot != nil else { return ("Connecting", Theme.subtle) }
-        return model.route == .local ? ("Wi-Fi direct", Theme.working) : ("Cloud", Theme.working)
+        if case .unknown = model.macLiveness() { return ("Unverified", Theme.subtle) }
+        return ("Connected", Theme.working)
     }
 
     private var macCard: some View {
@@ -142,8 +151,13 @@ struct SettingsView: View {
                 }
                 if let glance {
                     Text(glance.text).font(.subheadline).foregroundStyle(glance.tint).lineLimit(2)
+                } else if model.phoneOffline && !model.demo {
+                    Text("No internet on this iPhone" + (model.macAliveAt.map { " · last heard \(Age.sync($0))" } ?? ""))
+                        .font(.subheadline).foregroundStyle(Theme.muted)
                 } else if case .silent(let since) = model.macLiveness() {
                     Text("Last heard \(Age.sync(since))").font(.subheadline).foregroundStyle(Theme.muted)
+                } else if model.snapshot != nil {
+                    Text(routeValue).font(.subheadline).foregroundStyle(Theme.muted)
                 }
             }
             Spacer(minLength: 0)
@@ -171,7 +185,7 @@ struct SettingsView: View {
             DisclosureGroup {
                 if let snapshot = model.snapshot {
                     let stale = Self.lastKnown(model.macLiveness())
-                    if !model.demo { LabeledContent("Route", value: Connection.routeText(model.route)) }
+                    if !model.demo { LabeledContent("Route", value: routeValue) }
                     if let power = snapshot.macPower {
                         if let percent = power.percent { LabeledContent("Battery", value: Self.battery(percent: percent, power: power) + stale) }
                         if let closed = power.lidClosed { LabeledContent("Lid", value: (closed ? "Closed" : "Open") + stale) }
