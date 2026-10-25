@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.0
+
+- See what each subagent is doing: tap a subagent in a chat's background strip to open its live steps, right
+  in the conversation window. It needs the background service updated to this version.
+
 ## 2.3.0
 
 - Updating is smoother: a banner says when an update is available or ready, "Restart to update" quits and
