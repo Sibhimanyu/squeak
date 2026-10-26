@@ -16,26 +16,28 @@ struct NeedsYouPage: View {
     private var all: [PhoneSnapshot.Session] { model.snapshot?.sessions ?? [] }
 
     var body: some View {
-        let waiting = NeedsYou.ordered(all)
+        let waiting = NeedsYou.entries(sessions: all, films: model.snapshot?.films ?? [])
         let layout = NeedsYou.layout(count: waiting.count)
         ScrollView {
             if waiting.isEmpty {
                 empty
             } else {
                 VStack(alignment: .leading, spacing: 16) {
-                    ForEach(Array(waiting.prefix(layout.full))) { session in
-                        DecisionCard(session: session, prominent: waiting.count == 1) { path.append(.session(session.key)) }
+                    ForEach(Array(waiting.prefix(layout.full))) { entry in
+                        card(entry, prominent: waiting.count == 1)
                     }
                     if let more = layout.moreLine {
                         Text(more).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.muted)
                             .padding(.top, 8).accessibilityAddTraits(.isHeader)
-                        ForEach(Array(waiting.dropFirst(layout.full))) { session in
-                            if opened.contains(session.key) {
-                                DecisionCard(session: session, prominent: false) { path.append(.session(session.key)) }
-                            } else {
+                        ForEach(Array(waiting.dropFirst(layout.full))) { entry in
+                            if opened.contains(entry.id) {
+                                card(entry, prominent: false)
+                            } else if case .session(let session) = entry {
                                 CompactDecisionRow(session: session) {
-                                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { _ = opened.insert(session.key) }
+                                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { _ = opened.insert(entry.id) }
                                 }
+                            } else {
+                                card(entry, prominent: false)
                             }
                         }
                     }
@@ -50,6 +52,13 @@ struct NeedsYouPage: View {
         .refreshable { await model.refresh() }
         .safeAreaInset(edge: .bottom) { ConnectionBar() }
         .foregroundStyle(Theme.ink)
+    }
+
+    @ViewBuilder private func card(_ entry: NeedsYou.Entry, prominent: Bool) -> some View {
+        switch entry {
+        case .session(let session): DecisionCard(session: session, prominent: prominent) { path.append(.session(session.key)) }
+        case .film(let film): FilmDecisionCard(film: film, prominent: prominent) { path.append(.film(film.id)) }
+        }
     }
 
     private var empty: some View {

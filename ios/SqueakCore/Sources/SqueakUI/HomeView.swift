@@ -9,6 +9,7 @@ enum HomeRoute: Hashable {
     case project(String)
     case status(Presentation.Filter)
     case recent
+    case film(String)
 }
 
 /// DESIGN.md §8.2: Home is a stack of group cards, by project or by state; a card's header opens
@@ -51,6 +52,8 @@ struct HomeView: View {
     /// `-squeak-open <key>` starts inside a session: screenshots of the demo only.
     @State private var path: [HomeRoute] = {
         let args = ProcessInfo.processInfo.arguments
+        // `-squeak-open-film <id>` starts inside a film: screenshots of the demo only.
+        if let index = args.firstIndex(of: "-squeak-open-film"), index + 1 < args.count { return [.film(args[index + 1])] }
         guard let index = args.firstIndex(of: "-squeak-open"), index + 1 < args.count else { return [] }
         return [.session(args[index + 1])]
     }()
@@ -90,7 +93,7 @@ struct HomeView: View {
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $query, prompt: "Search sessions…")
             .navigationDestination(for: HomeRoute.self) { route in
-                if case .session(let key) = route { SessionView(key: key) } else { GroupView(route: route, path: $path) }
+                if case .session(let key) = route { SessionView(key: key) } else if case .film(let id) = route { FilmView(id: id) } else { GroupView(route: route, path: $path) }
             }
             .refreshable { await model.refresh() }
             .toolbar { toolbar }
@@ -138,6 +141,8 @@ struct HomeView: View {
             }
             .padding(.bottom, 4)
             if let starting = model.startingChat { StartingRow(label: starting.label) }
+            // RasanAI films, as things of their own, above the chats.
+            if let films = model.snapshot?.films, !films.isEmpty { FilmsCard(films: films) }
             if sessions.isEmpty {
                 restingDuck
                 if !unreadReplies.isEmpty { NewRepliesCard(sessions: unreadReplies) }
@@ -287,7 +292,7 @@ struct GroupView: View {
         switch route {
         case .project(let name): return Presentation.newestFirst(all.filter { Presentation.projectName($0) == name })
         case .status(let filter): return Presentation.newestFirst(all.filter { Presentation.inFilter($0, filter) })
-        case .recent, .session: return []
+        case .recent, .session, .film: return []
         }
     }
 
@@ -296,7 +301,7 @@ struct GroupView: View {
         switch route {
         case .project(let name): return model.recentChats.filter { Presentation.projectName($0) == name }
         case .recent: return model.recentChats
-        case .status, .session: return []
+        case .status, .session, .film: return []
         }
     }
 
@@ -304,7 +309,7 @@ struct GroupView: View {
         switch route {
         case .project(let name): return name
         case .status(let filter): return filter.heading
-        case .recent, .session: return "Earlier"
+        case .recent, .session, .film: return "Earlier"
         }
     }
 

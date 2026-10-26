@@ -9,7 +9,7 @@ import SwiftUI
 /// Everything here is the director's text: plain text only.
 struct WorkflowCard: View {
     let workflow: Workflow
-    let session: PhoneSnapshot.Session
+    let owner: WorkflowOwner
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -17,6 +17,7 @@ struct WorkflowCard: View {
     @State private var choice: String?
     @State private var words = ""
     @State private var sending = false
+    @State private var installing = false
     @State private var result: (delivered: Bool, line: String)?
 
     private var answered: Bool { result?.delivered == true }
@@ -30,7 +31,7 @@ struct WorkflowCard: View {
                 ForEach(options) { option in optionCard(option) }
                 pickFooter(options)
             } else if let review = workflow.review {
-                ReviewCard(review: review, session: session)
+                ReviewCard(review: review, owner: owner, workflow: workflow)
                     .id(workflow.revision)
             } else if let macOnly = workflow.macOnly {
                 note(macOnly)
@@ -65,7 +66,7 @@ struct WorkflowCard: View {
         } label: {
             VStack(alignment: .leading, spacing: 10) {
                 if let image = option.image {
-                    WorkflowPicture(source: image, session: session, name: option.title)
+                    CardPicture(owner: owner, source: image, name: option.title)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Lucide(on ? .circleCheck : .circle, size: 18, color: on ? Theme.ink : Theme.subtle)
@@ -95,8 +96,7 @@ struct WorkflowCard: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(frames, id: \.image) { frame in
-                                WorkflowPicture(source: frame.image, session: session, name: frame.id, height: 120)
-                                    .frame(width: 160)
+                                CardPicture(owner: owner, source: frame.image, name: frame.id, fit: .box(width: 160, height: 120))
                             }
                         }
                     }
@@ -153,8 +153,21 @@ struct WorkflowCard: View {
                     }
                     .buttonStyle(.plain)
                 }
+                decideButton
             }
             resultLine
+        }
+    }
+
+    /// "You decide": the film's own pick for this call (contract v2), on a film of its own only.
+    @ViewBuilder private var decideButton: some View {
+        if owner.film != nil, workflow.canDecide == true {
+            Button { send(type: "decide", value: WorkflowCommand.Value.none) } label: {
+                Text("You decide").font(.subheadline.weight(.medium)).foregroundStyle(Theme.ink)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -199,9 +212,30 @@ struct WorkflowCard: View {
         let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
         VStack(alignment: .leading, spacing: 8) {
             if !answered {
+                if let tool = workflow.tool, let film = owner.film {
+                    Button {
+                        installing = true
+                        Task {
+                            let outcome = await model.installTool(film, workflow: workflow, tool: tool)
+                            installing = false
+                            if !outcome.line.isEmpty { result = outcome }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if installing { ProgressView() }
+                            Text(installing ? "Asking your Mac…" : "Install \(tool.label) for me")
+                        }
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.lineStrong))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(installing)
+                }
                 primaryButton("Send answer", enabled: choice != nil || !text.isEmpty) {
                     send(type: "answer", value: .answer(choice: choice, text: text))
                 }
+                decideButton
             }
             resultLine
         }
@@ -243,51 +277,11 @@ struct WorkflowCard: View {
     private func send(type: String, value: WorkflowCommand.Value?) {
         sending = true
         Task {
-            let outcome = await model.act(on: session, type: type, value: value)
+            let outcome = await model.act(on: owner, workflow: workflow, type: type, value: value)
             sending = false
             if !outcome.line.isEmpty { result = outcome }
         }
     }
 }
 
-/// A picture on a film's card (a look's poster), loaded from the Mac when the card shows: the
-/// card is asking you to pick by looking. Tap to see it full screen.
-private struct WorkflowPicture: View {
-    @Environment(AppModel.self) private var model
-    let source: String
-    let session: PhoneSnapshot.Session
-    let name: String
-    var height: CGFloat = 200
-
-    private enum Phase { case loading, loaded(UIImage), failed(String) }
-    @State private var phase: Phase = .loading
-
-    var body: some View {
-        Group {
-            switch phase {
-            case let .loaded(image):
-                Image(uiImage: image).resizable().scaledToFill()
-                    .frame(maxWidth: .infinity).frame(height: height)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .accessibilityLabel(name)
-            case .loading:
-                placeholder { ProgressView() }
-            case let .failed(reason):
-                placeholder { Text(reason).font(.caption).foregroundStyle(Theme.muted).multilineTextAlignment(.center).padding(8) }
-            }
-        }
-        .task(id: source) {
-            switch await model.loadImage(session, source: source) {
-            case let .image(image): phase = .loaded(image)
-            case let .refused(reason): phase = .failed(reason)
-            }
-        }
-    }
-
-    private func placeholder(@ViewBuilder _ content: () -> some View) -> some View {
-        RoundedRectangle(cornerRadius: 10).fill(Theme.surfaceRaised)
-            .frame(maxWidth: .infinity).frame(height: height)
-            .overlay(content())
-    }
-}
 #endif

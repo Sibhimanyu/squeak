@@ -66,6 +66,34 @@ let (applyId, applyDocument) = try channel.workflowDocument(
 let (mediaId, mediaDocument) = try channel.mediaDocument(
     sessionKey: "claude-transcript:d1", source: ".rasanai/run-1/animatic-mix.wav", signer: signer, now: madeAt)
 let (historyId, historyDocument) = try channel.historyDocument(key: "claude-transcript:d1", before: "4821", n: 12, signer: signer, now: madeAt)
+// RasanAI films, independent of any chat. Film `film:0123456789abcdef`, its brief call (step "brief", revision
+// "brief@1"): submit the form (a number stays a number) and a format; "just make it"; a styleframe comment and a
+// redo; a chat line to Rasan; wake and stop the director; install a missing tool; and a film's poster and media.
+let filmId = "film:0123456789abcdef"
+let (filmSubmitId, filmSubmitDocument) = try channel.filmDocument(
+    filmId: filmId, op: .answer, step: "brief", revision: "brief@1", type: "submit",
+    value: FilmAnswer.briefSubmit(
+        fields: ["length_s": .number(60), "aspect": .string("16:9"), "subject": .string("A film about Quotidian"), "use_brand": .bool(true)],
+        format: (tile: "launch", option: "hero")),
+    signer: signer, now: madeAt)
+let (filmDecideRestId, filmDecideRestDocument) = try channel.filmDocument(
+    filmId: filmId, op: .answer, step: "brief", revision: "brief@1", type: "decide-rest", signer: signer, now: madeAt)
+let (filmCommentId, filmCommentDocument) = try channel.filmDocument(
+    filmId: filmId, op: .answer, step: "styleframes", revision: "styleframes@3", type: "comment",
+    value: FilmAnswer.frameComment(frame: "f2", text: "Warmer light"), signer: signer, now: madeAt)
+let (filmRedoId, filmRedoDocument) = try channel.filmDocument(
+    filmId: filmId, op: .answer, step: "styleframes", revision: "styleframes@3", type: "redo",
+    value: FilmAnswer.redo(ids: ["f1", "f3"], note: "Less busy"), signer: signer, now: madeAt)
+let (filmChatId, filmChatDocument) = try channel.filmDocument(
+    filmId: filmId, op: .chat, text: "Can the title hold longer?", signer: signer, now: madeAt)
+let (filmResumeId, filmResumeDocument) = try channel.filmDocument(filmId: filmId, op: .resume, signer: signer, now: madeAt)
+let (filmStopId, filmStopDocument) = try channel.filmDocument(filmId: filmId, op: .stop, signer: signer, now: madeAt)
+let (filmInstallId, filmInstallDocument) = try channel.filmDocument(
+    filmId: filmId, op: .installTool, askId: "2", tool: "ffmpeg", signer: signer, now: madeAt)
+let (filmImageId, filmImageDocument) = try channel.imageDocument(
+    sessionId: "", filmId: filmId, source: ".rasanai/run-1/design/Wild/specimen.png", signer: signer, now: madeAt)
+let (filmMediaId, filmMediaDocument) = try channel.mediaDocument(
+    filmId: filmId, source: ".rasanai/run-1/animatic-mix.wav", signer: signer, now: madeAt)
 let fixture: [String: Any] = [
     "madeAt": Int64(madeAt.timeIntervalSince1970 * 1000),
     "key": key,
@@ -139,6 +167,27 @@ let fixture: [String: Any] = [
     "historyCommand": ["box": historyDocument.box, "sig": historyDocument.sig!, "device": historyDocument.device!],
     "mediaCommandId": mediaId,
     "mediaCommand": ["box": mediaDocument.box, "sig": mediaDocument.sig!, "device": mediaDocument.device!],
+    // Films (kind "film", filmId film:0123456789abcdef): see the comment above the commands in main.swift.
+    "filmSubmitCommandId": filmSubmitId,
+    "filmSubmitCommand": ["box": filmSubmitDocument.box, "sig": filmSubmitDocument.sig!, "device": filmSubmitDocument.device!],
+    "filmDecideRestCommandId": filmDecideRestId,
+    "filmDecideRestCommand": ["box": filmDecideRestDocument.box, "sig": filmDecideRestDocument.sig!, "device": filmDecideRestDocument.device!],
+    "filmCommentCommandId": filmCommentId,
+    "filmCommentCommand": ["box": filmCommentDocument.box, "sig": filmCommentDocument.sig!, "device": filmCommentDocument.device!],
+    "filmRedoCommandId": filmRedoId,
+    "filmRedoCommand": ["box": filmRedoDocument.box, "sig": filmRedoDocument.sig!, "device": filmRedoDocument.device!],
+    "filmChatCommandId": filmChatId,
+    "filmChatCommand": ["box": filmChatDocument.box, "sig": filmChatDocument.sig!, "device": filmChatDocument.device!],
+    "filmResumeCommandId": filmResumeId,
+    "filmResumeCommand": ["box": filmResumeDocument.box, "sig": filmResumeDocument.sig!, "device": filmResumeDocument.device!],
+    "filmStopCommandId": filmStopId,
+    "filmStopCommand": ["box": filmStopDocument.box, "sig": filmStopDocument.sig!, "device": filmStopDocument.device!],
+    "filmInstallToolCommandId": filmInstallId,
+    "filmInstallToolCommand": ["box": filmInstallDocument.box, "sig": filmInstallDocument.sig!, "device": filmInstallDocument.device!],
+    "filmImageCommandId": filmImageId,
+    "filmImageCommand": ["box": filmImageDocument.box, "sig": filmImageDocument.sig!, "device": filmImageDocument.device!],
+    "filmMediaCommandId": filmMediaId,
+    "filmMediaCommand": ["box": filmMediaDocument.box, "sig": filmMediaDocument.sig!, "device": filmMediaDocument.device!],
     "workflowImageCommandId": posterId,
     "workflowImageCommand": ["box": posterDocument.box, "sig": posterDocument.sig!, "device": posterDocument.device!],
 ]

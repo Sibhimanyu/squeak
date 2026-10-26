@@ -122,6 +122,7 @@ function fixture(
     image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
     hotspot?: RemoteBridgeDependencies["hotspot"];
     workflow?: RemoteWorkflows | null;
+    films?: RemoteBridgeDependencies["films"];
     media?: RemoteBridgeDependencies["media"];
     renamer?: RemoteBridgeDependencies["renamer"];
     closer?: RemoteBridgeDependencies["closer"];
@@ -206,6 +207,7 @@ function fixture(
     image: options.image ?? null,
     hotspot: options.hotspot ?? null,
     workflow: options.workflow ?? null,
+    films: options.films ?? null,
     media: options.media ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
@@ -3473,6 +3475,248 @@ describe("RemoteBridge media", () => {
     await polled.store.set(`${polled.channel}/commands/c1`, polled.mediaCommand());
     await polled.bridge.tick();
     expect(polled.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't send films to a phone." });
+  });
+});
+
+describe("RemoteBridge films", () => {
+  const FILM = "film:0123456789abcdef";
+  const phoneFilm = {
+    id: FILM,
+    title: "26keys",
+    updatedAt: "2026-09-25T02:58:00.000Z",
+    progress: null,
+    director: {
+      state: "stopped" as "stopped" | "running",
+      since: "2026-09-25T02:50:00.000Z",
+      detail: "Stopped before the film was done.",
+    },
+    card: null,
+    pending: [],
+    chat: [],
+    canChat: true,
+    canResume: true,
+    canStop: false,
+    sessionKey: null,
+    poster: "videos/p.png",
+    engineNote: null,
+  };
+  const films = () => ({
+    list: vi.fn<(active: unknown[]) => (typeof phoneFilm)[]>(() => [phoneFilm]),
+    imageProject: vi.fn((filmId: string, source: string) =>
+      filmId === FILM && source === "videos/p.png" ? "/films/26keys" : null,
+    ),
+    mediaProject: vi.fn((filmId: string, source: string) =>
+      filmId === FILM && source === "exports/film.mp4" ? "/films/26keys" : null,
+    ),
+    handle: vi.fn<(command: unknown) => Promise<{ ok: true; said: string } | { ok: false; reason: string }>>(
+      async () => ({
+        ok: true,
+        said: "Waking the director.",
+      }),
+    ),
+  });
+  const presence = (f: ReturnType<typeof fixture>, caps?: string[]) =>
+    f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, ...(caps ? { caps } : {}) }) });
+  const filmCommand = (f: ReturnType<typeof fixture>, overrides: Record<string, unknown> = {}, signer = f.phone) => {
+    const body = {
+      v: 1,
+      kind: "film",
+      filmId: FILM,
+      op: "chat",
+      text: "What happened?",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: NOW + 60_000,
+      ...overrides,
+    };
+    const box = seal(f.payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+  const withFilms = (extra: Parameters<typeof fixture>[0] = {}) => {
+    const mock = films();
+    const f = fixture({ ...extra, films: mock } as never);
+    return { f, mock };
+  };
+
+  it("lists films only for a phone whose presence says it reads them", async () => {
+    const { f, mock } = withFilms();
+    await f.pair();
+    expect(f.bridge.phoneView()).not.toHaveProperty("films");
+    await presence(f, ["z", "films"]);
+    await f.bridge.tick();
+    expect(f.bridge.phoneView().films).toEqual([phoneFilm]);
+    expect(mock.list).toHaveBeenCalled();
+    const bare = fixture();
+    await bare.pair();
+    await presence(bare, ["films"]);
+    await bare.bridge.tick();
+    expect(bare.bridge.phoneView()).not.toHaveProperty("films");
+  });
+
+  it("publishes a film's change, and carries the films in the split view too", async () => {
+    const { f, mock } = withFilms({ streaming: true });
+    await f.pair();
+    await presence(f, ["z", "split", "films"]);
+    await f.bridge.tick();
+    const read = () => open<Record<string, unknown>>(f.payload.k, f.store.docs.get(`${f.channel}/state/snapshot`)!.box);
+    expect(read().films).toEqual([phoneFilm]);
+    mock.list.mockReturnValue([{ ...phoneFilm, director: { ...phoneFilm.director, state: "running" } }]);
+    f.advance(5_000);
+    await f.bridge.tick();
+    expect((read().films as Array<{ director: { state: string } }>)[0]!.director.state).toBe("running");
+  });
+
+  it("hands a film command to the films service as the phone signed it, and answers with what it said", async () => {
+    const { f, mock } = withFilms();
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, filmCommand(f, { projectDir: "/etc" }));
+    await f.store.set(
+      `${f.channel}/commands/c2`,
+      filmCommand(f, {
+        op: "answer",
+        text: undefined,
+        step: "brief",
+        revision: "brief@1",
+        type: "submit",
+        value: { fields: { length_s: 30 } },
+      }),
+    );
+    await f.store.set(`${f.channel}/commands/c3`, filmCommand(f, { op: "resume", text: undefined }));
+    await f.store.set(
+      `${f.channel}/commands/c4`,
+      filmCommand(f, { op: "installTool", text: undefined, askId: "a1", tool: "ffmpeg" }),
+    );
+    await f.bridge.tick();
+    expect(mock.handle).toHaveBeenCalledTimes(4);
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent", said: "Waking the director." });
+    expect(mock.handle.mock.calls[1]![0]).toMatchObject({
+      filmId: FILM,
+      op: "answer",
+      step: "brief",
+      revision: "brief@1",
+      type: "submit",
+      value: { fields: { length_s: 30 } },
+    });
+    expect(f.result("c2")).toMatchObject({ status: "sent" });
+    expect(f.result("c3")).toMatchObject({ status: "sent" });
+    expect(f.result("c4")).toMatchObject({ status: "sent" });
+  });
+
+  it("refuses a malformed film command before the service sees it", async () => {
+    const { f, mock } = withFilms();
+    await f.pair();
+    const bad: Record<string, unknown>[] = [
+      { filmId: "film:../../etc" },
+      { filmId: "session:123" },
+      { filmId: 7 },
+      { op: "format" },
+      { op: "answer", step: "brief", revision: "r" },
+      { op: "answer", step: "brief", revision: "r", type: "Submit; rm" },
+      { op: "answer", step: "", revision: "r", type: "decide" },
+      { op: "answer", step: "brief", revision: "r", type: "submit", value: "x".repeat(25_000) },
+      { op: "chat", text: "" },
+      { op: "chat", text: "x".repeat(2_001) },
+      { op: "chat", text: 5 },
+      { op: "installTool", askId: "a1" },
+      { op: "installTool", tool: "ffmpeg" },
+      { v: 2 },
+    ];
+    for (const [index, overrides] of bad.entries()) {
+      await f.store.set(`${f.channel}/commands/b${index}`, filmCommand(f, overrides));
+    }
+    await f.bridge.tick();
+    expect(mock.handle).not.toHaveBeenCalled();
+    for (const index of bad.keys()) {
+      expect(f.result(`b${index}`)).toMatchObject({ status: "refused" });
+    }
+  });
+
+  it("keeps every signed-command check: another key, an expired command, a replayed nonce", async () => {
+    const { f, mock } = withFilms();
+    await f.pair();
+    const stranger = device();
+    await f.store.set(`${f.channel}/commands/s1`, filmCommand(f, {}, stranger));
+    await f.store.set(`${f.channel}/commands/e1`, filmCommand(f, { expiresAt: NOW - 1 }));
+    const once = filmCommand(f, { nonce: "n".repeat(16) });
+    await f.store.set(`${f.channel}/commands/r1`, once);
+    await f.store.set(`${f.channel}/commands/r2`, once);
+    await f.bridge.tick();
+    // A command another key signed is dropped without an answer.
+    expect(f.result("s1")).toBeNull();
+    expect(f.result("e1")).toMatchObject({ status: "refused" });
+    expect(f.result("r1")).toMatchObject({ status: "sent" });
+    expect(f.result("r2")).toMatchObject({ status: "refused" });
+    expect(mock.handle).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the service's no on as the reason, and refuses everything when this Mac has no films", async () => {
+    const { f, mock } = withFilms();
+    mock.handle.mockResolvedValueOnce({ ok: false, reason: "That film isn't on this Mac any more." });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, filmCommand(f));
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That film isn't on this Mac any more." });
+    const bare = fixture();
+    await bare.pair();
+    await bare.store.set(`${bare.channel}/commands/c1`, filmCommand(bare));
+    await bare.bridge.tick();
+    expect(bare.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't answer that from a phone." });
+  });
+
+  it("sends a film's picture, read in its folder, and nothing it doesn't name", async () => {
+    const image = vi.fn(
+      async (): Promise<PhoneImageResult> => ({ ok: true, image: { mime: "image/jpeg", data: "AAAA" } }),
+    );
+    const { f, mock } = withFilms({ image });
+    await f.pair();
+    await f.store.set(
+      `${f.channel}/commands/c1`,
+      f.imageCommand({ sessionId: undefined, filmId: FILM, source: "videos/p.png" }),
+    );
+    await f.store.set(
+      `${f.channel}/commands/c2`,
+      f.imageCommand({ sessionId: "", filmId: FILM, source: ".rasanai/run-1/director.log" }),
+    );
+    await f.store.set(
+      `${f.channel}/commands/c3`,
+      f.imageCommand({ sessionId: "", filmId: "film:ffffffffffffffff", source: "videos/p.png" }),
+    );
+    await f.store.set(
+      `${f.channel}/commands/c4`,
+      f.imageCommand({ sessionId: "", filmId: "nope", source: "videos/p.png" }),
+    );
+    await f.bridge.tick();
+    expect(image).toHaveBeenCalledTimes(1);
+    expect(image).toHaveBeenCalledWith("videos/p.png", "/films/26keys");
+    expect(mock.imageProject).toHaveBeenCalledWith(FILM, "videos/p.png");
+    expect(f.result("c1")).toMatchObject({ status: "sent" });
+    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That picture isn't on this film." });
+    expect(f.result("c3")).toMatchObject({ status: "refused" });
+    expect(f.result("c4")).toMatchObject({ status: "refused", reason: "Not a request this Mac understands." });
+  });
+
+  it("sends what a film's card plays by film id, only on the streaming store", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-film-media-"));
+    dirs.push(dir);
+    const file = path.join(dir, "copy.m4v");
+    fs.writeFileSync(file, Buffer.from("film"));
+    const media = vi.fn(async () => ({
+      ok: true as const,
+      file: { path: file, mime: "video/mp4" as const, bytes: 4 },
+    }));
+    const { f } = withFilms({ streaming: true, media });
+    await f.pair();
+    await f.store.set(
+      `${f.channel}/commands/c1`,
+      f.mediaCommand({ sessionKey: undefined, filmId: FILM, source: "exports/film.mp4" }),
+    );
+    await f.store.set(
+      `${f.channel}/commands/c2`,
+      f.mediaCommand({ sessionKey: undefined, filmId: FILM, source: "exports/other.mp4" }),
+    );
+    await f.bridge.tick();
+    expect(media).toHaveBeenCalledWith("exports/film.mp4", "/films/26keys");
+    expect(f.result("c1")).toMatchObject({ status: "sent", media: { chunks: 1, bytes: 4 } });
+    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That isn't on this film." });
   });
 });
 

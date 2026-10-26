@@ -42,7 +42,8 @@ import { isStalled } from "../fleet/attention.js";
 import { resolveSetup } from "../fleet/chat-setup.js";
 import type { BackgroundTask } from "../fleet/background-work.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
-import type { WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../workflows/types.js";
+import type { FilmCommand, FilmResult } from "../workflows/rasanai/films.js";
+import type { PhoneFilm, WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../workflows/types.js";
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
 import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
 import type { ChannelDoc } from "./firestore-rest.js";
@@ -301,6 +302,11 @@ export interface ImageCommand {
    * a chat named: the fleet key of the session, and `sessionId` is ignored.
    */
   sessionKey?: string;
+  /**
+   * Or a picture on a film's card (or its poster), by film id (`film:<16 hex>`): the film list, not a chat
+   * session, names it. `sessionId` is ignored then.
+   */
+  filmId?: string;
   source: string;
   nonce: string;
   /** Epoch ms. */
@@ -334,7 +340,9 @@ export interface WorkflowCommand {
 export interface MediaCommand {
   v: 1;
   kind: "media";
-  sessionKey: string;
+  /** The session directing the film, or `filmId` instead. */
+  sessionKey?: string;
+  filmId?: string;
   source: string;
   nonce: string;
   /** Epoch ms. */
@@ -356,6 +364,18 @@ export interface RemoteWorkflows {
   allowsImage(status: WorkflowStatus, source: string): boolean;
   allowsMedia?(status: WorkflowStatus, source: string): boolean;
   act(projectDir: string, action: WorkflowAction): WorkflowResult;
+}
+
+export type { FilmCommand };
+
+/** What lists a phone's films and takes its film commands (workflows/rasanai/films.ts). */
+export interface RemoteFilms {
+  list(active: FleetSession[]): PhoneFilm[];
+  /** The project folder a picture may be read from, when the film's card (or poster) names it; else null. */
+  imageProject(filmId: string, source: string): string | null;
+  /** The project folder a film or soundtrack may be read from, when the film's waiting card plays it; else null. */
+  mediaProject(filmId: string, source: string): string | null;
+  handle(command: FilmCommand): Promise<FilmResult>;
 }
 
 /** What reads a workspace's diff (fleet/diff-view.ts). */
@@ -758,6 +778,8 @@ export interface RemoteBridgeDependencies {
   image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
   /** A workflow's cards and answers (RasanAI). Absent: phones see plain sessions, and answers are refused. */
   workflow?: RemoteWorkflows | null;
+  /** RasanAI films independent of chats: the phone's `films`, and its `film` commands. Absent: no films. */
+  films?: RemoteFilms | null;
   /** Makes a phone copy of a film or soundtrack a card plays (phone-media.ts). Absent: refused. */
   media?: ((source: string, cwd: string) => Promise<PhoneMediaResult>) | null;
   /**
@@ -780,6 +802,9 @@ const RESULT_WRITE_ATTEMPTS = 3;
 const RESULT_WRITE_RETRY_MS = 400;
 
 export const MAX_COMMAND_LIFETIME_MS = 10 * 60_000;
+/** A film's id: `film:` and the first 16 hex of sha256(realpath(projectDir)). */
+const FILM_ID = /^film:[0-9a-f]{16}$/;
+const FILM_OPS: ReadonlySet<unknown> = new Set(["answer", "chat", "resume", "stop", "installTool"]);
 /** How long a phone counts as "open" after its last presence ping. */
 const PRESENCE_WINDOW_MS = 60_000;
 /**
@@ -1675,6 +1700,9 @@ export class RemoteBridge {
     if (kind === "workflow") {
       return this.handleWorkflow(device, id, command as unknown as WorkflowCommand);
     }
+    if (kind === "film") {
+      return this.handleFilm(device, id, command as unknown as FilmCommand);
+    }
     if (kind === "media") {
       return this.handleMedia(config, device, id, command as unknown as MediaCommand);
     }
@@ -2421,7 +2449,8 @@ export class RemoteBridge {
     };
     if (
       command.v !== 1 ||
-      typeof command.sessionId !== "string" ||
+      (command.filmId === undefined && typeof command.sessionId !== "string") ||
+      (command.filmId !== undefined && !FILM_ID.test(String(command.filmId))) ||
       typeof command.source !== "string" ||
       !command.source.trim() ||
       command.source.length > 2_000
@@ -2431,6 +2460,9 @@ export class RemoteBridge {
     const read = this.deps.image;
     if (!read) {
       return refuse("This Mac can't send images to a phone.");
+    }
+    if (command.filmId !== undefined) {
+      return this.handleFilmImage(device, id, command, read);
     }
     if (command.sessionKey !== undefined) {
       return this.handleWorkflowImage(device, id, command, read);
@@ -2460,6 +2492,34 @@ export class RemoteBridge {
       return refuse(outcome.reason);
     }
     this.log(device.name, "sent", `an image from ${command.sessionId.slice(0, 8)}`);
+    return { write: true, result: { id, status: "sent", image: outcome.image } };
+  }
+
+  /** A picture on a film's card, or its poster: only one the film names now, read inside its project. */
+  private async handleFilmImage(
+    device: PairedDevice,
+    id: string,
+    command: ImageCommand,
+    read: (source: string, cwd: string) => Promise<PhoneImageResult>,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `image: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const projectDir = this.deps.films?.imageProject(command.filmId as string, command.source) ?? null;
+    if (!projectDir) {
+      return refuse("That picture isn't on this film.");
+    }
+    let outcome: PhoneImageResult;
+    try {
+      outcome = await read(command.source, projectDir);
+    } catch {
+      outcome = { ok: false, reason: "Your Mac couldn't read that image." };
+    }
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.log(device.name, "sent", "a picture from a film");
     return { write: true, result: { id, status: "sent", image: outcome.image } };
   }
 
@@ -2545,6 +2605,75 @@ export class RemoteBridge {
   }
 
   /**
+   * A film command: answer a call, talk to Rasan, wake or stop the director, install a missing tool.
+   * Signature, freshness and nonce have already held. The film must be one the Mac lists for the phone;
+   * the answer is then checked against the film's files as they are now (films.ts, provider.ts).
+   */
+  private async handleFilm(
+    device: PairedDevice,
+    id: string,
+    command: FilmCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `film: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const films = this.deps.films;
+    if (!films) {
+      return refuse("This Mac can't answer that from a phone.");
+    }
+    const short = (value: unknown, max: number) => typeof value === "string" && value.length > 0 && value.length <= max;
+    const optional = (value: unknown, max: number) =>
+      value === undefined || (typeof value === "string" && value.length <= max);
+    if (
+      command.v !== 1 ||
+      typeof command.filmId !== "string" ||
+      !FILM_ID.test(command.filmId) ||
+      !FILM_OPS.has(command.op) ||
+      !optional(command.step, 200) ||
+      !optional(command.revision, 300) ||
+      !optional(command.type, 20) ||
+      !optional(command.note, 8_000) ||
+      !optional(command.askId, 200) ||
+      !optional(command.tool, 40) ||
+      (command.type !== undefined && !/^[a-z-]{2,20}$/.test(command.type)) ||
+      JSON.stringify(command.value ?? null).length > 24_000
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (
+      command.op === "answer" &&
+      (!short(command.step, 200) || !short(command.revision, 300) || !short(command.type, 20))
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (command.op === "installTool" && (!short(command.askId, 200) || !short(command.tool, 40))) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (command.op === "chat") {
+      if (typeof command.text !== "string" || !command.text.trim()) {
+        return refuse("Write a message first.");
+      }
+      if (command.text.length > 2_000) {
+        return refuse("That message is too long.");
+      }
+    }
+    let result: FilmResult;
+    try {
+      result = await films.handle(command);
+    } catch (error) {
+      logger.warn("film command failed", { error: error instanceof Error ? error.message : String(error) });
+      return refuse("Your Mac couldn't do that. Try again.");
+    }
+    if (!result.ok) {
+      return refuse(result.reason);
+    }
+    this.log(device.name, "sent", `${command.op}: ${result.said}`);
+    this.nudgePublish(500);
+    return { write: true, result: { id, status: "sent", said: result.said } };
+  }
+
+  /**
    * A film or soundtrack on a workflow's card: only what the card waiting now
    * plays, read inside its project, sent as a phone copy in sealed chunks.
    * Only on the Realtime Database: Firestore's rules have no `media`, and its
@@ -2560,9 +2689,10 @@ export class RemoteBridge {
       this.log(device.name, "rejected", `media: ${reason}`);
       return { write: true, result: { id, status: "refused", reason } };
     };
+    const byFilm = command.filmId !== undefined;
     if (
       command.v !== 1 ||
-      typeof command.sessionKey !== "string" ||
+      (byFilm ? !FILM_ID.test(String(command.filmId)) : typeof command.sessionKey !== "string") ||
       typeof command.source !== "string" ||
       !command.source.trim() ||
       command.source.length > 2_000
@@ -2571,15 +2701,25 @@ export class RemoteBridge {
     }
     const prepare = this.deps.media;
     const workflows = this.deps.workflow;
-    if (!prepare || !workflows?.allowsMedia || !this.deps.store.watch) {
+    if (!prepare || !this.deps.store.watch || (byFilm ? !this.deps.films : !workflows?.allowsMedia)) {
       return refuse("This Mac can't send films to a phone.");
     }
-    const session = this.workflowSession(command.sessionKey);
-    if (!session?.workflow) {
-      return refuse("That isn't waiting on you any more.");
-    }
-    if (!workflows.allowsMedia(session.workflow, command.source)) {
-      return refuse("That isn't on this card.");
+    let projectDir: string;
+    if (byFilm) {
+      const allowed = this.deps.films!.mediaProject(command.filmId as string, command.source);
+      if (!allowed) {
+        return refuse("That isn't on this film.");
+      }
+      projectDir = allowed;
+    } else {
+      const session = this.workflowSession(command.sessionKey as string);
+      if (!session?.workflow) {
+        return refuse("That isn't waiting on you any more.");
+      }
+      if (!workflows!.allowsMedia!(session.workflow, command.source)) {
+        return refuse("That isn't on this card.");
+      }
+      projectDir = session.workflow.projectDir;
     }
     if (this.mediaBusy.has(device.id)) {
       return refuse("Your Mac is still sending the last one.");
@@ -2588,7 +2728,7 @@ export class RemoteBridge {
     try {
       let prepared: PhoneMediaResult;
       try {
-        prepared = await prepare(command.source, session.workflow.projectDir);
+        prepared = await prepare(command.source, projectDir);
       } catch {
         prepared = { ok: false, reason: "Your Mac couldn't read that." };
       }
@@ -3034,6 +3174,7 @@ export class RemoteBridge {
     // reading must not republish the snapshot just because it was re-read.
     const core =
       JSON.stringify(view.sessions) +
+      JSON.stringify(view.films ?? null) +
       JSON.stringify(view.duck) +
       JSON.stringify(view.keepAwake) +
       JSON.stringify(view.awakeUntil) +
@@ -3185,6 +3326,8 @@ export class RemoteBridge {
       ...this.phoneProjectIcons(),
       ...this.phoneChatModels(),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
+      // RasanAI films, independent of chats, only for a phone whose presence says it reads them.
+      ...this.phoneFilms(snapshot),
       // Older phones ignore it; newer ones list it under Recent and can reply to any of them.
       recent: recent.map((session, index) =>
         this.phoneSession(
@@ -3196,6 +3339,18 @@ export class RemoteBridge {
       // Whether "Show more" would find anything; older phones ignore it.
       recentMore: more,
     };
+  }
+
+  private phoneFilms(snapshot: FleetSnapshot): { films?: PhoneFilm[] } {
+    if (!this.deps.films || !this.phoneCaps.includes("films")) {
+      return {};
+    }
+    try {
+      return { films: this.deps.films.list(snapshot.active) };
+    } catch (error) {
+      logger.debug("could not list films", { error: error instanceof Error ? error.message : String(error) });
+      return { films: [] };
+    }
   }
 
   private phoneLocal(): { local?: { port: number; hosts: string[]; tag: string } } {

@@ -28,8 +28,9 @@ public enum ChannelCrypto {
     }
 
     /// What this phone tells the Mac it can read (its presence `caps`): compressed boxes ("z"), and the
-    /// recent list and a live turn's history in documents of their own ("split").
-    public static let capabilities = ["z", "split"]
+    /// recent list and a live turn's history in documents of their own ("split"), and RasanAI films
+    /// as things of their own, not chats ("films").
+    public static let capabilities = ["z", "split", "films"]
 
     /// A box's plaintext: JSON, or a zero byte and raw DEFLATE of the JSON (remote-crypto.ts `seal`).
     static func json(_ plain: Data) throws -> Data {

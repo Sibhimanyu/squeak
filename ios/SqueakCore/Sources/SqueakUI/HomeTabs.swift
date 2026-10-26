@@ -27,7 +27,7 @@ struct HomeTabs: View {
                 .tag(Tab.sessions)
             NeedsYouTab()
                 .tabItem { TabLabel("Needs you", icon: .inbox) }
-                .badge(Presentation.needsYouCount(model.snapshot?.sessions ?? []))
+                .badge(NeedsYou.count(sessions: model.snapshot?.sessions ?? [], films: model.snapshot?.films ?? []))
                 .tag(Tab.needsYou)
             SettingsView(inTab: true)
                 .tabItem { TabLabel("Settings", icon: .settings) }
@@ -77,7 +77,7 @@ private struct NeedsYouTab: View {
         NavigationStack(path: $path) {
             NeedsYouPage(path: $path)
                 .navigationDestination(for: HomeRoute.self) { route in
-                    if case .session(let key) = route { SessionView(key: key) } else { GroupView(route: route, path: $path) }
+                    if case .session(let key) = route { SessionView(key: key) } else if case .film(let id) = route { FilmView(id: id) } else { GroupView(route: route, path: $path) }
                 }
         }
     }

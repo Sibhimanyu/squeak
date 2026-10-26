@@ -338,6 +338,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// Repositories a new workspace can be made in. Its presence says the Mac archives and makes workspaces and
     /// asks a chat for a PR. Optional: an older Mac omits it, and the phone offers none of them.
     public var repos: [Repo]? = nil
+    /// RasanAI films, as things of their own (not chats), newest first. Only for a phone whose presence caps name
+    /// "films", and only from a Mac new enough to send it.
+    public var films: [PhoneFilm]? = nil
 
     public struct Repo: Codable, Equatable, Sendable, Identifiable {
         public let id: String
@@ -730,6 +733,8 @@ public struct ImageCommand: Codable, Equatable, Sendable {
     public let sessionId: String
     /// A picture on a workflow's card instead of one a chat named: the session's fleet key.
     public var sessionKey: String? = nil
+    /// Or a film's own picture (its poster, its call's images): the film's id ("film:…"), with no session at all.
+    public var filmId: String? = nil
     public let source: String
     public let nonce: String
     /// Epoch milliseconds.
@@ -807,6 +812,15 @@ public struct Workflow: Codable, Equatable, Sendable {
     public var review: Review? = nil
     /// Set when this call can only be made on the Mac for now; says why.
     public var macOnly: String? = nil
+    /// The brief's editable fields, the formats to pick from, what the research found. Only from a Mac new
+    /// enough to send it (RasanAI contract v2).
+    public var brief: Brief? = nil
+    /// The styleframes to approve, comment on or redo. Only from a Mac new enough to send it.
+    public var styleframes: Styleframes? = nil
+    /// "You decide" is offered on this call (contract v2).
+    public var canDecide: Bool? = nil
+    /// An ask that is a missing-tool ask: the tool the Mac can install for you.
+    public var tool: ToolAsk? = nil
 
     /// The animatic or the film, to watch and leave notes on.
     public struct Review: Codable, Equatable, Sendable {
@@ -868,7 +882,9 @@ public struct Workflow: Codable, Equatable, Sendable {
 
     public init(provider: String, call: String, step: String, revision: String, title: String?, prompt: String,
                 context: String? = nil, options: [Option]? = nil, recommended: String? = nil,
-                canAskMore: Bool? = nil, ask: Ask? = nil, review: Review? = nil, macOnly: String? = nil) {
+                canAskMore: Bool? = nil, ask: Ask? = nil, review: Review? = nil, macOnly: String? = nil,
+                brief: Brief? = nil, styleframes: Styleframes? = nil, canDecide: Bool? = nil, tool: ToolAsk? = nil) {
+        self.brief = brief; self.styleframes = styleframes; self.canDecide = canDecide; self.tool = tool
         self.provider = provider; self.call = call; self.step = step; self.revision = revision
         self.title = title; self.prompt = prompt; self.context = context; self.options = options
         self.recommended = recommended; self.canAskMore = canAskMore; self.ask = ask; self.review = review; self.macOnly = macOnly
@@ -996,7 +1012,10 @@ public struct WorkflowCommand: Codable, Equatable, Sendable {
 public struct MediaCommand: Codable, Equatable, Sendable {
     public let v: Int
     public let kind: String
-    public let sessionKey: String
+    /// The session's fleet key, or nil when the media is named by `filmId`.
+    public let sessionKey: String?
+    /// A film's id ("film:…"), instead of a session's key.
+    public var filmId: String? = nil
     public let source: String
     public let nonce: String
     /// Epoch milliseconds.
