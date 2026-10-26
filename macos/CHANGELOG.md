@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.7.1
+
+- The menu-bar panel no longer shows a lighter square patch behind its rounded bottom corners.
+
 ## 2.7.0
 
 - Squeak checks for updates every hour, and tells you: a small dot on the menu-bar icon and one notification

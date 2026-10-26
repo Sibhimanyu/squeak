@@ -23,7 +23,7 @@ struct PopoverView: View {
     @State private var hostScreenHeight: CGFloat?
 
     /// Offline captures pin the screen height to show a short screen. Live, the panel always draws its
-    /// own 24pt surface, and `MenuWindowAccessor` clips the window to the same shape.
+    /// own 24pt surface, and `MenuPanel`'s window shadow follows it.
     var drawsOwnSurface = true
     var screenHeightOverride: CGFloat?
 
