@@ -95,6 +95,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// A film (RasanAI) waiting on one of its calls: the card to show instead of a chat reply.
         /// Only from a Mac new enough to send it.
         public var workflow: Workflow? = nil
+        /// A film (RasanAI) in progress, working or waiting: which of its five calls it is on and what the
+        /// director is doing now. Shown beside the chat, whatever the film's state. Only from a Mac new enough to send it.
+        public var workflowProgress: WorkflowProgress? = nil
         /// Whether the chat's tab is open in Conductor (false: closed there). Absent from a Mac that
         /// cannot tell, and from anything Conductor does not hold.
         public var open: Bool? = nil
@@ -869,6 +872,45 @@ public struct Workflow: Codable, Equatable, Sendable {
         self.provider = provider; self.call = call; self.step = step; self.revision = revision
         self.title = title; self.prompt = prompt; self.context = context; self.options = options
         self.recommended = recommended; self.canAskMore = canAskMore; self.ask = ask; self.review = review; self.macOnly = macOnly
+    }
+}
+
+/// Where a film (RasanAI) is: its five calls and the director's latest line. Every string is read
+/// as it comes, so a call or state a newer Mac names never fails the whole snapshot.
+public struct WorkflowProgress: Codable, Equatable, Sendable {
+    public struct Call: Codable, Equatable, Sendable {
+        /// "brief", "story", "look", "animatic", "final"
+        public let call: String
+        /// "done", "now" or "next"; anything else reads as next.
+        public let state: String
+        public init(call: String, state: String) { self.call = call; self.state = state }
+    }
+    public let provider: String
+    public let title: String?
+    public let step: String?
+    /// "brief", "story", "look", "animatic", "final", "ask" or "other".
+    public let call: String
+    public let calls: [Call]
+    public let waiting: Bool
+    public let activity: String?
+    public let activityAt: String?
+
+    public init(provider: String = "rasanai", title: String? = nil, step: String? = nil, call: String, calls: [Call],
+                waiting: Bool = false, activity: String? = nil, activityAt: String? = nil) {
+        self.provider = provider; self.title = title; self.step = step; self.call = call; self.calls = calls
+        self.waiting = waiting; self.activity = activity; self.activityAt = activityAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        provider = (try? c.decode(String.self, forKey: .provider)) ?? "rasanai"
+        title = try? c.decode(String.self, forKey: .title)
+        step = try? c.decode(String.self, forKey: .step)
+        call = (try? c.decode(String.self, forKey: .call)) ?? "other"
+        calls = (try? c.decode([Call].self, forKey: .calls)) ?? []
+        waiting = (try? c.decode(Bool.self, forKey: .waiting)) ?? false
+        activity = try? c.decode(String.self, forKey: .activity)
+        activityAt = try? c.decode(String.self, forKey: .activityAt)
     }
 }
 

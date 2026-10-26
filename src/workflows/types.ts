@@ -138,3 +138,20 @@ export interface WorkflowAction {
 }
 
 export type WorkflowResult = { ok: true; actionId: string; said: string } | { ok: false; reason: string };
+
+/** Where a workflow's film stands, whether or not it waits on the human. Read-only: nothing is answered through it. */
+export interface WorkflowProgress {
+  provider: "rasanai";
+  title: string | null;
+  /** The product's current step id ("brief", "films"…) and the call it belongs to. */
+  step: string;
+  call: WorkflowCall;
+  /** The five calls in order. done: behind the film; now: the call it is on; next: ahead. */
+  calls: { call: "brief" | "story" | "look" | "animatic" | "final"; state: "done" | "now" | "next" }[];
+  /** True when the film waits on the human now (then `workflow` is set too). */
+  waiting: boolean;
+  /** What the director says it is doing (session.json `working.msg`), plain text, ≤ 200 chars; null when idle or waiting. */
+  activity: string | null;
+  /** ISO time of that line (`working.t`), or null. */
+  activityAt: string | null;
+}

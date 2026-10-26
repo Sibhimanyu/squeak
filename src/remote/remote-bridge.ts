@@ -3331,6 +3331,8 @@ export class RemoteBridge {
       ...(session.state === "awaiting_input" ? { question: this.questionFor(session) } : {}),
       // A workflow's own card (RasanAI: pick a story, pick a look); older phones ignore it.
       ...(session.workflow ? { workflow: this.workflowView(session.workflow) } : {}),
+      // Where the film stands, waiting or working (read-only progress); older phones ignore it.
+      ...(session.workflowProgress ? { workflowProgress: session.workflowProgress } : {}),
       // Why an errored chat failed, so its row can say so; older phones ignore it.
       ...(session.state === "error" && conductorSessionId
         ? { failure: this.failure(conductorSessionId, session.lastActivityAt) }
@@ -3651,6 +3653,7 @@ export function snapshotSignature(snapshot: FleetSnapshot): string {
       session.detail,
       session.conductorSessionId,
       session.workflow?.revision ?? null,
+      session.workflowProgress ?? null,
     ]),
   );
 }
