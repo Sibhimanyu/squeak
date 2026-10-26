@@ -250,7 +250,7 @@ struct NotificationTests {
     private func key(_ id: String) -> SessionKey { SessionKey(provider: "conductor", hostSessionId: id) }
 
     @Test func reopenWithoutAnOrdinaryWindowShowsTheComposerNeverTheConversation() {
-        #expect(ReopenPolicy.action(hasOrdinaryWindow: false) == .showQuickComposer)
+        #expect(ReopenPolicy.action(hasOrdinaryWindow: false) == .showConversation)
         #expect(ReopenPolicy.action(hasOrdinaryWindow: true) == .none)
     }
 

@@ -130,11 +130,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows _: Bool) -> Bool {
         // AppKit counts the popover and hidden panels in `flag`, so look for a real window ourselves.
-        // With none, a reopen is usually a clicked notification's activation: show the composer
-        // (a notification's explicit target retargets it, in whichever order the two arrive).
-        // "Open Squeak" in the popover and menus still opens the conversation directly.
+        // With none, a click on the app opens the conversation window, unless a notification's click
+        // arrives within a moment and shows the composer for its chat instead (either order).
         let action = ReopenPolicy.action(hasOrdinaryWindow: NSApp.windows.contains(where: ActivationPolicyController.isAppWindow))
-        if action == .showQuickComposer { QuickComposerController.shared.scheduleReopen() }
+        if action == .showConversation { QuickComposerController.shared.scheduleReopen() }
         return false
     }
 

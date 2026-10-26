@@ -88,6 +88,13 @@ export interface IngressControl {
     read(): unknown;
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
   };
+  /**
+   * `POST /control/telegram/avatar`: set the Telegram bot's profile photo to Squeak's logo (telegram/avatar.ts).
+   * Body `{}` or `{ which: "logo" }`; answers `{ message }` or `{ error }` (429 when tried within 30 s).
+   */
+  telegramAvatar?(
+    request: unknown,
+  ): Promise<{ ok: true; message: string } | { ok: false; reason: string; retry?: boolean }>;
   /** Which channels are set up and healthy. Never carries a secret. */
   channels?(): unknown;
   /** Chats that messaged the Telegram bot without being allowed. */
@@ -664,6 +671,57 @@ export class HookIngressServer {
           return;
         }
         respondJson(response, 200, outcome.state);
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/telegram/avatar") {
+      if (request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!control.telegramAvatar) {
+        request.resume();
+        respond(response, 503, "avatar unavailable");
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        control.telegramAvatar!(parsed)
+          .then((outcome) => {
+            if (!outcome.ok) {
+              respondJson(response, outcome.retry ? 429 : 400, { error: outcome.reason });
+              return;
+            }
+            respondJson(response, 200, { message: outcome.message });
+          })
+          .catch(() => {
+            logger.warn("control telegram avatar failed");
+            respond(response, 500, "avatar failed");
+          });
       });
       request.on("error", () => {
         aborted = true;

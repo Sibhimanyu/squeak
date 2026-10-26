@@ -71,6 +71,11 @@ rm -rf "$DEST"
 mkdir -p "$DEST"
 cp -R "$STAGE/dist" "$STAGE/node_modules" "$STAGE/package.json" "$DEST/"
 cp "$NODE" "$DEST/node"
+# The Telegram bot's avatar (src/telegram/avatar.ts looks for ../../brand/logo/png from dist/telegram): one small file.
+AVATAR="squeak-bot-avatar-640.jpg"
+[ -f "$REPO/brand/logo/png/$AVATAR" ] || { echo "embed-daemon: brand/logo/png/$AVATAR is missing" >&2; exit 1; }
+mkdir -p "$DEST/brand/logo/png"
+cp "$REPO/brand/logo/png/$AVATAR" "$DEST/brand/logo/png/$AVATAR"
 printf '%s\n' "$DAEMON_VERSION" > "$DEST/VERSION"
 
 # Signing: node needs JIT entitlements (V8); library validation is off so it can load the .node addon,

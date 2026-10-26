@@ -379,6 +379,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// What Telegram and Cliq may push (src/fleet/notify-settings.ts; `notify` command). Optional: an older Mac
     /// omits it, and the phone hides the page.
     public var notify: NotifySettings? = nil
+    /// This Mac can set the Telegram bot's photo to Squeak's logo (`telegramAvatar` command). Optional: an older
+    /// Mac omits it, and the phone hides the button.
+    public var telegramAvatar: Bool? = nil
     /// Where this Mac listens on the local network, for the direct same-Wi-Fi path (docs/remote-channel.md).
     /// Optional: older Macs, and a Mac with the path off, omit it. A phone off that network just fails to
     /// connect and stays on the cloud.
@@ -1603,6 +1606,29 @@ public struct NotifyCommand: Encodable, Equatable, Sendable {
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
+}
+
+/// A signed request to set the Telegram bot's photo to Squeak's logo. Exactly these keys, no others.
+public struct TelegramAvatarCommand: Encodable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// The words of the bot picture row, kept in the core so tests can pin them.
+public enum TelegramAvatarFormat {
+    /// The Mac allows one try per 30 seconds; the button waits that long after a press.
+    public static let cooldown: TimeInterval = 30
+    public static let done = "Done. It can take a moment to show in Telegram."
+    public static let noAnswer = "Your Mac didn't answer. Is Squeak running?"
+    public static let unreachable = "Couldn't reach your Mac."
+    public static let fallbackRefusal = "Your Mac couldn't set the picture."
+    /// The line after an answer: success, or the Mac's own fixed reason.
+    public static func line(for result: CommandResult) -> String {
+        result.sent ? done : (result.reason ?? fallbackRefusal)
+    }
 }
 
 /// The words of the Notifications page, kept in the core so the Mac's tests can pin them.

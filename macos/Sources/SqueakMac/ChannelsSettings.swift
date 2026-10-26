@@ -3,6 +3,7 @@ import CoreImage.CIFilterBuiltins
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Destructive (§8.9): surface-raised fill, needs-you-red text.
 struct DestructiveButtonStyle: ButtonStyle {
@@ -64,6 +65,7 @@ struct TelegramSettings: View {
             telegramStatus
             telegramToken(m: $m)
             allowedChats
+            botPicture
             NotificationsSection(channel: .telegram)
             telegramActions
         }
@@ -161,6 +163,30 @@ struct TelegramSettings: View {
         }
     }
 
+    private var botPicture: some View {
+        Section {
+            HStack(spacing: 12) {
+                BotLogoPreview()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Bot picture")
+                    Text("The duck on Ink, as the bot's profile photo.").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if m.avatarState.isWorking { ProgressView().controlSize(.small) }
+                Button("Use Squeak logo") { Task { await m.setTelegramAvatar() } }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(!m.avatarState.canSet(telegramConfigured: m.tokenSet))
+            }
+        } footer: {
+            if let line = BotAvatarText.line(m.avatarState) {
+                Text(line).font(.callout).foregroundStyle(m.avatarState.isError ? Theme.needsYou : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            } else if !m.tokenSet {
+                Footnote("Set the bot token first.")
+            }
+        }
+    }
+
     private var telegramActions: some View {
         Section {
             HStack(spacing: 8) {
@@ -181,6 +207,23 @@ struct TelegramSettings: View {
     }
 }
 
+/// The bot's profile picture from the brand kit, as a chat app crops it: a circle.
+struct BotLogoPreview: View {
+    var body: some View {
+        Group {
+            if let img = BrandAssets.image(ChannelsModel.botLogoFile) {
+                Image(nsImage: img).resizable().interpolation(.high).scaledToFill()
+            } else {
+                Theme.surfaceRaised
+            }
+        }
+        .frame(width: 36, height: 36)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(Theme.line))
+        .accessibilityLabel("Squeak bot logo")
+    }
+}
+
 // MARK: - Zoho Cliq
 
 struct CliqSettings: View {
@@ -193,6 +236,7 @@ struct CliqSettings: View {
         Form {
             cliqConnection(m: $m)
             cliqOwner(m: $m)
+            botLogo
             NotificationsSection(channel: .cliq)
             twoWaySection
         }
@@ -250,6 +294,34 @@ struct CliqSettings: View {
         } header: { Text("Owner") } footer: {
             Footnote(self.m.cliqDirty ? "The owner email and ID say whose messages Squeak accepts. Saving restarts the Squeak service for a few seconds." : "The owner email and ID say whose messages Squeak accepts.")
         }
+    }
+
+    private var botLogo: some View {
+        Section {
+            HStack(spacing: 12) {
+                BotLogoPreview()
+                Text("Bot logo")
+                Spacer(minLength: 8)
+                if m.savedLogo != nil {
+                    Button("Reveal in Finder") { if let u = m.savedLogo { NSWorkspace.shared.activateFileViewerSelecting([u]) } }
+                        .buttonStyle(QuietButtonStyle())
+                }
+                Button("Save logo…") { saveLogo() }.buttonStyle(SecondaryButtonStyle())
+            }
+        } header: { Text("Logo") } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                if let msg = m.logoMessage { Footnote(msg) }
+                Footnote("Zoho blocks setting it from Squeak. In Cliq: Bots → Squeak → Edit → upload the picture, crop to the circle, and Save.")
+            }
+        }
+    }
+
+    private func saveLogo() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "squeak-bot-avatar.jpg"
+        panel.allowedContentTypes = [.jpeg]
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK, let url = panel.url { m.saveBotLogo(to: url) }
     }
 
     private var twoWaySection: some View {

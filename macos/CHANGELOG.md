@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.6.0
+
+- Set Squeak's logo as your Telegram bot's picture with one button in Settings, Telegram. For Cliq, Settings
+  saves the logo file and shows where to upload it, since Zoho does not allow setting it from Squeak.
+- Clicking Squeak in the Dock, Finder or Spotlight now opens the conversation window instead of the small
+  message panel. A clicked notification still opens the message panel for its chat.
+
 ## 2.5.0
 
 - Choose what Telegram and Zoho Cliq tell you, in Settings: approvals, questions, "seems stuck", quota alerts,

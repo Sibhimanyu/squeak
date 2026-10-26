@@ -4059,3 +4059,87 @@ describe("RemoteBridge notification settings from the phone", () => {
     off.bridge.stop();
   });
 });
+
+describe("RemoteBridge Telegram avatar from the phone", () => {
+  async function avatarT(
+    options: { offered?: boolean; outcome?: { ok: true; message: string } | { ok: false; reason: string } } = {},
+  ) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-avatar-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    const apply = vi.fn((...args: unknown[]) => {
+      void args;
+      return Promise.resolve(options.outcome ?? { ok: true as const, message: "Done" });
+    });
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      ...(options.offered === false ? {} : { telegramAvatar: { apply } }),
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const phone = device();
+    await store.set(`channels/${payload.c}/pairing/iphone-1`, {
+      box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }),
+    });
+    await bridge.tick();
+    await bridge.approve("iphone-1");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    const command = (
+      fields: Record<string, unknown> = {},
+      signer = phone,
+      nonce = crypto.randomBytes(16).toString("hex"),
+    ) => {
+      const box = seal(payload.k, { v: 1, kind: "telegramAvatar", nonce, expiresAt: NOW + 60_000, ...fields });
+      return { box, sig: signer.sign(box), device: "iphone-1" };
+    };
+    return { bridge, config, command, apply };
+  }
+
+  it("carries the capability flag and runs one signed command", async () => {
+    const t = await avatarT();
+    expect(t.bridge.phoneView().telegramAvatar).toBe(true);
+    const verdict = await t.bridge.handleCommand(t.config, "a1", t.command());
+    expect(verdict.result).toEqual({ id: "a1", status: "sent" });
+    expect(t.apply).toHaveBeenCalledWith({});
+    t.bridge.stop();
+  });
+
+  it("passes the Mac's fixed refusal sentence through", async () => {
+    const t = await avatarT({ outcome: { ok: false, reason: "Telegram is not set up" } });
+    const verdict = await t.bridge.handleCommand(t.config, "a1", t.command());
+    expect(verdict.result).toEqual({ id: "a1", status: "refused", reason: "Telegram is not set up" });
+    t.bridge.stop();
+  });
+
+  it("refuses extra keys, a wrong version, a replay, a stranger, and a Mac without it", async () => {
+    const t = await avatarT();
+    for (const fields of [{ which: "logo" }, { extra: 1 }, { v: 2 }]) {
+      const verdict = await t.bridge.handleCommand(t.config, "x", t.command(fields));
+      expect(verdict.result).toMatchObject({ status: "refused" });
+    }
+    expect(t.apply).not.toHaveBeenCalled();
+    const nonce = "n".repeat(32);
+    expect((await t.bridge.handleCommand(t.config, "a", t.command({}, undefined, nonce))).result).toMatchObject({
+      status: "sent",
+    });
+    expect((await t.bridge.handleCommand(t.config, "b", t.command({}, undefined, nonce))).result).toMatchObject({
+      status: "refused",
+    });
+    const stranger = await t.bridge.handleCommand(t.config, "c", t.command({}, device()));
+    expect(stranger.write).toBe(false);
+    expect(t.apply).toHaveBeenCalledTimes(1);
+    t.bridge.stop();
+
+    const off = await avatarT({ offered: false });
+    expect(off.bridge.phoneView()).not.toHaveProperty("telegramAvatar");
+    expect((await off.bridge.handleCommand(off.config, "d", off.command())).result).toMatchObject({
+      status: "refused",
+    });
+    off.bridge.stop();
+  });
+});

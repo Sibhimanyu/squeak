@@ -668,6 +668,10 @@ export interface RemoteBridgeDependencies {
       | { ok: false; reason: string }
     >;
   };
+  /** Set the Telegram bot's photo to Squeak's logo (telegram/avatar.ts). Present: phones show the button (`telegramAvatar: true`). */
+  telegramAvatar?: {
+    apply(request: unknown): Promise<{ ok: true; message: string } | { ok: false; reason: string; retry?: boolean }>;
+  };
   /** Notification settings (fleet/notify-settings.ts). Absent: phones hide the page, and a change is refused. */
   notify?: {
     state(): unknown;
@@ -1625,6 +1629,9 @@ export class RemoteBridge {
     }
     if (kind === "notify") {
       return this.handleNotify(device, id, command as unknown as Record<string, unknown>);
+    }
+    if (kind === "telegramAvatar") {
+      return this.handleTelegramAvatar(device, id, command as unknown as Record<string, unknown>);
     }
     if (kind === "lidActions") {
       return this.handleLidActions(device, id, command as unknown as LidActionsCommand);
@@ -2859,6 +2866,35 @@ export class RemoteBridge {
     return { write: true, result: { id, status: "sent" } };
   }
 
+  /**
+   * Set the bot's Telegram photo to Squeak's logo: `{ v: 1, kind: "telegramAvatar", nonce, expiresAt }`, exactly
+   * these keys. Signature, freshness and nonce have already held; it ends in the Mac app route's function, with
+   * its one-try-per-30-s limit. Success is `sent`; a refusal carries one of its fixed sentences.
+   */
+  private async handleTelegramAvatar(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `telegramAvatar: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const avatar = this.deps.telegramAvatar;
+    if (!avatar || command.v !== 1) {
+      return refuse("This Mac can't set the Telegram photo from a phone.", "not available");
+    }
+    if (Object.keys(command).sort().join(",") !== "expiresAt,kind,nonce,v") {
+      return refuse("Not a request this Mac understands.", "bad keys");
+    }
+    const outcome = await avatar.apply({});
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.log(device.name, "sent", "telegramAvatar");
+    return { write: true, result: { id, status: "sent" } };
+  }
+
   /** One live control. Signature, freshness and nonce have already held; the change is read strictly here. */
   private async handleControls(
     device: PairedDevice,
@@ -3013,6 +3049,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeSleepProblem) +
       JSON.stringify(view.hotspot) +
       JSON.stringify(view.notify) +
+      JSON.stringify(view.telegramAvatar) +
       JSON.stringify(view.macControls) +
       JSON.stringify(view.local) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
@@ -3132,6 +3169,8 @@ export class RemoteBridge {
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
       // What Telegram and Cliq may push, and which of them this Mac has. Absent: the page is hidden.
       ...(this.deps.notify ? { notify: this.deps.notify.state() } : {}),
+      // The Mac can set the Telegram bot's photo to Squeak's logo. Absent on an older Mac: the button is hidden.
+      ...(this.deps.telegramAvatar ? { telegramAvatar: true as const } : {}),
       // Usage › Details is offered: the numbers themselves come only in a `stats` command's answer.
       ...(this.deps.stats ? { usageStats: true } : {}),
       // Volume, brightness, fans: what the phone's Mac controls page draws. Absent: the page is hidden.

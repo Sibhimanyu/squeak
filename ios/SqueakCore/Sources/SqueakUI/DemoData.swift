@@ -308,6 +308,7 @@ enum DemoData {
                                         .init(id: "com.apple.Terminal", name: "Terminal", active: false),
                                         .init(id: "com.apple.Music", name: "Music", active: false)],
                                  media: .init(playing: args.contains("-squeak-demo-playing")))
+        demo.telegramAvatar = true
         demo.notify = .init(
             telegram: .init(),
             cliq: .init(finished: "off", quiet: .init(from: "22:00", to: "07:00")),

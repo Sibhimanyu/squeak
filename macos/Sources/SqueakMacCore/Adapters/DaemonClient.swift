@@ -181,6 +181,16 @@ public struct DaemonClient: Sendable {
         return try decode(TelegramTestResult.self, r.body)
     }
 
+    /// Sets the Telegram bot's profile picture to Squeak's logo. Only ever call this from the user's own tap.
+    public func setTelegramAvatar() async -> BotAvatarOutcome {
+        do {
+            let r = try await post("/control/telegram/avatar", timeout: 30)
+            return BotAvatarOutcome.from(status: r.status, body: r.body)
+        } catch {
+            return BotAvatarOutcome.from(error: error)
+        }
+    }
+
     // MARK: iPhone pairing (RemoteBridge through /control/remote/*)
 
     /// nil when the daemon has no such route (404) or no phone channel behind it (503).
