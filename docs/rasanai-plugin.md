@@ -15,7 +15,7 @@ Squeak already pages you when an agent needs you and lets you answer from the
 iPhone, Telegram or the menu bar. The partnership adds a RasanAI plugin to
 Squeak:
 
-- **The page:** "RasanAI needs you: pick a look for *Some Assembly Required*."
+- **The page:** "RasanAI needs you: pick a look for _Some Assembly Required_."
 - **The call:** the iPhone shows a screen built for that call, not a chat
   message. The three looks appear as posters, the three stories as swipeable
   cards, and the animatic as a player you tap to leave a note at a timecode.
@@ -24,13 +24,13 @@ Squeak:
 
 ## What each side already has
 
-| | RasanAI | Squeak |
-| --- | --- | --- |
-| Knowing a person is needed | `session.json`: `steps[current].status == "awaiting"` and no `sent` field, or an open `ask` | the fleet layer and attention kinds that decide when to push |
-| Taking an answer | headless protocol: add a line to `actions.jsonl` while holding `actions.lock`; `console.mjs wait` reads it and records it in `consumed.json` | signed, encrypted, single-use commands from paired phones (`RemoteBridge.handleCommand`) |
-| Showing progress | `activity[]`, `crew/ledger.jsonl`, `steps.build.scenes` | "What it's doing" feed, live turn |
-| Media | look posters, story frames, animatic stills and WAV, draft and final MP4 | images on request only, shrunk to a JPEG of at most 700 KB; no video |
-| Remote | none: the console is loopback only, with a token and a Host check | Realtime Database channel, pairing, Telegram, Cliq |
+|                            | RasanAI                                                                                                                                      | Squeak                                                                                   |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Knowing a person is needed | `session.json`: `steps[current].status == "awaiting"` and no `sent` field, or an open `ask`                                                  | the fleet layer and attention kinds that decide when to push                             |
+| Taking an answer           | headless protocol: add a line to `actions.jsonl` while holding `actions.lock`; `console.mjs wait` reads it and records it in `consumed.json` | signed, encrypted, single-use commands from paired phones (`RemoteBridge.handleCommand`) |
+| Showing progress           | `activity[]`, `crew/ledger.jsonl`, `steps.build.scenes`                                                                                      | "What it's doing" feed, live turn                                                        |
+| Media                      | look posters, story frames, animatic stills and WAV, draft and final MP4                                                                     | images on request only, shrunk to a JPEG of at most 700 KB; no video                     |
+| Remote                     | none: the console is loopback only, with a token and a Host check                                                                            | Realtime Database channel, pairing, Telegram, Cliq                                       |
 
 The two fit well. RasanAI already has a file protocol that needs no server,
 which Studio uses, and Squeak already has a trusted path from the phone to
@@ -45,7 +45,7 @@ name. Add one narrow interface, `src/workflows/types.ts`:
 
 ```ts
 interface WorkflowProvider {
-  id: string;                                   // "rasanai"
+  id: string; // "rasanai"
   /** Is this fleet session running one of my workflows? Cheap: called every refresh. */
   attach(session: FleetSession): WorkflowRef | null;
   /** What the human is being asked right now, trimmed for a phone. Null if not waiting. */
@@ -107,14 +107,14 @@ token and a Host check, and getting around that would weaken RasanAI.
 **What the phone may send** is an allowlist per call, checked against the
 current `session.json` and not just the command's own data:
 
-| Call | Allowed actions | Checks |
-| --- | --- | --- |
-| Brief | `submit` (edited fields), `decide-rest` | fields keep the brief's own types; aspect, length and format come from the catalog |
-| Story | `choose <id>`, `more` | id must be one of the stories shown now |
-| Look | `choose <id>`, `more`; styleframes: `approve`, `comment`, `redo` | id must be one of the styles or frames shown now |
-| Animatic | `comment {scene, t, x, y, scope, quick}` + note, `apply {ids}`, `approve` | scene exists; `t` within its duration; `x` and `y` in 0–1; note ≤ 4000 characters |
-| Final | `comment`, `apply`, `choose render\|preview` | same as Animatic |
-| Ask | `answer {ask, choice, text}` | the ask id is the one open now and not yet answered |
+| Call     | Allowed actions                                                           | Checks                                                                             |
+| -------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Brief    | `submit` (edited fields), `decide-rest`                                   | fields keep the brief's own types; aspect, length and format come from the catalog |
+| Story    | `choose <id>`, `more`                                                     | id must be one of the stories shown now                                            |
+| Look     | `choose <id>`, `more`; styleframes: `approve`, `comment`, `redo`          | id must be one of the styles or frames shown now                                   |
+| Animatic | `comment {scene, t, x, y, scope, quick}` + note, `apply {ids}`, `approve` | scene exists; `t` within its duration; `x` and `y` in 0–1; note ≤ 4000 characters  |
+| Final    | `comment`, `apply`, `choose render\|preview`                              | same as Animatic                                                                   |
+| Ask      | `answer {ask, choice, text}`                                              | the ask id is the one open now and not yet answered                                |
 
 Each command names the step and a **step revision**, the `session.updated`
 value the phone saw. A command made for a step that has since moved on is
@@ -124,12 +124,12 @@ refused. Squeak's current-turn check does the same job for chat replies.
 
 ### 3. Media to the phone
 
-| Asset | Raw | What to send |
-| --- | --- | --- |
-| Look poster (`specimen.png`), story frames | 35–600 KB PNG | the existing image path: `sips` makes a JPEG of at most 1600 px, sent inline (≤ 700 KB). Works today. |
-| Animatic stills | 1.7–3.2 MB PNG each | the same, sent per scene as it is opened |
-| Animatic audio | 6–17 MB WAV | **a new path**, see below |
-| Draft or final film | 3–85 MB MP4 | **a new path**, see below |
+| Asset                                      | Raw                 | What to send                                                                                          |
+| ------------------------------------------ | ------------------- | ----------------------------------------------------------------------------------------------------- |
+| Look poster (`specimen.png`), story frames | 35–600 KB PNG       | the existing image path: `sips` makes a JPEG of at most 1600 px, sent inline (≤ 700 KB). Works today. |
+| Animatic stills                            | 1.7–3.2 MB PNG each | the same, sent per scene as it is opened                                                              |
+| Animatic audio                             | 6–17 MB WAV         | **a new path**, see below                                                                             |
+| Draft or final film                        | 3–85 MB MP4         | **a new path**, see below                                                                             |
 
 Video and audio cannot go inline through the Realtime Database. Proposed path:
 
@@ -180,7 +180,7 @@ The other surfaces get less:
 - **iPhone Home:** the urgent card reads "Pick a look", with the three
   posters as thumbnails.
 - **Telegram and Cliq:**
-  - The card: "🎬 *Some Assembly Required* needs a look".
+  - The card: "🎬 _Some Assembly Required_ needs a look".
   - Pick buttons: Sure, Bold, Wild (`fleet:wf:<handle>:<id>`).
   - Posters go out with `sendPhoto`, which `src/telegram/client.ts` gains.
   - The animatic and final link to "Open in Squeak". Timed notes on a video
@@ -207,12 +207,12 @@ breaking with every RasanAI release:
 
 ## Plan
 
-| Phase | Ships | Effort |
-| --- | --- | --- |
-| 1 | Provider seam, RasanAI attach and waiting rule, push on a pending call, phone cards for Story, Look (posters through the existing image path) and Ask, `workflow` command kind with step-revision checks | ~1 week |
-| 2 | Video proxies plus encrypted Storage transport; Animatic and Final players with timed notes, apply, approve and render | ~1–1.5 weeks |
-| 3 | Brief card, Telegram and Cliq cards with `sendPhoto`, Mac window cards, crew progress feed | ~1 week |
-| 4 | Start a new film from the phone (brief composer → Studio project + director launch) | later |
+| Phase | Ships                                                                                                                                                                                                    | Effort       |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1     | Provider seam, RasanAI attach and waiting rule, push on a pending call, phone cards for Story, Look (posters through the existing image path) and Ask, `workflow` command kind with step-revision checks | ~1 week      |
+| 2     | Video proxies plus encrypted Storage transport; Animatic and Final players with timed notes, apply, approve and render                                                                                   | ~1–1.5 weeks |
+| 3     | Brief card, Telegram and Cliq cards with `sendPhoto`, Mac window cards, crew progress feed                                                                                                               | ~1 week      |
+| 4     | Start a new film from the phone (brief composer → Studio project + director launch)                                                                                                                      | later        |
 
 Every phase needs:
 
@@ -221,6 +221,39 @@ Every phase needs:
   under `src/workflows/rasanai/fixtures/`;
 - a test that a stale step revision is refused and that a choice not offered
   is refused.
+
+## Films, contract v2 and the director (2026-10-26)
+
+A film is now a first-class thing on the phone, not a chat's card. Spec: `.context/rasanai-remote-v2.md`.
+
+- **`external_actions` 1 and 2.** The daemon accepts both (`SUPPORTED_EXTERNAL_ACTIONS`); a newer number is refused
+  with "newer than Squeak". v2 is a strict superset: brief `submit`, `decide`, `decide-rest` (written on step `*`),
+  styleframes `approve`/`comment`/`redo`, and chat. On a v1 run the brief and styleframes cards say "Update RasanAI
+  Studio to answer this from your phone." and `decide` is refused. A plain `note` works on both.
+- **`FilmService`** (`films.ts`) lists projects (`~/Documents/RasanAI/*` plus the cwd of any fleet session with
+  `.rasanai/current`; last 7 days, newest first, 12) as `PhoneFilm`s under the phone view's `films`, only for a phone
+  whose presence `caps` has `films`. Cached by the run files' mtimes; liveness is `director-events.jsonl` + `kill(pid,
+0)` + `ps -o stat=` (a `T` is paused, cached 5 s), never a node spawn. Finished = the Final step (`render`/`final`)
+  is the current one and `done`.
+- **The director command.** `<engine>/scripts/director.mjs` (RasanAI 1.28+) runs `resume`, `stop`, `install-tool`.
+  `console.json`'s `skill` is written by the film's agent, so it is only used when it is a real folder under an
+  install root (`/Applications`, `~/Applications`, `~/.claude`, `~/.agents`, `~/Library/Application Support`,
+  `SQUEAK_RASANAI_ENGINE_DIRS`), holds `SKILL.md`, and is not inside the film's own folder. Without the script,
+  `canResume`/`canStop` are false and `engineNote` says to update RasanAI Studio. A refusal's reason is passed on only
+  as one plain sentence; anything else becomes a fixed one. One resume/stop per film per 20 s.
+- **Chat** is Studio's `note` with `value.chat` (`rules`, `max_sentences` 3, `max_tool_calls` 3, `context`: step,
+  looking_at, last_error, recent_events), on the current step whether or not it waits (v2); a v1 run takes a plain
+  note while it waits. The reply lands in `steps.<step>.thread` (`who: "claude"`); the phone's own line is `you` there
+  once consumed, and a pending bubble until then. No `revision-request` is written.
+- **Waking.** An answer or message for a stopped or crashed director starts it with `director.mjs resume`, like
+  Studio's `wakeForSentCall`, once per 20 s, not awaited; a failure becomes the film's `engineNote` for 10 minutes.
+- **Install a tool.** An ask with an `install-tool:<tool>` option carries `tool`. The `installTool` command runs
+  `director.mjs install-tool` in the background and, on success, answers the same open ask with `tool-ready:<tool>`;
+  that choice is only ever written by Squeak itself, never taken from a phone's answer. Progress and the result are
+  the film's `engineNote`.
+- **Pushes.** A waiting film pages once per call through the existing blocked-question path, and so does a director
+  that stopped or crashed mid-film (the session is marked `awaiting_input` with `workflow.call` `other`; Resume is
+  offered only when `director.mjs` exists). A stop the phone made itself, or one older than a day, pages nothing.
 
 ## Open questions
 

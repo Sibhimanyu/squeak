@@ -205,6 +205,11 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
   service with its own rules for the same untrusted pipe. Measured on this
   Mac behind its proxy: a 5 MB film copy up in 106 s, down in 21 s,
   byte-identical.
+  - **Films (2026-10-26).** A film is also named by its own id, not only through a chat's session: `film:` and the
+    first 16 hex of sha256(realpath(projectDir)). A phone whose presence `caps` has `films` gets `films` in the
+    view; the signed `film` command (`answer`, `chat`, `resume`, `stop`, `installTool`) and the `image`/`media`
+    commands with a `filmId` all name a film from the Mac's own list (never a path from the phone), and `answer` is
+    checked exactly as a `workflow` answer is, against the files as they are now. See docs/rasanai-plugin.md.
   - **Finding the database.** New pairing codes carry it as `r`. A phone paired
     before the move reads the sealed `state/transport` document the Mac writes
     in Firestore (`{ r }`, sealed with the channel key) and follows it,

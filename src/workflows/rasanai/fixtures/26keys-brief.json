@@ -1,0 +1,224 @@
+{
+  "title": "26keys",
+  "schema": 1,
+  "current": "brief",
+  "updated": "2026-10-26T07:30:00.000Z",
+  "steps": {
+    "brief": {
+      "fields": {
+        "length_s": 45,
+        "kind": "launch film",
+        "subject": "26Keys (26keys.app): the Mac app that turns the English you write into the English you speak",
+        "aspect": "16:9",
+        "destination": "website and social",
+        "narration": "none: kinetic type and real product cards, with music and sound design",
+        "brand_name": "26Keys",
+        "use_brand": true
+      },
+      "format": {
+        "tile": "launch",
+        "option": "launch-film",
+        "why": "Picked in Studio: a launch film for 26keys.app",
+        "scope": "universal"
+      },
+      "captures": [
+        {
+          "image": "videos/26keys-launch/capture/screenshots/scroll-000.png",
+          "caption": "The hero line: 'The English you write becomes the English you speak.'"
+        },
+        {
+          "image": "videos/26keys-launch/capture/screenshots/scroll-010.png",
+          "caption": "The familiar feeling: 'You knew what to say. But the words didn't show up.'"
+        },
+        {
+          "image": "videos/26keys-launch/capture/screenshots/scroll-015.png",
+          "caption": "The real product cards: write, learn the why, practise, say it out loud"
+        }
+      ],
+      "findings": [
+        {
+          "text": "26Keys is a native Mac app (macOS 26+) for non-native English speakers. It proofreads what you write and explains why, b",
+          "source": "26keys.app"
+        },
+        {
+          "text": "The loop: write as you always do, get the why behind each fix, practise what you got wrong, then say it out loud ('No pa",
+          "source": "26keys.app, How it works"
+        },
+        {
+          "text": "The voice is calm and anti-ghostwriter: 'AI should be your coach. Not your ghostwriter.' and 'Writing is speaking, in sl",
+          "source": "26keys.app/manifesto"
+        }
+      ],
+      "status": "awaiting",
+      "updated": "2026-10-26T07:24:00.000Z",
+      "formats": {
+        "version": 1,
+        "scopes": {
+          "universal": "Many uses: people use it for all kinds of things",
+          "category": "One area, several jobs",
+          "single-task": "One job, done much better"
+        },
+        "tiles": [
+          {
+            "id": "launch",
+            "title": "Launch or promo",
+            "description": "Show off your product, app or site with its real screens.",
+            "thumbnail": "A real app window glides in on a soft glow; one word of a headline highlights; a button pulses \"Get it\".",
+            "group": "motion",
+            "default": "launch-film",
+            "options": [
+              {
+                "id": "launch-film",
+                "title": "Launch film",
+                "description": "Introduce your product with its real screens, big lines and a clear call to action.",
+                "kind": "launch film",
+                "status": "ready",
+                "length_s": 45,
+                "aspect": "16:9",
+                "input": {
+                  "id": "url",
+                  "prompt": "Your product's website or app link",
+                  "accepts": ["url"]
+                }
+              },
+              {
+                "id": "feature-reveal",
+                "title": "Feature launch",
+                "description": "Announce a new feature and show what people can do with it.",
+                "kind": "feature launch",
+                "status": "ready",
+                "length_s": 30,
+                "aspect": "16:9",
+                "input": {
+                  "id": "url",
+                  "prompt": "Your product's website or app link",
+                  "accepts": ["url"]
+                },
+                "scope_question": {
+                  "question": "Is this feature for many kinds of uses, or one job?",
+                  "options": [
+                    {
+                      "scope": "universal",
+                      "label": "Many uses",
+                      "description": "People use it for all kinds of things (\"ask anything\")."
+                    },
+                    {
+                      "scope": "category",
+                      "label": "One area, several jobs",
+                      "description": "One main job plus more, or one family of jobs (\"reviews every pull request\")."
+                    },
+                    {
+                      "scope": "single-task",
+                      "label": "One job, done much better",
+                      "description": "One task it makes easy (\"triage feedback automatically\")."
+                    }
+                  ],
+                  "unsure": "Not sure: I'll read the feature's own page and decide"
+                }
+              },
+              {
+                "id": "launch-teaser",
+                "title": "Teaser",
+                "description": "Tease what's coming: one glimpse, the feeling, the date.",
+                "kind": "teaser",
+                "status": "partial",
+                "length_s": 12,
+                "aspect": "9:16",
+                "input": {
+                  "id": "url",
+                  "prompt": "Your product's website or app link",
+                  "accepts": ["url"]
+                },
+                "partial": "Its own teaser shape (withhold, one glimpse, the date) is still being built; today it's told as a very short launch film."
+              },
+              {
+                "id": "app-store-preview",
+                "title": "App Store preview",
+                "description": "A 15 to 30 second recording of your app for the App Store page.",
+                "kind": "App Store preview",
+                "status": "soon",
+                "length_s": 25,
+                "aspect": "device",
+                "input": {
+                  "id": "screen-recording",
+                  "prompt": "Recordings of your app on a device",
+                  "accepts": ["files"]
+                },
+                "soon": "Apple's capture-only rules (real recordings, no device frame, 15 to 30 s) aren't built yet.",
+                "nearest": {
+                  "id": "product-tour",
+                  "title": "Product tour",
+                  "tile": "launch"
+                }
+              }
+            ]
+          },
+          {
+            "id": "explainer",
+            "title": "Explainer",
+            "description": "Explain an idea, a process or the numbers, with animated visuals.",
+            "thumbnail": "A dot becomes a diagram: three icons connect with lines; a chart bar grows; a label pops.",
+            "group": "motion",
+            "default": "explainer",
+            "options": [
+              {
+                "id": "explainer",
+                "title": "Explainer",
+                "description": "Explain an idea with animated shapes, icons and diagrams.",
+                "kind": "explainer",
+                "status": "ready",
+                "length_s": 60,
+                "aspect": "16:9",
+                "input": {
+                  "id": "script",
+                  "prompt": "What should it explain? A topic, an article or a few notes.",
+                  "accepts": ["text", "file"]
+                }
+              },
+              {
+                "id": "character-story",
+                "title": "Character story",
+                "description": "Drawn characters act out your story.",
+                "kind": "character story",
+                "status": "soon",
+                "length_s": 60,
+                "aspect": "16:9",
+                "input": {
+                  "id": "script",
+                  "prompt": "What should it say? Paste a script, an article or a few notes.",
+                  "accepts": ["text", "file"]
+                },
+                "soon": "Drawn characters that move and talk (rigs, mouth shapes) aren't built yet.",
+                "nearest": {
+                  "id": "explainer",
+                  "title": "Explainer",
+                  "tile": "explainer"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "thread": [
+        {
+          "who": "you",
+          "text": "Time's up for research: go with what you have, and move on to the brief.",
+          "t": "2026-10-26T07:21:08.192Z"
+        },
+        {
+          "who": "claude",
+          "text": "Research is done and the brief is ready above. Fix any word, then press Start (or Just make it).",
+          "t": "2026-10-26T07:21:58.853Z"
+        }
+      ]
+    }
+  },
+  "working": null,
+  "activity": [
+    {
+      "msg": "Reading your brief",
+      "t": "2026-10-26T07:17:37.502Z",
+      "level": "info"
+    }
+  ]
+}

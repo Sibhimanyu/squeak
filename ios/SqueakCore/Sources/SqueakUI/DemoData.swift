@@ -126,6 +126,15 @@ enum DemoData {
     /// story call; `-squeak-demo-film-ask` on a question from the director; `-squeak-demo-film-working` on a film at work.
     private static var film: [PhoneSnapshot.Session] {
         let args = ProcessInfo.processInfo.arguments
+        // `-squeak-demo-films` is the films section's own demo; its one chat is the director of "26 keys".
+        if args.contains("-squeak-demo-films"), !args.contains(where: { $0.hasPrefix("-squeak-demo-film-") }) {
+            var director = PhoneSnapshot.Session(
+                key: "film", conductorSessionId: nil, label: "RasanAI · 26 keys", agent: "claude", state: "working",
+                lastActivityAt: now(-35), detail: "RasanAI · Building the animatic", git: nil, contextPercent: nil,
+                turnId: nil, message: nil, choices: nil, title: "26 keys")
+            director.workflowProgress = nil
+            return [director]
+        }
         guard args.contains(where: { $0.hasPrefix("-squeak-demo-film") }) else { return [] }
         let order = ["brief", "story", "look", "animatic", "final"]
         if args.contains("-squeak-demo-film-working") {
@@ -220,6 +229,117 @@ enum DemoData {
             calls: order.enumerated().map { .init(call: $1, state: $0 < at ? "done" : $0 == at ? "now" : "next") },
             waiting: true)
         return [session]
+    }
+
+
+    /// `-squeak-demo-films`: RasanAI films of their own, newest first: a brief to confirm, styleframes to approve,
+    /// one at work with an Ask Rasan thread, one whose director stopped, one finished.
+    static var films: [PhoneFilm] {
+        let order = ["brief", "story", "look", "styleframes", "animatic", "final"]
+        func progress(_ title: String, at call: String, waiting: Bool, activity: String? = nil, ago: Double = -30) -> WorkflowProgress {
+            let at = order.firstIndex(of: call) ?? 0
+            return WorkflowProgress(
+                title: title, step: call, call: call,
+                calls: order.enumerated().map { .init(call: $1, state: $0 < at ? "done" : $0 == at ? "now" : "next") },
+                waiting: waiting, activity: activity, activityAt: activity == nil ? nil : now(ago))
+        }
+        let brief = Workflow(
+            provider: "rasanai", call: "brief", step: "brief", revision: "brief@1", title: "Quotidian",
+            prompt: "Confirm the brief",
+            context: "I read your site and the talk. Change anything that is off, then start.",
+            brief: .init(
+                fields: [
+                    .init(key: "subject", label: "What it is about", kind: "longtext",
+                          value: .string("Quotidian: a talk about the everyday as the place where ideas become real.")),
+                    .init(key: "destination", label: "Where it will play", kind: "text", value: .string("Conference opener and the website")),
+                    .init(key: "length_s", label: "Length in seconds", kind: "number", value: .number(60), min: 5, max: 600),
+                    .init(key: "aspect", label: "Shape", kind: "choice", value: .string("16:9"),
+                          options: [.init(id: "16:9", label: "Wide 16:9"), .init(id: "9:16", label: "Tall 9:16"), .init(id: "1:1", label: "Square 1:1")]),
+                    .init(key: "narration", label: "Narration", kind: "longtext", value: .string("Keep the speaker's own words, every one.")),
+                    .init(key: "brand_name", label: "Brand name", kind: "text", value: .string("Quotidian")),
+                    .init(key: "use_brand", label: "Use the brand's colours and type", kind: "bool", value: .bool(true)),
+                ],
+                format: .init(tile: "launch", option: "hero", label: "Launch film · Hero"),
+                formats: [
+                    .init(tile: "launch", title: "Launch film", options: [
+                        .init(id: "hero", label: "Hero", lengthS: 60, aspect: "16:9"),
+                        .init(id: "teaser", label: "Teaser", lengthS: 20, aspect: "16:9"),
+                    ]),
+                    .init(tile: "social", title: "Social cut", options: [
+                        .init(id: "reel", label: "Reel", lengthS: 30, aspect: "9:16"),
+                        .init(id: "square", label: "Square", lengthS: 15, aspect: "1:1"),
+                    ]),
+                    .init(tile: "explainer", title: "Explainer", options: [
+                        .init(id: "walk", label: "Walkthrough", lengthS: 120, aspect: "16:9"),
+                    ]),
+                ],
+                findings: [
+                    .init(text: "The talk is eleven minutes and has ten ideas, each a plain object.", source: "talk.srt"),
+                    .init(text: "The site uses one red accent and a serif for titles.", source: "quotidian.example"),
+                    .init(text: "The speaker never appears on screen in the recording.", source: nil),
+                ],
+                captures: [
+                    .init(image: "demo/site-home.png", caption: "Home page"),
+                    .init(image: "demo/site-talk.png", caption: "The talk's page"),
+                    .init(image: "demo/site-about.png", caption: "About"),
+                ]),
+            canDecide: true)
+        let styleframes = Workflow(
+            provider: "rasanai", call: "styleframes", step: "styleframes", revision: "styleframes@3", title: "Harvest Moon",
+            prompt: "Check the styleframes",
+            context: "One frame per kind of shot. Approve them, comment on one, or send some back.",
+            styleframes: .init(
+                frames: [
+                    .init(id: "f1", image: "demo/frame-title.png", ref: "demo/ref-title.png", shot: "Title", verdict: "Matches the look"),
+                    .init(id: "f2", image: "demo/frame-field.png", ref: nil, shot: "Wide, the field", verdict: nil),
+                    .init(id: "f3", image: "demo/frame-hands.png", ref: "demo/ref-hands.png", shot: "Close, hands", verdict: "Light is flat"),
+                    .init(id: "f4", image: "demo/frame-moon.png", ref: nil, shot: "The moon", verdict: nil),
+                    .init(id: "f5", image: "demo/frame-bread.png", ref: nil, shot: "Bread", verdict: nil),
+                    .init(id: "f6", image: "demo/frame-end.png", ref: nil, shot: "End card", verdict: "Matches the look"),
+                ],
+                sheet: "demo/sheet.png"),
+            canDecide: true)
+        let chat: [PhoneFilm.ChatLine] = [
+            .init(id: "c1", who: "you", text: "Why did you pick a serif for the titles?", t: now(-900), state: "sent"),
+            .init(id: "c2", who: "rasan", text: "The site already sets its titles in a serif, and the talk is about plain, old things. A serif keeps the film sounding like the speaker.", t: now(-870)),
+            .init(id: "c3", who: "you", text: "Can the first title hold longer?", t: now(-300), state: "sent"),
+            .init(id: "c4", who: "rasan", text: "Yes. I will hold it for 2.5 seconds instead of 1.5 and shift the rest of the scenes.", t: now(-260)),
+            .init(id: "c5", who: "you", text: "And keep the music quiet under the first line.", t: now(-40), state: "pending"),
+        ]
+        return [
+            PhoneFilm(
+                id: "film:0123456789abcdef", title: "Quotidian", updatedAt: now(-60),
+                progress: progress("Quotidian", at: "brief", waiting: true),
+                director: .init(state: "running", since: now(-1500)), card: brief,
+                pending: [], chat: [], canChat: true, canResume: false, canStop: true,
+                sessionKey: nil, poster: "demo/site-home.png"),
+            PhoneFilm(
+                id: "film:1123456789abcdef", title: "Harvest Moon", updatedAt: now(-420),
+                progress: progress("Harvest Moon", at: "styleframes", waiting: true),
+                director: .init(state: "running", since: now(-5400)), card: styleframes,
+                pending: [], chat: [], canChat: true, canResume: false, canStop: true,
+                sessionKey: nil, poster: "demo/frame-moon.png"),
+            PhoneFilm(
+                id: "film:2123456789abcdef", title: "26 keys", updatedAt: now(-35),
+                progress: progress("26 keys", at: "animatic", waiting: false, activity: "Building the animatic: scene 3 of 7", ago: -35),
+                director: .init(state: "running", since: now(-2400)), card: nil,
+                pending: [.init(id: "p1", type: "comment", said: "Noted: keep the music quiet", t: now(-40))],
+                chat: chat, canChat: true, canResume: false, canStop: true,
+                sessionKey: "film", poster: "demo/frame-keys.png"),
+            PhoneFilm(
+                id: "film:3123456789abcdef", title: "Brand sting", updatedAt: now(-3 * 3600),
+                progress: progress("Brand sting", at: "look", waiting: false, activity: "Drawing the three looks", ago: -3 * 3600),
+                director: .init(state: "stopped", since: now(-3 * 3600), detail: "The director stopped when RasanAI Studio quit."), card: nil,
+                pending: [], chat: [], canChat: true, canResume: true, canStop: false,
+                sessionKey: nil, poster: "demo/frame-sting.png"),
+            PhoneFilm(
+                id: "film:4123456789abcdef", title: "Moon Bakery", updatedAt: now(-26 * 3600),
+                progress: WorkflowProgress(title: "Moon Bakery", step: "final", call: "final",
+                                           calls: order.map { .init(call: $0, state: "done") }, waiting: false),
+                director: .init(state: "finished", since: now(-26 * 3600)), card: nil,
+                pending: [], chat: [], canChat: false, canResume: false, canStop: false,
+                sessionKey: nil, poster: "demo/frame-bread.png"),
+        ]
     }
 
     /// `-squeak-demo-plan`: the payment chat waits on a plan instead (ExitPlanMode).
@@ -327,6 +447,7 @@ enum DemoData {
                                         .init(id: "com.apple.Terminal", name: "Terminal", active: false),
                                         .init(id: "com.apple.Music", name: "Music", active: false)],
                                  media: .init(playing: args.contains("-squeak-demo-playing")))
+        if args.contains("-squeak-demo-films") { demo.films = films }
         demo.telegramAvatar = true
         demo.notify = .init(
             telegram: .init(),

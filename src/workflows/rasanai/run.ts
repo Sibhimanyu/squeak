@@ -2,12 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import type {
   WorkflowCall,
+  WorkflowBrief,
+  WorkflowBriefField,
   WorkflowNote,
   WorkflowOption,
   WorkflowProgress,
   WorkflowReview,
   WorkflowScene,
   WorkflowStatus,
+  WorkflowStyleframes,
   WorkflowView,
 } from "../types.js";
 
@@ -24,6 +27,7 @@ import type {
 /** The parts of `session.json` this reads. Everything is optional: it is another product's file. */
 export interface RasanaiSession {
   title?: string;
+  activity?: { msg?: string; t?: string; level?: string }[];
   comments?: Record<string, unknown>[];
   current?: string;
   updated?: string;
@@ -65,24 +69,41 @@ export interface RasanaiRun {
   headless: boolean;
   /**
    * RasanAI's `console.json` `external_actions` (references/remote.md): 1 means its
-   * `wait` applies a line another app appended in either mode. Null from a RasanAI
-   * older than the contract.
+   * `wait` applies a line another app appended in either mode; 2 is a strict superset
+   * (brief submit, decide, styleframes, chat). Null from a RasanAI older than the contract.
    */
   externalActions: number | null;
   session: RasanaiSession;
 }
 
-/** The contract version Squeak speaks (RasanAI's references/remote.md). */
-export const EXTERNAL_ACTIONS_VERSION = 1;
+/** The contract versions Squeak speaks (RasanAI's references/remote.md): 2 is a strict superset of 1. */
+export const SUPPORTED_EXTERNAL_ACTIONS: readonly number[] = [1, 2];
 
 /**
  * Whether an answer appended by Squeak will be applied: a run that says it
- * takes other apps' answers in the version Squeak knows, or (before the
+ * takes other apps' answers in a version Squeak knows, or (before the
  * contract) a headless Studio run, whose `wait` always applied every line.
  */
 export function acceptsExternalActions(run: RasanaiRun): boolean {
-  return run.externalActions === null ? run.headless : run.externalActions === EXTERNAL_ACTIONS_VERSION;
+  return run.externalActions === null ? run.headless : SUPPORTED_EXTERNAL_ACTIONS.includes(run.externalActions);
 }
+
+/** A v2 run: the brief form, "you decide", styleframes and chat-with-rules are accepted. */
+export function isV2(run: RasanaiRun): boolean {
+  return run.externalActions === 2;
+}
+
+/**
+ * The film is done: its Final call (`render`/`final`) is the current step and closed. A film that
+ * finished keeps `current` there, so this holds for as long as the run is read.
+ */
+export function isFinished(run: RasanaiRun): boolean {
+  const current = text(run.session.current);
+  return current !== null && CALL_OF_STEP[current] === "final" && run.session.steps?.[current]?.status === "done";
+}
+
+/** What a v1 run's card says for a call that needs the v2 contract. */
+export const V2_ONLY_NOTE = "Update RasanAI Studio to answer this from your phone.";
 
 /**
  * RasanAI's steps mapped to its five calls (references/console.md). A step
@@ -219,10 +240,13 @@ export function workflowView(run: RasanaiRun, status: WorkflowStatus): WorkflowV
     title: status.title,
     prompt: status.prompt,
   };
+  const v2 = isV2(run);
   if (status.call === "ask") {
     const ask = run.session.ask ?? {};
+    const tool = toolOfAsk(ask);
     return {
       ...base,
+      ...(tool ? { tool } : {}),
       prompt: clip(text(ask.question) ?? status.prompt, TEXT_MAX),
       ask: {
         id: String(ask.id),
@@ -243,10 +267,12 @@ export function workflowView(run: RasanaiRun, status: WorkflowStatus): WorkflowV
   }
   const step = run.session.steps?.[status.step] ?? {};
   const context = clipOrNull(text(step.context) ?? text(step.note), 1_000);
+  const decide = v2 ? { canDecide: true } : {};
   const pick = pickOptions(status.step, step);
   if (pick) {
     return {
       ...base,
+      ...decide,
       prompt: clip(text(step.question) ?? status.prompt, TEXT_MAX),
       context,
       options: pick,
@@ -256,10 +282,26 @@ export function workflowView(run: RasanaiRun, status: WorkflowStatus): WorkflowV
   }
   const review = reviewOf(run, status.step, step);
   if (review) {
-    return { ...base, prompt: clip(text(step.question) ?? status.prompt, TEXT_MAX), context, review };
+    return { ...base, ...decide, prompt: clip(text(step.question) ?? status.prompt, TEXT_MAX), context, review };
+  }
+  if (status.step === "brief") {
+    return v2 ? { ...base, ...decide, context, brief: briefView(step) } : { ...base, context, macOnly: V2_ONLY_NOTE };
+  }
+  const frames = status.step === "styleframes" ? styleframesView(step) : null;
+  if (frames) {
+    return v2
+      ? {
+          ...base,
+          ...decide,
+          prompt: clip(text(step.question) ?? status.prompt, TEXT_MAX),
+          context,
+          styleframes: frames,
+        }
+      : { ...base, context, macOnly: V2_ONLY_NOTE };
   }
   return {
     ...base,
+    ...decide,
     context,
     macOnly:
       status.call === "animatic" || status.call === "final"
@@ -373,6 +415,9 @@ export function viewImages(view: WorkflowView): string[] {
     ]),
     ...(view.review?.scenes ?? []).flatMap((scene) => (scene.thumb ? [scene.thumb] : [])),
     ...(view.review?.media?.poster ? [view.review.media.poster] : []),
+    ...(view.brief?.captures ?? []).map((capture) => capture.image),
+    ...(view.styleframes?.frames ?? []).flatMap((frame) => [frame.image, ...(frame.ref ? [frame.ref] : [])]),
+    ...(view.styleframes?.sheet ? [view.styleframes.sheet] : []),
   ];
 }
 
@@ -476,7 +521,11 @@ const FIVE_CALLS = ["brief", "story", "look", "animatic", "final"] as const;
  * Where the film stands, waiting or not, or null for a run left aside (nothing
  * touched it for STALE_WAIT_MS) or one with no current step.
  */
-export function workflowProgress(run: RasanaiRun, nowMs: number): WorkflowProgress | null {
+export function workflowProgress(
+  run: RasanaiRun,
+  nowMs: number,
+  maxAgeMs: number = STALE_WAIT_MS,
+): WorkflowProgress | null {
   const session = run.session;
   const current = text(session.current);
   if (!current) {
@@ -485,7 +534,7 @@ export function workflowProgress(run: RasanaiRun, nowMs: number): WorkflowProgre
   const stamps = [session.updated, session.working?.t, session.steps?.[current]?.updated]
     .map((value) => Date.parse(text(value) ?? ""))
     .filter((value) => Number.isFinite(value));
-  if (stamps.length === 0 || nowMs - Math.max(...stamps) > STALE_WAIT_MS) {
+  if (stamps.length === 0 || nowMs - Math.max(...stamps) > maxAgeMs) {
     return null;
   }
   const status = waitingStatus(run, nowMs);
@@ -507,6 +556,12 @@ export function workflowProgress(run: RasanaiRun, nowMs: number): WorkflowProgre
   if (at < 0) {
     at = 0;
   }
+  // A call answered and done while the director has not yet pushed the next step: the film is
+  // working on the next call (26keys: brief done, `current` still "brief", the script desk at work).
+  const advanced = !status && session.steps?.[current]?.status === "done" && at < FIVE_CALLS.length - 1;
+  if (advanced) {
+    at += 1;
+  }
   const waiting = status !== null;
   const msg = waiting ? null : clean(session.working?.msg, BEAT_TEXT_MAX);
   const mapped = CALL_OF_STEP[step];
@@ -515,7 +570,7 @@ export function workflowProgress(run: RasanaiRun, nowMs: number): WorkflowProgre
     provider: "rasanai",
     title: text(session.title),
     step,
-    call: status?.call ?? mapped ?? FIVE_CALLS[at]!,
+    call: status?.call ?? (advanced ? FIVE_CALLS[at]! : (mapped ?? FIVE_CALLS[at]!)),
     calls: FIVE_CALLS.map((call, index) => ({
       call,
       state: index < at ? ("done" as const) : index === at ? ("now" as const) : ("next" as const),
@@ -541,4 +596,412 @@ function clean(value: unknown, max: number): string | null {
     .replace(/ {2,}/g, " ")
     .trim();
   return plain ? plain.slice(0, max) : null;
+}
+
+// ---- v2: the brief form, styleframes, a missing-tool ask -------------------------------------------------------
+
+const TOOL_INSTALL_PREFIX = "install-tool:";
+export const TOOL_READY_PREFIX = "tool-ready:";
+const TOOL_NAME = /^[a-z][a-z0-9-]{0,30}$/;
+
+/** A missing-tool ask (Studio's `ToolNeed`): an option whose id is `install-tool:<tool>`. */
+export function toolOfAsk(ask: RasanaiAsk): { tool: string; label: string } | null {
+  for (const option of Array.isArray(ask.options) ? ask.options : []) {
+    const id = typeof option?.id === "string" ? option.id : "";
+    if (!id.startsWith(TOOL_INSTALL_PREFIX)) {
+      continue;
+    }
+    const tool = id.slice(TOOL_INSTALL_PREFIX.length).trim();
+    if (TOOL_NAME.test(tool)) {
+      return { tool, label: clip(text(option.label) ?? `Install ${tool}`, 120) };
+    }
+  }
+  return null;
+}
+
+interface FieldSpec {
+  label: string;
+  kind: WorkflowBriefField["kind"];
+  min?: number;
+  max?: number;
+  maxLen?: number;
+  required?: boolean;
+  options?: { id: string; label: string }[];
+}
+
+const BRIEF_FIELDS: Record<string, FieldSpec> = {
+  source: { label: "What's the video about?", kind: "longtext", maxLen: 2_000, required: true },
+  length_s: { label: "Length (seconds)", kind: "number", min: 5, max: 600 },
+  kind: { label: "Kind of video", kind: "text", maxLen: 200, required: true },
+  subject: { label: "What it's about", kind: "longtext", maxLen: 2_000, required: true },
+  aspect: {
+    label: "Shape",
+    kind: "choice",
+    options: [
+      { id: "16:9", label: "16:9 wide" },
+      { id: "9:16", label: "9:16 tall" },
+      { id: "1:1", label: "1:1 square" },
+    ],
+  },
+  destination: { label: "Where it will be seen", kind: "text", maxLen: 200 },
+  narration: { label: "Narration", kind: "longtext", maxLen: 1_000 },
+  brand_name: { label: "Brand", kind: "text", maxLen: 200 },
+  use_brand: { label: "Use the brand's look", kind: "bool" },
+};
+const BRIEF_FIELD_ORDER = [
+  "source",
+  "length_s",
+  "kind",
+  "subject",
+  "aspect",
+  "destination",
+  "narration",
+  "brand_name",
+  "use_brand",
+];
+const BRIEF_FINDINGS_MAX = 8;
+const BRIEF_CAPTURES_MAX = 8;
+const BRIEF_FIELD_KEYS_MAX = 24;
+
+interface ResolvedField extends FieldSpec {
+  key: string;
+  /** What a choice's ids stand for, when they are not strings. */
+  values?: Map<string, unknown>;
+}
+
+/** The brief's fields as the form edits them: known keys in Studio's order, then any other the director pushed. */
+function briefFieldSpecs(step: RasanaiStep): ResolvedField[] {
+  const values = step.fields && typeof step.fields === "object" ? (step.fields as Record<string, unknown>) : {};
+  const choices = step.choices && typeof step.choices === "object" ? (step.choices as Record<string, unknown>) : {};
+  const keys = [
+    ...BRIEF_FIELD_ORDER.filter((key) => (key === "source" ? step.needs_source === true : key in values)),
+    ...Object.keys(values)
+      .filter((key) => !(key in BRIEF_FIELDS) && /^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(key))
+      .slice(0, BRIEF_FIELD_KEYS_MAX),
+  ];
+  const specs: ResolvedField[] = [];
+  for (const key of keys) {
+    const known = BRIEF_FIELDS[key];
+    const current = values[key];
+    let spec: ResolvedField;
+    if (known) {
+      spec = { key, ...known };
+    } else if (typeof current === "number") {
+      spec = { key, label: humanise(key), kind: "number" };
+    } else if (typeof current === "boolean") {
+      spec = { key, label: humanise(key), kind: "bool" };
+    } else if (typeof current === "string") {
+      spec = { key, label: humanise(key), kind: "text", maxLen: 1_000 };
+    } else {
+      continue;
+    }
+    // choices.<field> narrows a field to a menu of values.
+    const menu = choices[key];
+    if (Array.isArray(menu) && menu.length > 0 && menu.length <= 24) {
+      const map = new Map<string, unknown>();
+      const options: { id: string; label: string }[] = [];
+      for (const entry of menu) {
+        const raw = entry && typeof entry === "object" ? (entry as Record<string, unknown>).value : entry;
+        if (typeof raw !== "string" && typeof raw !== "number") {
+          continue;
+        }
+        const label = entry && typeof entry === "object" ? text((entry as Record<string, unknown>).label) : null;
+        map.set(String(raw), raw);
+        options.push({ id: String(raw), label: clip(label ?? String(raw), 80) });
+      }
+      if (options.length > 0) {
+        spec = { ...spec, kind: "choice", options, values: map };
+      }
+    }
+    if (spec.kind === "choice") {
+      // A current value outside the menu stays selectable, so opening and saving the form changes nothing.
+      const held = current === undefined || current === null ? null : String(current);
+      const options = spec.options ?? [];
+      if (held !== null && held && !options.some((option) => option.id === held) && typeof current !== "object") {
+        spec = { ...spec, options: [...options, { id: held, label: clip(held, 80) }] };
+      }
+    }
+    specs.push(spec);
+  }
+  return specs;
+}
+
+function humanise(key: string): string {
+  const spaced = key.replace(/_/g, " ").trim();
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : key;
+}
+
+/** The format catalog, as RasanAI pushed it (`formats.mjs list`): tiles with their options. */
+interface CatalogOption {
+  id: string;
+  title: string;
+  kind: string | null;
+  status: string;
+  lengthS: number | null;
+  aspect: string | null;
+  scopes: string[];
+}
+interface CatalogTile {
+  id: string;
+  title: string;
+  options: CatalogOption[];
+}
+
+function briefCatalog(step: RasanaiStep): CatalogTile[] {
+  const formats = step.formats;
+  const tiles = formats && typeof formats === "object" ? (formats as { tiles?: unknown }).tiles : null;
+  if (!Array.isArray(tiles)) {
+    return [];
+  }
+  return tiles.slice(0, 40).flatMap((tile: Record<string, unknown>) => {
+    const id = text(tile?.id);
+    if (!id || !Array.isArray(tile.options)) {
+      return [];
+    }
+    const options = (tile.options as Record<string, unknown>[]).slice(0, 40).flatMap((option) => {
+      const optionId = text(option?.id);
+      if (!optionId) {
+        return [];
+      }
+      const question = option.scope_question as { options?: { scope?: unknown }[] } | undefined;
+      return [
+        {
+          id: optionId,
+          title: clip(text(option.title) ?? optionId, 80),
+          kind: text(option.kind),
+          status: text(option.status) ?? "ready",
+          lengthS: finite(option.length_s),
+          aspect: text(option.aspect),
+          scopes: (Array.isArray(question?.options) ? question.options : []).flatMap((entry) =>
+            typeof entry?.scope === "string" ? [entry.scope] : [],
+          ),
+        },
+      ];
+    });
+    return [{ id, title: clip(text(tile.title) ?? id, 80), options }];
+  });
+}
+
+const FORMAT_OFFERED = new Set(["ready", "partial"]);
+
+function currentFormat(step: RasanaiStep): { tile: string; option: string; scope: string | null } | null {
+  const format = step.format as { tile?: unknown; option?: unknown; scope?: unknown } | null | undefined;
+  const tile = text(format?.tile);
+  const option = text(format?.option);
+  return tile && option ? { tile, option, scope: text(format?.scope) } : null;
+}
+
+/** The brief call's form, from the step. */
+function briefView(step: RasanaiStep): WorkflowBrief {
+  const values = step.fields && typeof step.fields === "object" ? (step.fields as Record<string, unknown>) : {};
+  const fields: WorkflowBriefField[] = briefFieldSpecs(step).map((spec) => {
+    const current = values[spec.key];
+    let value: WorkflowBriefField["value"] = null;
+    if (spec.kind === "number") {
+      value = typeof current === "number" && Number.isFinite(current) ? current : null;
+    } else if (spec.kind === "bool") {
+      value = typeof current === "boolean" ? current : null;
+    } else if (typeof current === "string" || typeof current === "number") {
+      value = clip(String(current), spec.maxLen ?? 1_000);
+    }
+    return {
+      key: spec.key,
+      label: spec.label,
+      kind: spec.kind,
+      value,
+      ...(spec.options ? { options: spec.options } : {}),
+      ...(spec.min !== undefined ? { min: spec.min } : {}),
+      ...(spec.max !== undefined ? { max: spec.max } : {}),
+    };
+  });
+  const catalog = briefCatalog(step);
+  const format = currentFormat(step);
+  const chosen = format
+    ? catalog.find((tile) => tile.id === format.tile)?.options.find((option) => option.id === format.option)
+    : undefined;
+  const findings = (Array.isArray(step.findings) ? (step.findings as Record<string, unknown>[]) : [])
+    .slice(0, BRIEF_FINDINGS_MAX)
+    .flatMap((finding) => {
+      const body = text(typeof finding === "string" ? finding : finding?.text);
+      return body ? [{ text: clip(body, 500), source: clipOrNull(text(finding?.source), 120) }] : [];
+    });
+  const captures = (Array.isArray(step.captures) ? (step.captures as Record<string, unknown>[]) : [])
+    .slice(0, BRIEF_CAPTURES_MAX)
+    .flatMap((capture) => {
+      const image = imagePath(capture?.image);
+      return image ? [{ image, caption: clipOrNull(text(capture.caption), 200) }] : [];
+    });
+  return {
+    fields,
+    format: format ? { tile: format.tile, option: format.option, label: chosen?.title ?? format.option } : null,
+    formats: catalog.flatMap((tile) => {
+      const options = tile.options
+        .filter((option) => FORMAT_OFFERED.has(option.status))
+        .map((option) => ({ id: option.id, label: option.title, lengthS: option.lengthS, aspect: option.aspect }));
+      return options.length > 0 ? [{ tile: tile.id, title: tile.title, options }] : [];
+    }),
+    findings,
+    captures,
+  };
+}
+
+/** What a brief answer's `value` carries once checked: the sentence's fields and the format, flat, as Studio writes it. */
+export type BriefSubmit = { ok: true; value: Record<string, unknown> } | { ok: false; reason: string };
+
+/**
+ * Check a brief `submit` from a phone against the brief as it is now: each field against its kind, the
+ * format against the catalog (never a `soon` option), and nothing the form does not show.
+ */
+export function checkBriefSubmit(step: RasanaiStep, value: unknown): BriefSubmit {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  const sent = input?.fields && typeof input.fields === "object" && !Array.isArray(input.fields) ? input.fields : null;
+  if (!input || !sent) {
+    return { ok: false, reason: "That isn't a brief this card can send." };
+  }
+  const specs = briefFieldSpecs(step);
+  const byKey = new Map(specs.map((spec) => [spec.key, spec]));
+  const held = step.fields && typeof step.fields === "object" ? (step.fields as Record<string, unknown>) : {};
+  const fields: Record<string, unknown> = {};
+  for (const spec of specs) {
+    if (spec.key in held) {
+      fields[spec.key] = held[spec.key];
+    }
+  }
+  for (const [key, raw] of Object.entries(sent as Record<string, unknown>)) {
+    const spec = byKey.get(key);
+    if (!spec) {
+      return { ok: false, reason: "That isn't a field of this brief." };
+    }
+    const checked = checkField(spec, raw);
+    if (!checked.ok) {
+      return checked;
+    }
+    fields[key] = checked.value;
+  }
+  for (const spec of specs) {
+    if (spec.required && !(typeof fields[spec.key] === "string" && String(fields[spec.key]).trim())) {
+      return { ok: false, reason: `${spec.label} can't be empty.` };
+    }
+  }
+  const before = currentFormat(step);
+  let format = before;
+  const asked = input.format;
+  if (asked !== undefined && asked !== null) {
+    const pick = asked && typeof asked === "object" ? (asked as Record<string, unknown>) : null;
+    const tile = pick && typeof pick.tile === "string" ? pick.tile : null;
+    const option = pick && typeof pick.option === "string" ? pick.option : null;
+    const entry = briefCatalog(step)
+      .find((candidate) => candidate.id === tile)
+      ?.options.find((candidate) => candidate.id === option);
+    if (!tile || !option || !entry || !FORMAT_OFFERED.has(entry.status)) {
+      return { ok: false, reason: "That format isn't available." };
+    }
+    let scope: string | null = null;
+    if (pick!.scope !== undefined && pick!.scope !== null) {
+      if (typeof pick!.scope !== "string" || !entry.scopes.includes(pick!.scope)) {
+        return { ok: false, reason: "That isn't an answer to this format's question." };
+      }
+      scope = pick!.scope;
+    } else if (before && before.tile === tile && before.option === option) {
+      scope = before.scope;
+    }
+    format = { tile, option, scope };
+    // A format brings its own noun, length and shape, unless the person already changed them.
+    if (!before || before.tile !== tile || before.option !== option) {
+      const unchanged = (key: string) =>
+        !(key in (sent as object)) || (sent as Record<string, unknown>)[key] === held[key];
+      if (entry.kind && "kind" in fields && unchanged("kind")) {
+        fields.kind = entry.kind;
+      }
+      if (entry.lengthS !== null && "length_s" in fields && unchanged("length_s")) {
+        fields.length_s = entry.lengthS;
+      }
+      if (entry.aspect && "aspect" in fields && unchanged("aspect")) {
+        fields.aspect = entry.aspect;
+      }
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      ...fields,
+      ...(format
+        ? { format: { tile: format.tile, option: format.option, ...(format.scope ? { scope: format.scope } : {}) } }
+        : {}),
+    },
+  };
+}
+
+function checkField(spec: ResolvedField, raw: unknown): { ok: true; value: unknown } | { ok: false; reason: string } {
+  const bad = (reason: string) => ({ ok: false as const, reason });
+  switch (spec.kind) {
+    case "bool":
+      return typeof raw === "boolean" ? { ok: true, value: raw } : bad(`${spec.label} is on or off.`);
+    case "number": {
+      const ok =
+        typeof raw === "number" &&
+        Number.isFinite(raw) &&
+        (spec.min === undefined || (Number.isInteger(raw) && raw >= spec.min && raw <= (spec.max ?? Infinity))) &&
+        Math.abs(raw) <= 1e9;
+      return ok
+        ? { ok: true, value: raw }
+        : bad(
+            spec.min !== undefined
+              ? `${spec.label} is a whole number from ${spec.min} to ${spec.max}.`
+              : `${spec.label} is a number.`,
+          );
+    }
+    case "choice": {
+      const id = typeof raw === "string" ? raw : typeof raw === "number" ? String(raw) : null;
+      if (id === null || !(spec.options ?? []).some((option) => option.id === id)) {
+        return bad(`That isn't one of the choices for ${spec.label.toLowerCase()}.`);
+      }
+      return { ok: true, value: spec.values?.has(id) ? spec.values.get(id) : id };
+    }
+    default: {
+      if (typeof raw !== "string") {
+        return bad(`${spec.label} is text.`);
+      }
+      const trimmed = raw.trim();
+      if (trimmed.length > (spec.maxLen ?? 1_000)) {
+        return bad(`${spec.label} is too long.`);
+      }
+      return { ok: true, value: trimmed };
+    }
+  }
+}
+
+const STYLEFRAMES_MAX = 24;
+
+/** The styleframes call: the frames to approve, comment on, or send back. Null when the step names none. */
+export function styleframesView(step: RasanaiStep): WorkflowStyleframes | null {
+  const raw = Array.isArray(step.frames) ? (step.frames as Record<string, unknown>[]) : [];
+  const frames = raw.slice(0, STYLEFRAMES_MAX).flatMap((frame) => {
+    const id = text(frame?.id);
+    const image = imagePath(frame?.image);
+    if (!id || !image) {
+      return [];
+    }
+    const ref =
+      frame.ref && typeof frame.ref === "object" ? imagePath((frame.ref as Record<string, unknown>).image) : null;
+    const shot = frame.shot && typeof frame.shot === "object" ? (frame.shot as Record<string, unknown>) : null;
+    const parts = shot
+      ? [text(shot.size), text(shot.angle), text(shot.light), shot.hero === true ? "hero" : null].filter(
+          (part): part is string => part !== null,
+        )
+      : [];
+    return [
+      {
+        id,
+        image,
+        ref,
+        shot: parts.length > 0 ? clip(parts.join(" · "), 120) : null,
+        verdict: clipOrNull(text(frame.verdict), 20),
+      },
+    ];
+  });
+  if (frames.length === 0) {
+    return null;
+  }
+  return { frames, sheet: imagePath(step.sheet) };
 }

@@ -731,7 +731,7 @@ private struct ChatRows: View {
             }
             if let workflow = session.workflow {
                 // A film's call has its own card; a question read from the director's transcript would repeat it.
-                WorkflowCard(workflow: workflow, session: session)
+                WorkflowCard(workflow: workflow, owner: .session(session))
             } else if session.state == "awaiting_input", let question = session.question {
                 if let plan = question.plan {
                     PlanCard(plan: plan, agentName: agentName, session: session)

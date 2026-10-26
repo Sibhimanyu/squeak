@@ -92,7 +92,7 @@ final class MacInteropTests: XCTestCase {
     func testPresenceSaysWhatThisPhoneReads() throws {
         let key = Data(repeating: 7, count: 32).base64EncodedString()
         let box = try ChannelCrypto.seal(Presence(at: 1, caps: ChannelCrypto.capabilities), key: key)
-        XCTAssertEqual(try ChannelCrypto.open(Presence.self, box: box, key: key).caps, ["z", "split"])
+        XCTAssertEqual(try ChannelCrypto.open(Presence.self, box: box, key: key).caps, ["z", "split", "films"])
     }
 
     func fixture() throws -> Fixture {

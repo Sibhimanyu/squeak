@@ -82,6 +82,42 @@ export interface WorkflowView {
   review?: WorkflowReview;
   /** Set when the phone can only look: this call needs the Mac for now. Says why. */
   macOnly?: string | null;
+  /** The brief's editable form (a v2 run). */
+  brief?: WorkflowBrief;
+  /** The styleframes call: the frames to approve, comment on, or send back (a v2 run). */
+  styleframes?: WorkflowStyleframes;
+  /** "You decide" is offered for this call (a v2 run). */
+  canDecide?: boolean;
+  /** An ask that is a missing-tool ask: the Mac can install the tool. */
+  tool?: { tool: string; label: string } | null;
+}
+
+export interface WorkflowBriefField {
+  key: string;
+  label: string;
+  kind: "text" | "longtext" | "number" | "choice" | "bool";
+  value: string | number | boolean | null;
+  options?: { id: string; label: string }[];
+  min?: number;
+  max?: number;
+}
+
+export interface WorkflowBrief {
+  fields: WorkflowBriefField[];
+  format: { tile: string; option: string; label: string } | null;
+  /** The format catalog, ready and partial options only. */
+  formats: {
+    tile: string;
+    title: string;
+    options: { id: string; label: string; lengthS: number | null; aspect: string | null }[];
+  }[];
+  findings: { text: string; source: string | null }[];
+  captures: { image: string; caption: string | null }[];
+}
+
+export interface WorkflowStyleframes {
+  frames: { id: string; image: string; ref: string | null; shot: string | null; verdict: string | null }[];
+  sheet: string | null;
 }
 
 /** A moment of the animatic or the film, to jump to and to pin a note on. */
@@ -138,6 +174,30 @@ export interface WorkflowAction {
 }
 
 export type WorkflowResult = { ok: true; actionId: string; said: string } | { ok: false; reason: string };
+
+/** What a film's director is doing, from its own event log and its process. */
+export type DirectorState = "running" | "frozen" | "stopped" | "crashed" | "finished" | "none";
+
+/** A RasanAI film as the phone lists it, independent of any chat session (phone view key `films`). */
+export interface PhoneFilm {
+  /** "film:" + the first 16 hex of sha256(realpath(projectDir)). */
+  id: string;
+  title: string;
+  updatedAt: string;
+  progress: WorkflowProgress | null;
+  director: { state: DirectorState; since: string | null; detail: string | null };
+  /** The waiting call, in the same shape as a chat's card. */
+  card: WorkflowView | null;
+  /** This phone's answers the director has not read yet (chat messages are in `chat`, as pending). */
+  pending: { id: string; type: string; said: string; t: string }[];
+  chat: { id: string; who: "you" | "rasan"; text: string; t: string | null; state: "sent" | "pending" | null }[];
+  canChat: boolean;
+  canResume: boolean;
+  canStop: boolean;
+  sessionKey: string | null;
+  poster: string | null;
+  engineNote: string | null;
+}
 
 /** Where a workflow's film stands, whether or not it waits on the human. Read-only: nothing is answered through it. */
 export interface WorkflowProgress {

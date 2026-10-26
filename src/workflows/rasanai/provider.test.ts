@@ -315,6 +315,19 @@ describe("workflow progress", () => {
     expect(marked?.workflowProgress?.calls.map((c) => c.state)).toEqual(["done", "done", "now", "next", "next"]);
   });
 
+  it("moves on to the story once the brief is done and the director works on", () => {
+    const { projectDir } = project((s) => {
+      s.current = "brief";
+      s.steps = { brief: { status: "done", sent: { type: "submit" }, updated: "2026-10-14T16:44:00.000Z" } };
+      s.ask = null;
+      s.updated = "2026-10-14T16:44:00.000Z";
+      s.working = { msg: "Script desk: writing three scripts", t: "2026-10-14T16:44:30.000Z" };
+    });
+    const [marked] = new RasanaiProvider({ now: () => NOW }).annotate([director(projectDir)]);
+    expect(marked?.workflowProgress).toMatchObject({ call: "story", waiting: false });
+    expect(marked?.workflowProgress?.calls.map((c) => c.state)).toEqual(["done", "now", "next", "next", "next"]);
+  });
+
   it("gives a stale run none", () => {
     const { projectDir } = project((s) => {
       s.current = "brief";
@@ -419,7 +432,16 @@ describe("RasanaiProvider.act", () => {
         value: "wild",
       }).ok,
     ).toBe(true);
-    const newer = project(() => {}, { console: { headless: true, external_actions: 2 } });
+    const v2 = project(() => {}, { console: { headless: true, external_actions: 2 } });
+    expect(
+      provider.act(v2.projectDir, {
+        step: "story",
+        revision: revisionOf(v2.projectDir),
+        type: "choose",
+        value: "wild",
+      }).ok,
+    ).toBe(true);
+    const newer = project(() => {}, { console: { headless: true, external_actions: 3 } });
     expect(
       provider.act(newer.projectDir, {
         step: "story",

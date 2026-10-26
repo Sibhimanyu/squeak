@@ -23,7 +23,7 @@ final class AppModel {
     }
 
     private(set) var phase: Phase = .unpaired
-    private(set) var snapshot: PhoneSnapshot? { didSet { remember(snapshot); settleStarting(snapshot) } }
+    private(set) var snapshot: PhoneSnapshot? { didSet { remember(snapshot); settleStarting(snapshot); settleFilmChat() } }
     /// A chat the Mac accepted, until it shows up in the snapshot (the row's "Starting…").
     private(set) var startingChat: StartingChat?
 
@@ -151,7 +151,7 @@ final class AppModel {
     let demo: Bool
 
     init() {
-        demo = ProcessInfo.processInfo.arguments.contains("-squeak-demo")
+        demo = ProcessInfo.processInfo.arguments.contains("-squeak-demo") || ProcessInfo.processInfo.arguments.contains("-squeak-demo-films")
         signer = demo ? SoftwareSigner() : KeyStore.signer()
         historyStore = demo ? nil : HistoryStore()
         if let historyStore {
@@ -1061,8 +1061,56 @@ final class AppModel {
     /// notes, approving and rendering do not.
     func act(on session: PhoneSnapshot.Session, type: String, value: WorkflowCommand.Value?, note: String? = nil) async -> (delivered: Bool, line: String) {
         guard let workflow = session.workflow else { return (false, "That isn't waiting on you any more.") }
+        return await act(on: .session(session), workflow: workflow, type: type, value: value, note: note)
+    }
+
+    /// The same for a call on either kind of card: a chat's film card, or a film of its own.
+    func act(on owner: WorkflowOwner, workflow: Workflow, type: String, value: WorkflowCommand.Value?, note: String? = nil) async -> (delivered: Bool, line: String) {
+        switch owner {
+        case let .film(film):
+            return await act(on: film, workflow: workflow, type: type, value: JSONValue(value), note: note)
+        case let .session(session):
+            if type != "comment" {
+                guard await confirmWithBiometrics(reason: "Answer \(workflow.title ?? "your film")") else { return (false, "") }
+            }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            if demo {
+                try? await Task.sleep(for: .seconds(1))
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                return (true, "Sent to RasanAI")
+            }
+            guard let channel else { return (false, "Not connected to your Mac.") }
+            do {
+                let (id, document) = try channel.workflowDocument(
+                    sessionKey: session.key, workflow: workflow, type: type, value: value, note: note, signer: signer)
+                try await channel.send(document, id: id)
+                guard let result = try await awaitResult(id, on: channel) else {
+                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                    return (false, "Your Mac didn't confirm it. Check the film before answering again.")
+                }
+                guard result.sent else {
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    return (false, result.reason ?? "Your Mac couldn't send that to RasanAI.")
+                }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                return (true, (result.said ?? "Sent") + " · RasanAI picks it up from here")
+            } catch {
+                return (false, "Couldn't reach your Mac.")
+            }
+        }
+    }
+
+    /* ---------- films (RasanAI, independent of any chat) ---------- */
+
+    /// The film as the Mac last said it.
+    func film(_ id: String) -> PhoneFilm? { snapshot?.film(id) }
+
+    /// Answer a film's waiting call (a brief's form, a pick, a styleframe verdict, a question): signed, with the
+    /// step and revision the phone saw, so the Mac refuses it if the call has moved on. Face ID first, except for a
+    /// comment, which leaves the call open.
+    func act(on film: PhoneFilm, workflow: Workflow, type: String, value: JSONValue?, note: String? = nil) async -> (delivered: Bool, line: String) {
         if type != "comment" {
-            guard await confirmWithBiometrics(reason: "Answer \(workflow.title ?? "your film")") else { return (false, "") }
+            guard await confirmWithBiometrics(reason: "Answer \(film.title)") else { return (false, "") }
         }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if demo {
@@ -1070,24 +1118,101 @@ final class AppModel {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             return (true, "Sent to RasanAI")
         }
+        return await sendFilm(film, op: .answer, step: workflow.step, revision: workflow.revision, type: type, value: value, note: note) { $0 ?? "Sent" }
+    }
+
+    /// Send one signed film command and wait for the Mac's word. `said` turns the Mac's own sentence (if any) into the line shown.
+    private func sendFilm(
+        _ film: PhoneFilm, op: FilmCommand.Op, step: String? = nil, revision: String? = nil, type: String? = nil,
+        value: JSONValue? = nil, note: String? = nil, text: String? = nil, askId: String? = nil, tool: String? = nil,
+        line said: (String?) -> String
+    ) async -> (delivered: Bool, line: String) {
         guard let channel else { return (false, "Not connected to your Mac.") }
         do {
-            let (id, document) = try channel.workflowDocument(
-                sessionKey: session.key, workflow: workflow, type: type, value: value, note: note, signer: signer)
+            let (id, document) = try channel.filmDocument(
+                filmId: film.id, op: op, step: step, revision: revision, type: type, value: value, note: note,
+                text: text, askId: askId, tool: tool, signer: signer)
             try await channel.send(document, id: id)
-            guard let result = try await awaitResult(id, on: channel) else {
+            guard let result = try await awaitResult(id, on: channel, within: op == .resume || op == .stop ? 40 : 30) else {
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
-                return (false, "Your Mac didn't confirm it. Check the film before answering again.")
+                return (false, "Your Mac didn't confirm it. Check the film before trying again.")
             }
             guard result.sent else {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 return (false, result.reason ?? "Your Mac couldn't send that to RasanAI.")
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            return (true, (result.said ?? "Sent") + " · RasanAI picks it up from here")
+            return (true, said(result.said ?? result.note))
         } catch {
             return (false, "Couldn't reach your Mac.")
         }
+    }
+
+    /// What was typed to Rasan on this phone and the Mac's thread does not show yet, per film.
+    private(set) var filmChatLocal: [String: [FilmChat.Local]] = [:]
+
+    /// The Ask Rasan thread as it reads now: the Mac's lines, then what is still on its way.
+    func filmChatRows(_ film: PhoneFilm) -> [FilmChat.Row] {
+        FilmChat.rows(server: film.chat, local: filmChatLocal[film.id] ?? [])
+    }
+
+    /// Drop typed lines the Mac's thread has caught up with; called when a view of the film arrives.
+    func settleFilmChat() {
+        for film in snapshot?.films ?? [] {
+            guard let local = filmChatLocal[film.id] else { continue }
+            let kept = FilmChat.settled(server: film.chat, local: local)
+            if kept != local { filmChatLocal[film.id] = kept.isEmpty ? nil : kept }
+        }
+    }
+
+    /// Say something to Rasan (the director's Ask Rasan chat). The line shows at once and stays until the Mac's
+    /// thread has it; a failure keeps it, with the reason and a way to send it again.
+    func sendFilmChat(_ film: PhoneFilm, text: String, retrying: UUID? = nil) async {
+        let words = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000))
+        guard !words.isEmpty else { return }
+        var list = filmChatLocal[film.id] ?? []
+        let id: UUID
+        if let retrying, let i = list.firstIndex(where: { $0.id == retrying }) {
+            id = retrying; list[i].state = .sending
+        } else {
+            let item = FilmChat.Local(text: words); id = item.id; list.append(item)
+        }
+        filmChatLocal[film.id] = list
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        func mark(_ state: FilmChat.Local.State) {
+            guard var list = filmChatLocal[film.id], let i = list.firstIndex(where: { $0.id == id }) else { return }
+            list[i].state = state
+            filmChatLocal[film.id] = list
+        }
+        if demo {
+            try? await Task.sleep(for: .milliseconds(700))
+            mark(.sent)
+            return
+        }
+        let outcome = await sendFilm(film, op: .chat, text: words) { $0 ?? "Sent" }
+        mark(outcome.delivered ? .sent : .failed(outcome.line.isEmpty ? "Couldn't send it." : outcome.line))
+    }
+
+    /// Wake the film's director (resume or thaw) or stop it, as RasanAI Studio's buttons do. Returns the line to show.
+    func filmDirector(_ film: PhoneFilm, resume: Bool) async -> (delivered: Bool, line: String) {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if demo {
+            try? await Task.sleep(for: .seconds(1))
+            return (true, resume ? "Waking the director." : "Stopped.")
+        }
+        return await sendFilm(film, op: resume ? .resume : .stop) { $0 ?? (resume ? "Waking the director." : "Stopped.") }
+    }
+
+    /// Have the Mac install the tool a missing-tool question asks for, then answer it. Can take minutes; the
+    /// Mac says "Installing …" at once and reports the finish itself.
+    func installTool(_ film: PhoneFilm, workflow: Workflow, tool: Workflow.ToolAsk) async -> (delivered: Bool, line: String) {
+        guard await confirmWithBiometrics(reason: "Install \(tool.label) on your Mac") else { return (false, "") }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if demo {
+            try? await Task.sleep(for: .seconds(1))
+            return (true, "Installing \(tool.label)…")
+        }
+        return await sendFilm(film, op: .installTool, askId: workflow.ask?.id, tool: tool.tool) { $0 ?? "Installing \(tool.label)…" }
     }
 
     func refreshUsage() async -> String {
@@ -1578,7 +1703,24 @@ final class AppModel {
         let size: CGSize
         if source.contains("-portrait") { size = CGSize(width: 600, height: 1300) }
         else if source.contains("-wide") { size = CGSize(width: 1600, height: 700) }
+        else if source.hasPrefix("demo/") { size = CGSize(width: 960, height: 540) }
         else { return nil }
+        // A film's demo pictures: a soft gradient of its own colours, named, so a grid of them tells apart.
+        if source.hasPrefix("demo/") {
+            let name = (source as NSString).lastPathComponent.replacingOccurrences(of: ".png", with: "")
+            let seed = name.unicodeScalars.reduce(7) { ($0 &* 31 &+ Int($1.value)) % 360 }
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+                let a = UIColor(hue: CGFloat(seed) / 360, saturation: 0.45, brightness: 0.75, alpha: 1).cgColor
+                let b = UIColor(hue: CGFloat((seed + 40) % 360) / 360, saturation: 0.55, brightness: 0.35, alpha: 1).cgColor
+                let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [a, b] as CFArray, locations: [0, 1])!
+                ctx.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+                let label = name as NSString
+                let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 54, weight: .semibold), .foregroundColor: UIColor.white.withAlphaComponent(0.9)]
+                let textSize = label.size(withAttributes: attrs)
+                label.draw(at: CGPoint(x: (size.width - textSize.width) / 2, y: (size.height - textSize.height) / 2), withAttributes: attrs)
+            }
+        }
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
         return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             let colors = [UIColor(red: 0.98, green: 0.78, blue: 0.2, alpha: 1).cgColor, UIColor(red: 0.2, green: 0.45, blue: 0.9, alpha: 1).cgColor]
@@ -1594,20 +1736,39 @@ final class AppModel {
     /// An image the chat's agent showed, from the Mac (read-only, so no Face ID). Kept in memory
     /// only, never written to the phone.
     func loadImage(_ session: PhoneSnapshot.Session, source: String) async -> ImageAnswer {
-        let cacheKey = session.key + "\u{1}" + source
+        // A picture on a film's card is named by the session's key; a chat's, by its Conductor id.
+        let cardKey = session.workflow != nil ? session.key : nil
+        return await fetchImage(
+            cacheKey: session.key + "\u{1}" + source, source: source,
+            sessionId: session.conductorSessionId ?? (cardKey == nil ? nil : ""), sessionKey: cardKey, filmId: nil)
+    }
+
+    /// A picture on a card, whichever it belongs to: a chat's film card (named by the session's key) or a film
+    /// of its own (named by the film's id).
+    func loadImage(_ owner: WorkflowOwner, source: String) async -> ImageAnswer {
+        switch owner {
+        case let .session(session): return await loadImage(session, source: source)
+        case let .film(film): return await loadImage(film: film, source: source)
+        }
+    }
+
+    /// A film's own picture (poster, a call's images), by the film's id: no session at all.
+    func loadImage(film: PhoneFilm, source: String) async -> ImageAnswer {
+        await fetchImage(cacheKey: film.id + "\u{1}" + source, source: source, sessionId: "", sessionKey: nil, filmId: film.id)
+    }
+
+    private func fetchImage(cacheKey: String, source: String, sessionId: String?, sessionKey: String?, filmId: String?) async -> ImageAnswer {
         if let hit = images[cacheKey] { return .image(hit) }
         if demo {
             try? await Task.sleep(for: .milliseconds(400))
             if let shaped = Self.demoPicture(source) { return .image(shaped) }
             return UIImage(named: "duck-asleep", in: .module, with: nil).map(ImageAnswer.image) ?? .refused("No demo image.")
         }
-        // A picture on a film's card is named by the session's key; a chat's, by its Conductor id.
-        let cardKey = session.workflow != nil ? session.key : nil
-        guard let channel, let sessionId = session.conductorSessionId ?? cardKey.map({ _ in "" }) else { return .refused("Not connected to your Mac.") }
+        guard let channel, let sessionId else { return .refused("Not connected to your Mac.") }
         do {
             let signer = signer
             let (id, document) = try await Task.detached(priority: .userInitiated) {
-                try channel.imageDocument(sessionId: sessionId, sessionKey: cardKey, source: source, signer: signer)
+                try channel.imageDocument(sessionId: sessionId, sessionKey: sessionKey, filmId: filmId, source: source, signer: signer)
             }.value
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else { return .refused("Your Mac didn't answer. Is Squeak running?") }
@@ -1616,7 +1777,7 @@ final class AppModel {
             guard let decoded else { return .refused("That image arrived damaged.") }
             images[cacheKey] = decoded
             imageOrder.append(cacheKey)
-            if imageOrder.count > 24 { images[imageOrder.removeFirst()] = nil }
+            if imageOrder.count > 36 { images[imageOrder.removeFirst()] = nil }
             return .image(decoded)
         } catch {
             return .refused("Couldn't reach your Mac.")
@@ -1630,13 +1791,17 @@ final class AppModel {
     /// What a film's card plays, as a phone copy: the Mac converts it and leaves it in the channel in
     /// sealed chunks; this fetches them, checks the hash, and keeps the file in Caches by its hash.
     /// Read-only, so no Face ID. Converting and uploading take a while on a slow link (5 MB took ~110 s at 50 KB/s), so this waits up to 5 minutes.
-    func loadMedia(_ session: PhoneSnapshot.Session, source: String) async -> MediaAnswer {
+    func loadMedia(_ owner: WorkflowOwner, source: String) async -> MediaAnswer {
         if demo { return .refused("Films play from your Mac, not in the demo.") }
         guard let channel else { return .refused("Not connected to your Mac.") }
         do {
             let signer = signer
+            let (sessionKey, filmId): (String?, String?) = switch owner {
+            case let .session(session): (session.key, nil)
+            case let .film(film): (nil, film.id)
+            }
             let (id, document) = try await Task.detached(priority: .userInitiated) {
-                try channel.mediaDocument(sessionKey: session.key, source: source, signer: signer)
+                try channel.mediaDocument(sessionKey: sessionKey, filmId: filmId, source: source, signer: signer)
             }.value
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel, within: 300) else {

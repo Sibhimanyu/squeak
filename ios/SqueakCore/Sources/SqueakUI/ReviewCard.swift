@@ -11,7 +11,8 @@ import SwiftUI
 /// Everything here is the director's text: plain text only.
 struct ReviewCard: View {
     let review: Workflow.Review
-    let session: PhoneSnapshot.Session
+    let owner: WorkflowOwner
+    let workflow: Workflow
     @Environment(AppModel.self) private var model
     @State private var player = ReviewPlayer()
     @State private var loading = false
@@ -75,7 +76,7 @@ struct ReviewCard: View {
             loading = true
             loadProblem = nil
             Task {
-                switch await model.loadMedia(session, source: media.source) {
+                switch await model.loadMedia(owner, source: media.source) {
                 case let .file(url): player.load(url, video: media.kind == "video")
                 case let .refused(reason): loadProblem = reason
                 }
@@ -126,7 +127,7 @@ struct ReviewCard: View {
                     let on = scene?.id == item.id
                     Button { player.seek(item.start) } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            SceneThumb(source: item.thumb, session: session) { image in
+                            SceneThumb(source: item.thumb, owner: owner) { image in
                                 if let source = item.thumb { stills[source] = image }
                             }
                             .frame(width: 96, height: 64)
@@ -291,7 +292,7 @@ struct ReviewCard: View {
     private func send(type: String, value: WorkflowCommand.Value?, note: String? = nil, then done: @escaping () -> Void) {
         sending = true
         Task {
-            let outcome = await model.act(on: session, type: type, value: value, note: note)
+            let outcome = await model.act(on: owner, workflow: workflow, type: type, value: value, note: note)
             sending = false
             if !outcome.line.isEmpty { line = (outcome.delivered, outcome.line) }
             if outcome.delivered { done() }
@@ -429,7 +430,7 @@ private struct ReviewSurface: UIViewRepresentable {
 private struct SceneThumb: View {
     @Environment(AppModel.self) private var model
     let source: String?
-    let session: PhoneSnapshot.Session
+    let owner: WorkflowOwner
     let loaded: (UIImage) -> Void
     @State private var image: UIImage?
 
@@ -440,7 +441,7 @@ private struct SceneThumb: View {
         }
         .task(id: source) {
             guard let source, image == nil else { return }
-            if case let .image(found) = await model.loadImage(session, source: source) {
+            if case let .image(found) = await model.loadImage(owner, source: source) {
                 image = found
                 loaded(found)
             }

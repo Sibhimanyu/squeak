@@ -66,6 +66,7 @@ import { RtdbRest } from "../remote/rtdb-rest.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
 import { LocalAdvertiser, LocalChannelServer } from "../remote/local-channel.js";
 import { MirrorStore } from "../remote/mirror-store.js";
+import { FilmService } from "../workflows/rasanai/films.js";
 import { RasanaiProvider } from "../workflows/rasanai/provider.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
@@ -134,6 +135,12 @@ export class SqueakApp {
   private readonly runtime: FleetRuntime;
   /** RasanAI films waiting on a call, answered the way RasanAI Studio does (src/workflows/rasanai/). */
   private readonly rasanai = new RasanaiProvider();
+  /** The same films as phone-listed projects, independent of chat sessions: liveness, chat, resume and stop. */
+  private readonly films = new FilmService({
+    provider: this.rasanai,
+    extraDirs: () =>
+      this.runtime?.monitor.snapshot.sessions.flatMap((session) => (session.cwd ? [session.cwd] : [])) ?? [],
+  });
   private readonly controller: FleetController;
   private readonly replier: ConductorReplier;
   /** The loopback relay into Conductor's composer; inert until set up. */
@@ -293,7 +300,7 @@ export class SqueakApp {
       redact: config.botToken ? [config.botToken] : [],
     });
     this.runtime = createFleetRuntime({
-      workflows: this.rasanai,
+      workflows: this.films,
       conductorDbPath: config.conductorDbPath,
       workspacesRoot: config.workspacesRoot,
       defaultFallbackModel: config.defaultFallbackModel,
@@ -400,6 +407,7 @@ export class SqueakApp {
             image: (source, cwd) => readPhoneImage(source, cwd),
             // A film waiting on a call (RasanAI): its card, and the answer.
             workflow: this.rasanai,
+            films: this.films,
             // Its film or soundtrack as a phone copy (avconvert / afconvert), cached beside Squeak's state.
             media: (source, cwd) =>
               preparePhoneMedia(source, cwd, { cacheDir: path.join(config.supportDir, "media-cache") }),

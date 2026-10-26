@@ -310,11 +310,11 @@ public struct Channel: Sendable {
     }
 
     /// The signed document asking for an image a chat's agent showed.
-    public func imageDocument(sessionId: String, sessionKey: String? = nil, source: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+    public func imageDocument(sessionId: String, sessionKey: String? = nil, filmId: String? = nil, source: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = ImageCommand(
-            v: 1, kind: "image", sessionId: sessionId, sessionKey: sessionKey, source: source,
+            v: 1, kind: "image", sessionId: sessionId, sessionKey: sessionKey, filmId: filmId, source: source,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )
@@ -333,6 +333,26 @@ public struct Channel: Sendable {
         let command = WorkflowCommand(
             v: 1, kind: "workflow", sessionKey: sessionKey, step: workflow.step, revision: workflow.revision,
             type: type, value: value, note: note,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// The signed document for a film (RasanAI), independent of any chat: answer its waiting call (`step` and
+    /// `revision` name the call as the phone saw it), talk to Rasan, wake or stop the director, or install a tool.
+    public func filmDocument(
+        filmId: String, op: FilmCommand.Op, step: String? = nil, revision: String? = nil, type: String? = nil,
+        value: JSONValue? = nil, note: String? = nil, text: String? = nil, askId: String? = nil, tool: String? = nil,
+        signer: CommandSigner, now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = FilmCommand(
+            v: 1, kind: "film", filmId: filmId, op: op, step: step, revision: revision, type: type, value: value,
+            note: note, text: text, askId: askId, tool: tool,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )
@@ -404,11 +424,11 @@ public struct Channel: Sendable {
     }
 
     /// The signed document asking for what a film's card plays.
-    public func mediaDocument(sessionKey: String, source: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+    public func mediaDocument(sessionKey: String? = nil, filmId: String? = nil, source: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = MediaCommand(
-            v: 1, kind: "media", sessionKey: sessionKey, source: source,
+            v: 1, kind: "media", sessionKey: sessionKey, filmId: filmId, source: source,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

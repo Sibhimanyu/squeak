@@ -118,6 +118,55 @@ enum NeedsYou {
         Presentation.newestFirst(sessions.filter(\.needsYou))
     }
 
+    /// One thing on the page: a chat, or a film (RasanAI) waiting on its call. A film has no chat of its own on this
+    /// page: the director's session it names is dropped, since the film's card stands for it.
+    enum Entry: Equatable, Identifiable {
+        case session(PhoneSnapshot.Session)
+        case film(PhoneFilm)
+
+        var id: String {
+            switch self {
+            case .session(let session): session.key
+            case .film(let film): film.id
+            }
+        }
+        var date: Date? {
+            switch self {
+            case .session(let session): Age.date(session.lastActivityAt)
+            case .film(let film): Age.date(film.updatedAt)
+            }
+        }
+    }
+
+    /// Films waiting on a call, newest first.
+    static func waitingFilms(_ films: [PhoneFilm]) -> [PhoneFilm] {
+        films.filter(\.waitingOnYou).sorted { a, b in
+            let x = Age.date(a.updatedAt), y = Age.date(b.updatedAt)
+            if let x, let y, x != y { return x > y }
+            return a.title < b.title
+        }
+    }
+
+    /// Everything that waits on you, newest first by last activity: chats and films together.
+    static func entries(sessions: [PhoneSnapshot.Session], films: [PhoneFilm]) -> [Entry] {
+        let waiting = waitingFilms(films)
+        let stood = Set(waiting.compactMap(\.sessionKey))
+        let all = sessions.filter(\.needsYou).filter { !stood.contains($0.key) }.map(Entry.session) + waiting.map(Entry.film)
+        return all.sorted { a, b in
+            switch (a.date, b.date) {
+            case let (x?, y?) where x != y: return x > y
+            case (nil, _?): return false
+            case (_?, nil): return true
+            default: return a.id < b.id
+            }
+        }
+    }
+
+    /// The Needs you tab's badge.
+    static func count(sessions: [PhoneSnapshot.Session], films: [PhoneFilm]) -> Int {
+        entries(sessions: sessions, films: films).count
+    }
+
     /// How many cards are full and how many are compact rows: one or two are all full; from three on
     /// the first two are full and the rest wait in rows.
     struct Layout: Equatable {

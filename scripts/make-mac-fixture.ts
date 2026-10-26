@@ -14,6 +14,8 @@ import type { FleetSnapshot } from "../src/fleet/fleet-monitor.js";
 import type { FleetSession } from "../src/fleet/types.js";
 import { RemoteBridge, type ChannelStore } from "../src/remote/remote-bridge.js";
 import { seal } from "../src/remote/remote-crypto.js";
+import { realDirectorDeps } from "../src/workflows/rasanai/director.js";
+import { FilmService } from "../src/workflows/rasanai/films.js";
 import { RasanaiProvider } from "../src/workflows/rasanai/provider.js";
 
 const out = path.resolve("ios/SqueakCore/Tests/SqueakCoreTests/Fixtures/mac-made.json");
@@ -90,6 +92,40 @@ const [director, animaticDirector] = rasanai.annotate([
     title: null,
   }),
 ]);
+
+// A film, independent of any chat: its brief waiting (a v2 run, from a trimmed real run), its director stopped
+// with an engine that can resume it, a message to Rasan waiting to be read, and the thread so far.
+const filmsRoot = "/tmp/squeak-mac-fixture";
+fs.rmSync(filmsRoot, { recursive: true, force: true });
+const briefDir = path.join(filmsRoot, "films", "26keys");
+const briefRun = path.join(briefDir, ".rasanai", "run-1");
+const engineDir = path.join(filmsRoot, "engine");
+fs.mkdirSync(briefRun, { recursive: true });
+fs.mkdirSync(path.join(engineDir, "scripts"), { recursive: true });
+fs.writeFileSync(path.join(engineDir, "SKILL.md"), "---\nname: rasanai\n---\n");
+fs.writeFileSync(path.join(engineDir, "scripts", "director.mjs"), "console.log(JSON.stringify({ ok: true }));\n");
+const brief = JSON.parse(fs.readFileSync("src/workflows/rasanai/fixtures/26keys-brief.json", "utf8"));
+fs.writeFileSync(path.join(briefDir, ".rasanai", "current"), "run-1");
+fs.writeFileSync(path.join(briefRun, "session.json"), JSON.stringify(brief));
+fs.writeFileSync(
+  path.join(briefRun, "console.json"),
+  JSON.stringify({ headless: true, external_actions: 2, skill: engineDir }),
+);
+fs.writeFileSync(
+  path.join(briefRun, "director-events.jsonl"),
+  `${JSON.stringify({ t: "2026-10-26T07:17:37.532Z", event: "start", pid: 1341 })}\n${JSON.stringify({ t: "2026-10-26T07:33:56.642Z", event: "exit", code: 130, stopped: true })}\n`,
+);
+fs.writeFileSync(
+  path.join(briefRun, "actions.jsonl"),
+  `${JSON.stringify({ id: "sqfixture1", ts: "2026-10-26T07:40:00.000Z", step: "brief", type: "note", value: { chat: { rules: "r", max_sentences: 3, max_tool_calls: 3, context: { step: "brief" } } }, note: "What is it doing?", source: "squeak-phone" })}\n`,
+);
+const filmNow = () => Date.parse("2026-10-26T08:00:00.000Z");
+const films = new FilmService({
+  provider: new RasanaiProvider({ now: filmNow }),
+  roots: [path.join(filmsRoot, "films")],
+  now: filmNow,
+  director: { engineRoots: [filmsRoot], run: realDirectorDeps.run },
+});
 
 const sessions = [
   session({}),
@@ -184,6 +220,7 @@ const bridge = new RemoteBridge({
         }
       : null,
   workflow: rasanai,
+  films,
   // The awake session as the daemon reports it, so the phone's tests decode the real fields.
   awake: {
     state: () => null,
@@ -199,6 +236,8 @@ const bridge = new RemoteBridge({
 
 const pairingURL = bridge.startPairing().url;
 const key = JSON.parse(Buffer.from(new URL(pairingURL).searchParams.get("d")!, "base64url").toString()).k as string;
+// The phone in front of this Mac reads films: its presence would say so.
+(bridge as unknown as { phoneCaps: string[] }).phoneCaps = ["films"];
 const view = bridge.phoneView();
 const parts = bridge.phoneViewParts();
 const z = { compress: true };
@@ -273,6 +312,7 @@ fs.writeFileSync(
 fs.rmSync(dir, { recursive: true, force: true });
 fs.rmSync(filmDir, { recursive: true, force: true });
 fs.rmSync(animaticDir, { recursive: true, force: true });
+fs.rmSync(filmsRoot, { recursive: true, force: true });
 console.log(`wrote ${out}`);
 console.log(
   JSON.stringify(

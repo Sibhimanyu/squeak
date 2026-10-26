@@ -6,10 +6,17 @@ import { appendAction, newActionId, pendingActions } from "./actions.js";
 import type { LockDeps } from "./actions.js";
 import {
   acceptsExternalActions,
+  checkBriefSubmit,
   choosableIds,
+  isFinished,
+  isV2,
   QUICK_NOTES,
   readRasanaiRun,
   reviewOf,
+  styleframesView,
+  TOOL_READY_PREFIX,
+  toolOfAsk,
+  V2_ONLY_NOTE,
   viewImages,
   viewMedia,
   waitingStatus,
@@ -23,6 +30,39 @@ const NOTE_MAX = 4_000;
 const PENDING_NOTES_MAX = 20;
 /** "Three more" sends the crew back to work, so one per film per this long. */
 const MORE_MIN_GAP_MS = 30_000;
+
+/** Longest message to Rasan, in characters. */
+export const CHAT_MAX = 2_000;
+const CHAT_PENDING_MAX = 5;
+const CHAT_EVENTS_MAX = 5;
+const CHAT_LINE_MAX = 160;
+
+/**
+ * The standing instruction Studio sends with every chat message (DirectorChatRules.swift), naming this app
+ * as the person's place. The limits are the same: three sentences, three tool calls.
+ */
+export const CHAT_RULES =
+  "This is a chat message from the person in Squeak on their iPhone. Answer it with console.mjs reply on the same step, " +
+  "in at most 3 short sentences, unless they clearly asked for detail. Answer only what they asked, " +
+  "using the context packet first. Never recap the whole film or its history. Use at most 3 tool calls " +
+  "to find the answer before you reply; if that is not enough, say what you know and what you would check next. " +
+  "Then go back to the step you were on.";
+
+export interface ChatContext {
+  /** Why the director is not running, when it is not ("Exited with code 1."). */
+  lastError?: string | null;
+}
+
+/** A pending line that is a chat message, not an answer. */
+export function isChat(line: { type?: unknown; value?: unknown }): boolean {
+  const value = line.value as { chat?: unknown } | null | undefined;
+  return line.type === "note" && Boolean(value && typeof value === "object" && value.chat);
+}
+
+function clipLine(value: string): string {
+  const plain = value.replace(/\s+/g, " ").trim();
+  return plain.length > CHAT_LINE_MAX ? `${plain.slice(0, CHAT_LINE_MAX - 1)}…` : plain;
+}
 
 export interface RasanaiProviderOptions {
   now?: () => number;
@@ -114,9 +154,11 @@ export class RasanaiProvider {
 
   /**
    * Check an answer against the film as it is on disk now, never against
-   * what the phone saw, then hand it to the director.
+   * what the phone saw, then hand it to the director. `toolReady` names a tool
+   * Squeak itself just installed for an open missing-tool ask: the only way
+   * `tool-ready:<tool>` is ever sent, never taken from a phone.
    */
-  act(projectDir: string, action: WorkflowAction): WorkflowResult {
+  act(projectDir: string, action: WorkflowAction, options: { toolReady?: string } = {}): WorkflowResult {
     const run = readRasanaiRun(projectDir);
     if (!run) {
       return { ok: false, reason: "That film isn't on this Mac any more." };
@@ -124,9 +166,10 @@ export class RasanaiProvider {
     if (!acceptsExternalActions(run)) {
       return {
         ok: false,
-        reason: run.headless
-          ? "This film's RasanAI is newer than Squeak. Update Squeak on your Mac."
-          : "This film's console is open in a browser. Answer it there, or update RasanAI.",
+        reason:
+          run.externalActions !== null || run.headless
+            ? "This film's RasanAI is newer than Squeak. Update Squeak on your Mac."
+            : "This film's console is open in a browser. Answer it there, or update RasanAI.",
       };
     }
     const status = waitingStatus(run, this.now());
@@ -139,16 +182,17 @@ export class RasanaiProvider {
     // Notes pile up while you watch; anything else closes the call, so one at a time,
     // and never while notes it should include are still on their way.
     const pending = pendingActions(run.runDir, status.step);
-    if (action.type === "comment" ? pending.length >= PENDING_NOTES_MAX : pending.length > 0) {
+    const keepsWaiting = action.type === "comment" || action.type === "note";
+    if (keepsWaiting ? pending.length >= PENDING_NOTES_MAX : pending.length > 0) {
       return {
         ok: false,
-        reason: pending.every((line) => line.type === "comment")
+        reason: pending.every((line) => line.type === "comment" || line.type === "note")
           ? "Your notes are still on their way to RasanAI. Try again in a moment."
           : "An answer is already on its way. RasanAI hasn't read it yet.",
       };
     }
     const note = typeof action.note === "string" ? action.note.trim().slice(0, NOTE_MAX) : "";
-    const built = this.build(run, status, action, note);
+    const built = this.build(run, status, action, note, options.toolReady ?? null);
     if (!built.ok) {
       return built;
     }
@@ -158,7 +202,7 @@ export class RasanaiProvider {
       {
         id,
         ts: new Date(this.now()).toISOString(),
-        step: status.step,
+        step: built.step ?? status.step,
         type: built.type,
         value: built.value,
         note: built.note,
@@ -176,12 +220,86 @@ export class RasanaiProvider {
     return { ok: true, actionId: id, said: built.said };
   }
 
+  /**
+   * A message to Rasan (the film's chat). A v2 run takes it on the current step whether or not that waits,
+   * as a `note` carrying Studio's own chat packet (`value.chat`: the rules, the limits, a small context),
+   * which the director answers with `console.mjs reply` into `steps.<step>.thread`. A v1 run takes only a
+   * plain note, and only while it waits.
+   */
+  chat(projectDir: string, message: string, context: ChatContext = {}): WorkflowResult {
+    const run = readRasanaiRun(projectDir);
+    if (!run) {
+      return { ok: false, reason: "That film isn't on this Mac any more." };
+    }
+    if (!acceptsExternalActions(run)) {
+      return { ok: false, reason: "This film's RasanAI can't take a message from a phone. Update RasanAI Studio." };
+    }
+    const text = message.trim().slice(0, CHAT_MAX);
+    if (!text) {
+      return { ok: false, reason: "Write a message first." };
+    }
+    if (isFinished(run)) {
+      return { ok: false, reason: "This film is finished." };
+    }
+    const nowMs = this.now();
+    let step: string;
+    let value: unknown = null;
+    if (isV2(run)) {
+      step = typeof run.session.current === "string" ? run.session.current : "";
+      if (!step) {
+        return { ok: false, reason: "RasanAI hasn't started this film yet." };
+      }
+      const waiting = waitingStatus(run, nowMs);
+      const events = (Array.isArray(run.session.activity) ? run.session.activity : [])
+        .slice(-CHAT_EVENTS_MAX)
+        .flatMap((entry) => (typeof entry?.msg === "string" && entry.msg.trim() ? [clipLine(entry.msg)] : []));
+      value = {
+        chat: {
+          rules: CHAT_RULES,
+          max_sentences: 3,
+          max_tool_calls: 3,
+          context: {
+            step,
+            ...(waiting ? { looking_at: clipLine(waiting.prompt) } : {}),
+            ...(context.lastError ? { last_error: clipLine(context.lastError) } : {}),
+            ...(events.length > 0 ? { recent_events: events } : {}),
+          },
+        },
+      };
+    } else {
+      const waiting = waitingStatus(run, nowMs);
+      if (!waiting) {
+        return { ok: false, reason: "RasanAI isn't waiting on you. Ask again when it is." };
+      }
+      step = waiting.step;
+    }
+    const pending = pendingActions(run.runDir, step);
+    if (pending.filter((line) => isChat(line)).length >= CHAT_PENDING_MAX) {
+      return { ok: false, reason: "Rasan is still reading your earlier messages." };
+    }
+    if (pending.length >= PENDING_NOTES_MAX) {
+      return { ok: false, reason: "RasanAI hasn't read what you already sent." };
+    }
+    const id = newActionId();
+    const written = appendAction(
+      run.runDir,
+      { id, ts: new Date(nowMs).toISOString(), step, type: "note", value, note: text, source: "squeak-phone" },
+      this.lockDeps,
+    );
+    return written
+      ? { ok: true, actionId: id, said: "Sent to Rasan" }
+      : { ok: false, reason: "RasanAI is busy writing. Try again in a moment." };
+  }
+
   private build(
     run: RasanaiRun,
     status: WorkflowStatus,
     action: WorkflowAction,
     note: string,
-  ): { ok: true; type: string; value: unknown; note: string; said: string } | { ok: false; reason: string } {
+    toolReady: string | null,
+  ):
+    | { ok: true; type: string; value: unknown; note: string; said: string; step?: string }
+    | { ok: false; reason: string } {
     if (status.call === "ask") {
       const ask = run.session.ask!;
       if (action.type !== "answer") {
@@ -191,6 +309,18 @@ export class RasanaiProvider {
       const options = (ask.options ?? []).filter((option) => typeof option?.id === "string");
       const choice = typeof value.choice === "string" ? value.choice : null;
       const option = choice === null ? null : options.find((candidate) => candidate.id === choice);
+      if (choice !== null && toolReady !== null && choice === `${TOOL_READY_PREFIX}${toolReady}`) {
+        if (toolOfAsk(ask)?.tool !== toolReady || !isV2(run)) {
+          return { ok: false, reason: "That isn't one of the choices." };
+        }
+        return {
+          ok: true,
+          type: "answer",
+          value: { ask: ask.id, choice, text: "" },
+          note: "",
+          said: `Installed ${toolReady}`,
+        };
+      }
       if (choice !== null && !option) {
         return { ok: false, reason: "That isn't one of the choices." };
       }
@@ -206,7 +336,41 @@ export class RasanaiProvider {
         said: option ? `Answered: ${option.label ?? option.id}` : "Answered",
       };
     }
-    const review = reviewOf(run, status.step, run.session.steps?.[status.step] ?? {});
+    const step = run.session.steps?.[status.step] ?? {};
+    // Answers every waiting step takes: a plain note (both contracts), "you decide" (v2).
+    if (action.type === "note") {
+      return note
+        ? { ok: true, type: "note", value: null, note, said: "Sent a note" }
+        : { ok: false, reason: "Write a note first." };
+    }
+    if (action.type === "decide" || action.type === "decide-rest") {
+      if (!isV2(run)) {
+        return { ok: false, reason: V2_ONLY_NOTE };
+      }
+      return action.type === "decide"
+        ? { ok: true, type: "decide", value: null, note, said: "Left this one to Rasan" }
+        : { ok: true, type: "decide-rest", value: null, note, said: "Asked Rasan to make the rest", step: "*" };
+    }
+    if (status.step === "brief" && action.type === "submit") {
+      if (!isV2(run)) {
+        return { ok: false, reason: V2_ONLY_NOTE };
+      }
+      const checked = checkBriefSubmit(step, action.value);
+      return checked.ok ? { ok: true, type: "submit", value: checked.value, note, said: "Sent the brief" } : checked;
+    }
+    if (status.step === "styleframes") {
+      const frames = styleframesView(step);
+      if (frames) {
+        return isV2(run)
+          ? buildStyleframes(
+              frames.frames.map((frame) => frame.id),
+              action,
+              note,
+            )
+          : { ok: false, reason: V2_ONLY_NOTE };
+      }
+    }
+    const review = reviewOf(run, status.step, step);
     if (review) {
       return buildReview(review, action, note);
     }
@@ -296,6 +460,57 @@ export class RasanaiProvider {
     }
     return `${current.mtimeMs}|${runName}|${session}`;
   }
+}
+
+/** Approve the styleframes, comment on one, or send some back for a redo. */
+function buildStyleframes(
+  ids: string[],
+  action: WorkflowAction,
+  note: string,
+): { ok: true; type: string; value: unknown; note: string; said: string } | { ok: false; reason: string } {
+  const value = (action.value && typeof action.value === "object" ? action.value : {}) as Record<string, unknown>;
+  const words = (raw: unknown): string => (typeof raw === "string" ? raw.trim().slice(0, NOTE_MAX) : "") || note;
+  if (action.type === "approve") {
+    return { ok: true, type: "approve", value: null, note, said: "Approved the frames" };
+  }
+  if (action.type === "comment") {
+    const frame = value.frame;
+    const text = words(value.text);
+    if (typeof frame !== "string" || !ids.includes(frame)) {
+      return { ok: false, reason: "That frame isn't in this set." };
+    }
+    if (!text) {
+      return { ok: false, reason: "Write a note first." };
+    }
+    return {
+      ok: true,
+      type: "comment",
+      value: { scene: frame, t: null, x: null, y: null, scope: "scene" },
+      note: text,
+      said: "Note on a frame",
+    };
+  }
+  if (action.type === "redo") {
+    const picked = value.ids;
+    if (
+      !Array.isArray(picked) ||
+      picked.length === 0 ||
+      picked.length > ids.length ||
+      new Set(picked).size !== picked.length ||
+      picked.some((id) => typeof id !== "string" || !ids.includes(id))
+    ) {
+      return { ok: false, reason: "Pick the frames to redo from this set." };
+    }
+    const text = words(value.note);
+    return {
+      ok: true,
+      type: "redo",
+      value: { ids: picked, note: text },
+      note: text,
+      said: `Asked for ${picked.length} frame${picked.length === 1 ? "" : "s"} again`,
+    };
+  }
+  return { ok: false, reason: "Not something this card can send." };
 }
 
 /** A note on the animatic or the film, applying the open notes, or closing the call. */
