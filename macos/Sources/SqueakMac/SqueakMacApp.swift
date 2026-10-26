@@ -21,13 +21,6 @@ struct SqueakMacApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuBarContent().environment(model)
-        } label: {
-            MenuBarLabel().environment(model)
-        }
-        .menuBarExtraStyle(.window)
-
         Window("Squeak", id: "conversation") {
             ConversationView().environment(model)
                 .heresay()
@@ -43,26 +36,13 @@ struct SqueakMacApp: App {
     }
 }
 
-struct MenuBarLabel: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Image(nsImage: MenuBarIcon.image(for: MenuBarIcon.State(model: model)))
-        .accessibilityLabel(model.attentionCount > 0 ? "Squeak, \(model.attentionCount) need you" : "Squeak")
-        .task {
-            // The label is alive from launch, so it is where the window actions are captured.
-            model.openConversationWindow = { openWindow(id: "conversation") }
-        }
-        // The awake countdown beside the duck, kept current from launch.
-        .task { await model.pollAwake() }
-    }
-}
-
 struct SqueakCommands: Commands {
     let model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        // Commands are alive from launch, so this is where the window action is captured.
+        let _ = { model.openConversationWindow = { openWindow(id: "conversation") } }()
         CommandGroup(replacing: .newItem) {
             Button("New chat…") { NewChatController.shared.show() }
                 .keyboardShortcut("n", modifiers: .command)
@@ -112,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActivationPolicyController.shared.start()
         let model = AppModel.shared
         model.start()
+        MenuBarController.shared.start(model: model)
         let env = ProcessInfo.processInfo.environment
         if model.demoMode, let refinement = env["SQUEAK_MAC_REFINEMENT_DEMO"] {
             // Demo data only, left running for a person or a UI test. No onboarding and no ordinary window:

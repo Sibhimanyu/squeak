@@ -112,6 +112,11 @@ final class AppModel {
     var hotKeyID: String? { didSet { defaults.set(HotKeyPreference.storedValue(for: hotKeyID), forKey: "hotKey"); HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID)) } }
     var notificationsEnabled: Bool { didSet { defaults.set(notificationsEnabled, forKey: "notifications") } }
     var notificationsShowNames: Bool { didSet { defaults.set(notificationsShowNames, forKey: "notificationNames") } }
+    /// "Tell me when an update is available": the dot on the menu-bar mark and the one notification per version.
+    var updateAlertsEnabled: Bool { didSet { defaults.set(updateAlertsEnabled, forKey: "updateAlerts"); updateStateChanged() } }
+    var updateBadgeShown: Bool {
+        UpdateAlert.badgeShown(available: updater.availableVersion, ready: updater.readyVersion, switchOn: updateAlertsEnabled)
+    }
     var launchOfferPending = false
     var windowVisible = false
     var onboardingDone: Bool { didSet { defaults.set(onboardingDone, forKey: "onboardingDone") } }
@@ -149,6 +154,7 @@ final class AppModel {
         hotKeyID = HotKeyPreference.resolve(stored: d.string(forKey: "hotKey"), alreadyMigrated: d.bool(forKey: HotKeyPreference.migrationKey))
         notificationsEnabled = d.object(forKey: "notifications") as? Bool ?? true
         notificationsShowNames = d.bool(forKey: "notificationNames")
+        updateAlertsEnabled = d.object(forKey: "updateAlerts") as? Bool ?? true
         onboardingDone = d.bool(forKey: "onboardingDone")
         lastUsed = d.string(forKey: "lastUsed").flatMap(SessionKey.init(stringValue:))
         // Demo and capture runs neither read nor write the real unread and anchor state.
@@ -175,6 +181,12 @@ final class AppModel {
             MainActor.assumeIsolated { HotKeyCenter.shared.recheck() }
         }
         Notifier.shared.onOpen = { open in QuickComposerController.shared.show(notification: open) }
+        // An update notification opens Settings > About: it names no chat, so the composer never hears of it.
+        Notifier.shared.onOpenUpdate = { [weak self] in self?.openSettings(.about) }
+        updater.onChange = { [weak self] in self?.updateStateChanged() }
+        if demoMode, let v = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_UPDATE"], !v.isEmpty {
+            updater.demoFound(v, notes: ["The menu-bar mark shows a dot when an update is waiting."])
+        }
         observeWindowVisibility()
         AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")
         if demoMode { installDemo(); return }
@@ -244,6 +256,22 @@ final class AppModel {
             // Off the event loop: a slow transcript read must not hold up the next event.
             Task { [weak self] in await self?.deliver(n) }
         }
+    }
+
+    // MARK: Update alert
+
+    /// One notification per new version, remembered across launches. Never in capture or demo runs.
+    private func updateStateChanged() {
+        guard !captureMode, !demoMode, Bundled.isApp else { return }
+        let downloaded = updater.readyVersion != nil
+        let version = UpdateAlert.pendingVersion(available: updater.availableVersion, ready: updater.readyVersion)
+        guard UpdateAlert.shouldNotify(
+            version: version, lastNotified: defaults.string(forKey: "updateNotifiedVersion"),
+            skipped: updater.skippedVersion, switchOn: updateAlertsEnabled, notificationsOn: notificationsEnabled),
+            let version else { return }
+        defaults.set(version, forKey: "updateNotifiedVersion")
+        Notifier.shared.postUpdate(UpdateAlert.payload(
+            version: version, downloaded: downloaded, notes: downloaded ? updater.readyNotes : updater.availableNotes))
     }
 
     // MARK: Notification delivery and unread

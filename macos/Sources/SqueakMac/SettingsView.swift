@@ -339,12 +339,15 @@ private struct AboutSettings: View {
                 Section {
                     Toggle("Automatically check for updates", isOn: Binding(get: { model.updater.automaticallyChecks }, set: { model.updater.automaticallyChecks = $0 }))
                         .disabled(!model.updater.isActive)
+                    Toggle("Tell me when an update is available", isOn: $model.updateAlertsEnabled)
                     Toggle("Download and install updates automatically", isOn: Binding(get: { model.updater.automaticallyInstalls }, set: { model.updater.automaticallyInstalls = $0 }))
                         .disabled(!model.updater.isActive)
                     if let ready = model.updater.readyVersion {
                         LabeledContent("Update \(ready) is ready") { Button("Restart to update") { model.updater.installNow() } }
+                        UpdateNotesDisclosure(notes: model.updater.readyNotes, size: 12)
                     } else if let available = model.updater.availableVersion {
                         LabeledContent("Update \(available) available") { Button("Install") { model.updater.checkForUpdates() } }
+                        UpdateNotesDisclosure(notes: model.updater.availableNotes, size: 12)
                     }
                     if let note = model.updateNote { Text(note).foregroundStyle(.secondary) }
                     Button("Check for updates…") { model.updater.checkForUpdates() }

@@ -12,6 +12,7 @@ enum CaptureRunner {
         let env = ProcessInfo.processInfo.environment
         if let a = env["SQUEAK_MAC_APPEARANCE"] { NSApp.appearance = NSAppearance(named: a == "light" ? .aqua : .darkAqua) }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "awake" { await runAwakeOnly(prefix: prefix, model: model); return }
+        if env["SQUEAK_MAC_CAPTURE_ONLY"] == "updatebadge" { await runUpdateBadge(prefix: prefix); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "popover" { await runPopoverOnly(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "refinements" {
             // Quick composer on demo-6's reply first, then the menu panel; the last one terminates.
@@ -67,6 +68,33 @@ enum CaptureRunner {
         gw.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(900))
         write(gallery, to: "\(prefix)-components.png")
+        NSApp.terminate(nil)
+    }
+
+    /// SQUEAK_MAC_CAPTURE_ONLY=updatebadge: the menu-bar mark with and without the update dot, on a dark and a
+    /// light bar, at 8x. The real template images, tinted the way macOS tints them. Writes <prefix>.png.
+    static func runUpdateBadge(prefix: String) async {
+        let states: [(String, MenuBarIcon.State, Bool)] = [("plain", .normal, false), ("update", .normal, true), ("needs you 2", .needsYou(2), true)]
+        func bar(dark: Bool) -> some View {
+            HStack(spacing: 28) {
+                ForEach(Array(states.enumerated()), id: \.offset) { _, s in
+                    VStack(spacing: 8) {
+                        Image(nsImage: MenuBarIcon.image(for: s.1, updateDot: s.2)).renderingMode(.template)
+                            .resizable().interpolation(.high).aspectRatio(contentMode: .fit).frame(height: 18 * 8)
+                        Text(s.0).font(.system(size: 14))
+                    }
+                }
+            }
+            .foregroundStyle(dark ? Color.white : Color.black)
+            .padding(32).background(dark ? Color(red: 0.12, green: 0.12, blue: 0.14) : Color(red: 0.88, green: 0.89, blue: 0.91))
+        }
+        let host = NSHostingView(rootView: VStack(spacing: 0) { bar(dark: true); bar(dark: false) })
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        let win = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        win.contentView = host
+        win.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(600))
+        write(host, to: "\(prefix).png")
         NSApp.terminate(nil)
     }
 

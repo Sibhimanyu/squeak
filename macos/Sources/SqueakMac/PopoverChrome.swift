@@ -6,8 +6,8 @@ import SwiftUI
 /// menu rows. Used by `PopoverView` and `UsageSection` only; the shared components stay as they are.
 enum PopoverMetrics {
     static let width: CGFloat = 360
-    /// The outer radius of the whole panel. The real menu window is clipped to this too (see
-    /// `MenuWindowAccessor`), so the material, the highlight and the shadow share one outline.
+    /// The outer radius of the whole panel. The menu panel's window shadow follows it too (see
+    /// `MenuPanel`), so the material, the highlight and the shadow share one outline.
     static let corner: CGFloat = 24
     /// Left/right inset of every row's content, so headings, rows and footer text share one edge.
     static let inset: CGFloat = 16
@@ -82,8 +82,8 @@ struct MenuRow: View {
 }
 
 /// The panel's surface for a preview that has no system window around it (the offline captures):
-/// native material, an inset outline, large continuous corners. The real `MenuBarExtra` window draws
-/// its own material, border and shadow, so `PopoverView` leaves this off there. Reduce Transparency
+/// native material, an inset outline, large continuous corners. The live panel (`MenuPanel`) draws this
+/// too; `PopoverView(drawsOwnSurface: false)` leaves it off. Reduce Transparency
 /// gets the near-opaque token (see `PanelBackground`).
 struct PanelSurface: ViewModifier {
     func body(content: Content) -> some View {

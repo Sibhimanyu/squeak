@@ -23,7 +23,7 @@ struct PopoverView: View {
     @State private var hostScreenHeight: CGFloat?
 
     /// Offline captures pin the screen height to show a short screen. Live, the panel always draws its
-    /// own 24pt surface, and `MenuWindowAccessor` clips the window to the same shape.
+    /// own 24pt surface, and `MenuPanel`'s window shadow follows it.
     var drawsOwnSurface = true
     var screenHeightOverride: CGFloat?
 
@@ -198,8 +198,10 @@ struct PopoverView: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 if let ready = updater.readyVersion {
                     updateRow("Update \(ready) is ready", action: "Restart to update") { updater.installNow() }
+                    UpdateNotesDisclosure(notes: updater.readyNotes)
                 } else if let available = updater.availableVersion {
                     updateRow("Update \(available) available", action: "Install") { dismissMenu(); updater.checkForUpdates() }
+                    UpdateNotesDisclosure(notes: updater.availableNotes)
                 }
                 if let note = model.updateNote {
                     updateRow(note, action: "Dismiss") { model.dismissUpdateNote() }

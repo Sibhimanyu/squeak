@@ -278,6 +278,56 @@ describe("RasanaiProvider.annotate", () => {
   });
 });
 
+describe("workflow progress", () => {
+  it("shows a working film: brief now, with the director's line", () => {
+    const { projectDir } = project((s) => {
+      s.current = "brief";
+      s.steps = { brief: { status: "working", updated: "2026-10-14T16:44:00.000Z" } };
+      s.ask = null;
+      s.updated = "2026-10-14T16:44:00.000Z";
+      s.working = { msg: "Checking the tools:\u0007 ffmpeg", t: "2026-10-14T16:44:30.000Z" };
+    });
+    const [marked] = new RasanaiProvider({ now: () => NOW }).annotate([director(projectDir)]);
+    expect(marked?.workflow).toBeUndefined();
+    expect(marked?.state).toBe("finished");
+    expect(marked?.workflowProgress).toMatchObject({
+      step: "brief",
+      call: "brief",
+      waiting: false,
+      activity: "Checking the tools: ffmpeg",
+      activityAt: "2026-10-14T16:44:30.000Z",
+    });
+    expect(marked?.workflowProgress?.calls.map((c) => c.state)).toEqual(["now", "next", "next", "next", "next"]);
+  });
+
+  it("shows a waiting look run: brief and story done, look now, workflow still set", () => {
+    const { projectDir } = project((s) => {
+      s.current = "look";
+      s.steps!.story!.status = "done";
+      s.steps!.look = { status: "awaiting", updated: "2026-10-14T16:44:00.000Z", styles: [] };
+      s.ask = null;
+      s.updated = "2026-10-14T16:44:00.000Z";
+      s.working = { msg: "stale line", t: "2026-10-14T16:44:00.000Z" };
+    });
+    const [marked] = new RasanaiProvider({ now: () => NOW }).annotate([director(projectDir)]);
+    expect(marked?.workflow?.call).toBe("look");
+    expect(marked?.workflowProgress).toMatchObject({ call: "look", waiting: true, activity: null, activityAt: null });
+    expect(marked?.workflowProgress?.calls.map((c) => c.state)).toEqual(["done", "done", "now", "next", "next"]);
+  });
+
+  it("gives a stale run none", () => {
+    const { projectDir } = project((s) => {
+      s.current = "brief";
+      s.steps = { brief: { status: "working" } };
+      s.ask = null;
+      s.working = { msg: "x", t: "2026-10-01T00:00:00.000Z" };
+      s.updated = "2026-10-01T00:00:00.000Z";
+    });
+    const provider = new RasanaiProvider({ now: () => NOW + STALE_WAIT_MS });
+    expect(provider.annotate([director(projectDir)])[0]?.workflowProgress).toBeUndefined();
+  });
+});
+
 describe("RasanaiProvider.act", () => {
   const revisionOf = (projectDir: string) => waitingStatus(readRasanaiRun(projectDir)!, NOW)!.revision;
 

@@ -93,7 +93,7 @@ enum DemoData {
             question: s.key == "pay" && s.state == "awaiting_input"
                 ? (ProcessInfo.processInfo.arguments.contains("-squeak-demo-plan") ? plan : question) : nil,
             failure: s.failure)
-        titled.workflow = s.workflow; titled.asks = s.asks
+        titled.workflow = s.workflow; titled.asks = s.asks; titled.workflowProgress = s.workflowProgress
         titled.workspaceId = "w-\(s.key)"
         // The Telegram chat has two workers out and a test run beside its turn.
         if s.key == "tg" {
@@ -123,10 +123,24 @@ enum DemoData {
     }
 
     /// `-squeak-demo-film`: a RasanAI film waiting on its look call; `-squeak-demo-film-story` on its
-    /// story call; `-squeak-demo-film-ask` on a question from the director.
+    /// story call; `-squeak-demo-film-ask` on a question from the director; `-squeak-demo-film-working` on a film at work.
     private static var film: [PhoneSnapshot.Session] {
         let args = ProcessInfo.processInfo.arguments
         guard args.contains(where: { $0.hasPrefix("-squeak-demo-film") }) else { return [] }
+        let order = ["brief", "story", "look", "animatic", "final"]
+        if args.contains("-squeak-demo-film-working") {
+            // The director at work between calls: no card to answer, only the progress.
+            var working = PhoneSnapshot.Session(
+                key: "film", conductorSessionId: nil, label: "RasanAI · Quotidian", agent: "claude", state: "working",
+                lastActivityAt: now(-12), detail: "RasanAI · Checking the tools", git: nil, contextPercent: nil,
+                turnId: nil, message: nil, choices: nil, title: "Quotidian")
+            working.workflowProgress = WorkflowProgress(
+                title: "Quotidian", step: "brief", call: "brief",
+                calls: order.enumerated().map { .init(call: $1, state: $0 == 0 ? "now" : "next") },
+                waiting: false, activity: "Checking the tools: Node, FFmpeg, HyperFrames and the browser are here",
+                activityAt: now(-12))
+            return [working]
+        }
         let workflow: Workflow
         if args.contains("-squeak-demo-film-story") {
             workflow = Workflow(
@@ -200,6 +214,11 @@ enum DemoData {
             lastActivityAt: now(-60), detail: "RasanAI · \(workflow.prompt)", git: nil, contextPercent: nil,
             turnId: nil, message: nil, choices: nil, title: "Quotidian")
         session.workflow = workflow
+        let at = order.firstIndex(of: workflow.call) ?? 0
+        session.workflowProgress = WorkflowProgress(
+            title: workflow.title, step: workflow.step, call: workflow.call,
+            calls: order.enumerated().map { .init(call: $1, state: $0 < at ? "done" : $0 == at ? "now" : "next") },
+            waiting: true)
         return [session]
     }
 

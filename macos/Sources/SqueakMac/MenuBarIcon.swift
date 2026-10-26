@@ -27,7 +27,7 @@ enum MenuBarIcon {
         return image.representations.isEmpty ? nil : image
     }()
 
-    static func image(for state: State) -> NSImage {
+    static func image(for state: State, updateDot: Bool = false) -> NSImage {
         var alpha: CGFloat = 1
         var text: NSAttributedString?
         var width = markSize.width
@@ -49,6 +49,18 @@ enum MenuBarIcon {
         }
         let image = NSImage(size: NSSize(width: width, height: markSize.height), flipped: false) { rect in
             mark?.draw(in: NSRect(origin: .zero, size: markSize), from: .zero, operation: .sourceOver, fraction: alpha)
+            if updateDot {
+                // An update waits (DESIGN.md §3.3: a badge is a dot on the thing it describes). The mark is a
+                // template, so the dot is black with a clear ring cut around it, legible in light and dark.
+                let c = NSPoint(x: markSize.width - 2.75, y: markSize.height - 2.75)
+                NSGraphicsContext.current?.saveGraphicsState()
+                NSGraphicsContext.current?.compositingOperation = .destinationOut
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: NSRect(x: c.x - 3.25, y: c.y - 3.25, width: 6.5, height: 6.5)).fill()
+                NSGraphicsContext.current?.restoreGraphicsState()
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: NSRect(x: c.x - 2.25, y: c.y - 2.25, width: 4.5, height: 4.5)).fill()
+            }
             if let text {
                 let s = text.size()
                 text.draw(at: NSPoint(x: markSize.width + 2, y: (rect.height - s.height) / 2))

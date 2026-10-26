@@ -28,6 +28,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     var onOpen: ((PendingNotificationOpen) -> Void)? {
         didSet { if onOpen != nil, let open = pendingOpens.drain() { onOpen?(open) } }
     }
+    /// A click on an update notification. Held until the handler exists (cold launch).
+    var onOpenUpdate: (() -> Void)? {
+        didSet { if onOpenUpdate != nil, pendingUpdateClick { pendingUpdateClick = false; onOpenUpdate?() } }
+    }
+    private var pendingUpdateClick = false
     private var pendingOpens = PendingNotificationOpens()
     private var configured = false
 
@@ -74,6 +79,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
     }
 
+    /// Quiet on purpose: no sound, and a version of its own thread so it never groups with a chat.
+    func postUpdate(_ p: UpdateAlert.Payload) {
+        guard let center else { return }
+        configure()
+        let content = UNMutableNotificationContent()
+        content.title = p.title
+        content.body = p.body
+        content.threadIdentifier = p.threadIdentifier
+        content.userInfo = p.userInfo
+        center.add(UNNotificationRequest(identifier: p.identifier, content: content, trigger: nil))
+    }
+
     static func body(_ event: NotificationEvent, showName: Bool) -> String {
         guard showName else { return genericBody(event.kind) }
         guard let detail = event.detail, !detail.isEmpty else { return event.body }
@@ -95,6 +112,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping @Sendable () -> Void
     ) {
         let info = response.notification.request.content.userInfo
+        if UpdateAlert.isUpdate(info) {
+            let dismissed = response.actionIdentifier == UNNotificationDismissActionIdentifier
+            Task { @MainActor in
+                if !dismissed {
+                    if let open = self.onOpenUpdate { open() } else { self.pendingUpdateClick = true }
+                }
+                completionHandler()
+            }
+            return
+        }
         let raw = info["session"] as? String
         let anchor = NotificationAnchor.parse(info)
         // Any action, including an already-delivered legacy Reply, only opens the composer: its typed text is never read.
@@ -110,6 +137,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping @Sendable (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        completionHandler(UpdateAlert.isUpdate(notification.request.content.userInfo) ? [.banner] : [.banner, .sound])
     }
 }

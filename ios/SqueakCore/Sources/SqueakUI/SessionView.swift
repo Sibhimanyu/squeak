@@ -726,6 +726,9 @@ private struct ChatRows: View {
                     EmptyChat(text: text, loading: model.lastHistory[session.key] == nil)
                 }
             }
+            if let progress = session.workflowProgress {
+                FilmProgressCard(progress: progress)
+            }
             if let workflow = session.workflow {
                 // A film's call has its own card; a question read from the director's transcript would repeat it.
                 WorkflowCard(workflow: workflow, session: session)

@@ -13,6 +13,7 @@ import {
   viewImages,
   viewMedia,
   waitingStatus,
+  workflowProgress,
   workflowView,
 } from "./run.js";
 import type { RasanaiRun } from "./run.js";
@@ -74,11 +75,20 @@ export class RasanaiProvider {
     for (const session of director.values()) {
       const run = this.read(session.cwd!);
       const status = run ? waitingStatus(run, nowMs) : null;
+      const progress = run ? workflowProgress(run, nowMs) : null;
       if (!status) {
+        if (progress) {
+          marked.set(session.key, {
+            ...session,
+            workflowProgress: progress,
+            title: session.title ?? progress.title,
+          });
+        }
         continue;
       }
       marked.set(session.key, {
         ...session,
+        workflowProgress: progress,
         workflow: status,
         // A real permission prompt stays what it is; anything else is the film waiting.
         state: session.state === "awaiting_approval" ? session.state : "awaiting_input",

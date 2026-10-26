@@ -6,7 +6,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
-VERSION="2.5.0"
+VERSION="2.7.1"
 # Sparkle compares CFBundleVersion, so it must only ever grow: 2.0.2 -> 20002, 2.1.0 -> 20100.
 # (A pre-release suffix is ignored; give a beta its own patch number if it must be offered.)
 IFS=. read -r V_MAJOR V_MINOR V_PATCH <<<"${VERSION%%-*}"
@@ -79,7 +79,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>SUFeedURL</key><string>$FEED_URL</string>
   <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
   <key>SUEnableAutomaticChecks</key><true/>
-  <key>SUScheduledCheckInterval</key><integer>86400</integer>
+  <key>SUScheduledCheckInterval</key><integer>3600</integer>
   <key>SUAllowsAutomaticUpdates</key><true/>
   $ICON_KEY
 </dict>

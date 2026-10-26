@@ -10,7 +10,7 @@
  */
 
 import type { GitState } from "./git-state.js";
-import type { WorkflowStatus } from "../workflows/types.js";
+import type { WorkflowProgress, WorkflowStatus } from "../workflows/types.js";
 
 export type AgentKind = "claude" | "codex";
 
@@ -163,6 +163,8 @@ export interface FleetSession extends ObservedSession {
    * story, pick a look…). The state is then `awaiting_input`.
    */
   workflow?: WorkflowStatus | null;
+  /** Where the film stands, waiting or working (read-only; answers stay gated on `workflow`). */
+  workflowProgress?: WorkflowProgress | null;
   /**
    * Set only while the session is `finished` and its last message closes on a question put to the person
    * ("Want me to open a PR?"): that question, clipped. The agent is waiting on an answer, so every surface

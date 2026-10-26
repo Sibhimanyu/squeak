@@ -4,6 +4,7 @@ import type {
   WorkflowCall,
   WorkflowNote,
   WorkflowOption,
+  WorkflowProgress,
   WorkflowReview,
   WorkflowScene,
   WorkflowStatus,
@@ -467,4 +468,77 @@ function clipOrNull(value: string | null, max: number): string | null {
 
 function capitalise(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+const FIVE_CALLS = ["brief", "story", "look", "animatic", "final"] as const;
+
+/**
+ * Where the film stands, waiting or not, or null for a run left aside (nothing
+ * touched it for STALE_WAIT_MS) or one with no current step.
+ */
+export function workflowProgress(run: RasanaiRun, nowMs: number): WorkflowProgress | null {
+  const session = run.session;
+  const current = text(session.current);
+  if (!current) {
+    return null;
+  }
+  const stamps = [session.updated, session.working?.t, session.steps?.[current]?.updated]
+    .map((value) => Date.parse(text(value) ?? ""))
+    .filter((value) => Number.isFinite(value));
+  if (stamps.length === 0 || nowMs - Math.max(...stamps) > STALE_WAIT_MS) {
+    return null;
+  }
+  const status = waitingStatus(run, nowMs);
+  const ask = session.ask;
+  const openAsk = ask && typeof ask === "object" && !ask.answered && typeof ask.id === "string" ? ask : null;
+  let step = status?.step ?? current;
+  let at = indexOfCall(CALL_OF_STEP[step]);
+  if (at < 0 && openAsk) {
+    at = indexOfCall(CALL_OF_STEP[text(openAsk.step) ?? ""]);
+  }
+  if (at < 0) {
+    // An unmapped step: stay on the furthest call any started step belongs to.
+    for (const [id, entry] of Object.entries(session.steps ?? {})) {
+      if (entry?.status) {
+        at = Math.max(at, indexOfCall(CALL_OF_STEP[id]));
+      }
+    }
+  }
+  if (at < 0) {
+    at = 0;
+  }
+  const waiting = status !== null;
+  const msg = waiting ? null : clean(session.working?.msg, BEAT_TEXT_MAX);
+  const mapped = CALL_OF_STEP[step];
+  step = step || current;
+  return {
+    provider: "rasanai",
+    title: text(session.title),
+    step,
+    call: status?.call ?? mapped ?? FIVE_CALLS[at]!,
+    calls: FIVE_CALLS.map((call, index) => ({
+      call,
+      state: index < at ? ("done" as const) : index === at ? ("now" as const) : ("next" as const),
+    })),
+    waiting,
+    activity: msg,
+    activityAt: msg ? (text(session.working?.t) ?? null) : null,
+  };
+}
+
+function indexOfCall(call: WorkflowCall | undefined): number {
+  return call ? FIVE_CALLS.indexOf(call as (typeof FIVE_CALLS)[number]) : -1;
+}
+
+function clean(value: unknown, max: number): string | null {
+  const raw = text(value);
+  if (!raw) {
+    return null;
+  }
+  const plain = raw
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/ {2,}/g, " ")
+    .trim();
+  return plain ? plain.slice(0, max) : null;
 }
