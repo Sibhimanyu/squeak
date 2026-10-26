@@ -198,8 +198,10 @@ struct PopoverView: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 if let ready = updater.readyVersion {
                     updateRow("Update \(ready) is ready", action: "Restart to update") { updater.installNow() }
+                    UpdateNotesDisclosure(notes: updater.readyNotes)
                 } else if let available = updater.availableVersion {
                     updateRow("Update \(available) available", action: "Install") { dismissMenu(); updater.checkForUpdates() }
+                    UpdateNotesDisclosure(notes: updater.availableNotes)
                 }
                 if let note = model.updateNote {
                     updateRow(note, action: "Dismiss") { model.dismissUpdateNote() }

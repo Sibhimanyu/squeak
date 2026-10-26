@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.7.0
+
+- Squeak checks for updates every hour, and tells you: a small dot on the menu-bar icon and one notification
+  per new version. Settings, About has a switch for it.
+- The update window and the update banner show what changed in each version, instead of a web page.
+
 ## 2.6.0
 
 - Set Squeak's logo as your Telegram bot's picture with one button in Settings, Telegram. For Cliq, Settings

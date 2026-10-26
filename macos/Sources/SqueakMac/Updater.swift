@@ -2,6 +2,8 @@ import AppKit
 import Foundation
 import Observation
 import Sparkle
+import SqueakMacCore
+import SwiftUI
 
 /// Sparkle 2, owned by the app. It only starts from the real bundle: a bare
 /// `swift run`, a capture or the demo has no feed to read and no place to install to.
@@ -19,10 +21,20 @@ final class AppUpdater {
     private(set) var availableVersion: String?
     /// Version of an update already downloaded and waiting to install when the app quits.
     private(set) var readyVersion: String?
+    /// What changed in those versions, as plain bullets (empty when the appcast item has none).
+    private(set) var availableNotes: [String] = []
+    private(set) var readyNotes: [String] = []
     @ObservationIgnored private var controller: SPUStandardUpdaterController?
     @ObservationIgnored private var observation: NSKeyValueObservation?
     @ObservationIgnored private var delegate: UpdateDelegate?
     @ObservationIgnored fileprivate var installHandler: (() -> Void)?
+    /// Told after every change to what is found or ready, so the model can badge and notify.
+    @ObservationIgnored var onChange: (() -> Void)?
+    /// Version the person chose to skip (Sparkle also remembers it); never notified about.
+    @ObservationIgnored fileprivate(set) var skippedVersion: String?
+
+    /// Capture and demo only (`SQUEAK_MAC_DEMO_UPDATE`): shows an update with no Sparkle behind it.
+    func demoFound(_ version: String, notes: [String]) { found(version, notes: notes) }
 
     var isActive: Bool { controller != nil }
 
@@ -75,11 +87,22 @@ final class AppUpdater {
 
     // MARK: Called by the delegate (main thread)
 
-    fileprivate func found(_ version: String?) { availableVersion = version }
-    fileprivate func cleared() { availableVersion = nil; readyVersion = nil; installHandler = nil }
-    fileprivate func ready(_ version: String?, handler: @escaping () -> Void) {
+    fileprivate func found(_ version: String?, notes: [String]) {
+        let changed = version != availableVersion
+        availableVersion = version
+        if !notes.isEmpty || changed { availableNotes = notes }
+        onChange?()
+    }
+    fileprivate func cleared(skipped: String? = nil) {
+        if let skipped { skippedVersion = skipped }
+        availableVersion = nil; readyVersion = nil; availableNotes = []; readyNotes = []; installHandler = nil
+        onChange?()
+    }
+    fileprivate func ready(_ version: String?, notes: [String], handler: @escaping () -> Void) {
         readyVersion = version
+        readyNotes = notes
         installHandler = handler
+        onChange?()
     }
 }
 
@@ -106,9 +129,10 @@ final class UpdateDelegate: NSObject, SPUUpdaterDelegate, @preconcurrency SPUSta
     /// and the installer stays reachable from the panel ("Restart to update").
     func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem, immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
         let version = item.displayVersionString
+        let notes = ReleaseNotes.bullets(fromHTML: item.itemDescription)
         onMain {
             QuitIntent.shared.installPending = true
-            self.owner?.ready(version, handler: immediateInstallHandler)
+            self.owner?.ready(version, notes: notes, handler: immediateInstallHandler)
         }
         return true
     }
@@ -125,13 +149,17 @@ final class UpdateDelegate: NSObject, SPUUpdaterDelegate, @preconcurrency SPUSta
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         let version = item.displayVersionString
-        onMain { self.owner?.found(version) }
+        let notes = ReleaseNotes.bullets(fromHTML: item.itemDescription)
+        onMain { self.owner?.found(version, notes: notes) }
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) { onMain { self.owner?.cleared() } }
 
     func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice, forUpdate updateItem: SUAppcastItem, state: SPUUserUpdateState) {
-        if choice == .skip { onMain { self.owner?.cleared() } }
+        if choice == .skip {
+            let version = updateItem.displayVersionString
+            onMain { self.owner?.cleared(skipped: version) }
+        }
     }
 
     // MARK: Gentle reminders
@@ -146,10 +174,35 @@ final class UpdateDelegate: NSObject, SPUUpdaterDelegate, @preconcurrency SPUSta
 
     func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
         let version = update.displayVersionString
+        let notes = ReleaseNotes.bullets(fromHTML: update.itemDescription)
         onMain {
-            self.owner?.found(version)
+            self.owner?.found(version, notes: notes)
             // The alert is about to show: an accessory app must be active, or it opens unseen.
             if handleShowingUpdate { NSApp.activate(ignoringOtherApps: true) }
+        }
+    }
+}
+
+/// "What's new" under an update banner: collapsed, and absent when the update carries no notes.
+struct UpdateNotesDisclosure: View {
+    let notes: [String]
+    var size: CGFloat = 11.5
+    @State private var open = false
+
+    var body: some View {
+        if !notes.isEmpty {
+            DisclosureGroup("What's new", isExpanded: $open) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("\u{2022}")
+                            Text(note).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
+            .font(.system(size: size)).foregroundStyle(.secondary)
         }
     }
 }

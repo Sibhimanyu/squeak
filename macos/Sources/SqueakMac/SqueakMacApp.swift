@@ -48,8 +48,8 @@ struct MenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Image(nsImage: MenuBarIcon.image(for: MenuBarIcon.State(model: model)))
-        .accessibilityLabel(model.attentionCount > 0 ? "Squeak, \(model.attentionCount) need you" : "Squeak")
+        Image(nsImage: MenuBarIcon.image(for: MenuBarIcon.State(model: model), updateDot: model.updateBadgeShown))
+        .accessibilityLabel((model.attentionCount > 0 ? "Squeak, \(model.attentionCount) need you" : "Squeak") + (model.updateBadgeShown ? ", update available" : ""))
         .task {
             // The label is alive from launch, so it is where the window actions are captured.
             model.openConversationWindow = { openWindow(id: "conversation") }
