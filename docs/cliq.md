@@ -5,11 +5,11 @@ are in place — take commands, button taps and replies back from it.
 
 ## How it works
 
-Cliq cannot call the Mac: button taps, messages and forms run *handlers*
+Cliq cannot call the Mac: button taps, messages and forms run _handlers_
 (Deluge scripts) on Zoho's servers, and the Mac sits behind NAT on loopback.
 The first design had the handlers write to a Cliq database the Mac read
 with Zoho OAuth, but a managed Zoho org refuses a personal Self Client
-(`oauth_app_blocked`, seen on zohocorp). Handlers can still post *out*, so
+(`oauth_app_blocked`, seen on zohocorp). Handlers can still post _out_, so
 they post to Squeak's own Firebase project instead:
 
 ```
@@ -63,17 +63,17 @@ delete only, `{box, sig, at}`, a 64-character signature.
 
 What Cliq can do:
 
-| in Cliq | does |
-| --- | --- |
-| tap **A** / **B** / **C** on a card | sends that letter |
-| tap **Reply**, type, **Send** | sends the text |
-| reply to a card | sends the text |
-| tap **Full message** | posts the agent's whole last message, with its own buttons |
-| ask anything, in plain words | an answer from what Squeak sees ("anything need me?", "what did greenroom change?", "mute for two hours") |
-| "tell *session* to …" | a card with the exact text and **Send** / **Cancel**; only Send types it |
-| type `radar` | what is running now |
-| type `snooze` / `unmute` | silence alerts for an hour / resume (Telegram too) |
-| type `hooks`, `help` | hook wiring, what this is |
+| in Cliq                             | does                                                                                                      |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| tap **A** / **B** / **C** on a card | sends that letter                                                                                         |
+| tap **Reply**, type, **Send**       | sends the text                                                                                            |
+| reply to a card                     | sends the text                                                                                            |
+| tap **Full message**                | posts the agent's whole last message, with its own buttons                                                |
+| ask anything, in plain words        | an answer from what Squeak sees ("anything need me?", "what did greenroom change?", "mute for two hours") |
+| "tell _session_ to …"               | a card with the exact text and **Send** / **Cancel**; only Send types it                                  |
+| type `radar`                        | what is running now                                                                                       |
+| type `snooze` / `unmute`            | silence alerts for an hour / resume (Telegram too)                                                        |
+| type `hooks`, `help`                | hook wiring, what this is                                                                                 |
 
 ### Chatting
 
@@ -106,7 +106,7 @@ own data centre's hosts (`.com`, `.eu`, …) throughout.
 
 ### 1. The bot and its webhook token (one-way)
 
-1. Cliq → **Integrations → Bots → Create Bot**, access level *Personal*.
+1. Cliq → **Integrations → Bots → Create Bot**, access level _Personal_.
    Subscribe to it.
 2. **Integrations → Webhook Tokens → Generate New Token.**
 3. In Squeak's `.env`:
@@ -179,3 +179,16 @@ seconds. `grep -i cliq ~/Library/Logs/squeak/squeak.log` shows any failure.
 ## Notification settings
 
 Which cards and quota alerts reach Cliq (and, separately, Telegram) is set in `notify-settings.json`, edited from the Mac app and the phone: mute, approvals, questions, stalls, quota, finishes (Conductor / all / off) and quiet hours. The filter is applied in `CliqChannel` itself, after the monitor's own rules, so a muted card still shows on the radar. See `docs/remote-channel.md`, "Notification settings".
+
+## The bot's logo
+
+Squeak cannot set it: the org blocks Zoho OAuth (`oauth_app_blocked`) and the bot has only a webhook, so there is no
+API to call. Set it by hand:
+
+1. In Cliq open **Bots & Tools** (the grid icon, or Profile > Bots & Tools) > **Bots**.
+2. Hover the `squeak` bot and choose **Edit** (the pencil).
+3. Click the bot's picture, upload the logo, crop to the circle, and **Save**.
+
+Use `brand/logo/png/squeak-bot-avatar-640.jpg` from the repo (the same file is bundled at
+`Squeak.app/Contents/Resources/daemon/brand/logo/png/squeak-bot-avatar-640.jpg`): the duck on Ink, already
+centred so a circle crop keeps all of it.

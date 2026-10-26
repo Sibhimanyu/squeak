@@ -43,9 +43,9 @@ final class QuickComposerController {
         present(target: open.key, anchor: open.anchor, fromNotification: open.fromNotification)
     }
 
-    /// The activation that follows a Spotlight/Finder reopen, and that a clicked notification also
+    /// The activation that follows a Spotlight/Finder/Dock reopen, and that a clicked notification also
     /// causes, arrives either side of the notification response. Waiting a moment lets an explicit
-    /// notification open win; a generic open never touches an explicit target or its context.
+    /// notification open win; otherwise the click opens the conversation window.
     func scheduleReopen() {
         reopenTask?.cancel()
         reopenTask = Task { [weak self] in
@@ -54,7 +54,7 @@ final class QuickComposerController {
             guard Date().timeIntervalSince(lastExplicitOpen) > 2, panel?.isVisible != true else { return }
             // A window opened during the wait (Open Squeak, New Chat, Settings) owns the screen now.
             guard !NSApp.windows.contains(where: ActivationPolicyController.isAppWindow) else { return }
-            show()
+            AppModel.shared.showConversationWindow()
         }
     }
 

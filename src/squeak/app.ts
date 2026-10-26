@@ -69,6 +69,7 @@ import { MirrorStore } from "../remote/mirror-store.js";
 import { RasanaiProvider } from "../workflows/rasanai/provider.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
+import { TelegramAvatar } from "../telegram/avatar.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
 import type { TelegramChat, TelegramConversationTarget, TelegramUpdate } from "../types.js";
 import { logger } from "../utils/logger.js";
@@ -125,6 +126,8 @@ function helpText(): string {
 export class SqueakApp {
   private readonly config: SqueakConfig;
   private readonly telegram: TelegramClient | null;
+  /** Sets the bot's profile photo to Squeak's logo; the Mac app's route and the phone's `telegramAvatar` end in it. */
+  private readonly telegramAvatar: TelegramAvatar;
   private readonly telegramStatus: TelegramStatus;
   /** What Telegram and Cliq may push (notify-settings.json), edited from the Mac app and the phone. */
   private readonly notifySettings: NotifySettingsStore;
@@ -282,6 +285,7 @@ export class SqueakApp {
     });
     this.telegram = config.botToken ? new TelegramClient(config.botToken) : null;
     const telegram = this.telegram;
+    this.telegramAvatar = new TelegramAvatar({ telegram });
     this.notifySettings = new NotifySettingsStore(path.join(config.supportDir, "notify-settings.json"));
     this.telegramStatus = new TelegramStatus({
       sender: telegram ? { sendMessage: (chatId, text) => telegram.sendMessage(chatId, text) } : null,
@@ -411,6 +415,7 @@ export class SqueakApp {
               state: () => this.hotspot.state,
               apply: (request) => this.applyHotspot(request),
             },
+            telegramAvatar: { apply: (request) => this.telegramAvatar.apply(request) },
             notify: {
               state: () => this.notifyView(),
               apply: (request) => this.applyNotify(request),
@@ -526,6 +531,7 @@ export class SqueakApp {
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
+      telegramAvatar: (request) => this.telegramAvatar.apply(request),
       fanRule: () => {
         const rule = fansSudoersRule(os.userInfo().username);
         return rule ? { path: FANS_SUDOERS_PATH, rule, helperPath: FANS_HELPER_PRIVILEGED } : null;

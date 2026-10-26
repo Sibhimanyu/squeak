@@ -86,15 +86,15 @@ public enum NotificationRouting {
     }
 }
 
-/// What an app reopen (Spotlight, Finder, `open`, and the activation a clicked notification causes)
-/// does. The notification response and the reopen arrive in either order, so a reopen with no
-/// ordinary window never opens the conversation: it shows the quick composer, which an explicit
-/// notification target then retargets. An explicit "Open Squeak" never goes through here.
+/// What an app reopen (Spotlight, Finder, the Dock, `open`, and the activation a clicked notification
+/// causes) does. The notification response and the reopen arrive in either order, so the reopen waits a
+/// moment (`QuickComposerController.scheduleReopen`): a notification's explicit target wins and shows the
+/// quick composer, and a plain click on the app opens the conversation window.
 public enum ReopenPolicy {
-    public enum Action: Equatable { case none, showQuickComposer }
+    public enum Action: Equatable { case none, showConversation }
 
     public static func action(hasOrdinaryWindow: Bool) -> Action {
-        hasOrdinaryWindow ? .none : .showQuickComposer
+        hasOrdinaryWindow ? .none : .showConversation
     }
 }
 

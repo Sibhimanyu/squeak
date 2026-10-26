@@ -1329,6 +1329,21 @@ final class AppModel {
         }
     }
 
+    /// Asks the Mac to set the Telegram bot's photo to Squeak's logo. No Face ID: a fixed picture, no words.
+    /// Returns the line to show: success, or the Mac's reason.
+    func setTelegramAvatar() async -> String {
+        if demo { try? await Task.sleep(for: .milliseconds(600)); return TelegramAvatarFormat.done }
+        guard let channelStore = channel else { return "Not connected to your Mac." }
+        do {
+            let (id, document) = try channelStore.telegramAvatarDocument(signer: signer)
+            try await channelStore.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channelStore) else { return TelegramAvatarFormat.noAnswer }
+            return TelegramAvatarFormat.line(for: result)
+        } catch {
+            return TelegramAvatarFormat.unreachable
+        }
+    }
+
     /// One live control of the Mac (volume, mute, brightness, fans, screen off). No Face ID: it reaches no agent
     /// and carries no words. Nil when the Mac took it, else a line to show.
     func changeControl(_ change: ControlsCommand.Change) async -> String? {

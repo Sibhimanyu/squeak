@@ -25,6 +25,12 @@ struct NotificationsView: View {
             ForEach(shown, id: \.id) { channel in
                 ChannelBlock(id: channel.id, title: channel.title, problem: $problem)
             }
+            if shown.contains(where: { $0.id == "telegram" }), model.snapshot?.telegramAvatar == true {
+                BotPictureSection()
+            }
+            if shown.contains(where: { $0.id == "cliq" }) {
+                Section {} footer: { Text("Set the Cliq bot picture from Squeak on your Mac.") }
+            }
             if !shown.isEmpty {
                 Section {} footer: { Text(NotifyFormat.quietFootnote) }
             }
@@ -89,6 +95,43 @@ private struct ChannelBlock: View {
         } header: { Label(title, systemImage: id == "telegram" ? "paperplane" : "bubble.left") } footer: {
             if s.muted { Text("Nothing is pushed to \(title) while it's muted, quota alerts included.") }
         }
+    }
+}
+
+/// Telegram's bot picture: one button, shown only on a Mac that offers `telegramAvatar`. The Mac allows one try
+/// per 30 seconds, so the button waits that long after a press.
+private struct BotPictureSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var sending = false
+    @State private var lockedUntil: Date?
+    @State private var line: String?
+
+    var body: some View {
+        Section {
+            Button {
+                Task { await press() }
+            } label: {
+                HStack {
+                    Text("Use Squeak logo")
+                    Spacer()
+                    if sending { ProgressView() }
+                }
+            }
+            .frame(minHeight: 44)
+            .disabled(sending || lockedUntil != nil)
+            .accessibilityIdentifier("telegram-avatar")
+            if let line { Text(line).font(.footnote).foregroundStyle(Theme.muted) }
+        } header: { Text("Telegram bot picture") }
+    }
+
+    private func press() async {
+        sending = true
+        line = nil
+        lockedUntil = Date().addingTimeInterval(TelegramAvatarFormat.cooldown)
+        line = await model.setTelegramAvatar()
+        sending = false
+        try? await Task.sleep(for: .seconds(TelegramAvatarFormat.cooldown))
+        lockedUntil = nil
     }
 }
 

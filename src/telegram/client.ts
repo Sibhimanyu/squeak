@@ -28,6 +28,8 @@ const RETRYABLE_NETWORK_ERROR_CODES = new Set([
 ]);
 
 interface TelegramRequestOptions {
+  /** A multipart body (file uploads). Rebuilt per attempt, since a FormData body is consumed once sent. */
+  form?: () => FormData;
   lane?: TelegramRequestLane;
   timeoutMs?: number;
 }
@@ -453,6 +455,27 @@ export class TelegramClient {
     );
   }
 
+  /**
+   * Sets the bot's profile photo (Bot API 9.4, setMyProfilePhoto). Telegram takes only a new upload, as a
+   * JPG: `photo` is an InputProfilePhotoStatic JSON object that points at a multipart file part.
+   */
+  async setMyProfilePhoto(jpeg: Uint8Array): Promise<void> {
+    await this.callApi(
+      "setMyProfilePhoto",
+      {},
+      {
+        lane: "control",
+        timeoutMs: 30_000,
+        form: () => {
+          const form = new FormData();
+          form.set("photo", JSON.stringify({ type: "static", photo: "attach://avatar" }));
+          form.set("avatar", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "avatar.jpg");
+          return form;
+        },
+      },
+    );
+  }
+
   async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
     try {
       await this.callApi(
@@ -483,13 +506,15 @@ export class TelegramClient {
       await this.waitForRetryWindow(lane);
 
       let response: Response;
-      const requestInit: RequestInit = {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(body),
-      };
+      const requestInit: RequestInit = options?.form
+        ? { method: "POST", body: options.form() }
+        : {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(body),
+          };
       if (options?.timeoutMs) {
         requestInit.signal = AbortSignal.timeout(options.timeoutMs);
       }

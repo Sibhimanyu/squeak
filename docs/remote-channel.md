@@ -316,13 +316,13 @@ answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
   during one turn cannot stop the next, and the replier refuses a chat
   Conductor does not call working.
 - **What changed, from the phone (2026-10-19).** `{ v: 1, kind: "diff",
-  sessionId, file?, nonce, expiresAt }`, read-only but signed, since it
+sessionId, file?, nonce, expiresAt }`, read-only but signed, since it
   reveals code. The folder and base branch come from the Mac's snapshot of a
   chat the phone is shown, never from the phone. The result carries `diff`
   (the file list, fleet/diff-view.ts) and, when `file` is an index into it,
   `patch: { index, path, text }` (up to 12,000 characters). No Face ID.
 - **Hotspot failover (2026-10-20).** `{ v: 1, kind: "hotspot", action:
-  "configure" | "join" | "leave", ssid?, password?, enabled?, nonce, expiresAt }`.
+"configure" | "join" | "leave", ssid?, password?, enabled?, nonce, expiresAt }`.
   `configure` carries the hotspot's name, its WPA password (8–63 printable
   ASCII) and whether to switch by itself; the password goes to the Mac's login
   Keychain and is never written to a file, a result, or the phone's view, which
@@ -334,7 +334,7 @@ answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
   also removes the Keychain item); both end in the daemon's one
   `applyHotspot`, and neither echoes or logs the password.
 - **Lid actions (2026-10-23).** `{ v: 1, kind: "lidActions", settings:
-  { displayOff?, mute?, lowPower?, freezeApps? }, nonce, expiresAt }` changes
+{ displayOff?, mute?, lowPower?, freezeApps? }, nonce, expiresAt }` changes
   what the Mac does when its lid closes in a lid-closed awake session
   (fleet/lid-actions.ts). After the shared checks the Mac reads `settings`
   strictly: one to four known keys, booleans only, anything else is refused,
@@ -342,13 +342,13 @@ answersTurn?, nonce, expiresAt }`, the same checks, then Conductor's own
   (`{ action: "lid-actions", settings }`), the same path as the Mac app's
   control route. It reaches no agent and carries no words, so no Face ID. The
   phone view gains optional `awakeLidActions: { displayOff, mute, lowPower,
-  freezeApps }`, `awakeRules: { lowPowerPercent, endPercent, heat }` (the
+freezeApps }`, `awakeRules: { lowPowerPercent, endPercent, heat }` (the
   effective safety floors; a phone says 40 and 10 only when absent),
   `awakeLastEnd: { reason, at, why? }` and `awakeSleepProblem`. Older phones
   ignore them, so no `caps` entry is needed; a phone hides the switches when
   the Mac sends no `awakeLidActions`.
 - **Images from a chat (2026-10-19).** `{ v: 1, kind: "image", sessionId,
-  source, nonce, expiresAt }` asks for an image the chat's agent showed
+source, nonce, expiresAt }` asks for an image the chat's agent showed
   (`![alt](source)` alone in a paragraph). Read-only but signed. After the
   shared checks: the chat must be one the phone is shown; `source` must appear
   in the chat's own messages (its latest answer or its history), so a phone
@@ -491,7 +491,7 @@ the same `handleCommand`.
   a phone is local, so a Mac without internet still answers a phone beside it.
 - **Once, even on both.** After the bridge handles a command it deletes it, and `MirrorStore` remembers that id for
   15 minutes and hides later copies, so the same command arriving on the other transport after the first ran neither
-  runs again nor makes the Mac write "already received" over the real result. If a *different* id carries the same
+  runs again nor makes the Mac write "already received" over the real result. If a _different_ id carries the same
   nonce, the nonce check refuses it as ever. A phone's local delete (taking a command back) removes only the local
   copy, so a withdrawn command can still be sent through the cloud.
 - **The phone.** `LocalRouter` / `RoutedBackend` (`SqueakCore/LocalRoute.swift`) sit behind the `ChannelBackend`
@@ -549,16 +549,16 @@ lifecycle on every Mac and phone for no new authority, and iOS gives a Local Net
 an ATS exemption (`NSAllowsLocalNetworking`) for exactly this. Not accepted: anything unauthenticated, anything that
 puts the channel key or channel id on the wire, anything outside the allow-list.
 
-| Threat on the direct path | Mitigation |
-| --- | --- |
-| A host on the same network reads or sends | Every request needs a MAC under a key only the Mac and paired phones hold; a command still needs a paired device's signature; documents are sealed. A stranger gets a bare 401 |
-| A captured request is sent again | 60 s window plus a remembered nonce; commands also keep their own expiry and nonce checks |
-| A host impersonates the Mac and replays an old view | A response MAC binds the request's nonce; without the key an impostor cannot make one, and the phone falls back to the cloud |
+| Threat on the direct path                                        | Mitigation                                                                                                                                                                                                                            |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A host on the same network reads or sends                        | Every request needs a MAC under a key only the Mac and paired phones hold; a command still needs a paired device's signature; documents are sealed. A stranger gets a bare 401                                                        |
+| A captured request is sent again                                 | 60 s window plus a remembered nonce; commands also keep their own expiry and nonce checks                                                                                                                                             |
+| A host impersonates the Mac and replays an old view              | A response MAC binds the request's nonce; without the key an impostor cannot make one, and the phone falls back to the cloud                                                                                                          |
 | A host (or a forged view) aims the phone at a server it controls | The phone tries only private-range addresses, only from the Mac's own sealed view or a Bonjour result whose tag matches, and sends nothing the key is not needed to read: a signed request reveals neither the key nor the channel id |
-| Flooding the Mac | Per-address rate and failure limits, stream and in-flight caps, size caps, timeouts |
-| The channel id leaks from the LAN | It is never in a local path or header, so a sniffer cannot address the cloud channel |
-| A command runs twice (both transports, or a retry) | One transport per command, a confirmed take-back before a cloud resend, the Mac's handled-id memory, and the nonce check |
-| Reading the Mac's other state | Nothing but the channel's `state`, `results`, `live` and `commands` is served, and only what the bridge itself wrote |
+| Flooding the Mac                                                 | Per-address rate and failure limits, stream and in-flight caps, size caps, timeouts                                                                                                                                                   |
+| The channel id leaks from the LAN                                | It is never in a local path or header, so a sniffer cannot address the cloud channel                                                                                                                                                  |
+| A command runs twice (both transports, or a retry)               | One transport per command, a confirmed take-back before a cloud resend, the Mac's handled-id memory, and the nonce check                                                                                                              |
+| Reading the Mac's other state                                    | Nothing but the channel's `state`, `results`, `live` and `commands` is served, and only what the bridge itself wrote                                                                                                                  |
 
 **What the owner must do.** The iPhone asks once for **Local Network** access ("Squeak talks to your Mac directly
 when you're on the same Wi-Fi."); declining keeps everything on the cloud. If the Mac's firewall is on, macOS asks once
@@ -584,7 +584,7 @@ messages turn up, so a turn of hundreds of tool rows no longer hides its own pro
   `{ messages: [{ id, cursor?, role, text, at, turnId, workBefore? }], complete, nextBefore }`. `before` is digits
   only (a positive integer); anything else is a 400. Token-gated, no CORS, like the other control routes.
 - **Phone command (signed, read-only):** `{ v: 1, kind: "history", key, before?: "<cursor>", n?: 1...12,
-  nonce, expiresAt }`. It runs through `handleCommand` (device signature, expiry, nonce) but has no turn check, since
+nonce, expiresAt }`. It runs through `handleCommand` (device signature, expiry, nonce) but has no turn check, since
   it changes nothing. `key` must be a session the Mac shows the phone (active, or in Recent with a Conductor chat);
   `n` above 12 is clamped. One page at a time per chat. Needs a streaming store (the Realtime Database), like the
   live turn. The result is `{ id, status: "sent", doc }`, or `refused`.
@@ -614,8 +614,15 @@ inside that session's own `subagents` directory. Steps are labels (`describeClau
 **The view.** Each `background` item of an agent may carry two new optional fields (older Macs omit them):
 
 ```json
-{ "id": "toolu_01…", "kind": "agent", "label": "Survey the tests", "status": "running", "background": true,
-  "agentId": "a1b2c3d4e5f607182", "hasSteps": true }
+{
+  "id": "toolu_01…",
+  "kind": "agent",
+  "label": "Survey the tests",
+  "status": "running",
+  "background": true,
+  "agentId": "a1b2c3d4e5f607182",
+  "hasSteps": true
+}
 ```
 
 `hasSteps` is present (always `true`) only when the subagent's transcript can be read now. A phone shows a
@@ -626,7 +633,14 @@ refused.
 Exactly these keys, no others:
 
 ```json
-{ "v": 1, "kind": "subagent", "key": "<session key open on screen>", "taskId": "toolu_01…", "nonce": "…", "expiresAt": 0 }
+{
+  "v": 1,
+  "kind": "subagent",
+  "key": "<session key open on screen>",
+  "taskId": "toolu_01…",
+  "nonce": "…",
+  "expiresAt": 0
+}
 ```
 
 `taskId: null` stops the feed. Otherwise the Mac refuses unless: verbose is allowed, the key is the chat the
@@ -638,10 +652,18 @@ one of its subagents as the Mac reads them right now. Result: `{ "id", "status":
 sealed with the channel key, overwritten in place at most once a second and only when changed:
 
 ```json
-{ "v": 1, "key": "<session key>", "taskId": "toolu_01…", "agentId": "a1b2c3d4e5f607182|null",
-  "label": "Survey the tests", "status": "running|done|failed|stopped", "available": true,
-  "total": 4, "steps": [ { "kind": "thinking|note|tool|background|you", "text": "…", "at": "ISO|null" } ],
-  "seq": 123 }
+{
+  "v": 1,
+  "key": "<session key>",
+  "taskId": "toolu_01…",
+  "agentId": "a1b2c3d4e5f607182|null",
+  "label": "Survey the tests",
+  "status": "running|done|failed|stopped",
+  "available": true,
+  "total": 4,
+  "steps": [{ "kind": "thinking|note|tool|background|you", "text": "…", "at": "ISO|null" }],
+  "seq": 123
+}
 ```
 
 `steps` is the newest 50, oldest first, each text up to 4,000 characters; `total` is how many the subagent has
@@ -667,10 +689,24 @@ push today have a switch: errors and context pressure never push, so they have n
 
 ```json
 {
-  "telegram": { "muted": false, "approval": true, "question": true, "stalled": true, "quota": true,
-                "finished": "conductor", "quiet": null },
-  "cliq":     { "muted": false, "approval": true, "question": true, "stalled": true, "quota": true,
-                "finished": "conductor", "quiet": { "from": "22:00", "to": "07:00" } },
+  "telegram": {
+    "muted": false,
+    "approval": true,
+    "question": true,
+    "stalled": true,
+    "quota": true,
+    "finished": "conductor",
+    "quiet": null
+  },
+  "cliq": {
+    "muted": false,
+    "approval": true,
+    "question": true,
+    "stalled": true,
+    "quota": true,
+    "finished": "conductor",
+    "quiet": { "from": "22:00", "to": "07:00" }
+  },
   "channels": { "telegram": true, "cliq": false }
 }
 ```
@@ -704,3 +740,22 @@ checks). Exactly these keys, no others:
 Result: `{ "id", "status": "sent" }`, or `{ "id", "status": "refused", "reason" }`. The phone view carries
 `notify` only on a Mac that offers it (older Macs omit it, so a phone hides the page); the view changes and the
 phone re-reads it. Both the route and the command end in the same `applyNotify`.
+
+## Telegram avatar (2026-10-26)
+
+Set the Telegram bot's profile photo to Squeak's logo from the Mac app or the phone. Telegram's `setMyProfilePhoto`
+(Bot API 9.4, 9 Feb 2026) takes `photo`, an `InputProfilePhotoStatic` (`{"type":"static","photo":"attach://<part>"}`),
+uploaded as multipart/form-data; the file must be a **JPG** and cannot be a file id or URL. The daemon sends
+`brand/logo/png/squeak-bot-avatar-640.jpg` (640 x 640, the full duck at 65% on Ink, DESIGN.md §6.1 avatar), found two
+folders above `dist/telegram`, which is the same place in the checkout and in the app-bundled daemon.
+
+- **Phone view:** optional `telegramAvatar: true`, present only on a daemon that offers it. Absent: hide the button.
+- **Phone command:** `{ v: 1, kind: "telegramAvatar", nonce, expiresAt }`, exactly these keys, signed and sealed like every
+  command. The result is `{ id, status: "sent" }` on success, or `{ id, status: "refused", reason }` where `reason` is one of:
+  `Telegram is not set up`, `Try again in a minute` (one try per 30 s, shared with the Mac app's route),
+  `Squeak's logo file is missing from this install`, `Telegram refused the photo`, `Telegram could not be reached`,
+  `This Mac can't set the Telegram photo from a phone.`, `Not a request this Mac understands.`
+- **Mac route:** token-gated `POST /control/telegram/avatar` on the ingress, no CORS header; body empty, `{}` or exactly
+  `{"which":"logo"}`. `200 {"message":"Done"}`, `400 {"error": <sentence above>}`, `429` for the rate limit, `405`
+  for other methods, `503` from a daemon without it (an older one: hide the button).
+- Both end in `TelegramAvatar.apply` (`src/telegram/avatar.ts`). Never show or log the token or Telegram's own words.

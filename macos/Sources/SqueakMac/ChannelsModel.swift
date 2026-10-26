@@ -37,6 +37,11 @@ final class ChannelsModel {
     private(set) var notifyError: String?
     @ObservationIgnored private var notifyInFlight = 0
 
+    // The bot picture row (Telegram) and the saved logo file (Cliq).
+    private(set) var avatarState = BotAvatarState.idle
+    private(set) var savedLogo: URL?
+    private(set) var logoMessage: String?
+
     // What `.env` says (never the values of secrets).
     private(set) var tokenSet = false
     private(set) var webhookSet = false
@@ -246,6 +251,33 @@ final class ChannelsModel {
         }
     }
 
+    // MARK: Bot picture
+
+    static let botLogoFile = "squeak-bot-avatar-640.jpg"
+
+    /// Telegram's "Use Squeak logo": the daemon uploads the brand's own JPG.
+    func setTelegramAvatar() async {
+        guard avatarState.canSet(telegramConfigured: tokenSet) else { return }
+        avatarState = .working
+        if demo { try? await Task.sleep(for: .milliseconds(400)); avatarState = .done; return }
+        avatarState = BotAvatarState(await client.setTelegramAvatar())
+    }
+
+    /// Cliq's "Save logo…": the same JPG, written where the person chooses. The API route is blocked by the org.
+    func saveBotLogo(to url: URL) {
+        guard let source = BrandAssets.url(Self.botLogoFile), let data = try? Data(contentsOf: source) else {
+            logoMessage = "The logo file is missing from this copy of Squeak."
+            return
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            savedLogo = url
+            logoMessage = "Saved."
+        } catch {
+            logoMessage = "Couldn't save the logo there."
+        }
+    }
+
     // MARK: Cliq
 
     func pasteWebhook() {
@@ -425,6 +457,11 @@ final class ChannelsModel {
     ]
 
     private func seedDemo() {
+        if ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_AVATAR"] == "done" {
+            avatarState = .done
+            savedLogo = URL(fileURLWithPath: "/Users/demo/Desktop/squeak-bot-avatar.jpg")
+            logoMessage = "Saved."
+        }
         tokenSet = true
         webhookSet = true
         savedAllowed = [5_550_101]

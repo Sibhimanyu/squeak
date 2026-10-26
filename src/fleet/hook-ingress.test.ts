@@ -566,6 +566,43 @@ describe("HookIngressServer control routes", () => {
     expect(body.telegram.finished).toBe("conductor");
   });
 
+  it("sets the Telegram photo only with the token, strictly, rate-limited, without CORS", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/telegram/avatar`;
+    const auth = { "x-squeak-token": harness.token };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(url, { method: "POST", headers: auth })).status).toBe(503);
+    const calls: unknown[] = [];
+    let next: { ok: true; message: string } | { ok: false; reason: string; retry?: boolean } = {
+      ok: true,
+      message: "Done",
+    };
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      telegramAvatar: async (request) => {
+        calls.push(request);
+        return next;
+      },
+    });
+    expect((await fetch(url, { method: "POST" })).status).toBe(403);
+    expect((await fetch(url, { headers: auth })).status).toBe(405);
+    expect((await fetch(url, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
+    const ok = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ which: "logo" }) });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ message: "Done" });
+    expect((await fetch(url, { method: "POST", headers: auth })).status).toBe(200);
+    expect(calls).toEqual([{ which: "logo" }, {}]);
+    next = { ok: false, reason: "Telegram is not set up" };
+    const failed = await fetch(url, { method: "POST", headers: auth });
+    expect(failed.status).toBe(400);
+    expect(await failed.json()).toEqual({ error: "Telegram is not set up" });
+    next = { ok: false, reason: "Try again in a minute", retry: true };
+    expect((await fetch(url, { method: "POST", headers: auth })).status).toBe(429);
+  });
+
   it("serves fan control's sudoers rule only with the token, and 503 when none is wired", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;

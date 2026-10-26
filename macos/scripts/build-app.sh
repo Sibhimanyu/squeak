@@ -6,7 +6,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
-VERSION="2.4.0"
+VERSION="2.5.0"
 # Sparkle compares CFBundleVersion, so it must only ever grow: 2.0.2 -> 20002, 2.1.0 -> 20100.
 # (A pre-release suffix is ignored; give a beta its own patch number if it must be offered.)
 IFS=. read -r V_MAJOR V_MINOR V_PATCH <<<"${VERSION%%-*}"
@@ -49,6 +49,8 @@ mkdir -p "$BRAND"
 cp "$REPO"/brand/logo/png/squeak-duck-full-color-*.png "$REPO"/brand/logo/png/squeak-duck-compact-*.png \
    "$REPO"/brand/logo/png/squeak-lockup-horizontal-*.png "$BRAND/"
 cp "$REPO/brand/logo/png/duckTemplate.png" "$REPO/brand/logo/png/duckTemplate@2x.png" "$BRAND/"
+# The bot's profile picture (Telegram's "Use Squeak logo", Cliq's "Save logo"): the same JPG the daemon uploads.
+cp "$REPO/brand/logo/png/squeak-bot-avatar-640.jpg" "$BRAND/"
 
 ICON=""
 for c in "$REPO/macos/assets/squeak.icns"; do [ -f "$c" ] && ICON="$c"; done
