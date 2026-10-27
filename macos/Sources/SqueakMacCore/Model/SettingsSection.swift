@@ -3,13 +3,14 @@ import Foundation
 /// The pages of Settings, which lives inside the main window. `AppModel.settingsSection` is the
 /// page on screen, or nil while the window shows sessions.
 public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifiable {
-    case general, awake, connections, telegram, cliq, iphone, privacy, about
+    case general, notifications, awake, connections, telegram, cliq, iphone, privacy, about
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
-        case .general: "General"
+        case .general: "Mac"
+        case .notifications: "Notifications"
         case .awake: "Keep awake"
         case .connections: "Connections"
         case .telegram: "Telegram"
@@ -22,8 +23,8 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
 
     /// Sidebar grouping: how the app behaves, the services it talks to, then Squeak itself.
     public static let groups: [[SettingsSection]] = [
-        [.general, .awake, .connections],
-        [.telegram, .cliq, .iphone],
+        [.general, .notifications, .awake],
+        [.connections, .telegram, .cliq, .iphone],
         [.privacy, .about],
     ]
 
@@ -32,6 +33,8 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
     public init?(link: String?) {
         guard let raw = link?.trimmingCharacters(in: .whitespaces).lowercased(), !raw.isEmpty else { return nil }
         if raw == "channels" { self = .telegram; return }
+        if raw == "notify" || raw == "notification" { self = .notifications; return }
+        if raw == "mac" { self = .general; return }
         if raw == "cliq" || raw == "zoho" { self = .cliq; return }
         guard let s = SettingsSection(rawValue: raw) else { return nil }
         self = s

@@ -297,7 +297,9 @@ Environment variables:
 | `SQUEAK_DAEMON_PORT` | daemon port to talk to instead of 8477 |
 | `SQUEAK_MAC_CAPTURE=<prefix>` | open the conversation window, save screenshots with that prefix, quit; uses no real cache or key file |
 | `SQUEAK_MAC_APPEARANCE=light` | with capture, force light appearance (otherwise dark) |
+| `SQUEAK_MAC_NEWCHAT_CUSTOMIZE=1` | opens New chat with its Customize card expanded (capture, or by hand) |
 | `SQUEAK_MAC_DEMO=1` | demo data only: no network, no reporting, no cache, and no send reaches a chat |
+| `SQUEAK_MAC_CAPTURE_ONLY=popup` | with `SQUEAK_MAC_CAPTURE` and demo, every menu-bar popup screen (home, needs-you, usage, controls, new-chat, new-chat-customize, workspaces, session) as `<prefix>-popup-<screen>.png`; `SQUEAK_MAC_POPUP_SCREEN=<screen>` takes one, `SQUEAK_MAC_POPUP_SCREEN_HEIGHT=<pt>` pins the screen height |
 | `SQUEAK_MAC_CAPTURE_ONLY=popover` | with `SQUEAK_MAC_CAPTURE` and demo, only the menu-bar panel: dark, light, short screen |
 | `SQUEAK_MAC_CAPTURE_ONLY=refinements` | with `SQUEAK_MAC_CAPTURE` and demo, the quick composer on a notification reply (dark, light), a layout check at 440, 600 and 900pt screen heights (`<prefix>-layout.json`, with `allFit`), then the menu panel; it quits when done |
 | `SQUEAK_MAC_REFINEMENT_DEMO=menu` | with demo, leaves the app running with only the menu-bar item (no onboarding, no window), for clicking through by hand |

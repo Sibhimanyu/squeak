@@ -8,13 +8,16 @@ public struct NewChatWorkspace: Decodable, Sendable, Equatable, Identifiable, Ha
     public var title: String?
     public var lastActivityAt: Date?
     public var defaultAgent: NewChatAgent
+    /// The workspace's folder on this Mac, where an attached image is saved; nil from a daemon that does not say.
+    public var path: String?
 
-    public init(id: String, repoName: String, branch: String, title: String? = nil, lastActivityAt: Date? = nil, defaultAgent: NewChatAgent = .claude) {
+    public init(id: String, repoName: String, branch: String, title: String? = nil, lastActivityAt: Date? = nil, defaultAgent: NewChatAgent = .claude, path: String? = nil) {
+        self.path = path
         self.id = id; self.repoName = repoName; self.branch = branch; self.title = title
         self.lastActivityAt = lastActivityAt; self.defaultAgent = defaultAgent
     }
 
-    enum CodingKeys: String, CodingKey { case id, repoName, branch, title, lastActivityAt, defaultAgent }
+    enum CodingKeys: String, CodingKey { case id, repoName, branch, title, lastActivityAt, defaultAgent, path }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -24,6 +27,7 @@ public struct NewChatWorkspace: Decodable, Sendable, Equatable, Identifiable, Ha
         title = c.lenient(String.self, .title)
         lastActivityAt = c.lenient(String.self, .lastActivityAt).flatMap(DaemonDate.parse)
         defaultAgent = c.lenient(String.self, .defaultAgent).flatMap(NewChatAgent.init(rawValue:)) ?? .claude
+        path = c.lenient(String.self, .path).flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// "repo · branch", the one label the picker uses everywhere.
@@ -78,10 +82,16 @@ extension DaemonClient {
     }
 
     /// Never throws and never retries: a new chat is created by the first message, so a retry could make two.
-    public func startChat(workspaceId: String, agent: NewChatAgent, text: String) async -> StartChatResult {
+    /// `model`, `thinking` and `split` are sent only when set; a split only for Claude, plan first only with a split.
+    public func startChat(workspaceId: String, agent: NewChatAgent, text: String,
+                          model: String? = nil, thinking: String? = nil, split: WorkSplit? = nil) async -> StartChatResult {
         guard let token = tokenProvider() else { return .failed(reason: "Squeak's access token was not found") }
-        let fields = ["workspaceId": workspaceId, "agent": agent.rawValue, "text": text]
-        guard let body = try? JSONEncoder().encode(fields) else { return .failed(reason: "Could not encode the message") }
+        var fields: [String: any Sendable] = ["workspaceId": workspaceId, "agent": agent.rawValue, "text": text]
+        if let model, !model.isEmpty { fields["model"] = model }
+        if let thinking, !thinking.isEmpty { fields["thinking"] = thinking }
+        if agent == .claude, let split, !split.isEmpty { fields["split"] = split.json }
+        let extended = fields.count > 3
+        guard JSONSerialization.isValidJSONObject(fields), let body = try? JSONSerialization.data(withJSONObject: fields) else { return .failed(reason: "Could not encode the message") }
         let request = HTTPRequest(
             method: "POST", url: controlURL("/control/chats"),
             headers: ["x-squeak-token": token, "content-type": "application/json"], body: body, timeout: 45)
@@ -103,6 +113,9 @@ extension DaemonClient {
             return .failed(reason: "This version of the Squeak service can't start chats yet. Update the service.")
         }
         let parsed = try? JSONDecoder().decode(StartChatBody.self, from: response.body)
+        if extended, response.status == 400, parsed?.ok != true, (parsed?.reason ?? "").isEmpty {
+            return .failed(reason: "This version of the Squeak service can't take a model or work split yet. Update the service.")
+        }
         if parsed?.ok == true, let id = parsed?.sessionId, !id.isEmpty { return .started(sessionId: id) }
         if let reason = parsed?.reason, !reason.isEmpty { return .failed(reason: reason) }
         if (400..<500).contains(response.status) { return .failed(reason: "Squeak rejected the request (HTTP \(response.status))") }
@@ -120,8 +133,13 @@ public struct NewChatForm: Sendable, Equatable {
     public private(set) var agent: NewChatAgent = .claude
     private var agentChosen = false
     public var text = ""
+    /// The daemon's models (empty until loaded or from an older daemon) and the chosen setup.
+    public private(set) var models: [DaemonChatModel] = []
+    public private(set) var setup = ChatSetup()
+    private let store: ChatChoiceStore?
 
-    public init(workspaces: [NewChatWorkspace] = [], preselect: String? = nil) {
+    public init(workspaces: [NewChatWorkspace] = [], preselect: String? = nil, store: ChatChoiceStore? = nil) {
+        self.store = store
         self.workspaces = workspaces.sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
         if let preselect, self.workspaces.contains(where: { $0.id == preselect }) { select(preselect) }
         else if let first = self.workspaces.first { select(first.id) }
@@ -129,9 +147,11 @@ public struct NewChatForm: Sendable, Equatable {
 
     public mutating func setWorkspaces(_ list: [NewChatWorkspace]) {
         let keep = workspaceId, keepAgent = agentChosen ? agent : nil, keepQuery = query, keepText = text
-        self = NewChatForm(workspaces: list, preselect: keep)
+        let keepModels = models, keepSetup = setup
+        self = NewChatForm(workspaces: list, preselect: keep, store: store)
         query = keepQuery
         text = keepText
+        models = keepModels; setup = keepSetup
         if let keepAgent { agent = keepAgent; agentChosen = true }
     }
 
@@ -154,7 +174,56 @@ public struct NewChatForm: Sendable, Equatable {
         if !agentChosen { agent = w.defaultAgent }
     }
 
-    public mutating func choose(agent: NewChatAgent) { self.agent = agent; agentChosen = true }
+    public mutating func choose(agent: NewChatAgent) {
+        self.agent = agent; agentChosen = true
+        restoreSetup()
+    }
+
+    // MARK: Setup (presets, model, thinking, split)
+
+    public mutating func setModels(_ list: [DaemonChatModel]) {
+        models = list
+        restoreSetup()
+    }
+
+    private mutating func restoreSetup() {
+        setup = models.isEmpty ? ChatSetup() : (store?.restore(agent: agent, models: models) ?? ChatPresets.setup(for: .best, agent: agent, models: models) ?? ChatSetup())
+    }
+
+    public var agentModels: [DaemonChatModel] { ChatPresets.models(models, agent) }
+    public var chosenModel: DaemonChatModel? { agentModels.first { $0.id == setup.modelId } }
+    public var presets: [ChatPreset] { ChatPresets.available(agent: agent, models: models) }
+    public var preset: ChatPreset { ChatPresets.preset(of: setup, agent: agent, models: models) }
+    public var summary: String { ChatPresets.summary(of: setup, agent: agent, models: models) }
+    public var canSplit: Bool { agent == .claude && !models.isEmpty }
+
+    public mutating func apply(preset: ChatPreset) {
+        guard let s = ChatPresets.setup(for: preset, agent: agent, models: models) else { return }
+        setup = s
+        remember()
+    }
+
+    public mutating func pick(modelId: String) {
+        guard let m = agentModels.first(where: { $0.id == modelId }) else { return }
+        setup.modelId = m.id
+        if let l = setup.level, m.levels.contains(l) {} else { setup.level = m.levels.isEmpty ? nil : (m.defaultLevel ?? m.levels.first) }
+        remember()
+    }
+
+    public mutating func pick(level: String) { setup.level = level; remember() }
+    public mutating func pick(code: String?) { setup.code = code; remember() }
+    public mutating func pick(run: String?) { setup.run = run; remember() }
+    /// Plan first needs a split to hold; with none it stays off.
+    public mutating func set(planFirst: Bool) { setup.planFirst = planFirst && canSplit; remember() }
+
+    private func remember() { store?.save(setup, preset: preset, agent: agent) }
+
+    /// What startChat sends: nil keys when default, a split only for Claude.
+    public var request: (model: String?, thinking: String?, split: WorkSplit?) {
+        let s = ChatPresets.sanitised(setup, agent: agent, models: models)
+        let split = canSplit && !s.split.isEmpty ? s.split : nil
+        return (s.modelId, s.level, split)
+    }
 
     public var trimmedText: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
     public var isTooLong: Bool { trimmedText.count > Self.maxLength }

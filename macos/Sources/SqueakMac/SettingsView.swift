@@ -37,6 +37,7 @@ private extension SettingsSection {
     var symbol: LucideName {
         switch self {
         case .general: .settings
+        case .notifications: .bell
         case .awake: .moon
         case .connections: .link
         case .telegram: .send
@@ -99,6 +100,7 @@ private struct SettingsPage: View {
     @ViewBuilder private var page: some View {
         switch section {
         case .general: GeneralSettings()
+        case .notifications: NotificationsSettings()
         case .awake: AwakeSettings()
         case .connections: ConnectionsSettings()
         case .telegram: TelegramSettings()
@@ -123,16 +125,51 @@ private struct SectionFootnote: View {
     }
 }
 
-private struct GeneralSettings: View {
+/// Settings › Notifications: this Mac's banners, then what each set-up channel may push.
+private struct NotificationsSettings: View {
     @Environment(AppModel.self) private var model
-    private let hotKeys = HotKeyCenter.shared
-    @State private var loginOn = LoginItem.isEnabled
-    @State private var loginError: String?
     @State private var bannersShown: Bool?
 
     var body: some View {
         @Bindable var model = model
         Form {
+            Section {
+                Toggle("Notify me on this Mac when a session needs me or finishes", isOn: $model.notificationsEnabled)
+                    .disabled(!Bundled.isApp)
+                if model.notificationsEnabled, bannersShown == false {
+                    LabeledContent {
+                        Button("Open Notification Settings") { GeneralSettings.openNotificationSettings() }
+                    } label: {
+                        Text("macOS isn't showing Squeak's banners")
+                        Text("They only land in Notification Center. Set Squeak's alert style to Banners or Alerts.")
+                    }
+                }
+            } footer: {
+                SectionFootnote("Approvals, questions, plans to review, errors, and finished Conductor chats. Reply to a finished chat from the notification itself.")
+            }
+            ForEach(NotifyChannel.allCases, id: \.self) { NotificationsSection(channel: $0) }
+            if model.channels.notify?.shown.isEmpty ?? true {
+                Section { SectionFootnote("Set up Telegram or Zoho Cliq to choose what each one pushes.") }
+            }
+        }
+        .formStyle(.grouped)
+        .task { bannersShown = await Notifier.shared.bannersShown(); await model.channels.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { bannersShown = await Notifier.shared.bannersShown() }
+        }
+    }
+}
+
+private struct GeneralSettings: View {
+    @Environment(AppModel.self) private var model
+    private let hotKeys = HotKeyCenter.shared
+    @State private var loginOn = LoginItem.isEnabled
+    @State private var loginError: String?
+
+    var body: some View {
+        @Bindable var model = model
+        Form {
+            macCard
             Section {
                 Toggle("Open Squeak when I log in", isOn: Binding(
                     get: { loginOn },
@@ -185,26 +222,33 @@ private struct GeneralSettings: View {
                     SectionFootnote("Tap \(key) twice, quickly and on its own, from any app. Holding \(key) to use it with another key never counts.")
                 }
             }
-            Section {
-                Toggle("Notify me when a session needs me or finishes", isOn: $model.notificationsEnabled)
-                    .disabled(!Bundled.isApp)
-                if model.notificationsEnabled, bannersShown == false {
-                    LabeledContent {
-                        Button("Open Notification Settings") { Self.openNotificationSettings() }
-                    } label: {
-                        Text("macOS isn't showing Squeak's banners")
-                        Text("They only land in Notification Center. Set Squeak's alert style to Banners or Alerts.")
-                    }
-                }
-            } footer: {
-                SectionFootnote("Approvals, questions, plans to review, errors, and finished Conductor chats. Reply to a finished chat from the notification itself.")
-            }
         }
         .formStyle(.grouped)
-        .task { bannersShown = await Notifier.shared.bannersShown() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { bannersShown = await Notifier.shared.bannersShown() }
+    }
+
+    private var macCard: some View {
+        let r = model.connectionsReport
+        return Section {
+            Card {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    macRow("Conductor", r.database)
+                    macRow("Squeak service", r.daemon)
+                    macRow("Sending", r.sending)
+                }
+            }
+            .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+        } footer: {
+            SectionFootnote("Details are under Connections.")
         }
+    }
+
+    private func macRow(_ name: String, _ row: ConnectionsReport.Row) -> some View {
+        HStack {
+            Text(name).font(Typo.body).foregroundStyle(Theme.ink)
+            Spacer(minLength: 8)
+            Text(row.value).font(Typo.body).foregroundStyle(Theme.muted)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     static func openNotificationSettings() {

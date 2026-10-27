@@ -26,11 +26,11 @@ struct NotificationsSection: View {
                 }
                 .disabled(s.muted)
                 if let e = m.notifyError { Footnote(e) }
-            } header: { Text("Notifications") } footer: {
+            } header: { Text(channel.title) } footer: {
                 Footnote(m.notifyOutdated ? NotifyText.outdated : NotifyText.footnote)
             }
         } else if m.notifyOutdated, channel == .telegram ? m.tokenSet : m.webhookSet {
-            Section { Footnote(NotifyText.outdated) } header: { Text("Notifications") }
+            Section { Footnote(NotifyText.outdated) } header: { Text(channel.title) }
         }
     }
 

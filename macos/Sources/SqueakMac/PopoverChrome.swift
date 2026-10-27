@@ -8,13 +8,13 @@ enum PopoverMetrics {
     static let width: CGFloat = 360
     /// The outer radius of the whole panel. The menu panel's window shadow follows it too (see
     /// `MenuPanel`), so the material, the highlight and the shadow share one outline.
-    static let corner: CGFloat = 24
+    static let corner: CGFloat = 16
     /// Left/right inset of every row's content, so headings, rows and footer text share one edge.
-    static let inset: CGFloat = 16
+    static let inset: CGFloat = 14
     /// Room left around the panel on a short screen (menu bar, shadow, a margin).
     static let screenMargin: CGFloat = 48
     /// The tallest the panel grows; past it the session list scrolls inside the panel.
-    static let maxHeight: CGFloat = 620
+    static let maxHeight: CGFloat = 720
 }
 
 /// Section heading: 13pt semibold, muted, like "Listening Mode" in the Sound menu.
@@ -65,18 +65,17 @@ struct MenuRow: View {
             HStack(spacing: Space.s) {
                 Text(title).font(.system(size: 13)).lineLimit(1)
                 Spacer(minLength: Space.s)
-                if let hint { Text(hint).font(.system(size: 12)).foregroundStyle(Theme.subtle) }
+                if let hint { Text(hint).font(.system(size: 13)).foregroundStyle(Theme.subtle) }
             }
             .foregroundStyle(disabled ? Theme.subtle : Theme.ink)
-            .padding(.horizontal, Space.m)
-            .frame(height: 26)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.ink.opacity(hovering && !disabled ? 0.09 : 0)))
+            .frame(height: 28)
+            // The highlight reaches 6pt past the text into the popup's inset, never to the panel edge.
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.ink.opacity(hovering && !disabled ? 0.09 : 0)).padding(.horizontal, -6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(disabled)
         .onHover { hovering = $0 }
-        .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
     }
 }
@@ -94,7 +93,7 @@ struct PanelSurface: ViewModifier {
             .overlay(shape.strokeBorder(Theme.lineStrong, lineWidth: 1))
             // A hairline inset from the top edge, kept off the curve so it reads as light on glass.
             .overlay(alignment: .top) {
-                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                Rectangle().fill(Theme.line).frame(height: 1)
                     .padding(.horizontal, PopoverMetrics.corner)
                     .accessibilityHidden(true)
             }

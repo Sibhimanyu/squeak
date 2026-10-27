@@ -18,6 +18,8 @@ struct ComposerField: NSViewRepresentable {
     var fontSize: CGFloat = 14
     /// ⌥↩: the quick composer's "steer into the running turn". Nil: ⌥↩ is a plain Return.
     var onOptionReturn: (() -> Void)?
+    /// Images pasted (⌘V with an image and no text) or dropped on the field. Nil: the field takes none.
+    var onImages: (([ImageSource]) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -49,6 +51,7 @@ struct ComposerField: NSViewRepresentable {
             steer()
             return true
         }
+        if onImages != nil { tv.registerForDraggedTypes([.fileURL, .png, .tiff]) }
         scroll.documentView = tv
         return scroll
     }
@@ -58,6 +61,7 @@ struct ComposerField: NSViewRepresentable {
         guard let tv = scroll.documentView as? PlaceholderTextView else { return }
         if tv.string != text { tv.string = text }
         tv.placeholder = placeholder
+        tv.onImages = onImages
         tv.isEditable = isEnabled
         tv.alphaValue = isEnabled ? 1 : 0.5
         tv.needsDisplay = true
@@ -123,6 +127,33 @@ final class PlaceholderTextView: NSTextView {
     var onCommandReturn: (() -> Void)?
     /// True when it took the key; false lets ⌥↩ be an ordinary Return.
     var onOptionReturn: (() -> Bool)?
+    var onImages: (([ImageSource]) -> Void)?
+
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        onImages == nil ? super.readablePasteboardTypes : super.readablePasteboardTypes + [.png, .tiff, .fileURL]
+    }
+
+    /// An image on the clipboard is attached; anything else pastes as it always did.
+    override func paste(_ sender: Any?) {
+        if let onImages {
+            let found = ImagePasteboard.sources(.general, rawNeedsNoText: true)
+            if !found.isEmpty { onImages(found); return }
+        }
+        super.paste(sender)
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        if onImages != nil, !ImagePasteboard.sources(sender.draggingPasteboard, rawNeedsNoText: false).isEmpty { return .copy }
+        return super.draggingEntered(sender)
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        if let onImages {
+            let found = ImagePasteboard.sources(sender.draggingPasteboard, rawNeedsNoText: false)
+            if !found.isEmpty { onImages(found); return true }
+        }
+        return super.performDragOperation(sender)
+    }
 
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command), event.keyCode == 36 || event.keyCode == 76 {

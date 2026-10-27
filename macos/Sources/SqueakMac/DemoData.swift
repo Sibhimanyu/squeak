@@ -11,14 +11,12 @@ enum DemoData {
     }
 
     static let question = """
-    I found the retry path and added an idempotency check. One decision needs your input.
+    We're seeing intermittent payment provider timeouts during checkout.
 
     How should temporary failures be retried?
 
     A. Retry automatically — Up to 3 attempts with exponential backoff. (Recommended)
     B. Let the customer retry — Show a clear error and keep checkout available.
-
-    Both approaches prevent duplicate charges.
     """
 
     static let singleAsk = PendingAsk(
@@ -31,6 +29,32 @@ enum DemoData {
                     AskOption(label: "Let the customer retry", description: "Show a clear error and keep checkout available."),
                 ])
         ])
+
+    /// What the conversation window shows for the Payment chat: the agent marks its pick the way Claude does.
+    static let windowAsk = PendingAsk(
+        toolUseId: "toolu_demo_1",
+        questions: [
+            AskQuestion(
+                question: "How should temporary failures be retried?", header: "Retries",
+                options: [
+                    AskOption(label: "Retry automatically (Recommended)", description: "Up to 3 attempts with exponential backoff."),
+                    AskOption(label: "Let the customer retry", description: "Show a clear error and keep checkout available."),
+                ])
+        ])
+
+    static let atlasQuestion = """
+    Which migration should we use for existing indexes?
+
+    A. Background backfill (Recommended)
+    B. Rebuild on demand
+    """
+
+    static let compassQuestion = """
+    Should the integration request write access?
+
+    A. Read-only first (Recommended)
+    B. Request write access
+    """
 
     static let multiAsk = PendingAsk(
         toolUseId: "toolu_demo_2",
@@ -153,17 +177,18 @@ enum DemoData {
         let pay = s("demo-1", "conductor", "Payment retry logic", .blocked, min: 2, "storefront", "payment-retries", "claude")
         let list = [
             pay,
-            s("demo-2", "conductor", "Search index migration", .blocked, min: 5, "atlas", "search-migration", "codex", approval: true),
+            s("demo-2", "conductor", "Search index migration", .blocked, min: 7, "atlas", "search-migration", "codex"),
             s("demo-3", "conductor", "Telegram message formatting", .working, min: 12, "squeak", "telegram-formatting", "claude"),
-            s("demo-4", "codex-terminal", "Fix onboarding deep link", .working, min: 18, "compass", "onboarding-link", "codex"),
+            s("demo-4", "conductor", "Permission scope", .blocked, min: 12, "compass", "permission-scope", "claude"),
             s("demo-5", "claude-desktop", "API response caching", .working, min: 27, "atlas", "api-caching", "claude"),
             s("demo-6", "conductor", "Session isolation checks", .finished, min: 60, "squeak", "session-isolation", "claude"),
             s("demo-7", "codex-desktop", "Native notifications", .finished, min: 120, "compass", "native-notifications", "codex"),
-            s("demo-8", "claude-terminal", "CLI help cleanup", .finished, min: 180, "atlas", "cli-help", "claude"),
+            s("demo-8", "claude-terminal", "CLI help cleanup", .working, min: 180, "atlas", "cli-help", "claude"),
             s("demo-9", "conductor", "Flaky checkout test", .error, min: 45, "storefront", "checkout-flake", "codex"),
             s("demo-10", "conductor", "Untitled", .idle, min: 300, "compass", "release-notes", "claude"),
         ]
-        return Bundle(sessions: list, needsYouText: [pay.key: question], asks: [pay.key: singleAsk])
+        return Bundle(sessions: list, needsYouText: [pay.key: question, list[1].key: atlasQuestion, list[3].key: compassQuestion],
+                      asks: [pay.key: windowAsk])
     }
 }
 
@@ -201,7 +226,7 @@ extension DemoData {
             // A reply was just sent: the previous answer stays (muted), then "You", then the working row.
             return [
                 m("1", .user, "Why does bold text show up as literal asterisks in Telegram?", at(10, 2), state: .confirmed),
-                m("2", .assistant, "The splitter cuts messages inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. I can fix the splitter and keep the fallback.", at(10, 9)),
+                m("2", .assistant, "The splitter cuts messages inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. I can fix the splitter and keep the fallback.\n\nShould I preserve tables in the fallback?\n\nA) Preserve tables\nB) Plain text only", at(10, 9)),
                 m("3", .user, "Fix the splitter, and make sure tables still render.", at(10, 12), state: .accepted(via: "conductor", delivery: .steered)),
                 m("4", .user, "Also keep the plain-text fallback for anything it still can't parse.", at(10, 14), state: .accepted(via: "conductor", delivery: .queued)),
             ]

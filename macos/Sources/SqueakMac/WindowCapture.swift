@@ -19,6 +19,7 @@ extension CaptureRunner {
         win.setContentSize(NSSize(width: 1200, height: 800))
         win.makeKeyAndOrderFront(nil)
         if env["SQUEAK_MAC_GLASS"] == "1" { NSApp.activate(ignoringOtherApps: true) }
+        model.installDemoAwake(DaemonAwake(until: Date().addingTimeInterval(7200)), lidReady: false)  // Home's status strip
         model.select(SessionKey(provider: "conductor", hostSessionId: "demo-1"))
         try? await Task.sleep(for: .milliseconds(1800))
         // The window's own frame view includes the toolbar; fall back to the content view.
@@ -28,6 +29,16 @@ extension CaptureRunner {
             try? await Task.sleep(for: .seconds(Double(env["SQUEAK_MAC_HOLD"] ?? "6") ?? 6))
         }
 
+        // Needs you (the decision cards) and Sessions (grouped by status), then a chat.
+        let savedAsks = DemoData.make().asks
+        model.demoSetAsks([:])
+        model.navFilter = .needsYou
+        try? await Task.sleep(for: .milliseconds(800))
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-needsyou.png")
+        model.demoSetAsks(savedAsks)
+        model.navFilter = .all
+        try? await Task.sleep(for: .milliseconds(800))
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-sessions.png")
         model.select(SessionKey(provider: "conductor", hostSessionId: "demo-3"))
         try? await Task.sleep(for: .milliseconds(1200))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-working.png")

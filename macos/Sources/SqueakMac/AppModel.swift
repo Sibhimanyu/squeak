@@ -11,7 +11,7 @@ enum SessionFilter: Hashable {
 
 /// The sidebar's filters: sections of the list, or where a session runs.
 enum NavFilter: Hashable {
-    case all, needsYou, working, done
+    case home, all, needsYou, working, done
     case source(SessionSource)
     /// Not a list of sessions: opens the usage view in the detail column.
     case usage
@@ -100,10 +100,15 @@ final class AppModel {
     // MARK: Browsing
     var query = ""
     var filter: SessionFilter = .all
-    var navFilter: NavFilter? = .all {
+    var navFilter: NavFilter? = .home {
         // Usage is a screen of its own, so no chat stays open behind it; picking a chat leaves it.
-        didSet { if navFilter == .usage, selected != nil { select(nil) } }
+        didSet {
+            if navFilter == .usage, selected != nil { select(nil) }
+            if navFilter != oldValue { projectFilter = nil }
+        }
     }
+    /// The project Home is drilled into (`HomeProject.name`); nil shows every project. See AppModel+Projects.swift.
+    var projectFilter: String?
     /// A short live phrase per working session ("Running tests"), for the list rows.
     private(set) var liveSteps: [SessionKey: String] = [:]
     private(set) var pinned: Set<SessionKey>
@@ -362,6 +367,12 @@ final class AppModel {
         Task { await refreshLiveSteps() }
     }
 
+    /// Capture only: the Needs you page shown as the lettered-option buttons (no live question card).
+    func demoSetAsks(_ new: [SessionKey: PendingAsk]) {
+        guard demoMode else { return }
+        asks = new
+    }
+
     // MARK: Window visibility drives the poll mode
 
     private func observeWindowVisibility() {
@@ -423,7 +434,7 @@ final class AppModel {
             case .repo(let r): if s.repoName != r { return false }
             }
             switch navFilter ?? .all {
-            case .all: return true
+            case .all, .home: return true
             case .needsYou: return SessionGrouping.kind(of: s, now: now) == .needsYou
             case .working: return SessionGrouping.kind(of: s, now: now) == .working
             case .done: return SessionGrouping.kind(of: s, now: now) == .done
@@ -442,7 +453,7 @@ final class AppModel {
         case .working: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .working }.count
         case .done: return sessions.filter { SessionGrouping.kind(of: $0, now: now) == .done }.count
         case .source(let src): return sessions.filter { $0.source == src }.count
-        case .usage: return 0
+        case .usage, .home: return 0
         }
     }
 

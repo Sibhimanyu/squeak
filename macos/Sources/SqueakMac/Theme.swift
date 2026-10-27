@@ -24,17 +24,20 @@ enum Theme {
     static let surface = adaptive(Tokens.Dark.surface, Tokens.Light.surface)
     /// Light is white, so anything raised also carries a `line` border.
     static let surfaceRaised = adaptive(Tokens.Dark.surfaceRaised, Tokens.Light.surfaceRaised)
+    /// Selected row, hover and the selected tab: one step above `surfaceRaised`.
+    static let selected = adaptive(Tokens.Dark.selected, Tokens.Light.selected)
+    static let selectedStrong = adaptive(Tokens.Dark.selectedStrong, Tokens.Light.selectedStrong)
     static let panelTranslucent = Color(nsColor: NSColor(name: nil) { a in
         a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 24 / 255, green: 24 / 255, blue: 27 / 255, alpha: 0.92) : NSColor(white: 1, alpha: 0.88)
+            ? NSColor(srgbRed: 36 / 255, green: 33 / 255, blue: 30 / 255, alpha: 0.92) : NSColor(white: 1, alpha: 0.88)
     })
     static let panelGlass = Color(nsColor: NSColor(name: nil) { a in
         a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 24 / 255, green: 24 / 255, blue: 27 / 255, alpha: 0.40) : NSColor(white: 1, alpha: 0.45)
+            ? NSColor(srgbRed: 36 / 255, green: 33 / 255, blue: 30 / 255, alpha: 0.40) : NSColor(white: 1, alpha: 0.45)
     })
     /// A grouped area inside the menu-bar panel, a step off the glass.
     static let panelBand = Color(nsColor: NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.07) : NSColor(white: 0, alpha: 0.045)
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: Tokens.Dark.selected).withAlphaComponent(0.6) : NSColor(white: 0, alpha: 0.045)
     })
     static let line = Color(nsColor: NSColor(name: nil) { a in
         a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.08) : NSColor(white: 0, alpha: 0.08)

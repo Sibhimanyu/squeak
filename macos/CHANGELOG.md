@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.8.4
+
+- Paste images (⌘V), drop image files or press + in the chat composer, New chat, the popup and the quick
+  message: the picture is saved in the chat's folder and the message tells the agent where.
+- Queued messages show under the chat, and Steer sends one into the running turn now; Edit and Delete work
+  too. It needs the background service updated to this version.
+- Pressing a project on Home opens it, with its chats grouped by status.
+- The Connected row in the sidebar opens the connection details; the awake and power chips on Home open Settings.
+- The popup's rows, tabs and buttons line up on one even margin.
+
+## 2.8.3
+
+- A picture an agent puts on the line right after a label ("At rest:") now shows as a picture instead of `[image: …]`.
+
+## 2.8.2
+
+- The sidebar is redone: a glass look that lets the desktop show through, the duck and the Squeak name with the
+  new-chat button on one row, a roomier search field and larger menu items.
+
+## 2.8.1
+
+- The whole app is back to standard macOS sizes: smaller type, tighter rows and a 360 pt menu-bar popup,
+  where 2.8.0 looked zoomed in. New chat is a 580 pt window.
+- Dark mode uses Conductor's warm greys instead of near-black.
+- The empty grey bar across the top of the conversation window is gone.
+
+## 2.8.0
+
+- Squeak for Mac is redesigned to match the iPhone app: the conversation window opens on Home (projects, a Mac
+  status strip) with Needs you as its own page, where each blocked chat has one-tap lettered answers and a
+  reply field.
+- New chat has the iPhone's presets (Best, Balanced, Save usage) and a Customize section: model, thinking
+  level, Split the work (the chat plans, cheaper models write the code and run tests) and Plan first.
+  Older background services ignore the split, so update the service to use it.
+- The menu-bar popup is now a control surface: Home, Needs you, Usage and Controls tabs, New chat and a chat's
+  conversation inside the popup, Keep awake and notification switches without opening the window.
+- Settings opens on Mac and Notifications, and Usage refreshes when you open it.
+
 ## 2.7.1
 
 - The menu-bar panel no longer shows a lighter square patch behind its rounded bottom corners.

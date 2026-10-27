@@ -19,6 +19,37 @@ enum Space {
     static let xxl: CGFloat = 32
 }
 
+/// Sizes at standard macOS density (DESIGN.md §4.2). One place, so no surface drifts back to
+/// mockup-pixel numbers: the generated mockups were measured in pixels, these are points.
+enum Metrics {
+    // Type
+    static let pageTitle: CGFloat = 22
+    static let cardTitle: CGFloat = 15
+    static let rowTitle: CGFloat = 13
+    static let rowMeta: CGFloat = 11
+    static let sectionLabel: CGFloat = 11
+    // Icons
+    static let icon: CGFloat = 14
+    static let iconSmall: CGFloat = 13
+    // Control heights
+    static let navRow: CGFloat = 36
+    static let sidebarField: CGFloat = 32
+    static let sidebarInset: CGFloat = 14
+    static let sidebarRowGap: CGFloat = 8
+    static let sidebarRadius: CGFloat = 10
+    static let sidebarText: CGFloat = 14
+    static let sidebarIcon: CGFloat = 16
+    static let field: CGFloat = 28
+    static let button: CGFloat = 26
+    static let segmented: CGFloat = 26
+    static let pill: CGFloat = 22
+    // Main window
+    static let sidebarWidth: CGFloat = 220
+    static let listMinWidth: CGFloat = 320
+    static let listIdealWidth: CGFloat = 350
+    static let listMaxWidth: CGFloat = 480
+}
+
 /// Corner radii (§5): panel 16, card 12, control 8, chip 6.
 enum Radius {
     static let panel: CGFloat = 16
@@ -26,6 +57,36 @@ enum Radius {
     static let control: CGFloat = 8
     static let chip: CGFloat = 6
     static let row: CGFloat = 8
+}
+
+// MARK: Cards (the iPhone's card language)
+
+/// Surface plus a 1px `line` stroke, radius 12, no shadow. State is told by a `StateDot` and a word, never a fill.
+struct Card<Content: View>: View {
+    var padding: CGFloat = Space.m
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line, lineWidth: 1))
+    }
+}
+
+/// The card for something that waits on the person (an approval, a question): radius 16, the same surface and stroke.
+struct DecisionCard<Content: View>: View {
+    var padding: CGFloat = Space.l
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.panel))
+            .overlay(RoundedRectangle(cornerRadius: Radius.panel).strokeBorder(Theme.line, lineWidth: 1))
+    }
 }
 
 // MARK: Section label
@@ -206,7 +267,7 @@ struct SessionRowView: View {
         .padding(.horizontal, Space.m)
         .padding(.vertical, 7)
         .background(
-            RoundedRectangle(cornerRadius: Radius.row).fill(Theme.surfaceRaised.opacity(isSelected ? 1 : hovering ? 0.7 : 0))
+            RoundedRectangle(cornerRadius: Radius.row).fill(isSelected ? Theme.selected : Theme.surfaceRaised.opacity(hovering ? 0.8 : 0))
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }

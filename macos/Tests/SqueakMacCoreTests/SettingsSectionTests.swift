@@ -15,6 +15,13 @@ import Testing
         #expect(SettingsSection(link: "zoho") == .cliq)
     }
 
+    @Test func phoneStyleOrderAndAliases() {
+        #expect(SettingsSection.groups.first == [.general, .notifications, .awake])
+        #expect(SettingsSection.general.title == "Mac")
+        #expect(SettingsSection(link: "notify") == .notifications)
+        #expect(SettingsSection(link: "mac") == .general)
+    }
+
     @Test func theOldChannelsTabLandsOnTelegram() {
         #expect(SettingsSection(link: "channels") == .telegram)
     }

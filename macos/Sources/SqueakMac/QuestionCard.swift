@@ -11,6 +11,8 @@ struct AskCard: View {
     let ask: PendingAsk
     /// The compact form for the popover: shorter text, and a plan is read in the window.
     var compact = false
+    /// The conversation window's card: framed, the question above its header, lettered rows, a "Recommended" pill.
+    var framed = false
     /// False when nothing can be sent from here (offline, or the session is read-only).
     var canSend = true
     var onOpen: () -> Void = {}
@@ -25,12 +27,12 @@ struct AskCard: View {
     @State private var outcome: AnswerOutcome?
     @FocusState private var otherFocused: Bool
 
-    init(ask: PendingAsk, compact: Bool = false, canSend: Bool = true, onOpen: @escaping () -> Void = {},
+    init(ask: PendingAsk, compact: Bool = false, framed: Bool = false, canSend: Bool = true, onOpen: @escaping () -> Void = {},
          onSend: @escaping (AskForm) async -> AnswerOutcome = { _ in .refused(reason: "Nothing is sent here.") },
          initial: AskForm? = nil, result: AnswerOutcome? = nil) {
         self.result = result
         _outcome = State(initialValue: result)
-        self.ask = ask; self.compact = compact; self.canSend = canSend; self.onOpen = onOpen; self.onSend = onSend
+        self.ask = ask; self.compact = compact; self.framed = framed; self.canSend = canSend; self.onOpen = onOpen; self.onSend = onSend
         self.initial = initial
         _form = State(initialValue: initial ?? AskForm(ask))
     }
@@ -53,6 +55,9 @@ struct AskCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(framed ? 14 : 0)
+        .background { if framed { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.surface.opacity(0.7)) } }
+        .overlay { if framed { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.lineStrong) } }
         .animation(nil, value: form.index)
     }
 
@@ -60,19 +65,25 @@ struct AskCard: View {
 
     @ViewBuilder private var questionBody: some View {
         if let q = form.current {
+            if framed {
+                Text(verbatim: q.question).font(.system(size: Metrics.cardTitle, weight: .semibold)).foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                 if let header = q.header, !header.isEmpty {
-                    Text(verbatim: header).font(Typo.meta).foregroundStyle(Theme.muted)
+                    Text(verbatim: header).font(framed ? .system(size: 12) : Typo.meta).foregroundStyle(Theme.muted)
                 }
                 Spacer(minLength: 0)
                 if q.multiSelect { Text("Choose any").font(Typo.meta).foregroundStyle(Theme.muted) }
                 if let progress = form.progress { Text(verbatim: progress).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted) }
             }
-            Text(verbatim: q.question).font(compact ? Typo.label : Typo.heading).foregroundStyle(Theme.ink)
-                .lineLimit(compact ? 3 : nil).fixedSize(horizontal: false, vertical: true)
+            if !framed {
+                Text(verbatim: q.question).font(compact ? Typo.label : Typo.heading).foregroundStyle(Theme.ink)
+                    .lineLimit(compact ? 3 : nil).fixedSize(horizontal: false, vertical: true)
+            }
             VStack(spacing: compact ? 6 : Space.s) {
-                ForEach(q.options, id: \.label) { option in
-                    optionRow(option, selected: form.picks[form.index].contains(option.label), multi: q.multiSelect)
+                ForEach(Array(q.options.enumerated()), id: \.element.label) { i, option in
+                    optionRow(option, index: i, selected: form.picks[form.index].contains(option.label), multi: q.multiSelect)
                 }
                 otherRow(multi: q.multiSelect)
             }
@@ -100,26 +111,41 @@ struct AskCard: View {
         }
     }
 
-    private func optionRow(_ option: AskOption, selected: Bool, multi: Bool) -> some View {
-        Button {
+    /// Claude marks the option it prefers with a "(Recommended)" suffix; framed rows show that as a pill.
+    private func split(_ label: String) -> (title: String, recommended: Bool) {
+        let tag = "(recommended)"
+        guard label.lowercased().hasSuffix(tag) else { return (label, false) }
+        return (String(label.dropLast(tag.count)).trimmingCharacters(in: .whitespaces), true)
+    }
+
+    private func optionRow(_ option: AskOption, index: Int = 0, selected: Bool, multi: Bool) -> some View {
+        let parts = framed ? split(option.label) : (option.label, false)
+        let letter = framed ? "\(Character(UnicodeScalar(65 + index % 26)!))) " : ""
+        return Button {
             form.toggle(option.label, in: form.index)
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 control(selected: selected, multi: multi)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: option.label).font(Typo.label).foregroundStyle(Theme.ink)
+                    Text(verbatim: letter + parts.0).font(framed ? .system(size: 13, weight: .semibold) : Typo.label).foregroundStyle(Theme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     if let d = option.description, !d.isEmpty {
-                        Text(verbatim: d).font(compact ? Typo.meta : Typo.body).foregroundStyle(Theme.muted)
+                        Text(verbatim: d).font(framed ? .system(size: 12) : compact ? Typo.meta : Typo.body).foregroundStyle(Theme.muted)
                             .lineLimit(compact ? 2 : nil).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 0)
+                if parts.1 {
+                    Text("Recommended").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.working)
+                        .padding(.horizontal, 8).frame(height: 22)
+                        .background(Theme.working.opacity(0.16), in: Capsule())
+                }
             }
-            .padding(.horizontal, 12).padding(.vertical, compact ? 8 : 11)
-            .frame(maxWidth: .infinity, minHeight: compact ? 36 : 44, alignment: .leading)
-            .background(selected ? Theme.surfaceRaised : Theme.surfaceRaised.opacity(0.35), in: RoundedRectangle(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(selected ? Theme.lineStrong : Theme.line))
+            .padding(.horizontal, 12).padding(.vertical, framed ? 8 : compact ? 8 : 11)
+            .frame(maxWidth: .infinity, minHeight: compact ? 32 : 40, alignment: .leading)
+            .background(framed ? Theme.bg.opacity(selected ? 0.2 : 0.45) : selected ? Theme.surfaceRaised : Theme.surfaceRaised.opacity(0.35),
+                        in: RoundedRectangle(cornerRadius: framed ? 10 : Radius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: framed ? 10 : Radius.card, style: .continuous).strokeBorder(selected ? Theme.lineStrong : Theme.line))
             .contentShape(RoundedRectangle(cornerRadius: Radius.card))
         }
         .buttonStyle(.plain)
@@ -238,7 +264,7 @@ struct AskCard: View {
                 Text(sending ? "Sending…" : title).font(Typo.label)
             }
             .foregroundStyle(enabled ? Theme.primaryText : Theme.muted)
-            .padding(.horizontal, 14).frame(height: 32)
+            .padding(.horizontal, 12).frame(height: Metrics.button)
             .background(enabled ? Theme.primaryFill : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
         }
         .buttonStyle(.plain)
@@ -249,7 +275,7 @@ struct AskCard: View {
     private func quietButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(Typo.label).foregroundStyle(Theme.muted)
-                .padding(.horizontal, Space.s).frame(height: 30).contentShape(Rectangle())
+                .padding(.horizontal, Space.s).frame(height: Metrics.button).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

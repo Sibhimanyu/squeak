@@ -332,6 +332,45 @@ describe("HookIngressServer control routes", () => {
     expect((await fetch(`${base}/toolu_known0001/activity`, { method: "POST", headers: auth })).status).toBe(405);
   });
 
+  it("lists and changes a chat queue only with the token, checks the id is still queued, and sends no CORS header", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const actions: string[] = [];
+    server.setControl({
+      sessionMessage: () => ({}),
+      reply: async () => ({}),
+      queue: async (id) => (id === "gone" ? null : [{ id: "m_1", text: "x".repeat(5000), mode: "queue", position: 1 }]),
+      queueAction: async (id, messageId, action) => {
+        actions.push(`${id}/${messageId}/${action}`);
+        return { ok: true };
+      },
+    });
+    const base = `http://127.0.0.1:${harness.port}/control/session/abc-123/queue`;
+    const auth = { "x-squeak-token": harness.token };
+    expect((await fetch(base)).status).toBe(403);
+    expect((await fetch(`${base}/m_1/promote`, { method: "POST" })).status).toBe(403);
+    const list = await fetch(base, { headers: auth });
+    expect(list.status).toBe(200);
+    expect(list.headers.get("access-control-allow-origin")).toBeNull();
+    const body = (await list.json()) as { items: Array<{ id: string; text: string }> };
+    expect(body.items[0]!.id).toBe("m_1");
+    expect(body.items[0]!.text).toHaveLength(4000);
+    expect((await fetch(`http://127.0.0.1:${harness.port}/control/session/gone/queue`, { headers: auth })).status).toBe(
+      404,
+    );
+    expect((await fetch(`${base}/m_1/promote`, { method: "POST", headers: auth })).status).toBe(200);
+    expect((await fetch(`${base}/m_1/cancel`, { method: "POST", headers: auth })).status).toBe(200);
+    expect((await fetch(`${base}/m_9/promote`, { method: "POST", headers: auth })).status).toBe(404);
+    expect((await fetch(`${base}/bad%2Fid/promote`, { method: "POST", headers: auth })).status).toBe(404);
+    expect((await fetch(`${base}/m_1/promote`, { headers: auth })).status).toBe(405);
+    expect(actions).toEqual(["abc-123/m_1/promote", "abc-123/m_1/cancel"]);
+  });
+
+  it("answers 503 for queue routes when the wiring cannot read a queue", async () => {
+    const { base, auth } = await withControl();
+    expect((await fetch(`${base}/queue`, { headers: auth })).status).toBe(503);
+  });
+
   it("serves a transcript only with the token, clamps the limit, and sends no CORS header", async () => {
     const { base, auth } = await withControl();
     expect((await fetch(`${base}/transcript`)).status).toBe(403);

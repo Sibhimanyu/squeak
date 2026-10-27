@@ -195,6 +195,10 @@ public enum MessageMarkup {
                 quote.append(String(rest))
             } else if item != nil, indent >= 2, quote.isEmpty {
                 item?.lines.append(String(trimmed))
+            } else if item == nil, quote.isEmpty, let image = standaloneImage(String(trimmed)) {
+                // An image alone on its line is a block even straight after a label line.
+                flushPara()
+                blocks.append(image)
             } else {
                 flushQuote(); flushItem()
                 para.append(String(line))
