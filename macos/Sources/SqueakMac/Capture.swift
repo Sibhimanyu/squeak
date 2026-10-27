@@ -163,8 +163,10 @@ enum CaptureRunner {
         ns.prepare(model: model, preselect: nil)
         try? await Task.sleep(for: .milliseconds(600))
         ns.form.text = "Add retries with backoff to the checkout call, and a test for the timeout case."
-        let nw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: NewChatSheet.width, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
-        let nHost = NSHostingView(rootView: NewChatSheet(close: {}).environment(model).environment(ns))
+        let nw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: NewChatSheet.width, height: 560), styleMask: [.borderless], backing: .buffered, defer: false)
+        nw.isOpaque = false
+        nw.backgroundColor = .clear
+        let nHost = NSHostingView(rootView: NewChatSheet(close: {}).panelSurface().environment(model).environment(ns))
         nw.contentView = nHost
         nw.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(900))

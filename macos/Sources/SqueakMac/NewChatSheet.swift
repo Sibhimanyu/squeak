@@ -3,37 +3,71 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// Opens the New chat sheet from anywhere: ⌘N, the popover footer, the quick composer. It is a window
-/// of its own, not a SwiftUI `.sheet`, because those entry points have no window to hang one on.
+/// Opens New chat from anywhere: ⌘N, the popover footer, the quick composer. A borderless panel with the
+/// menu-bar panel's own glass surface, dropped under the status item where that panel opens, so starting a
+/// chat stays in the panel's look instead of opening a titled window.
 @MainActor
-final class NewChatController: NSObject, NSWindowDelegate {
+final class NewChatController: NSObject {
     static let shared = NewChatController()
-    private var window: NSWindow?
+    private var panel: QuickPanel?
+    private var clickMonitor: Any?
     let state = NewChatState()
 
     func show(preselect workspaceId: String? = nil) {
         let model = AppModel.shared
-        if window == nil {
-            let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: NewChatSheet.width, height: 680),
-                styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            w.title = "New chat"
-            w.titlebarAppearsTransparent = true
-            w.isReleasedWhenClosed = false
-            w.delegate = self
-            w.contentView = NSHostingView(rootView: NewChatSheet(close: { [weak self] in self?.hide() }).environment(model).environment(state))
-            window = w
+        if panel == nil {
+            let p = QuickPanel(
+                contentRect: NSRect(x: 0, y: 0, width: NewChatSheet.width, height: 640),
+                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            p.isOpaque = false
+            p.backgroundColor = .clear
+            p.hasShadow = true
+            p.level = .floating
+            p.hidesOnDeactivate = false
+            p.isReleasedWhenClosed = false
+            p.isMovableByWindowBackground = true
+            p.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+            p.onEscape = { [weak self] in self?.hide() }
+            let host = NSHostingView(rootView: NewChatSheet(close: { [weak self] in self?.hide() })
+                .panelSurface()
+                .environment(model).environment(state))
+            host.sizingOptions = [.intrinsicContentSize]
+            p.contentView = host
+            panel = p
         }
         state.prepare(model: model, preselect: workspaceId)
-        ActivationPolicyController.shared.willShowWindow()
-        window?.center()
-        window?.makeKeyAndOrderFront(nil)
+        guard let panel else { return }
+        if !panel.isVisible { place(panel) }
+        panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        watchOutsideClicks()
     }
 
-    func hide() { window?.orderOut(nil) }
+    func hide() {
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        clickMonitor = nil
+        panel?.orderOut(nil)
+    }
 
-    nonisolated func windowShouldClose(_ sender: NSWindow) -> Bool { true }
+    /// Under the status item, like the menu-bar panel; on the pointer's screen, high, when there is none.
+    private func place(_ panel: NSPanel) {
+        let size = panel.contentView?.fittingSize ?? panel.frame.size
+        if let frame = MenuBarController.shared.dropFrame(size: size) {
+            panel.setFrame(frame, display: false)
+            return
+        }
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+        guard let v = screen?.visibleFrame else { return panel.center() }
+        panel.setFrame(CGRect(x: v.midX - size.width / 2, y: v.maxY - 12 - size.height, width: size.width, height: size.height), display: false)
+    }
+
+    /// A click in another app closes it, as it does the menu-bar panel.
+    private func watchOutsideClicks() {
+        guard clickMonitor == nil else { return }
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor in self?.hide() }
+        }
+    }
 }
 
 @MainActor @Observable
@@ -138,7 +172,6 @@ struct NewChatSheet: View {
         }
         .padding(20)
         .frame(width: Self.width)
-        .background(Theme.bg)
     }
 
     private func notice(_ text: String) -> some View {

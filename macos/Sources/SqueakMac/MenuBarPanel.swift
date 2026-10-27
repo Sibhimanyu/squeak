@@ -59,6 +59,15 @@ final class MenuBarController: NSObject {
 
     var isOpen: Bool { panel?.isVisible == true }
 
+    /// Where a panel of `size` opens under the status item, as the menu-bar panel does: New chat drops
+    /// from the same spot. Nil before the item has a window.
+    func dropFrame(size: CGSize) -> CGRect? {
+        guard let button = item?.button, let buttonWindow = button.window else { return nil }
+        let anchor = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let visible = (buttonWindow.screen ?? NSScreen.main)?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        return PopoverPlacement.frame(button: anchor, size: size, visible: visible)
+    }
+
     func start(model: AppModel) {
         guard item == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
