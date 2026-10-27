@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.8.1
+
+- The whole app is back to standard macOS sizes: smaller type, tighter rows and a 360 pt menu-bar popup,
+  where 2.8.0 looked zoomed in. New chat is a 580 pt window.
+- Dark mode uses Conductor's warm greys instead of near-black.
+- The empty grey bar across the top of the conversation window is gone.
+
 ## 2.8.0
 
 - Squeak for Mac is redesigned to match the iPhone app: the conversation window opens on Home (projects, a Mac

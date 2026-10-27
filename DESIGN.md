@@ -154,6 +154,8 @@ for the apps.
 | `muted` | `#A1A1AA` | `#52525B` | Secondary text: meta lines, counts |
 | `subtle` | `#71717A` | `#71717A` | Idle dots, disabled, placeholder |
 
+**Mac dark neutrals** (owner's decision, 2026-10-27): Squeak for Mac's dark neutrals follow Conductor's warm greys instead of the zinc values above (the iPhone app keeps the table): `bg` `#1A1514`, `sidebar` and `surface` `#24211E`, `surface-raised` `#2B2825`, `selected` (selected row, hover, selected tab) `#34312F`, strongest fill `#3A3735`; the menu-bar panel's base is `rgba(36,33,30,…)`. Light is unchanged.
+
 Note that `muted` differs by theme: zinc-400 is only **2.56:1** on white and
 fails as text, so light mode uses zinc-600.
 

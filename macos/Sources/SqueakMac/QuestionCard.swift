@@ -55,7 +55,7 @@ struct AskCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(framed ? 18 : 0)
+        .padding(framed ? 14 : 0)
         .background { if framed { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.surface.opacity(0.7)) } }
         .overlay { if framed { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.lineStrong) } }
         .animation(nil, value: form.index)
@@ -66,12 +66,12 @@ struct AskCard: View {
     @ViewBuilder private var questionBody: some View {
         if let q = form.current {
             if framed {
-                Text(verbatim: q.question).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text(verbatim: q.question).font(.system(size: Metrics.cardTitle, weight: .semibold)).foregroundStyle(Theme.ink)
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                 if let header = q.header, !header.isEmpty {
-                    Text(verbatim: header).font(framed ? .system(size: 12.5) : Typo.meta).foregroundStyle(Theme.muted)
+                    Text(verbatim: header).font(framed ? .system(size: 12) : Typo.meta).foregroundStyle(Theme.muted)
                 }
                 Spacer(minLength: 0)
                 if q.multiSelect { Text("Choose any").font(Typo.meta).foregroundStyle(Theme.muted) }
@@ -127,22 +127,22 @@ struct AskCard: View {
             HStack(alignment: .top, spacing: 12) {
                 control(selected: selected, multi: multi)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: letter + parts.0).font(framed ? .system(size: 14.5, weight: .semibold) : Typo.label).foregroundStyle(Theme.ink)
+                    Text(verbatim: letter + parts.0).font(framed ? .system(size: 13, weight: .semibold) : Typo.label).foregroundStyle(Theme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     if let d = option.description, !d.isEmpty {
-                        Text(verbatim: d).font(framed ? .system(size: 13) : compact ? Typo.meta : Typo.body).foregroundStyle(Theme.muted)
+                        Text(verbatim: d).font(framed ? .system(size: 12) : compact ? Typo.meta : Typo.body).foregroundStyle(Theme.muted)
                             .lineLimit(compact ? 2 : nil).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 0)
                 if parts.1 {
-                    Text("Recommended").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.working)
-                        .padding(.horizontal, 12).frame(height: 28)
+                    Text("Recommended").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.working)
+                        .padding(.horizontal, 8).frame(height: 22)
                         .background(Theme.working.opacity(0.16), in: Capsule())
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, framed ? 10 : compact ? 8 : 11)
-            .frame(maxWidth: .infinity, minHeight: compact ? 36 : 44, alignment: .leading)
+            .padding(.horizontal, 12).padding(.vertical, framed ? 8 : compact ? 8 : 11)
+            .frame(maxWidth: .infinity, minHeight: compact ? 32 : 40, alignment: .leading)
             .background(framed ? Theme.bg.opacity(selected ? 0.2 : 0.45) : selected ? Theme.surfaceRaised : Theme.surfaceRaised.opacity(0.35),
                         in: RoundedRectangle(cornerRadius: framed ? 10 : Radius.card, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: framed ? 10 : Radius.card, style: .continuous).strokeBorder(selected ? Theme.lineStrong : Theme.line))
@@ -200,7 +200,7 @@ struct AskCard: View {
                     .overlay { if selected { Circle().fill(Theme.primaryFill).padding(4) } }
             }
         }
-        .frame(width: framed ? 21 : 18, height: framed ? 21 : 18)
+        .frame(width: 18, height: 18)
         .padding(.top, 1)
         .accessibilityHidden(true)
     }
@@ -264,7 +264,7 @@ struct AskCard: View {
                 Text(sending ? "Sending…" : title).font(Typo.label)
             }
             .foregroundStyle(enabled ? Theme.primaryText : Theme.muted)
-            .padding(.horizontal, 14).frame(height: 32)
+            .padding(.horizontal, 12).frame(height: Metrics.button)
             .background(enabled ? Theme.primaryFill : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
         }
         .buttonStyle(.plain)
@@ -275,7 +275,7 @@ struct AskCard: View {
     private func quietButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(Typo.label).foregroundStyle(Theme.muted)
-                .padding(.horizontal, Space.s).frame(height: 30).contentShape(Rectangle())
+                .padding(.horizontal, Space.s).frame(height: Metrics.button).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

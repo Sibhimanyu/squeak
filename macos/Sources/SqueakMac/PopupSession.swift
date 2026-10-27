@@ -52,19 +52,19 @@ struct PopupSessionTop: View {
                 PopupBackButton { PopupNav.shared.back() } .accessibilityLabel("Back")
                 if let s = model.session(key) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: SessionText.headline(s)).font(.popup(16, .semibold)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.8)
-                        Text(verbatim: agentLine(s)).font(.popup(13.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                        Text(verbatim: SessionText.headline(s)).font(.popup(14, .semibold)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.8)
+                        Text(verbatim: agentLine(s)).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
                     }
                     Spacer(minLength: 6)
                     HStack(spacing: 6) {
-                        Circle().fill(Theme.color(for: s.state)).frame(width: 10, height: 10)
-                        Text(Theme.label(for: s.state)).font(.popup(13.5, .medium)).foregroundStyle(Theme.ink)
-                        if let at = s.lastActivityAt { Text("· " + ShortRelativeTime.format(at)).font(.popup(13.5)).foregroundStyle(Theme.muted) }
+                        Circle().fill(Theme.color(for: s.state)).frame(width: 8, height: 8)
+                        Text(Theme.label(for: s.state)).font(.popup(12.5, .medium)).foregroundStyle(Theme.ink)
+                        if let at = s.lastActivityAt { Text("· " + ShortRelativeTime.format(at)).font(.popup(12.5)).foregroundStyle(Theme.muted) }
                     }
                     .fixedSize()
                     .accessibilityElement(children: .combine)
                 } else {
-                    Text("This chat is no longer listed.").font(.popup(14)).foregroundStyle(Theme.muted)
+                    Text("This chat is no longer listed.").font(.popup(13)).foregroundStyle(Theme.muted)
                     Spacer(minLength: 0)
                 }
             }
@@ -94,12 +94,12 @@ struct PopupSessionBand: View {
             if let last = store.lastAssistant {
                 let choices = Choices.parse(last.text)
                 HStack(alignment: .top, spacing: 12) {
-                    Text("AI").font(.popup(13, .semibold)).foregroundStyle(Theme.ink)
-                        .frame(width: 32, height: 32).background(Circle().fill(Color.wash(0.10)))
+                    Text("AI").font(.popup(12.5, .semibold)).foregroundStyle(Theme.ink)
+                        .frame(width: 28, height: 26).background(Circle().fill(Color.wash(0.10)))
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .firstTextBaseline, spacing: 9) {
-                            Text(session.flatMap(agentName) ?? "Agent").font(.popup(15.5, .semibold)).foregroundStyle(Theme.ink)
-                            if let at = last.at { Text(AwakeFormat.clock(at)).font(.popup(13.5)).foregroundStyle(Theme.muted) }
+                            Text(session.flatMap(agentName) ?? "Agent").font(.popup(14, .semibold)).foregroundStyle(Theme.ink)
+                            if let at = last.at { Text(AwakeFormat.clock(at)).font(.popup(12.5)).foregroundStyle(Theme.muted) }
                         }
                         MessageText(markdown: Self.body(last.text, choices: choices), style: Self.style)
                     }
@@ -114,14 +114,14 @@ struct PopupSessionBand: View {
                     .padding(.leading, 44)
                 }
             } else if store.loaded {
-                Text("No message from the agent yet.").font(.popup(14)).foregroundStyle(Theme.muted).padding(.vertical, 20)
+                Text("No message from the agent yet.").font(.popup(13)).foregroundStyle(Theme.muted).padding(.vertical, 20)
             } else {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading…").foregroundStyle(Theme.muted) }
                     .frame(maxWidth: .infinity, minHeight: 80)
             }
             ForEach(store.queued) { m in queuedRow(m) }
             if let note = store.note {
-                Text(verbatim: note).font(.popup(12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                Text(verbatim: note).font(.popup(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, PopupMetrics.inset + 1).padding(.vertical, 16)
@@ -131,13 +131,13 @@ struct PopupSessionBand: View {
     private func queuedRow(_ m: ChatMessage) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "person.fill").font(.system(size: 14)).foregroundStyle(Theme.muted)
-                .frame(width: 32, height: 32).background(Circle().fill(Color.wash(0.10)))
+                .frame(width: 28, height: 26).background(Circle().fill(Color.wash(0.10)))
             VStack(alignment: .leading, spacing: 6) {
-                Text(verbatim: m.text).font(.popup(14.5)).foregroundStyle(Theme.ink).lineSpacing(3)
+                Text(verbatim: m.text).font(.popup(13)).foregroundStyle(Theme.ink).lineSpacing(3)
                     .padding(.horizontal, 12).padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.wash(0.07)))
-                Text("Queued").font(.popup(12.5)).foregroundStyle(Theme.muted)
+                Text("Queued").font(.popup(12)).foregroundStyle(Theme.muted)
             }
             .padding(8)
             .popupCard(radius: 11, fill: 0.03, stroke: 0.10)
@@ -200,28 +200,28 @@ struct PopupSessionFooter: View {
             HStack(spacing: 10) {
                 ComposerField(text: Binding(get: { store.text }, set: { store.text = $0 }), sendKey: .returnSends,
                               placeholder: canSend ? "Reply to \(session.flatMap(agentName) ?? "the agent")…" : "Can't send to this chat from here",
-                              isEnabled: canSend && !store.sending, onSend: { send(.queue) }, fontSize: 14.5,
+                              isEnabled: canSend && !store.sending, onSend: { send(.queue) }, fontSize: 13,
                               onOptionReturn: working ? { send(.steer) } : nil)
                     .padding(.horizontal, 8)
-                    .frame(height: 42)
+                    .frame(height: 32)
                     .popupCard(radius: 10, fill: 0.03, stroke: 0.11)
                 if working, let session, session.conductorSessionId != nil {
                     Button { stop(session) } label: {
                         HStack(spacing: 8) {
-                            RoundedRectangle(cornerRadius: 2.5).fill(Theme.needsYou).frame(width: 12, height: 12)
+                            RoundedRectangle(cornerRadius: 2.5).fill(Theme.needsYou).frame(width: 8, height: 8)
                             Text("Stop")
                         }
                     }
-                    .buttonStyle(PopupButtonStyle(kind: .danger, radius: 10, height: 42, hPad: 16, size: 14.5))
+                    .buttonStyle(PopupButtonStyle(kind: .danger, radius: 10, height: 32, hPad: 16, size: 13))
                     .disabled(stopping || model.chatBusy)
                     .accessibilityLabel("Stop this chat's turn")
                 }
             }
             .padding(.horizontal, PopupMetrics.inset + 1).padding(.top, 12)
             HStack(spacing: 8) {
-                Lucide(.keyboard, size: 15, color: Theme.muted)
+                Lucide(.keyboard, size: 14, color: Theme.muted)
                 Text(working ? "Return queues it after this turn · ⌥↩ steers now" : "Return sends to this chat")
-                    .font(.popup(13)).foregroundStyle(Theme.muted)
+                    .font(.popup(12.5)).foregroundStyle(Theme.muted)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, PopupMetrics.inset + 3).padding(.top, 12).padding(.bottom, 14)

@@ -149,15 +149,15 @@ final class NewChatState {
 }
 
 struct NewChatSheet: View {
-    static let width: CGFloat = 880
+    static let width: CGFloat = 580
     var close: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(NewChatState.self) private var state
 
     var body: some View {
         @Bindable var state = state
-        VStack(alignment: .leading, spacing: 18) {
-            Text("New chat").font(.system(size: 32, weight: .bold)).padding(.bottom, 2)
+        VStack(alignment: .leading, spacing: 14) {
+            Text("New chat").font(.system(size: Metrics.pageTitle, weight: .bold))
             switch state.phase {
             case .loading:
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading workspaces…").foregroundStyle(Theme.muted) }
@@ -171,7 +171,7 @@ struct NewChatSheet: View {
             }
             footer
         }
-        .padding(.horizontal, 32).padding(.top, 28).padding(.bottom, 22)
+        .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 16)
         .frame(width: Self.width)
     }
 
@@ -183,9 +183,9 @@ struct NewChatSheet: View {
     @ViewBuilder private var form: some View {
         @Bindable var state = state
         let busy = state.phase == .starting
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Workspace").font(.system(size: 17, weight: .semibold))
+                Text("Workspace").font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if let repos = model.workspaceRepos, !repos.isEmpty {
                     if state.makingWorkspace {
@@ -198,8 +198,8 @@ struct NewChatSheet: View {
                             }
                         } label: {
                             HStack(spacing: 6) {
-                                Text("New workspace").font(.system(size: 14)).foregroundStyle(Theme.ink)
-                                Lucide(.chevronDown, size: 16, color: Theme.ink)
+                                Text("New workspace").font(.system(size: 13)).foregroundStyle(Theme.ink)
+                                Lucide(.chevronDown, size: 13, color: Theme.ink)
                             }
                         }
                         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
@@ -214,11 +214,11 @@ struct NewChatSheet: View {
         }
         setupSection.disabled(busy)
         VStack(alignment: .leading, spacing: 8) {
-            Text("First message").font(.system(size: 14)).foregroundStyle(Theme.muted)
+            Text("First message").font(.system(size: 12)).foregroundStyle(Theme.muted)
             ComposerField(
                 text: $state.form.text, sendKey: .commandReturnSends, placeholder: "What should it work on?",
                 isEnabled: !busy, focusToken: state.focus, onSend: start, onEscape: close)
-                .frame(height: 84)
+                .frame(height: 72)
                 .background(Theme.surfaceRaised.opacity(0.3), in: RoundedRectangle(cornerRadius: Radius.card))
                 .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
             if state.form.isTooLong {
@@ -230,11 +230,11 @@ struct NewChatSheet: View {
 
     private var searchField: some View {
         @Bindable var state = state
-        return HStack(spacing: 10) {
-            Lucide(.search, size: 18, color: Theme.muted)
-            TextField("Search workspaces", text: $state.form.query).textFieldStyle(.plain).font(.system(size: 14.5))
+        return HStack(spacing: 8) {
+            Lucide(.search, size: Metrics.iconSmall, color: Theme.muted)
+            TextField("Search workspaces", text: $state.form.query).textFieldStyle(.plain).font(.system(size: 13))
         }
-        .padding(.horizontal, 14).frame(height: 36)
+        .padding(.horizontal, 10).frame(height: Metrics.field)
         .background(Theme.surfaceRaised.opacity(0.3), in: RoundedRectangle(cornerRadius: Radius.card - 2))
         .overlay(RoundedRectangle(cornerRadius: Radius.card - 2).strokeBorder(Theme.line))
     }
@@ -250,11 +250,11 @@ struct NewChatSheet: View {
                         let on = f.preset == p
                         Button { if p != .custom { state.form.apply(preset: p) } } label: {
                             Text(p.title)
-                                .font(.system(size: 14, weight: on ? .semibold : .regular))
+                                .font(.system(size: 13, weight: on ? .semibold : .regular))
                                 .foregroundStyle(on ? Theme.ink : Theme.muted)
-                                .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
+                                .frame(maxWidth: .infinity, minHeight: Metrics.field, maxHeight: Metrics.field)
                                 .background(on ? Theme.lineStrong : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
-                                .padding(3)
+                                .padding(2)
                                 .overlay(RoundedRectangle(cornerRadius: Radius.card - 2).strokeBorder(Theme.lineStrong.opacity(0.8)))
                                 .contentShape(Rectangle())
                         }
@@ -264,7 +264,7 @@ struct NewChatSheet: View {
                 }
             }
             if !f.models.isEmpty {
-                Text(f.summary).font(.system(size: 13)).foregroundStyle(Theme.muted)
+                Text(f.summary).font(.system(size: 12)).foregroundStyle(Theme.muted)
             }
             customizeCard.padding(.top, 8).padding(.horizontal, -6)
         }
@@ -276,18 +276,18 @@ struct NewChatSheet: View {
         return VStack(alignment: .leading, spacing: 0) {
             Button { withAnimation(.easeOut(duration: 0.15)) { state.customizing.toggle() } } label: {
                 HStack {
-                    Text("Customize").font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.ink)
+                    Text("Customize").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
                     Spacer()
-                    Lucide(state.customizing ? .chevronDown : .chevronRight, size: 18, color: Theme.muted)
+                    Lucide(state.customizing ? .chevronDown : .chevronRight, size: 13, color: Theme.muted)
                 }
-                .padding(.horizontal, 16).frame(height: 46)
+                .padding(.horizontal, 12).frame(height: 34)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             if state.customizing {
                 NCHairline()
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .top, spacing: 32) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
                         column("Agent") {
                             NCPopup(label: "Agent", selection: Binding(get: { state.form.agent }, set: { state.form.choose(agent: $0) }),
                                     options: NewChatAgent.allCases.map { ($0, $0.displayName) })
@@ -308,19 +308,19 @@ struct NewChatSheet: View {
                     if f.canSplit {
                         NCHairline()
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Split the work").font(.system(size: 15, weight: .semibold))
+                            Text("Split the work").font(.system(size: 13, weight: .semibold))
                             Text("The chat's model plans and reviews; cheaper ones do the typing.")
-                                .font(.system(size: 13)).foregroundStyle(Theme.muted)
+                                .font(.system(size: 12)).foregroundStyle(Theme.muted)
                         }
-                        HStack(alignment: .top, spacing: 32) {
+                        HStack(alignment: .top, spacing: 12) {
                             column("Writes the code") { workerPicker(\.setup.code, label: "Writes the code") { state.form.pick(code: $0) } }
                             column("Runs tests and builds") { workerPicker(\.setup.run, label: "Runs tests and builds") { state.form.pick(run: $0) } }
                         }
                         NCHairline()
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("Plan first").font(.system(size: 15, weight: .semibold))
-                                Text("Shows you the plan and waits for your go.").font(.system(size: 13)).foregroundStyle(Theme.muted)
+                                Text("Plan first").font(.system(size: 13, weight: .semibold))
+                                Text("Shows you the plan and waits for your go.").font(.system(size: 12)).foregroundStyle(Theme.muted)
                             }
                             Spacer()
                             Toggle("Plan first", isOn: Binding(get: { state.form.setup.planFirst }, set: { state.form.set(planFirst: $0) }))
@@ -328,7 +328,7 @@ struct NewChatSheet: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 14)
+                .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 12)
             }
         }
         .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: Radius.card + 2))
@@ -336,8 +336,8 @@ struct NewChatSheet: View {
     }
 
     private func column<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title).font(.system(size: 14)).foregroundStyle(Theme.muted)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 12)).foregroundStyle(Theme.muted)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -362,17 +362,17 @@ struct NewChatSheet: View {
                     if i > 0 { NCHairline() }
                     Button { state.form.select(w.id) } label: {
                         HStack(spacing: 0) {
-                            ZStack { if on { Lucide(.check, size: 18, color: Theme.ink) } }.frame(width: 38)
+                            ZStack { if on { Lucide(.check, size: Metrics.icon, color: Theme.ink) } }.frame(width: 30)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(verbatim: w.label).font(.system(size: 15)).foregroundStyle(Theme.ink).lineLimit(1)
-                                if let t = w.title { Text(t).font(.system(size: 13)).foregroundStyle(Theme.muted).lineLimit(1) }
+                                Text(verbatim: w.label).font(.system(size: 13)).foregroundStyle(Theme.ink).lineLimit(1)
+                                if let t = w.title { Text(t).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(1) }
                             }
                             Spacer(minLength: 0)
-                            RelativeTimeText(w.lastActivityAt).font(.system(size: 13)).foregroundStyle(Theme.muted)
+                            RelativeTimeText(w.lastActivityAt).font(.system(size: 11)).foregroundStyle(Theme.muted)
                         }
-                        .padding(.trailing, 14).padding(.vertical, 7)
-                        .frame(minHeight: 38)
-                        .background(on ? Color.white.opacity(0.08) : .clear)
+                        .padding(.trailing, 12).padding(.vertical, 5)
+                        .frame(minHeight: 32)
+                        .background(on ? Theme.selected : .clear)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -380,7 +380,7 @@ struct NewChatSheet: View {
                 }
             }
         }
-        .frame(height: 198)
+        .frame(height: 168)
         .clipShape(RoundedRectangle(cornerRadius: Radius.card - 2))
         .overlay(RoundedRectangle(cornerRadius: Radius.card - 2).strokeBorder(Theme.lineStrong.opacity(0.8)))
     }
@@ -389,7 +389,7 @@ struct NewChatSheet: View {
         VStack(alignment: .leading, spacing: Space.s) {
             if let e = state.error {
                 HStack(alignment: .top, spacing: 6) {
-                    Lucide(.triangleAlert, size: 16, color: Theme.error)
+                    Lucide(.triangleAlert, size: Metrics.icon, color: Theme.error)
                     Text(e).font(Typo.body).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -398,7 +398,7 @@ struct NewChatSheet: View {
                 if state.phase == .starting { ProgressView().controlSize(.small); Text("Starting…").font(Typo.meta).foregroundStyle(Theme.muted) }
                 else if state.phase == .ready {
                     NCKeycap()
-                    Text("starts").font(.system(size: 13)).foregroundStyle(Theme.subtle)
+                    Text("starts").font(.system(size: 12)).foregroundStyle(Theme.subtle)
                 }
                 Spacer()
                 Button("Cancel") { close() }.buttonStyle(NCFooterButtonStyle(primary: false)).keyboardShortcut(.cancelAction)
@@ -420,12 +420,12 @@ private struct NCFooterButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let fill: Color = primary ? (isEnabled ? (configuration.isPressed ? Theme.primaryPressed : Theme.primaryFill) : Theme.surfaceRaised) : Theme.surfaceRaised.opacity(0.5)
         configuration.label
-            .font(.system(size: 14.5, weight: primary ? .semibold : .regular))
+            .font(.system(size: 13, weight: primary ? .semibold : .regular))
             .foregroundStyle(primary ? (isEnabled ? Theme.primaryText : Theme.muted) : Theme.ink)
-            .padding(.horizontal, primary ? 26 : 24)
-            .frame(minHeight: 38)
-            .background(fill, in: RoundedRectangle(cornerRadius: Radius.control + 2))
-            .overlay { if !primary || !isEnabled { RoundedRectangle(cornerRadius: Radius.control + 2).strokeBorder(Theme.line) } }
+            .padding(.horizontal, primary ? 18 : 16)
+            .frame(minHeight: Metrics.field)
+            .background(fill, in: RoundedRectangle(cornerRadius: Radius.control))
+            .overlay { if !primary || !isEnabled { RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line) } }
     }
 }
 

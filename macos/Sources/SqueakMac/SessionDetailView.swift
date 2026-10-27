@@ -110,7 +110,7 @@ struct SessionDetail: View {
         VStack(spacing: 0) {
             header
             if !model.isConnected {
-                ConnectionNotice(compact: true).padding(.horizontal, 22).padding(.bottom, Space.s)
+                ConnectionNotice(compact: true).padding(.horizontal, 16).padding(.bottom, Space.s)
             }
             switch tab {
             case .chat: transcript.transition(.opacity)
@@ -146,13 +146,13 @@ struct SessionDetail: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 12) {
                 Text(verbatim: SessionText.headline(session))
-                    .font(.system(size: 22, weight: .bold)).lineLimit(1).truncationMode(.tail)
+                    .font(.system(size: 18, weight: .bold)).lineLimit(1).truncationMode(.tail)
                     .help(SessionText.headline(session))
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 12)
                 if session.capabilities.openInHost.isSupported {
                     Button { model.openInHost() } label: {
-                        Lucide(.externalLink, size: 14, color: Theme.ink)
+                        Lucide(.externalLink, size: Metrics.icon, color: Theme.ink)
                     }
                     .modifier(GlassBorderedButton())
                     .help("Open this chat in Conductor")
@@ -163,16 +163,16 @@ struct SessionDetail: View {
                     ChatActionsMenu(session: session)
                 }
             }
-            Text(verbatim: metaLine).font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.muted)
+            Text(verbatim: metaLine).font(.system(size: 11.5)).monospacedDigit().foregroundStyle(Theme.muted)
                 .lineLimit(1).truncationMode(.middle)
                 .help(metaLine)
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras)
             }
-            tabStrip.padding(.top, 4)
+            tabStrip.padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 8)
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
     }
 
     /// Chat | Activity as one wide segmented control: a hairline-framed track, the chosen half raised.
@@ -180,19 +180,19 @@ struct SessionDetail: View {
         HStack(spacing: 0) {
             ForEach(DetailTab.allCases) { t in
                 Button { tab = t } label: {
-                    Text(t.rawValue).font(.system(size: 12.5, weight: tab == t ? .semibold : .regular))
+                    Text(t.rawValue).font(.system(size: 12, weight: tab == t ? .semibold : .regular))
                         .foregroundStyle(tab == t ? Theme.ink : Theme.muted)
-                        .frame(maxWidth: .infinity, minHeight: 31)
-                        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(tab == t ? Theme.surfaceRaised : .clear))
+                        .frame(maxWidth: .infinity, minHeight: 22)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(tab == t ? Theme.selectedStrong : .clear))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(tab == t ? .isSelected : [])
             }
         }
-        .padding(3)
-        .background(Theme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.lineStrong))
+        .padding(2)
+        .background(Theme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.lineStrong))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chat or activity")
     }
@@ -255,7 +255,7 @@ struct SessionDetail: View {
                             .onDisappear { atBottom = false }
                     }
                     .frame(maxWidth: 820, alignment: .leading)
-                    .padding(.horizontal, 22)
+                    .padding(.horizontal, 16)
                     .padding(.top, 12)
                     .padding(.bottom, Space.l)
                     .frame(maxWidth: .infinity)
@@ -342,7 +342,7 @@ struct SessionDetail: View {
                         if newBelow { Text("New").font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.ink) }
                     }
                     .padding(.horizontal, newBelow ? 12 : 0)
-                    .frame(minWidth: 32, minHeight: 32)
+                    .frame(minWidth: 28, minHeight: 28)
                     .background(Theme.surfaceRaised, in: Capsule())
                     .overlay(Capsule().stroke(Theme.line))
                     .contentShape(Capsule())
@@ -388,9 +388,9 @@ struct SessionDetail: View {
                 }
         }
         .frame(maxWidth: 820)
-        .padding(.horizontal, 22)
-        .padding(.top, 10)
-        .padding(.bottom, 14)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
         .frame(maxWidth: .infinity)
         .background(Theme.bg)
     }
@@ -430,7 +430,7 @@ struct SessionDetail: View {
     private var composer: some View {
         let text = Binding(get: { model.draft }, set: { model.setDraft($0) })
         let editable = sendBlock == nil && model.isConnected
-        let minH: CGFloat = 34
+        let minH: CGFloat = 28
         let maxH: CGFloat = 17 * 7 + 12
         return HStack(alignment: .bottom, spacing: 10) {
             ComposerField(
@@ -477,7 +477,7 @@ struct SessionDetail: View {
                 }
             }
         }
-        .padding(.leading, 18).padding(.trailing, 9).padding(.vertical, 9)
+        .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 6)
         .background(Theme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.lineStrong))
         .accessibilityElement(children: .contain)
@@ -504,14 +504,14 @@ struct SessionDetail: View {
 }
 
 
-/// The composer's Send: duck yellow with ink text, 34pt high, as the mockup draws it. Dimmed while there is nothing to send.
+/// The composer's Send: duck yellow with ink text, 28pt high, as the mockup draws it. Dimmed while there is nothing to send.
 struct MockSendStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(Theme.primaryText)
-            .padding(.horizontal, 14).frame(minWidth: 66, minHeight: 34)
+            .padding(.horizontal, 12).frame(minWidth: 56, minHeight: Metrics.field)
             .background(configuration.isPressed ? Theme.primaryPressed : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .opacity(isEnabled ? 1 : 0.55)
     }

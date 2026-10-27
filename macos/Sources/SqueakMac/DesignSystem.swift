@@ -19,6 +19,31 @@ enum Space {
     static let xxl: CGFloat = 32
 }
 
+/// Sizes at standard macOS density (DESIGN.md §4.2). One place, so no surface drifts back to
+/// mockup-pixel numbers: the generated mockups were measured in pixels, these are points.
+enum Metrics {
+    // Type
+    static let pageTitle: CGFloat = 22
+    static let cardTitle: CGFloat = 15
+    static let rowTitle: CGFloat = 13
+    static let rowMeta: CGFloat = 11
+    static let sectionLabel: CGFloat = 11
+    // Icons
+    static let icon: CGFloat = 14
+    static let iconSmall: CGFloat = 13
+    // Control heights
+    static let navRow: CGFloat = 28
+    static let field: CGFloat = 28
+    static let button: CGFloat = 26
+    static let segmented: CGFloat = 26
+    static let pill: CGFloat = 22
+    // Main window
+    static let sidebarWidth: CGFloat = 200
+    static let listMinWidth: CGFloat = 320
+    static let listIdealWidth: CGFloat = 350
+    static let listMaxWidth: CGFloat = 480
+}
+
 /// Corner radii (§5): panel 16, card 12, control 8, chip 6.
 enum Radius {
     static let panel: CGFloat = 16
@@ -236,7 +261,7 @@ struct SessionRowView: View {
         .padding(.horizontal, Space.m)
         .padding(.vertical, 7)
         .background(
-            RoundedRectangle(cornerRadius: Radius.row).fill(Theme.surfaceRaised.opacity(isSelected ? 1 : hovering ? 0.7 : 0))
+            RoundedRectangle(cornerRadius: Radius.row).fill(isSelected ? Theme.selected : Theme.surfaceRaised.opacity(hovering ? 0.8 : 0))
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }

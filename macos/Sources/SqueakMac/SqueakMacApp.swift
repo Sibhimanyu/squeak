@@ -27,7 +27,7 @@ struct SqueakMacApp: App {
                 // Once per install, say where reports live; only on the main window, never over Welcome.
                 .onAppear { if Self.reportsEnabled { Heresay.introduce() } }
         }
-        .defaultSize(width: 1000, height: 680)
+        .defaultSize(width: 1100, height: 720)
         .suppressedAtLaunch()
         .commands {
             SqueakCommands(model: model)

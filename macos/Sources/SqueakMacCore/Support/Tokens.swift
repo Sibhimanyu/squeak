@@ -9,10 +9,13 @@ public enum Tokens {
     public static let duckText: UInt32 = 0x8A5A00
 
     public enum Dark {
-        public static let bg: UInt32 = 0x09090B
-        public static let sidebar: UInt32 = 0x0E0E11
-        public static let surface: UInt32 = 0x18181B
-        public static let surfaceRaised: UInt32 = 0x27272A
+        // Mac dark neutrals follow Conductor's warm greys (the iPhone app keeps its own tokens).
+        public static let bg: UInt32 = 0x1A1514
+        public static let sidebar: UInt32 = 0x24211E
+        public static let surface: UInt32 = 0x24211E
+        public static let surfaceRaised: UInt32 = 0x2B2825
+        public static let selected: UInt32 = 0x34312F
+        public static let selectedStrong: UInt32 = 0x3A3735
         public static let ink: UInt32 = 0xF4F4F5
         public static let muted: UInt32 = 0xA1A1AA
         public static let subtle: UInt32 = 0x71717A
@@ -29,6 +32,8 @@ public enum Tokens {
         public static let sidebar: UInt32 = 0xEBEBEC
         public static let surface: UInt32 = 0xFFFFFF
         public static let surfaceRaised: UInt32 = 0xFFFFFF
+        public static let selected: UInt32 = 0xE0E0E2
+        public static let selectedStrong: UInt32 = 0xD4D4D8
         public static let ink: UInt32 = 0x18181B
         public static let muted: UInt32 = 0x52525B
         public static let subtle: UInt32 = 0x71717A

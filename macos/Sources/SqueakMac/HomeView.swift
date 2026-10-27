@@ -11,7 +11,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 header
                 if model.isSearching {
                     results
@@ -24,7 +24,7 @@ struct HomeView: View {
                     }
                 }
             }
-            .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, Space.xl)
+            .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, Space.xl)
         }
         .scrollContentBackground(.hidden)
         .task(id: model.hasLoaded) { await model.pollLiveSteps() }
@@ -32,15 +32,15 @@ struct HomeView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Home").font(.system(size: 28, weight: .bold)).accessibilityAddTraits(.isHeader)
-                Text(model.sessionsSummary).font(.system(size: 13)).foregroundStyle(Theme.muted)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Home").font(.system(size: Metrics.pageTitle, weight: .bold)).accessibilityAddTraits(.isHeader)
+                Text(model.sessionsSummary).font(.system(size: 12)).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 12) {
-                HStack(spacing: 7) {
-                    Circle().fill(model.homeConnectionColor).frame(width: 9, height: 9)
-                    Text(model.homeConnectionText).font(.system(size: 12)).foregroundStyle(Theme.ink).lineLimit(1)
+            VStack(alignment: .trailing, spacing: 8) {
+                HStack(spacing: 6) {
+                    Circle().fill(model.homeConnectionColor).frame(width: 8, height: 8)
+                    Text(model.homeConnectionText).font(.system(size: 11)).foregroundStyle(Theme.ink).lineLimit(1)
                 }
                 .accessibilityElement(children: .combine)
                 .padding(.top, 4)
@@ -54,15 +54,15 @@ struct HomeView: View {
     @ViewBuilder private var strip: some View {
         let items = model.macStatusItems
         if !items.isEmpty {
-            VStack(alignment: .trailing, spacing: 6) {
+            VStack(alignment: .trailing, spacing: 4) {
                 ForEach(items) { item in
-                    HStack(spacing: 8) {
-                        Lucide(.monitor, size: 14, color: color(item.tone))
-                        Text(verbatim: item.text).font(.system(size: 12)).foregroundStyle(Theme.ink).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Lucide(.monitor, size: 12, color: color(item.tone))
+                        Text(verbatim: item.text).font(.system(size: 11)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
                     }
-                    .padding(.horizontal, 13).frame(height: 31)
-                    .background(Theme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.lineStrong))
+                    .padding(.horizontal, 10).frame(height: Metrics.pill)
+                    .background(Theme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.lineStrong))
                 }
             }
             .accessibilityElement(children: .combine)
@@ -114,7 +114,7 @@ struct HomeView: View {
                     HomeSessionRow(session: pair.0, snippet: pair.1.titleMatch ? nil : pair.1.snippet)
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 4)
         }
     }
 }
@@ -131,7 +131,7 @@ struct HomeCardChrome<Content: View>: View {
 }
 
 struct HomeRowDivider: View {
-    var body: some View { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 18) }
+    var body: some View { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 12) }
 }
 
 /// One project: its name, what waits on you in it, and its chats.
@@ -142,17 +142,17 @@ struct ProjectCard: View {
         HomeCardChrome {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
-                    Text(verbatim: project.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(verbatim: project.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                     Spacer(minLength: 8)
                     if project.needsYouCount > 0 {
-                        Text("\(project.needsYouCount) needs you").font(.system(size: 12, weight: .semibold))
+                        Text("\(project.needsYouCount) needs you").font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Theme.needsYou)
-                            .padding(.horizontal, 12).frame(height: 25)
+                            .padding(.horizontal, 8).frame(height: 20)
                             .background(Theme.needsYou.opacity(0.16), in: Capsule())
                     }
-                    Lucide(.chevronRight, size: 15, color: Theme.muted)
+                    Lucide(.chevronRight, size: Metrics.iconSmall, color: Theme.muted)
                 }
-                .padding(.horizontal, 18).frame(height: 52)
+                .padding(.horizontal, 12).frame(height: 40)
                 .accessibilityAddTraits(.isHeader)
                 VStack(spacing: 0) {
                     ForEach(Array(project.sessions.enumerated()), id: \.element.id) { i, session in
@@ -160,7 +160,7 @@ struct ProjectCard: View {
                         HomeSessionRow(session: session)
                     }
                 }
-                .padding(.bottom, 6)
+                .padding(.bottom, 4)
             }
         }
     }
@@ -183,26 +183,26 @@ struct HomeSessionRow: View {
     var body: some View {
         let selected = model.selected == session.key
         Button { model.select(session.key) } label: {
-            HStack(alignment: .top, spacing: 14) {
-                StateDot(state: session.state).frame(width: 10, height: 20).scaleEffect(1.1)
-                VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .top, spacing: 10) {
+                StateDot(state: session.state).frame(width: 10, height: 18)
+                VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(verbatim: SessionText.headline(session)).font(.system(size: 13.5, weight: .medium)).foregroundStyle(Theme.ink).lineLimit(1)
-                        if model.pinned.contains(session.key) { Lucide(.pin, size: 13, label: "Pinned", color: Theme.subtle) }
+                        Text(verbatim: SessionText.headline(session)).font(.system(size: Metrics.rowTitle, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        if model.pinned.contains(session.key) { Lucide(.pin, size: 12, label: "Pinned", color: Theme.subtle) }
                     }
-                    Text(verbatim: word).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(verbatim: word).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 TimelineView(.periodic(from: .now, by: 30)) { ctx in
                     if let at = session.lastActivityAt {
                         Text(verbatim: ShortRelativeTime.format(at, now: ctx.date))
-                            .font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .font(.system(size: Metrics.rowMeta)).monospacedDigit().foregroundStyle(Theme.muted)
                     }
                 }
-                .padding(.top, 2)
+                .padding(.top, 1)
             }
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.surfaceRaised.opacity(selected ? 0.6 : hovering ? 0.3 : 0)))
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selected ? Theme.selected : Theme.surfaceRaised.opacity(hovering ? 0.6 : 0)))
             .padding(.horizontal, 6)
             .contentShape(Rectangle())
         }

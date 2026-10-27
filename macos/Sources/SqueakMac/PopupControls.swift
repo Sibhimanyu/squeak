@@ -6,7 +6,7 @@ import SwiftUI
 struct PopupControlsHeader: View {
     var body: some View {
         PopupTabHeader(selected: .controls) {
-            Text("Controls").font(.popup(22, .bold)).foregroundStyle(Theme.ink)
+            Text("Controls").font(.popup(16, .bold)).foregroundStyle(Theme.ink)
         } trailing: { EmptyView() }
     }
 }
@@ -24,12 +24,12 @@ struct PopupControlsBand: View {
             PopupMacCard()
             Button { dismiss(); model.showConversationWindow() } label: {
                 HStack(spacing: 10) {
-                    Lucide(.externalLink, size: 16, color: Theme.ink)
+                    Lucide(.externalLink, size: 14, color: Theme.ink)
                     Text("Open Squeak")
                 }
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(PopupButtonStyle(radius: 11, height: 36, size: 14.5))
+            .buttonStyle(PopupButtonStyle(radius: 11, height: 28, size: 13))
         }
         .padding(.horizontal, PopupMetrics.inset)
         .padding(.bottom, 16)
@@ -58,31 +58,31 @@ struct PopupAwakeCard: View {
         let awake = model.awake
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 10) {
-                Circle().fill(awake == nil ? Theme.idle : Theme.working).frame(width: 11, height: 11).padding(.top, 4).accessibilityHidden(true)
+                Circle().fill(awake == nil ? Theme.idle : Theme.working).frame(width: 8, height: 8).padding(.top, 4).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Keep Mac awake").font(.popup(15.5, .semibold)).foregroundStyle(Theme.ink)
-                    Text(status(awake, now: now)).font(.popup(13.5)).foregroundStyle(Theme.muted).monospacedDigit()
+                    Text("Keep Mac awake").font(.popup(14, .semibold)).foregroundStyle(Theme.ink)
+                    Text(status(awake, now: now)).font(.popup(12.5)).foregroundStyle(Theme.muted).monospacedDigit()
                 }
                 Spacer(minLength: 8)
                 if awake != nil {
                     Button("End") { Task { await model.changeAwake("end") } }
-                        .buttonStyle(PopupButtonStyle(height: 29, hPad: 16, size: 13.5))
+                        .buttonStyle(PopupButtonStyle(height: 26, hPad: 16, size: 12.5))
                         .accessibilityLabel("End keep awake")
                 }
             }
             if let awake, let until = awake.until, let left = nav.awakeRemaining(until: until, now: now) {
-                PopupBar(fraction: left, fill: Theme.working, track: Color.wash(0.13), height: 9).padding(.top, 12)
+                PopupBar(fraction: left, fill: Theme.working, track: Color.wash(0.13), height: 6).padding(.top, 12)
             }
-            PopupSegmented(items: Self.lengths, selection: selectedLength(awake), height: 32, size: 14,
+            PopupSegmented(items: Self.lengths, selection: selectedLength(awake), height: 26, size: 13,
                            enabled: !model.settingUpLid) { pick($0) }
                 .padding(.top, 12)
             PopupDivider().padding(.top, 12)
             lidRow(awake)
             if let note = localNote ?? model.awakeNote {
-                Text(note).font(.popup(12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
+                Text(note).font(.popup(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
             }
             if let problem = model.awakeSleepProblem {
-                Text(problem).font(.popup(12.5)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
+                Text(problem).font(.popup(12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
             }
         }
         .padding(14)
@@ -116,14 +116,14 @@ struct PopupAwakeCard: View {
     }
 
     @ViewBuilder private func lidRow(_ awake: DaemonAwake?) -> some View {
-        PopupIconRow(icon: AnyView(PopupSymbol(name: "laptopcomputer", size: 19, color: Theme.muted)), title: "With the lid closed") {
+        PopupIconRow(icon: AnyView(PopupSymbol(name: "laptopcomputer", size: 14, color: Theme.muted)), title: "With the lid closed") {
             if model.awakeLidReady {
                 PopupSwitch(label: "With the lid closed", isOn: Binding(get: { lidOn }, set: { setLid($0) }), enabled: !model.settingUpLid)
             } else if model.settingUpLid {
                 ProgressView().controlSize(.small)
             } else {
                 Button("Set up…") { Task { await model.setUpLidClosed() } }
-                    .buttonStyle(PopupButtonStyle(height: 26, hPad: 10, size: 12.5))
+                    .buttonStyle(PopupButtonStyle(height: 26, hPad: 10, size: 12))
             }
         }
         .padding(.top, 8)
@@ -153,7 +153,7 @@ struct PopupNotifyCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Notifications").font(.popup(15.5, .semibold)).foregroundStyle(Theme.ink).padding(.bottom, 6)
+            Text("Notifications").font(.popup(14, .semibold)).foregroundStyle(Theme.ink).padding(.bottom, 6)
             if let s = channels.first.flatMap({ m.notify?[$0] }) {
                 row("bell", "Mute all", on: s.muted) { .muted($0) }
                 rowDivider
@@ -163,11 +163,11 @@ struct PopupNotifyCard: View {
                 rowDivider
                 finishedRow(s)
                 if let e = m.notifyError {
-                    Text(e).font(.popup(12.5)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
+                    Text(e).font(.popup(12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
                 }
             } else {
                 Text(m.notifyOutdated ? NotifyText.outdated : "Set up Telegram or Zoho Cliq in Settings to choose what they push.")
-                    .font(.popup(13.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true).padding(.vertical, 4)
+                    .font(.popup(12.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true).padding(.vertical, 4)
             }
         }
         .padding(14)
@@ -178,7 +178,7 @@ struct PopupNotifyCard: View {
     private var rowDivider: some View { PopupDivider().padding(.leading, 36) }
 
     private func row(_ symbol: String, _ title: String, on: Bool, disabled: Bool = false, make: @escaping (Bool) -> NotifyChange) -> some View {
-        PopupIconRow(icon: AnyView(PopupSymbol(name: symbol, size: 18, color: Theme.muted)), title: title) {
+        PopupIconRow(icon: AnyView(PopupSymbol(name: symbol, size: 14, color: Theme.muted)), title: title) {
             PopupSwitch(label: title, isOn: Binding(get: { on }, set: { v in change(make(v)) }), enabled: !disabled && !m.notifyOutdated)
         }
         .frame(minHeight: 36)
@@ -187,7 +187,7 @@ struct PopupNotifyCard: View {
     /// On: Finished pushes only for Conductor chats. Off: for every agent. A channel set to Off says so.
     private func finishedRow(_ s: ChannelNotify) -> some View {
         let title = s.finished == .conductor ? "Finished: Conductor only" : "Finished: \(s.finished.title)"
-        return PopupIconRow(icon: AnyView(PopupSymbol(name: "terminal", size: 18, color: Theme.muted)), title: title) {
+        return PopupIconRow(icon: AnyView(PopupSymbol(name: "terminal", size: 14, color: Theme.muted)), title: title) {
             PopupSwitch(label: "Finished: Conductor only", isOn: Binding(
                 get: { s.finished == .conductor }, set: { v in change(.finished(v ? .conductor : .all)) }),
                 enabled: !s.muted && !m.notifyOutdated)
@@ -212,20 +212,20 @@ struct PopupMacCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Your Mac").font(.popup(15.5, .semibold)).foregroundStyle(Theme.ink).padding(.bottom, 6)
+            Text("Your Mac").font(.popup(14, .semibold)).foregroundStyle(Theme.ink).padding(.bottom, 6)
             HStack(spacing: 14) {
-                PopupSymbol(name: "laptopcomputer", size: 19, color: Theme.muted)
+                PopupSymbol(name: "laptopcomputer", size: 14, color: Theme.muted)
                 HStack(spacing: 7) {
-                    Text(verbatim: name).font(.popup(14.5)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(verbatim: name).font(.popup(13)).foregroundStyle(Theme.ink).lineLimit(1)
                     Text("·").foregroundStyle(Theme.muted)
-                    Text(model.homeConnectionText).font(.popup(14)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(model.homeConnectionText).font(.popup(13)).foregroundStyle(Theme.muted).lineLimit(1)
                     Circle().fill(model.homeConnectionColor).frame(width: 7, height: 7)
                 }
                 Spacer(minLength: 4)
                 if let battery {
                     HStack(spacing: 7) {
-                        PopupSymbol(name: battery > 66 ? "battery.100" : battery > 33 ? "battery.50" : "battery.25", size: 19, color: Theme.ink)
-                        Text("\(battery)%").font(.popup(14)).monospacedDigit().foregroundStyle(Theme.ink)
+                        PopupSymbol(name: battery > 66 ? "battery.100" : battery > 33 ? "battery.50" : "battery.25", size: 14, color: Theme.ink)
+                        Text("\(battery)%").font(.popup(13)).monospacedDigit().foregroundStyle(Theme.ink)
                     }
                     .accessibilityElement(children: .combine).accessibilityLabel("Battery \(battery) percent")
                 }
@@ -234,11 +234,11 @@ struct PopupMacCard: View {
             if let power, power.available.count > 1, let mode = power.mode {
                 PopupDivider().padding(.leading, 36)
                 HStack(spacing: 14) {
-                    PopupSymbol(name: "bolt", size: 19, color: Theme.muted)
-                    Text("Power mode").font(.popup(14.5)).foregroundStyle(Theme.ink)
+                    PopupSymbol(name: "bolt", size: 14, color: Theme.muted)
+                    Text("Power mode").font(.popup(13)).foregroundStyle(Theme.ink)
                     Spacer(minLength: 8)
                     PopupSegmented(items: power.available.map { ($0, $0 == "auto" ? "Auto" : $0.capitalized) }, selection: mode,
-                                   height: 30, size: 13.5, enabled: false) { _ in }
+                                   height: 26, size: 13.5, enabled: false) { _ in }
                         .frame(width: 200)
                         .opacity(0.9)
                         .help("Energy mode is picked on your iPhone; this shows what is in use.")

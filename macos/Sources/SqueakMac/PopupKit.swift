@@ -3,13 +3,13 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// The menu-bar popup's own pieces, drawn to the generated mockups: a 420pt panel, bordered cards, a
+/// The menu-bar popup's own pieces, drawn to the generated mockups: a 360pt panel, bordered cards, a
 /// raised-pill tab bar, bordered segmented controls, green switches, flat buttons. Everything is a thin
 /// ink overlay on the panel's glass, so light and dark both follow the system.
 enum PopupMetrics {
-    static let inset: CGFloat = 16
+    static let inset: CGFloat = 14
     static let cardRadius: CGFloat = 12
-    static let controlRadius: CGFloat = 9
+    static let controlRadius: CGFloat = 8
 }
 
 extension Font {
@@ -51,9 +51,9 @@ struct PopupButtonStyle: ButtonStyle {
     enum Kind { case plain, primary, danger }
     var kind: Kind = .plain
     var radius: CGFloat = PopupMetrics.controlRadius
-    var height: CGFloat = 32
-    var hPad: CGFloat = 14
-    var size: CGFloat = 13.5
+    var height: CGFloat = Metrics.button
+    var hPad: CGFloat = 12
+    var size: CGFloat = 13
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -99,8 +99,8 @@ struct PopupButtonStyle: ButtonStyle {
 struct PopupSegmented<ID: Hashable>: View {
     var items: [(id: ID, title: String)]
     var selection: ID?
-    var height: CGFloat = 32
-    var size: CGFloat = 13.5
+    var height: CGFloat = Metrics.segmented
+    var size: CGFloat = 12.5
     var enabled = true
     var onPick: (ID) -> Void
 
@@ -117,8 +117,8 @@ struct PopupSegmented<ID: Hashable>: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background {
                             if on {
-                                RoundedRectangle(cornerRadius: PopupMetrics.controlRadius - 2, style: .continuous).fill(Color.wash(0.14))
-                                    .overlay(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius - 2, style: .continuous).strokeBorder(Color.wash(0.16)))
+                                RoundedRectangle(cornerRadius: PopupMetrics.controlRadius - 2, style: .continuous).fill(Theme.selectedStrong)
+                                    .overlay(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius - 2, style: .continuous).strokeBorder(Color.wash(0.10)))
                             }
                         }
                         .contentShape(Rectangle())
@@ -143,7 +143,7 @@ struct PopupMenuField<Tag: Hashable>: View {
     var label: String
     var selection: Binding<Tag>
     var options: [(tag: Tag, title: String)]
-    var height: CGFloat = 34
+    var height: CGFloat = Metrics.field
 
     var body: some View {
         Menu {
@@ -152,7 +152,7 @@ struct PopupMenuField<Tag: Hashable>: View {
             }.pickerStyle(.inline).labelsHidden()
         } label: {
             HStack(spacing: 6) {
-                Text(options.first { $0.tag == selection.wrappedValue }?.title ?? "").font(.popup(14)).foregroundStyle(Theme.ink).lineLimit(1)
+                Text(options.first { $0.tag == selection.wrappedValue }?.title ?? "").font(.popup(13)).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 4)
                 Lucide(.chevronDown, size: 14, color: Theme.ink)
             }
@@ -176,9 +176,9 @@ struct PopupSwitch: View {
         Button { isOn.toggle() } label: {
             ZStack(alignment: isOn ? .trailing : .leading) {
                 Capsule().fill(isOn ? Theme.working : Color.wash(0.22))
-                Circle().fill(Color.white).frame(width: 20, height: 20).padding(2).shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+                Circle().fill(Color.white).frame(width: 18, height: 18).padding(2).shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
             }
-            .frame(width: 40, height: 24)
+            .frame(width: 38, height: 22)
             .opacity(enabled ? 1 : 0.45)
             .contentShape(Capsule())
         }
@@ -197,13 +197,13 @@ struct PopupIconRow<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(spacing: 14) {
-            icon.frame(width: 22, height: 22)
-            Text(title).font(.popup(14.5)).foregroundStyle(Theme.ink).lineLimit(1)
+        HStack(spacing: 10) {
+            icon.frame(width: 20, height: 20)
+            Text(title).font(.popup(13)).foregroundStyle(Theme.ink).lineLimit(1)
             Spacer(minLength: 8)
             trailing
         }
-        .frame(minHeight: 30)
+        .frame(minHeight: 28)
         .accessibilityElement(children: .contain)
     }
 }
@@ -211,7 +211,7 @@ struct PopupIconRow<Trailing: View>: View {
 /// SF Symbols for the few glyphs Lucide's bundled set lacks, drawn light so they sit with it.
 struct PopupSymbol: View {
     var name: String
-    var size: CGFloat = 17
+    var size: CGFloat = 14
     var color: Color = Theme.muted
 
     var body: some View {
@@ -222,7 +222,7 @@ struct PopupSymbol: View {
 
 /// Three vertical bars: the Usage tab's glyph.
 struct PopupBarsGlyph: View {
-    var size: CGFloat = 17
+    var size: CGFloat = 14
     var color: Color = Theme.muted
 
     var body: some View {
@@ -244,8 +244,8 @@ struct PopupBarsGlyph: View {
 struct PopupBadge: View {
     var count: Int
     var body: some View {
-        Text("\(count)").font(.popup(11.5, .semibold)).foregroundStyle(Color.white).monospacedDigit()
-            .frame(minWidth: 18, minHeight: 18)
+        Text("\(count)").font(.popup(11, .semibold)).foregroundStyle(Color.white).monospacedDigit()
+            .frame(minWidth: 16, minHeight: 16)
             .padding(.horizontal, count > 9 ? 4 : 0)
             .background(Capsule().fill(Theme.needsYou))
             .accessibilityLabel("\(count) need you")
@@ -257,7 +257,7 @@ struct PopupBar: View {
     var fraction: Double
     var fill: Color
     var track: Color = Color.wash(0.14)
-    var height: CGFloat = 10
+    var height: CGFloat = 8
 
     var body: some View {
         GeometryReader { p in
@@ -277,8 +277,8 @@ struct PopupBackButton: View {
 
     var body: some View {
         Button(action: action) {
-            Lucide(.arrowLeft, size: 18, label: "Back", color: Theme.ink)
-                .frame(width: 32, height: 32)
+            Lucide(.arrowLeft, size: 14, label: "Back", color: Theme.ink)
+                .frame(width: 28, height: 26)
                 .background { if bordered { RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.wash(0.06)) } }
                 .overlay { if bordered { RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.wash(0.12)) } }
                 .contentShape(Rectangle())

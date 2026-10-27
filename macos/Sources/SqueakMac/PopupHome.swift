@@ -18,15 +18,15 @@ struct PopupTabBar: View {
                 Button { nav.show(tab) } label: {
                     HStack(spacing: 6) {
                         icon(tab, on: on)
-                        Text(tab.title).font(.popup(13, on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted).lineLimit(1).fixedSize()
+                        Text(tab.title).font(.popup(12.5, on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted).lineLimit(1).fixedSize()
                         if tab == .needsYou, needs > 0 { PopupBadge(count: needs) }
                     }
                     .padding(.horizontal, 10)
-                    .frame(height: 34)
+                    .frame(height: 28)
                     .background {
                         if on {
-                            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.wash(0.12))
-                                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Color.wash(0.16)))
+                            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.selectedStrong)
+                                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Color.wash(0.10)))
                         }
                     }
                     .contentShape(Rectangle())
@@ -37,7 +37,7 @@ struct PopupTabBar: View {
             }
         }
         .padding(2.5)
-        .frame(height: 39)
+        .frame(height: 30)
         .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.wash(0.025)))
         .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Color.wash(0.11)))
     }
@@ -47,10 +47,10 @@ struct PopupTabBar: View {
     @ViewBuilder private func icon(_ tab: PopupNav.Tab, on: Bool) -> some View {
         let color = on ? Theme.ink : Theme.muted
         switch tab {
-        case .home: Lucide(.house, size: 15, color: color)
-        case .needsYou: Lucide(.circleAlert, size: 15, color: color)
-        case .usage: PopupBarsGlyph(size: 15, color: color)
-        case .controls: Lucide(.settings, size: 15, color: color)
+        case .home: Lucide(.house, size: 14, color: color)
+        case .needsYou: Lucide(.circleAlert, size: 14, color: color)
+        case .usage: PopupBarsGlyph(size: 14, color: color)
+        case .controls: Lucide(.settings, size: 14, color: color)
         }
     }
 }
@@ -95,19 +95,19 @@ struct PopupHomeTop: View {
         VStack(spacing: 0) {
             PopupTabHeader(selected: .home) {
                 HStack(spacing: 12) {
-                    Circle().fill(model.isConnected ? Theme.done : Theme.offline).frame(width: 12, height: 12).padding(.leading, 2)
+                    Circle().fill(model.isConnected ? Theme.done : Theme.offline).frame(width: 8, height: 8).padding(.leading, 2)
                         .accessibilityHidden(true)
                     Text(model.health != nil && !model.isConnected
                          ? model.connectionTitle
                          : "\(total) \(total == 1 ? "session" : "sessions") · \(working) working")
-                        .font(.popup(15.5, .semibold)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.85)
+                        .font(.popup(14, .semibold)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.85)
                         .accessibilityLabel(model.isConnected ? "Connected, \(total) sessions, \(working) working" : "Connection: \(model.connectionTitle)")
                 }
             } trailing: {
                 Button { PopupNav.shared.openNewChat() } label: { Text("New chat") }
-                    .buttonStyle(PopupButtonStyle(height: 31, hPad: 13, size: 13.5))
+                    .buttonStyle(PopupButtonStyle(height: 26, hPad: 13, size: 12.5))
                 Button { overflowOpen.toggle() } label: {
-                    Lucide(.ellipsis, size: 16, label: "More", color: Theme.ink).frame(width: 32, height: 31)
+                    Lucide(.ellipsis, size: 14, label: "More", color: Theme.ink).frame(width: 28, height: 26)
                         .background(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).fill(Color.wash(overflowOpen ? 0.12 : 0.07)))
                         .overlay(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).strokeBorder(Color.wash(0.12)))
                         .contentShape(Rectangle())
@@ -190,13 +190,13 @@ struct PopupMacStrip: View {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 0) {
                     if let awakeLine {
-                        stripRow(icon: Lucide(.moon, size: 18, color: Theme.muted), text: awakeLine, tab: .controls, label: "Awake. Opens controls.")
+                        stripRow(icon: Lucide(.moon, size: 14, color: Theme.muted), text: awakeLine, tab: .controls, label: "Awake. Opens controls.")
                     }
                     if let usageLine {
-                        stripRow(icon: Lucide(.gauge, size: 18, color: Theme.muted), text: usageLine, tab: .usage, label: "Plan usage. Opens usage.")
+                        stripRow(icon: Lucide(.gauge, size: 14, color: Theme.muted), text: usageLine, tab: .usage, label: "Plan usage. Opens usage.")
                     }
                 }
-                Lucide(.chevronRight, size: 15, color: Theme.muted)
+                Lucide(.chevronRight, size: 14, color: Theme.muted)
             }
             .padding(.horizontal, 14).padding(.vertical, 4)
             .popupCard()
@@ -209,7 +209,7 @@ struct PopupMacStrip: View {
         Button { PopupNav.shared.show(tab) } label: {
             HStack(spacing: 14) {
                 icon.frame(width: 22)
-                Text(verbatim: text).font(.popup(14)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.85)
+                Text(verbatim: text).font(.popup(13)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 0)
             }
             .frame(minHeight: 24)
@@ -292,8 +292,8 @@ struct PopupHomeBand: View {
 
     private var allQuiet: some View {
         VStack(spacing: 4) {
-            Text("All quiet").font(.popup(14, .semibold)).foregroundStyle(Theme.ink)
-            Text("Nothing needs you right now.").font(.popup(13)).foregroundStyle(Theme.muted)
+            Text("All quiet").font(.popup(13, .semibold)).foregroundStyle(Theme.ink)
+            Text("Nothing needs you right now.").font(.popup(12.5)).foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 28)
         .accessibilityElement(children: .combine)
@@ -377,21 +377,21 @@ struct PopupSectionHeader: View {
     var body: some View {
         Button { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { expanded?.wrappedValue.toggle() } } label: {
             HStack(spacing: 12) {
-                Circle().fill(color).frame(width: 13, height: 13).padding(.leading, 2).accessibilityHidden(true)
-                Text(title).font(.popup(16, .semibold)).foregroundStyle(Theme.ink)
+                Circle().fill(color).frame(width: 8, height: 8).padding(.leading, 2).accessibilityHidden(true)
+                Text(title).font(.popup(14, .semibold)).foregroundStyle(Theme.ink)
                 if compact {
                     Spacer(minLength: 8)
-                    Text(verbatim: countText ?? "\(count)").font(.popup(13.5)).foregroundStyle(Theme.muted)
+                    Text(verbatim: countText ?? "\(count)").font(.popup(12.5)).foregroundStyle(Theme.muted)
                 } else {
-                    Text("\(count)").font(.popup(13.5)).monospacedDigit().foregroundStyle(Theme.muted).padding(.leading, -2)
+                    Text("\(count)").font(.popup(12.5)).monospacedDigit().foregroundStyle(Theme.muted).padding(.leading, -2)
                     Spacer(minLength: 8)
                 }
                 if let expanded {
-                    Lucide(expanded.wrappedValue ? .chevronDown : .chevronRight, size: 16, color: Theme.muted)
+                    Lucide(expanded.wrappedValue ? .chevronDown : .chevronRight, size: 14, color: Theme.muted)
                 }
             }
             .padding(.horizontal, PopupMetrics.inset + 2)
-            .frame(height: 44)
+            .frame(height: 34)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -417,17 +417,17 @@ struct PopupSessionCard: View {
         let third = detail ?? (session.state == .working ? model.liveStep(session.key) : nil)
         Button { PopupNav.shared.openSession(session.key) } label: {
             HStack(alignment: .top, spacing: 12) {
-                Circle().fill(Theme.color(for: session.state)).frame(width: 12, height: 12).padding(.top, 4).accessibilityHidden(true)
+                Circle().fill(Theme.color(for: session.state)).frame(width: 8, height: 8).padding(.top, 4).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(verbatim: SessionText.headline(session)).font(.popup(14.5, .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Text(verbatim: SessionText.headline(session)).font(.popup(13, .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 4)
-                        if unread { Text("New").font(.popup(12, .medium)).foregroundStyle(Theme.done) }
-                        if showTime { RelativeTimeText(session.lastActivityAt, size: 13) }
+                        if unread { Text("New").font(.popup(11.5, .medium)).foregroundStyle(Theme.done) }
+                        if showTime { RelativeTimeText(session.lastActivityAt, size: 11.5) }
                     }
-                    Text(verbatim: SessionText.secondLine(session)).font(.popup(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(verbatim: SessionText.secondLine(session)).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
                     if let third, !third.isEmpty {
-                        Text(verbatim: third).font(.popup(13)).foregroundStyle(Theme.muted).lineLimit(1).padding(.top, 1)
+                        Text(verbatim: third).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1).padding(.top, 1)
                     }
                 }
             }
@@ -459,13 +459,13 @@ struct PopupAskCard: View {
                 Button { PopupNav.shared.openSession(session.key) } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(verbatim: SessionText.headline(session)).font(.popup(15, .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                            Text(verbatim: SessionText.headline(session)).font(.popup(14, .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                             Spacer(minLength: 4)
-                            RelativeTimeText(session.lastActivityAt, size: 13)
+                            RelativeTimeText(session.lastActivityAt, size: 11.5)
                         }
-                        Text(verbatim: SessionText.secondLine(session)).font(.popup(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                        Text(verbatim: SessionText.secondLine(session)).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
                         if let q = model.question(for: session.key), !q.isEmpty {
-                            Text(verbatim: q).font(.popup(13.5)).foregroundStyle(Theme.ink).lineLimit(2)
+                            Text(verbatim: q).font(.popup(12.5)).foregroundStyle(Theme.ink).lineLimit(2)
                                 .multilineTextAlignment(.leading).padding(.top, 3)
                         }
                     }
@@ -480,7 +480,7 @@ struct PopupAskCard: View {
                         }
                     }
                 }
-                if let note { Text(verbatim: note).font(.popup(12)).foregroundStyle(Theme.muted).lineLimit(2) }
+                if let note { Text(verbatim: note).font(.popup(11.5)).foregroundStyle(Theme.muted).lineLimit(2) }
             }
         }
         .padding(.leading, 10).padding(.trailing, 10).padding(.vertical, 10)
@@ -515,16 +515,16 @@ struct PopupOptionRow: View {
     var body: some View {
         let large = size == .large
         Button(action: action) {
-            HStack(spacing: large ? 16 : 11) {
-                Text(choice.letter).font(.popup(large ? 15 : 13.5, .semibold)).foregroundStyle(Theme.ink)
-                    .frame(width: large ? 34 : 23, height: large ? 34 : 23)
+            HStack(spacing: large ? 12 : 8) {
+                Text(choice.letter).font(.popup(large ? 14 : 12, .semibold)).foregroundStyle(Theme.ink)
+                    .frame(width: large ? 28 : 20, height: large ? 28 : 20)
                     .background(Circle().fill(Color.wash(0.10)))
-                Text(verbatim: choice.label).font(.popup(large ? 15.5 : 14, large ? .semibold : .regular)).foregroundStyle(Theme.ink).lineLimit(2)
+                Text(verbatim: choice.label).font(.popup(large ? 14 : 12.5, large ? .semibold : .regular)).foregroundStyle(Theme.ink).lineLimit(2)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, large ? 16 : 9)
-            .frame(maxWidth: .infinity, minHeight: large ? 56 : 32)
+            .padding(.horizontal, large ? 12 : 8)
+            .frame(maxWidth: .infinity, minHeight: large ? 40 : 28)
             .popupCard(radius: large ? 11 : 8, fill: busy ? 0.12 : 0.06, stroke: 0.09)
             .contentShape(Rectangle())
         }
@@ -546,16 +546,16 @@ struct PopupHomeFooter: View {
             HStack(spacing: 10) {
                 Button { dismiss(); QuickComposerController.shared.show() } label: {
                     HStack(spacing: 10) {
-                        PopupSymbol(name: "bubble.left", size: 17, color: Theme.muted)
-                        Text("Quick message…").font(.popup(14)).foregroundStyle(Theme.muted)
+                        PopupSymbol(name: "bubble.left", size: 14, color: Theme.muted)
+                        Text("Quick message…").font(.popup(13)).foregroundStyle(Theme.muted)
                         Spacer(minLength: 4)
-                        Text("⌘ K").font(.popup(12)).foregroundStyle(Theme.muted)
+                        Text("⌘ K").font(.popup(11.5)).foregroundStyle(Theme.muted)
                             .padding(.horizontal, 7).frame(height: 24)
                             .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.wash(0.07)))
                             .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.wash(0.10)))
                     }
                     .padding(.horizontal, 12)
-                    .frame(maxWidth: .infinity).frame(height: 35)
+                    .frame(maxWidth: .infinity).frame(height: 28)
                     .popupCard(radius: 9, fill: 0.03, stroke: 0.11)
                     .contentShape(Rectangle())
                 }
@@ -563,7 +563,7 @@ struct PopupHomeFooter: View {
                 .keyboardShortcut("k")
                 .accessibilityLabel("Quick message")
                 Button { dismiss(); model.showConversationWindow() } label: { Text("Open Squeak") }
-                    .buttonStyle(PopupButtonStyle(radius: 9, height: 35, hPad: 14, size: 14))
+                    .buttonStyle(PopupButtonStyle(radius: 9, height: 28, hPad: 14, size: 13))
             }
             .padding(.horizontal, PopupMetrics.inset)
             .padding(.top, 12).padding(.bottom, 12)

@@ -23,7 +23,7 @@ struct ConversationView: View {
                 // Needs you is a page, not a list beside a chat: two columns, the page as wide as the window.
                 NavigationSplitView(columnVisibility: $visibility) {
                     SidebarView()
-                        .navigationSplitViewColumnWidth(min: 208, ideal: 208, max: 208)
+                        .navigationSplitViewColumnWidth(min: Metrics.sidebarWidth, ideal: Metrics.sidebarWidth, max: Metrics.sidebarWidth)
                         .toolbar(removing: .sidebarToggle)
                 } detail: {
                     NeedsYouPage().background(Theme.bg.ignoresSafeArea())
@@ -32,12 +32,12 @@ struct ConversationView: View {
             } else {
                 NavigationSplitView(columnVisibility: $visibility) {
                     SidebarView()
-                        .navigationSplitViewColumnWidth(min: 208, ideal: 208, max: 208)
+                        .navigationSplitViewColumnWidth(min: Metrics.sidebarWidth, ideal: Metrics.sidebarWidth, max: Metrics.sidebarWidth)
                         .toolbar(removing: .sidebarToggle)
                 } content: {
                     ContentColumn()
                         .background(Theme.bg.ignoresSafeArea())
-                        .navigationSplitViewColumnWidth(min: 300, ideal: 400, max: 520)
+                        .navigationSplitViewColumnWidth(min: Metrics.listMinWidth, ideal: Metrics.listIdealWidth, max: Metrics.listMaxWidth)
                 } detail: {
                     DetailView().background(Theme.bg.ignoresSafeArea())
                 }
@@ -51,7 +51,7 @@ struct ConversationView: View {
                 .keyboardShortcut("\\", modifiers: .command)
                 .opacity(0).accessibilityHidden(true)
         }
-        .frame(minWidth: 960, minHeight: 600)
+        .frame(minWidth: 900, minHeight: 600)
     }
 }
 
@@ -65,6 +65,12 @@ private struct ConversationWindowReader: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             let w = window
+            if let w {
+                // Seamless chrome: the columns' own backgrounds run to the top edge, under the traffic lights.
+                w.titlebarAppearsTransparent = true
+                w.titleVisibility = .hidden
+                w.styleMask.insert(.fullSizeContentView)
+            }
             Task { @MainActor in AppModel.shared.conversationWindow = w }
         }
     }
@@ -74,9 +80,9 @@ private struct ConversationWindowReader: NSViewRepresentable {
 private struct WindowStyling: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 15, *) {
-            content.toolbar(removing: .title)
+            content.toolbar(removing: .title).toolbarBackground(.hidden, for: .windowToolbar)
         } else {
-            content
+            content.toolbarBackground(.hidden, for: .windowToolbar)
         }
     }
 }
