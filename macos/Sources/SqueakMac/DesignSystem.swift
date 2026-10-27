@@ -28,6 +28,36 @@ enum Radius {
     static let row: CGFloat = 8
 }
 
+// MARK: Cards (the iPhone's card language)
+
+/// Surface plus a 1px `line` stroke, radius 12, no shadow. State is told by a `StateDot` and a word, never a fill.
+struct Card<Content: View>: View {
+    var padding: CGFloat = Space.m
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line, lineWidth: 1))
+    }
+}
+
+/// The card for something that waits on the person (an approval, a question): radius 16, the same surface and stroke.
+struct DecisionCard<Content: View>: View {
+    var padding: CGFloat = Space.l
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.panel))
+            .overlay(RoundedRectangle(cornerRadius: Radius.panel).strokeBorder(Theme.line, lineWidth: 1))
+    }
+}
+
 // MARK: Section label
 
 /// Section header (§4.2 `heading`, sentence case: the product has no all-caps labels).

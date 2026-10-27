@@ -66,7 +66,6 @@ struct TelegramSettings: View {
             telegramToken(m: $m)
             allowedChats
             botPicture
-            NotificationsSection(channel: .telegram)
             telegramActions
         }
         .formStyle(.grouped)
@@ -237,7 +236,6 @@ struct CliqSettings: View {
             cliqConnection(m: $m)
             cliqOwner(m: $m)
             botLogo
-            NotificationsSection(channel: .cliq)
             twoWaySection
         }
         .formStyle(.grouped)

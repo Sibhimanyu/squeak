@@ -148,17 +148,27 @@ struct UsageDetailView: View {
                 claude
                 codex
                 cost
-                Text("Refresh fetches Claude's usage with your existing Claude Code sign-in, without consuming tokens, at most once a minute. Squeak never does it on its own. Codex is read from its own files and is always current.")
+                Text("Claude's usage is fetched when this page opens and on Refresh, with your existing Claude Code sign-in, without consuming tokens, at most once a minute. Codex is read from its own files and is always current.")
                     .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: 560, alignment: .leading)
             .padding(.horizontal, 32).padding(.vertical, 28)
             .frame(maxWidth: .infinity)
         }
-        .task { await model.pollUsage() }
+        .task {
+            // Like the phone: reading Claude on open, unless a reading is under a minute old.
+            if model.isConnected, !(model.usage?.claude?.observedAt.map { Date().timeIntervalSince($0) < 60 } ?? false) {
+                await model.refreshClaude()
+            }
+            await model.pollUsage()
+        }
     }
 
     private var claude: some View {
+        Card { claudeBody }
+    }
+
+    private var claudeBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             ProviderHeader(name: "Claude", reading: model.usage?.claude, bigger: true) { ClaudeRefreshButton() }
             if let reading = model.usage?.claude {
@@ -174,6 +184,10 @@ struct UsageDetailView: View {
     }
 
     private var codex: some View {
+        Card { codexBody }
+    }
+
+    private var codexBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             ProviderHeader(name: "Codex", reading: model.usage?.codex, bigger: true) { EmptyView() }
             if let reading = model.usage?.codex {
@@ -186,6 +200,10 @@ struct UsageDetailView: View {
     }
 
     private var cost: some View {
+        Card { costBody }
+    }
+
+    private var costBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Today").font(Typo.heading)
             if let usd = model.usage?.todayCostUsd, let n = model.usage?.todayCostSessions {

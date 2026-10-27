@@ -11,7 +11,7 @@ import SwiftUI
 struct PopoverView: View {
     @Environment(AppModel.self) private var model
     @State private var idleOpen = false
-    @State private var usageOpen = false
+    @State private var doneOpen = false
     @State private var overflowOpen = false
     /// Each section's order as it was when the pointer entered the list, so a row does not jump
     /// under the pointer. Nil when the pointer is off the list, and then the live order shows.
@@ -66,6 +66,7 @@ struct PopoverView: View {
                 VStack(spacing: 0) {
                     header
                     if overflowOpen { overflowRows }
+                    macStrip
                     SearchField(text: $model.query)
                         .padding(.horizontal, PopoverMetrics.inset)
                         .padding(.bottom, Space.m)
@@ -79,8 +80,6 @@ struct PopoverView: View {
             ScrollView(.vertical) {
                 VStack(spacing: 0) {
                     list
-                    InsetSeparator()
-                    usage
                 }
                 .background(GeometryReader { Color.clear.preference(key: PopoverHeightKey.self, value: $0.size.height) })
             }
@@ -99,6 +98,7 @@ struct PopoverView: View {
         .onPreferenceChange(PopoverChromeKey.self) { chromeHeight = $0 }
         .onPreferenceChange(PopoverFooterKey.self) { footerHeight = $0 }
         .task(id: model.hasLoaded) { await model.pollLiveSteps() }
+        .task { await model.readUsage() }
         .task {
             while !Task.isCancelled {
                 await model.refreshMenuPreviews()
@@ -124,17 +124,17 @@ struct PopoverView: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(spacing: Space.s) {
-            LogoLockup(height: 22)
+        let working = model.grouped.first(where: { $0.kind == .working })?.sessions.count ?? 0
+        let total = model.visibleSessions.count
+        return HStack(spacing: Space.s) {
+            Circle().fill(model.isConnected ? Theme.done : Theme.offline).frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+            Text(model.health != nil && !model.isConnected
+                 ? model.connectionTitle
+                 : "\(total) \(total == 1 ? "session" : "sessions") · \(working) working")
+                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                .accessibilityLabel(model.isConnected ? "Connected, \(total) sessions, \(working) working" : "Connection: \(model.connectionTitle)")
             Spacer(minLength: Space.s)
-            if model.health != nil, !model.isConnected {
-                HStack(spacing: 5) {
-                    Circle().fill(Theme.offline).frame(width: 9, height: 9)
-                    Text(model.connectionTitle).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Connection: \(model.connectionTitle)")
-            }
             Button {
                 dismissMenu()
                 NewChatController.shared.show()
@@ -161,6 +161,40 @@ struct PopoverView: View {
         .padding(.horizontal, PopoverMetrics.inset)
         .padding(.top, 14)
         .padding(.bottom, Space.m)
+    }
+
+    /// The Mac's state and plan usage in two quiet lines, like the phone's Mac strip. Usage opens the
+    /// Usage screen in the conversation window.
+    @ViewBuilder private var macStrip: some View {
+        let awakeLine = model.panelAwakeLine
+        let usageLine = model.panelUsageLine
+        if awakeLine != nil || usageLine != nil {
+            Card(padding: Space.s) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let awakeLine {
+                        HStack(spacing: 6) {
+                            Lucide(.moon, size: 12, label: "Awake", color: Theme.muted)
+                            Text(verbatim: awakeLine).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
+                        }
+                    }
+                    if let usageLine {
+                        Button { dismissMenu(); model.openUsage() } label: {
+                            HStack(spacing: 6) {
+                                Lucide(.gauge, size: 12, label: "Usage", color: Theme.muted)
+                                Text(verbatim: usageLine).font(.system(size: 12)).foregroundStyle(Theme.ink).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 0)
+                                Lucide(.chevronRight, size: 11, label: "Open usage", color: Theme.subtle)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Plan usage, percent left: \(usageLine). Opens usage.")
+                    }
+                }
+            }
+            .padding(.horizontal, PopoverMetrics.inset)
+            .padding(.bottom, Space.m)
+        }
     }
 
     /// The overflow, opened in place: the three things that are not a session.
@@ -321,7 +355,12 @@ struct PopoverView: View {
         case .needsYou:
             VStack(alignment: .leading, spacing: Space.xs) {
                 MenuSectionHeader(title: "Needs you", count: section.sessions.count)
-                ForEach(section.sessions) { sessionRow($0) }
+                ForEach(section.sessions) { s in
+                    MenuAskRow(session: s) { openSession(s) }
+                        .contextMenu {
+                            Button(model.pinned.contains(s.key) ? "Unpin" : "Pin to top") { model.togglePin(s.key) }
+                        }
+                }
             }
             .padding(.vertical, Space.xs)
         case .error:
@@ -332,11 +371,13 @@ struct PopoverView: View {
             .padding(.vertical, Space.xs)
         case .done:
             let unread = section.sessions.filter { model.hasUnreadUpdate(for: $0.key) }.count
-            VStack(alignment: .leading, spacing: Space.xs) {
-                MenuSectionHeader(title: "Finished", count: section.sessions.count, note: unread > 0 ? "\(unread) new" : nil)
-                ForEach(section.sessions) { s in
-                    sessionRow(s, detail: model.menuReplyPreviews[s.key], unread: model.hasUnreadUpdate(for: s.key))
+            MenuDisclosure(title: unread > 0 ? "Finished · \(unread) new" : "Finished", count: section.sessions.count, expanded: $doneOpen) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(section.sessions) { s in
+                        sessionRow(s, detail: model.menuReplyPreviews[s.key], unread: model.hasUnreadUpdate(for: s.key))
+                    }
                 }
+                .padding(.bottom, Space.xs)
             }
             .padding(.vertical, Space.xs)
         case .working:
@@ -369,16 +410,6 @@ struct PopoverView: View {
     private func openSession(_ s: HostSession) {
         dismissMenu()
         QuickComposerController.shared.show(target: s.key)
-    }
-
-    // MARK: Usage and awake
-
-    /// Plan usage, folded away. No percentage in the collapsed row: the expanded `UsageSection` names
-    /// each window and its freshness, and owns the one poll that keeps it current.
-    private var usage: some View {
-        MenuDisclosure(title: "Usage details", expanded: $usageOpen) {
-            UsageSection()
-        }
     }
 
     // MARK: Footer

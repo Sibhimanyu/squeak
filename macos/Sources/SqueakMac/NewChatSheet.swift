@@ -15,7 +15,7 @@ final class NewChatController: NSObject, NSWindowDelegate {
         let model = AppModel.shared
         if window == nil {
             let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: NewChatSheet.width, height: 560),
+                contentRect: NSRect(x: 0, y: 0, width: NewChatSheet.width, height: 680),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
             w.title = "New chat"
             w.titlebarAppearsTransparent = true
@@ -40,14 +40,17 @@ final class NewChatController: NSObject, NSWindowDelegate {
 final class NewChatState {
     enum Phase: Equatable { case loading, ready, starting, outdated, offline }
 
-    var form = NewChatForm()
+    var form = NewChatForm(store: ChatChoiceStore())
+    var customizing = false
     var phase: Phase = .loading
     var error: String?
     var focus = 0
     @ObservationIgnored private var loadTask: Task<Void, Never>?
 
     func prepare(model: AppModel, preselect: String?) {
-        form = NewChatForm(workspaces: form.workspaces, preselect: preselect ?? form.workspaceId)
+        let known = form.models
+        form = NewChatForm(workspaces: form.workspaces, preselect: preselect ?? form.workspaceId, store: ChatChoiceStore())
+        if !known.isEmpty { form.setModels(known) }
         form.text = ""
         form.query = ""
         error = nil
@@ -55,6 +58,9 @@ final class NewChatState {
         focus += 1
         loadTask?.cancel()
         loadTask = Task { [weak self] in
+            // Models come with the sheet; an older daemon lists none and the chat starts as it always did.
+            let listed = await model.newChatModels()
+            if let self, !Task.isCancelled, !listed.isEmpty { form.setModels(listed) }
             let result = await model.newChatWorkspaces()
             guard let self, !Task.isCancelled else { return }
             switch result {
@@ -94,9 +100,10 @@ final class NewChatState {
         guard form.canStart, phase == .ready, let w = form.selected else { return }
         phase = .starting
         error = nil
-        let text = form.trimmedText, agent = form.agent
+        let text = form.trimmedText, agent = form.agent, extra = form.request
         Task { [weak self] in
-            let result = await model.startChat(workspaceId: w.id, agent: agent, text: text)
+            let result = await model.startChat(workspaceId: w.id, agent: agent, text: text,
+                                               model: extra.model, thinking: extra.thinking, split: extra.split)
             guard let self else { return }
             switch result {
             case .started: phase = .ready; close()
@@ -166,13 +173,7 @@ struct NewChatSheet: View {
             SearchField(text: $state.form.query, placeholder: "Search workspaces")
             workspaceList.disabled(busy)
         }
-        VStack(alignment: .leading, spacing: Space.s) {
-            Text("Agent").font(Typo.label)
-            Picker("Agent", selection: Binding(get: { state.form.agent }, set: { state.form.choose(agent: $0) })) {
-                ForEach(NewChatAgent.allCases) { Text($0.displayName).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden().frame(width: 200).disabled(busy)
-        }
+        setupSection.disabled(busy)
         VStack(alignment: .leading, spacing: Space.s) {
             Text("First message").font(Typo.label)
             ComposerField(
@@ -186,6 +187,84 @@ struct NewChatSheet: View {
                     .font(Typo.meta).foregroundStyle(Theme.error)
             }
         }
+    }
+
+    /// Presets and their one-line summary, then Customize: agent, model, thinking, split, plan first.
+    @ViewBuilder private var setupSection: some View {
+        @Bindable var state = state
+        let f = state.form
+        VStack(alignment: .leading, spacing: Space.s) {
+            if !f.presets.isEmpty {
+                HStack(spacing: Space.s) {
+                    ForEach(f.presets + (f.preset == .custom ? [.custom] : []), id: \.self) { p in
+                        let on = f.preset == p
+                        Button(p.title) { if p != .custom { state.form.apply(preset: p) } }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12.5, weight: on ? .semibold : .regular))
+                            .foregroundStyle(on ? Theme.ink : Theme.muted)
+                            .padding(.horizontal, Space.m).padding(.vertical, 5)
+                            .background(on ? Theme.surfaceRaised : .clear, in: Capsule())
+                            .overlay(Capsule().strokeBorder(Theme.line))
+                            .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                }
+            }
+            if !f.models.isEmpty {
+                Text(f.summary).font(Typo.meta).foregroundStyle(Theme.muted)
+            }
+            DisclosureGroup(isExpanded: $state.customizing) {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    LabeledContent("Agent") {
+                        Picker("Agent", selection: Binding(get: { state.form.agent }, set: { state.form.choose(agent: $0) })) {
+                            ForEach(NewChatAgent.allCases) { Text($0.displayName).tag($0) }
+                        }
+                        .pickerStyle(.segmented).labelsHidden().frame(width: 200)
+                    }
+                    if !f.agentModels.isEmpty {
+                        LabeledContent("Model") {
+                            Picker("Model", selection: Binding(get: { state.form.setup.modelId ?? "" }, set: { state.form.pick(modelId: $0) })) {
+                                ForEach(f.agentModels) { m in
+                                    Text(ChatPresets.shortName(m.label) + (m.label.contains("1M") ? " · 1M" : "")).tag(m.id)
+                                }
+                            }
+                            .labelsHidden().fixedSize()
+                        }
+                        if let chosen = f.chosenModel, !chosen.levels.isEmpty {
+                            LabeledContent("Thinking") {
+                                Picker("Thinking", selection: Binding(get: { state.form.setup.level ?? "" }, set: { state.form.pick(level: $0) })) {
+                                    ForEach(chosen.levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag($0) }
+                                }
+                                .labelsHidden().fixedSize()
+                            }
+                        }
+                    }
+                    if f.canSplit {
+                        Text("Split the work").font(Typo.label).padding(.top, Space.xs)
+                        LabeledContent("Writes the code") { workerPicker(\.setup.code) { state.form.pick(code: $0) } }
+                        LabeledContent("Runs tests and builds") { workerPicker(\.setup.run) { state.form.pick(run: $0) } }
+                        Text("The chat's model plans and reviews; cheaper ones do the typing.")
+                            .font(Typo.meta).foregroundStyle(Theme.muted)
+                        Toggle(isOn: Binding(get: { state.form.setup.planFirst }, set: { state.form.set(planFirst: $0) })) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Plan first")
+                                Text("Shows you the plan and waits for your go.").font(Typo.meta).foregroundStyle(Theme.muted)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, Space.s)
+            } label: {
+                Text("Customize").font(Typo.label)
+            }
+        }
+    }
+
+    private func workerPicker(_ path: KeyPath<NewChatForm, String?>, set: @escaping (String?) -> Void) -> some View {
+        Picker("Worker", selection: Binding(get: { state.form[keyPath: path] ?? "" }, set: { set($0.isEmpty ? nil : $0) })) {
+            Text("Same model").tag("")
+            ForEach(ChatWorker.all) { Text($0.label).tag($0.id) }
+        }
+        .labelsHidden().fixedSize()
     }
 
     private var workspaceList: some View {
@@ -262,10 +341,20 @@ extension AppModel {
         }
     }
 
+    /// The models a new chat can pick from; empty from an older daemon or when it can't be reached.
+    func newChatModels() async -> [DaemonChatModel] {
+        if demoMode { return DemoData.chatModels }
+        if !chatModels.isEmpty { return chatModels }
+        let list = await client.chatModels()
+        if !list.isEmpty { chatModels = list }
+        return list
+    }
+
     /// A deliberate press of Start chat. On success the new chat opens as soon as the local reader lists it.
-    func startChat(workspaceId: String, agent: NewChatAgent, text: String) async -> StartChatResult {
+    func startChat(workspaceId: String, agent: NewChatAgent, text: String,
+                   model: String? = nil, thinking: String? = nil, split: WorkSplit? = nil) async -> StartChatResult {
         if demoMode { return .failed(reason: "Demo data: nothing is started.") }
-        let result = await client.startChat(workspaceId: workspaceId, agent: agent, text: text)
+        let result = await client.startChat(workspaceId: workspaceId, agent: agent, text: text, model: model, thinking: thinking, split: split)
         if case .started(let sessionId) = result {
             AppLog.info("new chat started")
             openWhenListed(sessionId: sessionId)

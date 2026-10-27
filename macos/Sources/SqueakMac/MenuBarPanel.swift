@@ -327,3 +327,84 @@ struct MenuDisclosure<Content: View>: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: expanded)
     }
 }
+
+/// A session that needs you, as a compact decision row (the phone's AskCard, condensed): a 3pt red
+/// capsule down its left edge, the title, the agent's question, and its lettered options as one-tap
+/// chips. A chip sends just its letter, as an answer to the chat's current turn, and only when tapped.
+struct MenuAskRow: View {
+    @Environment(AppModel.self) private var model
+    let session: HostSession
+    let open: () -> Void
+    @State private var hovering = false
+    @State private var sending: String?
+    @State private var note: String?
+
+    var body: some View {
+        let choices = Array(model.choices(for: session.key).prefix(4))
+        HStack(alignment: .top, spacing: Space.s) {
+            Capsule().fill(Theme.needsYou).frame(width: 3).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Button(action: open) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(verbatim: SessionText.headline(session))
+                                .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                            Spacer(minLength: Space.xs)
+                            RelativeTimeText(session.lastActivityAt, size: 12)
+                        }
+                        Text(verbatim: SessionText.secondLine(session))
+                            .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
+                        if let q = model.question(for: session.key), !q.isEmpty {
+                            Text(verbatim: q).font(.system(size: 12)).foregroundStyle(Theme.ink.opacity(0.85)).lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if !choices.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(choices, id: \.letter) { c in
+                            Button { send(c) } label: {
+                                HStack(spacing: 6) {
+                                    Text(c.letter).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.ink)
+                                        .frame(width: 18, height: 18)
+                                        .background(Circle().fill(Theme.ink.opacity(0.08)))
+                                    Text(verbatim: c.label).font(.system(size: 12)).foregroundStyle(Theme.ink).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 6).frame(height: 24)
+                                .background(RoundedRectangle(cornerRadius: Radius.chip, style: .continuous).fill(Theme.ink.opacity(sending == c.letter ? 0.14 : 0.05)))
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(sending != nil)
+                            .accessibilityLabel("Answer \(c.letter): \(c.label)")
+                        }
+                    }
+                }
+                if let note { Text(verbatim: note).font(.system(size: 11)).foregroundStyle(Theme.muted).lineLimit(2) }
+            }
+        }
+        .padding(.horizontal, Space.m)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.ink.opacity(hovering ? 0.05 : 0)))
+        .onHover { hovering = $0 }
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func send(_ c: Choice) {
+        sending = c.letter
+        note = nil
+        Task {
+            let result = await model.send(c.letter, to: session.key, answering: true)
+            sending = nil
+            switch result {
+            case .accepted: note = "Sent \(c.letter)"
+            case .none: break
+            default: note = "Not sent. Open the chat to answer."
+            }
+        }
+    }
+}
