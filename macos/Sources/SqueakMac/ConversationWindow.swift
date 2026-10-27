@@ -70,6 +70,10 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden
                 w.styleMask.insert(.fullSizeContentView)
+                // The sidebar is behind-window glass (SidebarGlass): the window must not paint an opaque
+                // background of its own. The content columns paint Theme.bg themselves.
+                w.isOpaque = false
+                w.backgroundColor = .clear
             }
             Task { @MainActor in AppModel.shared.conversationWindow = w }
         }

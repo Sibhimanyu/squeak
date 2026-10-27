@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.8.2
+
+- The sidebar is redone: a glass look that lets the desktop show through, the duck and the Squeak name with the
+  new-chat button on one row, a roomier search field and larger menu items.
+
 ## 2.8.1
 
 - The whole app is back to standard macOS sizes: smaller type, tighter rows and a 360 pt menu-bar popup,

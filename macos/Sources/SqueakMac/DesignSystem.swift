@@ -32,13 +32,19 @@ enum Metrics {
     static let icon: CGFloat = 14
     static let iconSmall: CGFloat = 13
     // Control heights
-    static let navRow: CGFloat = 28
+    static let navRow: CGFloat = 36
+    static let sidebarField: CGFloat = 32
+    static let sidebarInset: CGFloat = 14
+    static let sidebarRowGap: CGFloat = 8
+    static let sidebarRadius: CGFloat = 10
+    static let sidebarText: CGFloat = 14
+    static let sidebarIcon: CGFloat = 16
     static let field: CGFloat = 28
     static let button: CGFloat = 26
     static let segmented: CGFloat = 26
     static let pill: CGFloat = 22
     // Main window
-    static let sidebarWidth: CGFloat = 200
+    static let sidebarWidth: CGFloat = 220
     static let listMinWidth: CGFloat = 320
     static let listIdealWidth: CGFloat = 350
     static let listMaxWidth: CGFloat = 480
