@@ -56,6 +56,30 @@ public enum HomeProjects {
     }
 }
 
+/// One project's page: its chats grouped by status, each group newest first.
+public struct ProjectPage: Equatable, Sendable {
+    public var name: String
+    public var sections: [SessionSection]
+    public var sessionCount: Int
+    public var workingCount: Int
+
+    /// "N sessions · M working", worded like Home's own summary.
+    public var summary: String {
+        let base = "\(sessionCount) session\(sessionCount == 1 ? "" : "s")"
+        return workingCount > 0 ? "\(base) · \(workingCount) working" : base
+    }
+}
+
+extension HomeProjects {
+    /// The page for a project key (`HomeProject.name`), or nil when no card carries it any more.
+    public static func page(named name: String, in sessions: [HostSession], pinned: Set<SessionKey> = [],
+                            now: Date = Date()) -> ProjectPage? {
+        guard let p = build(sessions, now: now).first(where: { $0.name == name }) else { return nil }
+        return ProjectPage(name: p.name, sections: SessionGrouping.group(p.sessions, pinned: pinned, now: now),
+                           sessionCount: p.sessions.count, workingCount: p.workingCount)
+    }
+}
+
 /// Search on Home: chats that are active come first, then the earlier ones.
 public enum HomeSearch {
     public struct Split: Equatable, Sendable {

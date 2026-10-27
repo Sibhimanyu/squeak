@@ -34,6 +34,22 @@ struct HomeProjectsTests {
         #expect(p[2].sessions.map(\.title) == ["alpha", "Zed"])
     }
 
+    @Test func projectPage_groupsByStatusNewestFirst_andCounts() throws {
+        let list = [
+            s("1", "old done", repo: "alpha", state: .finished, ago: 900, now: now),
+            s("2", "new done", repo: "alpha", state: .finished, ago: 100, now: now),
+            s("3", "busy", repo: "alpha", state: .working, ago: 50, now: now),
+            s("4", "blocked", repo: "alpha", state: .blocked, ago: 4000, now: now),
+            s("5", "elsewhere", repo: "beta", state: .working, ago: 5, now: now),
+        ]
+        let page = try #require(HomeProjects.page(named: "alpha", in: list, now: now))
+        #expect(page.sections.map(\.kind) == [.needsYou, .done, .working])
+        #expect(page.sections[1].sessions.map(\.title) == ["new done", "old done"])
+        #expect(page.sessionCount == 4 && page.workingCount == 1)
+        #expect(page.summary == "4 sessions · 1 working")
+        #expect(HomeProjects.page(named: "gone", in: list, now: now) == nil)
+    }
+
     @Test func earlierIdleLeavesCardsAndSearchSplits() {
         let old = s("9", "ancient", repo: "r", state: .idle, ago: 3 * 86400, now: now)
         let fresh = s("8", "fresh", repo: "r", ago: 5, now: now)

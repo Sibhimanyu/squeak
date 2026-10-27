@@ -216,6 +216,8 @@ final class QuickState {
     var text = ""
     var focus = 0
     var result: SendResult?
+    /// Images pasted or dropped for the next message; saved into the chat's folder only on Send.
+    let images = ImageTray()
     /// Chats with a send still in flight. Outlives a hide, so a reopened composer cannot send the same text twice.
     private(set) var inFlight: Set<SessionKey> = []
     /// Bumped on every show and hide: a send that finishes under an older one must not touch this composer.
@@ -233,6 +235,7 @@ final class QuickState {
     func prepare(model: AppModel, explicit: SessionKey? = nil) {
         epoch += 1
         result = nil
+        images.clear()
         context.clear()
         // Only a default: the chip names it, and nothing is sent until ⌘↩.
         target = ComposerRouting.target(
@@ -266,6 +269,7 @@ final class QuickState {
         guard key != target else { return }
         epoch += 1
         result = nil
+        images.clear()
         // The reply belongs to the chat it was loaded for, never to the one now chosen. A composer
         // that was showing context keeps showing it, for the new chat's latest reply and with no
         // notification anchor; a compact one stays compact.
@@ -349,14 +353,17 @@ struct QuickComposerView: View {
                     .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
                     .padding(.horizontal, 6)
             } else {
+                ImageStrip(tray: state.images).padding(.horizontal, 6)
                 ComposerField(
                     text: $state.text, sendKey: .commandReturnSends,
                     placeholder: placeholder,
                     isEnabled: !state.sending, focusToken: state.focus, onSend: { send(.queue) }, onEscape: close,
                     onContentHeight: { fieldHeight = $0 }, fontSize: 16,
-                    onOptionReturn: target?.state == .working ? { send(.steer) } : nil
+                    onOptionReturn: target?.state == .working ? { send(.steer) } : nil,
+                    onImages: canAttach ? { state.images.add($0) } : nil
                 )
                 .frame(height: min(max(fieldHeight, QuickLayout.minFieldHeight), QuickLayout.maxFieldHeight))
+                .imageDrop(state.images)
             }
             HStack(spacing: 10) {
                 destinationMenu
@@ -440,7 +447,13 @@ struct QuickComposerView: View {
 
     private var canSend: Bool {
         guard let t = state.target, let s = model.session(t), model.canSend(s), model.isConnected, !state.sending else { return false }
-        return !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.images.hasImages
+    }
+
+    /// Paste and drop attach images when the chat takes a reply and its folder is known.
+    private var canAttach: Bool {
+        guard let target, model.canSend(target), !state.sending else { return false }
+        return target.capabilities.attachments.isSupported
     }
 
     private var destinationMenu: some View {
@@ -543,12 +556,15 @@ struct QuickComposerView: View {
     private func send(_ mode: SendMode) {
         guard canSend, let key = state.target else { return }
         let text = state.text
+        // Images are saved into the chat's folder only now; if that fails nothing is sent and everything stays.
+        guard let outgoing = state.images.prepareToSend(text: text, folder: target?.cwd) else { return }
         let epoch = state.epoch
         let mode: SendMode = target?.state == .working ? mode : .queue
         state.beginSend(to: key)
         Task {
-            let r = await model.send(text, to: key, mode: mode)
+            let r = await model.send(outgoing, to: key, mode: mode)
             if state.endSend(of: text, to: key, epoch: epoch, result: r) {
+                if state.epoch == epoch { state.images.clear() }
                 try? await Task.sleep(for: .milliseconds(900))
                 // Closes only the composer this send was made from, not one reopened since.
                 if state.epoch == epoch { close() }

@@ -7,6 +7,8 @@ import SwiftUI
 /// raised-pill tab bar, bordered segmented controls, green switches, flat buttons. Everything is a thin
 /// ink overlay on the panel's glass, so light and dark both follow the system.
 enum PopupMetrics {
+    /// The one left/right content inset of every popup screen. `PopupScaffold` applies it once around the
+    /// top, the band and the footer; nothing inside adds horizontal padding of its own beyond a card's.
     static let inset: CGFloat = 14
     static let cardRadius: CGFloat = 12
     static let controlRadius: CGFloat = 8

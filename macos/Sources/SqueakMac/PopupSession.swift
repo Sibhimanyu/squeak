@@ -15,10 +15,12 @@ final class PopupSessionModel {
     var sending = false
     var note: String?
     var optionBusy: String?
+    /// Images for the next reply; saved into the chat's folder only when it is sent.
+    let images = ImageTray()
     @ObservationIgnored var loadedKey: SessionKey?
 
     func load(_ key: SessionKey, model: AppModel) async {
-        if loadedKey != key { messages = []; loaded = false; text = ""; note = nil; loadedKey = key }
+        if loadedKey != key { messages = []; loaded = false; text = ""; note = nil; images.clear(); loadedKey = key }
         let cached = await model.cachedContextMessages(for: key)
         if messages.isEmpty, !cached.isEmpty { messages = cached }
         while !Task.isCancelled, loadedKey == key {
@@ -68,7 +70,7 @@ struct PopupSessionTop: View {
                     Spacer(minLength: 0)
                 }
             }
-            .padding(.horizontal, PopupMetrics.inset + 1).padding(.top, 14).padding(.bottom, 12)
+            .padding(.top, 14).padding(.bottom, 12)
             PopupDivider()
         }
     }
@@ -124,7 +126,7 @@ struct PopupSessionBand: View {
                 Text(verbatim: note).font(.popup(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, PopupMetrics.inset + 1).padding(.vertical, 16)
+        .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -197,14 +199,18 @@ struct PopupSessionFooter: View {
         let canSend = session.map { model.canSend($0) } ?? false
         VStack(spacing: 0) {
             PopupDivider()
-            HStack(spacing: 10) {
+            ImageStrip(tray: store.images).padding(.top, 10)
+            HStack(spacing: 8) {
+                if canSend, session?.capabilities.attachments.isSupported == true { AttachButton(tray: store.images, size: 28) }
                 ComposerField(text: Binding(get: { store.text }, set: { store.text = $0 }), sendKey: .returnSends,
                               placeholder: canSend ? "Reply to \(session.flatMap(agentName) ?? "the agent")…" : "Can't send to this chat from here",
                               isEnabled: canSend && !store.sending, onSend: { send(.queue) }, fontSize: 13,
-                              onOptionReturn: working ? { send(.steer) } : nil)
+                              onOptionReturn: working ? { send(.steer) } : nil,
+                              onImages: canSend && !store.sending && session?.capabilities.attachments.isSupported == true ? { store.images.add($0) } : nil)
                     .padding(.horizontal, 8)
                     .frame(height: 32)
                     .popupCard(radius: 10, fill: 0.03, stroke: 0.11)
+                    .imageDrop(store.images)
                 if working, let session, session.conductorSessionId != nil {
                     Button { stop(session) } label: {
                         HStack(spacing: 8) {
@@ -217,20 +223,22 @@ struct PopupSessionFooter: View {
                     .accessibilityLabel("Stop this chat's turn")
                 }
             }
-            .padding(.horizontal, PopupMetrics.inset + 1).padding(.top, 12)
+            .padding(.top, 12)
             HStack(spacing: 8) {
                 Lucide(.keyboard, size: 14, color: Theme.muted)
                 Text(working ? "Return queues it after this turn · ⌥↩ steers now" : "Return sends to this chat")
                     .font(.popup(12.5)).foregroundStyle(Theme.muted)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, PopupMetrics.inset + 3).padding(.top, 12).padding(.bottom, 14)
+            .padding(.top, 12).padding(.bottom, 14)
         }
     }
 
     private func send(_ mode: SendMode) {
-        let text = store.text
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !store.sending else { return }
+        let typed = store.text
+        guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.images.hasImages, !store.sending else { return }
+        // Images are saved into the chat's folder only now; if that fails nothing is sent and everything stays.
+        guard let text = store.images.prepareToSend(text: typed, folder: model.session(key)?.cwd) else { return }
         store.sending = true
         store.note = nil
         Task {
@@ -239,6 +247,7 @@ struct PopupSessionFooter: View {
             switch result {
             case .accepted(_, let delivery, _):
                 store.text = ""
+                store.images.clear()
                 store.note = delivery == .steered ? "Steered into the turn." : delivery == .queued ? "Queued behind the turn." : "Sent."
                 await store.load(key, model: model, once: true)
             case .refused(let r), .notSent(let r), .uncertain(let r): store.note = r

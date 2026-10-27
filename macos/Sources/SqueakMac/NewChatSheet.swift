@@ -79,6 +79,8 @@ final class NewChatState {
     var phase: Phase = .loading
     var error: String?
     var focus = 0
+    /// Images pasted, dropped or picked for the first message; written to the workspace only on Start chat.
+    let images = ImageTray()
     @ObservationIgnored private var loadTask: Task<Void, Never>?
 
     func prepare(model: AppModel, preselect: String?) {
@@ -88,6 +90,7 @@ final class NewChatState {
         form.text = ""
         form.query = ""
         error = nil
+        images.clear()
         phase = form.workspaces.isEmpty ? .loading : .ready
         focus += 1
         loadTask?.cancel()
@@ -134,14 +137,17 @@ final class NewChatState {
         guard form.canStart, phase == .ready, let w = form.selected else { return }
         phase = .starting
         error = nil
-        let text = form.trimmedText, agent = form.agent, extra = form.request
+        // The images go into the workspace's folder now; if that fails nothing starts and text and thumbnails stay.
+        guard let text = images.prepareToSend(text: form.trimmedText, folder: w.path) else { phase = .ready; return }
+        let agent = form.agent, extra = form.request
+        let hadImages = images.hasImages
         Task { [weak self] in
             let result = await model.startChat(workspaceId: w.id, agent: agent, text: text,
                                                model: extra.model, thinking: extra.thinking, split: extra.split,
                                                openInWindow: openInWindow)
             guard let self else { return }
             switch result {
-            case .started: phase = .ready; close()
+            case .started: phase = .ready; if hadImages { images.clear() }; close()
             case .failed(let reason), .uncertain(let reason): phase = .ready; error = reason // text stays, nothing is lost
             }
         }
@@ -214,13 +220,20 @@ struct NewChatSheet: View {
         }
         setupSection.disabled(busy)
         VStack(alignment: .leading, spacing: 8) {
-            Text("First message").font(.system(size: 12)).foregroundStyle(Theme.muted)
+            HStack {
+                Text("First message").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                Spacer()
+                if state.form.selected?.path != nil { AttachButton(tray: state.images, size: 22).disabled(busy) }
+            }
+            ImageStrip(tray: state.images)
             ComposerField(
                 text: $state.form.text, sendKey: .commandReturnSends, placeholder: "What should it work on?",
-                isEnabled: !busy, focusToken: state.focus, onSend: start, onEscape: close)
+                isEnabled: !busy, focusToken: state.focus, onSend: start, onEscape: close,
+                onImages: busy || state.form.selected?.path == nil ? nil : { state.images.add($0) })
                 .frame(height: 72)
                 .background(Theme.surfaceRaised.opacity(0.3), in: RoundedRectangle(cornerRadius: Radius.card))
                 .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+                .imageDrop(state.images)
             if state.form.isTooLong {
                 Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.")
                     .font(Typo.meta).foregroundStyle(Theme.error)

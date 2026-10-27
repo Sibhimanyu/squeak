@@ -8,13 +8,16 @@ public struct NewChatWorkspace: Decodable, Sendable, Equatable, Identifiable, Ha
     public var title: String?
     public var lastActivityAt: Date?
     public var defaultAgent: NewChatAgent
+    /// The workspace's folder on this Mac, where an attached image is saved; nil from a daemon that does not say.
+    public var path: String?
 
-    public init(id: String, repoName: String, branch: String, title: String? = nil, lastActivityAt: Date? = nil, defaultAgent: NewChatAgent = .claude) {
+    public init(id: String, repoName: String, branch: String, title: String? = nil, lastActivityAt: Date? = nil, defaultAgent: NewChatAgent = .claude, path: String? = nil) {
+        self.path = path
         self.id = id; self.repoName = repoName; self.branch = branch; self.title = title
         self.lastActivityAt = lastActivityAt; self.defaultAgent = defaultAgent
     }
 
-    enum CodingKeys: String, CodingKey { case id, repoName, branch, title, lastActivityAt, defaultAgent }
+    enum CodingKeys: String, CodingKey { case id, repoName, branch, title, lastActivityAt, defaultAgent, path }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -24,6 +27,7 @@ public struct NewChatWorkspace: Decodable, Sendable, Equatable, Identifiable, Ha
         title = c.lenient(String.self, .title)
         lastActivityAt = c.lenient(String.self, .lastActivityAt).flatMap(DaemonDate.parse)
         defaultAgent = c.lenient(String.self, .defaultAgent).flatMap(NewChatAgent.init(rawValue:)) ?? .claude
+        path = c.lenient(String.self, .path).flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// "repo · branch", the one label the picker uses everywhere.

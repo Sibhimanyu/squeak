@@ -126,7 +126,8 @@ public struct ConductorLocalAdapter: HostAdapter {
             capabilities: Capabilities(
                 discover: .supported, readTranscript: .supported, send: sendCapability, activity: .supported,
                 approve: .unsupported("Approve in Conductor"), openInHost: .supported,
-                attachments: .unsupported("Attachments are not supported yet")),
+                attachments: (row.workspacePath ?? "").isEmpty
+                    ? .unsupported("Squeak doesn't know this chat's folder, so it can't save an image there") : .supported),
             origin: .hostOwned,
             pendingQuestion: state == .blocked ? row.pendingQuestion : nil)
         return (session, retired)

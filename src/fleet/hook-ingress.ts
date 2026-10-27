@@ -32,11 +32,25 @@ export interface HookIngressOptions {
  * a conversation nor the ability to send an agent instructions may be
  * readable or usable from there.
  */
+/** A queued message's text is clipped on the way out. */
+const MAX_QUEUE_TEXT = 4000;
+
 export interface IngressControl {
   sessionMessage(replyTarget: string): unknown;
   /** A chat's readable history (user and assistant text only), oldest first. */
   transcript?(replyTarget: string, limit: number, before?: number | null): unknown;
   reply(replyTarget: string, text: string, mode?: "queue" | "steer", answersTurn?: string | null): Promise<unknown>;
+  /**
+   * A Conductor chat's queue of messages waiting for the turn to end (ConductorReplier.queue); null when it
+   * cannot be read (relay down, not a Conductor chat). Token-gated: queued text is conversation content.
+   */
+  queue?(sessionId: string): Promise<Array<{ id: string; text: string; mode: string; position: number }> | null>;
+  /** Steer a queued message in now (`promote`) or delete it (`cancel`); the same path the phone's signed command takes. */
+  queueAction?(
+    sessionId: string,
+    messageId: string,
+    action: "promote" | "cancel",
+  ): Promise<{ ok: true } | { ok: false; reason: string }>;
   /**
    * The current turn of a session, step by step, by its fleet key. Token-gated
    * like the rest: thinking and tool calls are the session's content.
@@ -289,6 +303,9 @@ export class HookIngressServer {
    * `GET  /control/session/<sessionKey>/activity`
    * `GET  /control/session/<sessionKey>/subagent/<toolUseId>/activity`
    * `GET  /control/session/<replyTarget>/transcript?limit=N&before=<cursor>`
+   * `GET  /control/session/<conductorSessionId>/queue` -> `{ items: [{ id, text, mode, position }] }` (503 when unwired, 404 when unreadable)
+   * `POST /control/session/<conductorSessionId>/queue/<messageId>/promote` steers a queued message in now
+   * `POST /control/session/<conductorSessionId>/queue/<messageId>/cancel` deletes it (`{ ok }` or 409 `{ ok:false, reason }`)
    * `GET  /control/session/<conductorSessionId>/question`
    * `POST /control/session/<conductorSessionId>/answer` with `{ toolUseId, answers?, plan? }`
    *
@@ -786,6 +803,54 @@ export class HookIngressServer {
         });
         respond(response, 500, "unavailable");
       }
+      return;
+    }
+
+    const queueRoute =
+      /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/queue(?:\/([A-Za-z0-9_-]{1,120})\/(promote|cancel))?$/.exec(
+        (request.url ?? "").split("?")[0] ?? "",
+      );
+    if (queueRoute) {
+      request.resume();
+      const [, queueSession, queueMessage, queueVerb] = queueRoute as unknown as [
+        string,
+        string,
+        string | undefined,
+        "promote" | "cancel" | undefined,
+      ];
+      const wantPost = queueVerb !== undefined;
+      if (request.method !== (wantPost ? "POST" : "GET")) {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!control.queue || !control.queueAction) {
+        respond(response, 503, "queue unavailable");
+        return;
+      }
+      const run = async (): Promise<void> => {
+        const items = await control.queue!(queueSession);
+        if (!items) {
+          respond(response, 404, "queue unavailable");
+          return;
+        }
+        if (!wantPost) {
+          respondJson(response, 200, {
+            items: items.map((item) => ({ ...item, text: item.text.slice(0, MAX_QUEUE_TEXT) })),
+          });
+          return;
+        }
+        // The id is the anchor: it must still be in Conductor's queue as it reads now, as for the phone.
+        if (!items.some((item) => item.id === queueMessage)) {
+          respondJson(response, 404, { ok: false, reason: "That message already went to the agent." });
+          return;
+        }
+        const outcome = await control.queueAction!(queueSession, queueMessage!, queueVerb!);
+        respondJson(response, outcome.ok ? 200 : 409, outcome);
+      };
+      run().catch((error: unknown) => {
+        logger.warn("control queue failed", { error: error instanceof Error ? error.message : String(error) });
+        respond(response, 500, "queue failed");
+      });
       return;
     }
 

@@ -62,7 +62,7 @@ struct DaemonDecodingTests {
         #expect(mapped[2].capabilities.send.reason != nil) // no replyTarget
         #expect(mapped[0].capabilities.openInHost == .supported)
         #expect(mapped[1].capabilities.openInHost.isSupported == false)
-        #expect(mapped[0].capabilities.attachments.isSupported == false)
+        #expect(mapped[0].capabilities.attachments.isSupported == true)
         #expect(mapped[0].capabilities.approve.isSupported == false)
         // A busy Conductor chat is still sendable client-side: the daemon decides.
         #expect(mapped[0].state == .working && mapped[0].capabilities.send == .supported)

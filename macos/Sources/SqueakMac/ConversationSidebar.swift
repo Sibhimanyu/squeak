@@ -45,6 +45,7 @@ private struct SidebarBackground: View {
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @FocusState private var searchFocused: Bool
+    @State private var showConnection = false
 
     private var current: NavFilter { model.navFilter ?? .home }
 
@@ -91,7 +92,7 @@ struct SidebarView: View {
     private func row(_ f: NavFilter, _ title: String, _ symbol: LucideName) -> some View {
         let selected = current == f
         let n = count(for: f) ?? 0
-        return Button { model.navFilter = f } label: {
+        return Button { model.navFilter = f; model.projectFilter = nil } label: {
             HStack(spacing: 12) {
                 Lucide(symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted).frame(width: 20)
                 Text(verbatim: title).font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular)).foregroundStyle(Theme.ink)
@@ -153,14 +154,18 @@ struct SidebarView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: Metrics.sidebarRowGap) {
-            HStack(spacing: 12) {
-                Circle().strokeBorder(model.homeConnectionColor, lineWidth: 2.5).frame(width: 16, height: 16).frame(width: 20)
-                Text(model.homeConnectionText).font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink).lineLimit(1)
-                Spacer(minLength: 0)
-                Lucide(.chevronRight, size: Metrics.iconSmall, color: Theme.muted)
+            Button { showConnection.toggle() } label: {
+                HStack(spacing: 12) {
+                    Circle().strokeBorder(model.homeConnectionColor, lineWidth: 2.5).frame(width: 16, height: 16).frame(width: 20)
+                    Text(model.homeConnectionText).font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Lucide(.chevronRight, size: Metrics.iconSmall, color: Theme.muted)
+                }
+                .padding(.horizontal, 12).frame(height: Metrics.navRow).contentShape(Rectangle())
             }
-            .padding(.horizontal, 12).frame(height: Metrics.navRow)
-            .accessibilityElement(children: .combine)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Connection: \(model.homeConnectionText)")
+            .popover(isPresented: $showConnection, arrowEdge: .trailing) { ConnectionPopover(dismiss: { showConnection = false }) }
             Button { model.openSettings() } label: {
                 HStack(spacing: 12) {
                     Lucide(.settings, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 20)
@@ -173,5 +178,34 @@ struct SidebarView: View {
         }
         .padding(.horizontal, Metrics.sidebarInset).padding(.vertical, 12)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, Metrics.sidebarInset) }
+    }
+}
+
+/// What the sidebar's connection row opens: the state in the daemon's own words, a recheck, and the way to Settings.
+private struct ConnectionPopover: View {
+    let dismiss: () -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle().fill(model.homeConnectionColor).frame(width: 8, height: 8)
+                Text(model.homeConnectionText).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+            }
+            if let help = model.connectionHelp {
+                Text(help).font(.system(size: 12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            if let synced = model.lastSyncedText {
+                Text(synced).font(.system(size: 11)).foregroundStyle(Theme.subtle)
+            }
+            Divider()
+            HStack {
+                Button("Check again") { model.recheck() }
+                Spacer()
+                Button("Open Settings \u{203A} Connections") { dismiss(); model.openSettings(.connections) }
+            }
+            .font(.system(size: 12))
+        }
+        .padding(14).frame(width: 300)
     }
 }

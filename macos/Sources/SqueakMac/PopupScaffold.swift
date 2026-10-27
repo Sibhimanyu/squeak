@@ -34,18 +34,18 @@ struct PopupScaffold<Top: View, Band: View, Footer: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
-                top.measuredAsChrome()
+                top.padding(.horizontal, PopupMetrics.inset).measuredAsChrome()
             }
             .scrollBounceBehavior(.basedOnSize)
             .frame(height: topHeight)
             ScrollView(.vertical) {
-                band.background(GeometryReader { Color.clear.preference(key: PopupBandHeightKey.self, value: $0.size.height) })
+                band.padding(.horizontal, PopupMetrics.inset).background(GeometryReader { Color.clear.preference(key: PopupBandHeightKey.self, value: $0.size.height) })
             }
             .scrollBounceBehavior(.basedOnSize)
             .scrollIndicators(.automatic)
             .onPreferenceChange(PopupBandHeightKey.self) { contentHeight = $0 }
             .frame(height: bandHeight)
-            if hasFooter { footer.measuredAsFooter() }
+            if hasFooter { footer.padding(.horizontal, PopupMetrics.inset).measuredAsFooter() }
         }
         .frame(width: PopoverMetrics.width)
         .background(ScreenHeightReader { hostScreenHeight = $0 })

@@ -83,6 +83,47 @@ public struct DaemonClient: Sendable {
         return try decode(DaemonSubagentFeed.self, r.body)
     }
 
+    // MARK: Queue (Conductor chats; nil / a clear result means the daemon predates the routes)
+
+    /// The messages waiting for the turn to end, oldest first. nil when they cannot be read: an older daemon
+    /// (404/503), a chat that is not Conductor's, or Conductor's relay being down.
+    public func queue(sessionId: String) async throws -> [QueuedMessage]? {
+        let r = try await get("/control/session/\(Self.encode(sessionId))/queue", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(DaemonQueueBody.self, r.body).items.sorted { $0.position < $1.position }
+    }
+
+    /// Steers a queued message into the running turn now. One attempt, never retried.
+    public func promoteQueued(sessionId: String, messageId: String) async -> QueueChangeResult {
+        await changeQueued(sessionId: sessionId, messageId: messageId, verb: "promote")
+    }
+
+    /// Deletes a queued message. One attempt, never retried.
+    public func cancelQueued(sessionId: String, messageId: String) async -> QueueChangeResult {
+        await changeQueued(sessionId: sessionId, messageId: messageId, verb: "cancel")
+    }
+
+    private func changeQueued(sessionId: String, messageId: String, verb: String) async -> QueueChangeResult {
+        // A message id is a plain token; anything else is never sent.
+        guard !messageId.isEmpty, messageId.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }) else {
+            return .failed(reason: "That queued message can't be changed.")
+        }
+        do {
+            let r = try await post("/control/session/\(Self.encode(sessionId))/queue/\(messageId)/\(verb)", timeout: 20)
+            if r.status == 401 || r.status == 403 { return .failed(reason: "Squeak rejected the access token") }
+            let reply = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any]
+            if reply?["ok"] as? Bool == true { return .done }
+            if r.status == 404, reply != nil { return .alreadySent }
+            if r.status == 404 || r.status == 503 { return .failed(reason: "Update the Squeak service on this Mac to do that from here.") }
+            return .failed(reason: (reply?["reason"] as? String) ?? "Squeak couldn't change that message.")
+        } catch AdapterError.tokenMissing {
+            return .failed(reason: "Squeak's access token was not found")
+        } catch {
+            return .failed(reason: "Squeak isn't running.")
+        }
+    }
+
     /// Maps every outcome to a `SendResult`; this never throws and never retries.
     /// `answersTurn` names the turn this answers; the daemon refuses it once the chat has moved on.
     public func reply(replyTarget: String, text: String, mode: SendMode = .queue, answersTurn: String? = nil) async -> SendResult {

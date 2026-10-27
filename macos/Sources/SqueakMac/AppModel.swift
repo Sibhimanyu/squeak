@@ -102,8 +102,13 @@ final class AppModel {
     var filter: SessionFilter = .all
     var navFilter: NavFilter? = .home {
         // Usage is a screen of its own, so no chat stays open behind it; picking a chat leaves it.
-        didSet { if navFilter == .usage, selected != nil { select(nil) } }
+        didSet {
+            if navFilter == .usage, selected != nil { select(nil) }
+            if navFilter != oldValue { projectFilter = nil }
+        }
     }
+    /// The project Home is drilled into (`HomeProject.name`); nil shows every project. See AppModel+Projects.swift.
+    var projectFilter: String?
     /// A short live phrase per working session ("Running tests"), for the list rows.
     private(set) var liveSteps: [SessionKey: String] = [:]
     private(set) var pinned: Set<SessionKey>

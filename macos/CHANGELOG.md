@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.8.4
+
+- Paste images (⌘V), drop image files or press + in the chat composer, New chat, the popup and the quick
+  message: the picture is saved in the chat's folder and the message tells the agent where.
+- Queued messages show under the chat, and Steer sends one into the running turn now; Edit and Delete work
+  too. It needs the background service updated to this version.
+- Pressing a project on Home opens it, with its chats grouped by status.
+- The Connected row in the sidebar opens the connection details; the awake and power chips on Home open Settings.
+- The popup's rows, tabs and buttons line up on one even margin.
+
 ## 2.8.3
 
 - A picture an agent puts on the line right after a label ("At rest:") now shows as a picture instead of `[image: …]`.

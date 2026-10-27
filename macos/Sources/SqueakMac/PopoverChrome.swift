@@ -65,18 +65,17 @@ struct MenuRow: View {
             HStack(spacing: Space.s) {
                 Text(title).font(.system(size: 13)).lineLimit(1)
                 Spacer(minLength: Space.s)
-                if let hint { Text(hint).font(.system(size: 12)).foregroundStyle(Theme.subtle) }
+                if let hint { Text(hint).font(.system(size: 13)).foregroundStyle(Theme.subtle) }
             }
             .foregroundStyle(disabled ? Theme.subtle : Theme.ink)
-            .padding(.horizontal, Space.m)
-            .frame(height: 26)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.ink.opacity(hovering && !disabled ? 0.09 : 0)))
+            .frame(height: 28)
+            // The highlight reaches 6pt past the text into the popup's inset, never to the panel edge.
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.ink.opacity(hovering && !disabled ? 0.09 : 0)).padding(.horizontal, -6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(disabled)
         .onHover { hovering = $0 }
-        .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
     }
 }

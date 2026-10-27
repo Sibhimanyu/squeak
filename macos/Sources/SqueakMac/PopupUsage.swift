@@ -54,7 +54,6 @@ struct PopupUsageBand: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 14).padding(.bottom, 4)
         }
-        .padding(.horizontal, PopupMetrics.inset + 2)
         .padding(.bottom, 14)
         .task { await model.pollUsage() }
     }

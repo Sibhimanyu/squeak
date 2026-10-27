@@ -11,7 +11,7 @@ struct PopupNewChatTop: View {
             Text("New chat").font(.popup(16, .bold)).foregroundStyle(Theme.ink)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, PopupMetrics.inset + 1).padding(.top, 14).padding(.bottom, 10)
+        .padding(.top, 14).padding(.bottom, 10)
     }
 }
 
@@ -34,7 +34,6 @@ struct PopupNewChatBand: View {
                 form
             }
         }
-        .padding(.horizontal, PopupMetrics.inset + 2)
         .padding(.bottom, 10)
         .disabled(state.phase == .starting)
     }
@@ -73,13 +72,20 @@ struct PopupNewChatBand: View {
             Text(f.summary).font(.popup(12.5)).foregroundStyle(Theme.muted).padding(.top, 8)
         }
         customize.padding(.top, 14)
-        label("First message").padding(.top, 14)
+        HStack(spacing: 0) {
+            label("First message")
+            Spacer(minLength: 0)
+            if f.selected?.path != nil { AttachButton(tray: state.images, size: 22).padding(.bottom, 7) }
+        }
+        .padding(.top, 14)
+        ImageStrip(tray: state.images).padding(.bottom, 8)
         ComposerField(text: $state.form.text, sendKey: .commandReturnSends, placeholder: "What should it work on?",
                       isEnabled: state.phase != .starting, focusToken: state.focus, onSend: start, onEscape: { PopupNav.shared.back() },
-                      fontSize: 13)
+                      fontSize: 13, onImages: f.selected?.path == nil ? nil : { state.images.add($0) })
             .padding(.horizontal, 6)
             .frame(height: 92)
             .popupCard(radius: 10, fill: 0.03, stroke: 0.10)
+            .imageDrop(state.images)
         if state.form.isTooLong {
             Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.")
                 .font(.popup(12)).foregroundStyle(Theme.error).padding(.top, 6)
@@ -208,7 +214,7 @@ struct PopupNewChatFooter: View {
                     Lucide(.triangleAlert, size: 14, color: Theme.error)
                     Text(e).font(.popup(12.5)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.horizontal, PopupMetrics.inset + 2).padding(.bottom, 8)
+                .padding(.bottom, 8)
             }
             PopupDivider()
             HStack(spacing: 10) {
@@ -241,8 +247,7 @@ struct PopupNewChatFooter: View {
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(!state.form.canStart || state.phase != .ready || !model.isConnected)
             }
-            .padding(.horizontal, PopupMetrics.inset + 2)
-            .padding(.top, 12).padding(.bottom, 14)
+                .padding(.top, 12).padding(.bottom, 14)
         }
     }
 
@@ -269,7 +274,7 @@ struct PopupWorkspacesTop: View {
             .padding(.horizontal, 12).frame(height: 28)
             .popupCard(radius: 9, fill: 0.03, stroke: 0.11)
         }
-        .padding(.horizontal, PopupMetrics.inset + 1).padding(.top, 14).padding(.bottom, 10)
+        .padding(.top, 14).padding(.bottom, 10)
     }
 }
 
@@ -310,7 +315,6 @@ struct PopupWorkspacesBand: View {
         }
         .popupCard(radius: 10, fill: 0.03, stroke: 0.10)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .padding(.horizontal, PopupMetrics.inset + 2)
         .padding(.bottom, 14)
     }
 }

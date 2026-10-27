@@ -76,7 +76,6 @@ struct PopupTabHeader<Leading: View, Trailing: View>: View {
             PopupTabBar(selected: selected)
                 .padding(.bottom, 12)
         }
-        .padding(.horizontal, PopupMetrics.inset)
     }
 }
 
@@ -118,7 +117,7 @@ struct PopupHomeTop: View {
             if overflowOpen { overflow }
             if searching {
                 SearchField(text: $model.query)
-                    .padding(.horizontal, PopupMetrics.inset).padding(.bottom, 12)
+                    .padding(.bottom, 12)
             }
             banners
         }
@@ -173,7 +172,6 @@ struct PopupHomeTop: View {
                 }
                 LaunchOfferBanner()
             }
-            .padding(.horizontal, PopupMetrics.inset)
             .padding(.bottom, 12)
         }
     }
@@ -200,8 +198,7 @@ struct PopupMacStrip: View {
             }
             .padding(.horizontal, 14).padding(.vertical, 4)
             .popupCard()
-            .padding(.horizontal, PopupMetrics.inset)
-            .padding(.bottom, 14)
+            .padding(.bottom, 12)
         }
     }
 
@@ -270,7 +267,7 @@ struct PopupHomeBand: View {
             VStack(alignment: .leading, spacing: 0) {
                 if sections.isEmpty { allQuiet }
                 ForEach(sections) { section in
-                    PopupDivider().padding(.horizontal, PopupMetrics.inset)
+                    PopupDivider()
                     sectionView(section)
                 }
             }
@@ -313,7 +310,7 @@ struct PopupHomeBand: View {
                         }
                     }
                 }
-                .padding(.horizontal, PopupMetrics.inset).padding(.vertical, 10)
+                .padding(.vertical, 10)
             }
         }
     }
@@ -352,7 +349,6 @@ struct PopupHomeBand: View {
                 }
             }
         }
-        .padding(.horizontal, PopupMetrics.inset)
         .padding(.bottom, 12)
     }
 }
@@ -377,7 +373,7 @@ struct PopupSectionHeader: View {
     var body: some View {
         Button { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { expanded?.wrappedValue.toggle() } } label: {
             HStack(spacing: 12) {
-                Circle().fill(color).frame(width: 8, height: 8).padding(.leading, 2).accessibilityHidden(true)
+                Circle().fill(color).frame(width: 8, height: 8).accessibilityHidden(true)
                 Text(title).font(.popup(14, .semibold)).foregroundStyle(Theme.ink)
                 if compact {
                     Spacer(minLength: 8)
@@ -390,7 +386,6 @@ struct PopupSectionHeader: View {
                     Lucide(expanded.wrappedValue ? .chevronDown : .chevronRight, size: 14, color: Theme.muted)
                 }
             }
-            .padding(.horizontal, PopupMetrics.inset + 2)
             .frame(height: 34)
             .contentShape(Rectangle())
         }
@@ -545,16 +540,16 @@ struct PopupHomeFooter: View {
             PopupDivider()
             HStack(spacing: 10) {
                 Button { dismiss(); QuickComposerController.shared.show() } label: {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         PopupSymbol(name: "bubble.left", size: 14, color: Theme.muted)
-                        Text("Quick message…").font(.popup(13)).foregroundStyle(Theme.muted)
+                        Text("Quick message").font(.popup(13)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
                         Spacer(minLength: 4)
                         Text("⌘ K").font(.popup(11.5)).foregroundStyle(Theme.muted)
                             .padding(.horizontal, 7).frame(height: 24)
                             .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.wash(0.07)))
                             .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.wash(0.10)))
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 10)
                     .frame(maxWidth: .infinity).frame(height: 28)
                     .popupCard(radius: 9, fill: 0.03, stroke: 0.11)
                     .contentShape(Rectangle())
@@ -564,8 +559,8 @@ struct PopupHomeFooter: View {
                 .accessibilityLabel("Quick message")
                 Button { dismiss(); model.showConversationWindow() } label: { Text("Open Squeak") }
                     .buttonStyle(PopupButtonStyle(radius: 9, height: 28, hPad: 14, size: 13))
+                    .fixedSize()
             }
-            .padding(.horizontal, PopupMetrics.inset)
             .padding(.top, 12).padding(.bottom, 12)
         }
     }

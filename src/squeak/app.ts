@@ -567,6 +567,8 @@ export class SqueakApp {
       },
       chatModels: () => listChatModels(config.conductorDbPath),
       sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),
+      queue: (sessionId) => this.replier.queue(sessionId),
+      queueAction: (sessionId, messageId, action) => this.replier.queueAction(sessionId, messageId, action),
       reply: async (target, text, mode, answersTurn) => {
         // A client that names the turn it answered is refused once the chat has moved on (answered on the laptop).
         if (typeof answersTurn === "string" && this.router.lastTurnId(target) !== answersTurn) {

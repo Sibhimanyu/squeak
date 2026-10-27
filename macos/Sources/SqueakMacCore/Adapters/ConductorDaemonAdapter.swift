@@ -45,7 +45,8 @@ public struct ConductorDaemonAdapter: HostAdapter {
             activity: .supported,
             approve: .unsupported("Approve in the host app"),
             openInHost: .unsupported("This session cannot be opened from Squeak"),
-            attachments: .unsupported("Attachments are not supported yet")
+            attachments: replyTarget != nil && nonEmpty(d.cwd) != nil
+                ? .supported : .unsupported("Squeak doesn't know this chat's folder, so it can't save an image there")
         )
         if provider == "conductor", workspace != nil, conductorSession != nil { caps.openInHost = .supported }
         // A finished chat that ends on a question is waiting on you: it reads as blocked, carrying the question,

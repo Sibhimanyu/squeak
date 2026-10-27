@@ -31,7 +31,6 @@ struct PopupControlsBand: View {
             }
             .buttonStyle(PopupButtonStyle(radius: 11, height: 28, size: 13))
         }
-        .padding(.horizontal, PopupMetrics.inset)
         .padding(.bottom, 16)
         .task { await model.readAwake() }
         .task { if !model.demoMode { await model.channels.refresh() } }

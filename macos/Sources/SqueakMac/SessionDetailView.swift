@@ -80,6 +80,7 @@ struct SessionDetail: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var tab: DetailTab = .chat
     @State private var focusToken = 0
+    @State private var images = ImageTray()
     @State private var atBottom = false
     /// Something arrived while you were reading further up: the jump button says "New".
     @State private var newBelow = false
@@ -378,6 +379,10 @@ struct SessionDetail: View {
             if let note = model.chatNote {
                 Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.error).padding(.leading, 4)
             }
+            if session.source == .conductor {
+                QueueStack(model: model, sessionId: session.key.hostSessionId, isWorking: working,
+                           onEdit: { model.setDraft($0) })
+            }
             composer
             Text(verbatim: destinationNote).font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, 4)
                 .task(id: model.serviceDown(session)) {
@@ -425,18 +430,24 @@ struct SessionDetail: View {
     private var working: Bool { session.state == .working }
 
     private var hasText: Bool { !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var canSend: Bool { sendBlock == nil && model.isConnected && hasText }
+    private var canSend: Bool { sendBlock == nil && model.isConnected && (hasText || images.hasImages) }
 
     private var composer: some View {
         let text = Binding(get: { model.draft }, set: { model.setDraft($0) })
         let editable = sendBlock == nil && model.isConnected
         let minH: CGFloat = 28
         let maxH: CGFloat = 17 * 7 + 12
-        return HStack(alignment: .bottom, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 4) {
+            ImageStrip(tray: images).padding(.leading, 4)
+            HStack(alignment: .bottom, spacing: 8) {
+            if editable && session.capabilities.attachments.isSupported {
+                AttachButton(tray: images).padding(.bottom, 0)
+            }
             ComposerField(
                 text: text, sendKey: .commandReturnSends, placeholder: placeholder,
                 isEnabled: editable, focusToken: focusToken, onSend: { send(.queue) },
-                onContentHeight: { contentHeight = $0 }
+                onContentHeight: { contentHeight = $0 },
+                onImages: editable && session.capabilities.attachments.isSupported ? { images.add($0) } : nil
             )
             .frame(height: min(max(contentHeight, minH), maxH))
             HStack(spacing: 8) {
@@ -473,14 +484,16 @@ struct SessionDetail: View {
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(!canSend)
                     .accessibilityLabel("Send message")
-                    .help(session.capabilities.attachments.reason.map { "Send (⌘↩). Attachments: \($0)" } ?? "Send (⌘↩)")
+                    .help(session.capabilities.attachments.reason.map { "Send (⌘↩). Attachments: \($0)" } ?? "Send (⌘↩). Paste, drop or + attaches images")
                 }
+            }
             }
         }
         .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 6)
         .background(Theme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.lineStrong))
         .accessibilityElement(children: .contain)
+        .imageDrop(images)
     }
 
     private func shortcut(_ mode: SendMode, _ modifiers: EventModifiers) -> some View {
@@ -491,14 +504,18 @@ struct SessionDetail: View {
     }
 
     private func send(_ mode: SendMode) {
-        let t = model.draft
-        guard canSend, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let typed = model.draft
+        guard canSend else { return }
+        // Images are saved into the chat's folder only now; if that fails nothing is sent and everything stays.
+        guard let t = images.prepareToSend(text: typed, folder: session.cwd) else { return }
+        let sentImages = images.hasImages
         let key = session.key
         // The mode only means something mid-turn; an idle chat is simply sent.
         let effective: SendMode = working ? mode : .queue
         if working { queueSteerExplained = true }
         // The field clears as it sends and keeps focus, so the next message can be typed at once.
         focusToken += 1
+        if sentImages { images.clear() }
         Task { _ = await model.send(t, to: key, mode: effective) }
     }
 }

@@ -10,6 +10,14 @@ struct HomeView: View {
     @State private var showEarlier = true
 
     var body: some View {
+        if model.projectFilter != nil, !model.isSearching {
+            ProjectPageView()
+        } else {
+            homeBody
+        }
+    }
+
+    private var homeBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 header
@@ -56,13 +64,18 @@ struct HomeView: View {
         if !items.isEmpty {
             VStack(alignment: .trailing, spacing: 4) {
                 ForEach(items) { item in
-                    HStack(spacing: 6) {
-                        Lucide(.monitor, size: 12, color: color(item.tone))
-                        Text(verbatim: item.text).font(.system(size: 11)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+                    Button { model.openSettings(item.tone == .warning ? .connections : .awake) } label: {
+                        HStack(spacing: 6) {
+                            Lucide(.monitor, size: 12, color: color(item.tone))
+                            Text(verbatim: item.text).font(.system(size: 11)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+                        }
+                        .padding(.horizontal, 10).frame(height: Metrics.pill)
+                        .background(Theme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.lineStrong))
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 10).frame(height: Metrics.pill)
-                    .background(Theme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.lineStrong))
+                    .buttonStyle(.plain)
+                    .help(item.tone == .warning ? "Open Settings › Connections" : "Open Settings › Keep awake")
                 }
             }
             .accessibilityElement(children: .combine)
@@ -137,10 +150,12 @@ struct HomeRowDivider: View {
 /// One project: its name, what waits on you in it, and its chats.
 struct ProjectCard: View {
     let project: HomeProject
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         HomeCardChrome {
             VStack(alignment: .leading, spacing: 0) {
+                Button { model.openProject(project.name) } label: {
                 HStack(spacing: 8) {
                     Text(verbatim: project.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                     Spacer(minLength: 8)
@@ -152,7 +167,10 @@ struct ProjectCard: View {
                     }
                     Lucide(.chevronRight, size: Metrics.iconSmall, color: Theme.muted)
                 }
-                .padding(.horizontal, 12).frame(height: 40)
+                .padding(.horizontal, 12).frame(height: 40).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open project \(project.name)")
                 .accessibilityAddTraits(.isHeader)
                 VStack(spacing: 0) {
                     ForEach(Array(project.sessions.enumerated()), id: \.element.id) { i, session in
@@ -213,5 +231,53 @@ struct HomeSessionRow: View {
         .contextMenu {
             Button(model.pinned.contains(session.key) ? "Unpin" : "Pin to top") { model.togglePin(session.key) }
         }
+    }
+}
+
+/// One project, drilled into from Home: "‹ Home", the project's name, its counts, and its chats grouped
+/// by status (the Sessions list's groups and order). Esc or the back button returns to Home.
+struct ProjectPageView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Button { model.closeProject() } label: {
+                    HStack(spacing: 4) {
+                        Lucide(.chevronLeft, size: Metrics.iconSmall, color: Theme.muted)
+                        Text("Home").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    }
+                    .frame(height: Metrics.pill).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.escape, modifiers: [])
+                .accessibilityLabel("Back to Home")
+                if let page = model.projectPage {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: page.name).font(.system(size: Metrics.pageTitle, weight: .bold)).lineLimit(1)
+                            .accessibilityAddTraits(.isHeader)
+                        Text(verbatim: page.summary).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    }
+                    .padding(.horizontal, 4)
+                    ForEach(page.sections) { section in
+                        SectionLabel(section.kind.title, count: section.sessions.count)
+                        HomeCardChrome {
+                            VStack(spacing: 0) {
+                                ForEach(Array(section.sessions.enumerated()), id: \.element.id) { i, session in
+                                    if i > 0 { HomeRowDivider() }
+                                    HomeSessionRow(session: session)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                } else {
+                    Text("Nothing active in this project.").font(Typo.body).foregroundStyle(Theme.muted).padding(.vertical, 12)
+                }
+            }
+            .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, Space.xl)
+        }
+        .scrollContentBackground(.hidden)
+        .task(id: model.hasLoaded) { await model.pollLiveSteps() }
     }
 }
