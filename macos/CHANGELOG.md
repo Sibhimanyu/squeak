@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.8.3
+
+- A picture an agent puts on the line right after a label ("At rest:") now shows as a picture instead of `[image: …]`.
+
 ## 2.8.2
 
 - The sidebar is redone: a glass look that lets the desktop show through, the duck and the Squeak name with the
