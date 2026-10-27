@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.8.0
+
+- Squeak for Mac is redesigned to match the iPhone app: the conversation window opens on Home (projects, a Mac
+  status strip) with Needs you as its own page, where each blocked chat has one-tap lettered answers and a
+  reply field.
+- New chat has the iPhone's presets (Best, Balanced, Save usage) and a Customize section: model, thinking
+  level, Split the work (the chat plans, cheaper models write the code and run tests) and Plan first.
+  Older background services ignore the split, so update the service to use it.
+- The menu-bar popup is now a control surface: Home, Needs you, Usage and Controls tabs, New chat and a chat's
+  conversation inside the popup, Keep awake and notification switches without opening the window.
+- Settings opens on Mac and Notifications, and Usage refreshes when you open it.
+
 ## 2.7.1
 
 - The menu-bar panel no longer shows a lighter square patch behind its rounded bottom corners.
