@@ -44,7 +44,10 @@ struct SqueakCommands: Commands {
         // Commands are alive from launch, so this is where the window action is captured.
         let _ = { model.openConversationWindow = { openWindow(id: "conversation") } }()
         CommandGroup(replacing: .newItem) {
-            Button("New chat…") { NewChatController.shared.show() }
+            Button("New chat…") {
+                // With the menu-bar panel open, ⌘N starts the chat inside it.
+                if MenuBarController.shared.isOpen { PopupNav.shared.openNewChat() } else { NewChatController.shared.show() }
+            }
                 .keyboardShortcut("n", modifiers: .command)
         }
         CommandGroup(replacing: .appTermination) {

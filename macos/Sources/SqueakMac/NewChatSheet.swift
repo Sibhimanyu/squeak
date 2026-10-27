@@ -75,7 +75,7 @@ final class NewChatState {
     enum Phase: Equatable { case loading, ready, starting, outdated, offline }
 
     var form = NewChatForm(store: ChatChoiceStore())
-    var customizing = false
+    var customizing = ProcessInfo.processInfo.environment["SQUEAK_MAC_NEWCHAT_CUSTOMIZE"] == "1"
     var phase: Phase = .loading
     var error: String?
     var focus = 0
@@ -130,14 +130,15 @@ final class NewChatState {
         }
     }
 
-    func start(model: AppModel, close: @escaping () -> Void) {
+    func start(model: AppModel, openInWindow: Bool = true, close: @escaping () -> Void) {
         guard form.canStart, phase == .ready, let w = form.selected else { return }
         phase = .starting
         error = nil
         let text = form.trimmedText, agent = form.agent, extra = form.request
         Task { [weak self] in
             let result = await model.startChat(workspaceId: w.id, agent: agent, text: text,
-                                               model: extra.model, thinking: extra.thinking, split: extra.split)
+                                               model: extra.model, thinking: extra.thinking, split: extra.split,
+                                               openInWindow: openInWindow)
             guard let self else { return }
             switch result {
             case .started: phase = .ready; close()
@@ -148,15 +149,15 @@ final class NewChatState {
 }
 
 struct NewChatSheet: View {
-    static let width: CGFloat = 520
+    static let width: CGFloat = 880
     var close: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(NewChatState.self) private var state
 
     var body: some View {
         @Bindable var state = state
-        VStack(alignment: .leading, spacing: Space.l) {
-            Text("New chat").font(Typo.title)
+        VStack(alignment: .leading, spacing: 18) {
+            Text("New chat").font(.system(size: 32, weight: .bold)).padding(.bottom, 2)
             switch state.phase {
             case .loading:
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading workspaces…").foregroundStyle(Theme.muted) }
@@ -170,7 +171,7 @@ struct NewChatSheet: View {
             }
             footer
         }
-        .padding(20)
+        .padding(.horizontal, 32).padding(.top, 28).padding(.bottom, 22)
         .frame(width: Self.width)
     }
 
@@ -182,38 +183,43 @@ struct NewChatSheet: View {
     @ViewBuilder private var form: some View {
         @Bindable var state = state
         let busy = state.phase == .starting
-        VStack(alignment: .leading, spacing: Space.s) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Workspace").font(Typo.label)
+                Text("Workspace").font(.system(size: 17, weight: .semibold))
                 Spacer()
                 if let repos = model.workspaceRepos, !repos.isEmpty {
                     if state.makingWorkspace {
                         ProgressView().controlSize(.small)
                         Text("Making a workspace…").font(Typo.meta).foregroundStyle(Theme.muted)
                     } else {
-                        Menu("New workspace") {
+                        Menu {
                             ForEach(repos) { repo in
                                 Button(repo.name) { state.createWorkspace(model: model, repoId: repo.id) }
                             }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text("New workspace").font(.system(size: 14)).foregroundStyle(Theme.ink)
+                                Lucide(.chevronDown, size: 16, color: Theme.ink)
+                            }
                         }
-                        .menuStyle(.borderlessButton).fixedSize()
+                        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
                         .disabled(busy)
                         .help("Make a fresh workspace in a repository, branched from its default branch")
                     }
                 }
             }
             .task { if model.workspaceRepos == nil { await model.loadWorkspaceRepos() } }
-            SearchField(text: $state.form.query, placeholder: "Search workspaces")
+            searchField
             workspaceList.disabled(busy)
         }
         setupSection.disabled(busy)
-        VStack(alignment: .leading, spacing: Space.s) {
-            Text("First message").font(Typo.label)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("First message").font(.system(size: 14)).foregroundStyle(Theme.muted)
             ComposerField(
                 text: $state.form.text, sendKey: .commandReturnSends, placeholder: "What should it work on?",
                 isEnabled: !busy, focusToken: state.focus, onSend: start, onEscape: close)
-                .frame(height: 110)
-                .background(Theme.surfaceRaised.opacity(0.4), in: RoundedRectangle(cornerRadius: Radius.card))
+                .frame(height: 84)
+                .background(Theme.surfaceRaised.opacity(0.3), in: RoundedRectangle(cornerRadius: Radius.card))
                 .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
             if state.form.isTooLong {
                 Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.")
@@ -222,107 +228,151 @@ struct NewChatSheet: View {
         }
     }
 
+    private var searchField: some View {
+        @Bindable var state = state
+        return HStack(spacing: 10) {
+            Lucide(.search, size: 18, color: Theme.muted)
+            TextField("Search workspaces", text: $state.form.query).textFieldStyle(.plain).font(.system(size: 14.5))
+        }
+        .padding(.horizontal, 14).frame(height: 36)
+        .background(Theme.surfaceRaised.opacity(0.3), in: RoundedRectangle(cornerRadius: Radius.card - 2))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card - 2).strokeBorder(Theme.line))
+    }
+
     /// Presets and their one-line summary, then Customize: agent, model, thinking, split, plan first.
     @ViewBuilder private var setupSection: some View {
         @Bindable var state = state
         let f = state.form
-        VStack(alignment: .leading, spacing: Space.s) {
+        VStack(alignment: .leading, spacing: 8) {
             if !f.presets.isEmpty {
-                HStack(spacing: Space.s) {
+                HStack(spacing: 8) {
                     ForEach(f.presets + (f.preset == .custom ? [.custom] : []), id: \.self) { p in
                         let on = f.preset == p
-                        Button(p.title) { if p != .custom { state.form.apply(preset: p) } }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 12.5, weight: on ? .semibold : .regular))
-                            .foregroundStyle(on ? Theme.ink : Theme.muted)
-                            .padding(.horizontal, Space.m).padding(.vertical, 5)
-                            .background(on ? Theme.surfaceRaised : .clear, in: Capsule())
-                            .overlay(Capsule().strokeBorder(Theme.line))
-                            .accessibilityAddTraits(on ? .isSelected : [])
+                        Button { if p != .custom { state.form.apply(preset: p) } } label: {
+                            Text(p.title)
+                                .font(.system(size: 14, weight: on ? .semibold : .regular))
+                                .foregroundStyle(on ? Theme.ink : Theme.muted)
+                                .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
+                                .background(on ? Theme.lineStrong : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
+                                .padding(3)
+                                .overlay(RoundedRectangle(cornerRadius: Radius.card - 2).strokeBorder(Theme.lineStrong.opacity(0.8)))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(on ? .isSelected : [])
                     }
                 }
             }
             if !f.models.isEmpty {
-                Text(f.summary).font(Typo.meta).foregroundStyle(Theme.muted)
+                Text(f.summary).font(.system(size: 13)).foregroundStyle(Theme.muted)
             }
-            DisclosureGroup(isExpanded: $state.customizing) {
-                VStack(alignment: .leading, spacing: Space.s) {
-                    LabeledContent("Agent") {
-                        Picker("Agent", selection: Binding(get: { state.form.agent }, set: { state.form.choose(agent: $0) })) {
-                            ForEach(NewChatAgent.allCases) { Text($0.displayName).tag($0) }
+            customizeCard.padding(.top, 8).padding(.horizontal, -6)
+        }
+    }
+
+    private var customizeCard: some View {
+        @Bindable var state = state
+        let f = state.form
+        return VStack(alignment: .leading, spacing: 0) {
+            Button { withAnimation(.easeOut(duration: 0.15)) { state.customizing.toggle() } } label: {
+                HStack {
+                    Text("Customize").font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.ink)
+                    Spacer()
+                    Lucide(state.customizing ? .chevronDown : .chevronRight, size: 18, color: Theme.muted)
+                }
+                .padding(.horizontal, 16).frame(height: 46)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if state.customizing {
+                NCHairline()
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 32) {
+                        column("Agent") {
+                            NCPopup(label: "Agent", selection: Binding(get: { state.form.agent }, set: { state.form.choose(agent: $0) }),
+                                    options: NewChatAgent.allCases.map { ($0, $0.displayName) })
                         }
-                        .pickerStyle(.segmented).labelsHidden().frame(width: 200)
-                    }
-                    if !f.agentModels.isEmpty {
-                        LabeledContent("Model") {
-                            Picker("Model", selection: Binding(get: { state.form.setup.modelId ?? "" }, set: { state.form.pick(modelId: $0) })) {
-                                ForEach(f.agentModels) { m in
-                                    Text(ChatPresets.shortName(m.label) + (m.label.contains("1M") ? " · 1M" : "")).tag(m.id)
-                                }
+                        if !f.agentModels.isEmpty {
+                            column("Model") {
+                                NCPopup(label: "Model", selection: Binding(get: { state.form.setup.modelId ?? "" }, set: { state.form.pick(modelId: $0) }),
+                                        options: f.agentModels.map { m in (m.id, ChatPresets.shortName(m.label) + (m.label.contains("1M") ? " · 1M" : "")) })
                             }
-                            .labelsHidden().fixedSize()
-                        }
-                        if let chosen = f.chosenModel, !chosen.levels.isEmpty {
-                            LabeledContent("Thinking") {
-                                Picker("Thinking", selection: Binding(get: { state.form.setup.level ?? "" }, set: { state.form.pick(level: $0) })) {
-                                    ForEach(chosen.levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag($0) }
+                            if let chosen = f.chosenModel, !chosen.levels.isEmpty {
+                                column("Thinking level") {
+                                    NCSegmented(options: chosen.levels.map { ($0, DaemonChatModel.levelName($0)) },
+                                                selection: state.form.setup.level ?? "") { state.form.pick(level: $0) }
                                 }
-                                .labelsHidden().fixedSize()
                             }
                         }
                     }
                     if f.canSplit {
-                        Text("Split the work").font(Typo.label).padding(.top, Space.xs)
-                        LabeledContent("Writes the code") { workerPicker(\.setup.code) { state.form.pick(code: $0) } }
-                        LabeledContent("Runs tests and builds") { workerPicker(\.setup.run) { state.form.pick(run: $0) } }
-                        Text("The chat's model plans and reviews; cheaper ones do the typing.")
-                            .font(Typo.meta).foregroundStyle(Theme.muted)
-                        Toggle(isOn: Binding(get: { state.form.setup.planFirst }, set: { state.form.set(planFirst: $0) })) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("Plan first")
-                                Text("Shows you the plan and waits for your go.").font(Typo.meta).foregroundStyle(Theme.muted)
+                        NCHairline()
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Split the work").font(.system(size: 15, weight: .semibold))
+                            Text("The chat's model plans and reviews; cheaper ones do the typing.")
+                                .font(.system(size: 13)).foregroundStyle(Theme.muted)
+                        }
+                        HStack(alignment: .top, spacing: 32) {
+                            column("Writes the code") { workerPicker(\.setup.code, label: "Writes the code") { state.form.pick(code: $0) } }
+                            column("Runs tests and builds") { workerPicker(\.setup.run, label: "Runs tests and builds") { state.form.pick(run: $0) } }
+                        }
+                        NCHairline()
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Plan first").font(.system(size: 15, weight: .semibold))
+                                Text("Shows you the plan and waits for your go.").font(.system(size: 13)).foregroundStyle(Theme.muted)
                             }
+                            Spacer()
+                            Toggle("Plan first", isOn: Binding(get: { state.form.setup.planFirst }, set: { state.form.set(planFirst: $0) }))
+                                .labelsHidden().toggleStyle(.switch)
                         }
                     }
                 }
-                .padding(.top, Space.s)
-            } label: {
-                Text("Customize").font(Typo.label)
+                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 14)
             }
         }
+        .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: Radius.card + 2))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card + 2).strokeBorder(Theme.lineStrong.opacity(0.8)))
     }
 
-    private func workerPicker(_ path: KeyPath<NewChatForm, String?>, set: @escaping (String?) -> Void) -> some View {
-        Picker("Worker", selection: Binding(get: { state.form[keyPath: path] ?? "" }, set: { set($0.isEmpty ? nil : $0) })) {
-            Text("Same model").tag("")
-            ForEach(ChatWorker.all) { Text($0.label).tag($0.id) }
+    private func column<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title).font(.system(size: 14)).foregroundStyle(Theme.muted)
+            content()
         }
-        .labelsHidden().fixedSize()
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func workerPicker(_ path: KeyPath<NewChatForm, String?>, label: String, set: @escaping (String?) -> Void) -> some View {
+        NCPopup(label: label, selection: Binding(get: { state.form[keyPath: path] ?? "" }, set: { set($0.isEmpty ? nil : $0) }),
+                options: [("", "Same model")] + ChatWorker.all.map { ($0.id, $0.label) })
     }
 
     private var workspaceList: some View {
         let rows = state.form.filtered
         return ScrollView {
-            LazyVStack(spacing: 2) {
+            LazyVStack(spacing: 0) {
                 if rows.isEmpty {
                     Text(state.form.workspaces.isEmpty ? "No open workspaces in Conductor." : "No workspace matches.")
                         .font(Typo.body).foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity, minHeight: 60)
                 }
-                ForEach(rows) { w in
+                ForEach(Array(rows.enumerated()), id: \.element.id) { i, w in
                     let on = w.id == state.form.workspaceId
+                    if i > 0 { NCHairline() }
                     Button { state.form.select(w.id) } label: {
-                        HStack(spacing: Space.s) {
+                        HStack(spacing: 0) {
+                            ZStack { if on { Lucide(.check, size: 18, color: Theme.ink) } }.frame(width: 38)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(verbatim: w.label).font(.system(size: 13, weight: on ? .semibold : .regular)).foregroundStyle(Theme.ink).lineLimit(1)
-                                if let t = w.title { Text(t).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1) }
+                                Text(verbatim: w.label).font(.system(size: 15)).foregroundStyle(Theme.ink).lineLimit(1)
+                                if let t = w.title { Text(t).font(.system(size: 13)).foregroundStyle(Theme.muted).lineLimit(1) }
                             }
                             Spacer(minLength: 0)
-                            RelativeTimeText(w.lastActivityAt)
-                            if on { Lucide(.check, size: 16, color: Theme.ink) }
+                            RelativeTimeText(w.lastActivityAt).font(.system(size: 13)).foregroundStyle(Theme.muted)
                         }
-                        .padding(.horizontal, Space.m).padding(.vertical, 6)
-                        .background(on ? Theme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: Radius.row))
+                        .padding(.trailing, 14).padding(.vertical, 7)
+                        .frame(minHeight: 38)
+                        .background(on ? Color.white.opacity(0.08) : .clear)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -330,9 +380,9 @@ struct NewChatSheet: View {
                 }
             }
         }
-        .frame(height: 150)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+        .frame(height: 198)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.card - 2))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card - 2).strokeBorder(Theme.lineStrong.opacity(0.8)))
     }
 
     private var footer: some View {
@@ -343,20 +393,40 @@ struct NewChatSheet: View {
                     Text(e).font(Typo.body).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            HStack(spacing: Space.s) {
+            NCHairline().padding(.horizontal, -6)
+            HStack(spacing: 12) {
                 if state.phase == .starting { ProgressView().controlSize(.small); Text("Starting…").font(Typo.meta).foregroundStyle(Theme.muted) }
-                else if state.phase == .ready { Text("⌘↩ starts").font(Typo.meta).foregroundStyle(Theme.subtle) }
+                else if state.phase == .ready {
+                    NCKeycap()
+                    Text("starts").font(.system(size: 13)).foregroundStyle(Theme.subtle)
+                }
                 Spacer()
-                Button("Cancel") { close() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+                Button("Cancel") { close() }.buttonStyle(NCFooterButtonStyle(primary: false)).keyboardShortcut(.cancelAction)
                 Button("Start chat") { start() }
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(NCFooterButtonStyle(primary: true))
                     .keyboardShortcut(.defaultAction)
                     .disabled(!state.form.canStart || state.phase != .ready || !model.isConnected)
             }
+            .padding(.top, 4)
         }
     }
 
     private func start() { state.start(model: model, close: close) }
+}
+
+private struct NCFooterButtonStyle: ButtonStyle {
+    var primary: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        let fill: Color = primary ? (isEnabled ? (configuration.isPressed ? Theme.primaryPressed : Theme.primaryFill) : Theme.surfaceRaised) : Theme.surfaceRaised.opacity(0.5)
+        configuration.label
+            .font(.system(size: 14.5, weight: primary ? .semibold : .regular))
+            .foregroundStyle(primary ? (isEnabled ? Theme.primaryText : Theme.muted) : Theme.ink)
+            .padding(.horizontal, primary ? 26 : 24)
+            .frame(minHeight: 38)
+            .background(fill, in: RoundedRectangle(cornerRadius: Radius.control + 2))
+            .overlay { if !primary || !isEnabled { RoundedRectangle(cornerRadius: Radius.control + 2).strokeBorder(Theme.line) } }
+    }
 }
 
 // MARK: - AppModel
@@ -385,12 +455,13 @@ extension AppModel {
 
     /// A deliberate press of Start chat. On success the new chat opens as soon as the local reader lists it.
     func startChat(workspaceId: String, agent: NewChatAgent, text: String,
-                   model: String? = nil, thinking: String? = nil, split: WorkSplit? = nil) async -> StartChatResult {
+                   model: String? = nil, thinking: String? = nil, split: WorkSplit? = nil,
+                   openInWindow: Bool = true) async -> StartChatResult {
         if demoMode { return .failed(reason: "Demo data: nothing is started.") }
         let result = await client.startChat(workspaceId: workspaceId, agent: agent, text: text, model: model, thinking: thinking, split: split)
         if case .started(let sessionId) = result {
             AppLog.info("new chat started")
-            openWhenListed(sessionId: sessionId)
+            if openInWindow { openWhenListed(sessionId: sessionId) }
         } else {
             AppLog.info("new chat not started")
         }

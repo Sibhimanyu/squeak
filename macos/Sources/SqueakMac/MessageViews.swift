@@ -51,26 +51,39 @@ struct MessageView: View {
     }
 
     private var agentBody: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 10) {
-                meta(agentName)
-                if let layout {
-                    if !layout.before.isEmpty { MessageText(markdown: layout.before, style: .squeak) }
-                    if let q = layout.question {
-                        MessageInlineText(markdown: q, style: .squeak, size: 15, weight: .semibold).padding(.top, 8).accessibilityAddTraits(.isHeader)
+        HStack(alignment: .top, spacing: 10) {
+            AgentAvatar().padding(.top, 1)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 9) {
+                    Text(agentName).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.ink)
+                    if let at = message.at {
+                        Text(at.formatted(date: .omitted, time: .shortened)).font(.system(size: 12)).foregroundStyle(Theme.muted)
                     }
-                    SqueakGlassGroup(spacing: 10) {
-                        VStack(spacing: 10) {
-                            ForEach(layout.cards, id: \.letter) { card in
-                                AnswerCard(card: card, isEnabled: canAnswer) { onChoose(card) }
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    if let layout {
+                        if !layout.before.isEmpty { MessageText(markdown: layout.before, style: .squeak) }
+                        if let q = layout.question {
+                            MessageInlineText(markdown: q, style: .squeak, size: 15, weight: .semibold).padding(.top, 8).accessibilityAddTraits(.isHeader)
+                        }
+                        SqueakGlassGroup(spacing: 10) {
+                            VStack(spacing: 10) {
+                                ForEach(layout.cards, id: \.letter) { card in
+                                    AnswerCard(card: card, isEnabled: canAnswer) { onChoose(card) }
+                                }
                             }
                         }
+                        if !layout.after.isEmpty { MessageText(markdown: layout.after, style: .squeak).padding(.top, 6) }
+                    } else {
+                        MessageText(markdown: message.text, style: .squeak)
                     }
-                    if !layout.after.isEmpty { MessageText(markdown: layout.after, style: .squeak).padding(.top, 6) }
-                } else {
-                    MessageText(markdown: message.text, style: .squeak)
                 }
+                .padding(.horizontal, 18).padding(.vertical, 15)
+                .background(Theme.surface.opacity(0.85), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
             }
+            .frame(maxWidth: 600, alignment: .leading)
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
@@ -179,7 +192,7 @@ struct SendLabel: View {
     var title = "Send"
     @Environment(\.isEnabled) private var isEnabled
     var body: some View {
-        Text(title).font(Typo.label).foregroundStyle(isEnabled ? Theme.primaryText : Theme.muted)
+        Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.primaryText)
     }
 }
 
@@ -233,5 +246,14 @@ struct WorkingRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(agentName) is working: \(label)")
+    }
+}
+
+/// The agent's mark beside its messages: a light disc with a spark, as in the mockup.
+struct AgentAvatar: View {
+    var body: some View {
+        Circle().fill(Color(nsColor: NSColor(hex: 0xE9DDD3))).frame(width: 26, height: 26)
+            .overlay(Lucide(.sparkles, size: 14, color: Color(nsColor: NSColor(hex: 0x6B4A3A))))
+            .accessibilityHidden(true)
     }
 }

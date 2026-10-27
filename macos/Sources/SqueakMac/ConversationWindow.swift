@@ -19,17 +19,28 @@ struct ConversationView: View {
         Group {
             if model.settingsSection != nil {
                 SettingsShell()
+            } else if (model.navFilter ?? .home) == .needsYou {
+                // Needs you is a page, not a list beside a chat: two columns, the page as wide as the window.
+                NavigationSplitView(columnVisibility: $visibility) {
+                    SidebarView()
+                        .navigationSplitViewColumnWidth(min: 208, ideal: 208, max: 208)
+                        .toolbar(removing: .sidebarToggle)
+                } detail: {
+                    NeedsYouPage().background(Theme.bg.ignoresSafeArea())
+                }
+                .modifier(WindowStyling())
             } else {
                 NavigationSplitView(columnVisibility: $visibility) {
                     SidebarView()
-                        .navigationSplitViewColumnWidth(min: 200, ideal: 216, max: 280)
+                        .navigationSplitViewColumnWidth(min: 208, ideal: 208, max: 208)
+                        .toolbar(removing: .sidebarToggle)
                 } content: {
                     ContentColumn()
-                        .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 520)
+                        .background(Theme.bg.ignoresSafeArea())
+                        .navigationSplitViewColumnWidth(min: 300, ideal: 400, max: 520)
                 } detail: {
-                    DetailView()
+                    DetailView().background(Theme.bg.ignoresSafeArea())
                 }
-                .searchable(text: $model.query, placement: .sidebar, prompt: "Search sessions…")
                 .modifier(WindowStyling())
             }
         }
@@ -59,32 +70,16 @@ private struct ConversationWindowReader: NSViewRepresentable {
     }
 }
 
-/// ⌘K focuses search (the system gives ⌘F), and the title leaves the toolbar: each column has its own heading.
+/// The title leaves the toolbar: each column has its own heading. (⌘K lives on the sidebar's search field.)
 private struct WindowStyling: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 15, *) {
-            content.modifier(SearchFocus()).toolbar(removing: .title)
+            content.toolbar(removing: .title)
         } else {
             content
         }
     }
 }
-
-@available(macOS 15, *)
-private struct SearchFocus: ViewModifier {
-    @FocusState private var focused: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .searchFocused($focused)
-            .background {
-                Button("Search") { focused = true }
-                    .keyboardShortcut("k", modifiers: .command)
-                    .opacity(0).accessibilityHidden(true)
-            }
-    }
-}
-
 
 /// The middle column: Home's project cards, the Needs you decisions, or the sessions grouped by status.
 private struct ContentColumn: View {

@@ -362,6 +362,12 @@ final class AppModel {
         Task { await refreshLiveSteps() }
     }
 
+    /// Capture only: the Needs you page shown as the lettered-option buttons (no live question card).
+    func demoSetAsks(_ new: [SessionKey: PendingAsk]) {
+        guard demoMode else { return }
+        asks = new
+    }
+
     // MARK: Window visibility drives the poll mode
 
     private func observeWindowVisibility() {

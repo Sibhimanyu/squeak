@@ -110,9 +110,8 @@ struct SessionDetail: View {
         VStack(spacing: 0) {
             header
             if !model.isConnected {
-                ConnectionNotice(compact: true).padding(.horizontal, 28).padding(.bottom, Space.s)
+                ConnectionNotice(compact: true).padding(.horizontal, 22).padding(.bottom, Space.s)
             }
-            Divider()
             switch tab {
             case .chat: transcript.transition(.opacity)
             case .activity: ActivityList(session: session).transition(.opacity)
@@ -144,21 +143,13 @@ struct SessionDetail: View {
     /// muted line of who, where and what changed. The transcript is what this
     /// window is for, so the header takes as little of it as it can.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 12) {
                 Text(verbatim: SessionText.headline(session))
-                    .font(Typo.heading).lineLimit(1).truncationMode(.tail)
+                    .font(.system(size: 22, weight: .bold)).lineLimit(1).truncationMode(.tail)
                     .help(SessionText.headline(session))
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 12)
-                Picker("View", selection: $tab) {
-                    ForEach(DetailTab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden().controlSize(.small).fixedSize()
-                .accessibilityLabel("Chat or activity")
-                if session.conductorSessionId != nil, model.workspaceRepos != nil {
-                    ChatActionsMenu(session: session)
-                }
                 if session.capabilities.openInHost.isSupported {
                     Button { model.openInHost() } label: {
                         Lucide(.externalLink, size: 14, color: Theme.ink)
@@ -168,16 +159,42 @@ struct SessionDetail: View {
                     .accessibilityLabel("Open in Conductor")
                     .disabled(model.openURL == nil && !model.demoMode)
                 }
+                if session.conductorSessionId != nil, model.workspaceRepos != nil {
+                    ChatActionsMenu(session: session)
+                }
             }
-            Text(verbatim: metaLine).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+            Text(verbatim: metaLine).font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.muted)
                 .lineLimit(1).truncationMode(.middle)
                 .help(metaLine)
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras)
             }
+            tabStrip.padding(.top, 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 28).padding(.top, 6).padding(.bottom, 10)
+        .padding(.horizontal, 22).padding(.top, 8).padding(.bottom, 8)
+    }
+
+    /// Chat | Activity as one wide segmented control: a hairline-framed track, the chosen half raised.
+    private var tabStrip: some View {
+        HStack(spacing: 0) {
+            ForEach(DetailTab.allCases) { t in
+                Button { tab = t } label: {
+                    Text(t.rawValue).font(.system(size: 12.5, weight: tab == t ? .semibold : .regular))
+                        .foregroundStyle(tab == t ? Theme.ink : Theme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 31)
+                        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(tab == t ? Theme.surfaceRaised : .clear))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(tab == t ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background(Theme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.lineStrong))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Chat or activity")
     }
 
     /// `Claude · working · Conductor · repo · branch · +12 −3` (§8.2: the git line lives here, not in the list row).
@@ -204,7 +221,7 @@ struct SessionDetail: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 26) {
+                    LazyVStack(alignment: .leading, spacing: 16) {
                         EarlierRow(paging: model.paging, onLoad: { requestEarlier() })
                             .onAppear { topVisible = true; if !settling { requestEarlier() } }
                             .onDisappear { topVisible = false }
@@ -228,7 +245,7 @@ struct SessionDetail: View {
                         }
                         if let display = model.askDisplay(for: session.key) {
                             AskCard(
-                                ask: display.ask, canSend: sendBlock == nil && model.isConnected,
+                                ask: display.ask, framed: true, canSend: sendBlock == nil && model.isConnected,
                                 onSend: { form in await model.answer(form, for: session.key) }, result: display.outcome
                             )
                             .id(display.ask.toolUseId)
@@ -238,8 +255,8 @@ struct SessionDetail: View {
                             .onDisappear { atBottom = false }
                     }
                     .frame(maxWidth: 820, alignment: .leading)
-                    .padding(.horizontal, 28)
-                    .padding(.top, Space.xl)
+                    .padding(.horizontal, 22)
+                    .padding(.top, 12)
                     .padding(.bottom, Space.l)
                     .frame(maxWidth: .infinity)
                     .background(GeometryReader { Color.clear.preference(key: ConversationHeightKey.self, value: $0.size.height) })
@@ -371,11 +388,11 @@ struct SessionDetail: View {
                 }
         }
         .frame(maxWidth: 820)
-        .padding(.horizontal, 28)
+        .padding(.horizontal, 22)
         .padding(.top, 10)
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity)
-        .background(.bar)
+        .background(Theme.bg)
     }
 
     // MARK: Composer
@@ -413,9 +430,9 @@ struct SessionDetail: View {
     private var composer: some View {
         let text = Binding(get: { model.draft }, set: { model.setDraft($0) })
         let editable = sendBlock == nil && model.isConnected
-        let minH: CGFloat = 44
+        let minH: CGFloat = 34
         let maxH: CGFloat = 17 * 7 + 12
-        return VStack(alignment: .leading, spacing: 6) {
+        return HStack(alignment: .bottom, spacing: 10) {
             ComposerField(
                 text: text, sendKey: .commandReturnSends, placeholder: placeholder,
                 isEnabled: editable, focusToken: focusToken, onSend: { send(.queue) },
@@ -423,13 +440,6 @@ struct SessionDetail: View {
             )
             .frame(height: min(max(contentHeight, minH), maxH))
             HStack(spacing: 8) {
-                Spacer(minLength: 0)
-                if editable {
-                    Text("⌘ ↩").font(Typo.meta).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 7).frame(height: 22)
-                        .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
-                        .accessibilityHidden(true)
-                }
                 if working {
                     // Click queues; the arrow or a click-and-hold offers Steer now.
                     Menu {
@@ -446,7 +456,7 @@ struct SessionDetail: View {
                     }
                     .menuStyle(.button)
                     .menuIndicator(.hidden)
-                    .modifier(SendButtonStyle())
+                    .buttonStyle(MockSendStyle())
                     .fixedSize()
                     .disabled(!canSend)
                     .accessibilityLabel("Queue message")
@@ -459,7 +469,7 @@ struct SessionDetail: View {
                     Button { send(.queue) } label: {
                         SendLabel(title: "Send").padding(.horizontal, 6)
                     }
-                    .modifier(SendButtonStyle())
+                    .buttonStyle(MockSendStyle())
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(!canSend)
                     .accessibilityLabel("Send message")
@@ -467,8 +477,9 @@ struct SessionDetail: View {
                 }
             }
         }
-        .padding(.leading, 14).padding(.trailing, 10).padding(.top, 8).padding(.bottom, 10)
-        .squeakGlass(radius: Radius.card)
+        .padding(.leading, 18).padding(.trailing, 9).padding(.vertical, 9)
+        .background(Theme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.lineStrong))
         .accessibilityElement(children: .contain)
     }
 
@@ -492,3 +503,16 @@ struct SessionDetail: View {
     }
 }
 
+
+/// The composer's Send: duck yellow with ink text, 34pt high, as the mockup draws it. Dimmed while there is nothing to send.
+struct MockSendStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Theme.primaryText)
+            .padding(.horizontal, 14).frame(minWidth: 66, minHeight: 34)
+            .background(configuration.isPressed ? Theme.primaryPressed : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .opacity(isEnabled ? 1 : 0.55)
+    }
+}

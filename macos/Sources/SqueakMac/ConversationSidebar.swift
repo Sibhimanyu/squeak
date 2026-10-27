@@ -6,86 +6,135 @@ import SwiftUI
 
 // MARK: - Sidebar
 
+/// The window's left column, drawn by hand to the mockup: a brand line, a search field with a ⌘K hint,
+/// 32pt line-icon rows (a count, or a red badge for what needs you), a SOURCES group, and the
+/// connection and Settings at the foot. Selection is `model.navFilter`.
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @FocusState private var searchFocused: Bool
+
+    private var current: NavFilter { model.navFilter ?? .home }
 
     var body: some View {
-        @Bindable var model = model
-        List(selection: $model.navFilter) {
-            Section {
-                row(.home, "Home", .house)
-                row(.all, "Sessions", .list)
-                row(.needsYou, "Needs you", .bell)
+        VStack(alignment: .leading, spacing: 0) {
+            brand
+            searchField.padding(.horizontal, 10).padding(.top, 10)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    row(.home, "Home", .house)
+                    row(.all, "Sessions", .messageSquare)
+                    row(.needsYou, "Needs you", .circleAlert)
+                    row(.usage, "Usage", .gauge)
+                    Text("SOURCES").font(.system(size: 11, weight: .medium)).tracking(0.4).foregroundStyle(Theme.subtle)
+                        .padding(.horizontal, 12).padding(.top, 26).padding(.bottom, 6)
+                        .accessibilityAddTraits(.isHeader)
+                    row(.source(.conductor), SessionSource.conductor.title, .gitBranch)
+                    row(.source(.terminal), SessionSource.terminal.title, .squareTerminal)
+                    row(.source(.claudeDesktop), SessionSource.claudeDesktop.title, .monitor)
+                    if model.hasCodexApp { row(.source(.codexApp), SessionSource.codexApp.title, .code) }
+                }
+                .padding(.horizontal, 10).padding(.top, 14)
             }
-            Section {
-                LucideLabel("Usage", .gauge).tag(NavFilter.usage)
-                    .accessibilityLabel("Usage")
-            }
-            Section("Sources") {
-                source(.conductor, .gitBranch)
-                source(.terminal, .terminal)
-                source(.claudeDesktop, .monitor)
-                if model.hasCodexApp { source(.codexApp, .code) }
-            }
+            .scrollContentBackground(.hidden)
+            footer
         }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .top, spacing: 0) { brand }
-        .safeAreaInset(edge: .bottom, spacing: 0) { footer }
+        .frame(minWidth: 208, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.bg.ignoresSafeArea())
+        .background {
+            // ⌘K focuses the search field, wherever focus is.
+            Button("Search") { searchFocused = true }
+                .keyboardShortcut("k", modifiers: .command)
+                .opacity(0).accessibilityHidden(true)
+        }
+    }
+
+    private func count(for f: NavFilter) -> Int? {
+        switch f {
+        case .home, .usage, .source: nil
+        default: model.count(f)
+        }
     }
 
     private func row(_ f: NavFilter, _ title: String, _ symbol: LucideName) -> some View {
-        HStack {
-            LucideLabel(title, symbol)
-            Spacer(minLength: 4)
-            count(model.count(f), needsYou: f == .needsYou)
+        let selected = current == f
+        let n = count(for: f) ?? 0
+        return Button { model.navFilter = f } label: {
+            HStack(spacing: 12) {
+                Lucide(symbol, size: 17, color: selected ? Theme.ink : Theme.muted).frame(width: 20)
+                Text(verbatim: title).font(.system(size: 13, weight: selected ? .medium : .regular)).foregroundStyle(Theme.ink)
+                Spacer(minLength: 4)
+                if f == .needsYou, n > 0 {
+                    Text("\(n)").font(.system(size: 12, weight: .bold)).monospacedDigit().foregroundStyle(.white)
+                        .frame(minWidth: 22, minHeight: 22)
+                        .background(Theme.needsYou, in: Capsule())
+                } else if n > 0 {
+                    Text("\(n)").font(.system(size: 13)).monospacedDigit().foregroundStyle(Theme.muted)
+                }
+            }
+            .padding(.horizontal, 12).frame(height: 34)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selected ? Theme.surfaceRaised.opacity(0.7) : .clear))
+            .contentShape(Rectangle())
         }
-        .tag(f)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), \(model.count(f))")
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(count(for: f).map { "\(title), \($0)" } ?? title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// 8.3: a red pill with a white count for things that need you; every other count is plain muted text.
-    @ViewBuilder private func count(_ n: Int, needsYou: Bool) -> some View {
-        if needsYou && n > 0 {
-            Text("\(n)").font(.system(size: 11, weight: .bold)).monospacedDigit().foregroundStyle(.white)
-                .padding(.horizontal, 7).frame(minWidth: 20, minHeight: 20)
-                .background(Theme.needsYou, in: Capsule())
-        } else if n > 0 {
-            Text("\(n)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
-        }
-    }
-
-    private func source(_ s: SessionSource, _ symbol: LucideName) -> some View {
-        LucideLabel(s.title, symbol).tag(NavFilter.source(s))
-    }
-
-    /// No duck here: the sidebar sits on the system's glass, and glass never sits behind the duck (DESIGN.md 5).
+    /// No duck here: the sidebar is a calm column (DESIGN.md 5). Quick message stays, quiet, at the right.
     private var brand: some View {
         HStack(spacing: 8) {
+            Text("Squeak").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.ink)
+                .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
             Button { QuickComposerController.shared.show() } label: {
-                Lucide(.squarePen, size: 20, color: Theme.muted).frame(width: 26, height: 26).contentShape(Rectangle())
+                Lucide(.squarePen, size: 17, color: Theme.muted).frame(width: 26, height: 26).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).foregroundStyle(Theme.muted)
+            .buttonStyle(.plain)
             .accessibilityLabel("Quick message").help("Quick message")
         }
-        .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 8)
-        .accessibilityElement(children: .contain)
+        .padding(.horizontal, 22).padding(.top, 14)
+    }
+
+    private var searchField: some View {
+        @Bindable var model = model
+        return HStack(spacing: 8) {
+            Lucide(.search, size: 15, color: Theme.muted)
+            TextField("Search sessions…", text: $model.query)
+                .textFieldStyle(.plain).font(.system(size: 12.5)).focused($searchFocused)
+            if model.query.isEmpty {
+                Text("\u{2318} K").font(.system(size: 11)).foregroundStyle(Theme.subtle).accessibilityHidden(true)
+            } else {
+                Button { model.query = "" } label: {
+                    Lucide(.x, size: 13, color: Theme.muted)
+                }
+                .buttonStyle(.plain).accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 11).frame(height: 33)
+        .background(Theme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(searchFocused ? Theme.lineStrong : Theme.line))
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 9) {
                 Circle().fill(model.homeConnectionColor).frame(width: 9, height: 9)
-                Text(model.homeConnectionText).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
+                Text(model.homeConnectionText).font(.system(size: 13)).foregroundStyle(Theme.ink).lineLimit(1)
             }
+            .padding(.horizontal, 12).frame(height: 30)
             .accessibilityElement(children: .combine)
             Button { model.openSettings() } label: {
-                LucideLabel("Settings", .settings).font(Typo.body)
+                HStack(spacing: 12) {
+                    Lucide(.settings, size: 17, color: Theme.muted).frame(width: 20)
+                    Text("Settings").font(.system(size: 13)).foregroundStyle(Theme.ink)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12).frame(height: 34).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).foregroundStyle(Theme.muted)
+            .buttonStyle(.plain)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16).padding(.vertical, 12)
+        .padding(.horizontal, 10).padding(.vertical, 10)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 }

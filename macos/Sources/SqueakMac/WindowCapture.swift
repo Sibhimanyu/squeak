@@ -30,9 +30,12 @@ extension CaptureRunner {
         }
 
         // Needs you (the decision cards) and Sessions (grouped by status), then a chat.
+        let savedAsks = DemoData.make().asks
+        model.demoSetAsks([:])
         model.navFilter = .needsYou
         try? await Task.sleep(for: .milliseconds(800))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-needsyou.png")
+        model.demoSetAsks(savedAsks)
         model.navFilter = .all
         try? await Task.sleep(for: .milliseconds(800))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-sessions.png")
