@@ -61,6 +61,14 @@ struct MessageMarkupTests {
         #expect(M.parseInlines("![chart](https://e.com/c.png)") == [.text("[image: chart]")])
     }
 
+    @Test func imageRightAfterALabelLineIsABlock() {
+        let blocks = MessageMarkup.parse("At rest:\n![Rest](/a/rest.png)\nWith mouse:\n![Mouse](/a/m.png)")
+        #expect(blocks == [
+            .paragraph([.text("At rest:")]), .image(alt: "Rest", source: "/a/rest.png"),
+            .paragraph([.text("With mouse:")]), .image(alt: "Mouse", source: "/a/m.png"),
+        ])
+    }
+
     @Test func bareURLsAreAutolinked() {
         #expect(M.parseInlines("https://e.com") == [.url("https://e.com")])
         #expect(M.parseInlines("go to https://e.com/a_b_c?x=1, then") == [.text("go to "), .url("https://e.com/a_b_c?x=1"), .text(", then")])
