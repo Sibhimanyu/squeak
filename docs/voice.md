@@ -1,5 +1,31 @@
 # Voice: Squeak rings you through your PBX
 
+Two ways to place the call. **Gateway (recommended):** a Home Assistant add-on on your LAN places it, and the Mac
+asks for each call through Firebase, so the Mac can be on any network. **Direct:** the Mac registers with the PBX
+itself, which needs a route to it (home Wi-Fi or a VPN). The gateway wins when both are set up.
+
+## Gateway setup
+
+1. `squeak voice-relay` on the Mac makes the channel and key (saved to `.env`) and prints the add-on options.
+2. `scripts/build-voice-addon.sh` builds `dist-addon/squeak-voice`. Copy that folder to Home Assistant's `/addons`
+   share (Samba or SSH add-on), then Settings > Add-ons > Add-on store > menu > Check for updates, and install
+   Squeak Voice under Local add-ons. Fill in its options (see its Documentation tab) and start it.
+3. Deploy the database rules once (`firebase deploy --only database`): they allow the `voice` and `voiceresult`
+   kinds in the channel.
+4. Restart Squeak (`./scripts/ship.sh`).
+
+How it is kept safe: the request (it holds the agent's question) and the result are sealed with AES-256-GCM and
+signed with an HMAC bound to direction and id, under a key only the Mac and the add-on hold
+(`relay-protocol.ts`). A request counts only if sealed with the key, naming its own id, fresh (2 min) and new; the
+gateway claims it before calling. The Mac accepts a result only for the request it is waiting on and only for a
+letter that call offered, then sends it through the same replier and turn check as every other surface. The PIN
+and the SIP password live only in the add-on's options.
+
+The add-on image builds baresip 4.12 from source (the version tested here) and uses `espeak-ng` for speech, so its
+voice is plainer than the Mac's.
+
+## Direct setup
+
 When an agent is waiting on you (blocked on an approval, blocked on a question, or finished on a question), Squeak can
 phone you. It reads the question aloud; after your PIN, a key press answers it. Written for 3CX's free edition, but any
 SIP extension works.
@@ -17,8 +43,6 @@ SIP extension works.
 - One call per episode, at least 5 minutes between calls, and none in quiet hours.
 - **Answering needs `SQUEAK_VOICE_PIN`.** A call goes to whoever picks up, and an answer can start an agent that may run
   with permissions off. Without a PIN a call can tell you but never takes an answer. Two wrong PINs hang up.
-
-## Setup
 
 1. `brew install baresip`.
 2. In 3CX, add an extension for Squeak (say 900). Note its extension number, Authentication ID and password.
@@ -48,6 +72,9 @@ Tested here: the dialog and keypad, policy, config validation, the channel's che
 config loading with the `aufile` modules, dialling, answering, switching the audio source mid-call, and DTMF arriving as
 `CALL_DTMF_START` events with the digit in `param` (two baresip instances on this Mac, the callee typing digits through
 its `stdio` module).
+
+Gateway: the sealed and signed relay, the Mac and gateway round trip through a fake database, claim-before-call and
+replay refusal are tested; the add-on image (Dockerfile) and the bundle running on Home Assistant are not.
 
 Not tested against a real PBX: registration with 3CX, and the 3CX app's keypad sending RFC 2833 digits baresip accepts.
 `squeak voice-test` is that check.

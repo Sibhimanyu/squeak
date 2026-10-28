@@ -75,6 +75,8 @@ import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { TelegramAvatar } from "../telegram/avatar.js";
 import { BaresipLine } from "../voice/baresip-line.js";
+import { DirectLine } from "../voice/direct-line.js";
+import { RelayLine } from "../voice/relay-line.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker } from "../voice/tts.js";
 import { VoiceChannel } from "../voice/voice-channel.js";
@@ -1159,21 +1161,37 @@ export class SqueakApp {
     }
   }
 
-  /** A bad voice setting was already turned into "no voice" by the config; this only wires a good one. */
+  /**
+   * Voice goes through the Home Assistant gateway when the relay is set up (any network), else the Mac
+   * places the call itself (needs a route to the PBX). A bad setting was already turned into "off" by the config.
+   */
   private createVoice(): VoiceChannel | null {
-    const voice = this.config.voice;
+    const { voice, voiceRelay, remoteDatabaseUrl } = this.config;
+    const base = { monitor: this.runtime.monitor, replier: this.router, note: (text: string) => this.announce(text) };
+    if (voiceRelay && remoteDatabaseUrl) {
+      return new VoiceChannel({
+        ...base,
+        line: new RelayLine({
+          store: new RtdbRest(remoteDatabaseUrl),
+          channel: voiceRelay.channel,
+          key: voiceRelay.key,
+        }),
+        canTakeKeys: true,
+        policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voiceRelay.quiet }),
+      });
+    }
+    if (voiceRelay) {
+      logger.warn("voice relay needs SQUEAK_REMOTE_DATABASE_URL; voice is off");
+    }
     if (!voice) {
       return null;
     }
     this.voiceSpeaker = new MacSpeaker(voice.speechVoice);
     return new VoiceChannel({
-      monitor: this.runtime.monitor,
-      replier: this.router,
-      line: new BaresipLine(voice.line, this.voiceSpeaker),
-      callee: voice.callee,
-      pin: voice.pin,
+      ...base,
+      line: new DirectLine(new BaresipLine(voice.line, this.voiceSpeaker), voice.callee, voice.pin),
+      canTakeKeys: voice.pin !== null,
       policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voice.quiet }),
-      note: (text) => this.announce(text),
     });
   }
 

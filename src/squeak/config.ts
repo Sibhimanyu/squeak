@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ZodError, z } from "zod";
 
-import { readVoiceConfig, type VoiceConfig } from "../voice/config.js";
+import { readVoiceConfig, readVoiceRelayConfig, type VoiceConfig, type VoiceRelayConfig } from "../voice/config.js";
 import { logger } from "../utils/logger.js";
 import { defaultSqueakDbPath, expandHome, resolveSqueakEnvPath } from "./paths.js";
 
@@ -113,6 +113,9 @@ const schema = z.object({
   SQUEAK_VOICE_TRANSPORT: z.string().optional(),
   SQUEAK_VOICE_QUIET: z.string().optional(),
   SQUEAK_VOICE_BARESIP: z.string().optional(),
+  SQUEAK_VOICE_BARESIP_MODULES: z.string().optional(),
+  SQUEAK_VOICE_RELAY_CHANNEL: z.string().optional(),
+  SQUEAK_VOICE_RELAY_KEY: z.string().optional(),
   SQUEAK_VOICE_VOICE: z.string().optional(),
   POLL_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(50).default(30),
   FLEET_HOOK_PORT: z.coerce.number().int().min(1024).max(65535).default(8477),
@@ -157,6 +160,8 @@ export interface SqueakConfig {
   cliqWebhookUrl: string | null;
   /** Null unless voice is set up and valid (src/voice/config.ts). */
   voice: VoiceConfig | null;
+  /** Calls placed by the Home Assistant gateway through the relay; wins over `voice` (src/voice/relay-line.ts). */
+  voiceRelay: VoiceRelayConfig | null;
   /** Null unless every two-way setting is present. */
   cliqTwoWay: {
     projectId: string;
@@ -234,6 +239,7 @@ export function loadSqueakConfig(): SqueakConfig {
     caffeinateOnPower: !["off", "working"].includes(parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() ?? ""),
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
     voice: voiceConfig(parsed, baseDir),
+    voiceRelay: voiceRelayConfig(parsed),
     cliqTwoWay: cliqTwoWay(parsed),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
     hookPort: parsed.FLEET_HOOK_PORT,
@@ -285,6 +291,15 @@ function voiceConfig(parsed: z.infer<typeof schema>, supportDir: string): VoiceC
     return readVoiceConfig(parsed, supportDir);
   } catch (error) {
     logger.warn("voice is off", { error: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
+}
+
+function voiceRelayConfig(parsed: z.infer<typeof schema>): VoiceRelayConfig | null {
+  try {
+    return readVoiceRelayConfig(parsed);
+  } catch (error) {
+    logger.warn("voice relay is off", { error: error instanceof Error ? error.message : String(error) });
     return null;
   }
 }

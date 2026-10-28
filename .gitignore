@@ -11,3 +11,4 @@ dist.failed/
 .envrc
 .DS_Store
 .impeccable/
+dist-addon/

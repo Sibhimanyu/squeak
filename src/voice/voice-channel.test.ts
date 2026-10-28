@@ -5,7 +5,6 @@ import type { CallResult } from "./baresip-line.js";
 import { item, QUESTION } from "./fixtures.js";
 import { CallPolicy } from "./policy.js";
 import { VoiceChannel } from "./voice-channel.js";
-import type { CallDialog } from "./script.js";
 
 function setup(
   options: { result?: CallResult; pin?: string | null; text?: () => string | null; attention?: AttentionItem[] } = {},
@@ -14,7 +13,7 @@ function setup(
   const notes: string[] = [];
   const sent: string[] = [];
   let pushed: ((items: AttentionItem[]) => void) | null = null;
-  const dialogs: CallDialog[] = [];
+  const dialogs: boolean[] = [];
   const text = options.text ?? (() => QUESTION);
   const channel = new VoiceChannel({
     monitor: {
@@ -33,13 +32,12 @@ function setup(
       },
     },
     line: {
-      call: async (_callee, dialog) => {
-        dialogs.push(dialog);
+      call: async (_script, answerable) => {
+        dialogs.push(answerable);
         return options.result ?? { status: "answered", letter: "B" };
       },
     },
-    callee: "101",
-    pin: options.pin === undefined ? "1234" : options.pin,
+    canTakeKeys: options.pin === undefined ? true : options.pin !== null,
     policy: new CallPolicy({ minGapMs: 0, quiet: null }),
     graceMs: 10,
     note: (message) => notes.push(message),

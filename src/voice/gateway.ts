@@ -1,0 +1,130 @@
+import { logger } from "../utils/logger.js";
+import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CallResult } from "./baresip-line.js";
+import { CallDialog } from "./dialog.js";
+import {
+  readRequest,
+  requestPath,
+  REQUEST_KIND,
+  resultPath,
+  sealResult,
+  type CallResultDoc,
+} from "./relay-protocol.js";
+
+export type GatewayStore = Pick<RtdbRest, "list" | "set" | "delete" | "watch">;
+
+export interface GatewayDependencies {
+  store: GatewayStore;
+  channel: string;
+  key: string;
+  /** Places the call to the owner's phone and runs the dialog (`BaresipLine.call`). */
+  line: { call(callee: string, dialog: CallDialog): Promise<CallResult> };
+  /** The owner's phone extension. Fixed here, never taken from a request. */
+  callee: string;
+  /** Checked on this side only: neither the Mac nor the database ever holds it. Null: calls tell, never take an answer. */
+  pin: string | null;
+  now?: () => number;
+}
+
+const SAFETY_POLL_MS = 60_000;
+const REMEMBER = 200;
+
+/**
+ * The Home Assistant half of voice: watches the channel for call requests from the Mac, places each call
+ * over the LAN through the SBC, and writes the signed result back. The same checks as every other pipe
+ * to the Mac, mirrored: a request counts only if it is sealed with the key, names its own id, is fresh and
+ * is new; it is claimed (deleted) before the call so a copy cannot ring twice.
+ */
+export class VoiceGateway {
+  private readonly now: () => number;
+  private unwatch: (() => void) | null = null;
+  private timer: NodeJS.Timeout | null = null;
+  private stopped = false;
+  private running = false;
+  private dirty = false;
+  private readonly handled: string[] = [];
+
+  constructor(private readonly deps: GatewayDependencies) {
+    this.now = deps.now ?? Date.now;
+  }
+
+  start(): void {
+    this.stopped = false;
+    this.unwatch = this.deps.store.watch(`channels/${this.deps.channel}/${REQUEST_KIND}`, () => this.wake(), {
+      onError: (error) => logger.warn("voice gateway stream", { error: error.message }),
+    });
+    this.timer = setInterval(() => this.wake(), SAFETY_POLL_MS);
+    this.timer.unref?.();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.unwatch?.();
+    this.unwatch = null;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  private wake(): void {
+    if (this.stopped) return;
+    if (this.running) {
+      this.dirty = true;
+      return;
+    }
+    this.running = true;
+    void this.pass()
+      .catch((error: unknown) =>
+        logger.warn("voice gateway pass failed", { error: error instanceof Error ? error.message : String(error) }),
+      )
+      .finally(() => {
+        this.running = false;
+        if (this.dirty) {
+          this.dirty = false;
+          this.wake();
+        }
+      });
+  }
+
+  /** One pass over the waiting requests; exposed for tests. */
+  async pass(): Promise<void> {
+    const { store, channel, key } = this.deps;
+    const waiting = await store.list(`channels/${channel}/${REQUEST_KIND}`);
+    for (const { id, doc } of waiting) {
+      if (this.stopped) return;
+      if (this.handled.includes(id)) {
+        await store.delete(requestPath(channel, id)).catch(() => undefined);
+        continue;
+      }
+      const read = readRequest(key, id, doc, this.now());
+      // Remember it first, synchronously: a second pass (the stream wakes one while another runs) must see
+      // it as taken. Then claim: an undeletable document is left for the next pass, never run twice.
+      this.handled.push(id);
+      if (this.handled.length > REMEMBER) this.handled.shift();
+      try {
+        await store.delete(requestPath(channel, id));
+      } catch (error) {
+        this.handled.splice(this.handled.indexOf(id), 1);
+        logger.warn("voice gateway could not claim a request", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
+      if (!read.ok) {
+        logger.info("voice gateway dropped a request", { reason: read.reason });
+        continue;
+      }
+      const { request } = read;
+      const result = await this.deps.line.call(
+        this.deps.callee,
+        new CallDialog(request.script, request.answerable ? this.deps.pin : null),
+      );
+      const body: CallResultDoc =
+        result.status === "answered"
+          ? { v: 1, id, at: this.now(), status: "answered", letter: result.letter }
+          : result.status === "unanswered"
+            ? { v: 1, id, at: this.now(), status: "unanswered" }
+            : { v: 1, id, at: this.now(), status: "failed", reason: result.reason };
+      await store.set(resultPath(channel, id), sealResult(key, body));
+    }
+  }
+}

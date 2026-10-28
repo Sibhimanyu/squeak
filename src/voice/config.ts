@@ -16,6 +16,9 @@ export interface VoiceEnv {
   SQUEAK_VOICE_TRANSPORT?: string | undefined;
   SQUEAK_VOICE_QUIET?: string | undefined;
   SQUEAK_VOICE_BARESIP?: string | undefined;
+  SQUEAK_VOICE_BARESIP_MODULES?: string | undefined;
+  SQUEAK_VOICE_RELAY_CHANNEL?: string | undefined;
+  SQUEAK_VOICE_RELAY_KEY?: string | undefined;
   SQUEAK_VOICE_VOICE?: string | undefined;
 }
 
@@ -29,7 +32,26 @@ export interface VoiceConfig {
   speechVoice: string | null;
 }
 
-const BARESIP_CANDIDATES = ["/opt/homebrew/bin/baresip", "/usr/local/bin/baresip"];
+const BARESIP_CANDIDATES = ["/opt/homebrew/bin/baresip", "/usr/local/bin/baresip", "/usr/bin/baresip"];
+
+/** The Mac's side of the Home Assistant gateway: which channel and key to seal call requests with. */
+export interface VoiceRelayConfig {
+  channel: string;
+  /** Base64, 32 bytes: the AES-GCM key and, derived, the HMAC key. */
+  key: string;
+  quiet: QuietHours | null;
+}
+
+/** Null unless both relay settings are present; a malformed one throws, naming it. */
+export function readVoiceRelayConfig(env: VoiceEnv): VoiceRelayConfig | null {
+  const channel = env.SQUEAK_VOICE_RELAY_CHANNEL?.trim();
+  const key = env.SQUEAK_VOICE_RELAY_KEY?.trim();
+  if (!channel || !key) return null;
+  if (!/^[A-Za-z0-9_-]{22,64}$/.test(channel)) throw new Error("SQUEAK_VOICE_RELAY_CHANNEL is not a channel id");
+  if (Buffer.from(key, "base64").length !== 32)
+    throw new Error("SQUEAK_VOICE_RELAY_KEY must be 32 random bytes, base64");
+  return { channel, key, quiet: readQuietRange(env.SQUEAK_VOICE_QUIET) };
+}
 
 /** "22:00-07:00" as quiet hours; null for anything else. */
 export function readQuietRange(value: string | undefined): QuietHours | null {
@@ -74,7 +96,9 @@ export function readVoiceConfig(env: VoiceEnv, supportDir: string): VoiceConfig 
   const baresipPath = env.SQUEAK_VOICE_BARESIP?.trim() || BARESIP_CANDIDATES.find((file) => fs.existsSync(file));
   if (!baresipPath)
     throw new Error("baresip is not installed (brew install baresip) and SQUEAK_VOICE_BARESIP is not set");
-  const modulePath = path.join(path.dirname(path.dirname(baresipPath)), "lib", "baresip", "modules");
+  const modulePath =
+    env.SQUEAK_VOICE_BARESIP_MODULES?.trim() ||
+    path.join(path.dirname(path.dirname(baresipPath)), "lib", "baresip", "modules");
 
   return {
     line: {

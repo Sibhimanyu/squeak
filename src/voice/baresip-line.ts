@@ -4,7 +4,7 @@ import net from "node:net";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
-import type { CallDialog, DialogAction } from "./script.js";
+import type { CallDialog, DialogAction } from "./dialog.js";
 import type { Speaker } from "./tts.js";
 
 /**

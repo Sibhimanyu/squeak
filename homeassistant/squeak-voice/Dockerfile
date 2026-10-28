@@ -1,0 +1,23 @@
+# Squeak Voice: the gateway (node) and baresip, built from the same release Squeak was tested against.
+FROM node:22-bookworm-slim AS baresip
+ARG BARESIP_VERSION=4.12.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake git ca-certificates libssl-dev zlib1g-dev pkg-config \
+ && git clone --depth 1 --branch "v${BARESIP_VERSION}" https://github.com/baresip/re.git \
+ && cmake -S re -B re/build -DCMAKE_BUILD_TYPE=Release && cmake --build re/build -j2 && cmake --install re/build \
+ && git clone --depth 1 --branch "v${BARESIP_VERSION}" https://github.com/baresip/baresip.git \
+ && cmake -S baresip -B baresip/build -DCMAKE_BUILD_TYPE=Release -DSTATIC=OFF \
+      -DMODULES="account;aufile;ctrl_tcp;g711;menu" \
+ && cmake --build baresip/build -j2 && cmake --install baresip/build
+
+FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libssl3 zlib1g espeak-ng ffmpeg ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=baresip /usr/local /usr/local
+RUN ldconfig
+WORKDIR /app
+COPY gateway.mjs run.sh ./
+ENV SQUEAK_VOICE_BARESIP=/usr/local/bin/baresip \
+    SQUEAK_VOICE_BARESIP_MODULES=/usr/local/lib/baresip/modules
+CMD ["/app/run.sh"]

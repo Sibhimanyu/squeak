@@ -1,0 +1,36 @@
+name: Squeak Voice
+version: "0.1.0"
+slug: squeak_voice
+description: Phones you when a coding agent waits on you, through your 3CX extension; Squeak on your Mac asks for each call through Firebase.
+arch:
+  - aarch64
+  - amd64
+startup: services
+boot: auto
+init: false
+# SIP and its audio (RTP) must reach the SBC on the LAN without NAT in between.
+host_network: true
+options:
+  database_url: ""
+  channel: ""
+  key: ""
+  sip_host: ""
+  sip_proxy: ""
+  extension: ""
+  auth_id: ""
+  password: ""
+  callee: ""
+  pin: ""
+  transport: udp
+schema:
+  database_url: str
+  channel: str
+  key: password
+  sip_host: str
+  sip_proxy: str?
+  extension: str
+  auth_id: str?
+  password: password
+  callee: str
+  pin: password
+  transport: list(udp|tcp|tls)
