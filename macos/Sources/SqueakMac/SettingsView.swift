@@ -94,7 +94,8 @@ private struct SettingsPage: View {
         VStack(spacing: 0) {
             Text(section.title).font(Typo.title).accessibilityAddTraits(.isHeader)
                 .frame(maxWidth: 680, alignment: .leading)
-                .padding(.leading, 48).padding(.trailing, 28).padding(.top, 8).padding(.bottom, 4)
+                .padding(.horizontal, 28).padding(.top, 20).padding(.bottom, 16)
+                .offset(x: 18)
             page.frame(maxWidth: 680)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -159,6 +160,7 @@ private struct NotificationsSettings: View {
                 Section { SectionFootnote("Set up Telegram or Zoho Cliq to choose what each one pushes.") }
             }
         }
+        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
         .task { bannersShown = await Notifier.shared.bannersShown(); await model.channels.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -230,6 +232,7 @@ private struct GeneralSettings: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
     }
 
@@ -271,29 +274,88 @@ private struct ConnectionsSettings: View {
 
     var body: some View {
         let r = model.connectionsReport
-        Form {
-            Section {
-                row(r.database, name: "Conductor", okWord: "reading chats", okColor: Theme.working)
-                row(r.daemon, name: "Squeak service", okWord: "connected", okColor: Theme.working)
-                row(r.sending, name: "Sending", okWord: "available", okColor: Theme.done)
-            } footer: {
-                SectionFootnote("Squeak reads agent chats locally and sends replies only when you choose.")
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xl) {
+                Card {
+                    VStack(alignment: .leading, spacing: Space.m) {
+                        HStack(spacing: Space.s) {
+                            Image(systemName: "point.3.connected.trianglepath.dotted")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Theme.working)
+                                .frame(width: 30, height: 30)
+                                .background(Theme.working.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Local connection").font(Typo.heading).foregroundStyle(Theme.ink)
+                                Text("Squeak reads agent chats locally and only sends replies when you choose.")
+                                    .font(Typo.body).foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: Space.m) {
+                            row(r.database, name: "Conductor", okWord: "Reading chats", okColor: Theme.working)
+                            row(r.daemon, name: "Squeak service", okWord: "Connected", okColor: Theme.working)
+                            row(r.sending, name: "Sending", okWord: "Available", okColor: Theme.done)
+                        }
+                        .padding(.top, Space.xs)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: Space.s) {
+                    SectionLabel("Channels")
+                    Card {
+                        VStack(alignment: .leading, spacing: Space.m) {
+                            ForEach(model.channels.summary) { channelRow($0) }
+                        }
+                    }
+                    Text("Manage Telegram, Zoho Cliq and iPhone in Settings.")
+                        .font(.callout).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, Space.xs)
+                }
+
+                VStack(alignment: .leading, spacing: Space.s) {
+                    SectionLabel("Service details")
+                    Card {
+                        VStack(alignment: .leading, spacing: Space.m) {
+                            detailRow("Address", value: model.client.baseURL.absoluteString, selectable: true)
+                            if let synced = model.lastSyncedText { detailRow("Last sync", value: synced) }
+                            HStack {
+                                Button("Check again") { model.recheck() }.buttonStyle(SecondaryButtonStyle())
+                                Spacer()
+                            }
+                            if let help = model.connectionHelp {
+                                Text(help).font(.callout).foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
             }
-            Section {
-                ForEach(model.channels.summary) { channelRow($0) }
-            } header: { Text("Channels") } footer: {
-                SectionFootnote("Set these up under Telegram, Zoho Cliq and iPhone in Settings.")
-            }
-            Section {
-                LabeledContent("Address") { Text(verbatim: model.client.baseURL.absoluteString).textSelection(.enabled) }
-                if let synced = model.lastSyncedText { LabeledContent("Sync") { Text(synced) } }
-                Button("Check again") { model.recheck() }
-            } footer: {
-                if let help = model.connectionHelp { SectionFootnote(help) }
-            }
+            .padding(.horizontal, 28)
+            .padding(.bottom, Space.xxl)
         }
-        .formStyle(.grouped)
+        .scrollIndicators(.automatic)
         .task { await model.channels.refresh() }
+    }
+
+    private func detailRow(_ title: String, value: String, selectable: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.l) {
+            Text(title).font(Typo.body).foregroundStyle(Theme.ink)
+            Spacer(minLength: Space.s)
+            valueText(value, selectable: selectable)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private func valueText(_ value: String, selectable: Bool) -> some View {
+        if selectable {
+            Text(verbatim: value).font(Typo.body).foregroundStyle(Theme.muted)
+                .textSelection(.enabled).multilineTextAlignment(.trailing)
+        } else {
+            Text(verbatim: value).font(Typo.body).foregroundStyle(Theme.muted)
+                .multilineTextAlignment(.trailing)
+        }
     }
 
     private func channelRow(_ r: ChannelsModel.SummaryRow) -> some View {
@@ -304,29 +366,30 @@ private struct ConnectionsSettings: View {
             case .error: Circle().fill(Theme.error).frame(width: 9, height: 9).accessibilityHidden(true)
             case .none: EmptyView()
             }
-            (Text(r.name).font(.system(size: 13, weight: .medium)) + Text("  —  ").foregroundStyle(.secondary) + Text(r.value).foregroundStyle(.secondary))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(r.name).font(Typo.label).foregroundStyle(Theme.ink)
+                Text(r.value).font(Typo.body).foregroundStyle(Theme.muted)
+            }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
     }
 
     private func row(_ r: ConnectionsReport.Row, name: String, okWord: String, okColor: Color) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Circle().fill(color(r.level, ok: okColor)).frame(width: 9, height: 9)
-                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                .padding(.top, 5)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                (Text(name).font(.system(size: 13, weight: .medium))
-                    + Text("  —  ").foregroundStyle(.secondary)
-                    + Text(r.level == .ok ? okWord : r.value.lowercased()).foregroundStyle(.secondary))
+                Text(name).font(Typo.label).foregroundStyle(Theme.ink)
+                Text(r.level == .ok ? okWord : r.value)
+                    .font(Typo.body).foregroundStyle(Theme.muted)
                 if let d = r.detail, r.level != .ok {
                     Text(d).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 5)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(name), \(r.level == .ok ? okWord : r.value)")
     }
@@ -361,6 +424,7 @@ private struct PrivacySettings: View {
                 SectionFootnote(model.cacheNotice ?? "Messages are encrypted on this Mac, kept 14 days, up to 50 MB.")
             }
         }
+        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
         .confirmationDialog("Delete the message cache and its encryption key?", isPresented: $confirm) {
             Button("Delete cache", role: .destructive) { Task { await model.purgeCache() } }
@@ -428,6 +492,7 @@ private struct AboutSettings: View {
                     }
                 }
         }
+        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
     }
 }

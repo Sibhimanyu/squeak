@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.2
+
+- Redesigned Settings with a cleaner, consistent background and clearer connection status, channels, and service details.
+
 ## 2.11.1
 
 - Refined the menu-bar popover: clearer session rows, readable answer choices, and a compact menu that no longer shifts the content.
