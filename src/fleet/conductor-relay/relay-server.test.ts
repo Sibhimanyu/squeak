@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   _internal,
   b64urlDecode,
@@ -8,6 +8,7 @@ import {
   hostIdFromStaticKey,
   transcriptHash,
 } from "./crypto.js";
+import { logger } from "../../utils/logger.js";
 import { ConductorRelayServer } from "./relay-server.js";
 
 const X25519_SPKI_PREFIX = Buffer.from("302a300506032b656e032100", "hex");
@@ -226,5 +227,101 @@ describe("ConductorRelayServer end-to-end (phone ⇄ from-spec host)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { accessToken: string };
     expect(body.accessToken).toBeTruthy();
+  });
+});
+
+describe("ConductorRelayServer 0.92 hardening", () => {
+  let server: ConductorRelayServer | undefined;
+  let sockets: WebSocket[] = [];
+
+  afterEach(async () => {
+    for (const ws of sockets) ws.close();
+    sockets = [];
+    await server?.close();
+    vi.restoreAllMocks();
+  });
+
+  const open = (port: number, path: string, protocols?: string | string[]) =>
+    new Promise<{ ws: WebSocket; protocol: string }>((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, protocols);
+      sockets.push(ws);
+      ws.addEventListener("open", () => resolve({ ws, protocol: ws.protocol }));
+      ws.addEventListener("error", () => reject(new Error("socket error")));
+    });
+
+  it("echoes the first offered subprotocol, which strict clients require", async () => {
+    server = new ConductorRelayServer({ onHost: () => {} });
+    const port = await server.listen(0);
+    const { protocol } = await open(port, "/desktop-relay/v1/host?hostId=x", ["conductor.v1", "other"]);
+    expect(protocol).toBe("conductor.v1");
+  });
+
+  it("accepts a later versioned host path instead of proxying it away", async () => {
+    const seen = vi.fn();
+    server = new ConductorRelayServer({ onHost: seen });
+    const port = await server.listen(0);
+    await open(port, "/desktop-relay/v2/host?hostId=x");
+    await vi.waitFor(() => expect(seen).toHaveBeenCalledTimes(1));
+  });
+
+  it("logs the arrival with path and subprotocol, never the query", async () => {
+    const info = vi.spyOn(logger, "info");
+    server = new ConductorRelayServer({ onHost: () => {} });
+    const port = await server.listen(0);
+    await open(port, "/desktop-relay/v1/host?hostId=x&accessToken=SECRET", "sub");
+    await vi.waitFor(() =>
+      expect(info).toHaveBeenCalledWith(
+        "conductor relay: host connection arrived",
+        expect.objectContaining({ path: "/desktop-relay/v1/host", subprotocol: "sub" }),
+      ),
+    );
+    expect(JSON.stringify(info.mock.calls)).not.toContain("SECRET");
+  });
+
+  it("logs a throwing onHost and keeps serving", async () => {
+    const warn = vi.spyOn(logger, "warn");
+    server = new ConductorRelayServer({
+      onHost: () => {
+        throw new Error("boom");
+      },
+    });
+    const port = await server.listen(0);
+    await open(port, "/desktop-relay/v1/host");
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith("conductor relay: onHost threw", expect.objectContaining({ error: "boom" })),
+    );
+    await open(port, "/desktop-relay/v1/host"); // still accepting
+  });
+
+  it("logs a rejecting async onHost", async () => {
+    const warn = vi.spyOn(logger, "warn");
+    server = new ConductorRelayServer({ onHost: () => Promise.reject(new Error("later")) });
+    const port = await server.listen(0);
+    await open(port, "/desktop-relay/v1/host");
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith("conductor relay: onHost failed", expect.objectContaining({ error: "later" })),
+    );
+  });
+
+  it("tells the connection's listener when the host's socket closes", async () => {
+    let closed: { code: number } | undefined;
+    server = new ConductorRelayServer({
+      onHost: (conn) => conn.onClose((info) => (closed = info)),
+    });
+    const port = await server.listen(0);
+    const { ws } = await open(port, "/desktop-relay/v1/host");
+    ws.close(1000);
+    await vi.waitFor(() => expect(closed).toBeDefined());
+  });
+
+  it("logs a non-relay path once, without its query", async () => {
+    const info = vi.spyOn(logger, "info");
+    server = new ConductorRelayServer({ onHost: () => {} });
+    const port = await server.listen(0);
+    await fetch(`http://127.0.0.1:${port}/new/thing?token=SECRET`);
+    await fetch(`http://127.0.0.1:${port}/new/thing?token=SECRET`);
+    const calls = info.mock.calls.filter(([m]) => String(m).includes("non-relay"));
+    expect(calls).toHaveLength(1);
+    expect(JSON.stringify(calls)).not.toContain("SECRET");
   });
 });

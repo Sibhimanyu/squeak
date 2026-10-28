@@ -2,9 +2,17 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import Database from "better-sqlite3";
 import { logger } from "../../utils/logger.js";
-import { ConductorRelayServer } from "./relay-server.js";
+import { ConductorRelayServer, type HostConnection } from "./relay-server.js";
 import type { QueueItem } from "../session-reply.js";
 import type { DeviceCredentials, PendingMessagesState, PhoneClient } from "./phone.js";
+
+/** Conductor versions whose relay was read and (0.91.x) run against. A newer one still runs, with a warning. */
+export const TESTED_CONDUCTOR_VERSIONS = ["0.91.1", "0.91.2", "0.92.0"];
+const CONDUCTOR_INFO_PLIST = "/Applications/Conductor.app/Contents/Info.plist";
+/** Each of the handshake and the authentication gets this long before the connection is dropped. */
+export const HOST_STEP_TIMEOUT_MS = 10_000;
+/** After this long listening with no host connection at all, say so once. */
+const NO_HOST_WARN_MS = 120_000;
 
 /**
  * The daemon-owned desktop relay. When the user has pointed Conductor's relay
@@ -32,6 +40,11 @@ export interface ConductorRelayServiceOptions {
   /** Shared with the CLI: `<supportDir>/conductor-relay.json`. */
   statePath: string;
   upstreamBaseUrl?: string;
+  /** Conductor's version, for the log. Defaults to reading its Info.plist. */
+  conductorVersion?: () => string | undefined;
+  /** Test hooks. */
+  stepTimeoutMs?: number;
+  noHostWarnMs?: number;
 }
 
 const LISTEN_RETRY_MS = 5000;
@@ -50,6 +63,8 @@ export class ConductorRelayService {
   private stopped = false;
   private retryTimer: NodeJS.Timeout | undefined;
   private warnedListen = false;
+  private noHostTimer: NodeJS.Timeout | undefined;
+  private hostSeen = false;
 
   constructor(private readonly options: ConductorRelayServiceOptions) {}
 
@@ -315,6 +330,7 @@ export class ConductorRelayService {
         return;
       }
       this.credentials = state.credentials;
+      this.logConductorVersion();
       const hostKey = state.hostStaticPublicKey ? Buffer.from(state.hostStaticPublicKey, "base64url") : undefined;
 
       this.listenWithRetry(port, hostKey);
@@ -334,7 +350,7 @@ export class ConductorRelayService {
     const server = new ConductorRelayServer({
       ...(hostKey ? { hostStaticPublicKey: hostKey } : {}),
       upstreamBaseUrl: this.options.upstreamBaseUrl ?? "https://api.conductor.build",
-      onHost: ({ client }) => void this.onHost(client),
+      onHost: (conn) => this.onHost(conn),
     });
     server
       .listen(port)
@@ -342,6 +358,7 @@ export class ConductorRelayService {
         this.server = server;
         this.warnedListen = false;
         logger.info("conductor relay listening", { port });
+        this.armNoHostWatchdog();
       })
       .catch((e) => {
         if (!this.warnedListen) {
@@ -354,24 +371,86 @@ export class ConductorRelayService {
       });
   }
 
-  private async onHost(client: PhoneClient): Promise<void> {
+  private async onHost(conn: HostConnection): Promise<void> {
+    const { client } = conn;
+    this.hostSeen = true;
+    this.clearNoHostWatchdog();
     this.client = undefined; // a new connection supersedes any previous one
+    // When this host's socket goes, the relay is not ready any more (it used to stay "ready" until a send failed).
+    conn.onClose(({ code, reason }) => {
+      if (this.client === client) {
+        this.client = undefined;
+        logger.info("conductor relay lost its host connection; waiting for Conductor to reconnect", { code, reason });
+      }
+    });
+    const stepMs = this.options.stepTimeoutMs ?? HOST_STEP_TIMEOUT_MS;
+    let step = "handshake";
     try {
-      await client.handshake();
+      logger.info("conductor relay: handshake started");
+      await withTimeout(client.handshake(), stepMs, "handshake");
+      logger.info("conductor relay: handshake done");
       if (client.hostStaticKey) this.persistHostKey(client.hostStaticKey.toString("base64url"));
       if (!this.credentials) return;
-      await client.authenticate(this.credentials);
+      step = "authentication";
+      await withTimeout(client.authenticate(this.credentials), stepMs, "authentication");
       this.client = client;
       logger.info("conductor relay authenticated; ready to answer chats live");
     } catch (e) {
       this.client = undefined;
-      logger.warn("conductor relay auth failed", { error: e instanceof Error ? e.message : String(e) });
+      const reason = e instanceof Error ? e.message : String(e);
+      // A step that went quiet leaves the host holding a dead phone slot; drop it so Conductor reconnects cleanly.
+      if (/timed out/.test(reason)) {
+        try {
+          conn.close("timeout");
+        } catch {
+          /* already gone */
+        }
+      }
+      logger.warn("conductor relay auth failed", { step, error: reason });
     }
+  }
+
+  private logConductorVersion(): void {
+    let version: string | undefined;
+    try {
+      version = (this.options.conductorVersion ?? readConductorVersion)();
+    } catch {
+      version = undefined;
+    }
+    if (version === undefined) {
+      logger.info("conductor relay: could not read Conductor's version");
+    } else if (TESTED_CONDUCTOR_VERSIONS.includes(version)) {
+      logger.info("conductor relay: Conductor version is one the relay was tested against", { version });
+    } else {
+      logger.warn("conductor relay: Conductor version is newer or older than any tested; the relay may not connect", {
+        version,
+        tested: TESTED_CONDUCTOR_VERSIONS.join(", "),
+      });
+    }
+  }
+
+  /** Conductor 0.92 moved the host into its sidecar; a Conductor that never dials in is worth one line. */
+  private armNoHostWatchdog(): void {
+    if (this.hostSeen || this.noHostTimer || this.stopped) return;
+    this.noHostTimer = setTimeout(() => {
+      this.noHostTimer = undefined;
+      if (this.hostSeen || this.stopped) return;
+      logger.warn(
+        "conductor relay: no host connection from Conductor yet; check Conductor's Settings for mobile access (signed in, switched on) and restart it",
+      );
+    }, this.options.noHostWarnMs ?? NO_HOST_WARN_MS);
+    this.noHostTimer.unref?.();
+  }
+
+  private clearNoHostWatchdog(): void {
+    if (this.noHostTimer) clearTimeout(this.noHostTimer);
+    this.noHostTimer = undefined;
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     this.client = undefined;
+    this.clearNoHostWatchdog();
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
     await this.server?.close();
@@ -418,4 +497,18 @@ export class ConductorRelayService {
 function queuedText(payload: { message?: unknown; displayMessage?: unknown } | undefined): string {
   if (typeof payload?.displayMessage === "string") return payload.displayMessage;
   return typeof payload?.message === "string" ? payload.message : "";
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** Conductor's CFBundleShortVersionString, read from its Info.plist (a text or binary plist both carry the string). */
+function readConductorVersion(): string | undefined {
+  const raw = fs.readFileSync(CONDUCTOR_INFO_PLIST).toString("latin1");
+  return /CFBundleShortVersionString<\/key>\s*<string>([0-9][0-9A-Za-z.+-]*)<\/string>/.exec(raw)?.[1];
 }

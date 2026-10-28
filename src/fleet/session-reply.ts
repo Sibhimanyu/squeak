@@ -323,6 +323,19 @@ export class ConductorReplier {
       logger.info("conductor relay reply failed; falling back", { sessionId, reason: result.reason });
     }
 
+    // The window is not a safe route to a working chat: Conductor's composer decides queue or steer itself
+    // (its own "steer on Enter" setting, `deliveryMode` default|steering in 0.92), so a message typed there can
+    // be steered while the phone was told it was queued. Only the relay names the mode, so mid-turn it is the
+    // only route; without it nothing is typed and the sender is told why.
+    if (inFlight && this.deps.ui) {
+      logger.info("not typing into a working chat's composer: its mode cannot be chosen", { sessionId });
+      return {
+        status: "refused",
+        reason:
+          "Conductor's relay isn't connected, and typing into a working chat could steer it instead of queueing. Send it once the turn ends.",
+      };
+    }
+
     let fallbackReason: string | null = null;
     if (this.deps.ui && !this.isReplying(sessionId)) {
       const startedAt = new Date().toISOString();
@@ -656,7 +669,6 @@ export class ConductorReplier {
   }
 }
 
-/** Typed into the window: Conductor queues it if mid-turn; it cannot steer. */
 /** Text as compared for "is this the message I sent": runs of whitespace are one space. */
 function squash(text: string): string {
   return text.replace(/\s+/g, " ").trim();

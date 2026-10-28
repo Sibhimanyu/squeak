@@ -4,6 +4,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PhoneClient } from "./phone.js";
+import { logger } from "../../utils/logger.js";
 import { ConductorRelayService } from "./service.js";
 
 /**
@@ -213,6 +214,119 @@ describe("ConductorRelayService startChat while the relay reconnects", () => {
       const pending = svc.startChat(start);
       await vi.advanceTimersByTimeAsync(9_000);
       expect(await pending).toEqual({ ok: false, reason: "Conductor's relay isn't connected" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("ConductorRelayService host connection (0.92 diagnostics)", () => {
+  const conn = (client: Partial<PhoneClient>) => {
+    const closers: Array<(i: { code: number; reason: string }) => void> = [];
+    const close = vi.fn();
+    return {
+      conn: {
+        client: client as PhoneClient,
+        close,
+        onClose: (cb: (i: { code: number; reason: string }) => void) => closers.push(cb),
+      },
+      close,
+      drop: () => closers.forEach((cb) => cb({ code: 1006, reason: "gone" })),
+    };
+  };
+  const make = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-host-"));
+    const svc = new ConductorRelayService({
+      conductorDbPath: path.join(dir, "x.db"),
+      statePath: path.join(dir, "state.json"),
+      stepTimeoutMs: 40,
+    });
+    (svc as unknown as { credentials: unknown }).credentials = { deviceId: "d", deviceToken: "t" };
+    return { svc, onHost: (c: unknown) => (svc as unknown as { onHost(c: unknown): Promise<void> }).onHost(c) };
+  };
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("becomes ready after handshake and auth, and not ready once the host socket closes", async () => {
+    const { svc, onHost } = make();
+    const c = conn({ handshake: async () => {}, authenticate: async () => {} });
+    await onHost(c.conn);
+    expect(svc.isReady()).toBe(true);
+    c.drop();
+    expect(svc.isReady()).toBe(false);
+  });
+
+  it("a stale connection closing does not clear a newer one", async () => {
+    const { svc, onHost } = make();
+    const first = conn({ handshake: async () => {}, authenticate: async () => {} });
+    await onHost(first.conn);
+    const second = conn({ handshake: async () => {}, authenticate: async () => {} });
+    await onHost(second.conn);
+    first.drop();
+    expect(svc.isReady()).toBe(true);
+  });
+
+  it("times out a handshake that never answers, warns with a short reason and closes the socket", async () => {
+    const warn = vi.spyOn(logger, "warn");
+    const { svc, onHost } = make();
+    const c = conn({ handshake: () => new Promise(() => {}) });
+    await onHost(c.conn);
+    expect(svc.isReady()).toBe(false);
+    expect(c.close).toHaveBeenCalledWith("timeout");
+    expect(warn).toHaveBeenCalledWith(
+      "conductor relay auth failed",
+      expect.objectContaining({ step: "handshake", error: expect.stringMatching(/handshake timed out/) }),
+    );
+  });
+
+  it("times out an authentication that never answers", async () => {
+    const warn = vi.spyOn(logger, "warn");
+    const { onHost } = make();
+    const c = conn({ handshake: async () => {}, authenticate: () => new Promise(() => {}) });
+    await onHost(c.conn);
+    expect(warn).toHaveBeenCalledWith(
+      "conductor relay auth failed",
+      expect.objectContaining({ step: "authentication" }),
+    );
+  });
+
+  it("warns on an untested Conductor version and says so for a tested one, without leaking anything else", () => {
+    const warn = vi.spyOn(logger, "warn");
+    const info = vi.spyOn(logger, "info");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-ver-"));
+    const run = (version: string | undefined) => {
+      const svc = new ConductorRelayService({
+        conductorDbPath: path.join(dir, "x.db"),
+        statePath: path.join(dir, "s.json"),
+        conductorVersion: () => version,
+      });
+      (svc as unknown as { logConductorVersion(): void }).logConductorVersion();
+    };
+    run("0.92.0");
+    expect(info).toHaveBeenCalledWith(expect.stringContaining("tested against"), { version: "0.92.0" });
+    run("0.93.0");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("newer or older"),
+      expect.objectContaining({ version: "0.93.0" }),
+    );
+    run(undefined);
+    expect(info).toHaveBeenCalledWith(expect.stringContaining("could not read"));
+  });
+
+  it("says once when Conductor never dials in", async () => {
+    vi.useFakeTimers();
+    try {
+      const warn = vi.spyOn(logger, "warn");
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-nohost-"));
+      const svc = new ConductorRelayService({
+        conductorDbPath: path.join(dir, "x.db"),
+        statePath: path.join(dir, "s.json"),
+        noHostWarnMs: 1000,
+      });
+      (svc as unknown as { armNoHostWatchdog(): void }).armNoHostWatchdog();
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("no host connection from Conductor"));
+      await svc.stop();
     } finally {
       vi.useRealTimers();
     }

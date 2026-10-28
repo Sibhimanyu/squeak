@@ -224,10 +224,12 @@ describe("ConductorReplier.send through Conductor's window", () => {
     expect(statuses).toEqual([]);
   });
 
-  it("goes through the window even while Conductor is working, since Conductor queues it itself", async () => {
+  it("never types into a working chat's composer, which could steer instead of queue", async () => {
     const ui = fakeUi({ ok: true });
     const { replier } = fixture(session({ status: "working" }), [], ui);
-    expect((await replier.send("s1", "A", () => undefined)).status).toBe("started");
+    const outcome = await replier.send("s1", "A", () => undefined, { mode: "queue" });
+    expect(outcome).toMatchObject({ status: "refused", reason: expect.stringMatching(/steer it instead of queueing/) });
+    expect(ui.requests).toEqual([]);
   });
 
   it("falls back to the background, with the reason, when nothing was typed", async () => {
@@ -362,12 +364,11 @@ describe("ConductorReplier.send queue and steer", () => {
     expect(sent[0]?.mode).toBe("queue");
   });
 
-  it("queues instead, and says so, when steer lands on a route that cannot steer", async () => {
+  it("refuses steer too when only the window is left, rather than guess the mode", async () => {
     const ui: ConductorUiSender = { send: async () => ({ ok: true }) as UiSendResult };
     const { replier } = fixture(session({ status: "working" }), [], ui);
     const outcome = await replier.send("s1", "change course", () => undefined, { mode: "steer" });
-    expect(outcome).toMatchObject({ status: "started", via: "conductor", delivery: "queued" });
-    expect(outcome.status === "started" && outcome.note).toMatch(/queued instead/);
+    expect(outcome.status).toBe("refused");
   });
 });
 
