@@ -135,7 +135,7 @@ export function parseEvent(payload: string): BaresipEvent | null {
   }
 }
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.once("error", reject);
@@ -146,11 +146,11 @@ function freePort(): Promise<number> {
   });
 }
 
-function delay(ms: number): Promise<void> {
+export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function connectWithRetry(port: number, child: ChildProcess): Promise<net.Socket> {
+export async function connectWithRetry(port: number, child: ChildProcess): Promise<net.Socket> {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     if (child.exitCode !== null) throw new Error("baresip exited before it was ready");
     try {

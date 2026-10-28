@@ -9,12 +9,14 @@
     // `media` a workflow's film or soundtrack in sealed chunks, deleted after 30 min.
     // `voice` and `voiceresult` carry phone-call requests to the Home Assistant gateway and its results,
     // sealed and signed with a key only the Mac and the gateway hold (src/voice/relay-protocol.ts).
+    // `voicedir`, `voiceup` and `voicedown` carry calling in: the list of who can take a message, a recorded
+    // memo and the transcript back (src/voice/memo-protocol.ts), sealed the same way.
     "channels": {
       "$channel": {
         "$kind": {
-          ".read": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results' || $kind === 'live' || $kind === 'media' || $kind === 'voice' || $kind === 'voiceresult')",
+          ".read": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results' || $kind === 'live' || $kind === 'media' || $kind === 'voice' || $kind === 'voiceresult' || $kind === 'voicedir' || $kind === 'voiceup' || $kind === 'voicedown')",
           "$doc": {
-            ".write": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results' || $kind === 'live' || $kind === 'media' || $kind === 'voice' || $kind === 'voiceresult') && $doc.matches(/^[A-Za-z0-9_-]{1,80}$/)",
+            ".write": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results' || $kind === 'live' || $kind === 'media' || $kind === 'voice' || $kind === 'voiceresult' || $kind === 'voicedir' || $kind === 'voiceup' || $kind === 'voicedown') && $doc.matches(/^[A-Za-z0-9_-]{1,80}$/)",
             ".validate": "newData.hasChild('box')",
             "box": { ".validate": "newData.isString() && newData.val().length < 900000" },
             "sig": { ".validate": "newData.isString() && newData.val().length < 512" },

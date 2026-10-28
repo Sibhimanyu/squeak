@@ -46,7 +46,7 @@ import { BackgroundWorkReader } from "../fleet/background-work.js";
 import { SubagentActivityReader } from "../fleet/subagent-activity.js";
 import { resolveSetup } from "../fleet/chat-setup.js";
 import { parseChoices } from "../fleet/choices.js";
-import { renderUsage } from "../fleet/radar.js";
+import { cardLabel, distinctTitles, renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
 import { listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
@@ -79,7 +79,9 @@ import { DirectLine } from "../voice/direct-line.js";
 import { RelayLine } from "../voice/relay-line.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker } from "../voice/tts.js";
+import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
 import { VoiceSettingsStore } from "../voice/settings.js";
+import { findWhisper, WhisperTranscriber } from "../voice/transcribe.js";
 import { VoiceChannel } from "../voice/voice-channel.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
 import type { TelegramChat, TelegramConversationTarget, TelegramUpdate } from "../types.js";
@@ -166,6 +168,10 @@ export class SqueakApp {
   /** Rings the owner through a SIP extension when an agent waits on them (src/voice/); null unless set up. */
   private voice: VoiceChannel | null = null;
   private voiceSpeaker: MacSpeaker | null = null;
+  /** Calling in: transcribes a phoned-in message and sends it (src/voice/memo-inbox.ts); null without the relay or Whisper. */
+  private memoInbox: MemoInbox | null = null;
+  private memoUnwatch: (() => void) | null = null;
+  private memoTimer: NodeJS.Timeout | null = null;
   /** The extension to ring, edited from the Mac app (voice-settings.json). */
   private readonly voiceSettings: VoiceSettingsStore;
   /** The Cliq webhook the channel posts through, for one-off notes (an awake session's end). */
@@ -629,6 +635,7 @@ export class SqueakApp {
     this.claudeRefresher = new ClaudeLimitsRefresher(this.claudeLimits, () => fetchClaudeUsage());
     this.cliq = this.createCliq();
     this.voice = this.createVoice();
+    this.memoInbox = this.createMemoInbox();
 
     this.controller = new FleetController({
       telegram: this.telegram,
@@ -655,6 +662,7 @@ export class SqueakApp {
     // Before the controller, which starts the monitor: the first push must reach Cliq too.
     this.cliq?.start();
     this.voice?.start();
+    this.startMemoInbox();
     if (this.config.caffeinate) {
       this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
     }
@@ -763,6 +771,7 @@ export class SqueakApp {
     await this.localChannel?.stop().catch(() => undefined);
     this.cliq?.stop();
     this.voice?.stop();
+    this.stopMemoInbox();
     this.voiceSpeaker?.dispose();
     await this.conductorRelay.stop().catch(() => undefined);
     await this.replier.stop().catch(() => undefined);
@@ -854,6 +863,75 @@ export class SqueakApp {
     };
   }
 
+  /**
+   * Calling in: the gateway answers your call and checks the PIN; this publishes who can take a message,
+   * transcribes the recording with Whisper and sends it through the same replier as every other surface.
+   * Off without the relay, or without whisper-cli, ffmpeg and the model (a warning says which).
+   */
+  private createMemoInbox(): MemoInbox | null {
+    const { voiceRelay, remoteDatabaseUrl, voiceWhisperModel } = this.config;
+    if (!voiceRelay || !remoteDatabaseUrl) return null;
+    const whisper = findWhisper(voiceWhisperModel);
+    if (!whisper) {
+      logger.warn("calling in is off: needs whisper-cli, ffmpeg and a speech model", { model: voiceWhisperModel });
+      return null;
+    }
+    return new MemoInbox({
+      store: new RtdbRest(remoteDatabaseUrl),
+      channel: voiceRelay.channel,
+      key: voiceRelay.key,
+      transcriber: new WhisperTranscriber(whisper),
+      targets: () => this.memoTargets(),
+      canSend: (target) => {
+        const session = this.runtime.monitor.snapshot.sessions.find((s) => replyTargetFor(s) === target);
+        return Boolean(session) && canTakeMessageNow(session!, this.router);
+      },
+      send: (target, text, onFailed) => this.router.send(target, text, onFailed),
+      caller: () => this.voiceSettings.settings.callee,
+      note: (text) => this.announce(text),
+    });
+  }
+
+  /** The chats that can take a message right now, those waiting on you first, then the newest. */
+  private memoTargets(): MemoTarget[] {
+    const snapshot = this.runtime.monitor.snapshot;
+    const needing = new Set(snapshot.attention.map((item) => item.session.key));
+    const titles = distinctTitles(snapshot.active);
+    return snapshot.active
+      .filter((session) => !session.retired && canTakeMessageNow(session, this.router))
+      .sort(
+        (a, b) =>
+          Number(needing.has(b.key)) - Number(needing.has(a.key)) ||
+          Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
+      )
+      .map((session) => {
+        const own = titles.get(session.key);
+        return { target: replyTargetFor(session), label: own ? `${cardLabel(session)} · ${own}` : cardLabel(session) };
+      });
+  }
+
+  private startMemoInbox(): void {
+    const inbox = this.memoInbox;
+    if (!inbox) return;
+    inbox.start();
+    // The list follows the fleet: a short pause so a burst of changes is one write.
+    this.memoUnwatch = this.runtime.monitor.onSnapshot(() => {
+      if (this.memoTimer) return;
+      this.memoTimer = setTimeout(() => {
+        this.memoTimer = null;
+        void inbox.publish().catch(() => undefined);
+      }, 3000);
+    });
+  }
+
+  private stopMemoInbox(): void {
+    this.memoUnwatch?.();
+    this.memoUnwatch = null;
+    if (this.memoTimer) clearTimeout(this.memoTimer);
+    this.memoTimer = null;
+    this.memoInbox?.stop();
+  }
+
   /** Whether voice is set up and who it rings: what `GET /control/voice` carries. */
   private voiceView() {
     const { voice, voiceRelay, remoteDatabaseUrl } = this.config;
@@ -863,6 +941,8 @@ export class SqueakApp {
 
   private applyVoice(request: unknown) {
     const outcome = this.voiceSettings.apply(request);
+    // Who may call in is the same setting: tell the gateway now.
+    if (outcome.ok) void this.memoInbox?.publish().catch(() => undefined);
     return outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome;
   }
 

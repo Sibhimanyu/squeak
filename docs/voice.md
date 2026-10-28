@@ -84,8 +84,32 @@ replay refusal are tested; the add-on image (Dockerfile) and the bundle running 
 Not tested against a real PBX: registration with 3CX, and the 3CX app's keypad sending RFC 2833 digits baresip accepts.
 `squeak voice-test` is that check.
 
+## Calling in
+
+Dial Squeak's extension (the one in the add-on's options) from your 3CX app, from anywhere.
+
+1. It answers only if the call is from the extension set in Squeak for Mac, Settings > Phone calls: with none set
+   nobody can call in. It then asks for the PIN (two tries).
+2. "Which chat?": the chats that can take a message now, those waiting on you first (up to six, by number).
+3. "Say your message after the beep, then press hash." (up to two minutes).
+4. The recording goes to the Mac as a small Opus file in a sealed, signed message (`voiceup`); the Mac transcribes
+   it with Whisper (local, about a third of a second for a sentence) and the gateway reads back what was heard.
+5. Press 1 to send, 2 to record again, hash to cancel. "Send" names the recording, never text: the Mac sends the
+   words it transcribed itself, through the same replier as every other surface, only if the chat can still take a
+   message, and Telegram/Cliq get a note of what was sent. At most 20 messages an hour by phone.
+
+Needs on the Mac: `whisper-cli` and `ffmpeg` (`brew install whisper-cpp ffmpeg`) and a speech model at
+`~/Library/Application Support/squeak/whisper/ggml-base.en.bin` (or `SQUEAK_VOICE_WHISPER_MODEL`). Without them
+calling in stays off and the log says which is missing. The gateway needs the Firebase rules for `voicedir`,
+`voiceup` and `voicedown` (`firebase deploy --only database`).
+
+`scripts/e2e-voice.ts` runs the whole call on one Mac with no PBX: the real SIP phone answers a second baresip that
+types the PIN and speaks a message, and Whisper transcribes it.
+
+Trust: whoever holds the channel key and passes the PIN can message a chat, as with the phone app's pairing but
+without a device key. The key lives only on the Mac and in the add-on's options.
+
 ## Later
 
-Inbound dictation: you dial Squeak's extension, speak, whisper.cpp transcribes the recording and it goes to the chosen
-chat as a message. `aufile` already writes what the caller says to a WAV; the parts missing are answering an incoming
-call, an end-of-speech rule, the transcription and picking the chat.
+Asking questions out loud ("what needs me?") on the same call, through the Cliq assistant; ending a message on
+silence instead of hash.

@@ -114,6 +114,8 @@ const schema = z.object({
   SQUEAK_VOICE_QUIET: z.string().optional(),
   SQUEAK_VOICE_BARESIP: z.string().optional(),
   SQUEAK_VOICE_BARESIP_MODULES: z.string().optional(),
+  /** A whisper.cpp ggml model for calling in; default `<support dir>/whisper/ggml-base.en.bin`. */
+  SQUEAK_VOICE_WHISPER_MODEL: z.string().optional(),
   SQUEAK_VOICE_RELAY_CHANNEL: z.string().optional(),
   SQUEAK_VOICE_RELAY_KEY: z.string().optional(),
   SQUEAK_VOICE_VOICE: z.string().optional(),
@@ -162,6 +164,8 @@ export interface SqueakConfig {
   voice: VoiceConfig | null;
   /** Calls placed by the Home Assistant gateway through the relay; wins over `voice` (src/voice/relay-line.ts). */
   voiceRelay: VoiceRelayConfig | null;
+  /** The speech model that turns a phoned-in message into words (src/voice/transcribe.ts). */
+  voiceWhisperModel: string;
   /** Null unless every two-way setting is present. */
   cliqTwoWay: {
     projectId: string;
@@ -240,6 +244,9 @@ export function loadSqueakConfig(): SqueakConfig {
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
     voice: voiceConfig(parsed, baseDir),
     voiceRelay: voiceRelayConfig(parsed),
+    voiceWhisperModel: parsed.SQUEAK_VOICE_WHISPER_MODEL?.trim()
+      ? resolve(parsed.SQUEAK_VOICE_WHISPER_MODEL.trim())
+      : path.join(baseDir, "whisper", "ggml-base.en.bin"),
     cliqTwoWay: cliqTwoWay(parsed),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
     hookPort: parsed.FLEET_HOOK_PORT,
