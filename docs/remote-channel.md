@@ -764,3 +764,35 @@ folders above `dist/telegram`, which is the same place in the checkout and in th
   `{"which":"logo"}`. `200 {"message":"Done"}`, `400 {"error": <sentence above>}`, `429` for the rate limit, `405`
   for other methods, `503` from a daemon without it (an older one: hide the button).
 - Both end in `TelegramAvatar.apply` (`src/telegram/avatar.ts`). Never show or log the token or Telegram's own words.
+
+## Phone calls (2026-10-28)
+
+Squeak can ring you when an agent waits on you and take a call in (docs/voice.md). The phone sets who it rings and
+starts a test call; neither reaches an agent, so there is no Face ID.
+
+The phone view carries `voice` when the Mac offers it (absent on an older Mac: the page is hidden):
+
+```json
+{
+  "mode": "gateway",
+  "callee": "35210",
+  "defaultCallee": null,
+  "lastTest": { "at": 0, "status": "answered", "letter": "A" }
+}
+```
+
+`mode` is `gateway` (the Home Assistant add-on places the call), `direct` (the Mac does) or `off`; `callee` is the
+extension set from an app (null until one is); `lastTest` appears once a test was asked for, with `status`
+`ringing`, `answered` (and the key pressed), `unanswered` or `failed` (and why).
+
+The command is one signed envelope, exactly these keys:
+
+```json
+{ "v": 1, "kind": "voice", "change": { "callee": "35210" }, "nonce": "…", "expiresAt": 0 }
+```
+
+`change` is exactly one of `{ "callee": "<2 to 6 digits>" }`, `{ "callee": null }` (clears it, an explicit null) or
+`{ "test": true }`. The extension is read again strictly in `src/voice/settings.ts` and ends in the same function as
+the Mac app's `POST /control/voice`; an outside number is refused here and again by the gateway. A test starts a call
+with a made-up question and answers `sent` at once (`refused` with a reason if one is already ringing or phone calls
+are not set up); how it went arrives in `voice.lastTest`.

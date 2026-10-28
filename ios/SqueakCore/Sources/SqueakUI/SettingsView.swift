@@ -223,6 +223,11 @@ struct SettingsView: View {
                             Text("New notification settings need a newer Squeak on your Mac.")
                                 .font(.footnote).foregroundStyle(Theme.muted)
                         }
+                        if snapshot.voice != nil {
+                            NavigationLink { VoiceSettingsView() } label: { Label("Phone calls", systemImage: "phone") }
+                                .frame(minHeight: 44)
+                                .accessibilityIdentifier("phone-calls")
+                        }
                     }
                 }
                 if model.awakeOffered {

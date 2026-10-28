@@ -36,6 +36,7 @@ import { historyPageDoc, liveHandle } from "./live-turn.js";
 import { subagentFeedDoc } from "./subagent-feed.js";
 import type { SubagentActivity } from "../fleet/subagent-activity.js";
 import { defaultNotifySettings, NotifySettingsStore } from "../fleet/notify-settings.js";
+import { VoiceSettingsStore } from "../voice/settings.js";
 
 const NOW = Date.parse("2026-09-25T03:00:00.000Z");
 
@@ -4300,6 +4301,128 @@ describe("RemoteBridge notification settings from the phone", () => {
     expect(off.bridge.phoneView()).not.toHaveProperty("notify");
     const verdict = await off.bridge.handleCommand(off.config, "d", off.command(fields));
     expect(verdict.result).toMatchObject({ status: "refused" });
+    off.bridge.stop();
+  });
+});
+
+describe("RemoteBridge phone-call settings from the phone", () => {
+  async function voiceT(
+    options: { offered?: boolean; testOutcome?: { ok: true } | { ok: false; reason: string } } = {},
+  ) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-voice-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    const voice = new VoiceSettingsStore(path.join(dir, "voice-settings.json"));
+    const view = () => ({ mode: "gateway", callee: voice.settings.callee, defaultCallee: null });
+    const apply = vi.fn((request: unknown) => {
+      const outcome = voice.apply(request);
+      return outcome.ok ? { ok: true as const, state: view() } : outcome;
+    });
+    const test = vi.fn(() => options.testOutcome ?? { ok: true as const });
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      ...(options.offered === false ? {} : { voice: { state: view, apply, test } }),
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const phone = device();
+    await store.set(`channels/${payload.c}/pairing/iphone-1`, {
+      box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }),
+    });
+    await bridge.tick();
+    await bridge.approve("iphone-1");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    const command = (
+      fields: Record<string, unknown>,
+      signer = phone,
+      nonce = crypto.randomBytes(16).toString("hex"),
+    ) => {
+      const box = seal(payload.k, { v: 1, kind: "voice", nonce, expiresAt: NOW + 60_000, ...fields });
+      return { box, sig: signer.sign(box), device: "iphone-1" };
+    };
+    return { bridge, config, command, apply, test, voice };
+  }
+
+  it("shows who it rings, sets the extension, and clears it", async () => {
+    const t = await voiceT();
+    expect(t.bridge.phoneView().voice).toEqual({ mode: "gateway", callee: null, defaultCallee: null });
+    const set = await t.bridge.handleCommand(t.config, "v1", t.command({ change: { callee: "35210" } }));
+    expect(set.result).toEqual({ id: "v1", status: "sent" });
+    expect(t.voice.settings.callee).toBe("35210");
+    expect(t.bridge.phoneView().voice).toMatchObject({ callee: "35210" });
+    const cleared = await t.bridge.handleCommand(t.config, "v2", t.command({ change: { callee: null } }));
+    expect(cleared.result).toMatchObject({ status: "sent" });
+    expect(t.voice.settings.callee).toBeNull();
+    t.bridge.stop();
+  });
+
+  it("starts a test call and answers at once, touching no setting", async () => {
+    const t = await voiceT();
+    const verdict = await t.bridge.handleCommand(t.config, "t1", t.command({ change: { test: true } }));
+    expect(verdict.result).toEqual({ id: "t1", status: "sent" });
+    expect(t.test).toHaveBeenCalledTimes(1);
+    expect(t.apply).not.toHaveBeenCalled();
+    t.bridge.stop();
+  });
+
+  it("passes the Mac's reason when a test cannot start", async () => {
+    const t = await voiceT({ testOutcome: { ok: false, reason: "A test call is already ringing." } });
+    const verdict = await t.bridge.handleCommand(t.config, "t2", t.command({ change: { test: true } }));
+    expect(verdict.result).toEqual({ id: "t2", status: "refused", reason: "A test call is already ringing." });
+    t.bridge.stop();
+  });
+
+  it("refuses every malformed change and changes nothing", async () => {
+    const t = await voiceT();
+    const bad: Record<string, unknown>[] = [
+      { change: { callee: "+919876543210" } },
+      { change: { callee: "1" } },
+      { change: { callee: 101 } },
+      { change: { callee: "101", test: true } },
+      { change: { test: false } },
+      { change: { test: "true" } },
+      { change: { test: true, callee: null } },
+      { change: {} },
+      { change: [] },
+      { change: null },
+      {},
+      { change: { callee: "101" }, extra: 1 },
+      { change: { callee: "101" }, v: 2 },
+    ];
+    for (const fields of bad) {
+      const verdict = await t.bridge.handleCommand(t.config, "x", t.command(fields));
+      expect(verdict.result).toMatchObject({ status: "refused" });
+    }
+    expect(t.voice.settings.callee).toBeNull();
+    expect(t.test).not.toHaveBeenCalled();
+    t.bridge.stop();
+  });
+
+  it("refuses a replay, a stranger's signature, and a Mac without phone calls", async () => {
+    const t = await voiceT();
+    const fields = { change: { callee: "35210" } };
+    const nonce = "v".repeat(32);
+    expect((await t.bridge.handleCommand(t.config, "a", t.command(fields, undefined, nonce))).result).toMatchObject({
+      status: "sent",
+    });
+    expect((await t.bridge.handleCommand(t.config, "b", t.command(fields, undefined, nonce))).result).toMatchObject({
+      status: "refused",
+    });
+    const stranger = await t.bridge.handleCommand(t.config, "c", t.command({ change: { test: true } }, device()));
+    expect(stranger.write).toBe(false);
+    expect(t.test).not.toHaveBeenCalled();
+    t.bridge.stop();
+
+    const off = await voiceT({ offered: false });
+    expect(off.bridge.phoneView()).not.toHaveProperty("voice");
+    expect((await off.bridge.handleCommand(off.config, "d", off.command(fields))).result).toMatchObject({
+      status: "refused",
+    });
     off.bridge.stop();
   });
 });

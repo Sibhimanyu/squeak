@@ -3,19 +3,11 @@ import path from "node:path";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { loadSqueakConfig } from "../squeak/config.js";
 import { BaresipLine } from "./baresip-line.js";
-import { CallDialog, type CallScript } from "./script.js";
+import { CallDialog } from "./script.js";
+import { TEST_SCRIPT } from "./test-script.js";
 import { RelayLine } from "./relay-line.js";
 import { VoiceSettingsStore } from "./settings.js";
 import { MacSpeaker } from "./tts.js";
-
-const TEST_SCRIPT: CallScript = {
-  greeting: "Squeak. This is a test call.",
-  question: "Pick a colour. Press 1 for blue, or press 2 for green. Press star to hear this again, or hash to hang up.",
-  options: [
-    { letter: "A", title: "blue" },
-    { letter: "B", title: "green" },
-  ],
-};
 
 /**
  * `squeak voice-test`: rings your phone with a made-up question and prints the key you pressed.

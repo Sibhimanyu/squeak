@@ -697,6 +697,15 @@ export interface RemoteBridgeDependencies {
     state(): unknown;
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
   } | null;
+  /**
+   * Phone calls (voice/): who they ring, and a test call. Absent: phones hide the page, and a change is refused.
+   * `test` starts a call with a made-up question and answers at once; how it went is in `state()`'s `lastTest`.
+   */
+  voice?: {
+    state(): unknown;
+    apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
+    test(): { ok: true } | { ok: false; reason: string };
+  } | null;
   hotspot?: {
     state(): HotspotState;
     apply(request: unknown): Promise<{ ok: true; state: HotspotState } | { ok: false; reason: string }>;
@@ -1654,6 +1663,9 @@ export class RemoteBridge {
     }
     if (kind === "notify") {
       return this.handleNotify(device, id, command as unknown as Record<string, unknown>);
+    }
+    if (kind === "voice") {
+      return this.handleVoice(device, id, command as unknown as Record<string, unknown>);
     }
     if (kind === "telegramAvatar") {
       return this.handleTelegramAvatar(device, id, command as unknown as Record<string, unknown>);
@@ -3007,6 +3019,44 @@ export class RemoteBridge {
   }
 
   /**
+   * Phone-call settings: `{ v: 1, kind: "voice", change: { callee: "101" | null } | { test: true }, nonce, expiresAt }`,
+   * exactly these keys. Signature, freshness and nonce have already held. A callee is read again strictly in
+   * voice/settings.ts (an internal extension or null) and ends in the same function as the Mac app's route; a test
+   * starts the made-up call and answers at once. Neither reaches an agent.
+   */
+  private handleVoice(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): { write: boolean; result: Record<string, unknown> } {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `voice: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const voice = this.deps.voice;
+    if (!voice || command.v !== 1) {
+      return refuse("This Mac can't change phone calls from a phone.", "not available");
+    }
+    if (Object.keys(command).sort().join(",") !== "change,expiresAt,kind,nonce,v") {
+      return refuse("Not a phone-call setting this Mac understands.", "bad keys");
+    }
+    const change = command.change;
+    const isTest =
+      typeof change === "object" &&
+      change !== null &&
+      !Array.isArray(change) &&
+      Object.keys(change).join(",") === "test" &&
+      (change as Record<string, unknown>).test === true;
+    const outcome = isTest ? voice.test() : voice.apply(change);
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.nudgePublish(0);
+    this.log(device.name, "sent", isTest ? "voice test" : "voice settings");
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
    * Set the bot's Telegram photo to Squeak's logo: `{ v: 1, kind: "telegramAvatar", nonce, expiresAt }`, exactly
    * these keys. Signature, freshness and nonce have already held; it ends in the Mac app route's function, with
    * its one-try-per-30-s limit. Success is `sent`; a refusal carries one of its fixed sentences.
@@ -3190,6 +3240,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeSleepProblem) +
       JSON.stringify(view.hotspot) +
       JSON.stringify(view.notify) +
+      JSON.stringify(view.voice) +
       JSON.stringify(view.telegramAvatar) +
       JSON.stringify(view.macControls) +
       JSON.stringify(view.local) +
@@ -3310,6 +3361,8 @@ export class RemoteBridge {
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
       // What Telegram and Cliq may push, and which of them this Mac has. Absent: the page is hidden.
       ...(this.deps.notify ? { notify: this.deps.notify.state() } : {}),
+      // Who phone calls ring, whether they are set up, and how the last test went. Absent: the page is hidden.
+      ...(this.deps.voice ? { voice: this.deps.voice.state() } : {}),
       // The Mac can set the Telegram bot's photo to Squeak's logo. Absent on an older Mac: the button is hidden.
       ...(this.deps.telegramAvatar ? { telegramAvatar: true as const } : {}),
       // Usage › Details is offered: the numbers themselves come only in a `stats` command's answer.

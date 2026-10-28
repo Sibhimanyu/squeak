@@ -449,6 +449,7 @@ enum DemoData {
                                  media: .init(playing: args.contains("-squeak-demo-playing")))
         if args.contains("-squeak-demo-films") { demo.films = films }
         demo.telegramAvatar = true
+        demo.voice = VoiceView(mode: "gateway", callee: "101")
         demo.notify = .init(
             telegram: .init(),
             cliq: .init(finished: "off", quiet: .init(from: "22:00", to: "07:00")),
