@@ -4,6 +4,7 @@
 // it. Everything the channel supplied goes in through `h` as text.
 
 import { h } from "./dom.js";
+import { renderFilmsCard } from "./films-card.js";
 import { chevronDown, chevronRight, chevronUp, history, projectMark } from "./icons.js";
 import {
   age,
@@ -262,6 +263,13 @@ export function homeNodes(model, env) {
         ),
       ),
     ),
+    env.hasWorkspaces
+      ? h(
+          "button",
+          { class: "btn primary", type: "button", "data-action": "new-chat", onclick: () => env.newChat?.() },
+          "New chat",
+        )
+      : null,
     model.summary && !model.searching ? h("div", { class: "summary" }, model.summary) : null,
     stripNode(env.strip),
   );
@@ -300,6 +308,10 @@ export function homeNodes(model, env) {
     }
     return nodes;
   }
+
+  // RasanAI films, only when the Mac publishes them (`env.ctx` is the screen context; absent draws nothing).
+  const filmsCard = renderFilmsCard(env.ctx);
+  if (filmsCard) nodes.push(filmsCard);
 
   // With nothing running Earlier is open in place, so the newest quiet chats are one tap from reviving.
   const earlierOpen = env.earlierOpen ?? model.sessions.length === 0;

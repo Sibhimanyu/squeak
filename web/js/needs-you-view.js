@@ -8,6 +8,8 @@ import { h } from "./dom.js";
 import { agentName, stripMarkdown } from "./format.js";
 import { chevronDown, chevronRight, projectMark } from "./icons.js";
 import { card as cardFor, cut, hint, layout, ordered, outcome as outcomeFor } from "./needs-you.js";
+import { filmLine, stateWord } from "./films-logic.js";
+import { askCard } from "./plan-question-card.js";
 import { age, displayTitle, projectName, read, subtitle } from "./presentation.js";
 
 const plain = (text) => stripMarkdown(text, { keepLines: true });
@@ -154,25 +156,20 @@ function control(name, session, cardData, locked, env) {
     case "choices":
       return options(session, locked, env);
     case "answerQuestion":
-      return h(
-        "div",
-        { class: "dnote" },
-        (session.question?.questions ?? []).map((prompt) =>
-          h("p", { class: "message strong" }, plain(prompt.question)),
-        ),
-        h("p", { class: "note" }, "Answer it in Squeak on your Mac or iPhone. Squeak for Web only sends replies."),
-      );
-    case "plan":
-      return h(
-        "div",
-        { class: "dnote" },
-        h("p", { class: "message" }, cut(plain(session.question?.plan ?? ""), 600)),
-        h(
-          "p",
-          { class: "note" },
-          "Approve the plan in Squeak on your Mac or iPhone. Squeak for Web only sends replies.",
-        ),
-      );
+    case "plan": {
+      // Answered in place when the page lends the extras (plan-question-card.js); read-only otherwise.
+      const asked = env.extras ? askCard(session, env.extras) : null;
+      if (asked) return asked;
+      return name === "plan"
+        ? h("div", { class: "dnote" }, h("p", { class: "message" }, cut(plain(session.question?.plan ?? ""), 600)))
+        : h(
+            "div",
+            { class: "dnote" },
+            (session.question?.questions ?? []).map((prompt) =>
+              h("p", { class: "message strong" }, plain(prompt.question)),
+            ),
+          );
+    }
     case "approvalNote":
       return h(
         "p",
@@ -243,18 +240,40 @@ function compactRow(session, env) {
   );
 }
 
+/** A film waiting on you: one row that opens its screen. */
+function filmRow(film, env) {
+  return h(
+    "button",
+    { class: "drow", type: "button", "data-film": film.id, onclick: () => env.openFilm(film.id) },
+    h(
+      "span",
+      { class: "grow" },
+      h("span", { class: "dtitle" }, film.title),
+      h("span", { class: "dask" }, filmLine(film) ?? ""),
+      h("span", { class: "dmeta" }, `Film · ${stateWord(film)} · ${age(film.updatedAt)}`),
+    ),
+    chevronRight(),
+  );
+}
+
 /** The pane: head (with Back where the list is hidden), then the cards or the empty page. */
 export function needsPane(env) {
   const waiting = ordered(env.sessions);
+  const films = env.films ?? [];
   const lay = layout(waiting.length);
   const head = h(
     "div",
     { class: "chat-head" },
     h("button", { class: "btn quiet back", type: "button", onclick: env.actions.close }, "Back"),
-    h("div", { class: "grow" }, h("h2", null, "Needs you"), h("div", { class: "meta" }, `${waiting.length} waiting`)),
+    h(
+      "div",
+      { class: "grow" },
+      h("h2", null, "Needs you"),
+      h("div", { class: "meta" }, `${waiting.length + films.length} waiting`),
+    ),
   );
   const body = h("div", { class: "timeline needs-body", tabindex: "-1" });
-  if (waiting.length === 0) {
+  if (waiting.length === 0 && films.length === 0) {
     body.append(
       h(
         "div",
@@ -266,6 +285,7 @@ export function needsPane(env) {
     );
     return [head, body];
   }
+  for (const film of films) body.append(filmRow(film, env));
   waiting.slice(0, lay.full).forEach((s) => body.append(decisionCard(s, env, { prominent: waiting.length === 1 })));
   if (lay.moreLine) {
     body.append(h("div", { class: "group" }, lay.moreLine));

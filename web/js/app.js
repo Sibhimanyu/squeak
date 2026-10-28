@@ -5,20 +5,30 @@
 import { RENAME_MAX_CHARS } from "./channel.js";
 import { HistoryStore, OutboxStore, ReadStore } from "./chat-stores.js";
 import { firstNonEmpty, isStarting, queueCards, rows as timelineRows } from "./chat-timeline.js";
+import { createExtras } from "./chat-extras.js";
 import { chatNodes } from "./chat-view.js";
+import { createCommands } from "./commands.js";
 import { h } from "./dom.js";
+import { filmsWaiting, readFilms, waitingOnYou } from "./films-logic.js";
+import { openFilm } from "./film-state.js";
+import { hiddenChats, isHiddenHere } from "./hidden-chats.js";
 import { agentName, groups } from "./format.js";
 import { homeModel, homeNodes } from "./home-view.js";
 import { KeyStore } from "./key-store.js";
 import { reconciled } from "./live.js";
 import { compose as composeStrip, liveness, splashShows, SPLASH_CAP_MS } from "./mac-strip.js";
+import { navNodes } from "./nav-view.js";
 import { needsPane } from "./needs-you-view.js";
 import { awaitApproval, beginPairing, channelFor, deviceNameFor } from "./pairing.js";
 import { PairingError } from "./pairing-link.js";
+import { duck, waitingScreen, welcomeScreen } from "./pairing-view.js";
 import { groupingPref, verbosePref } from "./prefs.js";
-import { displayTitle, isUnread } from "./presentation.js";
+import { displayTitle, isUnread, needsYouCount } from "./presentation.js";
+import { getScreen, isScreen, loadScreen, navEntries, screenState } from "./router.js";
+import "./screens.js";
 import { Outbox } from "./sends.js";
 import { Sync } from "./sync.js";
+import { workspaces as workspaceList } from "./view-model.js";
 
 const root = document.getElementById("app");
 const store = new KeyStore();
@@ -42,7 +52,7 @@ const ui = {
   grouping: "projects",
   /** Everything kept beside the keys that is not a cache: what the preferences file holds. */
   prefs: {},
-  /** Which pane the detail side shows besides a chat: "needs" is the Needs you inbox. */
+  /** Which pane the detail side shows besides a chat: "needs" is the Needs you inbox, else a registered screen's id (router.js). */
   pane: null,
   query: "",
   /** Groups opened in place (`p:<project>`, `s:<state>`), and Earlier (null: open only when nothing is active). */
@@ -62,6 +72,8 @@ const ui = {
   lookingSince: 0,
   read: null,
   outbox: null,
+  /** Typed commands beyond replies (commands.js), for the registered screens. */
+  commands: null,
   history: null,
   /** The newest history each chat had when last open (and kept, bounded, in IndexedDB). */
   lastHistory: {},
@@ -201,6 +213,7 @@ async function startPaired() {
     onChange: touch,
   });
   ui.outbox.restore(kept);
+  ui.commands = createCommands({ sync: ui.sync });
   ui.syncState = ui.sync.state;
   ui.sync.watch(ui.selected);
   ui.sync.start();
@@ -283,6 +296,66 @@ function closePane() {
   render(true);
 }
 
+/** The navigation: "home", "needs" or a registered screen's id. Opening one closes the open chat. */
+function navigate(id) {
+  if (id === "needs") return openNeeds();
+  if (id !== "home" && !isScreen(id)) return;
+  ui.pane = id === "home" ? null : id;
+  select(null);
+  render(true);
+}
+
+/** What a registered screen is handed (the contract is in router.js). */
+function screenContext() {
+  return {
+    view: ui.syncState?.view ?? null,
+    record: ui.record,
+    sync: ui.sync,
+    commands: ui.commands,
+    outbox: ui.outbox,
+    prefs: { get: (name) => ui.prefs[name], save: (change) => savePrefs(change) },
+    navigate,
+    touch,
+    selectChat: select,
+    settings: {
+      verbose: ui.verbose,
+      setVerbose: (on) => setVerbose(on),
+      confirmForget: ui.confirmForget,
+      setConfirmForget: (value) => {
+        ui.confirmForget = value;
+        render(true);
+      },
+      forget: () => forget(),
+    },
+  };
+}
+
+/** The open screen's nodes: its module loads on first open, and a failure says so instead of leaving a blank pane. */
+function screenNodes(id) {
+  const screen = getScreen(id);
+  const state = screenState(id);
+  if (state.status === "ready") {
+    try {
+      const nodes = state.module.render(screenContext());
+      return [nodes ?? []].flat();
+    } catch {
+      return [h("p", { class: "error", role: "alert" }, `${screen.title} could not be drawn.`)];
+    }
+  }
+  if (state.status === "error") {
+    return [
+      h("p", { class: "error", role: "alert" }, `${screen.title} could not be loaded.`),
+      h(
+        "button",
+        { class: "btn", type: "button", onclick: () => void loadScreen(id).then(() => render(true)) },
+        "Try again",
+      ),
+    ];
+  }
+  if (state.status === "idle") void loadScreen(id).then(() => render(true));
+  return [h("p", { class: "note", role: "status" }, "Loading…")];
+}
+
 async function forget(message = null) {
   ui.pairing?.abort();
   ui.pairing = null;
@@ -296,6 +369,7 @@ async function forget(message = null) {
     await channelFor(ui.record).cancelPairing();
   }
   await store.forget().catch(() => undefined);
+  extras.reset();
   Object.assign(ui, {
     screen: "unpaired",
     error: message,
@@ -307,6 +381,7 @@ async function forget(message = null) {
     confirmChoice: null,
     confirmForget: false,
     outbox: null,
+    commands: null,
     history: null,
     read: null,
     lastHistory: {},
@@ -402,6 +477,21 @@ function sendFrom(session, text, mode = "queue") {
   return ui.outbox.send(session, text, mode);
 }
 
+// The chat's extras (chat-extras.js): answering a plan or question, photos, earlier history, the chat menu, diff.
+const extras = createExtras({
+  commands: () => ui.commands,
+  channel: () => ui.sync?.channel ?? null,
+  prefs: { get: (name) => ui.prefs[name], save: (change) => savePrefs(change) },
+  touch,
+  send: (session, text, mode) => sendFrom(session, text, mode),
+  history: (key) =>
+    firstNonEmpty(ui.syncState?.live?.key === key ? ui.syncState.live.history : null, ui.lastHistory[key]) ?? [],
+  selected: () => ui.selected,
+  select,
+  view: () => ui.syncState?.view ?? null,
+  verbose: () => ui.verbose,
+});
+
 /** The Mac renames the chat in Conductor; the new name shows with its next view. */
 function renameEnv(session) {
   const state = ui.renaming?.key === session.key ? ui.renaming : null;
@@ -456,13 +546,17 @@ async function renameChat(session) {
 
 /** What the Needs you pane needs from this page. */
 function needsEnv(sessions, icons) {
+  const films = (readFilms(ui.syncState?.view ?? null) ?? []).filter(waitingOnYou);
   return {
     sessions,
+    films,
+    openFilm: (id) => openFilm(navigate, id),
     icons,
     drafts: ui.cardDrafts,
     showFull: ui.showFull,
     opened: ui.cardOpened,
     confirmChoice: ui.confirmChoice,
+    extras,
     sends: (key) => ui.outbox.list(key),
     actions: {
       close: closePane,
@@ -527,6 +621,7 @@ function chatEnv(session) {
   });
   const working = live?.working === true;
   return {
+    extras,
     rows,
     cards: queueCards(session, live, sends, ui.outbox.hiddenQueued),
     verbose: ui.verbose,
@@ -640,9 +735,14 @@ function render(force = false) {
         ? splashScreen()
         : pairedScreen()
       : ui.screen === "waiting"
-        ? waitingScreen()
+        ? waitingScreen({
+            macName: ui.record?.macName,
+            deviceName: ui.record?.deviceName,
+            code: ui.code,
+            cancel: () => void forget(),
+          })
         : ui.screen === "unpaired"
-          ? welcomeScreen()
+          ? welcomeScreen({ error: ui.error, pair: (text) => void pair(text) })
           : "",
   );
 
@@ -674,69 +774,9 @@ function render(force = false) {
   }
 }
 
-function duck() {
-  return h("img", { src: "assets/squeak-duck.svg", alt: "", width: 96, height: 83 });
-}
-
 /** The duck while the Mac's first view of this load comes in (never longer than 2.5 s). */
 function splashScreen() {
   return h("main", { class: "splash", role: "status" }, duck(), h("p", null, "Checking in with your Mac…"));
-}
-
-function welcomeScreen() {
-  const field = h("textarea", {
-    class: "field",
-    id: "code",
-    "aria-label": "Pairing code",
-    placeholder: "squeak://pair?d=…",
-    spellcheck: "false",
-    autocomplete: "off",
-    autocapitalize: "off",
-    autocorrect: "off",
-  });
-  const button = h("button", { class: "btn primary", type: "button" }, "Pair this browser");
-  const submit = () => {
-    const text = field.value;
-    field.value = "";
-    button.disabled = true;
-    void pair(text);
-  };
-  button.addEventListener("click", submit);
-  return h(
-    "main",
-    { class: "welcome" },
-    duck(),
-    h("h1", null, "Squeak for Web"),
-    h("p", null, "Answer your agents from this browser. Paste the pairing code from your Mac, then approve it there."),
-    field,
-    h("div", { class: "actions" }, button),
-    ui.error ? h("p", { class: "error", role: "alert" }, ui.error) : null,
-    h(
-      "p",
-      { class: "note" },
-      "The code is the squeak://pair link your Mac's QR code carries. This browser keeps its keys in its own storage and never sends them anywhere.",
-    ),
-  );
-}
-
-function waitingScreen() {
-  return h(
-    "main",
-    { class: "welcome" },
-    duck(),
-    h("h1", null, "Approve on your Mac"),
-    h(
-      "p",
-      null,
-      `Squeak on ${ui.record?.macName ?? "your Mac"} shows a request from ${ui.record?.deviceName ?? "this browser"}. Check that it shows this code, then approve it.`,
-    ),
-    h("div", { class: "code", "aria-label": "Pairing code to compare" }, ui.code ?? ""),
-    h(
-      "div",
-      { class: "actions" },
-      h("button", { class: "btn", type: "button", onclick: () => void forget() }, "Cancel"),
-    ),
-  );
 }
 
 function pairedScreen() {
@@ -747,6 +787,8 @@ function pairedScreen() {
   const all = [...active, ...recent];
   const session =
     all.find((candidate) => candidate.key === ui.selected) ?? (ui.selected ? ui.seen.get(ui.selected) : null) ?? null;
+  const hidden = hiddenChats(ui.prefs.hiddenChats);
+  const shown = (list) => list.filter((candidate) => !isHiddenHere(hidden, candidate));
   const alive = liveness({ aliveAt: ui.syncState?.aliveAt, lookingSince: ui.lookingSince });
   const icons = view?.projectIcons ?? null;
 
@@ -779,6 +821,9 @@ function pairedScreen() {
     problem: null,
     search: searchField,
     visible: [],
+    ctx: screenContext(),
+    hasWorkspaces: (workspaceList(view) ?? []).length > 0,
+    newChat: () => navigate("new-chat"),
     starting: (candidate) => (ui.outbox ? isStarting(candidate, ui.outbox.list(candidate.key)) : false),
     actions: {
       select,
@@ -796,13 +841,21 @@ function pairedScreen() {
       showMore: () => ui.sync.showMoreRecent(),
     },
   };
-  const model = homeModel({ view, active, recent, seen: env.seen, query: ui.query, grouping: ui.grouping });
+  const model = homeModel({
+    view,
+    active: shown(active),
+    recent: shown(recent),
+    seen: env.seen,
+    query: ui.query,
+    grouping: ui.grouping,
+  });
   const list = h("nav", { class: "list", "aria-label": "Sessions" }, homeNodes(model, env));
   ui.visible = env.visible;
 
   const detail = h("section", { class: "detail" });
   if (session) detail.append(...chatNodes(session, chatEnv(session)));
   else if (ui.pane === "needs") detail.append(...needsPane(needsEnv(active, icons)));
+  else if (ui.pane !== null && isScreen(ui.pane)) detail.append(...screenNodes(ui.pane));
   else {
     detail.append(
       h(
@@ -815,36 +868,12 @@ function pairedScreen() {
     );
   }
 
-  const footer = h(
-    "footer",
-    { class: "foot" },
-    h("span", { class: "grow" }, "Squeak for Web"),
-    h(
-      "label",
-      { class: "toggle", title: "Streams the open chat's whole turn and its history from your Mac" },
-      h("input", {
-        type: "checkbox",
-        checked: ui.verbose,
-        onchange: (event) => void setVerbose(event.target.checked),
-      }),
-      "Show thinking live",
-    ),
-    ui.confirmForget
-      ? [
-          h("span", null, "Wipe this browser's keys?"),
-          h("button", { class: "btn", type: "button", onclick: () => void forget() }, "Forget"),
-          h(
-            "button",
-            { class: "btn quiet", type: "button", onclick: () => ((ui.confirmForget = false), render(true)) },
-            "Keep",
-          ),
-        ]
-      : h(
-          "button",
-          { class: "btn quiet", type: "button", onclick: () => ((ui.confirmForget = true), render(true)) },
-          "Forget this browser",
-        ),
-  );
+  const tabs = navNodes({
+    entries: navEntries(),
+    current: session ? "home" : (ui.pane ?? "home"),
+    badges: { needs: needsYouCount(active) + filmsWaiting(view) },
+    onSelect: navigate,
+  });
 
   return h(
     "div",
@@ -852,7 +881,7 @@ function pairedScreen() {
     bar,
     ui.syncState?.error ? h("div", { class: "banner", role: "status" }, ui.syncState.error) : null,
     h("div", { class: session || ui.pane ? "layout open" : "layout" }, list, detail),
-    footer,
+    tabs,
   );
 }
 

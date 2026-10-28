@@ -215,13 +215,13 @@ describe("presence", () => {
     const w = await world();
     await w.channel.touchPresence();
     expect(Object.keys(await presenceOf(w)).sort()).toEqual(["at", "caps"]);
-    expect((await presenceOf(w)).caps).toEqual(["z", "split"]);
+    expect((await presenceOf(w)).caps).toEqual(["z", "split", "films"]);
   });
 
   it("names the open chat and asks for more recent chats, as the iPhone does", async () => {
     const w = await world();
     await w.channel.touchPresence({ watching: KEY, recent: 30 });
-    expect(await presenceOf(w)).toMatchObject({ watching: KEY, recent: 30, caps: ["z", "split"] });
+    expect(await presenceOf(w)).toMatchObject({ watching: KEY, recent: 30, caps: ["z", "split", "films"] });
     await w.channel.touchPresence({ watching: null, recent: 10 });
     expect(Object.keys(await presenceOf(w)).sort()).toEqual(["at", "caps"]); // the Mac's default is not asked for
     await w.channel.touchPresence({ recent: 500 });

@@ -80,6 +80,7 @@ describe("firebase.json for squeak-mac.web.app", () => {
         "script-src": "'self'",
         "style-src": "'self'",
         "img-src": "'self' data:",
+        "media-src": "blob:",
         "connect-src": "https://*.firebasedatabase.app https://*.firebaseio.com",
         "frame-ancestors": "'none'",
         "base-uri": "'none'",

@@ -8,11 +8,11 @@ tells you, at a glance, which ones need you. When an agent finishes or stops
 to ask something, you can read what it said and answer it from your Mac, your
 iPhone, or Telegram.
 
-| Surface                                          | What it does                                                                                                                                           |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Squeak for Mac** (`/Applications/Squeak.app`)  | A native menu-bar app: every session grouped by what needs you; the agent's full last message; one-tap answers to lettered questions; replies; a quick composer; Settings for Telegram, Zoho Cliq and iPhone pairing. Updates itself (Sparkle). |
-| **Squeak for iPhone**                            | The same list and answers, from anywhere. Installed through SideStore.                                                                                 |
-| **Telegram**                                     | Push cards when an agent is blocked or a Conductor chat finishes, with buttons to answer.                                                              |
+| Surface                                         | What it does                                                                                                                                                                                                                                    |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Squeak for Mac** (`/Applications/Squeak.app`) | A native menu-bar app: every session grouped by what needs you; the agent's full last message; one-tap answers to lettered questions; replies; a quick composer; Settings for Telegram, Zoho Cliq and iPhone pairing. Updates itself (Sparkle). |
+| **Squeak for iPhone**                           | The same list and answers, from anywhere. Installed through SideStore.                                                                                                                                                                          |
+| **Telegram**                                    | Push cards when an agent is blocked or a Conductor chat finishes, with buttons to answer.                                                                                                                                                       |
 
 The design system every surface follows is in [`DESIGN.md`](DESIGN.md).
 
@@ -93,6 +93,17 @@ Set `SQUEAK_REMOTE_PROJECT` in Squeak's `.env` to your Firebase project id
 (see `firebase/`), open Squeak on the Mac, choose **iPhone → Pair an iPhone**,
 and scan the code with the iPhone app. Releases are built with
 `ios/scripts/release.sh` and installed through SideStore.
+
+### Squeak for Web (no install)
+
+<https://squeak-mac.web.app/> is the phone option that needs no install: open it
+in any browser. It has the same features as the iPhone app: new chats with
+presets and split the work, answering plans and questions, queue and steer,
+Mac controls, keep awake, notifications, usage and films review. It does not
+have Face ID or the direct same-Wi-Fi route. Pair by scanning the code from
+**iPhone** in Squeak for Mac's Settings with the page's camera button, or paste
+the pairing link. It uses the same Firebase project (`SQUEAK_REMOTE_PROJECT`)
+as the iPhone app, and the iPhone app stays optional (SideStore).
 
 ### Zoho Cliq (optional)
 

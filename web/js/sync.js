@@ -225,6 +225,22 @@ export class Sync {
   async reply(session, text, { mode, messageId, onId } = {}) {
     const { id, document } = await this.channel.replyDocument(session, text, this.signingKey, { mode, messageId });
     onId?.(id);
+    return this.#deliver(id, document);
+  }
+
+  /**
+   * Any other signed command, with the same discipline as `reply`: `make` returns `{ id, document }` (a
+   * `channel.<kind>Document(...)`), and the answer is the Mac's own, or `{ status: "withdrawn" }` (taken back
+   * off the channel, so it can never run) or `{ status: "unconfirmed" }` (nothing is known). Throws only when
+   * the write failed and the command was proven taken back. Never resends.
+   */
+  async deliver(make, { onId } = {}) {
+    const { id, document } = await make();
+    onId?.(id);
+    return this.#deliver(id, document);
+  }
+
+  async #deliver(id, document) {
     const wait = (ms) =>
       new Promise((resolve) => {
         this.pending.set(id, { resolve, deadline: this.channel.now() + ms });
