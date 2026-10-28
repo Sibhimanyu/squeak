@@ -1,11 +1,22 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { logger } from "../utils/logger.js";
-import { BaresipLine } from "./baresip-line.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+import type { CallResult } from "./baresip-line.js";
+import type { CallDialog } from "./dialog.js";
 import { readVoiceConfig, readVoiceRelayConfig, type VoiceEnv } from "./config.js";
 import { VoiceGateway } from "./gateway.js";
-import { EspeakSpeaker } from "./tts.js";
+import { handleIncoming } from "./inbound-flow.js";
+import { dirPath, readDirectory } from "./memo-protocol.js";
+import { runDialog, type Phone } from "./phone.js";
+import { SipPhone } from "./sip-phone.js";
+import { RelayUplink } from "./uplink.js";
+import { EspeakSpeaker, PiperSpeaker, type Speaker } from "./tts.js";
 
 /** Where Home Assistant puts an add-on's options. */
 const ADDON_OPTIONS = "/data/options.json";
@@ -22,6 +33,7 @@ const OPTION_TO_ENV: Record<string, keyof VoiceEnv | "SQUEAK_REMOTE_DATABASE_URL
   callee: "SQUEAK_VOICE_CALLEE",
   pin: "SQUEAK_VOICE_PIN",
   transport: "SQUEAK_VOICE_TRANSPORT",
+  speech: "SQUEAK_VOICE_SPEECH",
 };
 
 /** An add-on's options file, as the same settings the Mac reads from `.env`. */
@@ -51,6 +63,53 @@ function databaseUrl(value: string | undefined): string {
   throw new Error("database_url must be your Firebase Realtime Database URL (https://….firebasedatabase.app)");
 }
 
+/** An outbound call on the shared phone: ring, then the dialog. */
+export function phoneLine(phone: Phone): {
+  call(callee: string, dialog: CallDialog): Promise<CallResult>;
+} {
+  return {
+    async call(callee, dialog) {
+      const dialled = await phone.dial(callee);
+      if (dialled.status === "unanswered") return { status: "unanswered" };
+      if (dialled.status === "failed") return { status: "failed", reason: dialled.reason };
+      return runDialog(dialled.call, dialog);
+    },
+  };
+}
+
+const run = promisify(execFile);
+
+/** A recorded call as a small Opus memo: about 2 KB a second, which is what keeps it inside one database document. */
+async function encodeOpus(wavFile: string): Promise<Buffer> {
+  const out = path.join(os.tmpdir(), `squeak-memo-${process.pid}-${Date.now()}.ogg`);
+  try {
+    await run("ffmpeg", ["-y", "-loglevel", "error", "-i", wavFile, "-c:a", "libopus", "-b:a", "16k", out], {
+      timeout: 30_000,
+    });
+    return fs.readFileSync(out);
+  } finally {
+    fs.rmSync(out, { force: true });
+  }
+}
+
+/** Piper when the image carries it (its paths are in the environment and exist), else the plain voice. */
+export function chooseSpeaker(env: Record<string, string | undefined>): Speaker {
+  const binary = env.SQUEAK_PIPER_BIN;
+  const model = env.SQUEAK_PIPER_MODEL;
+  const plain = new EspeakSpeaker();
+  // "plain" for a small machine: no neural model is ever loaded.
+  if (env.SQUEAK_VOICE_SPEECH?.toLowerCase() === "plain") {
+    logger.info("squeak voice gateway speaks with espeak-ng (speech: plain)");
+    return plain;
+  }
+  if (binary && model && fs.existsSync(binary) && fs.existsSync(model)) {
+    logger.info("squeak voice gateway speaks with piper");
+    return new PiperSpeaker({ binary, model }, plain);
+  }
+  logger.info("squeak voice gateway speaks with espeak-ng");
+  return plain;
+}
+
 /** `squeak voice-gateway`: runs until stopped. Returns the exit code if it cannot start. */
 export async function runGateway(): Promise<number> {
   const env: Record<string, string | undefined> = fs.existsSync(ADDON_OPTIONS)
@@ -66,19 +125,38 @@ export async function runGateway(): Promise<number> {
     if (!voice.pin) {
       throw new Error("Set a PIN: without one a call could not take an answer, and there would be no point.");
     }
-    const speaker = new EspeakSpeaker();
+    const speaker = chooseSpeaker(env);
+    const store = new RtdbRest(databaseUrl(env.SQUEAK_REMOTE_DATABASE_URL));
+    // One phone, registered for as long as the gateway runs: it rings you for questions and answers when you call in.
+    const phone = new SipPhone({ line: voice.line, speaker });
     const gateway = new VoiceGateway({
-      store: new RtdbRest(databaseUrl(env.SQUEAK_REMOTE_DATABASE_URL)),
+      store,
       channel: relay.channel,
       key: relay.key,
-      line: new BaresipLine(voice.line, speaker),
+      line: phoneLine(phone),
       callee: voice.callee,
       pin: voice.pin,
     });
+    const pin = voice.pin;
+    phone.onIncoming((incoming) => {
+      void handleIncoming(incoming, {
+        pin,
+        directory: async () => {
+          const doc = await store.get(dirPath(relay.channel));
+          return doc ? readDirectory(relay.key, doc, Date.now()) : null;
+        },
+        uplink: new RelayUplink({ store, channel: relay.channel, key: relay.key }),
+        encode: encodeOpus,
+      }).catch((error: unknown) =>
+        logger.warn("voice call-in failed", { error: error instanceof Error ? error.message : String(error) }),
+      );
+    });
+    phone.start();
     gateway.start();
     started = {
       stop: () => {
         gateway.stop();
+        phone.stop();
         speaker.dispose();
       },
     };
@@ -87,9 +165,13 @@ export async function runGateway(): Promise<number> {
     return 1;
   }
   logger.info("squeak voice gateway running");
+  // The stream's retry timers are unref'd, so while it is down nothing else holds the process: without
+  // this it exited silently after a failed connect instead of retrying.
+  const keepAlive = setInterval(() => undefined, 60_000);
   await new Promise<void>((resolve) => {
     for (const signal of ["SIGTERM", "SIGINT"] as const) {
       process.once(signal, () => {
+        clearInterval(keepAlive);
         started.stop();
         resolve();
       });

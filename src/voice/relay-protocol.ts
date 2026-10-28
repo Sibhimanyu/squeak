@@ -54,12 +54,15 @@ export function newCallId(): string {
   return crypto.randomBytes(16).toString("base64url");
 }
 
-function signature(keyBase64: string, direction: "req" | "res", id: string, box: string): string {
+/** Which way a document travels: bound into its signature so none can be replayed as another. */
+export type Direction = "req" | "res" | "dir" | "up" | "down";
+
+function signature(keyBase64: string, direction: Direction, id: string, box: string): string {
   const key = crypto.hkdfSync("sha256", Buffer.from(keyBase64, "base64"), Buffer.alloc(0), "squeak-voice-v1-sign", 32);
   return crypto.createHmac("sha256", Buffer.from(key)).update(`${direction}|${id}|${box}`, "utf8").digest("hex");
 }
 
-function sealDoc(keyBase64: string, direction: "req" | "res", id: string, body: unknown, at: number): ChannelDoc {
+export function sealBody(keyBase64: string, direction: Direction, id: string, body: unknown, at: number): ChannelDoc {
   const box = seal(keyBase64, body);
   return { box, sig: signature(keyBase64, direction, id, box), at };
 }
@@ -68,7 +71,7 @@ function equalHex(a: string, b: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-function openDoc(keyBase64: string, direction: "req" | "res", id: string, doc: ChannelDoc): unknown | null {
+export function openBody(keyBase64: string, direction: Direction, id: string, doc: ChannelDoc): unknown | null {
   if (typeof doc.box !== "string" || typeof doc.sig !== "string") return null;
   if (!equalHex(doc.sig, signature(keyBase64, direction, id, doc.box))) return null;
   try {
@@ -79,14 +82,14 @@ function openDoc(keyBase64: string, direction: "req" | "res", id: string, doc: C
 }
 
 export function sealRequest(keyBase64: string, request: CallRequest): ChannelDoc {
-  return sealDoc(keyBase64, "req", request.id, request, request.at);
+  return sealBody(keyBase64, "req", request.id, request, request.at);
 }
 
 export function sealResult(keyBase64: string, result: CallResultDoc): ChannelDoc {
-  return sealDoc(keyBase64, "res", result.id, result, result.at);
+  return sealBody(keyBase64, "res", result.id, result, result.at);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -109,7 +112,7 @@ export function readRequest(
   doc: ChannelDoc,
   now: number,
 ): { ok: true; request: CallRequest } | { ok: false; reason: string } {
-  const body = openDoc(keyBase64, "req", id, doc);
+  const body = openBody(keyBase64, "req", id, doc);
   if (!isRecord(body)) return { ok: false, reason: "not sealed with this key" };
   if (body.v !== 1 || body.id !== id || typeof body.at !== "number" || typeof body.expiresAt !== "number") {
     return { ok: false, reason: "not a call request" };
@@ -148,7 +151,7 @@ export function readResult(
   doc: ChannelDoc,
   offered: readonly string[],
 ): CallResultBody | null {
-  const body = openDoc(keyBase64, "res", id, doc);
+  const body = openBody(keyBase64, "res", id, doc);
   if (!isRecord(body) || body.v !== 1 || body.id !== id) return null;
   switch (body.status) {
     case "answered":

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { envFromAddonOptions } from "./gateway-main.js";
+import { chooseSpeaker, envFromAddonOptions } from "./gateway-main.js";
+import { EspeakSpeaker } from "./tts.js";
 import { wavDurationMs } from "./tts.js";
 
 describe("envFromAddonOptions", () => {
@@ -44,5 +45,23 @@ describe("wavDurationMs", () => {
     expect(wavDurationMs(wav(false, 8000))).toBe(1000);
     expect(wavDurationMs(wav(true, 4000))).toBe(500);
     expect(wavDurationMs(Buffer.from("junk"))).toBe(0);
+  });
+});
+
+describe("chooseSpeaker", () => {
+  it("is plain when asked, even if piper is installed", () => {
+    const speaker = chooseSpeaker({
+      SQUEAK_VOICE_SPEECH: "plain",
+      SQUEAK_PIPER_BIN: process.execPath,
+      SQUEAK_PIPER_MODEL: process.execPath,
+    });
+    expect(speaker).toBeInstanceOf(EspeakSpeaker);
+    speaker.dispose();
+  });
+
+  it("is plain when piper is not in the image", () => {
+    const speaker = chooseSpeaker({ SQUEAK_PIPER_BIN: "/nonexistent/piper", SQUEAK_PIPER_MODEL: "/nonexistent.onnx" });
+    expect(speaker).toBeInstanceOf(EspeakSpeaker);
+    speaker.dispose();
   });
 });
