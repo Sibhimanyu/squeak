@@ -48,6 +48,23 @@ describe("readDigits", () => {
   });
 });
 
+describe("CallDialog.prompts", () => {
+  it("lists everything a dialog says, so it can all be made while the phone rings", async () => {
+    for (const pin of ["4821", null]) {
+      const call = fakeCall(pin ? [..."4821#".split(""), "2"] : ["2"]);
+      await runDialog(call, new CallDialog(script, pin));
+      const ready = new Set(new CallDialog(script, pin).prompts());
+      expect(call.said.filter((text) => !ready.has(text))).toEqual([]);
+    }
+  });
+
+  it("includes the wrong-PIN sentences when a PIN is asked", () => {
+    const prompts = new CallDialog(script, "4821").prompts();
+    expect(prompts).toContain("That PIN is not right. Try again, then hash.");
+    expect(prompts).toContain("That PIN is not right. Goodbye.");
+  });
+});
+
 describe("runDialog", () => {
   it("runs the outbound dialog on a call: PIN, then the key", async () => {
     const call = fakeCall([..."4821#".split(""), "2"]);

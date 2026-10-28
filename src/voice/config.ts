@@ -17,6 +17,7 @@ export interface VoiceEnv {
   SQUEAK_VOICE_QUIET?: string | undefined;
   SQUEAK_VOICE_BARESIP?: string | undefined;
   SQUEAK_VOICE_SPEECH?: string | undefined;
+  SQUEAK_VOICE_CALLIN_PIN?: string | undefined;
   SQUEAK_VOICE_BARESIP_MODULES?: string | undefined;
   SQUEAK_VOICE_RELAY_CHANNEL?: string | undefined;
   SQUEAK_VOICE_RELAY_KEY?: string | undefined;

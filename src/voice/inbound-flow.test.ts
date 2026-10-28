@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { handleIncoming, type InboundDependencies } from "./inbound-flow.js";
+import { handleIncoming, inboundPrompts, type InboundDependencies } from "./inbound-flow.js";
 import type { DirectoryDoc, DownMessage } from "./memo-protocol.js";
 import type { IncomingCall, PhoneCall } from "./phone.js";
 
@@ -85,6 +85,21 @@ function setup(call: FakeCall, overrides: Partial<InboundDependencies> = {}, pee
 const keys = (text: string): string[] => text.split("");
 
 describe("call-in flow", () => {
+  it("skips the PIN when the gateway is set to, and goes straight to the chats", async () => {
+    const call = new FakeCall(["2", "1"]);
+    const t = setup(call, { pin: null });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said[0]).toContain("Which chat?");
+    expect(call.said.join(" ")).not.toContain("PIN");
+    expect(t.sends).toHaveLength(1);
+  });
+
+  it("still refuses another caller when the PIN is skipped", async () => {
+    const t = setup(new FakeCall([]), { pin: null }, "99999");
+    await handleIncoming(t.incoming, t.deps);
+    expect(t.state).toEqual({ rejected: true, answered: false });
+  });
+
   it("refuses a caller that is not the one extension allowed, without answering", async () => {
     const call = new FakeCall([]);
     const t = setup(call, {}, "99999");
@@ -170,5 +185,24 @@ describe("call-in flow", () => {
     });
     await handleIncoming(t.incoming, t.deps);
     expect(call.said.at(-1)).toContain("is busy right now");
+  });
+
+  it("has every fixed thing it says made ahead of time: only the read-back is made on the spot", async () => {
+    for (const askPin of [true, false]) {
+      const call = new FakeCall([...(askPin ? keys("4821#") : []), "2", "1"]);
+      const t = setup(call, { pin: askPin ? "4821" : null });
+      await handleIncoming(t.incoming, t.deps);
+      const ready = new Set(inboundPrompts(directory, askPin));
+      const late = call.said.filter((text) => text !== "<beep>" && !ready.has(text));
+      expect(late).toHaveLength(1);
+      expect(late[0]).toMatch(/^I heard: /);
+    }
+  });
+
+  it("also readies the wrong-PIN and failure sentences", async () => {
+    const call = new FakeCall([...keys("1111#"), ...keys("2222#")]);
+    const t = setup(call);
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.every((text) => inboundPrompts(directory, true).includes(text))).toBe(true);
   });
 });

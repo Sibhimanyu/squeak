@@ -385,6 +385,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// What Telegram and Cliq may push (src/fleet/notify-settings.ts; `notify` command). Optional: an older Mac
     /// omits it, and the phone hides the page.
     public var notify: NotifySettings? = nil
+    /// Phone calls: who Squeak rings, and how the last test call went (src/voice/; `voice` command). Optional: an
+    /// older Mac omits it, and the phone hides the page.
+    public var voice: VoiceView? = nil
     /// This Mac can set the Telegram bot's photo to Squeak's logo (`telegramAvatar` command). Optional: an older
     /// Mac omits it, and the phone hides the button.
     public var telegramAvatar: Bool? = nil
@@ -1667,6 +1670,107 @@ public struct NotifyCommand: Encodable, Equatable, Sendable {
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
+}
+
+/// Phone calls as the Mac describes them (`voice` in the phone view).
+public struct VoiceView: Codable, Equatable, Sendable {
+    /// "gateway" (the Home Assistant add-on places the call), "direct" (the Mac does) or "off".
+    public var mode: String
+    /// The extension set from an app; nil until one is.
+    public var callee: String?
+    /// What the Mac's config or the add-on falls back to.
+    public var defaultCallee: String?
+    public var lastTest: LastTest?
+
+    public struct LastTest: Codable, Equatable, Sendable {
+        /// Epoch milliseconds.
+        public var at: Double
+        /// "ringing", "answered", "unanswered" or "failed".
+        public var status: String
+        public var letter: String?
+        public var reason: String?
+        public init(at: Double, status: String, letter: String? = nil, reason: String? = nil) {
+            self.at = at; self.status = status; self.letter = letter; self.reason = reason
+        }
+    }
+
+    public init(mode: String, callee: String? = nil, defaultCallee: String? = nil, lastTest: LastTest? = nil) {
+        self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.lastTest = lastTest
+    }
+
+    public var isOn: Bool { mode != "off" }
+}
+
+/// One change to phone calls: the extension to ring (nil clears it, sent as an explicit `null`), or a test call.
+public enum VoiceChange: Equatable, Sendable {
+    case callee(String?)
+    case test
+}
+
+extension VoiceChange: Encodable {
+    private struct Key: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init(_ name: String) { stringValue = name }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    /// `{ "callee": "101" }`, `{ "callee": null }` or `{ "test": true }`, and nothing else.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Key.self)
+        switch self {
+        case .callee(let v):
+            if let v { try c.encode(v, forKey: Key("callee")) } else { try c.encodeNil(forKey: Key("callee")) }
+        case .test:
+            try c.encode(true, forKey: Key("test"))
+        }
+    }
+}
+
+/// A signed change to phone calls. Reaches no agent. Exactly these keys, no others.
+public struct VoiceCommand: Encodable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let change: VoiceChange
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// The words of the Phone calls page, kept in the core so tests can pin them.
+public enum VoiceFormat {
+    /// An internal extension: 2 to 6 digits. The Mac refuses anything else.
+    public static func isExtension(_ text: String) -> Bool {
+        (2...6).contains(text.count) && text.allSatisfy { $0 >= "0" && $0 <= "9" }
+    }
+
+    /// The typed text, trimmed; nil when empty (which clears the setting).
+    public static func normalized(_ typed: String) -> String? {
+        let t = typed.trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? nil : t
+    }
+
+    /// What the last test did, in one line; nil before any test.
+    public static func testLine(_ test: VoiceView.LastTest?) -> String? {
+        guard let test else { return nil }
+        switch test.status {
+        case "ringing": return "Ringing your phone…"
+        case "answered":
+            return test.letter.map { "You answered and pressed \($0). Nothing was sent anywhere." } ?? "You answered. No key was pressed."
+        case "unanswered": return "Nobody picked up."
+        case "failed": return "The call failed: \(test.reason ?? "no reason given")"
+        default: return nil
+        }
+    }
+
+    public static func modeLine(_ view: VoiceView) -> String {
+        switch view.mode {
+        case "gateway": "Your Home Assistant add-on places the calls."
+        case "direct": "Your Mac places the calls."
+        default: "Phone calls are not set up on your Mac."
+        }
+    }
 }
 
 /// A signed request to set the Telegram bot's photo to Squeak's logo. Exactly these keys, no others.

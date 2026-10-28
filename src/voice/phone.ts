@@ -44,6 +44,8 @@ export interface Phone {
   stop(): void;
   dial(callee: string): Promise<DialOutcome>;
   onIncoming(handler: (incoming: IncomingCall) => void): void;
+  /** Makes these prompts ahead of time so they are ready the moment a call connects. */
+  prewarm?(texts: readonly string[]): void;
 }
 
 /** After a prompt ends, how long to wait for a key. */

@@ -782,6 +782,22 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed document changing phone calls: the extension to ring, or a test call.
+    public func voiceDocument(
+        _ change: VoiceChange, signer: CommandSigner, now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = VoiceCommand(
+            v: 1, kind: "voice", change: change,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
     /// The signed document asking the Mac to set the Telegram bot's photo to Squeak's logo.
     public func telegramAvatarDocument(
         signer: CommandSigner, now: Date = Date()

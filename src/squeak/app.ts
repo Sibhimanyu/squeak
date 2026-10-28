@@ -79,6 +79,8 @@ import { DirectLine } from "../voice/direct-line.js";
 import { RelayLine } from "../voice/relay-line.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker } from "../voice/tts.js";
+import type { VoiceLine } from "../voice/relay-line.js";
+import { TEST_SCRIPT } from "../voice/test-script.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
 import { VoiceSettingsStore } from "../voice/settings.js";
 import { findWhisper, WhisperTranscriber } from "../voice/transcribe.js";
@@ -168,6 +170,15 @@ export class SqueakApp {
   /** Rings the owner through a SIP extension when an agent waits on them (src/voice/); null unless set up. */
   private voice: VoiceChannel | null = null;
   private voiceSpeaker: MacSpeaker | null = null;
+  /** The line voice calls go out on (the gateway through the relay, or this Mac), also for a test call from an app. */
+  private voiceLine: VoiceLine | null = null;
+  /** How the last test call from an app went; shown in the phone view and the Mac app. */
+  private voiceTest: {
+    at: number;
+    status: "ringing" | "answered" | "unanswered" | "failed";
+    letter?: string;
+    reason?: string;
+  } | null = null;
   /** Calling in: transcribes a phoned-in message and sends it (src/voice/memo-inbox.ts); null without the relay or Whisper. */
   private memoInbox: MemoInbox | null = null;
   private memoUnwatch: (() => void) | null = null;
@@ -446,6 +457,11 @@ export class SqueakApp {
               apply: (request) => this.applyHotspot(request),
             },
             telegramAvatar: { apply: (request) => this.telegramAvatar.apply(request) },
+            voice: {
+              state: () => this.voiceView(),
+              apply: (request) => this.applyVoice(request),
+              test: () => this.testVoiceCall(),
+            },
             notify: {
               state: () => this.notifyView(),
               apply: (request) => this.applyNotify(request),
@@ -936,7 +952,47 @@ export class SqueakApp {
   private voiceView() {
     const { voice, voiceRelay, remoteDatabaseUrl } = this.config;
     const mode = voiceRelay && remoteDatabaseUrl ? "gateway" : voice ? "direct" : "off";
-    return { mode, callee: this.voiceSettings.settings.callee, defaultCallee: voice?.callee ?? null };
+    return {
+      mode,
+      callee: this.voiceSettings.settings.callee,
+      defaultCallee: voice?.callee ?? null,
+      // Absent until a test has been asked for.
+      ...(this.voiceTest ? { lastTest: this.voiceTest } : {}),
+    };
+  }
+
+  /**
+   * A test call from an app: rings with a made-up question and answers at once; the outcome lands in `lastTest`
+   * (the phone and Mac app read it from the view). It touches no chat, and one at a time, 15 s apart.
+   */
+  private testVoiceCall(): { ok: true } | { ok: false; reason: string } {
+    const line = this.voiceLine;
+    if (!line) return { ok: false, reason: "Phone calls are not set up on this Mac." };
+    if (this.voiceTest?.status === "ringing") return { ok: false, reason: "A test call is already ringing." };
+    if (this.voiceTest && Date.now() - this.voiceTest.at < 15_000) {
+      return { ok: false, reason: "Wait a few seconds before another test call." };
+    }
+    this.voiceTest = { at: Date.now(), status: "ringing" };
+    this.remote?.changed();
+    void line
+      .call(TEST_SCRIPT, true)
+      .then((result) => {
+        this.voiceTest =
+          result.status === "failed"
+            ? { at: Date.now(), status: "failed", reason: result.reason }
+            : result.status === "unanswered"
+              ? { at: Date.now(), status: "unanswered" }
+              : { at: Date.now(), status: "answered", ...(result.letter ? { letter: result.letter } : {}) };
+      })
+      .catch((error: unknown) => {
+        this.voiceTest = {
+          at: Date.now(),
+          status: "failed",
+          reason: error instanceof Error ? error.message : String(error),
+        };
+      })
+      .finally(() => this.remote?.changed());
+    return { ok: true };
   }
 
   private applyVoice(request: unknown) {
@@ -1288,13 +1344,15 @@ export class SqueakApp {
       return null;
     }
     this.voiceSpeaker = new MacSpeaker(voice.speechVoice);
+    const direct = new DirectLine(
+      new BaresipLine(voice.line, this.voiceSpeaker),
+      () => this.voiceSettings.settings.callee ?? voice.callee ?? "",
+      voice.pin,
+    );
+    this.voiceLine = direct;
     return new VoiceChannel({
       ...base,
-      line: new DirectLine(
-        new BaresipLine(voice.line, this.voiceSpeaker),
-        () => this.voiceSettings.settings.callee ?? voice.callee ?? "",
-        voice.pin,
-      ),
+      line: direct,
       canTakeKeys: voice.pin !== null,
       policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voice.quiet }),
     });

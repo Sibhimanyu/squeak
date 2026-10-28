@@ -6,13 +6,44 @@ import { MAX_MEMO_MS, newMessageId, type DirectoryDoc } from "./memo-protocol.js
 import type { Uplink } from "./uplink.js";
 
 export interface InboundDependencies {
-  /** Checked here, on this side only: neither the Mac nor the database ever holds it. */
-  pin: string;
+  /**
+   * Checked here, on this side only: neither the Mac nor the database ever holds it. Null skips it: you called
+   * in, from the one extension allowed to, which the PBX has already proved is you.
+   */
+  pin: string | null;
   /** Who can take a message now, and the one extension allowed to call in (read from the Mac's sealed list). */
   directory: () => Promise<DirectoryDoc | null>;
   uplink: Uplink;
   /** Turns a recorded WAV into the small Opus memo that travels. */
   encode: (wavFile: string) => Promise<Buffer>;
+}
+
+/** Every fixed sentence the flow says: also what is made ahead of time, so it is ready the moment a call connects. */
+const SAYS = {
+  pin: "Squeak. Enter your PIN, then hash.",
+  pinAgain: "That PIN is not right. Try again, then hash.",
+  pinFail: "That PIN is not right. Goodbye.",
+  noChat: "No chat can take a message right now. Goodbye.",
+  wait: "One moment.",
+  nothing: "I did not hear anything.",
+  cancelled: "Cancelled. Goodbye.",
+  sent: "Sent. Goodbye.",
+  bye: "Goodbye.",
+  noMac: "I could not reach your Mac. Goodbye.",
+  record: "Speak after the beep, then press hash.",
+};
+
+function menuPrompt(directory: DirectoryDoc, greet: boolean): string {
+  const menu = directory.items.map((item) => `Press ${item.n} for ${item.label}.`).join(" ");
+  return `${greet ? "Squeak. " : ""}Which chat? ${menu} Or press hash to hang up.`;
+}
+
+/** What to have ready for this chat list (the read-back of a message is the one thing made on the spot). */
+export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean): string[] {
+  const fixed = [SAYS.record, SAYS.wait, SAYS.nothing, SAYS.cancelled, SAYS.sent, SAYS.bye, SAYS.noMac, SAYS.noChat];
+  const pin = askPin ? [SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
+  if (!directory || directory.items.length === 0) return [...pin, ...fixed];
+  return [...pin, menuPrompt(directory, !askPin), ...fixed];
 }
 
 /** The shortest recording that is a message, not a hiss. */
@@ -63,41 +94,41 @@ async function bye(call: PhoneCall, text: string): Promise<void> {
 }
 
 async function conversation(call: PhoneCall, deps: InboundDependencies): Promise<void> {
-  // 1. The PIN.
-  let known = false;
+  // 1. The PIN, unless this gateway is set to take the caller's extension as proof.
+  let known = deps.pin === null;
+  const pin = deps.pin ?? "";
   for (let attempt = 0; attempt < PIN_TRIES && call.open && !known; attempt++) {
     await call.say(
       attempt === 0 ? "Squeak. Enter your PIN, then hash." : "That PIN is not right. Try again, then hash.",
     );
     const typed = await readDigits(call, { maxLength: 12, timeoutMs: PIN_WAIT_MS });
     if (typed === null) return;
-    known = samePin(typed, deps.pin);
+    known = samePin(typed, pin);
   }
-  if (!known) return bye(call, "That PIN is not right. Goodbye.");
+  if (!known) return bye(call, SAYS.pinFail);
 
   // 2. Which chat. Re-read now: the list moves while the phone rings.
   const directory = await deps.directory().catch(() => null);
   if (!directory || directory.items.length === 0) {
-    return bye(call, "No chat can take a message right now. Goodbye.");
+    return bye(call, SAYS.noChat);
   }
-  const choice = await pickChat(call, directory);
-  if (choice === null) return bye(call, "Goodbye.");
-  const label = directory.items.find((item) => item.n === choice)?.label ?? `chat ${choice}`;
+  const choice = await pickChat(call, directory, deps.pin === null);
+  if (choice === null) return bye(call, SAYS.bye);
 
   // 3. Record, hear it back, send.
   for (let take = 0; take < MAX_TAKES && call.open; take++) {
-    await call.say(`Say your message for ${label} after the beep, then press hash.`);
+    await call.say(SAYS.record);
     await call.beep();
     const recording = await call.record({ maxMs: MAX_MEMO_MS });
     if (!recording) return;
     if (recording.durationMs < MIN_MEMO_MS) {
-      await call.say("I did not hear anything.");
+      await call.say(SAYS.nothing);
       continue;
     }
-    await call.say("One moment.");
+    await call.say(SAYS.wait);
     const memoId = newMessageId();
     const heard = await deps.uplink.memo(memoId, choice, directory.version, await deps.encode(recording.file));
-    if (!heard) return bye(call, "I could not reach your Mac. Goodbye.");
+    if (!heard) return bye(call, SAYS.noMac);
     if (heard.status !== "transcript") {
       await call.say(heard.status === "refused" ? heard.reason : "Something went wrong.");
       continue;
@@ -107,7 +138,7 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
     );
     const answer = await call.key(CONFIRM_WAIT_MS);
     if (answer === "2") continue;
-    if (answer !== "1") return bye(call, "Cancelled. Goodbye.");
+    if (answer !== "1") return bye(call, SAYS.cancelled);
     const outcome = await deps.uplink.send(memoId);
     if (!outcome) return bye(call, "I could not reach your Mac, so I am not sure it was sent. Check the app. Goodbye.");
     return bye(
@@ -119,14 +150,13 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
           : "Goodbye.",
     );
   }
-  return bye(call, "Goodbye.");
+  return bye(call, SAYS.bye);
 }
 
 /** The chat's number, or null if none was chosen. */
-async function pickChat(call: PhoneCall, directory: DirectoryDoc): Promise<number | null> {
-  const menu = directory.items.map((item) => `Press ${item.n} for ${item.label}.`).join(" ");
+async function pickChat(call: PhoneCall, directory: DirectoryDoc, greet: boolean): Promise<number | null> {
   for (let attempt = 0; attempt < 2 && call.open; attempt++) {
-    await call.say(`Which chat? ${menu} Or press hash to hang up.`);
+    await call.say(menuPrompt(directory, greet && attempt === 0));
     const key = await call.key(MENU_WAIT_MS);
     if (key === null || key === "#") return null;
     const n = Number(key);

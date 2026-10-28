@@ -11,8 +11,8 @@ import type { CallResult } from "./baresip-line.js";
 import type { CallDialog } from "./dialog.js";
 import { readVoiceConfig, readVoiceRelayConfig, type VoiceEnv } from "./config.js";
 import { VoiceGateway } from "./gateway.js";
-import { handleIncoming } from "./inbound-flow.js";
-import { dirPath, readDirectory } from "./memo-protocol.js";
+import { handleIncoming, inboundPrompts } from "./inbound-flow.js";
+import { DirectoryCache } from "./directory-cache.js";
 import { runDialog, type Phone } from "./phone.js";
 import { SipPhone } from "./sip-phone.js";
 import { RelayUplink } from "./uplink.js";
@@ -34,6 +34,7 @@ const OPTION_TO_ENV: Record<string, keyof VoiceEnv | "SQUEAK_REMOTE_DATABASE_URL
   pin: "SQUEAK_VOICE_PIN",
   transport: "SQUEAK_VOICE_TRANSPORT",
   speech: "SQUEAK_VOICE_SPEECH",
+  call_in_pin: "SQUEAK_VOICE_CALLIN_PIN",
 };
 
 /** An add-on's options file, as the same settings the Mac reads from `.env`. */
@@ -69,6 +70,8 @@ export function phoneLine(phone: Phone): {
 } {
   return {
     async call(callee, dialog) {
+      // Make what it will say while the phone rings, so the first word is there the moment you pick up.
+      phone.prewarm?.(dialog.prompts());
       const dialled = await phone.dial(callee);
       if (dialled.status === "unanswered") return { status: "unanswered" };
       if (dialled.status === "failed") return { status: "failed", reason: dialled.reason };
@@ -138,24 +141,31 @@ export async function runGateway(): Promise<number> {
       pin: voice.pin,
     });
     const pin = voice.pin;
+    // "skip": a call from the one allowed extension is proof enough. Squeak's own calls to you always ask.
+    const callInPin = env.SQUEAK_VOICE_CALLIN_PIN?.toLowerCase() === "skip" ? null : pin;
+    // Answered at once from memory, and the prompts made before anyone calls: a network read or a voice made after
+    // pick-up is a silence on the line.
+    const directory = new DirectoryCache(store, relay.channel, relay.key);
+    const uplink = new RelayUplink({ store, channel: relay.channel, key: relay.key });
     phone.onIncoming((incoming) => {
       void handleIncoming(incoming, {
-        pin,
-        directory: async () => {
-          const doc = await store.get(dirPath(relay.channel));
-          return doc ? readDirectory(relay.key, doc, Date.now()) : null;
-        },
-        uplink: new RelayUplink({ store, channel: relay.channel, key: relay.key }),
+        pin: callInPin,
+        directory: async () => directory.current() ?? (await directory.refresh()),
+        uplink,
         encode: encodeOpus,
       }).catch((error: unknown) =>
         logger.warn("voice call-in failed", { error: error instanceof Error ? error.message : String(error) }),
       );
     });
+    phone.prewarm?.(inboundPrompts(null, callInPin !== null));
+    void directory.refresh().then((first) => phone.prewarm?.(inboundPrompts(first, callInPin !== null)));
+    directory.start((changed) => phone.prewarm?.(inboundPrompts(changed, callInPin !== null)));
     phone.start();
     gateway.start();
     started = {
       stop: () => {
         gateway.stop();
+        directory.stop();
         phone.stop();
         speaker.dispose();
       },

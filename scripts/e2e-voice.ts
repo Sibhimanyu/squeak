@@ -12,7 +12,7 @@ import { FakeRtdb } from "../src/remote/fake-rtdb.js";
 import { generateChannel } from "../src/remote/remote-crypto.js";
 import { RtdbRest } from "../src/remote/rtdb-rest.js";
 import { encodeNetstring, NetstringReader, parseEvent, type LineConfig } from "../src/voice/baresip-line.js";
-import { handleIncoming } from "../src/voice/inbound-flow.js";
+import { handleIncoming, inboundPrompts } from "../src/voice/inbound-flow.js";
 import { MemoInbox } from "../src/voice/memo-inbox.js";
 import { dirPath, readDirectory } from "../src/voice/memo-protocol.js";
 import { SipPhone } from "../src/voice/sip-phone.js";
@@ -96,7 +96,10 @@ const line: LineConfig = {
 const speaker = new MacSpeaker();
 const phone = new SipPhone({ line, speaker, listen: `${IP}:5908` });
 let humanSpeaks: () => void = () => undefined;
+let t0 = 0;
+const ms = () => `+${Date.now() - t0}ms`;
 phone.onIncoming((incoming) => {
+  t0 = Date.now();
   console.log("INCOMING from", incoming.peer, incoming.uri);
   void handleIncoming(
     {
@@ -110,7 +113,7 @@ phone.onIncoming((incoming) => {
         };
         const say = call.say.bind(call);
         call.say = async (t) => {
-          console.log("SAYS:", t);
+          console.log("SAYS:", ms(), t);
           if (t.startsWith("I heard")) readBack = true;
           return say(t);
         };
@@ -133,7 +136,10 @@ phone.onIncoming((incoming) => {
   );
 });
 phone.start();
-await sleep(2500);
+// What the real gateway does at start-up: have the fixed prompts ready before anyone calls.
+if (!process.env.E2E_COLD)
+  phone.prewarm?.(inboundPrompts(readDirectory(key, (await store.get(dirPath(channel)))!, Date.now()), true));
+await sleep(process.env.E2E_COLD ? 2500 : 9000);
 
 // The person: a baresip that dials in, plays the quiet file until told to speak, and types digits on stdin.
 const humanDir = path.join(work, "human");
@@ -172,7 +178,7 @@ sock.on("data", (c) => {
 const ctl = (command: string, params?: string) =>
   sock.write(encodeNetstring({ command, ...(params ? { params } : {}) }));
 humanSpeaks = () => {
-  console.log("PERSON speaks");
+  console.log("PERSON speaks", ms());
   ctl("ausrc", `aufile,${work}/msg.wav`);
   setTimeout(() => human.stdin.write("#"), 5500);
 };

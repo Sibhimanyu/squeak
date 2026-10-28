@@ -1454,6 +1454,34 @@ final class AppModel {
         }
     }
 
+    /* ---------- phone calls ---------- */
+
+    /// Whether this Mac sends phone-call settings (an older one does not, and the page is hidden).
+    var voiceOffered: Bool { snapshot?.voice != nil }
+
+    /// Sets the extension to ring (nil clears it) or starts a test call. No Face ID: it is a Mac setting, reaches no
+    /// agent and carries no words. Nil when the Mac took it, else a line to show.
+    func changeVoice(_ change: VoiceChange) async -> String? {
+        if demo {
+            switch change {
+            case .callee(let value): snapshot?.voice?.callee = value
+            case .test: snapshot?.voice?.lastTest = .init(at: Date().timeIntervalSince1970 * 1000, status: "answered", letter: "A")
+            }
+            return nil
+        }
+        guard let channelStore = channel else { return "Not connected to your Mac." }
+        do {
+            let (id, document) = try channelStore.voiceDocument(change, signer: signer)
+            try await channelStore.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channelStore) else { return "Your Mac didn't answer. Is Squeak running?" }
+            guard result.sent else { return result.reason ?? "Your Mac couldn't change that." }
+            await refresh()
+            return nil
+        } catch {
+            return "Couldn't reach your Mac."
+        }
+    }
+
     /// Asks the Mac to set the Telegram bot's photo to Squeak's logo. No Face ID: a fixed picture, no words.
     /// Returns the line to show: success, or the Mac's reason.
     func setTelegramAvatar() async -> String {
