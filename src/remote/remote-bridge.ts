@@ -705,6 +705,8 @@ export interface RemoteBridgeDependencies {
     state(): unknown;
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
     test(): { ok: true } | { ok: false; reason: string };
+    /** Change the pin the gateway asks for: it needs the current one. Answers when the gateway has. */
+    changePin(current: string, next: string): Promise<{ ok: true } | { ok: false; reason: string }>;
   } | null;
   hotspot?: {
     state(): HotspotState;
@@ -3024,11 +3026,11 @@ export class RemoteBridge {
    * voice/settings.ts (an internal extension or null) and ends in the same function as the Mac app's route; a test
    * starts the made-up call and answers at once. Neither reaches an agent.
    */
-  private handleVoice(
+  private async handleVoice(
     device: PairedDevice,
     id: string,
     command: Record<string, unknown>,
-  ): { write: boolean; result: Record<string, unknown> } {
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
     const refuse = (reason: string, log = reason) => {
       this.log(device.name, "rejected", `voice: ${log}`);
       return { write: true, result: { id, status: "refused", reason } };
@@ -3041,6 +3043,32 @@ export class RemoteBridge {
       return refuse("Not a phone-call setting this Mac understands.", "bad keys");
     }
     const change = command.change;
+    // A pin change: `{ pin: { current, next } }`, digits only. Its values are never logged.
+    if (
+      typeof change === "object" &&
+      change !== null &&
+      !Array.isArray(change) &&
+      Object.keys(change).join(",") === "pin"
+    ) {
+      const pin = (change as Record<string, unknown>).pin;
+      const fields =
+        typeof pin === "object" && pin !== null && !Array.isArray(pin) ? (pin as Record<string, unknown>) : null;
+      const digits = /^\d{4,12}$/;
+      if (
+        !fields ||
+        Object.keys(fields).sort().join(",") !== "current,next" ||
+        typeof fields.current !== "string" ||
+        typeof fields.next !== "string" ||
+        !digits.test(fields.current) ||
+        !digits.test(fields.next)
+      ) {
+        return refuse("A pin is 4 to 12 digits.", "bad pin");
+      }
+      const outcome = await voice.changePin(fields.current, fields.next);
+      if (!outcome.ok) return refuse(outcome.reason, "pin change refused");
+      this.log(device.name, "sent", "voice pin changed");
+      return { write: true, result: { id, status: "sent" } };
+    }
     const isTest =
       typeof change === "object" &&
       change !== null &&

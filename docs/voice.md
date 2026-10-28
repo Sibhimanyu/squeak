@@ -84,6 +84,14 @@ replay refusal are tested; the add-on image (Dockerfile) and the bundle running 
 Not tested against a real PBX: registration with 3CX, and the 3CX app's keypad sending RFC 2833 digits baresip accepts.
 `squeak voice-test` is that check.
 
+## Changing the pin
+
+The pin starts as the add-on's `pin` option. From the iPhone app (Settings > Phone calls > Pin) you can change it: the
+app sends the current and the new pin, sealed in the phone's signed command; the Mac passes them to the add-on
+through the relay, and the add-on keeps the new one beside its options (`voice-pin.json`, 0600, in its own storage),
+where it wins over the option from then on. The Mac never stores it. A change needs the **current** pin, so someone
+who only holds the channel key cannot set their own, and five wrong guesses lock changes for ten minutes.
+
 ## Calling in
 
 Dial Squeak's extension (the one in the add-on's options) from your 3CX app, from anywhere.

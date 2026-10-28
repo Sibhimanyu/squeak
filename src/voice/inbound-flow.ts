@@ -10,7 +10,7 @@ export interface InboundDependencies {
    * Checked here, on this side only: neither the Mac nor the database ever holds it. Null skips it: you called
    * in, from the one extension allowed to, which the PBX has already proved is you.
    */
-  pin: string | null;
+  pin: () => string | null;
   /** Who can take a message now, and the one extension allowed to call in (read from the Mac's sealed list). */
   directory: () => Promise<DirectoryDoc | null>;
   uplink: Uplink;
@@ -20,9 +20,9 @@ export interface InboundDependencies {
 
 /** Every fixed sentence the flow says: also what is made ahead of time, so it is ready the moment a call connects. */
 const SAYS = {
-  pin: "Squeak. Enter your PIN, then hash.",
-  pinAgain: "That PIN is not right. Try again, then hash.",
-  pinFail: "That PIN is not right. Goodbye.",
+  pin: "Squeak. Enter your pin, then hash.",
+  pinAgain: "That pin is not right. Try again, then hash.",
+  pinFail: "That pin is not right. Goodbye.",
   noChat: "No chat can take a message right now. Goodbye.",
   wait: "One moment.",
   nothing: "I did not hear anything.",
@@ -95,15 +95,16 @@ async function bye(call: PhoneCall, text: string): Promise<void> {
 
 async function conversation(call: PhoneCall, deps: InboundDependencies): Promise<void> {
   // 1. The PIN, unless this gateway is set to take the caller's extension as proof.
-  let known = deps.pin === null;
-  const pin = deps.pin ?? "";
+  // Read once per call: a pin changed from an app applies from the next one.
+  const pin = deps.pin();
+  let known = pin === null;
   for (let attempt = 0; attempt < PIN_TRIES && call.open && !known; attempt++) {
     await call.say(
-      attempt === 0 ? "Squeak. Enter your PIN, then hash." : "That PIN is not right. Try again, then hash.",
+      attempt === 0 ? "Squeak. Enter your pin, then hash." : "That pin is not right. Try again, then hash.",
     );
     const typed = await readDigits(call, { maxLength: 12, timeoutMs: PIN_WAIT_MS });
     if (typed === null) return;
-    known = samePin(typed, pin);
+    known = samePin(typed, pin ?? "");
   }
   if (!known) return bye(call, SAYS.pinFail);
 
@@ -112,7 +113,7 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
   if (!directory || directory.items.length === 0) {
     return bye(call, SAYS.noChat);
   }
-  const choice = await pickChat(call, directory, deps.pin === null);
+  const choice = await pickChat(call, directory, pin === null);
   if (choice === null) return bye(call, SAYS.bye);
 
   // 3. Record, hear it back, send.

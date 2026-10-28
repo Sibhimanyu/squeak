@@ -32,15 +32,15 @@ Settings › About.
 Squeak bundles its background service (the "daemon"). Nothing is installed
 silently: the Setup checklist installs each piece when you ask. It lists:
 
-| Item                                         | What it does                                                                                              | Required |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------- | -------- |
-| Background service                           | Watches your sessions and serves them to the app, the phone and Telegram.                                 | Yes      |
-| Agent hooks                                  | Lets Squeak know at once when an agent finishes or waits for an approval.                                 | Yes      |
-| Conductor                                    | Connects to Conductor (see step 3).                                                                       | If you use it |
-| Notifications                                | macOS notifications when a session needs you.                                                             | Recommended |
-| Quick-message hotkey                         | The double-tap shortcut that opens the quick composer.                                                    | Optional |
-| Reply into Conductor's window (Accessibility) | Lets Squeak Hands type a reply into Conductor's own window so it shows and streams there.                | Optional |
-| Channels                                     | Telegram, Zoho Cliq, iPhone (steps 4 to 6).                                                               | Optional |
+| Item                                          | What it does                                                                              | Required      |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------- |
+| Background service                            | Watches your sessions and serves them to the app, the phone and Telegram.                 | Yes           |
+| Agent hooks                                   | Lets Squeak know at once when an agent finishes or waits for an approval.                 | Yes           |
+| Conductor                                     | Connects to Conductor (see step 3).                                                       | If you use it |
+| Notifications                                 | macOS notifications when a session needs you.                                             | Recommended   |
+| Quick-message hotkey                          | The double-tap shortcut that opens the quick composer.                                    | Optional      |
+| Reply into Conductor's window (Accessibility) | Lets Squeak Hands type a reply into Conductor's own window so it shows and streams there. | Optional      |
+| Channels                                      | Telegram, Zoho Cliq, iPhone (steps 4 to 6).                                               | Optional      |
 
 Reading Conductor chats works with nothing else set up.
 

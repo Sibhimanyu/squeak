@@ -11,6 +11,11 @@ struct VoiceSettingsView: View {
     @State private var saving = false
     @State private var testing = false
     @State private var problem: String?
+    @State private var currentPin = ""
+    @State private var newPin = ""
+    @State private var repeatPin = ""
+    @State private var changingPin = false
+    @State private var pinNote: String?
     @FocusState private var focused: Bool
 
     private var voice: VoiceView? { model.snapshot?.voice }
@@ -18,6 +23,9 @@ struct VoiceSettingsView: View {
     private var changed: Bool { VoiceFormat.normalized(typed) != voice?.callee }
     private var valid: Bool { VoiceFormat.normalized(typed).map(VoiceFormat.isExtension) ?? true }
     private var ringing: Bool { voice?.lastTest?.status == "ringing" }
+    private var pinReady: Bool {
+        VoiceFormat.isPin(currentPin) && VoiceFormat.isPin(newPin) && newPin == repeatPin && newPin != currentPin
+    }
 
     var body: some View {
         Form {
@@ -57,6 +65,20 @@ struct VoiceSettingsView: View {
                 } header: { Text("Test call") } footer: {
                     Text("Rings you with a made-up question. Nothing is sent to any chat.")
                 }
+                // The pin lives in the Home Assistant add-on; the Mac only passes a change on, never keeps it.
+                if voice.mode == "gateway" {
+                    Section {
+                        SecureField("Current pin", text: $currentPin).keyboardType(.numberPad).frame(minHeight: 44)
+                        SecureField("New pin", text: $newPin).keyboardType(.numberPad).frame(minHeight: 44)
+                        SecureField("New pin again", text: $repeatPin).keyboardType(.numberPad).frame(minHeight: 44)
+                        Button(changingPin ? "Changing…" : "Change pin", action: changePin)
+                            .disabled(!pinReady || changingPin)
+                            .frame(minHeight: 44)
+                        if let pinNote { Text(pinNote).font(.footnote).foregroundStyle(Theme.muted) }
+                    } header: { Text("Pin") } footer: {
+                        Text("The pin you key in on a call, 4 to 12 digits. It needs your current pin, and is kept on Home Assistant, not on your Mac.")
+                    }
+                }
                 Section { Text(VoiceFormat.modeLine(voice)).font(.footnote).foregroundStyle(Theme.muted) }
             } else {
                 Section {
@@ -91,6 +113,22 @@ struct VoiceSettingsView: View {
             problem = await model.changeVoice(.callee(callee))
             saving = false
             if problem != nil { typed = shownCallee }
+        }
+    }
+
+    private func changePin() {
+        pinNote = nil
+        changingPin = true
+        focused = false
+        Task {
+            let failure = await model.changeVoice(.pin(current: currentPin, next: newPin))
+            changingPin = false
+            if let failure {
+                pinNote = failure
+            } else {
+                pinNote = "Your pin is changed. It applies from the next call."
+                currentPin = ""; newPin = ""; repeatPin = ""
+            }
         }
     }
 

@@ -1465,6 +1465,7 @@ final class AppModel {
         if demo {
             switch change {
             case .callee(let value): snapshot?.voice?.callee = value
+            case .pin: break
             case .test: snapshot?.voice?.lastTest = .init(at: Date().timeIntervalSince1970 * 1000, status: "answered", letter: "A")
             }
             return nil

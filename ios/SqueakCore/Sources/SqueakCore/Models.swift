@@ -1705,6 +1705,8 @@ public struct VoiceView: Codable, Equatable, Sendable {
 public enum VoiceChange: Equatable, Sendable {
     case callee(String?)
     case test
+    /// A new pin for the gateway: the Mac needs the current one too, so a stolen channel key cannot set its own.
+    case pin(current: String, next: String)
 }
 
 extension VoiceChange: Encodable {
@@ -1724,6 +1726,10 @@ extension VoiceChange: Encodable {
             if let v { try c.encode(v, forKey: Key("callee")) } else { try c.encodeNil(forKey: Key("callee")) }
         case .test:
             try c.encode(true, forKey: Key("test"))
+        case .pin(let current, let next):
+            var inner = c.nestedContainer(keyedBy: Key.self, forKey: Key("pin"))
+            try inner.encode(current, forKey: Key("current"))
+            try inner.encode(next, forKey: Key("next"))
         }
     }
 }
@@ -1743,6 +1749,11 @@ public enum VoiceFormat {
     /// An internal extension: 2 to 6 digits. The Mac refuses anything else.
     public static func isExtension(_ text: String) -> Bool {
         (2...6).contains(text.count) && text.allSatisfy { $0 >= "0" && $0 <= "9" }
+    }
+
+    /// 4 to 12 digits, which is what a phone keypad can enter before the hash.
+    public static func isPin(_ text: String) -> Bool {
+        (4...12).contains(text.count) && text.allSatisfy { $0 >= "0" && $0 <= "9" }
     }
 
     /// The typed text, trimmed; nil when empty (which clears the setting).

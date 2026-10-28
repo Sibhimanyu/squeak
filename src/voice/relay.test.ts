@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FakeRtdb } from "../remote/fake-rtdb.js";
@@ -6,6 +9,7 @@ import { generateChannel } from "../remote/remote-crypto.js";
 import type { CallResult } from "./baresip-line.js";
 import type { CallDialog, CallScript } from "./dialog.js";
 import { VoiceGateway } from "./gateway.js";
+import { PinKeeper } from "./pin-keeper.js";
 import { RelayLine, relayLineFor } from "./relay-line.js";
 import { requestPath, sealRequest } from "./relay-protocol.js";
 
@@ -38,7 +42,7 @@ describe("Mac and gateway through the relay", () => {
       channel,
       key,
       callee: "101",
-      pin: "4821",
+      pin: () => "4821",
       line: {
         call: async (callee, dialog) => {
           callees.push(callee);
@@ -61,7 +65,7 @@ describe("Mac and gateway through the relay", () => {
     expect(callees).toEqual(["101"]);
     // The PIN is the gateway's: the dialog starts by asking for it, and the request never carried one.
     expect(dialogs[0]!.start()[0]).toMatchObject({ type: "play" });
-    expect((dialogs[0]!.start()[0] as { text: string }).text).toContain("enter your PIN");
+    expect((dialogs[0]!.start()[0] as { text: string }).text).toContain("enter your pin");
   });
 
   it("rings the extension the Mac names, not the gateway's default", async () => {
@@ -84,7 +88,7 @@ describe("Mac and gateway through the relay", () => {
       channel: generateChannel().channelId,
       key,
       callee: null,
-      pin: "1",
+      pin: () => "1",
       line: { call: async () => outcome },
     });
     expect(quiet).toBeDefined();
@@ -94,7 +98,7 @@ describe("Mac and gateway through the relay", () => {
       channel,
       key,
       callee: null,
-      pin: "4821",
+      pin: () => "4821",
       line: {
         call: async (c) => {
           callees.push(c);
@@ -170,5 +174,51 @@ describe("Mac and gateway through the relay", () => {
     await store.set(requestPath(channel, "dup"), doc);
     await gateway.pass();
     expect(callees).toHaveLength(1);
+  });
+
+  describe("changing the pin", () => {
+    function withKeeper() {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-pin-"));
+      const keeper = new PinKeeper("4821", path.join(dir, "voice-pin.json"));
+      gateway.stop();
+      gateway = new VoiceGateway({
+        store,
+        channel,
+        key,
+        callee: "101",
+        pin: () => keeper.current(),
+        pins: keeper,
+        line: { call: async () => outcome },
+      });
+      gateway.start();
+      return keeper;
+    }
+
+    it("takes effect on the gateway with the current pin, and the next call asks for the new one", async () => {
+      const keeper = withKeeper();
+      const line = new RelayLine({ store, channel, key });
+      expect(await line.changePin("4821", "135790")).toEqual({ ok: true });
+      expect(keeper.current()).toBe("135790");
+    });
+
+    it("is refused with the wrong current pin, and nothing changes", async () => {
+      const keeper = withKeeper();
+      const line = new RelayLine({ store, channel, key });
+      expect(await line.changePin("0000", "135790")).toEqual({ ok: false, reason: "That is not your current pin." });
+      expect(keeper.current()).toBe("4821");
+    });
+
+    it("leaves nothing in the database, and the pin never sits in it in the clear", async () => {
+      withKeeper();
+      await new RelayLine({ store, channel, key }).changePin("4821", "135790");
+      expect(db.tree.list(`channels/${channel}/voice`)).toEqual([]);
+      expect(db.tree.list(`channels/${channel}/voiceresult`)).toEqual([]);
+      expect(db.requests.join(" ")).not.toContain("135790");
+    });
+
+    it("is refused by a gateway with no way to change it", async () => {
+      // The one started in beforeEach has no keeper.
+      expect(await new RelayLine({ store, channel, key }).changePin("4821", "135790")).toMatchObject({ ok: false });
+    });
   });
 });

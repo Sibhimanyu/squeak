@@ -39,6 +39,15 @@ final class VoiceCommandTests: XCTestCase {
         // Clearing is an explicit null, not a missing key.
         XCTAssertEqual(try open(.callee(nil))["change"], .object(["callee": .null]))
         XCTAssertEqual(try open(.test)["change"], .object(["test": .bool(true)]))
+        // A pin change: exactly the two pins, nothing else.
+        XCTAssertEqual(
+            try open(.pin(current: "4821", next: "135790"))["change"],
+            .object(["pin": .object(["current": .string("4821"), "next": .string("135790")])]))
+    }
+
+    func testAPinIsFourToTwelveDigits() {
+        for ok in ["1234", "135790", "123456789012"] { XCTAssertTrue(VoiceFormat.isPin(ok), ok) }
+        for bad in ["", "123", "12ab", "1234567890123", "12 34", "+1234"] { XCTAssertFalse(VoiceFormat.isPin(bad), bad) }
     }
 
     func testViewDecodesWithAndWithoutALastTest() throws {

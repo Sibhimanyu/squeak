@@ -4319,13 +4319,19 @@ describe("RemoteBridge phone-call settings from the phone", () => {
       return outcome.ok ? { ok: true as const, state: view() } : outcome;
     });
     const test = vi.fn(() => options.testOutcome ?? { ok: true as const });
+    const changePin = vi.fn(async (current: string, next: string) => {
+      void next;
+      return current === "1234"
+        ? { ok: true as const }
+        : { ok: false as const, reason: "That is not your current pin." };
+    });
     const bridge = new RemoteBridge({
       configPath: path.join(dir, "remote.json"),
       projectId: "squeak-test",
       store,
       replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
       snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
-      ...(options.offered === false ? {} : { voice: { state: view, apply, test } }),
+      ...(options.offered === false ? {} : { voice: { state: view, apply, test, changePin } }),
       now: () => NOW,
     });
     const pairing = bridge.startPairing();
@@ -4345,7 +4351,7 @@ describe("RemoteBridge phone-call settings from the phone", () => {
       const box = seal(payload.k, { v: 1, kind: "voice", nonce, expiresAt: NOW + 60_000, ...fields });
       return { box, sig: signer.sign(box), device: "iphone-1" };
     };
-    return { bridge, config, command, apply, test, voice };
+    return { bridge, config, command, apply, test, voice, changePin };
   }
 
   it("shows who it rings, sets the extension, and clears it", async () => {
@@ -4374,6 +4380,47 @@ describe("RemoteBridge phone-call settings from the phone", () => {
     const t = await voiceT({ testOutcome: { ok: false, reason: "A test call is already ringing." } });
     const verdict = await t.bridge.handleCommand(t.config, "t2", t.command({ change: { test: true } }));
     expect(verdict.result).toEqual({ id: "t2", status: "refused", reason: "A test call is already ringing." });
+    t.bridge.stop();
+  });
+
+  it("changes the pin with the current one, and never logs either", async () => {
+    const t = await voiceT();
+    const ok = await t.bridge.handleCommand(
+      t.config,
+      "p1",
+      t.command({ change: { pin: { current: "1234", next: "987654" } } }),
+    );
+    expect(ok.result).toEqual({ id: "p1", status: "sent" });
+    expect(t.changePin).toHaveBeenCalledWith("1234", "987654");
+    const wrong = await t.bridge.handleCommand(
+      t.config,
+      "p2",
+      t.command({ change: { pin: { current: "0000", next: "987654" } } }),
+    );
+    expect(wrong.result).toEqual({ id: "p2", status: "refused", reason: "That is not your current pin." });
+    const log = JSON.stringify((t.bridge.status() as { activity: unknown }).activity);
+    expect(log).not.toContain("987654");
+    expect(log).not.toContain("1234");
+    t.bridge.stop();
+  });
+
+  it("refuses a malformed pin change without asking the gateway", async () => {
+    const t = await voiceT();
+    const bad: Record<string, unknown>[] = [
+      { change: { pin: { current: "123", next: "987654" } } },
+      { change: { pin: { current: "1234", next: "12ab" } } },
+      { change: { pin: { current: "1234", next: "1234567890123" } } },
+      { change: { pin: { current: "1234" } } },
+      { change: { pin: { current: "1234", next: "5678", extra: "1" } } },
+      { change: { pin: "1234" } },
+      { change: { pin: { current: 1234, next: 5678 } } },
+      { change: { pin: { current: "1234", next: "5678" }, callee: "101" } },
+    ];
+    for (const fields of bad) {
+      const verdict = await t.bridge.handleCommand(t.config, "x", t.command(fields));
+      expect(verdict.result).toMatchObject({ status: "refused" });
+    }
+    expect(t.changePin).not.toHaveBeenCalled();
     t.bridge.stop();
   });
 

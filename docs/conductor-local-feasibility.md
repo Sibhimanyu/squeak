@@ -18,14 +18,14 @@ Labels used throughout:
 
 ## 1. Version and harness tested
 
-| item | value | basis |
-| --- | --- | --- |
-| Conductor | 0.91.1 (Tauri, macOS WKWebView) | Observed: `defaults read /Applications/Conductor.app/Contents/Info CFBundleShortVersionString` |
-| macOS | Darwin 25.6.0 | Observed: this environment |
-| Date of live relay run | 2026-10-17 | Owner-run, recorded in the owner's memory notes |
-| Reverse-engineered bundles | `renderApp-BhRpw2zl.js`, `main-DAFNnNfp.js` | `.context/re/*.md` |
-| Squeak side | `src/fleet/conductor-relay/*` (crypto, pairing, phone client, relay server, upstream proxy, service), wired into `ConductorReplier.send` in `src/fleet/session-reply.ts` | code |
-| CLI | `scripts/conductor-relay.ts` (`list`, `setup`, `reset`, `run`, `keychain-pair`) | code |
+| item                       | value                                                                                                                                                                    | basis                                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Conductor                  | 0.91.1 (Tauri, macOS WKWebView)                                                                                                                                          | Observed: `defaults read /Applications/Conductor.app/Contents/Info CFBundleShortVersionString` |
+| macOS                      | Darwin 25.6.0                                                                                                                                                            | Observed: this environment                                                                     |
+| Date of live relay run     | 2026-10-17                                                                                                                                                               | Owner-run, recorded in the owner's memory notes                                                |
+| Reverse-engineered bundles | `renderApp-BhRpw2zl.js`, `main-DAFNnNfp.js`                                                                                                                              | `.context/re/*.md`                                                                             |
+| Squeak side                | `src/fleet/conductor-relay/*` (crypto, pairing, phone client, relay server, upstream proxy, service), wired into `ConductorReplier.send` in `src/fleet/session-reply.ts` | code                                                                                           |
+| CLI                        | `scripts/conductor-relay.ts` (`list`, `setup`, `reset`, `run`, `keychain-pair`)                                                                                          | code                                                                                           |
 
 Live state at the time of writing (read-only probes, nothing printed that is
 secret and no message content selected):
@@ -71,7 +71,7 @@ temp directory and read, never run; the sidecar is `Resources/bin/.internal/cond
   server that ignores an offered subprotocol makes such a client drop the socket. Squeak now echoes the first one.
 - Queue vs steer did **not** drift. `mode` stays `queue|steer` end to end (`deliveryMode`/`mode` in the queue state,
   `composer.steer` for promote). What steers is Conductor's composer when text is typed into the window: Enter follows
-  "Follow-up behavior" (`default_message_send_mode`, default *steering*). With the relay down, replies fell back to
+  "Follow-up behavior" (`default_message_send_mode`, default _steering_). With the relay down, replies fell back to
   window typing, so a message the phone showed as queued was steered on the Mac.
 
 Observed on this Mac (Conductor 0.92.0 started 10:33 IST): the sidecar (pid of `conductor-runtime sidecar`) holds
@@ -120,50 +120,50 @@ deep links; **R6** sidecar socket; **R7** app-actions DOM bridge.
 
 ### R1. Local relay (preferred)
 
-| capability | status | evidence |
-| --- | --- | --- |
-| Discover sessions | Observed | Squeak reads them from `conductor.db` (`conductor-registry.ts`), not through the relay. The relay can also list them (`sessions?workspace=` topic, `GET /workspaces`), Designed, RE only. |
-| Stable session id | Observed | `sessions.id` is the id in the route path; the send landed in the intended pre-existing chat. Joins to agent transcripts via `claude_session_id`. |
-| Send into the same session | Observed | 2026-10-17 run: message appeared live in the existing chat. If the id did not exist, Conductor would create a session (RE), so the id must come from the DB. |
-| Positive acknowledgment | Observed (HTTP) / Designed (delivery) | Response 200 with queue state is what `service.ts` treats as ok. A message moving from `messages` to `ingestedMessageIds` means delivered to the agent (RE, not coded). `409 generation` handling and idempotent retry on `messageId` are RE-documented; unit tests cover the client, not a live 409. |
-| Read reply | Observed (DB), Designed (relay feed) | Reply text is read from `session_messages` and the turn-end rows (section 4). The relay `/ws` and `/feed` topics could stream it; Squeak does not use them. |
-| Streaming or progress | Observed (in Conductor's own window), Designed (in Squeak) | Appears and streams live in Conductor's window. Squeak's own progress comes from transcripts (`activity.ts`), not the relay. |
-| Approvals | Not supported | RE: plan responses, question answers and tool approvals return 501 over this channel. `session-reply.ts` refuses `needs_user_input` and `needs_plan_response`. |
-| Open in host via `conductor://workspace?id=&session=` | Untested | Nothing in `src/` or the old `desktop/` uses `conductor://`. CLAUDE.md records that the documented links cannot open an existing chat. Treat as unavailable until tested. |
-| Survives Conductor restart | Observed once (setup restart) / Untested (steady state) | Conductor was restarted once during setup and then connected. Reconnect after a later relaunch is Designed: `onHost` supersedes any older client. See 7.2. |
-| Survives Squeak (daemon) restart | Designed | `listenWithRetry` rebinds the port every 5 s; the override points here permanently, so Conductor's cloud traffic waits meanwhile. Not exercised live. See 7.3. |
-| Survives sleep or wake | Untested | Sockets die on sleep; `send` clears the client on a thrown error so `isReady()` goes false and replies fall back. Recovery depends on Conductor redialing. See 7.4. |
-| Works with screen locked | Observed | 2026-10-17 run. |
-| Reversible disconnect | Designed | `scripts/conductor-relay.ts reset` deletes the settings rows (needs a Conductor restart); `setup` first copies `conductor.db` to `conductor.db.before-squeak-relay-<ts>`. Paired-device Keychain entry removal is manual. Not run live. |
+| capability                                            | status                                                     | evidence                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Discover sessions                                     | Observed                                                   | Squeak reads them from `conductor.db` (`conductor-registry.ts`), not through the relay. The relay can also list them (`sessions?workspace=` topic, `GET /workspaces`), Designed, RE only.                                                                                                             |
+| Stable session id                                     | Observed                                                   | `sessions.id` is the id in the route path; the send landed in the intended pre-existing chat. Joins to agent transcripts via `claude_session_id`.                                                                                                                                                     |
+| Send into the same session                            | Observed                                                   | 2026-10-17 run: message appeared live in the existing chat. If the id did not exist, Conductor would create a session (RE), so the id must come from the DB.                                                                                                                                          |
+| Positive acknowledgment                               | Observed (HTTP) / Designed (delivery)                      | Response 200 with queue state is what `service.ts` treats as ok. A message moving from `messages` to `ingestedMessageIds` means delivered to the agent (RE, not coded). `409 generation` handling and idempotent retry on `messageId` are RE-documented; unit tests cover the client, not a live 409. |
+| Read reply                                            | Observed (DB), Designed (relay feed)                       | Reply text is read from `session_messages` and the turn-end rows (section 4). The relay `/ws` and `/feed` topics could stream it; Squeak does not use them.                                                                                                                                           |
+| Streaming or progress                                 | Observed (in Conductor's own window), Designed (in Squeak) | Appears and streams live in Conductor's window. Squeak's own progress comes from transcripts (`activity.ts`), not the relay.                                                                                                                                                                          |
+| Approvals                                             | Not supported                                              | RE: plan responses, question answers and tool approvals return 501 over this channel. `session-reply.ts` refuses `needs_user_input` and `needs_plan_response`.                                                                                                                                        |
+| Open in host via `conductor://workspace?id=&session=` | Untested                                                   | Nothing in `src/` or the old `desktop/` uses `conductor://`. CLAUDE.md records that the documented links cannot open an existing chat. Treat as unavailable until tested.                                                                                                                             |
+| Survives Conductor restart                            | Observed once (setup restart) / Untested (steady state)    | Conductor was restarted once during setup and then connected. Reconnect after a later relaunch is Designed: `onHost` supersedes any older client. See 7.2.                                                                                                                                            |
+| Survives Squeak (daemon) restart                      | Designed                                                   | `listenWithRetry` rebinds the port every 5 s; the override points here permanently, so Conductor's cloud traffic waits meanwhile. Not exercised live. See 7.3.                                                                                                                                        |
+| Survives sleep or wake                                | Untested                                                   | Sockets die on sleep; `send` clears the client on a thrown error so `isReady()` goes false and replies fall back. Recovery depends on Conductor redialing. See 7.4.                                                                                                                                   |
+| Works with screen locked                              | Observed                                                   | 2026-10-17 run.                                                                                                                                                                                                                                                                                       |
+| Reversible disconnect                                 | Designed                                                   | `scripts/conductor-relay.ts reset` deletes the settings rows (needs a Conductor restart); `setup` first copies `conductor.db` to `conductor.db.before-squeak-relay-<ts>`. Paired-device Keychain entry removal is manual. Not run live.                                                               |
 
 ### R2. Squeak Hands AX typing (fallback 1)
 
-| capability | status | evidence |
-| --- | --- | --- |
+| capability                 | status                       | evidence                                                                                                                  |
+| -------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | Send into the same session | Observed (in production use) | `helpers/squeak-hands` proves the visible chat from the web area's `AXURL` (`...sessionId=<id>`), never from a tab label. |
-| Acknowledgment | Designed | Possibly-sent results are confirmed against `session_messages`, never re-sent (`session-reply.ts`, `mayHaveSent`). |
-| Read reply, approvals | As R1 | DB read; approvals still answered in Conductor. |
-| Screen locked | Not possible | Needs an unlocked GUI session and Accessibility. |
-| Restart or sleep | Designed | Stateless per send; fails closed. |
-| Disconnect | N/A | Nothing is installed in Conductor. |
+| Acknowledgment             | Designed                     | Possibly-sent results are confirmed against `session_messages`, never re-sent (`session-reply.ts`, `mayHaveSent`).        |
+| Read reply, approvals      | As R1                        | DB read; approvals still answered in Conductor.                                                                           |
+| Screen locked              | Not possible                 | Needs an unlocked GUI session and Accessibility.                                                                          |
+| Restart or sleep           | Designed                     | Stateless per send; fails closed.                                                                                         |
+| Disconnect                 | N/A                          | Nothing is installed in Conductor.                                                                                        |
 
 ### R3. Background CLI plus DB mirror (fallback 2)
 
-| capability | status | evidence |
-| --- | --- | --- |
-| Send | Observed (shipped) | `claude -p --resume` or codex app-server; both sides mirrored into `conductor.db` (`conductor-mirror.ts`). |
-| Same session | Partial | Same agent session and same Conductor row, but Conductor does not live-reload; the exchange appears only after Conductor reloads the chat. |
-| Busy sessions | Refused | `working`, `cancelling`, `needs_user_input`, `needs_plan_response`: a second writer would talk past Conductor. |
-| Risk | Writes `conductor.db` | Envelope must match Conductor's exactly or the UI shows "could not be displayed" (CLAUDE.md). |
+| capability    | status                | evidence                                                                                                                                   |
+| ------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Send          | Observed (shipped)    | `claude -p --resume` or codex app-server; both sides mirrored into `conductor.db` (`conductor-mirror.ts`).                                 |
+| Same session  | Partial               | Same agent session and same Conductor row, but Conductor does not live-reload; the exchange appears only after Conductor reloads the chat. |
+| Busy sessions | Refused               | `working`, `cancelling`, `needs_user_input`, `needs_plan_response`: a second writer would talk past Conductor.                             |
+| Risk          | Writes `conductor.db` | Envelope must match Conductor's exactly or the UI shows "could not be displayed" (CLAUDE.md).                                              |
 
 ### R4 to R7. Other routes
 
-| route | verdict | reason |
-| --- | --- | --- |
-| R4 public cloud API (`conductor message create`) | Not applicable | Cloud-only; cannot address a local session. |
-| R5 deep links | Open only | Can raise Conductor or a workspace; cannot send, and cannot open an existing chat per CLAUDE.md. |
-| R6 sidecar socket | Rejected | The agent runtime's loopback listeners belong to Conductor's own client; connecting would steal or confuse it, and it speaks the agent protocol, not the composer. |
-| R7 app-actions DOM bridge / webview JS | Weak; not pursued | `webview-injection-feasibility.md`: the WKWebView is inspectable, but only through Apple's Remote Web Inspector (private XPC, no supported client, tied to an unlocked GUI session). No Tauri command evaluates JS. Not lock-screen-safe. |
+| route                                            | verdict           | reason                                                                                                                                                                                                                                    |
+| ------------------------------------------------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R4 public cloud API (`conductor message create`) | Not applicable    | Cloud-only; cannot address a local session.                                                                                                                                                                                               |
+| R5 deep links                                    | Open only         | Can raise Conductor or a workspace; cannot send, and cannot open an existing chat per CLAUDE.md.                                                                                                                                          |
+| R6 sidecar socket                                | Rejected          | The agent runtime's loopback listeners belong to Conductor's own client; connecting would steal or confuse it, and it speaks the agent protocol, not the composer.                                                                        |
+| R7 app-actions DOM bridge / webview JS           | Weak; not pursued | `webview-injection-feasibility.md`: the WKWebView is inspectable, but only through Apple's Remote Web Inspector (private XPC, no supported client, tied to an unlocked GUI session). No Tauri command evaluates JS. Not lock-screen-safe. |
 
 ## 4. Reading replies back
 
@@ -204,17 +204,17 @@ open the file with `readonly: true`.
 
 ## 6. Risks and mitigations
 
-| risk | detail | mitigation |
-| --- | --- | --- |
-| Undocumented interface | Everything is reverse engineered from minified bundles; a Conductor release can rename, move or remove it. | Pin the tested versions (0.91.1, 0.91.2, 0.92.0 read-only; see 1.1). On start, compare `CFBundleShortVersionString` with the tested list; if it differs, leave the relay off and use R2 or R3. Re-run the RE diff per release. Keep the fallbacks in `ConductorReplier.send`. |
-| Minified names change per release | `ej`, `OVr`, `Ha` and friends are per-build aliases. | Anchor on stable strings: the setting key `roundhouse_client_url_override`, the path `/desktop-relay/v1/host`, the route `pending-messages/send`, the `hello.v == 2` handshake. Do not depend on alias names. |
-| Global override | The setting redirects **all** Roundhouse cloud traffic (REST, `/auth/exchange`, Codex proxy, terminal websocket, git sync), read live. If Squeak is down, Conductor's cloud features fail. | `proxy.ts` forwards everything except the relay path verbatim (HTTP, and websocket upgrades by piping bytes with no frame parsing). Daemon rebinds with retry. `reset` restores the default. Tell the owner this is a standing dependency. |
-| Keychain write | Pairing writes a login Keychain item owned by Conductor's service name. | Owner-initiated only (`keychain-pair`), one named item, document its removal; never done by the daemon on its own. |
-| Sign-in dependency | Needs a stored Conductor API token (prior sign-in); enterprise data privacy blocks it. | Detect and report "relay inert" instead of failing silently (`service.ts` logs the reason). |
-| One host per account | The relay allows one host (4409), so Squeak acts as the phone side. A second Conductor machine on the same account would conflict. | Single Mac assumption; documented. |
-| Telemetry | Each remote send is logged to Conductor's analytics (`remote_control_message_sent`). | Disclose; not avoidable on this route. |
-| Busy sessions not refused by relay | The relay queues behind a running turn (`mode: queue`) or injects into it (`steer`). | Squeak defaults to `queue`; replier still refuses held questions and plans. |
-| Settings edit while Conductor runs | `setup` and `reset` write `conductor.db`. | Run with Conductor quit; automatic timestamped backup first. |
+| risk                               | detail                                                                                                                                                                                     | mitigation                                                                                                                                                                                                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Undocumented interface             | Everything is reverse engineered from minified bundles; a Conductor release can rename, move or remove it.                                                                                 | Pin the tested versions (0.91.1, 0.91.2, 0.92.0 read-only; see 1.1). On start, compare `CFBundleShortVersionString` with the tested list; if it differs, leave the relay off and use R2 or R3. Re-run the RE diff per release. Keep the fallbacks in `ConductorReplier.send`. |
+| Minified names change per release  | `ej`, `OVr`, `Ha` and friends are per-build aliases.                                                                                                                                       | Anchor on stable strings: the setting key `roundhouse_client_url_override`, the path `/desktop-relay/v1/host`, the route `pending-messages/send`, the `hello.v == 2` handshake. Do not depend on alias names.                                                                 |
+| Global override                    | The setting redirects **all** Roundhouse cloud traffic (REST, `/auth/exchange`, Codex proxy, terminal websocket, git sync), read live. If Squeak is down, Conductor's cloud features fail. | `proxy.ts` forwards everything except the relay path verbatim (HTTP, and websocket upgrades by piping bytes with no frame parsing). Daemon rebinds with retry. `reset` restores the default. Tell the owner this is a standing dependency.                                    |
+| Keychain write                     | Pairing writes a login Keychain item owned by Conductor's service name.                                                                                                                    | Owner-initiated only (`keychain-pair`), one named item, document its removal; never done by the daemon on its own.                                                                                                                                                            |
+| Sign-in dependency                 | Needs a stored Conductor API token (prior sign-in); enterprise data privacy blocks it.                                                                                                     | Detect and report "relay inert" instead of failing silently (`service.ts` logs the reason).                                                                                                                                                                                   |
+| One host per account               | The relay allows one host (4409), so Squeak acts as the phone side. A second Conductor machine on the same account would conflict.                                                         | Single Mac assumption; documented.                                                                                                                                                                                                                                            |
+| Telemetry                          | Each remote send is logged to Conductor's analytics (`remote_control_message_sent`).                                                                                                       | Disclose; not avoidable on this route.                                                                                                                                                                                                                                        |
+| Busy sessions not refused by relay | The relay queues behind a running turn (`mode: queue`) or injects into it (`steer`).                                                                                                       | Squeak defaults to `queue`; replier still refuses held questions and plans.                                                                                                                                                                                                   |
+| Settings edit while Conductor runs | `setup` and `reset` write `conductor.db`.                                                                                                                                                  | Run with Conductor quit; automatic timestamped backup first.                                                                                                                                                                                                                  |
 
 ## In-app setup
 
@@ -222,8 +222,8 @@ The Mac app sets the relay up without the terminal, through the daemon (`src/fle
 shared with `scripts/conductor-relay.ts`). Token-gated, no CORS header, 503 when not wired:
 
 - `GET /control/relay` answers `{ state, conductorInstalled, conductorVersion, versionTested, configured, paired,
-  hostConnected, lastHostAt, port, message, steps }`. `state` is `unsupported | not-installed | off | needs-restart |
-  waiting | connected | error`. `needs-restart` compares Conductor's process start with the `setupAt` kept in
+hostConnected, lastHostAt, port, message, steps }`. `state` is `unsupported | not-installed | off | needs-restart |
+waiting | connected | error`. `needs-restart` compares Conductor's process start with the `setupAt` kept in
   `conductor-relay.json`; if that is unknowable it reads `waiting`.
 - `POST /control/relay/setup` (body `{}` or `{"force":true}`) backs up `conductor.db` (only when a row changes),
   writes the settings rows in one `BEGIN IMMEDIATE` transaction (5 s busy timeout), pairs through the login Keychain
@@ -254,7 +254,7 @@ on screen.
    `/control/session/<sidA>/reply`).
 4. Check with read-only SQL, counting only (do not select content):
    `SELECT session_id, COUNT(*) FROM session_messages WHERE role='user' AND
-   session_id IN ('<sidA>','<sidB>') GROUP BY session_id;` Expected: A gained
+session_id IN ('<sidA>','<sidB>') GROUP BY session_id;` Expected: A gained
    one row, B gained none.
 5. Repeat with A on screen and a reply to B. Then send to A and B back to back
    (under a second) and confirm one row each.
@@ -299,7 +299,7 @@ on screen.
    gone, and the backup file exists beside `conductor.db`.
 3. Remove the Keychain item
    (`security delete-generic-password -s com.conductor.app.production.settings
-   -a desktop_relay_paired_devices`). Note that this removes the whole paired
+-a desktop_relay_paired_devices`). Note that this removes the whole paired
    device list; check first that no real phone is paired.
 4. Reopen Conductor. Confirm cloud features work and port 8788 is no longer
    needed. Pass criterion: no Squeak process required for Conductor to function.

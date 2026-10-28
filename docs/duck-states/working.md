@@ -4,7 +4,7 @@
 
 Shown while an agent is mid-turn. The duck is busy and focused. This state
 also gets a faster bob from the app, so the drawing only needs to carry
-*attention*, not motion.
+_attention_, not motion.
 
 ## Prompt
 

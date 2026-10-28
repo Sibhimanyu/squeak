@@ -9,7 +9,7 @@ ChatGPT.
 
 ## Read this before generating anything
 
-**Upload `brand/mood-sprites/duck.png` first and ask for variations of *that*
+**Upload `brand/mood-sprites/duck.png` first and ask for variations of _that_
 duck.** Describing the duck again from scratch produces six ducks that do not
 look related. Do the whole set in **one conversation**, each time saying "same
 duck, same style, same colours, only change X".
@@ -23,14 +23,14 @@ more.
 **Every image goes in `brand/mood-sprites/`.** The app picks them up on restart.
 Filenames are exact — note the underscore in `needs_you`.
 
-| file | state | when it shows |
-| --- | --- | --- |
-| `duck.png` | idle | ✅ already exists — sessions open, nothing happening |
-| `duck-asleep.png` | asleep | nothing running at all |
-| `duck-working.png` | working | an agent is mid-turn |
-| `duck-celebrating.png` | celebrating | a session finished in the last 45s |
-| `duck-needs_you.png` | needs you | an agent is blocked waiting on you |
-| `duck-offline.png` | offline | *optional* — Squeak is not running |
+| file                   | state       | when it shows                                        |
+| ---------------------- | ----------- | ---------------------------------------------------- |
+| `duck.png`             | idle        | ✅ already exists — sessions open, nothing happening |
+| `duck-asleep.png`      | asleep      | nothing running at all                               |
+| `duck-working.png`     | working     | an agent is mid-turn                                 |
+| `duck-celebrating.png` | celebrating | a session finished in the last 45s                   |
+| `duck-needs_you.png`   | needs you   | an agent is blocked waiting on you                   |
+| `duck-offline.png`     | offline     | _optional_ — Squeak is not running                   |
 
 Save them into **`brand/mood-sprites/`**, then rebuild whatever uses them:
 

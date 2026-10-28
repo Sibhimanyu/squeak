@@ -76,7 +76,7 @@ import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-inst
 import { TelegramAvatar } from "../telegram/avatar.js";
 import { BaresipLine } from "../voice/baresip-line.js";
 import { DirectLine } from "../voice/direct-line.js";
-import { relayLineFor } from "../voice/relay-line.js";
+import { relayLineFor, type RelayLine } from "../voice/relay-line.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker } from "../voice/tts.js";
 import type { VoiceLine } from "../voice/relay-line.js";
@@ -172,6 +172,8 @@ export class SqueakApp {
   private voiceSpeaker: MacSpeaker | null = null;
   /** The line voice calls go out on (the gateway through the relay, or this Mac), also for a test call from an app. */
   private voiceLine: VoiceLine | null = null;
+  /** The relay line when the gateway places the calls: also how a pin change reaches it. */
+  private voiceRelayLine: RelayLine | null = null;
   /** How the last test call from an app went; shown in the phone view and the Mac app. */
   private voiceTest: {
     at: number;
@@ -461,6 +463,7 @@ export class SqueakApp {
               state: () => this.voiceView(),
               apply: (request) => this.applyVoice(request),
               test: () => this.testVoiceCall(),
+              changePin: (current, next) => this.changeVoicePin(current, next),
             },
             notify: {
               state: () => this.notifyView(),
@@ -961,6 +964,13 @@ export class SqueakApp {
     };
   }
 
+  /** A new pin for the gateway, from an app: only through the relay, and only with the current pin. */
+  private async changeVoicePin(current: string, next: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const line = this.voiceRelayLine;
+    if (!line) return { ok: false, reason: "The pin lives in the Home Assistant add-on: change it there." };
+    return line.changePin(current, next);
+  }
+
   /**
    * A test call from an app: rings with a made-up question and answers at once; the outcome lands in `lastTest`
    * (the phone and Mac app read it from the view). It touches no chat, and one at a time, 15 s apart.
@@ -1324,6 +1334,7 @@ export class SqueakApp {
     if (voiceRelay && remoteDatabaseUrl) {
       const line = relayLineFor(new RtdbRest(remoteDatabaseUrl), voiceRelay, this.voiceSettings);
       this.voiceLine = line;
+      this.voiceRelayLine = line;
       return new VoiceChannel({
         ...base,
         line,

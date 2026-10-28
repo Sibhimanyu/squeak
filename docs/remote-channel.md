@@ -796,3 +796,8 @@ The command is one signed envelope, exactly these keys:
 the Mac app's `POST /control/voice`; an outside number is refused here and again by the gateway. A test starts a call
 with a made-up question and answers `sent` at once (`refused` with a reason if one is already ringing or phone calls
 are not set up); how it went arrives in `voice.lastTest`.
+
+A third `change` shape changes the pin the gateway asks for (never logged, never stored on the Mac):
+`{ "pin": { "current": "4821", "next": "135790" } }`, both 4 to 12 digits, exactly these keys. The Mac relays it to the
+Home Assistant add-on, which checks the current pin (five wrong guesses lock changes for ten minutes) and answers; the
+command's answer is that outcome. A Mac whose calls are placed directly refuses: its pin is in its own config.
