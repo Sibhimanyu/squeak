@@ -78,7 +78,7 @@ python3 -I scripts/appcast-notes.py CHANGELOG.md build/appcast.xml build/appcast
   echo
   echo "SHA-256: \`$SUM\`"
   echo
-  echo "Ad-hoc signed, not notarized: right-click the app and choose Open the first time."
+  echo "Signed with an Apple Development certificate, not notarized: right-click the app and choose Open the first time."
 } > build/RELEASE_NOTES.md
 
 echo
