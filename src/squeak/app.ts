@@ -36,6 +36,7 @@ import { macTabsSystem, WindowTabs } from "../fleet/window-tabs.js";
 import { UsageStats } from "../fleet/usage-stats.js";
 import { POWER_SUDOERS_PATH, PowerMode, powerSudoersRule, powerSystem } from "../fleet/power-mode.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
+import { HooksSetup } from "../fleet/hooks-setup.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
@@ -73,6 +74,10 @@ import { RasanaiProvider } from "../workflows/rasanai/provider.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { TelegramAvatar } from "../telegram/avatar.js";
+import { BaresipLine } from "../voice/baresip-line.js";
+import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
+import { MacSpeaker } from "../voice/tts.js";
+import { VoiceChannel } from "../voice/voice-channel.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
 import type { TelegramChat, TelegramConversationTarget, TelegramUpdate } from "../types.js";
 import { logger } from "../utils/logger.js";
@@ -155,6 +160,9 @@ export class SqueakApp {
   /** The direct same-Wi-Fi path to a paired phone (remote/local-channel.ts); null when off. */
   private readonly localChannel: LocalChannelServer | null;
   private readonly cliq: CliqChannel | null;
+  /** Rings the owner through a SIP extension when an agent waits on them (src/voice/); null unless set up. */
+  private voice: VoiceChannel | null = null;
+  private voiceSpeaker: MacSpeaker | null = null;
   /** The Cliq webhook the channel posts through, for one-off notes (an awake session's end). */
   private cliqWebhook: CliqWebhook | null = null;
   /** Plain-language questions from Cliq, answered through the Mac's own `claude`. */
@@ -571,6 +579,7 @@ export class SqueakApp {
       sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),
       queue: (sessionId) => this.replier.queue(sessionId),
       relay: this.relaySetup(),
+      hooks: this.hooksSetup(),
       queueAction: (sessionId, messageId, action) => this.replier.queueAction(sessionId, messageId, action),
       reply: async (target, text, mode, answersTurn) => {
         // A client that names the turn it answered is refused once the chat has moved on (answered on the laptop).
@@ -612,6 +621,7 @@ export class SqueakApp {
     // Keychain is read only then.
     this.claudeRefresher = new ClaudeLimitsRefresher(this.claudeLimits, () => fetchClaudeUsage());
     this.cliq = this.createCliq();
+    this.voice = this.createVoice();
 
     this.controller = new FleetController({
       telegram: this.telegram,
@@ -637,6 +647,7 @@ export class SqueakApp {
   async start(): Promise<void> {
     // Before the controller, which starts the monitor: the first push must reach Cliq too.
     this.cliq?.start();
+    this.voice?.start();
     if (this.config.caffeinate) {
       this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
     }
@@ -744,6 +755,8 @@ export class SqueakApp {
     this.remote?.stop();
     await this.localChannel?.stop().catch(() => undefined);
     this.cliq?.stop();
+    this.voice?.stop();
+    this.voiceSpeaker?.dispose();
     await this.conductorRelay.stop().catch(() => undefined);
     await this.replier.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);
@@ -776,6 +789,16 @@ export class SqueakApp {
         return outcome;
       },
       reset: async () => resetRelay(options()),
+    };
+  }
+
+  /** Agent hooks from the Mac app (fleet/hooks-setup.ts) for the ingress's `/control/hooks*` routes. */
+  private hooksSetup(): NonNullable<IngressControl["hooks"]> {
+    const setup = new HooksSetup({ supportDir: this.config.supportDir, port: this.config.hookPort });
+    return {
+      status: () => setup.status(),
+      install: () => setup.install(),
+      uninstall: () => setup.uninstall(),
     };
   }
 
@@ -1134,6 +1157,24 @@ export class SqueakApp {
       logger.warn("cliq disabled", { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
+  }
+
+  /** A bad voice setting was already turned into "no voice" by the config; this only wires a good one. */
+  private createVoice(): VoiceChannel | null {
+    const voice = this.config.voice;
+    if (!voice) {
+      return null;
+    }
+    this.voiceSpeaker = new MacSpeaker(voice.speechVoice);
+    return new VoiceChannel({
+      monitor: this.runtime.monitor,
+      replier: this.router,
+      line: new BaresipLine(voice.line, this.voiceSpeaker),
+      callee: voice.callee,
+      pin: voice.pin,
+      policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voice.quiet }),
+      note: (text) => this.announce(text),
+    });
   }
 
   private hookStatus(): string {

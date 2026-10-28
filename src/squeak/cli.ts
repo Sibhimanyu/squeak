@@ -33,7 +33,7 @@ FLEET_CODEX_QUOTA_WARN_PERCENT=85
 `;
 
 function printUsage(): void {
-  console.log(`Usage: squeak [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|cliq-relay|help]
+  console.log(`Usage: squeak [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|cliq-relay|voice-test|help]
 
 Commands:
   start            Start squeaking (default)
@@ -44,6 +44,7 @@ Commands:
   uninstall-hooks  Remove the hooks this tool installed
   hooks-status     Show whether the hooks are installed
   cliq-relay       Set up two-way Zoho Cliq; writes the handlers to paste (--rotate: new secret)
+  voice-test       Ring your phone with a made-up question, to check the PBX setup (docs/voice.md)
   help             Show this message`);
 }
 
@@ -201,6 +202,11 @@ export async function main(argv: string[]): Promise<void> {
       for (const line of runCliqRelay(envPath, readValues(envPath), argv.slice(1))) {
         console.log(line);
       }
+      return;
+    }
+    case "voice-test": {
+      const { runVoiceTest } = await import("../voice/voice-test.js");
+      process.exitCode = await runVoiceTest();
       return;
     }
     case "help":

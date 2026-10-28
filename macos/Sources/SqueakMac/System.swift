@@ -51,6 +51,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center?.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
+    /// What macOS says about Squeak's notification permission, for the setup checklist. Unknown outside a bundle.
+    func access() async -> NotificationAccess {
+        guard let center else { return .unknown }
+        switch await center.notificationSettings().authorizationStatus {
+        case .notDetermined: return .notDetermined
+        case .denied: return .denied
+        default: return .authorized
+        }
+    }
+
     /// False when macOS will deliver but never show Squeak's banners (alert style
     /// None, or notifications off), so Settings can say so. Nil outside a bundle.
     func bannersShown() async -> Bool? {

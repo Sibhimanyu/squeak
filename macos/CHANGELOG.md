@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.10.0
+
+- A first-run Setup checklist: Squeak installs its background service (after one click), installs the agent
+  hooks, connects Conductor, and walks you through notifications and the quick-message shortcut, with the next
+  step highlighted. It is on Welcome, in Settings, Setup, and under "Finish setting up…" in the menu-bar popup
+  until the required steps are done. Agent hooks can be installed and removed from here (it needs the
+  background service updated to this version).
+
 ## 2.9.0
 
 - Set up Conductor without the terminal: Settings, Conductor shows whether live replies and new chats from your

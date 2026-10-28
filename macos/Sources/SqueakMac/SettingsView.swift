@@ -36,6 +36,7 @@ private struct HiddenTitle: ViewModifier {
 private extension SettingsSection {
     var symbol: LucideName {
         switch self {
+        case .setup: .check
         case .general: .settings
         case .notifications: .bell
         case .awake: .moon
@@ -100,6 +101,7 @@ private struct SettingsPage: View {
 
     @ViewBuilder private var page: some View {
         switch section {
+        case .setup: SetupSettings()
         case .general: GeneralSettings()
         case .notifications: NotificationsSettings()
         case .awake: AwakeSettings()

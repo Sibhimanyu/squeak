@@ -131,6 +131,9 @@ struct PopupHomeTop: View {
                 if !searching { model.query = "" }
                 overflowOpen = false
             }
+            if model.setupNeedsAttention {
+                MenuRow(title: "Finish setting up…") { dismiss(); model.openSettings(.setup) }
+            }
             MenuRow(title: "Settings…", hint: "⌘,") { dismiss(); model.openSettings() }
                 .keyboardShortcut(",")
             MenuRow(title: "Check for Updates…", disabled: !model.updater.canCheck) { dismiss(); model.updater.checkForUpdates() }

@@ -16,16 +16,22 @@ import Testing
     }
 
     @Test func phoneStyleOrderAndAliases() {
-        #expect(SettingsSection.groups.first == [.general, .notifications, .awake])
+        #expect(SettingsSection.groups[1] == [.general, .notifications, .awake])
         #expect(SettingsSection.general.title == "Mac")
         #expect(SettingsSection(link: "notify") == .notifications)
         #expect(SettingsSection(link: "mac") == .general)
     }
 
     @Test func conductorSitsAfterKeepAwakeBeforeConnections() {
-        #expect(SettingsSection.groups[1].first == .conductor)
+        #expect(SettingsSection.groups[2].first == .conductor)
         #expect(SettingsSection.conductor.title == "Conductor")
         #expect(SettingsSection(link: "conductor") == .conductor)
+    }
+
+    @Test func setupIsFirstOnItsOwn() {
+        #expect(SettingsSection.groups.first == [.setup])
+        #expect(SettingsSection(link: "setup") == .setup)
+        #expect(SettingsSection.setup.title == "Setup")
     }
 
     @Test func theOldChannelsTabLandsOnTelegram() {
