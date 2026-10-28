@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.11.0
+
+- Phone calls: Settings, Phone calls sets the extension Squeak rings when an agent is waiting on you (your phone
+  app's extension in 3CX). Only an extension is accepted, never an outside number. Calls are placed by the
+  Home Assistant add-on or by this Mac; it needs the background service updated to this version.
+
 ## 2.10.0
 
 - A first-run Setup checklist: Squeak installs its background service (after one click), installs the agent
