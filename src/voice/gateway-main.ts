@@ -5,7 +5,7 @@ import { logger } from "../utils/logger.js";
 import { BaresipLine } from "./baresip-line.js";
 import { readVoiceConfig, readVoiceRelayConfig, type VoiceEnv } from "./config.js";
 import { VoiceGateway } from "./gateway.js";
-import { EspeakSpeaker } from "./tts.js";
+import { EspeakSpeaker, PiperSpeaker, type Speaker } from "./tts.js";
 
 /** Where Home Assistant puts an add-on's options. */
 const ADDON_OPTIONS = "/data/options.json";
@@ -51,6 +51,19 @@ function databaseUrl(value: string | undefined): string {
   throw new Error("database_url must be your Firebase Realtime Database URL (https://….firebasedatabase.app)");
 }
 
+/** Piper when the image carries it (its paths are in the environment and exist), else the plain voice. */
+export function chooseSpeaker(env: Record<string, string | undefined>): Speaker {
+  const binary = env.SQUEAK_PIPER_BIN;
+  const model = env.SQUEAK_PIPER_MODEL;
+  const plain = new EspeakSpeaker();
+  if (binary && model && fs.existsSync(binary) && fs.existsSync(model)) {
+    logger.info("squeak voice gateway speaks with piper");
+    return new PiperSpeaker({ binary, model }, plain);
+  }
+  logger.info("squeak voice gateway speaks with espeak-ng");
+  return plain;
+}
+
 /** `squeak voice-gateway`: runs until stopped. Returns the exit code if it cannot start. */
 export async function runGateway(): Promise<number> {
   const env: Record<string, string | undefined> = fs.existsSync(ADDON_OPTIONS)
@@ -66,7 +79,7 @@ export async function runGateway(): Promise<number> {
     if (!voice.pin) {
       throw new Error("Set a PIN: without one a call could not take an answer, and there would be no point.");
     }
-    const speaker = new EspeakSpeaker();
+    const speaker = chooseSpeaker(env);
     const gateway = new VoiceGateway({
       store: new RtdbRest(databaseUrl(env.SQUEAK_REMOTE_DATABASE_URL)),
       channel: relay.channel,
