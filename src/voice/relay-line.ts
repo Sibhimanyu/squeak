@@ -110,3 +110,15 @@ export class RelayLine implements VoiceLine {
     }
   }
 }
+
+/**
+ * The Mac's relay line, wired the way the daemon wires it: the extension to ring is read from the saved voice
+ * settings each time, so a change in an app applies to the next call. One place, so a test can pin it.
+ */
+export function relayLineFor(
+  store: RelayStore,
+  relay: { channel: string; key: string },
+  settings: { settings: { callee: string | null } },
+): RelayLine {
+  return new RelayLine({ store, channel: relay.channel, key: relay.key, callee: () => settings.settings.callee });
+}
