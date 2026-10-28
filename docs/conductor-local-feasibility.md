@@ -49,6 +49,43 @@ server and authenticated; `GET /desktop-remote-access/health` returned 200;
 that appeared **live in the same, pre-existing chat**, with the screen locked
 and no cloud involved.
 
+### 1.1 Conductor 0.92.0 (read 2026-10-28)
+
+Tested versions the daemon knows (`TESTED_CONDUCTOR_VERSIONS` in `service.ts`): 0.91.1, 0.91.2 (run live) and
+0.92.0 (**read only**; live run unconfirmed). The daemon logs the installed version at start and warns on any other.
+
+What 0.92.0 changed (Observed in `Conductor.app`'s Tauri binary: the frontend is brotli-embedded, extracted to a
+temp directory and read, never run; the sidecar is `Resources/bin/.internal/conductor-runtime`, whose JS is plain text):
+
+- **The host relay moved from the webview into the sidecar** (a Bun process). The frontend now only answers three
+  requests for it: `remoteControlGetRelayHostUrl` (builds `ws(s)://<override>/desktop-relay/v1/host?hostId=&accessToken=`
+  after `/auth/exchange`), `remoteControlGetSecret`/`SetSecret` (Keychain). `renderApp-*.js` no longer contains
+  `desktop-relay`. `roundhouse_client_url_override` is still the only knob and still read from `settings`.
+- **Wire protocol is unchanged and still compatible.** Path `/desktop-relay/v1/host`; envelope `open|data|close`
+  with `connId`; handshake labels `conductor-desktop-relay-v1/...`; the host answers `hello{v,maxV?}` with
+  `min(maxV ?? v, 3)` and refuses only below 2, so Squeak's `v: 2` hello is accepted. v3 only adds frame
+  compression for the tunnel; Squeak does not offer it. `pair`/`auth`/`request` message shapes, the
+  `/pending-messages` routes (`send`, `:id/promote`, `:id/cancel`) and their bodies (`expectedGeneration`,
+  `expectedRevision`) match `phone.ts`. New close codes `4404/4408/4429`, at most 8 connections per host.
+- The host connects through the `ws` package (not a browser WebSocket): 30 s connect timeout, ping every 15 s, and a
+  server that ignores an offered subprotocol makes such a client drop the socket. Squeak now echoes the first one.
+- Queue vs steer did **not** drift. `mode` stays `queue|steer` end to end (`deliveryMode`/`mode` in the queue state,
+  `composer.steer` for promote). What steers is Conductor's composer when text is typed into the window: Enter follows
+  "Follow-up behavior" (`default_message_send_mode`, default *steering*). With the relay down, replies fell back to
+  window typing, so a message the phone showed as queued was steered on the Mac.
+
+Observed on this Mac (Conductor 0.92.0 started 10:33 IST): the sidecar (pid of `conductor-runtime sidecar`) holds
+**no** socket to Squeak's port in 50 s of `lsof` sampling; its only loopback sockets go to the logger. The one
+established connection to 8788 belongs to the app's own multiplexed `/ws` client (the proxy path). So the host never
+dialled in: the failure is before any upgrade, not in Squeak's handshake. The cause inside the sidecar (start of mobile
+access, the Keychain-held host key or paired-devices secret, its local server start) could not be read without
+running Conductor. Squeak now logs every host arrival (path, subprotocol), handshake start/end/timeout (10 s),
+the first sighting of each non-relay path, a lost host connection, and one warning after 2 min with no host at all.
+
+Owner steps if it stays silent: confirm Conductor's mobile access is switched on and shows connected, restart
+Conductor once, and if its Settings shows an error, that message is the cause. A re-pair is only needed if the paired
+devices secret is gone (`authError unknown_device` in the log).
+
 ## 2. How the relay route works
 
 1. Conductor reads `roundhouse_client_url_override` (a plain `settings` row,
@@ -169,7 +206,7 @@ open the file with `readonly: true`.
 
 | risk | detail | mitigation |
 | --- | --- | --- |
-| Undocumented interface | Everything is reverse engineered from minified bundles; a Conductor release can rename, move or remove it. | Pin the tested version (0.91.1). On start, compare `CFBundleShortVersionString` with the tested list; if it differs, leave the relay off and use R2 or R3. Re-run the RE diff per release. Keep the fallbacks in `ConductorReplier.send`. |
+| Undocumented interface | Everything is reverse engineered from minified bundles; a Conductor release can rename, move or remove it. | Pin the tested versions (0.91.1, 0.91.2, 0.92.0 read-only; see 1.1). On start, compare `CFBundleShortVersionString` with the tested list; if it differs, leave the relay off and use R2 or R3. Re-run the RE diff per release. Keep the fallbacks in `ConductorReplier.send`. |
 | Minified names change per release | `ej`, `OVr`, `Ha` and friends are per-build aliases. | Anchor on stable strings: the setting key `roundhouse_client_url_override`, the path `/desktop-relay/v1/host`, the route `pending-messages/send`, the `hello.v == 2` handshake. Do not depend on alias names. |
 | Global override | The setting redirects **all** Roundhouse cloud traffic (REST, `/auth/exchange`, Codex proxy, terminal websocket, git sync), read live. If Squeak is down, Conductor's cloud features fail. | `proxy.ts` forwards everything except the relay path verbatim (HTTP, and websocket upgrades by piping bytes with no frame parsing). Daemon rebinds with retry. `reset` restores the default. Tell the owner this is a standing dependency. |
 | Keychain write | Pairing writes a login Keychain item owned by Conductor's service name. | Owner-initiated only (`keychain-pair`), one named item, document its removal; never done by the daemon on its own. |

@@ -18,10 +18,19 @@ export function acceptKey(secWebSocketKey: string): string {
 }
 
 export interface WsConnection {
+  /** The subprotocol the client offered and we echoed, if any. */
+  readonly subprotocol: string | undefined;
   sendText(text: string): void;
   close(code?: number, reason?: string): void;
   onText(cb: (text: string) => void): void;
   onClose(cb: (code: number, reason: string) => void): void;
+}
+
+/** The first subprotocol token a client offered, if it is a plain RFC 7230 token. */
+export function offeredSubprotocol(header: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(header) ? header.join(",") : header;
+  const first = raw?.split(",")[0]?.trim();
+  return first && /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(first) ? first : undefined;
 }
 
 export function upgradeToWebSocket(
@@ -30,12 +39,16 @@ export function upgradeToWebSocket(
 ): WsConnection {
   const key = headers["sec-websocket-key"];
   if (typeof key !== "string") throw new Error("missing Sec-WebSocket-Key");
+  const subprotocol = offeredSubprotocol(headers["sec-websocket-protocol"]);
   socket.write(
     [
       "HTTP/1.1 101 Switching Protocols",
       "Upgrade: websocket",
       "Connection: Upgrade",
       `Sec-WebSocket-Accept: ${acceptKey(key)}`,
+      // A client that asked for a subprotocol (the `ws` package, tungstenite) drops the socket when the
+      // server does not pick one, so the first one offered is echoed.
+      ...(subprotocol ? [`Sec-WebSocket-Protocol: ${subprotocol}`] : []),
       "\r\n",
     ].join("\r\n"),
   );
@@ -150,6 +163,7 @@ export function upgradeToWebSocket(
   socket.on("error", () => emitClose(1006, "socket error"));
 
   return {
+    subprotocol,
     sendText: (text) => sendFrame(0x1, Buffer.from(text, "utf8")),
     close: (code = 1000, reason = "") => {
       const payload = Buffer.alloc(2 + Buffer.byteLength(reason));
