@@ -536,6 +536,45 @@ describe("HookIngressServer control routes", () => {
     expect(await refused.json()).toEqual({ error: "Not a hotspot request this Mac understands." });
   });
 
+  it("serves the relay setup routes only with the token, 503 unwired, 409 on refusal", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const base = `http://127.0.0.1:${harness.port}/control/relay`;
+    const auth = { "x-squeak-token": harness.token };
+    const status = { state: "off", port: 8788 };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(base, { headers: auth })).status).toBe(503);
+    const calls: unknown[] = [];
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      relay: {
+        status: () => status,
+        setup: async (request) => {
+          calls.push(request);
+          return request.force ? { ok: true, status } : { ok: false, reason: "no", status };
+        },
+        reset: async () => ({ ok: true, status }),
+      },
+    });
+    expect((await fetch(base)).status).toBe(403);
+    expect((await fetch(`${base}/setup`, { method: "POST" })).status).toBe(403);
+    expect((await fetch(`${base}/reset`, { method: "POST" })).status).toBe(403);
+    expect((await fetch(`${base}/setup`, { headers: auth })).status).toBe(405);
+    expect((await fetch(`${base}/setup`, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
+    expect(calls).toEqual([]);
+    const got = await fetch(base, { headers: auth });
+    expect(got.status).toBe(200);
+    expect(got.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await got.json()).toEqual(status);
+    const refused = await fetch(`${base}/setup`, { method: "POST", headers: auth, body: "{}" });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ ok: false, reason: "no", status });
+    const forced = await fetch(`${base}/setup`, { method: "POST", headers: auth, body: '{"force":true}' });
+    expect(await forced.json()).toEqual({ ok: true, status });
+    expect((await fetch(`${base}/reset`, { method: "POST", headers: auth })).status).toBe(200);
+  });
+
   it("answers 500 without the request when the hotspot call fails, and 503 when none is wired", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;

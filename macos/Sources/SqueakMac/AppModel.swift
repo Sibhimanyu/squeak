@@ -32,6 +32,8 @@ final class AppModel {
     let demoMode: Bool
     /// Settings › Channels and › iPhone. Demo and capture runs never touch the real `.env` or daemon.
     @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
+    /// Settings › Conductor and Welcome: the relay's setup and status (AppModel+Relay.swift).
+    @ObservationIgnored lazy var relay = RelayModel(client: client, demo: demoMode || captureMode)
     /// The background service Squeak installs and updates for installs without a checkout (DaemonManager.swift).
     @ObservationIgnored lazy var daemon = DaemonManager(enabled: !(demoMode || captureMode))
     @ObservationIgnored var openConversationWindow: (() -> Void)?
@@ -197,6 +199,7 @@ final class AppModel {
         if demoMode { installDemo(); return }
         updater.start(enabled: !captureMode)
         daemon.reconcileAtLaunch()
+        Task { [weak self] in await self?.relay.refresh() }
         Task { [weak self] in
             guard let self else { return }
             await broker.restoreFromCache()

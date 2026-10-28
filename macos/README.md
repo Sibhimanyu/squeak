@@ -137,7 +137,9 @@ macos/Sources/
   only after the daemon is shipped (`./scripts/ship.sh`, the owner's call); an
   older daemon answers 404 and the app reports no transcript.
 
-Settings has a Connections tab with one row per source: Conductor database
+Settings pages run Mac, Notifications, Keep awake, then Conductor (the relay's status and
+one-button setup, drawn from the daemon's `/control/relay`; New chat's "relay isn't connected" error and
+Welcome's optional step link to it), Connections, Telegram, Zoho Cliq, iPhone, Privacy, About. Settings has a Connections tab with one row per source: Conductor database
 (readable or not), Squeak service (connected, down, token missing, trouble) and
 Sending (available or why not). About has "Copy diagnostics", which is redacted
 (no message text, titles, paths, ids, tokens or URLs), "Check for Updates…" and

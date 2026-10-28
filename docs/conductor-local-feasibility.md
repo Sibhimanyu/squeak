@@ -216,6 +216,24 @@ open the file with `readonly: true`.
 | Busy sessions not refused by relay | The relay queues behind a running turn (`mode: queue`) or injects into it (`steer`). | Squeak defaults to `queue`; replier still refuses held questions and plans. |
 | Settings edit while Conductor runs | `setup` and `reset` write `conductor.db`. | Run with Conductor quit; automatic timestamped backup first. |
 
+## In-app setup
+
+The Mac app sets the relay up without the terminal, through the daemon (`src/fleet/conductor-relay/setup.ts`,
+shared with `scripts/conductor-relay.ts`). Token-gated, no CORS header, 503 when not wired:
+
+- `GET /control/relay` answers `{ state, conductorInstalled, conductorVersion, versionTested, configured, paired,
+  hostConnected, lastHostAt, port, message, steps }`. `state` is `unsupported | not-installed | off | needs-restart |
+  waiting | connected | error`. `needs-restart` compares Conductor's process start with the `setupAt` kept in
+  `conductor-relay.json`; if that is unknowable it reads `waiting`.
+- `POST /control/relay/setup` (body `{}` or `{"force":true}`) backs up `conductor.db` (only when a row changes),
+  writes the settings rows in one `BEGIN IMMEDIATE` transaction (5 s busy timeout), pairs through the login Keychain
+  as `keychain-pair` does, and starts the relay. Answers `{ ok: true, status }`, or 409 `{ ok: false, reason, status }`
+  (not installed, unsupported without `force`, unreadable settings, Keychain denied). Running it twice changes nothing.
+- `POST /control/relay/reset` puts the two rows back to what they were, removes only the Keychain entry Squeak
+  created, and says to restart Conductor. Same answer shapes.
+
+No response carries a token, key or Keychain value.
+
 ## 7. What remains untested (owner steps)
 
 All steps below only observe, or use throwaway chats. Do not run them on a chat

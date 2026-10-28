@@ -113,6 +113,7 @@ mode 0600 (`hook-ingress.ts:67-80`), compared with `timingSafeEqual`
 | `POST /control/remote/reject/<deviceId>` | Token | Reject a pending phone | `{ok}` |
 | `POST /control/remote/revoke/<deviceId>` | Token | Revoke a paired phone | `{ok}` |
 | `POST /control/remote/reset` | Token | Wipe the channel | `{ok}` |
+| `GET /control/relay`, `POST /control/relay/setup`, `POST /control/relay/reset` | Token | In-app Conductor relay setup (`conductor-relay/setup.ts`; see docs/conductor-local-feasibility.md, "In-app setup"); 409 on refusal, 503 not wired | JSON status / `{ok,status}` |
 | any other `/control/*` | Token first, then 404 | n/a | 404 `not found` |
 | anything else | None | n/a | 404 |
 

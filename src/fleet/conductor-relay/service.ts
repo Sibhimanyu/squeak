@@ -65,12 +65,19 @@ export class ConductorRelayService {
   private warnedListen = false;
   private noHostTimer: NodeJS.Timeout | undefined;
   private hostSeen = false;
+  private hostAt: number | null = null;
+  private started = false;
 
   constructor(private readonly options: ConductorRelayServiceOptions) {}
 
   /** True once Conductor's host is connected and this device is authenticated. */
   isReady(): boolean {
     return this.client !== undefined;
+  }
+
+  /** When Conductor's host last connected to the relay (epoch ms), or null when it has not since the daemon started. */
+  lastHostAt(): number | null {
+    return this.hostAt;
   }
 
   /**
@@ -318,7 +325,10 @@ export class ConductorRelayService {
   }
 
   start(): void {
+    // Called again after the in-app setup: already listening (or about to) means nothing to do.
+    if (this.started) return;
     try {
+      this.stopped = false;
       const port = this.readLocalPort();
       if (port === null) {
         logger.info("conductor relay inert: override is not a local URL");
@@ -329,6 +339,7 @@ export class ConductorRelayService {
         logger.info("conductor relay inert: no paired device (run the relay CLI's keychain-pair)");
         return;
       }
+      this.started = true;
       this.credentials = state.credentials;
       this.logConductorVersion();
       const hostKey = state.hostStaticPublicKey ? Buffer.from(state.hostStaticPublicKey, "base64url") : undefined;
@@ -374,6 +385,7 @@ export class ConductorRelayService {
   private async onHost(conn: HostConnection): Promise<void> {
     const { client } = conn;
     this.hostSeen = true;
+    this.hostAt = Date.now();
     this.clearNoHostWatchdog();
     this.client = undefined; // a new connection supersedes any previous one
     // When this host's socket goes, the relay is not ready any more (it used to stay "ready" until a send failed).
@@ -449,6 +461,7 @@ export class ConductorRelayService {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.started = false;
     this.client = undefined;
     this.clearNoHostWatchdog();
     if (this.retryTimer) clearTimeout(this.retryTimer);
