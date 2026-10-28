@@ -144,7 +144,7 @@ private struct BlockView: View {
     var body: some View {
         switch block {
         case .paragraph(let inlines):
-            InlineText(inlines: inlines, ctx: ctx)
+            InlineText(inlines: inlines, ctx: ctx, chips: true)
         case .heading(let level, let inlines):
             InlineText(inlines: inlines, ctx: ctx, size: ctx.heading(level), weight: .semibold)
                 .accessibilityAddTraits(.isHeader)
@@ -207,7 +207,7 @@ private struct ListRow: View {
         let width = ctx.body * 1.5
         HStack(alignment: .firstTextBaseline, spacing: ctx.body * 0.3) {
             markerView.frame(width: width, alignment: .trailing)
-            InlineText(inlines: inlines, ctx: ctx, struck: isDone)
+            InlineText(inlines: inlines, ctx: ctx, struck: isDone, chips: true)
         }
         .padding(.leading, CGFloat(depth) * ctx.body * 1.5)
     }
@@ -243,6 +243,8 @@ private struct InlineText: View {
     var size: CGFloat? = nil
     var weight: Font.Weight = .regular
     var struck = false
+    /// Show each link as a visible Copy row under the text (iPhone only; see `LinkChips`).
+    var chips = false
     @Environment(\.messageMuted) private var muted
 
     var body: some View {
@@ -254,11 +256,20 @@ private struct InlineText: View {
         if links.isEmpty {
             text
         } else {
+            #if os(iOS)
+            // A long-press menu on the text fights text selection for the same gesture, so neither worked
+            // reliably, and nothing showed it was there. A link is a row you can see and tap instead.
+            VStack(alignment: .leading, spacing: 6) {
+                text
+                if chips { LinkChips(links: links, ctx: ctx) }
+            }
+            #else
             text.contextMenu {
                 ForEach(Array(links.prefix(6).enumerated()), id: \.offset) { _, link in
                     Button(links.count == 1 ? "Copy link" : "Copy link: \(InlineRenderer.host(link))") { Clipboard.copy(link) }
                 }
             }
+            #endif
         }
     }
 
@@ -403,6 +414,57 @@ private struct CodeBlockView: View {
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }
 }
+
+#if os(iOS)
+/// Every link in a paragraph, as a row of its own: the address as written (so you see what you are copying)
+/// and a Copy mark. One tap copies the whole URL and says so. Links are never opened: agent text is untrusted.
+private struct LinkChips: View {
+    let links: [String]
+    let ctx: RenderContext
+    @State private var copied: String?
+
+    private var unique: [String] {
+        var seen = Set<String>()
+        return links.filter { seen.insert($0).inserted }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(unique.prefix(6)), id: \.self) { link in
+                Button {
+                    Clipboard.copy(link)
+                    copied = link
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.6))
+                        if copied == link { copied = nil }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Lucide(.link, size: 14, color: ctx.style.muted)
+                        Text(verbatim: link.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: ""))
+                            .font(.system(size: ctx.code, design: .monospaced))
+                            .foregroundStyle(ctx.style.ink)
+                            .lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        Text(copied == link ? "Copied" : "Copy")
+                            .font(.system(size: max(12, ctx.code), weight: .medium))
+                            .foregroundStyle(ctx.style.muted)
+                        Lucide(copied == link ? .check : .copy, size: 15, color: ctx.style.muted)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .background(ctx.style.codeSurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ctx.style.line))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(copied == link ? "Copied" : "Copy link \(InlineRenderer.host(link))")
+            }
+        }
+    }
+}
+#endif
 
 /// Copies the code only, and only when tapped.
 private struct CopyButton: View {
