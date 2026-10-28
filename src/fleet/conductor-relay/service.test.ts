@@ -185,3 +185,36 @@ describe("ConductorRelayService queue", () => {
     expect(sendChatMessage).toHaveBeenCalledWith(expect.objectContaining({ messageId: ID }));
   });
 });
+
+describe("ConductorRelayService startChat while the relay reconnects", () => {
+  const start = { workspaceId: "w1", agent: "claude" as const, text: "hello" };
+
+  it("waits for Conductor's host to come back and then starts the chat", async () => {
+    vi.useFakeTimers();
+    try {
+      const svc = new ConductorRelayService({ conductorDbPath: "/nonexistent", statePath: "/nonexistent" });
+      const startChat = vi.fn().mockResolvedValue({ status: 200, body: "" });
+      const pending = svc.startChat(start);
+      await vi.advanceTimersByTimeAsync(1_000);
+      (svc as unknown as { client: Partial<PhoneClient> }).client = { startChat };
+      await vi.advanceTimersByTimeAsync(500);
+      const res = await pending;
+      expect(res.ok).toBe(true);
+      expect(startChat).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still fails with the relay reason when it never comes back", async () => {
+    vi.useFakeTimers();
+    try {
+      const svc = new ConductorRelayService({ conductorDbPath: "/nonexistent", statePath: "/nonexistent" });
+      const pending = svc.startChat(start);
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(await pending).toEqual({ ok: false, reason: "Conductor's relay isn't connected" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -209,10 +209,17 @@ describe("PhoneClient.startChat", () => {
 
 describe("ConductorRelayService.startChat", () => {
   it("explains when the relay is not connected", async () => {
-    const svc = new ConductorRelayService({ conductorDbPath: dbPath, statePath: path.join(dir, "s.json") });
-    expect(await svc.startChat({ workspaceId: "w", agent: "claude", text: "hi" })).toEqual({
-      ok: false,
-      reason: "Conductor's relay isn't connected",
-    });
+    vi.useFakeTimers();
+    try {
+      const svc = new ConductorRelayService({ conductorDbPath: dbPath, statePath: path.join(dir, "s.json") });
+      const pending = svc.startChat({ workspaceId: "w", agent: "claude", text: "hi" });
+      await vi.advanceTimersByTimeAsync(9_000); // it waits for Conductor's host to reconnect first
+      expect(await pending).toEqual({
+        ok: false,
+        reason: "Conductor's relay isn't connected",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

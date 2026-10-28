@@ -35,6 +35,8 @@ export interface ConductorRelayServiceOptions {
 }
 
 const LISTEN_RETRY_MS = 5000;
+/** How long a new chat waits for Conductor's host to reconnect its relay socket. */
+const RELAY_RECONNECT_WAIT_MS = 8_000;
 /** A caller's message id must be what Conductor's zod UUID accepts, in the one spelling the phone sends. */
 export const MESSAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -269,7 +271,9 @@ export class ConductorRelayService {
     thinking?: string;
     agentText?: string;
   }): Promise<{ ok: true; sessionId: string } | { ok: false; reason: string }> {
-    const client = this.client;
+    // Conductor's host drops and re-opens its relay socket now and then; a new chat waits briefly for it
+    // to come back instead of failing in the gap.
+    const client = this.client ?? (await this.waitForClient(RELAY_RECONNECT_WAIT_MS));
     if (!client) return { ok: false, reason: "Conductor's relay isn't connected" };
     const sessionId = crypto.randomUUID();
     try {
@@ -289,6 +293,13 @@ export class ConductorRelayService {
       this.client = undefined;
       return { ok: false, reason: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  /** The relay client once Conductor's host is connected, or undefined after `ms`. */
+  private async waitForClient(ms: number): Promise<PhoneClient | undefined> {
+    const end = Date.now() + ms;
+    while (!this.client && Date.now() < end) await new Promise((r) => setTimeout(r, 250));
+    return this.client;
   }
 
   start(): void {
