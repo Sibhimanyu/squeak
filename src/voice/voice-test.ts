@@ -1,7 +1,21 @@
+import path from "node:path";
+
+import { RtdbRest } from "../remote/rtdb-rest.js";
 import { loadSqueakConfig } from "../squeak/config.js";
 import { BaresipLine } from "./baresip-line.js";
-import { CallDialog } from "./script.js";
+import { CallDialog, type CallScript } from "./script.js";
+import { RelayLine } from "./relay-line.js";
+import { VoiceSettingsStore } from "./settings.js";
 import { MacSpeaker } from "./tts.js";
+
+const TEST_SCRIPT: CallScript = {
+  greeting: "Squeak. This is a test call.",
+  question: "Pick a colour. Press 1 for blue, or press 2 for green. Press star to hear this again, or hash to hang up.",
+  options: [
+    { letter: "A", title: "blue" },
+    { letter: "B", title: "green" },
+  ],
+};
 
 /**
  * `squeak voice-test`: rings your phone with a made-up question and prints the key you pressed.
@@ -9,7 +23,31 @@ import { MacSpeaker } from "./tts.js";
  * and the PIN before relying on real calls.
  */
 export async function runVoiceTest(): Promise<number> {
-  const voice = loadSqueakConfig().voice;
+  const config = loadSqueakConfig();
+  // Through the Home Assistant gateway when it is set up, exactly as a real call goes.
+  if (config.voiceRelay && config.remoteDatabaseUrl) {
+    const callee = new VoiceSettingsStore(path.join(config.supportDir, "voice-settings.json")).settings.callee;
+    console.log(`Asking the gateway to ring ${callee ?? "its default extension"}...`);
+    const result = await new RelayLine({
+      store: new RtdbRest(config.remoteDatabaseUrl),
+      channel: config.voiceRelay.channel,
+      key: config.voiceRelay.key,
+      callee: () => callee,
+    }).call(TEST_SCRIPT, true);
+    if (result.status === "failed") {
+      console.error(`The call failed: ${result.reason}`);
+      return 1;
+    }
+    if (result.status === "unanswered") {
+      console.log("Nobody picked up.");
+      return 0;
+    }
+    console.log(
+      result.letter ? `You pressed ${result.letter} (nothing was sent anywhere).` : "Answered; no key was pressed.",
+    );
+    return 0;
+  }
+  const voice = config.voice;
   if (!voice) {
     console.error(
       "Voice is not set up. Set SQUEAK_VOICE_HOST, _EXTENSION, _PASSWORD and _CALLEE in the config (docs/voice.md); a warning above says if a value was wrong.",
@@ -24,18 +62,7 @@ export async function runVoiceTest(): Promise<number> {
   const speaker = new MacSpeaker(voice.speechVoice);
   try {
     console.log(`Registering as ${voice.line.user} on ${voice.line.host} and ringing ${callee}...`);
-    const dialog = new CallDialog(
-      {
-        greeting: "Squeak. This is a test call.",
-        question:
-          "Pick a colour. Press 1 for blue, or press 2 for green. Press star to hear this again, or hash to hang up.",
-        options: [
-          { letter: "A", title: "blue" },
-          { letter: "B", title: "green" },
-        ],
-      },
-      voice.pin,
-    );
+    const dialog = new CallDialog(TEST_SCRIPT, voice.pin);
     const result = await new BaresipLine(voice.line, speaker).call(callee, dialog);
     if (result.status === "failed") {
       console.error(`The call failed: ${result.reason}`);
