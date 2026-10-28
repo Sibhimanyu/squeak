@@ -87,9 +87,13 @@ export async function runGateway(): Promise<number> {
     return 1;
   }
   logger.info("squeak voice gateway running");
+  // The stream's retry timers are unref'd, so while it is down nothing else holds the process: without
+  // this it exited silently after a failed connect instead of retrying.
+  const keepAlive = setInterval(() => undefined, 60_000);
   await new Promise<void>((resolve) => {
     for (const signal of ["SIGTERM", "SIGINT"] as const) {
       process.once(signal, () => {
+        clearInterval(keepAlive);
         started.stop();
         resolve();
       });
