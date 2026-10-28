@@ -22,6 +22,7 @@ options:
   callee: ""
   pin: ""
   transport: udp
+  speech: natural
 schema:
   database_url: str
   channel: str
@@ -34,3 +35,4 @@ schema:
   callee: str?
   pin: password
   transport: list(udp|tcp|tls)
+  speech: list(natural|plain)?

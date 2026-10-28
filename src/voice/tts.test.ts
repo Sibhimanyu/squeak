@@ -27,6 +27,20 @@ function plain(label: string): Speaker & { spoken: string[] } {
 }
 
 describe("PiperSpeaker", () => {
+  it("gives up on a piper that is too slow and speaks plainly instead", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "slow-piper-"));
+    const binary = path.join(dir, "piper");
+    fs.writeFileSync(binary, "#!/bin/sh\nsleep 30\n", { mode: 0o755 });
+    const fallback = plain("plain");
+    const speaker = new PiperSpeaker({ binary, model: "unused", timeoutMs: 300 }, fallback);
+    const started = Date.now();
+    await speaker.speak("slow one");
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(fallback.spoken).toEqual(["plain:slow one"]);
+    speaker.dispose();
+    fs.rmSync(dir, { recursive: true });
+  });
+
   it("falls back to the plain voice when piper cannot run", async () => {
     const fallback = plain("plain");
     const speaker = new PiperSpeaker({ binary: "/nonexistent/piper", model: "/nonexistent.onnx" }, fallback);
@@ -52,6 +66,10 @@ describe("PiperSpeaker", () => {
     expect(result.durationMs).toBeLessThan(1100);
     expect(fs.readFileSync(seen, "utf8")).toBe("Which one? Press 1 for A.\n");
     expect(fallback.spoken).toEqual([]);
+    // "Press star" says the same words again: piper is not run twice for them.
+    fs.writeFileSync(seen, "");
+    await speaker.speak("Which one?\n\nPress 1   for A.");
+    expect(fs.readFileSync(seen, "utf8")).toBe("");
     speaker.dispose();
     fs.rmSync(dir, { recursive: true });
   });

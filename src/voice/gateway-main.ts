@@ -22,6 +22,7 @@ const OPTION_TO_ENV: Record<string, keyof VoiceEnv | "SQUEAK_REMOTE_DATABASE_URL
   callee: "SQUEAK_VOICE_CALLEE",
   pin: "SQUEAK_VOICE_PIN",
   transport: "SQUEAK_VOICE_TRANSPORT",
+  speech: "SQUEAK_VOICE_SPEECH",
 };
 
 /** An add-on's options file, as the same settings the Mac reads from `.env`. */
@@ -56,6 +57,11 @@ export function chooseSpeaker(env: Record<string, string | undefined>): Speaker 
   const binary = env.SQUEAK_PIPER_BIN;
   const model = env.SQUEAK_PIPER_MODEL;
   const plain = new EspeakSpeaker();
+  // "plain" for a small machine: no neural model is ever loaded.
+  if (env.SQUEAK_VOICE_SPEECH?.toLowerCase() === "plain") {
+    logger.info("squeak voice gateway speaks with espeak-ng (speech: plain)");
+    return plain;
+  }
   if (binary && model && fs.existsSync(binary) && fs.existsSync(model)) {
     logger.info("squeak voice gateway speaks with piper");
     return new PiperSpeaker({ binary, model }, plain);
