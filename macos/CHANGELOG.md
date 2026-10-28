@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.11.5
+
+- Collapse the shared sidebar to an icon rail from either Sessions or Settings, with aligned navigation, headers, and scrolling in the shared window shell.
+- Choose Glass or Solid for the main window; Reduce Transparency always uses the solid canvas.
+- Switch between Chat and Activity from a compact control beside Open in Conductor.
+- Refresh the daemon's energy mode during its periodic power check so `/state` reflects changes made in macOS Settings.
+
 ## 2.11.4
 
 - Animate the selected menu-bar tab between Home, Needs you, Usage, and Controls; respect Reduce Motion.

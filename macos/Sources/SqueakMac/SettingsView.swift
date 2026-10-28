@@ -4,37 +4,17 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// Settings, inside the main window: the sidebar swaps to a back row and the settings pages, and the
-/// content area shows the chosen page as a grouped form. Escape or Back returns to sessions with the
-/// previous filter and chat untouched.
-struct SettingsShell: View {
+/// The main NavigationSplitView owns the window chrome for both sessions and Settings.
+/// This is only the detail content shown when the Settings sidebar is active.
+struct SettingsDetail: View {
     @Environment(AppModel.self) private var model
-    @State private var visibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $visibility) {
-            SettingsSidebar()
-                .navigationSplitViewColumnWidth(min: Metrics.sidebarWidth, ideal: Metrics.sidebarWidth, max: 320)
-        } detail: {
+        ScrollView {
             SettingsPage(section: model.settingsSection ?? .general)
-                .background(Theme.bg.ignoresSafeArea())
         }
-        .modifier(SettingsWindowStyling())
-        .background {
-            Button("Back to sessions") { model.closeSettings() }
-                .keyboardShortcut(.cancelAction)
-                .opacity(0).accessibilityHidden(true)
-        }
-    }
-}
-
-private struct SettingsWindowStyling: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 15, *) {
-            content.toolbar(removing: .title).toolbarBackground(.hidden, for: .windowToolbar)
-        } else {
-            content.toolbarBackground(.hidden, for: .windowToolbar)
-        }
+        .squeakWindowCanvas()
+        .scrollIndicators(.automatic)
     }
 }
 
@@ -107,7 +87,7 @@ extension View {
     func settingsForm() -> some View {
         scrollContentBackground(.hidden)
             .formStyle(.grouped)
-            .background(Theme.bg)
+            .squeakWindowCanvas()
     }
 }
 
@@ -129,6 +109,7 @@ struct SettingSubsectionHeader: View {
 
 struct SettingsSidebar: View {
     @Environment(AppModel.self) private var model
+    @Binding var isCollapsed: Bool
     @FocusState private var searchFocused: Bool
     @FocusState private var focusedSection: SettingsSection?
     @State private var query = ""
@@ -148,9 +129,11 @@ struct SettingsSidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             brand
-            searchField
-                .padding(.horizontal, Metrics.sidebarInset)
-                .padding(.top, 14)
+            if !isCollapsed {
+                searchField
+                    .padding(.horizontal, Metrics.sidebarInset)
+                    .padding(.top, 14)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: Metrics.sidebarRowGap) {
                     ForEach(Array(filteredGroups.enumerated()), id: \.offset) { _, group in
@@ -167,14 +150,14 @@ struct SettingsSidebar: View {
                             .accessibilityLabel("No settings match \(query)")
                     }
                 }
-                .padding(.horizontal, Metrics.sidebarInset)
+                .padding(.horizontal, isCollapsed ? 8 : Metrics.sidebarInset)
                 .padding(.top, 14)
             }
             .scrollContentBackground(.hidden)
             .onMoveCommand(perform: moveFocus)
             footer
         }
-        .frame(minWidth: Metrics.sidebarWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(minWidth: isCollapsed ? 64 : Metrics.sidebarWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(SidebarBackground())
         .background {
             Button("Search Settings") { searchFocused = true }
@@ -185,12 +168,18 @@ struct SettingsSidebar: View {
     }
 
     private var brand: some View {
-        Text("Settings")
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(Theme.ink)
-            .accessibilityAddTraits(.isHeader)
-            .padding(.horizontal, Metrics.sidebarInset + 4)
-            .padding(.top, 36)
+        HStack {
+            if !isCollapsed {
+                Text("Settings")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            Spacer(minLength: 0)
+            SidebarCollapseButton(isCollapsed: $isCollapsed)
+        }
+        .padding(.horizontal, isCollapsed ? 16 : Metrics.sidebarInset + 4)
+        .padding(.top, 36)
     }
 
     private var searchField: some View {
@@ -206,12 +195,15 @@ struct SettingsSidebar: View {
             HStack(spacing: 12) {
                 Lucide(section.symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted)
                     .frame(width: 20)
-                Text(verbatim: section.title)
-                    .font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular))
-                    .foregroundStyle(Theme.ink)
-                Spacer(minLength: 4)
+                if !isCollapsed {
+                    Text(verbatim: section.title)
+                        .font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular))
+                        .foregroundStyle(Theme.ink)
+                    Spacer(minLength: 4)
+                }
             }
-            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+            .padding(.horizontal, isCollapsed ? 0 : 12)
             .frame(height: Metrics.navRow)
             .background(RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous).fill(selected ? Color.white.opacity(0.10) : .clear))
             .contentShape(Rectangle())
@@ -221,6 +213,7 @@ struct SettingsSidebar: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(section.title)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .help(section.title)
     }
 
     private var footer: some View {
@@ -229,13 +222,12 @@ struct SettingsSidebar: View {
             Button { model.closeSettings() } label: {
                 HStack(spacing: 12) {
                     Lucide(.chevronLeft, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 20)
-                    Text("Back to sessions").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink)
-                    Spacer(minLength: 0)
+                    if !isCollapsed { Text("Back to sessions").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink); Spacer(minLength: 0) }
                 }
-                .padding(.horizontal, 12).frame(height: Metrics.navRow).contentShape(Rectangle())
+                .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+                .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
             .padding(.horizontal, Metrics.sidebarInset)
             .padding(.vertical, 12)
             .help("Back to sessions (Esc)")
@@ -277,7 +269,7 @@ private struct SettingsPage: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: 680, alignment: .leading)
-            .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 16)
+            .padding(.leading, 61).padding(.trailing, 24).padding(.top, 18).padding(.bottom, 16)
             page.frame(maxWidth: 680)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -352,6 +344,7 @@ private struct NotificationsSettings: View {
 
 private struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(WindowAppearancePreference.key) private var glassWindowAppearance = true
     private let hotKeys = HotKeyCenter.shared
     private let floatingDuck = FloatingDuckController.shared
     @State private var loginOn = LoginItem.isEnabled
@@ -361,6 +354,15 @@ private struct GeneralSettings: View {
         @Bindable var model = model
         Form {
             macCard
+            Section {
+                Picker("Window appearance", selection: $glassWindowAppearance) {
+                    Text("Glass").tag(true)
+                    Text("Solid").tag(false)
+                }
+                .pickerStyle(.segmented)
+            } footer: {
+                SectionFootnote("Glass uses the native macOS window material. Reduce Transparency in Accessibility automatically switches to the solid appearance.")
+            }
             Section {
                 Toggle("Open Squeak when I log in", isOn: Binding(
                     get: { loginOn },

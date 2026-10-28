@@ -91,6 +91,25 @@ function fakeSystem(start: PowerChoice, options: { ready?: boolean; ignore?: boo
 }
 
 describe("PowerMode", () => {
+  it("refreshes a mode changed outside Squeak and notifies state readers", async () => {
+    let mode: PowerChoice = "low";
+    let changes = 0;
+    const system: PowerSystem = {
+      read: async () => ({ mode, available: ["auto", "low", "high"] }),
+      ruleInstalled: async () => true,
+      set: async () => ({ ok: true, stderr: "" }),
+    };
+    const power = new PowerMode({ file: path.join(tmp(), "p.json"), system, onChange: () => changes++ });
+
+    await power.refresh(true);
+    expect(power.state).toMatchObject({ mode: "low" });
+    mode = "high"; // e.g. the user changed Energy Mode in macOS Settings.
+    await power.refresh(true);
+
+    expect(power.state).toMatchObject({ mode: "high" });
+    expect(changes).toBe(2);
+  });
+
   it("applies a pick, reads it back, and keeps it", async () => {
     const dir = tmp();
     const file = path.join(dir, "power-mode.json");

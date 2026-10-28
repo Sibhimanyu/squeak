@@ -24,10 +24,11 @@ private struct SidebarGlass: NSViewRepresentable {
 struct SidebarBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduce
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.glassWindowEnabled) private var glassEnabled
 
     var body: some View {
         Group {
-            if reduce {
+            if reduce || !glassEnabled {
                 Theme.sidebar
             } else {
                 ZStack {
@@ -44,20 +45,45 @@ struct SidebarBackground: View {
 
 /// Shared brand/search chrome for the conversation and Settings sidebars.
 struct SidebarBrandHeader: View {
+    @Binding var isCollapsed: Bool
+
     var body: some View {
         HStack(spacing: 8) {
-            DuckMark(width: 28)
-            Text("Squeak").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.ink)
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 0)
-            Button { QuickComposerController.shared.show() } label: {
-                Lucide(.squarePen, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+            if !isCollapsed {
+                DuckMark(width: 28)
+                Text("Squeak").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.ink)
+                    .accessibilityAddTraits(.isHeader)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Quick message")
-            .help("Quick message")
+            Spacer(minLength: 0)
+            if !isCollapsed {
+                Button { QuickComposerController.shared.show() } label: {
+                    Lucide(.squarePen, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Quick message")
+                .help("Quick message")
+            }
+            SidebarCollapseButton(isCollapsed: $isCollapsed)
         }
-        .padding(.horizontal, Metrics.sidebarInset + 4).padding(.top, 36)
+        .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+        .padding(.horizontal, isCollapsed ? 16 : Metrics.sidebarInset + 4).padding(.top, 36)
+    }
+}
+
+struct SidebarCollapseButton: View {
+    @Binding var isCollapsed: Bool
+
+    var body: some View {
+        Button { isCollapsed.toggle() } label: {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: Metrics.sidebarIcon, weight: .regular))
+                .foregroundStyle(Theme.muted)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isCollapsed ? "Expand sidebar" : "Collapse sidebar")
+        .help(isCollapsed ? "Expand sidebar (⌘\\)" : "Collapse sidebar (⌘\\)")
     }
 }
 
@@ -88,6 +114,7 @@ struct SidebarSearchField: View {
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @Binding var isCollapsed: Bool
     @FocusState private var searchFocused: Bool
     @State private var showConnection = false
 
@@ -96,27 +123,29 @@ struct SidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             brand
-            searchField.padding(.horizontal, Metrics.sidebarInset).padding(.top, 14)
+            if !isCollapsed { searchField.padding(.horizontal, Metrics.sidebarInset).padding(.top, 14) }
             ScrollView {
                 VStack(alignment: .leading, spacing: Metrics.sidebarRowGap) {
                     row(.home, "Home", .house)
                     row(.all, "Sessions", .messageSquare)
                     row(.needsYou, "Needs you", .circleAlert)
                     row(.usage, "Usage", .gauge)
-                    Text("SOURCES").font(.system(size: Metrics.sectionLabel, weight: .medium)).tracking(0.4).foregroundStyle(Theme.subtle)
-                        .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 0)
-                        .accessibilityAddTraits(.isHeader)
+                    if !isCollapsed {
+                        Text("SOURCES").font(.system(size: Metrics.sectionLabel, weight: .medium)).tracking(0.4).foregroundStyle(Theme.subtle)
+                            .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 0)
+                            .accessibilityAddTraits(.isHeader)
+                    }
                     row(.source(.conductor), SessionSource.conductor.title, .gitBranch)
                     row(.source(.terminal), SessionSource.terminal.title, .squareTerminal)
                     row(.source(.claudeDesktop), SessionSource.claudeDesktop.title, .monitor)
                     if model.hasCodexApp { row(.source(.codexApp), SessionSource.codexApp.title, .code) }
                 }
-                .padding(.horizontal, Metrics.sidebarInset).padding(.top, 14)
+                .padding(.horizontal, isCollapsed ? 8 : Metrics.sidebarInset).padding(.top, 14)
             }
             .scrollContentBackground(.hidden)
             footer
         }
-        .frame(minWidth: Metrics.sidebarWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(minWidth: isCollapsed ? 64 : Metrics.sidebarWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(SidebarBackground())
         .background {
             // ⌘K focuses the search field, wherever focus is.
@@ -139,18 +168,21 @@ struct SidebarView: View {
         return Button { model.navFilter = f; model.projectFilter = nil } label: {
             HStack(spacing: 12) {
                 Lucide(symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted).frame(width: 20)
-                Text(verbatim: title).font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular)).foregroundStyle(Theme.ink)
-                Spacer(minLength: 4)
-                if f == .needsYou, n > 0 {
+                if !isCollapsed {
+                    Text(verbatim: title).font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular)).foregroundStyle(Theme.ink)
+                    Spacer(minLength: 4)
+                }
+                if !isCollapsed, f == .needsYou, n > 0 {
                     HStack(spacing: 6) {
                         Circle().fill(Theme.needsYou).frame(width: 7, height: 7)
                         Text("\(n)").font(.system(size: 13)).monospacedDigit().foregroundStyle(Theme.ink)
                     }
-                } else if n > 0 {
+                } else if !isCollapsed, n > 0 {
                     Text("\(n)").font(.system(size: 13)).monospacedDigit().foregroundStyle(Theme.muted)
                 }
             }
-            .padding(.horizontal, 12).frame(height: Metrics.navRow)
+            .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+            .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow)
             .background(RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous).fill(selected ? Color.white.opacity(0.10) : .clear))
             .contentShape(Rectangle())
         }
@@ -158,11 +190,12 @@ struct SidebarView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(count(for: f).map { "\(title), \($0)" } ?? title)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .help(title)
     }
 
     /// Duck and wordmark at the left, Quick message (compose) at the right, centred below the traffic lights.
     private var brand: some View {
-        SidebarBrandHeader()
+        SidebarBrandHeader(isCollapsed: $isCollapsed)
     }
 
     private var searchField: some View {
@@ -171,15 +204,18 @@ struct SidebarView: View {
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: Metrics.sidebarRowGap) {
+        VStack(alignment: isCollapsed ? .center : .leading, spacing: Metrics.sidebarRowGap) {
             Button { showConnection.toggle() } label: {
                 HStack(spacing: 12) {
                     Circle().strokeBorder(model.homeConnectionColor, lineWidth: 2.5).frame(width: 16, height: 16).frame(width: 20)
-                    Text(model.homeConnectionText).font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Spacer(minLength: 0)
-                    Lucide(.chevronRight, size: Metrics.iconSmall, color: Theme.muted)
+                    if !isCollapsed {
+                        Text(model.homeConnectionText).font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Spacer(minLength: 0)
+                        Lucide(.chevronRight, size: Metrics.iconSmall, color: Theme.muted)
+                    }
                 }
-                .padding(.horizontal, 12).frame(height: Metrics.navRow).contentShape(Rectangle())
+                .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+                .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Connection: \(model.homeConnectionText)")
@@ -187,14 +223,14 @@ struct SidebarView: View {
             Button { model.openSettings() } label: {
                 HStack(spacing: 12) {
                     Lucide(.settings, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 20)
-                    Text("Settings").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink)
-                    Spacer(minLength: 0)
+                    if !isCollapsed { Text("Settings").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink); Spacer(minLength: 0) }
                 }
-                .padding(.horizontal, 12).frame(height: Metrics.navRow).contentShape(Rectangle())
+                .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+                .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, Metrics.sidebarInset).padding(.vertical, 12)
+        .padding(.horizontal, isCollapsed ? 8 : Metrics.sidebarInset).padding(.vertical, 12)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, Metrics.sidebarInset) }
     }
 }
