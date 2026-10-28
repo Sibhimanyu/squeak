@@ -17,6 +17,7 @@ struct SettingsShell: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 216, max: 280)
         } detail: {
             SettingsPage(section: model.settingsSection ?? .general)
+                .background(Theme.bg.ignoresSafeArea())
         }
         .modifier(HiddenTitle())
         .background {

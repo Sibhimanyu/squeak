@@ -10,7 +10,6 @@ import SwiftUI
 /// close it first, so focus moves with nothing left behind.
 struct PopoverView: View {
     @Environment(AppModel.self) private var model
-    @State private var overflowOpen = false
     @State private var searching = false
     @State private var sessionStore = PopupSessionModel()
     let nav = PopupNav.shared
@@ -41,7 +40,7 @@ struct PopoverView: View {
         switch nav.screen {
         case .tab(.home):
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
-                PopupHomeTop(overflowOpen: $overflowOpen, searching: $searching, dismiss: dismissMenu)
+                PopupHomeTop(searching: $searching, dismiss: dismissMenu)
             } band: {
                 PopupHomeBand()
             } footer: {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.1
+
+- Refined the menu-bar popover: clearer session rows, readable answer choices, and a compact menu that no longer shifts the content.
+- Fixed the settings background so the desktop no longer shows through the page.
+
 ## 2.10.0
 
 - A first-run Setup checklist: Squeak installs its background service (after one click), installs the agent
