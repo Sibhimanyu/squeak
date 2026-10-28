@@ -89,7 +89,9 @@ Not tested against a real PBX: registration with 3CX, and the 3CX app's keypad s
 Dial Squeak's extension (the one in the add-on's options) from your 3CX app, from anywhere.
 
 1. It answers only if the call is from the extension set in Squeak for Mac, Settings > Phone calls: with none set
-   nobody can call in. It then asks for the PIN (two tries).
+   nobody can call in. It then asks for the PIN (two tries), unless the add-on option `call_in_pin` is `skip`
+   (a call from that one extension is then proof enough; Squeak's own calls to you always ask). The option lives in
+   the add-on, not the Mac app, so a stolen channel key cannot switch the PIN off.
 2. "Which chat?": the chats that can take a message now, those waiting on you first (up to six, by number).
 3. "Say your message after the beep, then press hash." (up to two minutes).
 4. The recording goes to the Mac as a small Opus file in a sealed, signed message (`voiceup`); the Mac transcribes

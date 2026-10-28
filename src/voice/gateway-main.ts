@@ -34,6 +34,7 @@ const OPTION_TO_ENV: Record<string, keyof VoiceEnv | "SQUEAK_REMOTE_DATABASE_URL
   pin: "SQUEAK_VOICE_PIN",
   transport: "SQUEAK_VOICE_TRANSPORT",
   speech: "SQUEAK_VOICE_SPEECH",
+  call_in_pin: "SQUEAK_VOICE_CALLIN_PIN",
 };
 
 /** An add-on's options file, as the same settings the Mac reads from `.env`. */
@@ -138,9 +139,11 @@ export async function runGateway(): Promise<number> {
       pin: voice.pin,
     });
     const pin = voice.pin;
+    // "skip": a call from the one allowed extension is proof enough. Squeak's own calls to you always ask.
+    const callInPin = env.SQUEAK_VOICE_CALLIN_PIN?.toLowerCase() === "skip" ? null : pin;
     phone.onIncoming((incoming) => {
       void handleIncoming(incoming, {
-        pin,
+        pin: callInPin,
         directory: async () => {
           const doc = await store.get(dirPath(relay.channel));
           return doc ? readDirectory(relay.key, doc, Date.now()) : null;

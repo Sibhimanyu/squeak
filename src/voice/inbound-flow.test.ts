@@ -85,6 +85,21 @@ function setup(call: FakeCall, overrides: Partial<InboundDependencies> = {}, pee
 const keys = (text: string): string[] => text.split("");
 
 describe("call-in flow", () => {
+  it("skips the PIN when the gateway is set to, and goes straight to the chats", async () => {
+    const call = new FakeCall(["2", "1"]);
+    const t = setup(call, { pin: null });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said[0]).toContain("Which chat?");
+    expect(call.said.join(" ")).not.toContain("PIN");
+    expect(t.sends).toHaveLength(1);
+  });
+
+  it("still refuses another caller when the PIN is skipped", async () => {
+    const t = setup(new FakeCall([]), { pin: null }, "99999");
+    await handleIncoming(t.incoming, t.deps);
+    expect(t.state).toEqual({ rejected: true, answered: false });
+  });
+
   it("refuses a caller that is not the one extension allowed, without answering", async () => {
     const call = new FakeCall([]);
     const t = setup(call, {}, "99999");

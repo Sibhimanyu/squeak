@@ -6,8 +6,11 @@ import { MAX_MEMO_MS, newMessageId, type DirectoryDoc } from "./memo-protocol.js
 import type { Uplink } from "./uplink.js";
 
 export interface InboundDependencies {
-  /** Checked here, on this side only: neither the Mac nor the database ever holds it. */
-  pin: string;
+  /**
+   * Checked here, on this side only: neither the Mac nor the database ever holds it. Null skips it: you called
+   * in, from the one extension allowed to, which the PBX has already proved is you.
+   */
+  pin: string | null;
   /** Who can take a message now, and the one extension allowed to call in (read from the Mac's sealed list). */
   directory: () => Promise<DirectoryDoc | null>;
   uplink: Uplink;
@@ -63,15 +66,16 @@ async function bye(call: PhoneCall, text: string): Promise<void> {
 }
 
 async function conversation(call: PhoneCall, deps: InboundDependencies): Promise<void> {
-  // 1. The PIN.
-  let known = false;
+  // 1. The PIN, unless this gateway is set to take the caller's extension as proof.
+  let known = deps.pin === null;
+  const pin = deps.pin ?? "";
   for (let attempt = 0; attempt < PIN_TRIES && call.open && !known; attempt++) {
     await call.say(
       attempt === 0 ? "Squeak. Enter your PIN, then hash." : "That PIN is not right. Try again, then hash.",
     );
     const typed = await readDigits(call, { maxLength: 12, timeoutMs: PIN_WAIT_MS });
     if (typed === null) return;
-    known = samePin(typed, deps.pin);
+    known = samePin(typed, pin);
   }
   if (!known) return bye(call, "That PIN is not right. Goodbye.");
 
