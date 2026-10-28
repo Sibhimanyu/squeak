@@ -76,7 +76,7 @@ import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-inst
 import { TelegramAvatar } from "../telegram/avatar.js";
 import { BaresipLine } from "../voice/baresip-line.js";
 import { DirectLine } from "../voice/direct-line.js";
-import { RelayLine } from "../voice/relay-line.js";
+import { relayLineFor } from "../voice/relay-line.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker } from "../voice/tts.js";
 import type { VoiceLine } from "../voice/relay-line.js";
@@ -1322,13 +1322,11 @@ export class SqueakApp {
     const { voice, voiceRelay, remoteDatabaseUrl } = this.config;
     const base = { monitor: this.runtime.monitor, replier: this.router, note: (text: string) => this.announce(text) };
     if (voiceRelay && remoteDatabaseUrl) {
+      const line = relayLineFor(new RtdbRest(remoteDatabaseUrl), voiceRelay, this.voiceSettings);
+      this.voiceLine = line;
       return new VoiceChannel({
         ...base,
-        line: new RelayLine({
-          store: new RtdbRest(remoteDatabaseUrl),
-          channel: voiceRelay.channel,
-          key: voiceRelay.key,
-        }),
+        line,
         canTakeKeys: true,
         policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voiceRelay.quiet }),
       });

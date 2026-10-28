@@ -6,7 +6,7 @@ import { generateChannel } from "../remote/remote-crypto.js";
 import type { CallResult } from "./baresip-line.js";
 import type { CallDialog, CallScript } from "./dialog.js";
 import { VoiceGateway } from "./gateway.js";
-import { RelayLine } from "./relay-line.js";
+import { RelayLine, relayLineFor } from "./relay-line.js";
 import { requestPath, sealRequest } from "./relay-protocol.js";
 
 const script: CallScript = {
@@ -67,6 +67,15 @@ describe("Mac and gateway through the relay", () => {
   it("rings the extension the Mac names, not the gateway's default", async () => {
     await new RelayLine({ store, channel, key, callee: () => "202" }).call(script, true);
     expect(callees).toEqual(["202"]);
+  });
+
+  it("rings the extension saved in the Mac's settings, and the next one after it changes", async () => {
+    const settings = { settings: { callee: "35210" as string | null } };
+    const line = relayLineFor(store, { channel, key }, settings);
+    await line.call(script, true);
+    settings.settings.callee = "202";
+    await line.call(script, true);
+    expect(callees).toEqual(["35210", "202"]);
   });
 
   it("says so when neither side has an extension", async () => {
