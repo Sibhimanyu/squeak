@@ -28,6 +28,7 @@ SIP extension works.
 SQUEAK_VOICE_HOST=pbx.example.com        # or host:port; your 3CX FQDN or LAN address
 SQUEAK_VOICE_EXTENSION=900
 SQUEAK_VOICE_AUTH_ID=...                 # 3CX's Authentication ID, if it differs
+SQUEAK_VOICE_PROXY=192.168.68.114:5060   # optional: your 3CX SBC (Outbound Proxy), when the PBX is behind one
 SQUEAK_VOICE_PASSWORD=...                # no quotes, backslashes, semicolons or angle brackets
 SQUEAK_VOICE_CALLEE=101                  # your phone's 3CX extension
 SQUEAK_VOICE_PIN=4821                    # 4 to 12 digits; needed to answer by key

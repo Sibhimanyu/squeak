@@ -109,6 +109,7 @@ const schema = z.object({
   SQUEAK_VOICE_PASSWORD: z.string().optional(),
   SQUEAK_VOICE_CALLEE: z.string().optional(),
   SQUEAK_VOICE_PIN: z.string().optional(),
+  SQUEAK_VOICE_PROXY: z.string().optional(),
   SQUEAK_VOICE_TRANSPORT: z.string().optional(),
   SQUEAK_VOICE_QUIET: z.string().optional(),
   SQUEAK_VOICE_BARESIP: z.string().optional(),

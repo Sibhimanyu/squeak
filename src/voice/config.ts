@@ -4,7 +4,7 @@ import path from "node:path";
 import type { QuietHours } from "../fleet/notify-settings.js";
 import { isSafeAccountValue, type LineConfig } from "./baresip-line.js";
 
-/** The `SQUEAK_VOICE_*` settings (docs/voice.md). All but the last four are needed; without them voice stays off. */
+/** The `SQUEAK_VOICE_*` settings (docs/voice.md). All but the optional ones are needed; without them voice stays off. */
 export interface VoiceEnv {
   SQUEAK_VOICE_HOST?: string | undefined;
   SQUEAK_VOICE_EXTENSION?: string | undefined;
@@ -12,6 +12,7 @@ export interface VoiceEnv {
   SQUEAK_VOICE_PASSWORD?: string | undefined;
   SQUEAK_VOICE_CALLEE?: string | undefined;
   SQUEAK_VOICE_PIN?: string | undefined;
+  SQUEAK_VOICE_PROXY?: string | undefined;
   SQUEAK_VOICE_TRANSPORT?: string | undefined;
   SQUEAK_VOICE_QUIET?: string | undefined;
   SQUEAK_VOICE_BARESIP?: string | undefined;
@@ -62,6 +63,9 @@ export function readVoiceConfig(env: VoiceEnv, supportDir: string): VoiceConfig 
     );
   }
   if (!/^[\w.+*#-]+$/.test(callee)) throw new Error("SQUEAK_VOICE_CALLEE is not a number Squeak will dial");
+  const proxy = env.SQUEAK_VOICE_PROXY?.trim() || null;
+  if (proxy !== null && !/^[\w.-]+(:\d{1,5})?$/.test(proxy))
+    throw new Error("SQUEAK_VOICE_PROXY must be a host or host:port");
   const pin = env.SQUEAK_VOICE_PIN?.trim() || null;
   if (pin !== null && !/^\d{4,12}$/.test(pin)) throw new Error("SQUEAK_VOICE_PIN must be 4 to 12 digits");
   const transport = (env.SQUEAK_VOICE_TRANSPORT?.trim().toLowerCase() || "udp") as LineConfig["transport"];
@@ -79,6 +83,7 @@ export function readVoiceConfig(env: VoiceEnv, supportDir: string): VoiceConfig 
       authUser,
       secret,
       transport,
+      proxy,
       baresipPath,
       modulePath: fs.existsSync(modulePath) ? modulePath : null,
       dir: path.join(supportDir, "voice"),
