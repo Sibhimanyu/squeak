@@ -33,6 +33,13 @@ describe("readVoiceConfig", () => {
     expect(() => readVoiceConfig({ ...base, SQUEAK_VOICE_CALLEE: "1;2" }, "/s")).toThrow(/CALLEE/);
   });
 
+  it("reads an SBC proxy and refuses a malformed one", () => {
+    expect(readVoiceConfig({ ...base, SQUEAK_VOICE_PROXY: "192.168.68.114:5060" }, "/s")?.line.proxy).toBe(
+      "192.168.68.114:5060",
+    );
+    expect(() => readVoiceConfig({ ...base, SQUEAK_VOICE_PROXY: "a;b" }, "/s")).toThrow(/PROXY/);
+  });
+
   it("insists on a numeric PIN of a usable length", () => {
     expect(() => readVoiceConfig({ ...base, SQUEAK_VOICE_PIN: "12" }, "/s")).toThrow(/PIN/);
     expect(() => readVoiceConfig({ ...base, SQUEAK_VOICE_PIN: "abcd" }, "/s")).toThrow(/PIN/);

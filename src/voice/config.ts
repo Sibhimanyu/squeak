@@ -4,7 +4,7 @@ import path from "node:path";
 import type { QuietHours } from "../fleet/notify-settings.js";
 import { isSafeAccountValue, type LineConfig } from "./baresip-line.js";
 
-/** The `SQUEAK_VOICE_*` settings (docs/voice.md). All but the last four are needed; without them voice stays off. */
+/** The `SQUEAK_VOICE_*` settings (docs/voice.md). All but the optional ones are needed; without them voice stays off. */
 export interface VoiceEnv {
   SQUEAK_VOICE_HOST?: string | undefined;
   SQUEAK_VOICE_EXTENSION?: string | undefined;
@@ -12,15 +12,20 @@ export interface VoiceEnv {
   SQUEAK_VOICE_PASSWORD?: string | undefined;
   SQUEAK_VOICE_CALLEE?: string | undefined;
   SQUEAK_VOICE_PIN?: string | undefined;
+  SQUEAK_VOICE_PROXY?: string | undefined;
   SQUEAK_VOICE_TRANSPORT?: string | undefined;
   SQUEAK_VOICE_QUIET?: string | undefined;
   SQUEAK_VOICE_BARESIP?: string | undefined;
+  SQUEAK_VOICE_BARESIP_MODULES?: string | undefined;
+  SQUEAK_VOICE_RELAY_CHANNEL?: string | undefined;
+  SQUEAK_VOICE_RELAY_KEY?: string | undefined;
   SQUEAK_VOICE_VOICE?: string | undefined;
 }
 
 export interface VoiceConfig {
   line: LineConfig;
-  callee: string;
+  /** The extension to ring; null only where the Mac names it per call (the gateway). */
+  callee: string | null;
   /** Digits only, 4 to 12; null means a call can tell you but never take an answer. */
   pin: string | null;
   quiet: QuietHours | null;
@@ -28,7 +33,26 @@ export interface VoiceConfig {
   speechVoice: string | null;
 }
 
-const BARESIP_CANDIDATES = ["/opt/homebrew/bin/baresip", "/usr/local/bin/baresip"];
+const BARESIP_CANDIDATES = ["/opt/homebrew/bin/baresip", "/usr/local/bin/baresip", "/usr/bin/baresip"];
+
+/** The Mac's side of the Home Assistant gateway: which channel and key to seal call requests with. */
+export interface VoiceRelayConfig {
+  channel: string;
+  /** Base64, 32 bytes: the AES-GCM key and, derived, the HMAC key. */
+  key: string;
+  quiet: QuietHours | null;
+}
+
+/** Null unless both relay settings are present; a malformed one throws, naming it. */
+export function readVoiceRelayConfig(env: VoiceEnv): VoiceRelayConfig | null {
+  const channel = env.SQUEAK_VOICE_RELAY_CHANNEL?.trim();
+  const key = env.SQUEAK_VOICE_RELAY_KEY?.trim();
+  if (!channel || !key) return null;
+  if (!/^[A-Za-z0-9_-]{22,64}$/.test(channel)) throw new Error("SQUEAK_VOICE_RELAY_CHANNEL is not a channel id");
+  if (Buffer.from(key, "base64").length !== 32)
+    throw new Error("SQUEAK_VOICE_RELAY_KEY must be 32 random bytes, base64");
+  return { channel, key, quiet: readQuietRange(env.SQUEAK_VOICE_QUIET) };
+}
 
 /** "22:00-07:00" as quiet hours; null for anything else. */
 export function readQuietRange(value: string | undefined): QuietHours | null {
@@ -43,12 +67,16 @@ export function readQuietRange(value: string | undefined): QuietHours | null {
  * Null when voice is not set up. A set-up but wrong value throws, naming the setting: the daemon
  * catches it and runs without voice rather than restarting in a loop.
  */
-export function readVoiceConfig(env: VoiceEnv, supportDir: string): VoiceConfig | null {
+export function readVoiceConfig(
+  env: VoiceEnv,
+  supportDir: string,
+  options: { calleeOptional?: boolean } = {},
+): VoiceConfig | null {
   const host = env.SQUEAK_VOICE_HOST?.trim();
   const user = env.SQUEAK_VOICE_EXTENSION?.trim();
   const secret = env.SQUEAK_VOICE_PASSWORD?.trim();
   const callee = env.SQUEAK_VOICE_CALLEE?.trim();
-  if (!host || !user || !secret || !callee) return null;
+  if (!host || !user || !secret || (!callee && !options.calleeOptional)) return null;
 
   if (!/^[\w.-]+(:\d{1,5})?$/.test(host)) throw new Error("SQUEAK_VOICE_HOST must be a host or host:port");
   if (!isSafeAccountValue(user) || !/^[\w.-]+$/.test(user))
@@ -61,7 +89,10 @@ export function readVoiceConfig(env: VoiceEnv, supportDir: string): VoiceConfig 
       "SQUEAK_VOICE_PASSWORD cannot contain quotes, backslashes, semicolons, angle brackets or line breaks",
     );
   }
-  if (!/^[\w.+*#-]+$/.test(callee)) throw new Error("SQUEAK_VOICE_CALLEE is not a number Squeak will dial");
+  if (callee && !/^[\w.+*#-]+$/.test(callee)) throw new Error("SQUEAK_VOICE_CALLEE is not a number Squeak will dial");
+  const proxy = env.SQUEAK_VOICE_PROXY?.trim() || null;
+  if (proxy !== null && !/^[\w.-]+(:\d{1,5})?$/.test(proxy))
+    throw new Error("SQUEAK_VOICE_PROXY must be a host or host:port");
   const pin = env.SQUEAK_VOICE_PIN?.trim() || null;
   if (pin !== null && !/^\d{4,12}$/.test(pin)) throw new Error("SQUEAK_VOICE_PIN must be 4 to 12 digits");
   const transport = (env.SQUEAK_VOICE_TRANSPORT?.trim().toLowerCase() || "udp") as LineConfig["transport"];
@@ -70,7 +101,9 @@ export function readVoiceConfig(env: VoiceEnv, supportDir: string): VoiceConfig 
   const baresipPath = env.SQUEAK_VOICE_BARESIP?.trim() || BARESIP_CANDIDATES.find((file) => fs.existsSync(file));
   if (!baresipPath)
     throw new Error("baresip is not installed (brew install baresip) and SQUEAK_VOICE_BARESIP is not set");
-  const modulePath = path.join(path.dirname(path.dirname(baresipPath)), "lib", "baresip", "modules");
+  const modulePath =
+    env.SQUEAK_VOICE_BARESIP_MODULES?.trim() ||
+    path.join(path.dirname(path.dirname(baresipPath)), "lib", "baresip", "modules");
 
   return {
     line: {
@@ -79,11 +112,12 @@ export function readVoiceConfig(env: VoiceEnv, supportDir: string): VoiceConfig 
       authUser,
       secret,
       transport,
+      proxy,
       baresipPath,
       modulePath: fs.existsSync(modulePath) ? modulePath : null,
       dir: path.join(supportDir, "voice"),
     },
-    callee,
+    callee: callee || null,
     pin,
     quiet: readQuietRange(env.SQUEAK_VOICE_QUIET),
     speechVoice: env.SQUEAK_VOICE_VOICE?.trim() || null,

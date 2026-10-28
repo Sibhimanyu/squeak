@@ -16,6 +16,7 @@ const line: LineConfig = {
   authUser: "abc123",
   secret: "pw",
   transport: "udp",
+  proxy: null,
   baresipPath: "/opt/homebrew/bin/baresip",
   modulePath: "/opt/homebrew/lib/baresip/modules",
   dir: "/s/voice",
@@ -58,6 +59,12 @@ describe("generated files", () => {
   it("registers with the 3CX authentication ID and a quoted password", () => {
     expect(accountsFile(line)).toBe(
       '<sip:900@pbx.local>;auth_user="abc123";auth_pass="pw";transport=udp;regint=300;answermode=manual\n',
+    );
+  });
+
+  it("sends everything through an SBC when there is one", () => {
+    expect(accountsFile({ ...line, proxy: "192.168.68.114:5060" })).toContain(
+      ';outbound="sip:192.168.68.114:5060;transport=udp"',
     );
   });
 

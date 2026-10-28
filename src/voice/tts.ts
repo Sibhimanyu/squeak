@@ -8,7 +8,6 @@ const run = promisify(execFile);
 
 /** 8 kHz mono 16-bit: what a phone line carries, and what baresip's `aufile` plays without resampling. */
 const SAMPLE_RATE = 8000;
-const WAV_HEADER_BYTES = 44;
 
 /** Speech as a WAV file the line can play. Injected in tests. */
 export interface Speaker {
@@ -17,9 +16,19 @@ export interface Speaker {
   dispose(): void;
 }
 
-/** Length of a 16-bit mono PCM WAV with a plain 44-byte header, which is what `afconvert` writes here. */
-export function wavDurationMs(bytes: number): number {
-  return Math.max(0, Math.round(((bytes - WAV_HEADER_BYTES) / (SAMPLE_RATE * 2)) * 1000));
+/**
+ * Length of a 16-bit mono 8 kHz PCM WAV, read from its `data` chunk: `afconvert` writes a plain
+ * header but `ffmpeg` adds a `LIST` chunk, so the header size is not a constant.
+ */
+export function wavDurationMs(wav: Buffer): number {
+  let at = 12;
+  while (at + 8 <= wav.length) {
+    const id = wav.toString("ascii", at, at + 4);
+    const size = wav.readUInt32LE(at + 4);
+    if (id === "data") return Math.round((Math.min(size, wav.length - at - 8) / (SAMPLE_RATE * 2)) * 1000);
+    at += 8 + size + (size % 2);
+  }
+  return 0;
 }
 
 /** macOS `say`, then `afconvert` to a telephone WAV. The text goes in on stdin, never as an argument. */
@@ -42,7 +51,53 @@ export class MacSpeaker implements Speaker {
     });
     await run("afconvert", ["-f", "WAVE", "-d", `LEI16@${SAMPLE_RATE}`, "-c", "1", `${base}.aiff`, `${base}.wav`]);
     fs.rmSync(`${base}.aiff`, { force: true });
-    return { file: `${base}.wav`, durationMs: wavDurationMs(fs.statSync(`${base}.wav`).size) };
+    return { file: `${base}.wav`, durationMs: wavDurationMs(fs.readFileSync(`${base}.wav`)) };
+  }
+
+  dispose(): void {
+    fs.rmSync(this.dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * `espeak-ng` then `ffmpeg` to a telephone WAV: what the Home Assistant add-on uses, since `say` is
+ * macOS-only. Plain, but it is a phone line.
+ */
+export class EspeakSpeaker implements Speaker {
+  private readonly dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-voice-"));
+  private count = 0;
+
+  async speak(text: string): Promise<{ file: string; durationMs: number }> {
+    const base = path.join(this.dir, `p${this.count++}`);
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn("espeak-ng", ["--stdin", "-s", "150", "-w", `${base}.raw.wav`], {
+        stdio: ["pipe", "ignore", "pipe"],
+      });
+      let stderr = "";
+      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+      child.on("error", reject);
+      child.on("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`espeak-ng exited ${code}: ${stderr.trim()}`)),
+      );
+      child.stdin.end(text);
+    });
+    await run("ffmpeg", [
+      "-y",
+      "-loglevel",
+      "error",
+      "-i",
+      `${base}.raw.wav`,
+      "-ar",
+      String(SAMPLE_RATE),
+      "-ac",
+      "1",
+      "-c:a",
+      "pcm_s16le",
+      "-bitexact",
+      `${base}.wav`,
+    ]);
+    fs.rmSync(`${base}.raw.wav`, { force: true });
+    return { file: `${base}.wav`, durationMs: wavDurationMs(fs.readFileSync(`${base}.wav`)) };
   }
 
   dispose(): void {

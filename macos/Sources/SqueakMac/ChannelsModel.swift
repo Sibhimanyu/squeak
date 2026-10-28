@@ -128,7 +128,48 @@ final class ChannelsModel {
             daemonReachable = false
         }
         await refreshNotify()
+        await refreshVoice()
         await refreshRemote()
+    }
+
+    // Phone calls (nil until the daemon answers): who they ring, and why a change did not stick.
+    private(set) var voice: VoiceSettings?
+    private(set) var voiceOutdated = false
+    private(set) var voiceError: String?
+    private(set) var voiceSaving = false
+
+    func refreshVoice() async {
+        if demo || voiceSaving { return }
+        do {
+            let v = try await client.voiceSettings()
+            voiceOutdated = v == nil
+            if let v { voice = v }
+        } catch {
+            // The service is off or busy: keep what is shown.
+        }
+    }
+
+    /// Saves the extension typed (empty clears it). Refused here if it is not 2 to 6 digits.
+    func setVoiceCallee(_ typed: String) async {
+        voiceError = nil
+        let callee = VoiceSettings.normalized(typed)
+        if let callee, !VoiceSettings.isExtension(callee) {
+            voiceError = "An extension is 2 to 6 digits, like 101."
+            return
+        }
+        if demo { voice?.callee = callee; return }
+        voiceSaving = true
+        do {
+            if let answered = try await client.setVoiceCallee(callee) {
+                voice = answered
+            } else {
+                voiceOutdated = true
+                voiceError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            voiceError = "Could not save: Squeak on this Mac did not answer."
+        }
+        voiceSaving = false
     }
 
     func refreshNotify() async {
@@ -476,6 +517,7 @@ final class ChannelsModel {
         cliqNotify.quiet = NotifyQuiet.standard
         cliqNotify.finished = .all
         notify = NotifySettings(telegram: ChannelNotify(), cliq: cliqNotify, telegramSetUp: true, cliqSetUp: true)
+        voice = VoiceSettings(mode: "gateway", callee: "101")
         remote = RemoteStatus(
             available: true, configured: true, phoneOpen: true, pairingOpen: true,
             devices: [.init(id: "d1", name: "Sibhi's iPhone", pairedAt: Date().addingTimeInterval(-86400 * 12))],

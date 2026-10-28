@@ -45,6 +45,7 @@ private extension SettingsSection {
         case .telegram: .send
         case .cliq: .messageSquare
         case .iphone: .smartphone
+        case .voice: .phone
         case .privacy: .hand
         case .about: .info
         }
@@ -110,6 +111,7 @@ private struct SettingsPage: View {
         case .telegram: TelegramSettings()
         case .cliq: CliqSettings()
         case .iphone: IPhoneSettings()
+        case .voice: VoiceSettingsPage()
         case .privacy: PrivacySettings()
         case .about: AboutSettings()
         }

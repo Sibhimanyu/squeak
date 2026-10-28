@@ -7,7 +7,8 @@ import { turnStamp } from "../cliq/channel.js";
 import { logger } from "../utils/logger.js";
 import type { CallResult } from "./baresip-line.js";
 import type { CallPolicy } from "./policy.js";
-import { CallDialog, composeScript, shouldCall } from "./script.js";
+import type { VoiceLine } from "./relay-line.js";
+import { composeScript, shouldCall } from "./script.js";
 
 /** How long a card waits before Squeak rings: long enough that you may have answered it already. */
 export const DEFAULT_GRACE_MS = 45_000;
@@ -16,11 +17,9 @@ const FAILURE_NOTE_GAP_MS = 60 * 60_000;
 export interface VoiceChannelDependencies {
   monitor: Pick<FleetMonitor, "onPush" | "snapshot" | "refresh">;
   replier: FleetReplier;
-  line: { call(callee: string, dialog: CallDialog): Promise<CallResult> };
-  /** The extension to ring: your phone's 3CX extension. */
-  callee: string;
-  /** Needed to answer by key; without it a call only tells you. */
-  pin: string | null;
+  line: VoiceLine;
+  /** Whether a PIN exists where the keys are taken; without one a call only tells you. */
+  canTakeKeys: boolean;
   policy: CallPolicy;
   graceMs?: number;
   /** A one-off note to Telegram and Cliq: what an answer by phone did, or why a call failed. */
@@ -98,14 +97,14 @@ export class VoiceChannel {
     const target = replyTargetFor(current.session);
     const text = safely(() => this.deps.replier.lastTurnText(target));
     const stamp = turnStamp(text);
-    const canAnswer = canReplyFromCard(current, this.deps.replier) && this.deps.pin !== null;
-    const dialog = new CallDialog(composeScript(current, text, canAnswer), canAnswer ? this.deps.pin : null);
+    const canAnswer = canReplyFromCard(current, this.deps.replier) && this.deps.canTakeKeys;
+    const script = composeScript(current, text, canAnswer);
 
     this.calling = true;
     this.deps.policy.record(episode, now);
     let result: CallResult;
     try {
-      result = await this.deps.line.call(this.deps.callee, dialog);
+      result = await this.deps.line.call(script, canAnswer);
     } finally {
       this.calling = false;
     }

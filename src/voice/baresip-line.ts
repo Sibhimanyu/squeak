@@ -4,7 +4,7 @@ import net from "node:net";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
-import type { CallDialog, DialogAction } from "./script.js";
+import type { CallDialog, DialogAction } from "./dialog.js";
 import type { Speaker } from "./tts.js";
 
 /**
@@ -26,6 +26,8 @@ export interface LineConfig {
   authUser: string | null;
   secret: string;
   transport: "udp" | "tcp" | "tls";
+  /** 3CX behind an SBC: the SBC's `host:port`, which every SIP message goes through; null when not used. */
+  proxy: string | null;
   baresipPath: string;
   /** Where baresip's modules live; null for its compiled-in default. */
   modulePath: string | null;
@@ -59,6 +61,7 @@ export function accountsFile(config: LineConfig): string {
     `transport=${config.transport}`,
     "regint=300",
     "answermode=manual",
+    ...(config.proxy ? [`outbound="sip:${config.proxy};transport=${config.transport}"`] : []),
   ];
   return `<sip:${config.user}@${config.host}>;${params.join(";")}\n`;
 }

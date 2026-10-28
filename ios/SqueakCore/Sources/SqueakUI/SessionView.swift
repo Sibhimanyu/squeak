@@ -813,6 +813,7 @@ private struct AgentMessage: View, Equatable {
     let choices: PhoneSnapshot.Choices?
     let disabled: Bool
     let onPick: (String) -> Void
+    @State private var selecting = false
 
     static func == (a: Self, b: Self) -> Bool {
         a.agentName == b.agentName && a.text == b.text && a.atISO == b.atISO && a.muted == b.muted
@@ -832,6 +833,11 @@ private struct AgentMessage: View, Equatable {
                 // The whole message out of the phone in one tap; the text itself stays selectable.
                 Menu {
                     Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
+                    Button { selecting = true } label: { Label("Select text", systemImage: "text.cursor") }
+                    // Each link in the message, whole, one tap: no selecting a URL by its handles.
+                    ForEach(MessageLinks.urls(in: text), id: \.self) { link in
+                        Button { UIPasteboard.general.string = link } label: { Label("Copy link: \(MessageLinks.host(link))", systemImage: "link") }
+                    }
                     ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
                 } label: {
                     Lucide(.ellipsis, size: 16, label: "More for this message", color: Theme.muted)
@@ -845,6 +851,7 @@ private struct AgentMessage: View, Equatable {
             if !reading.after.isEmpty { MessageText(markdown: reading.after.joined(separator: "\n\n"), style: .squeak) }
         }
         .accessibilityElement(children: .contain)
+        .sheet(isPresented: $selecting) { SelectableTextSheet(text: text, title: agentName) }
     }
 }
 
@@ -1378,6 +1385,11 @@ struct SentBubble: View, Equatable {
     let line: String?
     /// It did not go through (or cannot be vouched for): its line reads as a problem, not as a receipt.
     var failed = false
+    @State private var selecting = false
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.text == b.text && a.date == b.date && a.line == b.line && a.failed == b.failed
+    }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
@@ -1396,6 +1408,7 @@ struct SentBubble: View, Equatable {
                     .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 12))
                     .contextMenu {
                         Button { UIPasteboard.general.string = parts.body } label: { Label("Copy", systemImage: "doc.on.doc") }
+                        Button { selecting = true } label: { Label("Select text", systemImage: "text.cursor") }
                         ShareLink(item: parts.body) { Label("Share", systemImage: "square.and.arrow.up") }
                     }
             }
@@ -1408,6 +1421,7 @@ struct SentBubble: View, Equatable {
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("You\(date.map { ", \($0.formatted(date: .omitted, time: .shortened))" } ?? ""): \(text)\(line.map { ". \($0)" } ?? "")")
+        .sheet(isPresented: $selecting) { SelectableTextSheet(text: PhotoAttachment.split(text).body, title: "You") }
     }
 }
 
