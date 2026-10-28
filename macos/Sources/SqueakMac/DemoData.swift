@@ -4,6 +4,11 @@ import SqueakMacCore
 /// Made-up sessions for deterministic captures (SQUEAK_MAC_DEMO=1), matching the owner's reference
 /// image. Nothing here touches the network, and `AppModel.send` refuses in demo mode.
 enum DemoData {
+    /// Setup checklist in demo mode: hooks half installed, so the page shows mixed progress.
+    static let setupHooks = HooksStatus(
+        state: .partial, claude: .init(settingsFound: true, hooksInstalled: false, missing: ["Stop", "PermissionRequest"], askFormat: false),
+        codex: .init(agentsFound: true, askFormat: false), message: "Some hooks are missing.", steps: [])
+
     struct Bundle {
         var sessions: [HostSession]
         var needsYouText: [SessionKey: String]

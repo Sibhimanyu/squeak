@@ -575,6 +575,44 @@ describe("HookIngressServer control routes", () => {
     expect((await fetch(`${base}/reset`, { method: "POST", headers: auth })).status).toBe(200);
   });
 
+  it("serves the hooks routes only with the token, 503 unwired, 405/400, 409 on refusal, no CORS", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const base = `http://127.0.0.1:${harness.port}/control/hooks`;
+    const auth = { "x-squeak-token": harness.token };
+    const status = { state: "missing" };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(base, { headers: auth })).status).toBe(503);
+    let installs = 0;
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      hooks: {
+        status: () => status,
+        install: async () => {
+          installs += 1;
+          return { ok: true, status };
+        },
+        uninstall: async () => ({ ok: false, reason: "no", status }),
+      },
+    });
+    expect((await fetch(base)).status).toBe(403);
+    expect((await fetch(`${base}/install`, { method: "POST" })).status).toBe(403);
+    expect((await fetch(`${base}/install`, { headers: auth })).status).toBe(405);
+    expect((await fetch(base, { method: "POST", headers: auth })).status).toBe(405);
+    expect((await fetch(`${base}/install`, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
+    expect(installs).toBe(0);
+    const got = await fetch(base, { headers: auth });
+    expect(got.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await got.json()).toEqual(status);
+    const ok = await fetch(`${base}/install`, { method: "POST", headers: auth, body: "{}" });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ ok: true, status });
+    const refused = await fetch(`${base}/uninstall`, { method: "POST", headers: auth });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ ok: false, reason: "no", status });
+  });
+
   it("answers 500 without the request when the hotspot call fails, and 503 when none is wired", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;

@@ -34,6 +34,8 @@ final class AppModel {
     @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
     /// Settings › Conductor and Welcome: the relay's setup and status (AppModel+Relay.swift).
     @ObservationIgnored lazy var relay = RelayModel(client: client, demo: demoMode || captureMode)
+    /// The first-run checklist's facts (AppModel+Setup.swift).
+    @ObservationIgnored lazy var setup = SetupModel(client: client, demo: demoMode || captureMode)
     /// The background service Squeak installs and updates for installs without a checkout (DaemonManager.swift).
     @ObservationIgnored lazy var daemon = DaemonManager(enabled: !(demoMode || captureMode))
     @ObservationIgnored var openConversationWindow: (() -> Void)?
@@ -200,6 +202,11 @@ final class AppModel {
         updater.start(enabled: !captureMode)
         daemon.reconcileAtLaunch()
         Task { [weak self] in await self?.relay.refresh() }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self else { return }
+            await setup.refresh(self)
+        }
         Task { [weak self] in
             guard let self else { return }
             await broker.restoreFromCache()

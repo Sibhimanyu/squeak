@@ -19,7 +19,7 @@ final class OnboardingController {
     func show() {
         if window == nil {
             let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 480, height: 460),
+                contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false
             )
             w.title = "Welcome to Squeak"
@@ -43,138 +43,71 @@ struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @State private var step: Int
 
+    /// Step 0 is the welcome, the one place the person says yes to Squeak installing its background
+    /// service; any other step is the setup checklist.
     init(step: Int = 0, finish: @escaping () -> Void) {
         _step = State(initialValue: step)
         self.finish = finish
     }
 
-    private let last = 4
-
-    private let conductorInstalled = FileManager.default.fileExists(atPath: "/Applications/Conductor.app")
-
     var body: some View {
         VStack(spacing: 0) {
-            Group {
-                switch step {
-                case 0: welcome
-                case 1: detect
-                case 2: works
-                case 3: connectConductor
-                default: done
-                }
+            if step == 0 {
+                welcome.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                welcomeFooter
+            } else {
+                ScrollView { SetupChecklistView() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                checklistFooter
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            footer
         }
         .padding(.horizontal, Space.xxl)
         .padding(.top, Space.xxl)
         .padding(.bottom, Space.xl)
-        .frame(width: 480, height: 460)
+        .frame(width: 520, height: 600)
         .background(Theme.bg)
     }
 
-    private var footer: some View {
+    private var welcomeFooter: some View {
         HStack {
-            if step == 0 || step == last {
-                Button("Skip") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted)
-                    .opacity(step == last ? 0 : 1).accessibilityLabel("Skip setup")
-            } else {
-                Button("Back") { step -= 1 }.buttonStyle(.plain).foregroundStyle(Theme.muted)
-            }
+            Button("Skip") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted).accessibilityLabel("Skip setup")
             Spacer()
-            HStack(spacing: 6) {
-                ForEach(0...last, id: \.self) { Circle().fill($0 == step ? Theme.ink : Theme.subtle.opacity(0.4)).frame(width: 6, height: 6) }
+            Button("Set up Squeak") {
+                model.setup.confirmInstallService()
+                step = 1
             }
-            .accessibilityHidden(true)
-            Spacer()
-            Button(step == last ? "Finish" : "Continue") { if step == last { finish() } else { step += 1 } }
-                .buttonStyle(PrimaryButtonStyle())
-                .keyboardShortcut(.defaultAction)
+            .buttonStyle(PrimaryButtonStyle())
+            .keyboardShortcut(.defaultAction)
         }
         .font(.system(size: 13))
     }
 
-    private func heading(_ text: String) -> some View {
-        Text(text).font(.system(size: 22, weight: .semibold)).foregroundStyle(Theme.ink).multilineTextAlignment(.center)
+    private var checklistFooter: some View {
+        let done = model.setupChecklist.isComplete
+        return HStack {
+            Spacer()
+            if done {
+                Button("Done") { finish() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+            } else {
+                Button("Finish later") { finish() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(.top, Space.m)
+        .font(.system(size: 13))
     }
 
     private var welcome: some View {
         VStack(spacing: Space.m) {
-            DuckMark(width: 72).padding(.top, Space.l).padding(.bottom, Space.s)
-            heading("Squeak lives in your menu bar")
-            Text("It shows your coding-agent sessions, tells you when one needs you, and lets you answer without switching apps.")
+            DuckMark(width: 72).padding(.top, Space.xxl).padding(.bottom, Space.s)
+            Text("Welcome to Squeak").font(.system(size: 22, weight: .semibold)).foregroundStyle(Theme.ink)
+            Text("Squeak lives in your menu bar. It shows your coding-agent sessions, tells you when one needs you, and lets you answer without switching apps.")
                 .font(.system(size: 14)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Setup is optional. Skip it and everything still works.")
+            Text("Setup takes a minute. Squeak installs its own background service, then you pick the rest. Nothing needs the terminal.")
+                .font(.system(size: 13)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true).padding(.top, Space.xs)
+            Text("You can skip this and finish later in Settings › Setup.")
                 .font(.system(size: 12)).foregroundStyle(Theme.subtle).padding(.top, Space.xs)
-        }
-    }
-
-    private var detect: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            heading("What Squeak found").frame(maxWidth: .infinity)
-            VStack(alignment: .leading, spacing: Space.m) {
-                check(conductorInstalled, "Conductor is installed", "Conductor isn't in /Applications. Squeak can still follow sessions it sees, but can't open chats in Conductor.")
-                check(model.isConnected, "Squeak service is running", model.connectionHelp ?? "Looking for the service…")
-                check(model.tokenPresent, "Access token found", "Needed to send replies. Start the Squeak service once to create it.")
-            }
-            .padding(.top, Space.s)
-            Button("Check again") { model.recheck() }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.muted)
-        }
-    }
-
-    private func check(_ ok: Bool, _ good: String, _ bad: String) -> some View {
-        HStack(alignment: .top, spacing: Space.m) {
-            Circle().fill(ok ? Theme.working : Theme.subtle).frame(width: 8, height: 8).padding(.top, 5)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(good).font(.system(size: 13, weight: .medium)).foregroundStyle(ok ? Theme.ink : Theme.muted)
-                if !ok { Text(bad).font(.system(size: 12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private var works: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            heading("What works").frame(maxWidth: .infinity)
-            VStack(alignment: .leading, spacing: Space.m) {
-                bullet(.check, "Read conversations and see what an agent is doing")
-                bullet(.check, "Reply to Conductor chats, one message at a time")
-                bullet(.check, "Quick message from anywhere: double-tap Control, or pick another shortcut")
-                bullet(.minus, "Approvals and attachments aren't supported yet. Squeak says so and offers Open in Conductor.")
-            }
-            .padding(.top, Space.s)
-        }
-    }
-
-    /// Optional: the same status and setup control as Settings › Conductor. Continue skips it.
-    private var connectConductor: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            heading("Connect Conductor").frame(maxWidth: .infinity)
-            Text("Lets Squeak start chats and answer them live. Optional: Continue skips it, and Settings › Conductor has it later.")
-                .font(.system(size: 12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            ScrollView { ConductorRelayCard() }
-        }
-    }
-
-    private func bullet(_ symbol: LucideName, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: Space.m) {
-            Lucide(symbol, size: 16, color: Theme.subtle).padding(.top, 1)
-            Text(text).font(.system(size: 13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var done: some View {
-        VStack(spacing: Space.m) {
-            DuckMark(width: 56).padding(.top, Space.xl).padding(.bottom, Space.s)
-            heading("You're set up")
-            Text("Click the duck in the menu bar any time. Pick a quick-message shortcut and a login option in Settings.")
-                .font(.system(size: 14)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            if model.isConnected && Bundled.isApp && !LoginItem.isEnabled {
-                Button("Open Squeak at login") { model.answerLaunchOffer(enable: true) }
-                    .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink).padding(.top, Space.s)
-            }
         }
     }
 }

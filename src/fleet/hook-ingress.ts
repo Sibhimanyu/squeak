@@ -105,6 +105,19 @@ export interface IngressControl {
     reset(): Promise<{ ok: boolean; reason?: string; status: unknown }>;
   };
   /**
+   * Agent hooks from the Mac app (fleet/hooks-setup.ts): `GET /control/hooks` answers
+   * `{ state: "installed"|"partial"|"missing"|"error", claude: { settingsFound, hooksInstalled, missing: string[],
+   * askFormat }, codex: { agentsFound, askFormat }, message, steps: string[] }`; `POST /control/hooks/install` and
+   * `/uninstall` (body `{}`) answer `{ ok, status }` (200) or `{ ok: false, reason, status }` (409). Install is
+   * idempotent and repairs a partial one. Token-gated, no CORS header, 503 when not wired, 405 wrong method,
+   * 400 bad JSON; fixed sentences and event names only, never a path, token or file content.
+   */
+  hooks?: {
+    status(): unknown;
+    install(): Promise<{ ok: boolean; reason?: string; status: unknown }>;
+    uninstall(): Promise<{ ok: boolean; reason?: string; status: unknown }>;
+  };
+  /**
    * What Telegram and Cliq may push (fleet/notify-settings.ts): `GET /control/notify` answers
    * `{ telegram, cliq, channels: { telegram, cliq } }`; `POST` takes `{ channel, change }` (one key, strict)
    * and answers the same. Token-gated, no CORS header.
@@ -631,6 +644,62 @@ export class HookIngressServer {
           .catch(() => {
             logger.warn("control relay setup failed");
             respond(response, 500, "relay setup failed");
+          });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    const hooksRoute = /^\/control\/hooks(?:\/(install|uninstall))?$/.exec((request.url ?? "").split("?")[0] ?? "");
+    if (hooksRoute) {
+      const verb = hooksRoute[1];
+      if (request.method !== (verb ? "POST" : "GET")) {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      const hooks = control.hooks;
+      if (!hooks) {
+        request.resume();
+        respond(response, 503, "hooks setup unavailable");
+        return;
+      }
+      if (!verb) {
+        request.resume();
+        try {
+          respondJson(response, 200, hooks.status());
+        } catch {
+          logger.warn("control hooks status failed");
+          respond(response, 500, "hooks status failed");
+        }
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) return;
+        try {
+          const parsed: unknown = JSON.parse(body || "{}");
+          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        (verb === "install" ? hooks.install() : hooks.uninstall())
+          .then((outcome) => respondJson(response, outcome.ok ? 200 : 409, outcome))
+          .catch(() => {
+            logger.warn("control hooks setup failed");
+            respond(response, 500, "hooks setup failed");
           });
       });
       request.on("error", () => {

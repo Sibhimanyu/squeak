@@ -36,6 +36,7 @@ import { macTabsSystem, WindowTabs } from "../fleet/window-tabs.js";
 import { UsageStats } from "../fleet/usage-stats.js";
 import { POWER_SUDOERS_PATH, PowerMode, powerSudoersRule, powerSystem } from "../fleet/power-mode.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
+import { HooksSetup } from "../fleet/hooks-setup.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
@@ -578,6 +579,7 @@ export class SqueakApp {
       sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),
       queue: (sessionId) => this.replier.queue(sessionId),
       relay: this.relaySetup(),
+      hooks: this.hooksSetup(),
       queueAction: (sessionId, messageId, action) => this.replier.queueAction(sessionId, messageId, action),
       reply: async (target, text, mode, answersTurn) => {
         // A client that names the turn it answered is refused once the chat has moved on (answered on the laptop).
@@ -787,6 +789,16 @@ export class SqueakApp {
         return outcome;
       },
       reset: async () => resetRelay(options()),
+    };
+  }
+
+  /** Agent hooks from the Mac app (fleet/hooks-setup.ts) for the ingress's `/control/hooks*` routes. */
+  private hooksSetup(): NonNullable<IngressControl["hooks"]> {
+    const setup = new HooksSetup({ supportDir: this.config.supportDir, port: this.config.hookPort });
+    return {
+      status: () => setup.status(),
+      install: () => setup.install(),
+      uninstall: () => setup.uninstall(),
     };
   }
 

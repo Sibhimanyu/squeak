@@ -16,6 +16,28 @@ iPhone, or Telegram.
 
 The design system every surface follows is in [`DESIGN.md`](DESIGN.md).
 
+## Quick start
+
+1. **Install.** Download `Squeak-<version>.dmg` from the GitHub releases and
+   drag Squeak to Applications. It needs an Apple-silicon Mac on macOS 14 or
+   later. The build is not notarized yet: right-click the app, choose Open
+   (or System Settings › Privacy & Security › Open Anyway).
+2. **Run the Setup checklist.** Squeak lives in the menu bar and bundles its
+   background service; the checklist installs the service and agent hooks and
+   offers notifications and the quick-message hotkey. Reading Conductor chats
+   already works at this point.
+3. **Reply to Conductor chats.** Settings › Conductor, set up the relay
+   (macOS may ask for Keychain access), then quit and reopen Conductor once.
+4. **Add a channel (optional).** Telegram needs your own bot token from
+   @BotFather. Zoho Cliq is specific to a Zoho org.
+5. **Add the iPhone (optional).** Installed through SideStore, and it needs
+   your own Firebase project (`SQUEAK_REMOTE_PROJECT`); there is no hosted
+   backend. See [`docs/remote-channel.md`](docs/remote-channel.md).
+
+More detail, known limits and troubleshooting:
+[`docs/getting-started.md`](docs/getting-started.md). The steps under Setup
+below are for building from a checkout.
+
 ## How it works
 
 A small daemon (`squeak start`, run by launchd) reads agent transcripts,
