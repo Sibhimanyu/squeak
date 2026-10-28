@@ -206,3 +206,47 @@ export class PiperSpeaker implements Speaker {
     this.fallback.dispose();
   }
 }
+
+/**
+ * Remembers what it has said: the same prompt on the next call (or the next time round a menu) is a file that
+ * already exists, not a second of silence while the voice is made. Dynamic prompts (a read-back) pass through and
+ * the oldest are dropped, with their files, past `limit`.
+ */
+export class CachedSpeaker implements Speaker {
+  private readonly made = new Map<string, { file: string; durationMs: number }>();
+
+  constructor(
+    private readonly inner: Speaker,
+    private readonly limit = 120,
+  ) {}
+
+  async speak(text: string): Promise<{ file: string; durationMs: number }> {
+    const hit = this.made.get(text);
+    if (hit && fs.existsSync(hit.file)) {
+      // Most recently used last, so the dropped one is the stalest.
+      this.made.delete(text);
+      this.made.set(text, hit);
+      return hit;
+    }
+    const result = await this.inner.speak(text);
+    this.made.set(text, result);
+    while (this.made.size > this.limit) {
+      const oldest = this.made.keys().next().value as string;
+      const gone = this.made.get(oldest);
+      this.made.delete(oldest);
+      if (gone) fs.rmSync(gone.file, { force: true });
+    }
+    return result;
+  }
+
+  /** Makes each prompt now (one at a time, so a small machine is not swamped); a failure is left for the call to meet. */
+  async prewarm(texts: readonly string[]): Promise<void> {
+    for (const text of texts) {
+      await this.speak(text).catch(() => undefined);
+    }
+  }
+
+  dispose(): void {
+    this.inner.dispose();
+  }
+}

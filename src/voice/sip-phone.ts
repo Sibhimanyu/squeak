@@ -15,7 +15,7 @@ import {
   type LineConfig,
 } from "./baresip-line.js";
 import type { DialOutcome, IncomingCall, Phone, PhoneCall } from "./phone.js";
-import { wavDurationMs, type Speaker } from "./tts.js";
+import { CachedSpeaker, wavDurationMs, type Speaker } from "./tts.js";
 
 /**
  * The Home Assistant gateway's phone: one `baresip`, registered with the PBX for as long as the gateway runs, so
@@ -27,7 +27,7 @@ import { wavDurationMs, type Speaker } from "./tts.js";
 const READY_WAIT_MS = 20_000;
 const RING_TIMEOUT_MS = 40_000;
 const ANSWER_WAIT_MS = 15_000;
-const SETTLE_MS = 300;
+const SETTLE_MS = 150;
 const FINALIZE_MS = 400;
 const SAMPLE_RATE = 8000;
 
@@ -224,6 +224,7 @@ class LiveCall implements PhoneCall {
 
 export interface SipPhoneOptions {
   line: LineConfig;
+  /** Wrapped in a cache here, so anything prewarmed (or said before) costs nothing at pick-up. */
   speaker: Speaker;
   /** `ip:port` to listen on instead of a random port: for a test where the caller has no PBX to find us. */
   listen?: string;
@@ -242,7 +243,11 @@ export class SipPhone implements Phone {
   /** A call that is ringing or being answered: the next CALL_ESTABLISHED is its. */
   private awaiting: { peer: string; settle: (call: LiveCall | null) => void } | null = null;
 
+  private readonly speaker: CachedSpeaker;
+  private warming: Promise<void> = Promise.resolve();
+
   constructor(private readonly options: SipPhoneOptions) {
+    this.speaker = new CachedSpeaker(options.speaker);
     this.dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-phone-"));
     this.files = {
       silence: path.join(this.dir, "silence.wav"),
@@ -251,6 +256,11 @@ export class SipPhone implements Phone {
     };
     fs.writeFileSync(this.files.silence, wavOf(new Int16Array(SAMPLE_RATE)));
     fs.writeFileSync(this.files.beep, wavOf(tone(880, 0.3)));
+  }
+
+  /** Queued behind any earlier warm-up, one prompt at a time. */
+  prewarm(texts: readonly string[]): void {
+    this.warming = this.warming.then(() => this.speaker.prewarm(texts)).catch(() => undefined);
   }
 
   onIncoming(handler: (incoming: IncomingCall) => void): void {
@@ -341,7 +351,7 @@ export class SipPhone implements Phone {
   private context(): CallContext {
     return {
       send: this.send,
-      speaker: this.options.speaker,
+      speaker: this.speaker,
       dir: this.dir,
       silence: this.files.silence,
       discard: this.files.discard,

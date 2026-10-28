@@ -4,7 +4,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
-import { PiperSpeaker, type Speaker } from "./tts.js";
+import { CachedSpeaker, PiperSpeaker, type Speaker } from "./tts.js";
 
 const hasFfmpeg = (() => {
   try {
@@ -72,5 +72,47 @@ describe("PiperSpeaker", () => {
     expect(fs.readFileSync(seen, "utf8")).toBe("");
     speaker.dispose();
     fs.rmSync(dir, { recursive: true });
+  });
+});
+
+describe("CachedSpeaker", () => {
+  it("says the same words once and serves them from memory after", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cached-speaker-"));
+    let made = 0;
+    const inner: Speaker = {
+      async speak(text) {
+        made++;
+        const file = path.join(dir, `${made}.wav`);
+        fs.writeFileSync(file, text);
+        return { file, durationMs: text.length };
+      },
+      dispose() {},
+    };
+    const speaker = new CachedSpeaker(inner, 2);
+    const a = await speaker.speak("one");
+    expect(await speaker.speak("one")).toEqual(a);
+    expect(made).toBe(1);
+    // Past the limit the stalest goes, with its file; the one just used stays.
+    await speaker.speak("two");
+    await speaker.speak("one");
+    await speaker.speak("three");
+    expect(fs.existsSync(a.file)).toBe(true);
+    await speaker.speak("two");
+    expect(made).toBe(4);
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  it("prewarms what it is given and shrugs off one that fails", async () => {
+    const spoken: string[] = [];
+    const speaker = new CachedSpeaker({
+      async speak(text) {
+        if (text === "bad") throw new Error("no voice");
+        spoken.push(text);
+        return { file: "/nonexistent", durationMs: 1 };
+      },
+      dispose() {},
+    });
+    await speaker.prewarm(["a", "bad", "b"]);
+    expect(spoken).toEqual(["a", "b"]);
   });
 });
