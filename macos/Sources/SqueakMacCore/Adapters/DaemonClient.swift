@@ -205,6 +205,23 @@ public struct DaemonClient: Sendable {
         return .saved(try? JSONDecoder().decode(NotifySettings.self, from: r.body))
     }
 
+    // MARK: Voice (nil means the daemon predates the route: 404)
+
+    public func voiceSettings() async throws -> VoiceSettings? {
+        let r = try await get("/control/voice", token: true)
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try decode(VoiceSettings.self, r.body)
+    }
+
+    /// Sets the extension to ring, or clears it with nil. The daemon refuses anything but 2 to 6 digits.
+    public func setVoiceCallee(_ callee: String?) async throws -> VoiceSettings? {
+        let r = try await post("/control/voice", body: VoiceSettings.requestBody(callee: callee))
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
+    }
+
     public func telegramCandidates() async throws -> [TelegramCandidate]? {
         let r = try await get("/control/telegram/candidates", token: true)
         if r.status == 404 { return nil }

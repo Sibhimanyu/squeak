@@ -6,11 +6,11 @@ import type { VoiceLine } from "./relay-line.js";
 export class DirectLine implements VoiceLine {
   constructor(
     private readonly line: Pick<BaresipLine, "call">,
-    private readonly callee: string,
+    private readonly callee: () => string,
     private readonly pin: string | null,
   ) {}
 
   call(script: CallScript, answerable: boolean): Promise<CallResult> {
-    return this.line.call(this.callee, new CallDialog(script, answerable ? this.pin : null));
+    return this.line.call(this.callee(), new CallDialog(script, answerable ? this.pin : null));
   }
 }

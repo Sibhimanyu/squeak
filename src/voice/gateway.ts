@@ -19,8 +19,8 @@ export interface GatewayDependencies {
   key: string;
   /** Places the call to the owner's phone and runs the dialog (`BaresipLine.call`). */
   line: { call(callee: string, dialog: CallDialog): Promise<CallResult> };
-  /** The owner's phone extension. Fixed here, never taken from a request. */
-  callee: string;
+  /** The extension to ring when a request names none. A request may name one, but only an internal extension (checked on reading it). */
+  callee: string | null;
   /** Checked on this side only: neither the Mac nor the database ever holds it. Null: calls tell, never take an answer. */
   pin: string | null;
   now?: () => number;
@@ -114,10 +114,10 @@ export class VoiceGateway {
         continue;
       }
       const { request } = read;
-      const result = await this.deps.line.call(
-        this.deps.callee,
-        new CallDialog(request.script, request.answerable ? this.deps.pin : null),
-      );
+      const callee = request.callee ?? this.deps.callee;
+      const result: CallResult = callee
+        ? await this.deps.line.call(callee, new CallDialog(request.script, request.answerable ? this.deps.pin : null))
+        : { status: "failed", reason: "No phone extension is set. Set it in Squeak's settings on your Mac." };
       const body: CallResultDoc =
         result.status === "answered"
           ? { v: 1, id, at: this.now(), status: "answered", letter: result.letter }

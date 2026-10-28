@@ -16,9 +16,14 @@ export async function runVoiceTest(): Promise<number> {
     );
     return 1;
   }
+  const callee = voice.callee;
+  if (!callee) {
+    console.error("Set SQUEAK_VOICE_CALLEE: the extension to ring.");
+    return 1;
+  }
   const speaker = new MacSpeaker(voice.speechVoice);
   try {
-    console.log(`Registering as ${voice.line.user} on ${voice.line.host} and ringing ${voice.callee}...`);
+    console.log(`Registering as ${voice.line.user} on ${voice.line.host} and ringing ${callee}...`);
     const dialog = new CallDialog(
       {
         greeting: "Squeak. This is a test call.",
@@ -31,7 +36,7 @@ export async function runVoiceTest(): Promise<number> {
       },
       voice.pin,
     );
-    const result = await new BaresipLine(voice.line, speaker).call(voice.callee, dialog);
+    const result = await new BaresipLine(voice.line, speaker).call(callee, dialog);
     if (result.status === "failed") {
       console.error(`The call failed: ${result.reason}`);
       return 1;

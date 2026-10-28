@@ -42,6 +42,14 @@ describe("requests", () => {
     expect(readRequest(key, "abc", doc, NOW).ok).toBe(false);
   });
 
+  it("carries an internal extension and refuses anything else", () => {
+    const named = readRequest(key, "abc", sealRequest(key, { ...request, callee: "101" }), NOW);
+    expect(named).toMatchObject({ ok: true, request: { callee: "101" } });
+    for (const bad of ["+919876543210", "1", "10 1", "1234567", "00919876543210"]) {
+      expect(readRequest(key, "abc", sealRequest(key, { ...request, callee: bad }), NOW).ok).toBe(false);
+    }
+  });
+
   it("rejects a malformed script", () => {
     const doc = sealRequest(key, {
       ...request,

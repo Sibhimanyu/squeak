@@ -64,6 +64,42 @@ describe("Mac and gateway through the relay", () => {
     expect((dialogs[0]!.start()[0] as { text: string }).text).toContain("enter your PIN");
   });
 
+  it("rings the extension the Mac names, not the gateway's default", async () => {
+    await new RelayLine({ store, channel, key, callee: () => "202" }).call(script, true);
+    expect(callees).toEqual(["202"]);
+  });
+
+  it("says so when neither side has an extension", async () => {
+    const quiet = new VoiceGateway({
+      store,
+      channel: generateChannel().channelId,
+      key,
+      callee: null,
+      pin: "1",
+      line: { call: async () => outcome },
+    });
+    expect(quiet).toBeDefined();
+    gateway.stop();
+    const bare = new VoiceGateway({
+      store,
+      channel,
+      key,
+      callee: null,
+      pin: "4821",
+      line: {
+        call: async (c) => {
+          callees.push(c);
+          return outcome;
+        },
+      },
+    });
+    bare.start();
+    const result = await new RelayLine({ store, channel, key }).call(script, true);
+    bare.stop();
+    expect(result).toMatchObject({ status: "failed", reason: expect.stringContaining("No phone extension") });
+    expect(callees).toEqual([]);
+  });
+
   it("leaves nothing in the database afterwards", async () => {
     await new RelayLine({ store, channel, key }).call(script, true);
     expect(db.tree.list(`channels/${channel}/voice`)).toEqual([]);

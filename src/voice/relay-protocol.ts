@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { open, seal } from "../remote/remote-crypto.js";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import type { CallScript } from "./dialog.js";
+import { EXTENSION } from "./settings.js";
 
 /**
  * What the Mac and the Home Assistant gateway say to each other through the Realtime Database.
@@ -21,6 +22,8 @@ export interface CallRequest {
   /** Whether a reply could go back right now; the gateway only takes keys when it also holds a PIN. */
   answerable: boolean;
   script: CallScript;
+  /** The extension to ring, from the Mac's settings; absent: the gateway's own default. Internal extensions only. */
+  callee?: string;
 }
 
 export type CallResultBody =
@@ -113,6 +116,10 @@ export function readRequest(
   }
   if (typeof body.answerable !== "boolean" || !isScript(body.script))
     return { ok: false, reason: "not a call request" };
+  // Only an internal extension: a stolen key must not be able to point the PBX at an outside number.
+  if (body.callee !== undefined && !(typeof body.callee === "string" && EXTENSION.test(body.callee))) {
+    return { ok: false, reason: "not an extension" };
+  }
   if (
     body.expiresAt < now ||
     body.at > now + CLOCK_SKEW_MS ||
@@ -122,7 +129,15 @@ export function readRequest(
   }
   return {
     ok: true,
-    request: { v: 1, id, at: body.at, expiresAt: body.expiresAt, answerable: body.answerable, script: body.script },
+    request: {
+      v: 1,
+      id,
+      at: body.at,
+      expiresAt: body.expiresAt,
+      answerable: body.answerable,
+      script: body.script,
+      ...(typeof body.callee === "string" ? { callee: body.callee } : {}),
+    },
   };
 }
 

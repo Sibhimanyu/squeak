@@ -13,6 +13,7 @@ const out = join(root, "icons/Sources/SqueakIcons/LucideData.swift");
 export const CURATED = [
   // mapped from SF Symbols used in macos/ and ios/ (see icons/README.md)
   "settings",
+  "phone",
   "pin",
   "arrow-up",
   "circle-x",

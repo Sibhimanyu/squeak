@@ -3,7 +3,7 @@ import Foundation
 /// The pages of Settings, which lives inside the main window. `AppModel.settingsSection` is the
 /// page on screen, or nil while the window shows sessions.
 public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifiable {
-    case setup, general, notifications, awake, conductor, connections, telegram, cliq, iphone, privacy, about
+    case setup, general, notifications, awake, conductor, connections, telegram, cliq, iphone, voice, privacy, about
 
     public var id: String { rawValue }
 
@@ -18,6 +18,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         case .telegram: "Telegram"
         case .cliq: "Zoho Cliq"
         case .iphone: "iPhone"
+        case .voice: "Phone calls"
         case .privacy: "Privacy"
         case .about: "About"
         }
@@ -27,7 +28,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
     public static let groups: [[SettingsSection]] = [
         [.setup],
         [.general, .notifications, .awake],
-        [.conductor, .connections, .telegram, .cliq, .iphone],
+        [.conductor, .connections, .telegram, .cliq, .iphone, .voice],
         [.privacy, .about],
     ]
 
@@ -39,6 +40,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         if raw == "notify" || raw == "notification" { self = .notifications; return }
         if raw == "mac" { self = .general; return }
         if raw == "cliq" || raw == "zoho" { self = .cliq; return }
+        if raw == "calls" || raw == "phone" || raw == "3cx" { self = .voice; return }
         guard let s = SettingsSection(rawValue: raw) else { return nil }
         self = s
     }

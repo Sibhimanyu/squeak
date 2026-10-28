@@ -79,6 +79,7 @@ import { DirectLine } from "../voice/direct-line.js";
 import { RelayLine } from "../voice/relay-line.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker } from "../voice/tts.js";
+import { VoiceSettingsStore } from "../voice/settings.js";
 import { VoiceChannel } from "../voice/voice-channel.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
 import type { TelegramChat, TelegramConversationTarget, TelegramUpdate } from "../types.js";
@@ -165,6 +166,8 @@ export class SqueakApp {
   /** Rings the owner through a SIP extension when an agent waits on them (src/voice/); null unless set up. */
   private voice: VoiceChannel | null = null;
   private voiceSpeaker: MacSpeaker | null = null;
+  /** The extension to ring, edited from the Mac app (voice-settings.json). */
+  private readonly voiceSettings: VoiceSettingsStore;
   /** The Cliq webhook the channel posts through, for one-off notes (an awake session's end). */
   private cliqWebhook: CliqWebhook | null = null;
   /** Plain-language questions from Cliq, answered through the Mac's own `claude`. */
@@ -306,6 +309,7 @@ export class SqueakApp {
     const telegram = this.telegram;
     this.telegramAvatar = new TelegramAvatar({ telegram });
     this.notifySettings = new NotifySettingsStore(path.join(config.supportDir, "notify-settings.json"));
+    this.voiceSettings = new VoiceSettingsStore(path.join(config.supportDir, "voice-settings.json"));
     this.telegramStatus = new TelegramStatus({
       sender: telegram ? { sendMessage: (chatId, text) => telegram.sendMessage(chatId, text) } : null,
       allowedChatIds: config.allowedChatIds,
@@ -551,6 +555,7 @@ export class SqueakApp {
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
+      voice: { read: () => this.voiceView(), apply: (request) => this.applyVoice(request) },
       telegramAvatar: (request) => this.telegramAvatar.apply(request),
       fanRule: () => {
         const rule = fansSudoersRule(os.userInfo().username);
@@ -847,6 +852,18 @@ export class SqueakApp {
       ...this.notifySettings.snapshot(),
       channels: { telegram: Boolean(this.config.botToken), cliq: Boolean(this.config.cliqWebhookUrl) },
     };
+  }
+
+  /** Whether voice is set up and who it rings: what `GET /control/voice` carries. */
+  private voiceView() {
+    const { voice, voiceRelay, remoteDatabaseUrl } = this.config;
+    const mode = voiceRelay && remoteDatabaseUrl ? "gateway" : voice ? "direct" : "off";
+    return { mode, callee: this.voiceSettings.settings.callee, defaultCallee: voice?.callee ?? null };
+  }
+
+  private applyVoice(request: unknown) {
+    const outcome = this.voiceSettings.apply(request);
+    return outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome;
   }
 
   /** The one place a setting changes: the Mac app's route and the phone's signed `notify` command both end here. */
@@ -1186,10 +1203,18 @@ export class SqueakApp {
     if (!voice) {
       return null;
     }
+    if (!voice.callee && !this.voiceSettings.settings.callee) {
+      logger.warn("voice needs SQUEAK_VOICE_CALLEE or an extension in Settings; voice is off");
+      return null;
+    }
     this.voiceSpeaker = new MacSpeaker(voice.speechVoice);
     return new VoiceChannel({
       ...base,
-      line: new DirectLine(new BaresipLine(voice.line, this.voiceSpeaker), voice.callee, voice.pin),
+      line: new DirectLine(
+        new BaresipLine(voice.line, this.voiceSpeaker),
+        () => this.voiceSettings.settings.callee ?? voice.callee ?? "",
+        voice.pin,
+      ),
       canTakeKeys: voice.pin !== null,
       policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voice.quiet }),
     });

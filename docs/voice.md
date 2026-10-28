@@ -14,6 +14,11 @@ itself, which needs a route to it (home Wi-Fi or a VPN). The gateway wins when b
    kinds in the channel.
 4. Restart Squeak (`./scripts/ship.sh`).
 
+**Who it rings** is set in Squeak for Mac, Settings > Phone calls (`GET/POST /control/voice`, saved in
+`voice-settings.json`), and travels in each sealed request. Only an internal extension (2 to 6 digits) is accepted,
+by the daemon and again by the gateway, so a stolen key cannot point the PBX at an outside number. The add-on's
+optional `callee` option is only the fallback; with neither, the call fails with a note saying to set one.
+
 How it is kept safe: the request (it holds the agent's question) and the result are sealed with AES-256-GCM and
 signed with an HMAC bound to direction and id, under a key only the Mac and the add-on hold
 (`relay-protocol.ts`). A request counts only if sealed with the key, naming its own id, fresh (2 min) and new; the

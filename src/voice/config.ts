@@ -24,7 +24,8 @@ export interface VoiceEnv {
 
 export interface VoiceConfig {
   line: LineConfig;
-  callee: string;
+  /** The extension to ring; null only where the Mac names it per call (the gateway). */
+  callee: string | null;
   /** Digits only, 4 to 12; null means a call can tell you but never take an answer. */
   pin: string | null;
   quiet: QuietHours | null;
@@ -66,12 +67,16 @@ export function readQuietRange(value: string | undefined): QuietHours | null {
  * Null when voice is not set up. A set-up but wrong value throws, naming the setting: the daemon
  * catches it and runs without voice rather than restarting in a loop.
  */
-export function readVoiceConfig(env: VoiceEnv, supportDir: string): VoiceConfig | null {
+export function readVoiceConfig(
+  env: VoiceEnv,
+  supportDir: string,
+  options: { calleeOptional?: boolean } = {},
+): VoiceConfig | null {
   const host = env.SQUEAK_VOICE_HOST?.trim();
   const user = env.SQUEAK_VOICE_EXTENSION?.trim();
   const secret = env.SQUEAK_VOICE_PASSWORD?.trim();
   const callee = env.SQUEAK_VOICE_CALLEE?.trim();
-  if (!host || !user || !secret || !callee) return null;
+  if (!host || !user || !secret || (!callee && !options.calleeOptional)) return null;
 
   if (!/^[\w.-]+(:\d{1,5})?$/.test(host)) throw new Error("SQUEAK_VOICE_HOST must be a host or host:port");
   if (!isSafeAccountValue(user) || !/^[\w.-]+$/.test(user))
@@ -84,7 +89,7 @@ export function readVoiceConfig(env: VoiceEnv, supportDir: string): VoiceConfig 
       "SQUEAK_VOICE_PASSWORD cannot contain quotes, backslashes, semicolons, angle brackets or line breaks",
     );
   }
-  if (!/^[\w.+*#-]+$/.test(callee)) throw new Error("SQUEAK_VOICE_CALLEE is not a number Squeak will dial");
+  if (callee && !/^[\w.+*#-]+$/.test(callee)) throw new Error("SQUEAK_VOICE_CALLEE is not a number Squeak will dial");
   const proxy = env.SQUEAK_VOICE_PROXY?.trim() || null;
   if (proxy !== null && !/^[\w.-]+(:\d{1,5})?$/.test(proxy))
     throw new Error("SQUEAK_VOICE_PROXY must be a host or host:port");
@@ -112,7 +117,7 @@ export function readVoiceConfig(env: VoiceEnv, supportDir: string): VoiceConfig 
       modulePath: fs.existsSync(modulePath) ? modulePath : null,
       dir: path.join(supportDir, "voice"),
     },
-    callee,
+    callee: callee || null,
     pin,
     quiet: readQuietRange(env.SQUEAK_VOICE_QUIET),
     speechVoice: env.SQUEAK_VOICE_VOICE?.trim() || null,

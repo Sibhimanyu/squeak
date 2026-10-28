@@ -59,9 +59,9 @@ export async function runGateway(): Promise<number> {
   let started: { stop(): void };
   try {
     const relay = readVoiceRelayConfig(env);
-    const voice = readVoiceConfig(env, "/data");
+    const voice = readVoiceConfig(env, "/data", { calleeOptional: true });
     if (!relay || !voice) {
-      throw new Error("Set the channel, key, SIP host, extension, password and callee.");
+      throw new Error("Set the channel, key, SIP host, extension and password.");
     }
     if (!voice.pin) {
       throw new Error("Set a PIN: without one a call could not take an answer, and there would be no point.");

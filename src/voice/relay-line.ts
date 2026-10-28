@@ -20,6 +20,8 @@ export interface RelayLineOptions {
   channel: string;
   /** The base64 key shared with the gateway (`squeak voice-relay` writes it). */
   key: string;
+  /** The extension to ring now (the Mac's voice settings); null leaves it to the gateway's default. */
+  callee?: () => string | null;
   now?: () => number;
 }
 
@@ -40,10 +42,19 @@ export class RelayLine implements VoiceLine {
     const id = newCallId();
     const at = this.now();
     const offered = script.options.map((option) => option.letter);
+    const callee = this.options.callee?.() ?? null;
     try {
       await store.set(
         requestPath(channel, id),
-        sealRequest(key, { v: 1, id, at, expiresAt: at + REQUEST_TTL_MS, answerable, script }),
+        sealRequest(key, {
+          v: 1,
+          id,
+          at,
+          expiresAt: at + REQUEST_TTL_MS,
+          answerable,
+          script,
+          ...(callee ? { callee } : {}),
+        }),
       );
     } catch (error) {
       return {

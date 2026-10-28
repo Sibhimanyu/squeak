@@ -31,6 +31,6 @@ schema:
   extension: str
   auth_id: str?
   password: password
-  callee: str
+  callee: str?
   pin: password
   transport: list(udp|tcp|tls)

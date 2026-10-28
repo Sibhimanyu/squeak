@@ -127,6 +127,14 @@ export interface IngressControl {
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
   };
   /**
+   * Who a phone call rings (voice/settings.ts): `GET /control/voice` answers `{ mode, callee, defaultCallee }`;
+   * `POST` takes `{ callee }` (an internal extension, or null to clear it) and answers the same. Token-gated.
+   */
+  voice?: {
+    read(): unknown;
+    apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
+  };
+  /**
    * `POST /control/telegram/avatar`: set the Telegram bot's profile photo to Squeak's logo (telegram/avatar.ts).
    * Body `{}` or `{ which: "logo" }`; answers `{ message }` or `{ error }` (429 when tried within 30 s).
    */
@@ -821,6 +829,57 @@ export class HookIngressServer {
           return;
         }
         const outcome = notify.apply(parsed);
+        if (!outcome.ok) {
+          respondJson(response, 400, { error: outcome.reason });
+          return;
+        }
+        respondJson(response, 200, outcome.state);
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/voice") {
+      const voice = control.voice;
+      if (request.method !== "GET" && request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!voice) {
+        request.resume();
+        respond(response, 503, "voice settings unavailable");
+        return;
+      }
+      if (request.method === "GET") {
+        request.resume();
+        respondJson(response, 200, voice.read());
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        const outcome = voice.apply(parsed);
         if (!outcome.ok) {
           respondJson(response, 400, { error: outcome.reason });
           return;
