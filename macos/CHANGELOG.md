@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.4
+
+- Animate the selected menu-bar tab between Home, Needs you, Usage, and Controls; respect Reduce Motion.
+
 ## 2.11.3
 
 - Show a draggable floating duck that follows you between Spaces, reflects Squeak’s current state, and opens the session menu. Toggle it in Settings or with Control-Option-H.

@@ -7,14 +7,22 @@ import SwiftUI
 /// Home | Needs you (red count) | Usage | Controls: a bordered track, the selected tab a raised pill.
 struct PopupTabBar: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let nav = PopupNav.shared
     var selected: PopupNav.Tab
+    var namespace: Namespace.ID
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(Array(PopupNav.Tab.allCases.enumerated()), id: \.element) { i, tab in
                 let on = tab == selected
-                Button { nav.show(tab) } label: {
+                Button {
+                    if reduceMotion {
+                        nav.show(tab)
+                    } else {
+                        withAnimation(.snappy(duration: 0.24)) { nav.show(tab) }
+                    }
+                } label: {
                     HStack(spacing: 5) {
                         if tab != .needsYou { icon(tab, on: on) }
                         Text(tab == .needsYou ? "Needs you" : tab.title).font(.popup(11, on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
@@ -25,7 +33,9 @@ struct PopupTabBar: View {
                     .frame(maxWidth: .infinity)
                     .background {
                         if on {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.selectedStrong)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Theme.selectedStrong)
+                                .matchedGeometryEffect(id: "popup-selected-tab", in: namespace)
                         }
                     }
                     .contentShape(Rectangle())
@@ -58,6 +68,7 @@ struct PopupTabBar: View {
 /// The top of every tab screen: a leading title (or the Home summary) and trailing controls, then the tab bar.
 struct PopupTabHeader<Leading: View, Trailing: View>: View {
     var selected: PopupNav.Tab
+    var namespace: Namespace.ID
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
@@ -71,7 +82,7 @@ struct PopupTabHeader<Leading: View, Trailing: View>: View {
             .frame(minHeight: 32)
             .padding(.top, 12)
             .padding(.bottom, 13)
-            PopupTabBar(selected: selected)
+            PopupTabBar(selected: selected, namespace: namespace)
                 .padding(.bottom, 12)
         }
     }
@@ -83,13 +94,14 @@ struct PopupHomeTop: View {
     @Environment(AppModel.self) private var model
     @Binding var searching: Bool
     let dismiss: () -> Void
+    var namespace: Namespace.ID
 
     var body: some View {
         @Bindable var model = model
         let working = model.grouped.first(where: { $0.kind == .working })?.sessions.count ?? 0
         let total = model.visibleSessions.count
         VStack(spacing: 0) {
-            PopupTabHeader(selected: .home) {
+            PopupTabHeader(selected: .home, namespace: namespace) {
                 HStack(spacing: 12) {
                     Circle().fill(model.isConnected ? Theme.done : Theme.offline).frame(width: 8, height: 8).padding(.leading, 2)
                         .accessibilityHidden(true)

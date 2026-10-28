@@ -4,8 +4,9 @@ import SwiftUI
 
 /// The Controls tab's header.
 struct PopupControlsHeader: View {
+    var namespace: Namespace.ID
     var body: some View {
-        PopupTabHeader(selected: .controls) {
+        PopupTabHeader(selected: .controls, namespace: namespace) {
             Text("Controls").font(.popup(16, .bold)).foregroundStyle(Theme.ink)
         } trailing: { EmptyView() }
     }
