@@ -19,7 +19,7 @@ final class OnboardingController {
     func show() {
         if window == nil {
             let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
+                contentRect: NSRect(x: 0, y: 0, width: 480, height: 460),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false
             )
             w.title = "Welcome to Squeak"
@@ -48,6 +48,8 @@ struct OnboardingView: View {
         self.finish = finish
     }
 
+    private let last = 4
+
     private let conductorInstalled = FileManager.default.fileExists(atPath: "/Applications/Conductor.app")
 
     var body: some View {
@@ -57,6 +59,7 @@ struct OnboardingView: View {
                 case 0: welcome
                 case 1: detect
                 case 2: works
+                case 3: connectConductor
                 default: done
                 }
             }
@@ -66,25 +69,25 @@ struct OnboardingView: View {
         .padding(.horizontal, Space.xxl)
         .padding(.top, Space.xxl)
         .padding(.bottom, Space.xl)
-        .frame(width: 480, height: 420)
+        .frame(width: 480, height: 460)
         .background(Theme.bg)
     }
 
     private var footer: some View {
         HStack {
-            if step == 0 || step == 3 {
+            if step == 0 || step == last {
                 Button("Skip") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted)
-                    .opacity(step == 3 ? 0 : 1).accessibilityLabel("Skip setup")
+                    .opacity(step == last ? 0 : 1).accessibilityLabel("Skip setup")
             } else {
                 Button("Back") { step -= 1 }.buttonStyle(.plain).foregroundStyle(Theme.muted)
             }
             Spacer()
             HStack(spacing: 6) {
-                ForEach(0..<4, id: \.self) { Circle().fill($0 == step ? Theme.ink : Theme.subtle.opacity(0.4)).frame(width: 6, height: 6) }
+                ForEach(0...last, id: \.self) { Circle().fill($0 == step ? Theme.ink : Theme.subtle.opacity(0.4)).frame(width: 6, height: 6) }
             }
             .accessibilityHidden(true)
             Spacer()
-            Button(step == 3 ? "Finish" : "Continue") { if step == 3 { finish() } else { step += 1 } }
+            Button(step == last ? "Finish" : "Continue") { if step == last { finish() } else { step += 1 } }
                 .buttonStyle(PrimaryButtonStyle())
                 .keyboardShortcut(.defaultAction)
         }
@@ -141,6 +144,16 @@ struct OnboardingView: View {
                 bullet(.minus, "Approvals and attachments aren't supported yet. Squeak says so and offers Open in Conductor.")
             }
             .padding(.top, Space.s)
+        }
+    }
+
+    /// Optional: the same status and setup control as Settings › Conductor. Continue skips it.
+    private var connectConductor: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            heading("Connect Conductor").frame(maxWidth: .infinity)
+            Text("Lets Squeak start chats and answer them live. Optional: Continue skips it, and Settings › Conductor has it later.")
+                .font(.system(size: 12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            ScrollView { ConductorRelayCard() }
         }
     }
 

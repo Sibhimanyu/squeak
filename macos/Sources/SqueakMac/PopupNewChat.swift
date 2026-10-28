@@ -214,7 +214,12 @@ struct PopupNewChatFooter: View {
                     Lucide(.triangleAlert, size: 14, color: Theme.error)
                     Text(e).font(.popup(12.5)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.bottom, 8)
+                .padding(.bottom, RelayStatus.isRelayProblem(e) ? 4 : 8)
+                if RelayStatus.isRelayProblem(e) {
+                    Button("Open Conductor settings") { PopupNav.shared.show(.home); model.openSettings(.conductor) }
+                        .buttonStyle(.plain).font(.popup(12.5, .medium)).foregroundStyle(Theme.ink)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 8)
+                }
             }
             PopupDivider()
             HStack(spacing: 10) {

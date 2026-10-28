@@ -59,7 +59,9 @@ import {
 } from "../fleet/workspace-actions.js";
 import { listChatModels } from "../fleet/chat-models.js";
 import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "../fleet/project-icons.js";
+import type { IngressControl } from "../fleet/hook-ingress.js";
 import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
+import { realEffects, relayStatus, resetRelay, setupRelay } from "../fleet/conductor-relay/setup.js";
 import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
@@ -568,6 +570,7 @@ export class SqueakApp {
       chatModels: () => listChatModels(config.conductorDbPath),
       sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),
       queue: (sessionId) => this.replier.queue(sessionId),
+      relay: this.relaySetup(),
       queueAction: (sessionId, messageId, action) => this.replier.queueAction(sessionId, messageId, action),
       reply: async (target, text, mode, answersTurn) => {
         // A client that names the turn it answered is refused once the chat has moved on (answered on the laptop).
@@ -752,6 +755,30 @@ export class SqueakApp {
    * The Mac app's chat actions: Conductor's Stop, a new model or thinking level (checked against the models this
    * Mac offers for the chat's own agent, as the phone's are), and asking a resting chat to open a pull request.
    */
+  /** The in-app Conductor relay setup (fleet/conductor-relay/setup.ts) for the ingress's `/control/relay*` routes. */
+  private relaySetup(): NonNullable<IngressControl["relay"]> {
+    const options = () => ({
+      effects: realEffects({
+        conductorDbPath: this.config.conductorDbPath,
+        statePath: path.join(this.config.supportDir, "conductor-relay.json"),
+      }),
+      live: {
+        isReady: () => this.conductorRelay.isReady(),
+        lastHostAt: () => this.conductorRelay.lastHostAt(),
+      },
+    });
+    return {
+      status: () => relayStatus(options()),
+      setup: async ({ force }) => {
+        const outcome = setupRelay(options(), { force });
+        // The relay listens only once an override and a device exist; start it now rather than at the next daemon start.
+        if (outcome.ok) this.conductorRelay.start();
+        return outcome;
+      },
+      reset: async () => resetRelay(options()),
+    };
+  }
+
   private async chatAction(
     sessionId: string,
     action: "stop" | "setup" | "pr",

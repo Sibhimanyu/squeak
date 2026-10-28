@@ -405,6 +405,10 @@ struct NewChatSheet: View {
                     Lucide(.triangleAlert, size: Metrics.icon, color: Theme.error)
                     Text(e).font(Typo.body).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
                 }
+                if RelayStatus.isRelayProblem(e) {
+                    Button("Open Conductor settings") { model.openSettings(.conductor) }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
             }
             NCHairline().padding(.horizontal, -6)
             HStack(spacing: 12) {

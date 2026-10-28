@@ -94,6 +94,17 @@ export interface IngressControl {
    */
   hotspot?(request: unknown): Promise<{ ok: true; state: unknown } | { ok: false; reason: string }>;
   /**
+   * In-app setup of Conductor's live relay (fleet/conductor-relay/setup.ts). `GET /control/relay` answers
+   * the status object; `POST /control/relay/setup` (body `{}` or `{ "force": true }`) and `POST /control/relay/reset`
+   * answer `{ ok: true, status }` (200) or `{ ok: false, reason, status }` (409). Token-gated, no CORS header,
+   * 503 when not wired; never carries a token, key or Keychain value.
+   */
+  relay?: {
+    status(): unknown;
+    setup(request: { force: boolean }): Promise<{ ok: boolean; reason?: string; status: unknown }>;
+    reset(): Promise<{ ok: boolean; reason?: string; status: unknown }>;
+  };
+  /**
    * What Telegram and Cliq may push (fleet/notify-settings.ts): `GET /control/notify` answers
    * `{ telegram, cliq, channels: { telegram, cliq } }`; `POST` takes `{ channel, change }` (one key, strict)
    * and answers the same. Token-gated, no CORS header.
@@ -562,6 +573,64 @@ export class HookIngressServer {
           .catch((error: unknown) => {
             logger.warn("control keep-awake failed", { error: error instanceof Error ? error.message : String(error) });
             respond(response, 500, "keep awake failed");
+          });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    const relayRoute = /^\/control\/relay(?:\/(setup|reset))?$/.exec((request.url ?? "").split("?")[0] ?? "");
+    if (relayRoute) {
+      const verb = relayRoute[1];
+      if (request.method !== (verb ? "POST" : "GET")) {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      const relay = control.relay;
+      if (!relay) {
+        request.resume();
+        respond(response, 503, "relay setup unavailable");
+        return;
+      }
+      if (!verb) {
+        request.resume();
+        try {
+          respondJson(response, 200, relay.status());
+        } catch {
+          logger.warn("control relay status failed");
+          respond(response, 500, "relay status failed");
+        }
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        const force = (parsed as { force?: unknown }).force === true;
+        (verb === "setup" ? relay.setup({ force }) : relay.reset())
+          .then((outcome) => respondJson(response, outcome.ok ? 200 : 409, outcome))
+          .catch(() => {
+            logger.warn("control relay setup failed");
+            respond(response, 500, "relay setup failed");
           });
       });
       request.on("error", () => {

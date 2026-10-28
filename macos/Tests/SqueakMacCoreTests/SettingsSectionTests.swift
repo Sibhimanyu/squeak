@@ -22,6 +22,12 @@ import Testing
         #expect(SettingsSection(link: "mac") == .general)
     }
 
+    @Test func conductorSitsAfterKeepAwakeBeforeConnections() {
+        #expect(SettingsSection.groups[1].first == .conductor)
+        #expect(SettingsSection.conductor.title == "Conductor")
+        #expect(SettingsSection(link: "conductor") == .conductor)
+    }
+
     @Test func theOldChannelsTabLandsOnTelegram() {
         #expect(SettingsSection(link: "channels") == .telegram)
     }

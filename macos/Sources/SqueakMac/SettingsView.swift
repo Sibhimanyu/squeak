@@ -39,6 +39,7 @@ private extension SettingsSection {
         case .general: .settings
         case .notifications: .bell
         case .awake: .moon
+        case .conductor: .squareTerminal
         case .connections: .link
         case .telegram: .send
         case .cliq: .messageSquare
@@ -102,6 +103,7 @@ private struct SettingsPage: View {
         case .general: GeneralSettings()
         case .notifications: NotificationsSettings()
         case .awake: AwakeSettings()
+        case .conductor: ConductorSettings()
         case .connections: ConnectionsSettings()
         case .telegram: TelegramSettings()
         case .cliq: CliqSettings()

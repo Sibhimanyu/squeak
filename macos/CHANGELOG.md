@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.9.0
+
+- Set up Conductor without the terminal: Settings, Conductor shows whether live replies and new chats from your
+  phone are connected, and sets them up for you (it backs up Conductor's database first). After setting up,
+  quit and reopen Conductor once. Welcome has an optional "Connect Conductor" step too.
+- When a new chat fails because Conductor isn't connected, the New chat window offers "Open Conductor
+  settings". It needs the background service updated to this version.
+
 ## 2.8.4
 
 - Paste images (⌘V), drop image files or press + in the chat composer, New chat, the popup and the quick
