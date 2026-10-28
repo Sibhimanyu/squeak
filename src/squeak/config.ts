@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { ZodError, z } from "zod";
 
+import { readVoiceConfig, type VoiceConfig } from "../voice/config.js";
+import { logger } from "../utils/logger.js";
 import { defaultSqueakDbPath, expandHome, resolveSqueakEnvPath } from "./paths.js";
 
 function loadEnvFile(filePath: string): void {
@@ -100,6 +102,17 @@ const schema = z.object({
   SQUEAK_CLIQ_RELAY_SECRET: z.string().optional(),
   SQUEAK_CLIQ_OWNER_ID: z.string().optional(),
   SQUEAK_CLIQ_OWNER_EMAIL: z.string().optional(),
+  /** Phone calls through a 3CX (or any SIP) extension: see src/voice/ and docs/voice.md. */
+  SQUEAK_VOICE_HOST: z.string().optional(),
+  SQUEAK_VOICE_EXTENSION: z.string().optional(),
+  SQUEAK_VOICE_AUTH_ID: z.string().optional(),
+  SQUEAK_VOICE_PASSWORD: z.string().optional(),
+  SQUEAK_VOICE_CALLEE: z.string().optional(),
+  SQUEAK_VOICE_PIN: z.string().optional(),
+  SQUEAK_VOICE_TRANSPORT: z.string().optional(),
+  SQUEAK_VOICE_QUIET: z.string().optional(),
+  SQUEAK_VOICE_BARESIP: z.string().optional(),
+  SQUEAK_VOICE_VOICE: z.string().optional(),
   POLL_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(50).default(30),
   FLEET_HOOK_PORT: z.coerce.number().int().min(1024).max(65535).default(8477),
   FLEET_POLL_INTERVAL_MS: z.coerce.number().int().min(2000).default(5000),
@@ -141,6 +154,8 @@ export interface SqueakConfig {
   /** And always while it is plugged in. */
   caffeinateOnPower: boolean;
   cliqWebhookUrl: string | null;
+  /** Null unless voice is set up and valid (src/voice/config.ts). */
+  voice: VoiceConfig | null;
   /** Null unless every two-way setting is present. */
   cliqTwoWay: {
     projectId: string;
@@ -217,6 +232,7 @@ export function loadSqueakConfig(): SqueakConfig {
     caffeinate: parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() !== "off",
     caffeinateOnPower: !["off", "working"].includes(parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() ?? ""),
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
+    voice: voiceConfig(parsed, baseDir),
     cliqTwoWay: cliqTwoWay(parsed),
     pollTimeoutSeconds: parsed.POLL_TIMEOUT_SECONDS,
     hookPort: parsed.FLEET_HOOK_PORT,
@@ -260,6 +276,16 @@ export function databaseUrl(raw: string | undefined): string | null {
     // Not a URL.
   }
   throw new Error(`SQUEAK_REMOTE_DATABASE_URL is not a Realtime Database URL: ${value}`);
+}
+
+/** A wrong voice setting turns voice off with a warning: a throw here would restart the daemon in a loop. */
+function voiceConfig(parsed: z.infer<typeof schema>, supportDir: string): VoiceConfig | null {
+  try {
+    return readVoiceConfig(parsed, supportDir);
+  } catch (error) {
+    logger.warn("voice is off", { error: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
 }
 
 function cliqTwoWay(parsed: z.infer<typeof schema>): SqueakConfig["cliqTwoWay"] {
