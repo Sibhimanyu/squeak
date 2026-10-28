@@ -21,7 +21,7 @@ private struct SidebarGlass: NSViewRepresentable {
     func updateNSView(_ v: NSVisualEffectView, context: Context) {}
 }
 
-private struct SidebarBackground: View {
+struct SidebarBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduce
     @Environment(\.colorScheme) private var scheme
 
@@ -39,6 +39,50 @@ private struct SidebarBackground: View {
         }
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.line).frame(width: 1) }
         .ignoresSafeArea()
+    }
+}
+
+/// Shared brand/search chrome for the conversation and Settings sidebars.
+struct SidebarBrandHeader: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            DuckMark(width: 28)
+            Text("Squeak").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.ink)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            Button { QuickComposerController.shared.show() } label: {
+                Lucide(.squarePen, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Quick message")
+            .help("Quick message")
+        }
+        .padding(.horizontal, Metrics.sidebarInset + 4).padding(.top, 36)
+    }
+}
+
+struct SidebarSearchField: View {
+    let prompt: String
+    @Binding var text: String
+    var focused: FocusState<Bool>.Binding
+    let accessibilityLabel: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Lucide(.search, size: Metrics.iconSmall, color: Theme.muted)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain).font(.system(size: Metrics.sidebarText)).focused(focused)
+                .accessibilityLabel(accessibilityLabel)
+            if text.isEmpty {
+                Text("⌘ K").font(.system(size: 11)).foregroundStyle(Theme.subtle).accessibilityHidden(true)
+            } else {
+                Button { text = "" } label: { Lucide(.x, size: 12, color: Theme.muted) }
+                    .buttonStyle(.plain).accessibilityLabel("Clear \(accessibilityLabel.lowercased())")
+            }
+        }
+        .padding(.horizontal, 10).frame(height: Metrics.sidebarField)
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous).strokeBorder(focused.wrappedValue ? Theme.lineStrong : Theme.line))
     }
 }
 
@@ -118,38 +162,12 @@ struct SidebarView: View {
 
     /// Duck and wordmark at the left, Quick message (compose) at the right, centred below the traffic lights.
     private var brand: some View {
-        HStack(spacing: 8) {
-            DuckMark(width: 28)
-            Text("Squeak").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.ink)
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 0)
-            Button { QuickComposerController.shared.show() } label: {
-                Lucide(.squarePen, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Quick message").help("Quick message")
-        }
-        .padding(.horizontal, Metrics.sidebarInset + 4).padding(.top, 36)
+        SidebarBrandHeader()
     }
 
     private var searchField: some View {
         @Bindable var model = model
-        return HStack(spacing: 8) {
-            Lucide(.search, size: Metrics.iconSmall, color: Theme.muted)
-            TextField("Search sessions…", text: $model.query)
-                .textFieldStyle(.plain).font(.system(size: Metrics.sidebarText)).focused($searchFocused)
-            if model.query.isEmpty {
-                Text("\u{2318} K").font(.system(size: 11)).foregroundStyle(Theme.subtle).accessibilityHidden(true)
-            } else {
-                Button { model.query = "" } label: {
-                    Lucide(.x, size: 12, color: Theme.muted)
-                }
-                .buttonStyle(.plain).accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 10).frame(height: Metrics.sidebarField)
-        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous).strokeBorder(searchFocused ? Theme.lineStrong : Theme.line))
+        return SidebarSearchField(prompt: "Search sessions…", text: $model.query, focused: $searchFocused, accessibilityLabel: "Search sessions")
     }
 
     private var footer: some View {

@@ -1,3 +1,8 @@
+## 2.11.3
+
+- Show a draggable floating duck that follows you between Spaces, reflects Squeak’s current state, and opens the session menu. Toggle it in Settings or with Control-Option-H.
+- Refresh Settings with clearer section navigation, grouped content, and more consistent forms; improve sidebar search and navigation.
+
 # Changelog
 
 ## 2.11.2

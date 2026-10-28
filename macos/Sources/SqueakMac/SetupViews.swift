@@ -7,7 +7,7 @@ import SwiftUI
 struct SetupSettings: View {
     var body: some View {
         ScrollView {
-            SetupChecklistView().padding(.horizontal, 28).padding(.leading, 20).padding(.top, 8).padding(.bottom, 20)
+            SetupChecklistView().padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 20)
         }
     }
 }

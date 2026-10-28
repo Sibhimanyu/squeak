@@ -24,7 +24,20 @@ struct HotKeyPreset: Identifiable, Hashable {
 }
 
 private func squeakHotKeyHandler(_ next: EventHandlerCallRef?, _ event: EventRef?, _ userData: UnsafeMutableRawPointer?) -> OSStatus {
-    Task { @MainActor in HotKeyCenter.shared.onFire?() }
+    guard let event else { return noErr }
+    var hotKeyID = EventHotKeyID()
+    let status = GetEventParameter(event, OSType(kEventParamDirectObject), OSType(typeEventHotKeyID), nil,
+                                   MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
+    guard status == noErr, hotKeyID.signature == OSType(0x5351_4B31) else { return noErr }
+    Task { @MainActor in
+        // Carbon dispatches every registered hotkey to this handler. Always route by id: otherwise
+        // the duck shortcut would also toggle Quick message (and vice versa).
+        switch hotKeyID.id {
+        case 1: HotKeyCenter.shared.onFire?()
+        case 2: HotKeyCenter.shared.onDuckFire?()
+        default: break
+        }
+    }
     return noErr
 }
 
@@ -53,6 +66,7 @@ private func squeakModifierTapCallback(_ proxy: CGEventTapProxy, _ type: CGEvent
 final class HotKeyCenter {
     static let shared = HotKeyCenter()
     @ObservationIgnored var onFire: (() -> Void)?
+    @ObservationIgnored var onDuckFire: (() -> Void)?
     /// Set for capture and demo runs, which must never grab a global key or install a tap.
     @ObservationIgnored var isDisabled = false
     /// Demo and capture only: show the not-granted state without touching the real permission.
@@ -63,8 +77,10 @@ final class HotKeyCenter {
     private(set) var needsInputMonitoring = false
     /// The person pressed the grant button this run, so macOS may want a relaunch before the tap works.
     private(set) var requestedThisRun = false
+    private(set) var duckShortcutError: String?
     @ObservationIgnored private var chosenID: String?
     @ObservationIgnored private var ref: EventHotKeyRef?
+    @ObservationIgnored private var duckRef: EventHotKeyRef?
     @ObservationIgnored private var handler: EventHandlerRef?
     @ObservationIgnored private var tap: CFMachPort?
     @ObservationIgnored private var tapSource: CFRunLoopSource?
@@ -93,6 +109,34 @@ final class HotKeyCenter {
             return
         }
         registerCarbon(preset)
+    }
+
+    /// The floating duck shortcut is independent of the Quick message shortcut.
+    func registerDuckShortcut() {
+        if let duckRef { UnregisterEventHotKey(duckRef) }
+        duckRef = nil
+        duckShortcutError = nil
+        guard !isDisabled else { return }
+        if handler == nil {
+            var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            let installed = InstallEventHandler(GetApplicationEventTarget(), squeakHotKeyHandler, 1, &spec, nil, &handler)
+            guard installed == noErr else {
+                handler = nil
+                duckShortcutError = "macOS would not let Squeak listen for ⌃⌥ H (error \(installed))."
+                return
+            }
+        }
+        let id = EventHotKeyID(signature: OSType(0x5351_4B31), id: 2)
+        var newRef: EventHotKeyRef?
+        let status = RegisterEventHotKey(UInt32(kVK_ANSI_H), UInt32(controlKey | optionKey), id,
+                                         GetApplicationEventTarget(), 0, &newRef)
+        if status == noErr {
+            duckRef = newRef
+        } else if status == OSStatus(eventHotKeyExistsErr) {
+            duckShortcutError = "⌃⌥ H is already used by another app. Change that app's shortcut to use the floating duck shortcut."
+        } else {
+            duckShortcutError = "⌃⌥ H could not be registered (error \(status))."
+        }
     }
 
     /// Run again when the app becomes active: the grant may have been given in System Settings meanwhile.

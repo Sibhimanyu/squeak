@@ -14,12 +14,12 @@ struct SettingsShell: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $visibility) {
             SettingsSidebar()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 216, max: 280)
+                .navigationSplitViewColumnWidth(min: Metrics.sidebarWidth, ideal: Metrics.sidebarWidth, max: 320)
         } detail: {
             SettingsPage(section: model.settingsSection ?? .general)
                 .background(Theme.bg.ignoresSafeArea())
         }
-        .modifier(HiddenTitle())
+        .modifier(SettingsWindowStyling())
         .background {
             Button("Back to sessions") { model.closeSettings() }
                 .keyboardShortcut(.cancelAction)
@@ -28,9 +28,13 @@ struct SettingsShell: View {
     }
 }
 
-private struct HiddenTitle: ViewModifier {
+private struct SettingsWindowStyling: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(macOS 15, *) { content.toolbar(removing: .title) } else { content }
+        if #available(macOS 15, *) {
+            content.toolbar(removing: .title).toolbarBackground(.hidden, for: .windowToolbar)
+        } else {
+            content.toolbarBackground(.hidden, for: .windowToolbar)
+        }
     }
 }
 
@@ -51,38 +55,207 @@ private extension SettingsSection {
         case .about: .info
         }
     }
+
+    var headerColor: Color {
+        switch self {
+        case .setup, .general: Theme.done
+        case .notifications, .awake: Theme.needsYou
+        case .conductor, .connections: Theme.working
+        case .telegram, .cliq, .iphone, .voice: Color(red: 0.45, green: 0.62, blue: 1.0)
+        case .privacy: Theme.muted
+        case .about: Color(red: 0.72, green: 0.55, blue: 0.95)
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .setup: "A quick path to a working Squeak setup."
+        case .general: "Make Squeak feel right on this Mac."
+        case .notifications: "Choose what reaches you here and on your channels."
+        case .awake: "Keep this Mac reachable while you’re away."
+        case .conductor: "Connect Squeak to your Conductor workspace."
+        case .connections: "See the services and channels Squeak can reach."
+        case .telegram: "Send updates to a private Telegram chat."
+        case .cliq: "Send updates and receive replies through Zoho Cliq."
+        case .iphone: "Pair a phone to follow sessions and reply on the go."
+        case .voice: "Choose where Squeak rings when an agent needs you."
+        case .privacy: "Control what Squeak keeps on this Mac."
+        case .about: "Version, credits, and project links."
+        }
+    }
+
+    var searchAliases: [String] {
+        switch self {
+        case .setup: ["welcome", "onboarding"]
+        case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "update"]
+        case .notifications: ["alerts", "banners", "push"]
+        case .awake: ["sleep", "power", "lid", "keep mac awake"]
+        case .conductor: ["workspace", "project", "agent", "conductor workspace"]
+        case .connections: ["status", "connection", "service", "diagnostics"]
+        case .telegram: ["channel", "bot"]
+        case .cliq: ["zoho", "channel", "bot"]
+        case .iphone: ["phone", "pair", "mobile"]
+        case .voice: ["call", "ring", "phone"]
+        case .privacy: ["cache", "messages", "data", "delete"]
+        case .about: ["version", "credits", "updates"]
+        }
+    }
+}
+
+extension View {
+    /// Keep the page on the app canvas while retaining native Form controls and section behavior.
+    func settingsForm() -> some View {
+        scrollContentBackground(.hidden)
+            .formStyle(.grouped)
+            .background(Theme.bg)
+    }
+}
+
+struct SettingSubsectionHeader: View {
+    let title: String
+    let symbol: String
+    var color: Color = Theme.working
+
+    var body: some View {
+        Label {
+            Text(title).foregroundStyle(Theme.ink)
+        } icon: {
+            Image(systemName: symbol).foregroundStyle(color)
+        }
+        .font(Typo.label)
+        .accessibilityAddTraits(.isHeader)
+    }
 }
 
 struct SettingsSidebar: View {
     @Environment(AppModel.self) private var model
+    @FocusState private var searchFocused: Bool
+    @FocusState private var focusedSection: SettingsSection?
+    @State private var query = ""
 
-    var body: some View {
-        List(selection: Binding(get: { model.settingsSection }, set: { if let s = $0 { model.settingsSection = s } })) {
-            ForEach(Array(SettingsSection.groups.enumerated()), id: \.offset) { _, group in
-                Section {
-                    ForEach(group) { section in
-                        LucideLabel(section.title, section.symbol).tag(section)
-                    }
-                }
+    private var filteredGroups: [[SettingsSection]] {
+        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !terms.isEmpty else { return SettingsSection.groups }
+        return SettingsSection.groups.compactMap { group in
+            let matches = group.filter { section in
+                let haystack = ([section.title, section.subtitle] + section.searchAliases).joined(separator: " ").localizedLowercase
+                return terms.allSatisfy { haystack.contains($0.localizedLowercase) }
             }
+            return matches.isEmpty ? nil : matches
         }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .top, spacing: 0) { back }
     }
 
-    private var back: some View {
-        Button { model.closeSettings() } label: {
-            HStack(spacing: 6) {
-                Lucide(.chevronLeft, size: 16, color: Theme.muted)
-                Text("Back to sessions").font(Typo.body)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            brand
+            searchField
+                .padding(.horizontal, Metrics.sidebarInset)
+                .padding(.top, 14)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Metrics.sidebarRowGap) {
+                    ForEach(Array(filteredGroups.enumerated()), id: \.offset) { _, group in
+                        ForEach(group) { section in
+                            row(section)
+                        }
+                    }
+                    if filteredGroups.isEmpty {
+                        Text("No settings found")
+                            .font(.system(size: Metrics.sidebarText))
+                            .foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .accessibilityLabel("No settings match \(query)")
+                    }
+                }
+                .padding(.horizontal, Metrics.sidebarInset)
+                .padding(.top, 14)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .scrollContentBackground(.hidden)
+            .onMoveCommand(perform: moveFocus)
+            footer
+        }
+        .frame(minWidth: Metrics.sidebarWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(SidebarBackground())
+        .background {
+            Button("Search Settings") { searchFocused = true }
+                .keyboardShortcut("k", modifiers: .command)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var brand: some View {
+        Text("Settings")
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(Theme.ink)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.horizontal, Metrics.sidebarInset + 4)
+            .padding(.top, 36)
+    }
+
+    private var searchField: some View {
+        SidebarSearchField(prompt: "Search settings…", text: $query, focused: $searchFocused, accessibilityLabel: "Search settings")
+            .onSubmit { if let first = filteredGroups.first?.first { model.settingsSection = first } }
+    }
+
+    private func row(_ section: SettingsSection) -> some View {
+        let selected = model.settingsSection == section
+        return Button {
+            model.settingsSection = section
+        } label: {
+            HStack(spacing: 12) {
+                Lucide(section.symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted)
+                    .frame(width: 20)
+                Text(verbatim: section.title)
+                    .font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular))
+                    .foregroundStyle(Theme.ink)
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: Metrics.navRow)
+            .background(RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous).fill(selected ? Color.white.opacity(0.10) : .clear))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).foregroundStyle(Theme.muted)
-        .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 10)
-        .help("Back to sessions (Esc)")
-        .accessibilityLabel("Back to sessions")
+        .buttonStyle(.plain)
+        .focused($focusedSection, equals: section)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(section.title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var footer: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, Metrics.sidebarInset)
+            Button { model.closeSettings() } label: {
+                HStack(spacing: 12) {
+                    Lucide(.chevronLeft, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 20)
+                    Text("Back to sessions").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12).frame(height: Metrics.navRow).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .padding(.horizontal, Metrics.sidebarInset)
+            .padding(.vertical, 12)
+            .help("Back to sessions (Esc)")
+            .accessibilityLabel("Back to sessions")
+        }
+    }
+
+    private func moveFocus(_ direction: MoveCommandDirection) {
+        let sections = filteredGroups.flatMap { $0 }
+        guard !sections.isEmpty else { return }
+        let current = focusedSection ?? model.settingsSection
+        let index = current.flatMap(sections.firstIndex(of:))
+        let next: SettingsSection
+        switch direction {
+        case .up: next = index.map { sections[max($0 - 1, 0)] } ?? sections.last!
+        case .down: next = index.map { sections[min($0 + 1, sections.count - 1)] } ?? sections.first!
+        default: return
+        }
+        self.focusedSection = next
+        model.settingsSection = next
     }
 }
 
@@ -91,11 +264,20 @@ private struct SettingsPage: View {
     let section: SettingsSection
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text(section.title).font(Typo.title).accessibilityAddTraits(.isHeader)
-                .frame(maxWidth: 680, alignment: .leading)
-                .padding(.horizontal, 28).padding(.top, 20).padding(.bottom, 16)
-                .offset(x: 18)
+        VStack(alignment: .center, spacing: 0) {
+            HStack(alignment: .center, spacing: Space.m) {
+                Lucide(section.symbol, size: 18, color: section.headerColor)
+                    .frame(width: 38, height: 38)
+                    .background(section.headerColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.control))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(section.title).font(Typo.title).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                    Text(section.subtitle).font(Typo.body).foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: 680, alignment: .leading)
+            .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 16)
             page.frame(maxWidth: 680)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -160,8 +342,7 @@ private struct NotificationsSettings: View {
                 Section { SectionFootnote("Set up Telegram or Zoho Cliq to choose what each one pushes.") }
             }
         }
-        .scrollContentBackground(.hidden)
-        .formStyle(.grouped)
+        .settingsForm()
         .task { bannersShown = await Notifier.shared.bannersShown(); await model.channels.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { bannersShown = await Notifier.shared.bannersShown() }
@@ -172,6 +353,7 @@ private struct NotificationsSettings: View {
 private struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     private let hotKeys = HotKeyCenter.shared
+    private let floatingDuck = FloatingDuckController.shared
     @State private var loginOn = LoginItem.isEnabled
     @State private var loginError: String?
 
@@ -200,6 +382,19 @@ private struct GeneralSettings: View {
                 } else if !Bundled.isApp {
                     SectionFootnote("Available when running the Squeak app, not from a build folder.")
                 }
+            }
+            Section {
+                Toggle("Show the floating duck", isOn: Binding(
+                    get: { floatingDuck.isEnabled },
+                    set: { floatingDuck.setEnabled($0) }
+                ))
+                .disabled(model.captureMode || model.demoMode)
+                LabeledContent("Show or hide duck", value: "⌃⌥ H")
+                if let error = hotKeys.duckShortcutError {
+                    SectionFootnote(error)
+                }
+            } footer: {
+                SectionFootnote("Drag the duck anywhere on your screen. It follows you between Spaces; click it to open Squeak's session menu. The shortcut needs no permission.")
             }
             Section {
                 Picker("Quick message shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
@@ -232,21 +427,17 @@ private struct GeneralSettings: View {
                 }
             }
         }
-        .scrollContentBackground(.hidden)
-        .formStyle(.grouped)
+        .settingsForm()
     }
 
     private var macCard: some View {
         let r = model.connectionsReport
         return Section {
-            Card {
-                VStack(alignment: .leading, spacing: Space.s) {
-                    macRow("Conductor", r.database)
-                    macRow("Squeak service", r.daemon)
-                    macRow("Sending", r.sending)
-                }
+            VStack(alignment: .leading, spacing: Space.s) {
+                macRow("Conductor", r.database)
+                macRow("Squeak service", r.daemon)
+                macRow("Sending", r.sending)
             }
-            .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
         } footer: {
             SectionFootnote("Details are under Connections.")
         }
@@ -424,8 +615,7 @@ private struct PrivacySettings: View {
                 SectionFootnote(model.cacheNotice ?? "Messages are encrypted on this Mac, kept 14 days, up to 50 MB.")
             }
         }
-        .scrollContentBackground(.hidden)
-        .formStyle(.grouped)
+        .settingsForm()
         .confirmationDialog("Delete the message cache and its encryption key?", isPresented: $confirm) {
             Button("Delete cache", role: .destructive) { Task { await model.purgeCache() } }
         } message: {
@@ -492,7 +682,6 @@ private struct AboutSettings: View {
                     }
                 }
         }
-        .scrollContentBackground(.hidden)
-        .formStyle(.grouped)
+        .settingsForm()
     }
 }

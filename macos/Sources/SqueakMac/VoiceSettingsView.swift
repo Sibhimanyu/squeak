@@ -37,7 +37,7 @@ struct VoiceSettingsPage: View {
                 } header: { Text("Phone calls") }
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
         .task {
             await m.refreshVoice()
             if !loaded { typed = m.voice?.callee ?? ""; loaded = true }

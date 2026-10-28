@@ -96,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let model = AppModel.shared
         model.start()
         MenuBarController.shared.start(model: model)
+        FloatingDuckController.shared.start(model: model)
         let env = ProcessInfo.processInfo.environment
         if model.demoMode, let refinement = env["SQUEAK_MAC_REFINEMENT_DEMO"] {
             // Demo data only, left running for a person or a UI test. No onboarding and no ordinary window:
