@@ -21,10 +21,86 @@ private struct SidebarGlass: NSViewRepresentable {
     func updateNSView(_ v: NSVisualEffectView, context: Context) {}
 }
 
+/// NavigationSplitView assigns its AppKit sidebar item a 140pt minimum even when the
+/// SwiftUI column-width preference is lower. Update that native constraint alongside
+/// the sidebar content so the entire column, including its material, becomes an icon rail.
+struct SidebarColumnSizer: NSViewRepresentable {
+    let isCollapsed: Bool
+    let expandedMinimum: CGFloat
+    let expandedIdeal: CGFloat
+    let expandedMaximum: CGFloat
+
+    func makeNSView(context: Context) -> SidebarColumnSizerView {
+        SidebarColumnSizerView(configuration: configuration)
+    }
+
+    func updateNSView(_ view: SidebarColumnSizerView, context: Context) {
+        view.configuration = configuration
+        view.applyWhenAttached()
+    }
+
+    private var configuration: SidebarColumnSizerView.Configuration {
+        .init(
+            isCollapsed: isCollapsed,
+            expandedMinimum: expandedMinimum,
+            expandedIdeal: expandedIdeal,
+            expandedMaximum: expandedMaximum
+        )
+    }
+}
+
+@MainActor
+final class SidebarColumnSizerView: NSView {
+    struct Configuration: Equatable {
+        let isCollapsed: Bool
+        let expandedMinimum: CGFloat
+        let expandedIdeal: CGFloat
+        let expandedMaximum: CGFloat
+
+        var minimum: CGFloat { isCollapsed ? 64 : expandedMinimum }
+        var ideal: CGFloat { isCollapsed ? 64 : expandedIdeal }
+        var maximum: CGFloat { isCollapsed ? 64 : expandedMaximum }
+    }
+
+    var configuration: Configuration
+
+    init(configuration: Configuration) {
+        self.configuration = configuration
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyWhenAttached()
+    }
+
+    func applyWhenAttached() {
+        Task { @MainActor [weak self] in self?.apply() }
+    }
+
+    private func apply() {
+        var responder: NSResponder? = self
+        while let current = responder {
+            if let controller = current as? NSSplitViewController,
+               let sidebar = controller.splitViewItems.first(where: { $0.behavior == .sidebar }) {
+                guard sidebar.minimumThickness != configuration.minimum || sidebar.maximumThickness != configuration.maximum else { return }
+                sidebar.minimumThickness = configuration.minimum
+                sidebar.maximumThickness = configuration.maximum
+                controller.splitView.setPosition(configuration.ideal, ofDividerAt: 0)
+                return
+            }
+            responder = current.nextResponder
+        }
+    }
+}
+
 struct SidebarBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduce
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.glassWindowEnabled) private var glassEnabled
+    @Environment(\.glassTransparency) private var transparency
+    @Environment(\.glassSidebarContrast) private var sidebarContrast
 
     var body: some View {
         Group {
@@ -33,13 +109,19 @@ struct SidebarBackground: View {
             } else {
                 ZStack {
                     SidebarGlass()
-                    // Conductor's #24211E at ~60% in dark; a light veil in light mode.
-                    (scheme == .dark ? Color(red: 36 / 255, green: 33 / 255, blue: 30 / 255).opacity(0.6) : Color.white.opacity(0.35))
+                    Theme.sidebar.opacity(sidebarWashOpacity)
                 }
             }
         }
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.line).frame(width: 1) }
         .ignoresSafeArea()
+    }
+
+    /// Matches the main material tint, with a separate user controlled amount for the sidebar.
+    private var sidebarWashOpacity: Double {
+        let mainWash = (1 - min(max(transparency, 0), 100) / 100) * 0.42
+        let addedContrast = min(max(sidebarContrast, 0), 100) / 100 * 0.42
+        return min(mainWash + addedContrast, 0.72)
     }
 }
 
@@ -145,8 +227,20 @@ struct SidebarView: View {
             .scrollContentBackground(.hidden)
             footer
         }
-        .frame(minWidth: isCollapsed ? 64 : Metrics.sidebarWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Give the split view an actual narrow fitting view when collapsed. A minimum width
+        // alone still lets NavigationSplitView keep the last expanded sidebar width.
+        .frame(width: isCollapsed ? 64 : Metrics.sidebarWidth, alignment: .topLeading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(SidebarBackground())
+        .background {
+            SidebarColumnSizer(
+                isCollapsed: isCollapsed,
+                expandedMinimum: Metrics.sidebarWidth,
+                expandedIdeal: Metrics.sidebarWidth,
+                expandedMaximum: Metrics.sidebarWidth
+            )
+            .frame(width: 0, height: 0)
+        }
         .background {
             // ⌘K focuses the search field, wherever focus is.
             Button("Search") { searchFocused = true }

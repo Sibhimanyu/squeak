@@ -14,6 +14,8 @@ struct ConversationView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage(WindowAppearancePreference.key) private var glassWindowAppearance = true
+    @AppStorage(WindowAppearancePreference.transparencyKey) private var glassTransparency = WindowAppearancePreference.defaultTransparency
+    @AppStorage(WindowAppearancePreference.sidebarContrastKey) private var glassSidebarContrast = WindowAppearancePreference.defaultSidebarContrast
     @State private var visibility: NavigationSplitViewVisibility = .all
     @State private var sidebarCollapsed = false
 
@@ -54,6 +56,8 @@ struct ConversationView: View {
         .modifier(WindowStyling())
         .squeakWindowCanvas()
         .environment(\.glassWindowEnabled, glassWindowAppearance && !reduceTransparency)
+        .environment(\.glassTransparency, glassTransparency)
+        .environment(\.glassSidebarContrast, glassSidebarContrast)
         .background(ConversationWindowReader())
         .background {
             // ⌘\ collapses the navigation sidebar to an icon rail, wherever focus is.

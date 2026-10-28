@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.11.6
+
+- Adjust Glass transparency and sidebar contrast independently in Settings, General; Reduce Transparency still forces the solid canvas.
+- Fix the collapsed sidebar so the native macOS column and its material shrink to the icon rail.
+- Replace Sparkle’s standard update dialogs with a Squeak update window for permission, progress, install choices and errors.
+
 ## 2.11.5
 
 - Collapse the shared sidebar to an icon rail from either Sessions or Settings, with aligned navigation, headers, and scrolling in the shared window shell.
