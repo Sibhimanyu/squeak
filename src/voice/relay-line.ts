@@ -1,7 +1,17 @@
 import type { RtdbRest } from "../remote/rtdb-rest.js";
 import type { CallResult } from "./baresip-line.js";
 import type { CallScript } from "./dialog.js";
-import { newCallId, readResult, REQUEST_TTL_MS, requestPath, resultPath, sealRequest } from "./relay-protocol.js";
+import type { ChannelDoc } from "../remote/firestore-rest.js";
+import {
+  newCallId,
+  readResult,
+  REQUEST_TTL_MS,
+  requestPath,
+  resultPath,
+  sealPinChange,
+  sealRequest,
+  type CallResultBody,
+} from "./relay-protocol.js";
 
 /** What a call needs from a line: the script to read, and whether a key may answer it. */
 export interface VoiceLine {
@@ -12,6 +22,8 @@ export interface VoiceLine {
 const MAX_CALL_MS = 4 * 60_000;
 /** The stream only wakes a pass; this is the safety net and the way to notice a lost event. */
 const POLL_MS = 10_000;
+/** The gateway answers a pin change in a moment or not at all. */
+const PIN_WAIT_MS = 25_000;
 
 export type RelayStore = Pick<RtdbRest, "get" | "set" | "delete" | "watch">;
 
@@ -38,37 +50,75 @@ export class RelayLine implements VoiceLine {
   }
 
   async call(script: CallScript, answerable: boolean): Promise<CallResult> {
-    const { store, channel, key } = this.options;
+    const { key } = this.options;
     const id = newCallId();
     const at = this.now();
-    const offered = script.options.map((option) => option.letter);
     const callee = this.options.callee?.() ?? null;
+    const doc = sealRequest(key, {
+      v: 1,
+      id,
+      at,
+      expiresAt: at + REQUEST_TTL_MS,
+      answerable,
+      script,
+      ...(callee ? { callee } : {}),
+    });
+    const result = await this.roundTrip(
+      id,
+      doc,
+      script.options.map((option) => option.letter),
+      at + REQUEST_TTL_MS + MAX_CALL_MS,
+    );
+    if (result.status === "answered" || result.status === "unanswered" || result.status === "failed") return result;
+    return { status: "failed", reason: "The gateway answered with something else." };
+  }
+
+  /**
+   * Asks the gateway to change its pin. It needs the current one: a holder of the channel key alone cannot set their
+   * own. The gateway answers within seconds; neither pin is kept here.
+   */
+  async changePin(current: string, next: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const id = newCallId();
+    const at = this.now();
+    const doc = sealPinChange(this.options.key, {
+      v: 1,
+      id,
+      at,
+      expiresAt: at + PIN_WAIT_MS,
+      kind: "pin",
+      current,
+      next,
+    });
+    const result = await this.roundTrip(id, doc, [], at + PIN_WAIT_MS);
+    if (result.status === "pin") return result.ok ? { ok: true } : { ok: false, reason: result.reason };
+    return {
+      ok: false,
+      reason: result.status === "failed" ? result.reason : "The gateway answered with something else.",
+    };
+  }
+
+  /** Writes one request and waits for its result; never throws, and leaves nothing behind. */
+  private async roundTrip(
+    id: string,
+    doc: ChannelDoc,
+    offered: readonly string[],
+    deadline: number,
+  ): Promise<CallResultBody> {
+    const { store, channel, key } = this.options;
     try {
-      await store.set(
-        requestPath(channel, id),
-        sealRequest(key, {
-          v: 1,
-          id,
-          at,
-          expiresAt: at + REQUEST_TTL_MS,
-          answerable,
-          script,
-          ...(callee ? { callee } : {}),
-        }),
-      );
+      await store.set(requestPath(channel, id), doc);
     } catch (error) {
       return {
         status: "failed",
         reason: `Could not reach the relay: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
-    const deadline = at + REQUEST_TTL_MS + MAX_CALL_MS;
     try {
-      return await new Promise<CallResult>((resolve) => {
+      return await new Promise<CallResultBody>((resolve) => {
         let settled = false;
         let reading = false;
         let again = false;
-        const finish = (result: CallResult): void => {
+        const finish = (result: CallResultBody): void => {
           if (settled) return;
           settled = true;
           unwatch();
@@ -83,8 +133,8 @@ export class RelayLine implements VoiceLine {
           }
           reading = true;
           try {
-            const doc = await store.get(resultPath(channel, id));
-            const result = doc ? readResult(key, id, doc, offered) : null;
+            const got = await store.get(resultPath(channel, id));
+            const result = got ? readResult(key, id, got, offered) : null;
             if (result) return finish(result);
             if (this.now() > deadline) {
               finish({ status: "failed", reason: "The gateway did not answer. Is the Home Assistant add-on running?" });

@@ -64,7 +64,7 @@ function setup(call: FakeCall, overrides: Partial<InboundDependencies> = {}, pee
     },
   };
   const deps: InboundDependencies = {
-    pin: "4821",
+    pin: () => "4821",
     directory: async () => directory,
     encode: async () => Buffer.from("opus"),
     uplink: {
@@ -87,7 +87,7 @@ const keys = (text: string): string[] => text.split("");
 describe("call-in flow", () => {
   it("skips the PIN when the gateway is set to, and goes straight to the chats", async () => {
     const call = new FakeCall(["2", "1"]);
-    const t = setup(call, { pin: null });
+    const t = setup(call, { pin: () => null });
     await handleIncoming(t.incoming, t.deps);
     expect(call.said[0]).toContain("Which chat?");
     expect(call.said.join(" ")).not.toContain("PIN");
@@ -95,7 +95,7 @@ describe("call-in flow", () => {
   });
 
   it("still refuses another caller when the PIN is skipped", async () => {
-    const t = setup(new FakeCall([]), { pin: null }, "99999");
+    const t = setup(new FakeCall([]), { pin: () => null }, "99999");
     await handleIncoming(t.incoming, t.deps);
     expect(t.state).toEqual({ rejected: true, answered: false });
   });
@@ -132,7 +132,7 @@ describe("call-in flow", () => {
     const call = new FakeCall([...keys("1111#"), ...keys("2222#")]);
     const t = setup(call);
     await handleIncoming(t.incoming, t.deps);
-    expect(call.said.at(-1)).toBe("That PIN is not right. Goodbye.");
+    expect(call.said.at(-1)).toBe("That pin is not right. Goodbye.");
     expect(t.memos).toEqual([]);
   });
 
@@ -190,7 +190,7 @@ describe("call-in flow", () => {
   it("has every fixed thing it says made ahead of time: only the read-back is made on the spot", async () => {
     for (const askPin of [true, false]) {
       const call = new FakeCall([...(askPin ? keys("4821#") : []), "2", "1"]);
-      const t = setup(call, { pin: askPin ? "4821" : null });
+      const t = setup(call, { pin: () => (askPin ? "4821" : null) });
       await handleIncoming(t.incoming, t.deps);
       const ready = new Set(inboundPrompts(directory, askPin));
       const late = call.said.filter((text) => text !== "<beep>" && !ready.has(text));

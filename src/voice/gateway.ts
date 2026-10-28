@@ -3,6 +3,7 @@ import type { RtdbRest } from "../remote/rtdb-rest.js";
 import type { CallResult } from "./baresip-line.js";
 import { CallDialog } from "./dialog.js";
 import {
+  readPinChange,
   readRequest,
   requestPath,
   REQUEST_KIND,
@@ -10,6 +11,7 @@ import {
   sealResult,
   type CallResultDoc,
 } from "./relay-protocol.js";
+import type { PinKeeper } from "./pin-keeper.js";
 
 export type GatewayStore = Pick<RtdbRest, "list" | "set" | "delete" | "watch">;
 
@@ -21,8 +23,10 @@ export interface GatewayDependencies {
   line: { call(callee: string, dialog: CallDialog): Promise<CallResult> };
   /** The extension to ring when a request names none. A request may name one, but only an internal extension (checked on reading it). */
   callee: string | null;
-  /** Checked on this side only: neither the Mac nor the database ever holds it. Null: calls tell, never take an answer. */
-  pin: string | null;
+  /** Read at each call, so a pin changed from an app applies at once. Null: calls tell, never take an answer. */
+  pin: () => string | null;
+  /** Answers "change the pin"; absent: such a request is refused. */
+  pins?: Pick<PinKeeper, "change"> | null;
   now?: () => number;
 }
 
@@ -96,6 +100,8 @@ export class VoiceGateway {
         continue;
       }
       const read = readRequest(key, id, doc, this.now());
+      // Not a call: it may be a pin change, which is also sealed with the key and needs the current pin.
+      const pinChange = read.ok ? null : readPinChange(key, id, doc, this.now());
       // Remember it first, synchronously: a second pass (the stream wakes one while another runs) must see
       // it as taken. Then claim: an undeletable document is left for the next pass, never run twice.
       this.handled.push(id);
@@ -109,6 +115,17 @@ export class VoiceGateway {
         });
         continue;
       }
+      if (pinChange?.ok) {
+        const outcome = this.deps.pins
+          ? this.deps.pins.change(pinChange.request.current, pinChange.request.next)
+          : { ok: false as const, reason: "This add-on cannot change its pin from an app." };
+        logger.info("voice pin change", { ok: outcome.ok });
+        const answer: CallResultDoc = outcome.ok
+          ? { v: 1, id, at: this.now(), status: "pin", ok: true }
+          : { v: 1, id, at: this.now(), status: "pin", ok: false, reason: outcome.reason };
+        await store.set(resultPath(channel, id), sealResult(key, answer));
+        continue;
+      }
       if (!read.ok) {
         logger.info("voice gateway dropped a request", { reason: read.reason });
         continue;
@@ -116,7 +133,7 @@ export class VoiceGateway {
       const { request } = read;
       const callee = request.callee ?? this.deps.callee;
       const result: CallResult = callee
-        ? await this.deps.line.call(callee, new CallDialog(request.script, request.answerable ? this.deps.pin : null))
+        ? await this.deps.line.call(callee, new CallDialog(request.script, request.answerable ? this.deps.pin() : null))
         : { status: "failed", reason: "No phone extension is set. Set it in Squeak's settings on your Mac." };
       const body: CallResultDoc =
         result.status === "answered"

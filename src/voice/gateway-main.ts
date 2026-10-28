@@ -13,6 +13,7 @@ import { readVoiceConfig, readVoiceRelayConfig, type VoiceEnv } from "./config.j
 import { VoiceGateway } from "./gateway.js";
 import { handleIncoming, inboundPrompts } from "./inbound-flow.js";
 import { DirectoryCache } from "./directory-cache.js";
+import { PinKeeper } from "./pin-keeper.js";
 import { runDialog, type Phone } from "./phone.js";
 import { SipPhone } from "./sip-phone.js";
 import { RelayUplink } from "./uplink.js";
@@ -132,17 +133,20 @@ export async function runGateway(): Promise<number> {
     const store = new RtdbRest(databaseUrl(env.SQUEAK_REMOTE_DATABASE_URL));
     // One phone, registered for as long as the gateway runs: it rings you for questions and answers when you call in.
     const phone = new SipPhone({ line: voice.line, speaker });
+    // The pin: the add-on's option, until one is changed from an app (kept beside it, in the add-on's storage).
+    const pins = new PinKeeper(voice.pin, path.join(voice.line.dir, "voice-pin.json"));
     const gateway = new VoiceGateway({
       store,
       channel: relay.channel,
       key: relay.key,
       line: phoneLine(phone),
       callee: voice.callee,
-      pin: voice.pin,
+      pin: () => pins.current(),
+      pins,
     });
-    const pin = voice.pin;
     // "skip": a call from the one allowed extension is proof enough. Squeak's own calls to you always ask.
-    const callInPin = env.SQUEAK_VOICE_CALLIN_PIN?.toLowerCase() === "skip" ? null : pin;
+    const skipPinOnCallIn = env.SQUEAK_VOICE_CALLIN_PIN?.toLowerCase() === "skip";
+    const callInPin = (): string | null => (skipPinOnCallIn ? null : pins.current());
     // Answered at once from memory, and the prompts made before anyone calls: a network read or a voice made after
     // pick-up is a silence on the line.
     const directory = new DirectoryCache(store, relay.channel, relay.key);
@@ -157,9 +161,9 @@ export async function runGateway(): Promise<number> {
         logger.warn("voice call-in failed", { error: error instanceof Error ? error.message : String(error) }),
       );
     });
-    phone.prewarm?.(inboundPrompts(null, callInPin !== null));
-    void directory.refresh().then((first) => phone.prewarm?.(inboundPrompts(first, callInPin !== null)));
-    directory.start((changed) => phone.prewarm?.(inboundPrompts(changed, callInPin !== null)));
+    phone.prewarm?.(inboundPrompts(null, callInPin() !== null));
+    void directory.refresh().then((first) => phone.prewarm?.(inboundPrompts(first, callInPin() !== null)));
+    directory.start((changed) => phone.prewarm?.(inboundPrompts(changed, callInPin() !== null)));
     phone.start();
     gateway.start();
     started = {

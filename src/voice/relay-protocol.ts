@@ -29,7 +29,27 @@ export interface CallRequest {
 export type CallResultBody =
   | { status: "answered"; letter: string | null }
   | { status: "unanswered" }
-  | { status: "failed"; reason: string };
+  | { status: "failed"; reason: string }
+  /** The answer to a pin change: it took, or why not. */
+  | { status: "pin"; ok: true }
+  | { status: "pin"; ok: false; reason: string };
+
+/**
+ * Change the pin the gateway asks for. It needs the current pin: whoever only holds the channel key cannot set
+ * their own. The gateway keeps the new one on Home Assistant; the Mac never stores it.
+ */
+export interface PinChangeRequest {
+  v: 1;
+  id: string;
+  at: number;
+  expiresAt: number;
+  kind: "pin";
+  current: string;
+  next: string;
+}
+
+/** 4 to 12 digits: what a keypad can enter before `#`. */
+export const PIN_FORMAT = /^\d{4,12}$/;
 
 /** A call result, as the gateway seals it. `id` is the request's. */
 export type CallResultDoc = CallResultBody & { v: 1; id: string; at: number };
@@ -83,6 +103,36 @@ export function openBody(keyBase64: string, direction: Direction, id: string, do
 
 export function sealRequest(keyBase64: string, request: CallRequest): ChannelDoc {
   return sealBody(keyBase64, "req", request.id, request, request.at);
+}
+
+export function sealPinChange(keyBase64: string, request: PinChangeRequest): ChannelDoc {
+  return sealBody(keyBase64, "req", request.id, request, request.at);
+}
+
+export function readPinChange(
+  keyBase64: string,
+  id: string,
+  doc: ChannelDoc,
+  now: number,
+): { ok: true; request: PinChangeRequest } | { ok: false; reason: string } {
+  const body = openBody(keyBase64, "req", id, doc);
+  if (!isRecord(body)) return { ok: false, reason: "not sealed with this key" };
+  if (body.v !== 1 || body.kind !== "pin" || body.id !== id) return { ok: false, reason: "not a pin change" };
+  if (typeof body.at !== "number" || typeof body.expiresAt !== "number")
+    return { ok: false, reason: "not a pin change" };
+  if (typeof body.current !== "string" || typeof body.next !== "string")
+    return { ok: false, reason: "not a pin change" };
+  if (
+    body.expiresAt < now ||
+    body.at > now + CLOCK_SKEW_MS ||
+    body.expiresAt - body.at > REQUEST_TTL_MS + CLOCK_SKEW_MS
+  ) {
+    return { ok: false, reason: "expired" };
+  }
+  return {
+    ok: true,
+    request: { v: 1, id, at: body.at, expiresAt: body.expiresAt, kind: "pin", current: body.current, next: body.next },
+  };
 }
 
 export function sealResult(keyBase64: string, result: CallResultDoc): ChannelDoc {
@@ -163,6 +213,11 @@ export function readResult(
       return { status: "unanswered" };
     case "failed":
       return typeof body.reason === "string" ? { status: "failed", reason: body.reason.slice(0, 300) } : null;
+    case "pin":
+      if (body.ok === true) return { status: "pin", ok: true };
+      return body.ok === false && typeof body.reason === "string"
+        ? { status: "pin", ok: false, reason: body.reason.slice(0, 200) }
+        : null;
     default:
       return null;
   }

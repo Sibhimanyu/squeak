@@ -1,4 +1,4 @@
-# idle → `duck.png` *(already exists)*
+# idle → `duck.png` _(already exists)_
 
 **Lives at:** `brand/mood-sprites/duck.png`
 

@@ -60,8 +60,8 @@ describe("CallDialog.prompts", () => {
 
   it("includes the wrong-PIN sentences when a PIN is asked", () => {
     const prompts = new CallDialog(script, "4821").prompts();
-    expect(prompts).toContain("That PIN is not right. Try again, then hash.");
-    expect(prompts).toContain("That PIN is not right. Goodbye.");
+    expect(prompts).toContain("That pin is not right. Try again, then hash.");
+    expect(prompts).toContain("That pin is not right. Goodbye.");
   });
 });
 
@@ -70,7 +70,7 @@ describe("runDialog", () => {
     const call = fakeCall([..."4821#".split(""), "2"]);
     const result = await runDialog(call, new CallDialog(script, "4821"));
     expect(result).toEqual({ status: "answered", letter: "B" });
-    expect(call.said[0]).toContain("enter your PIN");
+    expect(call.said[0]).toContain("enter your pin");
     expect(call.said.at(-1)).toBe("Sent B. Goodbye.");
     expect(call.hungUp).toBe(true);
   });

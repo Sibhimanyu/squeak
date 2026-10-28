@@ -1,4 +1,4 @@
-# offline → `duck-offline.png` *(optional)*
+# offline → `duck-offline.png` _(optional)_
 
 **Save as:** `brand/mood-sprites/duck-offline.png`
 
