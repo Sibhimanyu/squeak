@@ -43,11 +43,13 @@ A wrong value turns voice off with a warning in the log; it never stops the daem
 
 ## Verified, and not
 
-Tested here: the dialog and keypad, policy, config validation, the channel's checks, baresip's netstring protocol,
-its config loading with the `aufile` modules, dialling, and switching the audio source mid-call.
+Tested here: the dialog and keypad, policy, config validation, the channel's checks, baresip's netstring protocol, its
+config loading with the `aufile` modules, dialling, answering, switching the audio source mid-call, and DTMF arriving as
+`CALL_DTMF_START` events with the digit in `param` (two baresip instances on this Mac, the callee typing digits through
+its `stdio` module).
 
-Not tested against a real PBX: registration with 3CX, and DTMF arriving as `CALL_DTMF_START` events from the 3CX app
-(baresip has no command to send a digit, so a loopback could not exercise it). `squeak voice-test` is that check.
+Not tested against a real PBX: registration with 3CX, and the 3CX app's keypad sending RFC 2833 digits baresip accepts.
+`squeak voice-test` is that check.
 
 ## Later
 
