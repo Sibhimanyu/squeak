@@ -22,17 +22,18 @@ The design system every surface follows is in [`DESIGN.md`](DESIGN.md).
    drag Squeak to Applications. It needs an Apple-silicon Mac on macOS 14 or
    later. The build is not notarized yet: right-click the app, choose Open
    (or System Settings › Privacy & Security › Open Anyway).
-2. **Run the Setup checklist.** Squeak lives in the menu bar and bundles its
-   background service; the checklist installs the service and agent hooks and
-   offers notifications and the quick-message hotkey. Reading Conductor chats
-   already works at this point.
+2. **Set up Squeak.** On first launch, choose **Set up Squeak** to install the
+   background service and start the guided setup. The service and agent hooks
+   are required; you can skip optional steps and return to them in **Settings
+   › Setup**. Reading Conductor chats already works at this point.
 3. **Reply to Conductor chats.** Settings › Conductor, set up the relay
    (macOS may ask for Keychain access), then quit and reopen Conductor once.
 4. **Add a channel (optional).** Telegram needs your own bot token from
    @BotFather. Zoho Cliq is specific to a Zoho org.
-5. **Add the iPhone (optional).** Installed through SideStore, and it needs
-   your own Firebase project (`SQUEAK_REMOTE_PROJECT`); there is no hosted
-   backend. See [`docs/remote-channel.md`](docs/remote-channel.md).
+5. **Add the iPhone (optional).** Install it through SideStore, then choose
+   your own Firebase project or Squeak's limited shared server in **Settings
+   › iPhone**. See [`docs/remote-channel.md`](docs/remote-channel.md) for the
+   shared-server limits.
 
 More detail, known limits and troubleshooting:
 [`docs/getting-started.md`](docs/getting-started.md). The steps under Setup
@@ -89,10 +90,11 @@ does not.
 
 ### iPhone
 
-Set `SQUEAK_REMOTE_PROJECT` in Squeak's `.env` to your Firebase project id
-(see `firebase/`), open Squeak on the Mac, choose **iPhone → Pair an iPhone**,
-and scan the code with the iPhone app. Releases are built with
-`ios/scripts/release.sh` and installed through SideStore.
+In Squeak for Mac, open **Settings › iPhone** and choose **Set up…**. You can
+have Squeak create and configure a Firebase project in your Google account, or
+use Squeak's limited shared server. The setup also offers a by-hand route.
+After choosing a server, pair the iPhone when the pairing sheet opens. Releases
+are built with `ios/scripts/release.sh` and installed through SideStore.
 
 ### Squeak for Web (no install)
 

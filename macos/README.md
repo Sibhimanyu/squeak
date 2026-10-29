@@ -327,23 +327,25 @@ Gatekeeper will warn the first time.
    still blocks it, go to System Settings, Privacy & Security, and choose
    "Open Anyway" next to the Squeak message.
 4. Squeak has no Dock icon; look for it in the menu bar.
-5. The first launch opens Welcome. One press of **Set up Squeak** is the person's yes: Squeak then installs its own
-   background service (the same `DaemonManager` path as About › Background service), and the **setup checklist**
-   follows. Nothing needs the terminal. The same checklist is **Settings › Setup**, and the menu-bar panel's `…` menu
-   shows **Finish setting up…** while a required step remains.
+5. The first launch opens Welcome. One press of **Set up Squeak** installs the background service through
+   `DaemonManager` and starts the guided Setup walkthrough. Nothing needs the terminal. Each screen has a progress
+   count and handles one step; optional steps can be skipped. The summary and **Settings › Setup** show completed,
+   skipped and unfinished steps, and let the person reopen them. The menu-bar panel's `…` menu shows **Finish setting
+   up…** while a required step remains.
 
-   | step | what it does | real or link |
+   | walkthrough step | what it does | required |
    | --- | --- | --- |
-   | Background service (required) | installs/repairs through `DaemonManager`; done when the daemon answers | real |
-   | Agent hooks (required) | `GET /control/hooks`, `POST /control/hooks/install` (and Remove… as `/uninstall`); the daemon edits `~/.claude/settings.json` with a backup. An older daemon answers 404/503 and the row says "Update the background service" | real |
-   | Conductor (required if installed) | the relay card (`/control/relay`); "Skip if you don't use Conductor" makes it optional | real |
-   | Notifications | asks macOS (`UNUserNotificationCenter`), status read from it; when denied, opens System Settings | real |
-   | Quick-message shortcut | status from `CGPreflightListenEventAccess`; the button asks and opens Privacy › Input Monitoring | real status, grant by the person |
-   | Reply into Conductor's window | Accessibility belongs to Squeak Hands, which has no status mode, so Squeak cannot read it: always "Optional", button opens Privacy › Accessibility with plain instructions, never shown as granted | link only |
-   | Telegram, Zoho Cliq, iPhone | optional; done once any is configured; opens Settings › Connections | link |
+   | Background service | installs/repairs through `DaemonManager`; done when the daemon answers | Yes |
+   | Agent hooks | `GET /control/hooks`, `POST /control/hooks/install` (and Remove… as `/uninstall`); the daemon edits `~/.claude/settings.json` with a backup | Yes |
+   | Conductor | configures the relay (`/control/relay`); skipped automatically when Conductor is not installed | If installed |
+   | Reply into Conductor's window | opens Privacy › Accessibility with instructions for Squeak Hands; macOS does not expose its permission status to Squeak | No |
+   | Notifications | asks macOS (`UNUserNotificationCenter`), reads status, and opens System Settings when permission is denied | No |
+   | Quick-message shortcut | reads `CGPreflightListenEventAccess`; the button asks and opens Privacy › Input Monitoring | No |
+   | iPhone | sets up your Firebase or Squeak's limited shared server, then opens phone pairing | No |
+   | Telegram, Zoho Cliq, phone calls, Keep awake | opens the settings screen for each feature | No |
 
-   `SetupChecklist` (SqueakMacCore, UI-free) derives every state from `SetupFacts`; `SetupModel` gathers the facts and
-   polls them every 3 s while the checklist is on screen. Demo mode shows mixed progress with no network.
+   `SetupWalkthrough` (SqueakMacCore, UI-free) derives order, progress, skip state and completion from
+   `SetupFacts` and the configured channels. The screens reuse the relevant settings and checklist actions.
 
 Reading Conductor chats needs nothing else. Sending, and terminal and desktop
 sessions, need the Squeak daemon running on the same Mac (step 1 above).
@@ -415,7 +417,7 @@ Node 22 arm64 (cached in `macos/build/cache`; offline with no cache fails the bu
 
 At launch `DaemonManager` (`DaemonInstaller` plans, `LiveDaemonEffects` acts) decides:
 a launch agent that does not run from `~/Library/Application Support/squeak/daemon/` is a dev checkout and is never touched;
-no agent waits for the person's press: **Welcome › Set up Squeak** (the checklist installs it) or **Settings › About › Background service › Install** (nothing is installed without one of those clicks); an agent we
+no agent waits for the person's press: **Welcome › Set up Squeak** (the guided setup installs it) or **Settings › About › Background service › Install** (nothing is installed without one of those clicks); an agent we
 own on an older build gets the new version copied beside it, the `current` symlink switched atomically,
 `launchctl kickstart -k`, a 20 s `GET /state` check and, if unhealthy, a rollback to the previous version
 (remembered in `daemon/failed-version` so the same build is not retried until Repair). The last two versions are kept.
