@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { logger } from "../utils/logger.js";
 
 const run = promisify(execFile);
 
@@ -68,6 +69,7 @@ export class EspeakSpeaker implements Speaker {
   private count = 0;
 
   async speak(text: string): Promise<{ file: string; durationMs: number }> {
+    const began = Date.now();
     const base = path.join(this.dir, `p${this.count++}`);
     await new Promise<void>((resolve, reject) => {
       const child = spawn("espeak-ng", ["--stdin", "-s", "150", "-w", `${base}.raw.wav`], {
@@ -97,12 +99,24 @@ export class EspeakSpeaker implements Speaker {
       `${base}.wav`,
     ]);
     fs.rmSync(`${base}.raw.wav`, { force: true });
+    logSpeechTime("plain", text, began);
     return { file: `${base}.wav`, durationMs: wavDurationMs(fs.readFileSync(`${base}.wav`)) };
   }
 
   dispose(): void {
     fs.rmSync(this.dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * How long a prompt took to make, in the log: a slow machine shows here (and a long one during a live call is what
+ * makes the line break up), so the cure is a number, not a guess. Never the words themselves.
+ */
+function logSpeechTime(engine: "plain" | "natural", text: string, began: number): void {
+  const ms = Date.now() - began;
+  const fields = { engine, ms, chars: text.length };
+  if (ms > 3000) logger.warn("voice speech was slow to make: a call that speaks while this runs can break up", fields);
+  else logger.debug("voice speech made", fields);
 }
 
 /** Longest Piper may take for one prompt. */
@@ -141,6 +155,7 @@ export class PiperSpeaker implements Speaker {
   }
 
   private async synthesize(text: string): Promise<{ file: string; durationMs: number }> {
+    const began = Date.now();
     const base = path.join(this.dir, `p${this.count++}`);
     try {
       await new Promise<void>((resolve, reject) => {
@@ -195,6 +210,7 @@ export class PiperSpeaker implements Speaker {
       fs.rmSync(`${base}.raw.wav`, { force: true });
       const durationMs = wavDurationMs(fs.readFileSync(`${base}.wav`));
       if (durationMs <= 0) throw new Error("piper made no audio");
+      logSpeechTime("natural", text, began);
       return { file: `${base}.wav`, durationMs };
     } catch {
       return this.fallback.speak(text);
