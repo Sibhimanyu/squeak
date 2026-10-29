@@ -67,9 +67,9 @@ function fake(
 
 describe("sudoersRule", () => {
   it("grants exactly the four pmset commands, to one plain account name", () => {
-    const rule = sudoersRule("sibhi-zstch1643")!;
+    const rule = sudoersRule("someone")!;
     expect(rule).toContain(
-      "sibhi-zstch1643 ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -b lowpowermode 1, /usr/bin/pmset -b lowpowermode 0",
+      "someone ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0, /usr/bin/pmset -b lowpowermode 1, /usr/bin/pmset -b lowpowermode 0",
     );
     expect(rule.split("\n").filter((line) => line && !line.startsWith("#"))).toHaveLength(1);
   });

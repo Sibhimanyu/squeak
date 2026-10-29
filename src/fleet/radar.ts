@@ -65,7 +65,7 @@ export function formatAge(fromIso: string, nowMs: number): string {
  * Repo and branch is the good case, but a session started in a home directory
  * has neither: its repo name derives from the directory, which is the user's
  * account name, and its branch reads "HEAD" because the checkout is detached.
- * "sibhi-zstch1643 · HEAD" tells nobody anything, so fall back to the path.
+ * "someone · HEAD" tells nobody anything, so fall back to the path.
  */
 export function sessionLabel(session: FleetSession, homeDir = os.homedir()): string {
   const branch = session.branch && session.branch !== "HEAD" ? session.branch : null;

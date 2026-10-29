@@ -11,7 +11,9 @@ enum CaptureRunner {
     static func run(prefix: String, model: AppModel) async {
         let env = ProcessInfo.processInfo.environment
         if let a = env["SQUEAK_MAC_APPEARANCE"] { NSApp.appearance = NSAppearance(named: a == "light" ? .aqua : .darkAqua) }
+        if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "firstsession" { await runFirstSession(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "awake" { await runAwakeOnly(prefix: prefix, model: model); return }
+        if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "update" { await AppUpdater.captureUpdateUI(prefix: prefix); return }
         if env["SQUEAK_MAC_CAPTURE_ONLY"] == "updatebadge" { await runUpdateBadge(prefix: prefix); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "sidebar" { await runSidebarDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "popup" { await runPopupOnly(prefix: prefix, model: model); return }

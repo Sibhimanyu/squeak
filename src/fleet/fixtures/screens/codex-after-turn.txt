@@ -9,7 +9,7 @@
 
   Tip: Try the Desktop app. Run 'codex app' or visit https://chatgpt.com/codex?app-landing-page=true
 
-⚠ clamping SessionEnd hook timeout to 3s in /Users/sibhi-zstch1643/.codex/hooks.json
+⚠ clamping SessionEnd hook timeout to 3s in /Users/someone/.codex/hooks.json
 
 • You have 3 usage limit resets available. Run /usage to use one.
 

@@ -311,16 +311,7 @@ struct PopupHomeBand: View {
     }
 
     @ViewBuilder private var emptyState: some View {
-        VStack {
-            if model.health == nil {
-                EmptyStateView(symbol: .ellipsis, title: "Connecting…", message: "Looking for the Squeak service on this Mac.")
-            } else if !model.isConnected {
-                EmptyStateView(symbol: .zapOff, title: "No sessions to show", message: "Squeak can't reach its service yet, so there is nothing to list.")
-            } else {
-                EmptyStateView(symbol: .inbox, title: "No sessions yet", message: "Start a chat in Conductor and it shows up here, with its replies.")
-            }
-        }
-        .frame(maxWidth: .infinity).frame(height: 220)
+        SessionEmptyView()
     }
 
     private var allQuiet: some View {

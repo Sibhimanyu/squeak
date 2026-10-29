@@ -17,6 +17,7 @@ struct SetupSettings: View {
 struct SetupChecklistView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmRemove = false
+    @State private var showExtras = false
 
     private var checklist: SetupChecklist { model.setupChecklist }
 
@@ -24,13 +25,37 @@ struct SetupChecklistView: View {
         let c = checklist
         VStack(alignment: .leading, spacing: Space.s) {
             header(c)
-            ForEach(c.steps) { step in
-                if step.state == .done { doneRow(step) } else { SetupStepRow(step: step, isPrimary: c.primary == step.id, run: run) }
+            ForEach(c.steps.filter(\.required)) { step in
+                stepRow(step, primary: c.primary)
             }
-            if let h = model.setup.hooks, h.state == .installed || h.state == .partial {
-                Button("Remove agent hooks…") { confirmRemove = true }
-                    .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted).padding(.top, Space.xs)
+            if c.isComplete {
+                HStack(alignment: .top, spacing: Space.s) {
+                    Image(systemName: "menubar.rectangle").foregroundStyle(Theme.muted).accessibilityHidden(true)
+                    Text("Click the duck in your menu bar to see your agents. Start a new agent session to try it.")
+                        .font(Typo.body).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, Space.s)
             }
+            DisclosureGroup(isExpanded: $showExtras) {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    ForEach(c.steps.filter { !$0.required }) { step in
+                        stepRow(step, primary: nil)
+                    }
+                    if let h = model.setup.hooks, h.state == .installed || h.state == .partial {
+                        Button("Remove agent hooks…") { confirmRemove = true }
+                            .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted).padding(.top, Space.xs)
+                    }
+                }
+                .padding(.top, Space.s)
+            } label: {
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    Text("Make it yours").font(Typo.label).foregroundStyle(Theme.ink)
+                    Text("Optional · Notifications, shortcuts and phone access")
+                        .font(Typo.meta).foregroundStyle(Theme.muted)
+                }
+            }
+            .padding(.top, Space.m)
         }
         .task { await model.setup.poll(model) }
         .confirmationDialog("Remove Squeak's agent hooks?", isPresented: $confirmRemove) {
@@ -42,23 +67,39 @@ struct SetupChecklistView: View {
     }
 
     private func header(_ c: SetupChecklist) -> some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
-            HStack {
-                Text(c.isComplete ? "You're set up" : "Finish setting up").font(Typo.heading).foregroundStyle(Theme.ink)
+        let required = c.steps.filter(\.required)
+        let completed = required.filter { $0.state == .done }.count
+        return VStack(alignment: .leading, spacing: Space.s) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(c.isComplete ? "Ready when you are" : "Connect your agents")
+                    .font(Typo.title).foregroundStyle(Theme.ink)
                 Spacer()
-                Text(c.progressLabel).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                Text("\(completed) of \(required.count)")
+                    .font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
             }
-            Text("Required steps first. Everything else is optional and can wait.")
+            ProgressView(value: Double(completed), total: Double(max(required.count, 1)))
+                .tint(Theme.working)
+                .accessibilityLabel("Essential setup")
+                .accessibilityValue("\(completed) of \(required.count) steps complete")
+            Text(c.isComplete ? "The essentials are ready. Explore the extras below whenever you like." : "Follow the steps below. You can finish later in Settings › Setup.")
                 .font(Typo.body).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.bottom, Space.xs)
-        .accessibilityElement(children: .combine)
+        .padding(.bottom, Space.s)
+    }
+
+    @ViewBuilder private func stepRow(_ step: SetupStep, primary: SetupStepID?) -> some View {
+        if step.state == .done {
+            doneRow(step)
+        } else {
+            SetupStepRow(step: step, isPrimary: primary == step.id, run: run)
+        }
     }
 
     private func doneRow(_ s: SetupStep) -> some View {
         HStack(spacing: Space.s) {
             Lucide(.check, size: 14, color: Theme.working)
-            Text(s.title).font(Typo.body).foregroundStyle(Theme.muted)
+            Text(s.id == .hooks ? "Claude Code & Codex connected" : s.title).font(Typo.body).foregroundStyle(Theme.muted)
             Spacer()
         }
         .padding(.horizontal, Space.m).padding(.vertical, 6)
@@ -116,8 +157,14 @@ private struct SetupStepRow: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                     Circle().fill(dot).frame(width: 8, height: 8).accessibilityHidden(true)
-                    Text(step.title).font(Typo.label).foregroundStyle(step.state == .blocked ? Theme.muted : Theme.ink)
-                    if step.state == .optional || (!step.required && step.state != .error) {
+                    Text(step.id == .hooks ? "Connect Claude Code & Codex" : step.title).font(Typo.label).foregroundStyle(step.state == .blocked ? Theme.muted : Theme.ink)
+                    Spacer(minLength: 0)
+                    if step.state == .blocked {
+                        Text("Waiting").font(Typo.meta).foregroundStyle(Theme.muted)
+                    } else if isPrimary {
+                        Text(step.state == .error ? "Needs attention" : "Next step")
+                            .font(Typo.meta).foregroundStyle(Theme.muted)
+                    } else if step.state == .optional || (!step.required && step.state != .error) {
                         Text("Optional").font(Typo.meta).foregroundStyle(Theme.subtle)
                     }
                 }
@@ -155,7 +202,7 @@ private struct SetupStepRow: View {
     private var dot: Color {
         switch step.state {
         case .done: Theme.working
-        case .todo: Theme.needsYou
+        case .todo: Theme.muted
         case .error: Theme.error
         case .blocked, .optional: Theme.offline
         }

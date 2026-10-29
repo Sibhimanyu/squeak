@@ -80,8 +80,7 @@ struct SessionListView: View {
     }
 
     @ViewBuilder private var emptyNote: some View {
-        Text(model.isConnected ? "No chats yet. Start one in Conductor and it shows up here." : "No chats to show yet.")
-            .font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center).padding(24)
+        SessionEmptyView()
     }
 }
 
