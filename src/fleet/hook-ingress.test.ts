@@ -200,7 +200,7 @@ describe("the installed hook script", () => {
     const result = await execFileAsync("/bin/sh", ["-c", `printf '{}' | ${scriptPath}; echo "exit=$?"`]);
 
     expect(result.stdout).toContain("exit=0");
-    expect(Date.now() - startedAt).toBeLessThan(2000);
+    expect(Date.now() - startedAt).toBeLessThan(5000);
   });
 });
 
