@@ -104,9 +104,13 @@ struct RootView: View {
         case .unpaired: PairView().onAppear { screen.report?("Pairing") }
         case let .awaitingApproval(code, mac): AwaitingApprovalView(code: code, mac: mac)
         case .paired:
-            Group { if tabs { HomeTabs() } else { HomeView() } }
-                .renameAlert()
-                .onAppear { screen.report?("Sessions"); onMainScreen?() }
+            if let mac = model.pairingCelebration {
+                PairingCelebrationView(mac: mac)
+            } else {
+                Group { if tabs { HomeTabs() } else { HomeView() } }
+                    .renameAlert()
+                    .onAppear { screen.report?("Sessions"); onMainScreen?() }
+            }
         }
     }
 }

@@ -43,6 +43,14 @@ final class AppModel {
     /// When the app last came on screen: the answer on record then is from the visit before.
     private(set) var lookingSince: Date?
     private(set) var problem: String?
+    /// Why the last pairing did not happen, for the unpaired screen (`PairingScreen`).
+    private(set) var pairingFailure: PairingFailure?
+    /// When the current pairing asked the Mac, for the wait limit.
+    private(set) var pairingAskedAt: Date?
+    /// The Mac's name from approval until the celebration has shown.
+    private(set) var pairingCelebration: String?
+    func endPairingCelebration() { pairingCelebration = nil }
+    func clearPairingFailure() { pairingFailure = nil; problem = nil }
     /// What this phone sent since the app opened, per session. Local only:
     /// the channel carries no conversation history back, so the phone shows
     /// its own replies and the Mac's latest message, nothing it cannot know.
@@ -248,16 +256,22 @@ final class AppModel {
             KeyStore.save(Data(deviceId.utf8), account: "device-id")
             self.channel = channel
             problem = nil
+            pairingFailure = nil
+            pairingAskedAt = Date()
             phase = .awaitingApproval(code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: pairing.n)
             resume()
         } catch is PairingPayload.Failure {
             problem = "That isn't a Squeak pairing code. Open Squeak on your Mac, choose iPhone, then Pair an iPhone."
+            pairingFailure = .notACode
         } catch {
             problem = "Couldn't reach Squeak's server. Check the connection and scan again."
+            pairingFailure = .unreachable
         }
     }
 
     func unpair() {
+        pairingFailure = nil
+        pairingAskedAt = nil
         routeTask?.cancel()
         routeTask = nil
         if let channel { Task { await channel.stopLocal() } }
@@ -710,11 +724,13 @@ final class AppModel {
                 if let answer = try await channel.pairingAnswer() {
                     if answer.approved {
                         KeyStore.save(Data("1".utf8), account: "approved")
+                        if case let .awaitingApproval(_, mac) = phase { pairingCelebration = mac }
                         phase = .paired
                         startLocal(channel)
                     } else {
                         unpair()
                         problem = "Your Mac said no. Pair again if that was a mistake."
+                        pairingFailure = .refused
                     }
                 }
                 return
