@@ -49,6 +49,35 @@ extension CaptureRunner {
         if let content = win.contentView { logSidebarWidth(in: content, state: "collapsed") }
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-main.png")
 
+        // Reproduce Home ↔ project navigation while the sidebar is collapsed. The demo
+        // project data contains "squeak" and this exercises the same NavigationSplitView.
+        await sendCommandB(to: win)
+        await waitForSidebarWidth(220, in: win)
+        model.navFilter = .home
+        model.openProject("squeak")
+        try? await Task.sleep(for: .milliseconds(500))
+        if let content = win.contentView { logSidebarWidth(in: content, state: "project expanded before collapse") }
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-project-expanded.png")
+        await sendCommandB(to: win)
+        await waitForSidebarWidth(64, in: win)
+        try? await Task.sleep(for: .milliseconds(300))
+        if let content = win.contentView { logSidebarWidth(in: content, state: "project collapsed") }
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-project-collapsed.png")
+        model.closeProject()
+        try? await Task.sleep(for: .milliseconds(500))
+        if let content = win.contentView { logSidebarWidth(in: content, state: "Home after returning from collapsed project") }
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-home-collapsed.png")
+
+        for cycle in 1...3 {
+            model.openProject("squeak")
+            try? await Task.sleep(for: .milliseconds(400))
+            if let content = win.contentView { logSidebarWidth(in: content, state: "collapsed project cycle \(cycle)") }
+            if cycle == 1 { snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-project-reopened.png") }
+            model.closeProject()
+            try? await Task.sleep(for: .milliseconds(400))
+            if let content = win.contentView { logSidebarWidth(in: content, state: "collapsed Home cycle \(cycle)") }
+        }
+
         await sendCommandB(to: win)
         await waitForSidebarWidth(220, in: win)
         if let content = win.contentView { logSidebarWidth(in: content, state: "main expanded with Cmd+B") }

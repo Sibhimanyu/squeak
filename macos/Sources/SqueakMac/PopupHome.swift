@@ -568,7 +568,7 @@ struct PopupHomeFooter: View {
         VStack(spacing: 0) {
             PopupDivider()
             HStack(spacing: 10) {
-                Button { dismiss(); QuickComposerController.shared.show() } label: {
+                Button { dismiss(); QuickComposerController.shared.show(fromPopup: true) } label: {
                     HStack(spacing: 8) {
                         PopupSymbol(name: "bubble.left", size: 14, color: Theme.muted)
                         Text("Quick message").font(.popup(13)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()

@@ -355,6 +355,8 @@ final class UpdateWindowController {
 /// A little release card: the duck carries the warmth; the release and controls stay precise.
 private struct UpdateStatusView: View {
     let owner: AppUpdater
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var artworkMotion = false
 
     static func height(for state: UpdatePresentationState) -> CGFloat { state == .available ? 560 : 440 }
 
@@ -433,25 +435,35 @@ private struct UpdateStatusView: View {
 
     private var illustration: some View {
         ZStack {
-            // A quiet pond, drawn around the original, unmodified brand artwork.
+            // A quiet pond around the original, unmodified brand artwork. The motion stays
+            // decorative and stops when Reduce Motion is enabled.
             ForEach([140.0, 210.0, 280.0], id: \.self) { width in
                 Ellipse()
-                    .stroke(Theme.line, lineWidth: 1)
+                    .stroke(Theme.lineStrong.opacity(artworkMotion && !reduceMotion ? 0.72 : 1), lineWidth: 1)
                     .frame(width: width, height: width * 0.08)
-                    .offset(y: 82)
+                    .offset(y: artworkMotion && !reduceMotion ? 78 : 84)
             }
-            DuckMark(width: 108).offset(y: -8)
+            Circle()
+                .fill(Theme.duck.opacity(artworkMotion && !reduceMotion ? 0.14 : 0.09))
+                .frame(width: 152, height: 152)
+                .scaleEffect(artworkMotion && !reduceMotion ? 1.04 : 0.98)
+            DuckMark(width: 108)
+                .offset(y: artworkMotion && !reduceMotion ? -12 : -4)
+                .rotationEffect(.degrees(artworkMotion && !reduceMotion ? -1.5 : 1.5))
             Image(systemName: stateSymbol)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(owner.presentation == .error ? Theme.error : Theme.ink)
                 .frame(width: 32, height: 32)
                 .background(Theme.surfaceRaised, in: Circle())
-                .overlay(Circle().strokeBorder(Theme.lineStrong))
+                .overlay(Circle().strokeBorder(Theme.duck.opacity(artworkMotion && !reduceMotion ? 0.52 : 0.22)))
                 .offset(x: 96, y: -24)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 190)
         .accessibilityHidden(true)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 3.0).repeatForever(autoreverses: true), value: artworkMotion)
+        .onAppear { artworkMotion = !reduceMotion }
+        .onChange(of: reduceMotion) { _, reduced in artworkMotion = !reduced }
     }
 
     private var uniqueNotes: [String] {

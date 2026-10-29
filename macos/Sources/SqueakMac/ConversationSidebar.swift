@@ -64,6 +64,7 @@ final class SidebarColumnSizerView: NSView {
 
     var configuration: Configuration
     private var applyScheduled = false
+    private weak var observedSplitView: NSSplitView?
 
     init(configuration: Configuration) {
         self.configuration = configuration
@@ -94,6 +95,7 @@ final class SidebarColumnSizerView: NSView {
 
     private func apply() {
         guard let controller = splitViewController else { return }
+        observeResizes(in: controller.splitView)
         guard let sidebar = controller.splitViewItems.first(where: { $0.behavior == .sidebar }) else { return }
 
         // The SwiftUI representable's responder chain ends at its hosting view on some
@@ -112,6 +114,28 @@ final class SidebarColumnSizerView: NSView {
             controller.splitView.setPosition(configuration.ideal, ofDividerAt: 0)
             controller.splitView.adjustSubviews()
         }
+    }
+
+    private func observeResizes(in splitView: NSSplitView) {
+        guard observedSplitView !== splitView else { return }
+        if let observedSplitView {
+            NotificationCenter.default.removeObserver(self, name: Self.didResizeSubviews, object: observedSplitView)
+        }
+        observedSplitView = splitView
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(splitViewDidResize(_:)),
+            name: Self.didResizeSubviews,
+            object: splitView
+        )
+    }
+
+    // NavigationSplitView can reset its divider after this view's layout pass when the
+    // content column changes (for example, Home ↔ project). Reapply after AppKit's resize.
+    private static let didResizeSubviews = Notification.Name("NSSplitViewDidResizeSubviewsNotification")
+
+    @objc private func splitViewDidResize(_ notification: Notification) {
+        applyWhenAttached()
     }
 
     private var splitViewController: NSSplitViewController? {

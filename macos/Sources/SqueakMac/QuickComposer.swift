@@ -31,8 +31,8 @@ final class QuickComposerController {
     /// `target` is explicit (a chat opened on purpose): it wins over the last chat messaged and
     /// opens with that chat's latest reply above the field. Without one, an open composer keeps its
     /// chat and a closed one picks a default, compact, with no context.
-    func show(target: SessionKey? = nil) {
-        present(target: target, anchor: nil, fromNotification: false)
+    func show(target: SessionKey? = nil, fromPopup: Bool = false) {
+        present(target: target, anchor: nil, fromNotification: false, fromPopup: fromPopup)
     }
 
     /// A clicked notification: its chat, and the reply this very event was about. It cancels a
@@ -40,7 +40,7 @@ final class QuickComposerController {
     func show(notification open: PendingNotificationOpen) {
         reopenTask?.cancel()
         lastExplicitOpen = Date()
-        present(target: open.key, anchor: open.anchor, fromNotification: open.fromNotification)
+        present(target: open.key, anchor: open.anchor, fromNotification: open.fromNotification, fromPopup: false)
     }
 
     /// The activation that follows a Spotlight/Finder/Dock reopen, and that a clicked notification also
@@ -58,7 +58,7 @@ final class QuickComposerController {
         }
     }
 
-    private func present(target: SessionKey?, anchor: NotificationAnchor?, fromNotification: Bool) {
+    private func present(target: SessionKey?, anchor: NotificationAnchor?, fromNotification: Bool, fromPopup: Bool) {
         // Any explicit open supersedes a generic reopen still waiting: a close right after it must not bring it back.
         if target != nil { reopenTask?.cancel() }
         let model = AppModel.shared
@@ -74,6 +74,9 @@ final class QuickComposerController {
             state.prepare(model: model, explicit: target)
             if let target { state.context.load(key: target, anchor: anchor, fromNotification: fromNotification, model: model) }
         }
+        // The panel is reused by the hot key, notifications and the menu-bar popup. Remember this
+        // opening's origin even when it retargets an already visible composer.
+        state.newChatInPopup = fromPopup
         if panel == nil {
             let p = QuickPanel(
                 contentRect: NSRect(x: 0, y: 0, width: QuickComposerView.windowWidth, height: 200),
@@ -213,6 +216,8 @@ final class QuickComposerController {
 @MainActor @Observable
 final class QuickState {
     var target: SessionKey?
+    /// A composer opened from the menu-bar popup starts new chats back in that same panel.
+    var newChatInPopup = false
     var text = ""
     var focus = 0
     var result: SendResult?
@@ -465,8 +470,14 @@ struct QuickComposerView: View {
             Divider()
             Button("New chat in…") {
                 let ws = state.target.flatMap { model.session($0)?.conductorWorkspaceId }
+                let inPopup = state.newChatInPopup
                 close()
-                NewChatController.shared.show(preselect: ws)
+                if inPopup {
+                    PopupNav.shared.openNewChat(preselect: ws)
+                    MenuBarController.shared.open()
+                } else {
+                    NewChatController.shared.show(preselect: ws)
+                }
             }
         } label: {
             HStack(spacing: 7) {
