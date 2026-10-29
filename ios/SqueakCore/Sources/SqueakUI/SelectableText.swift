@@ -47,8 +47,10 @@ struct SelectableTextSheet: View {
         NavigationStack {
             VStack(spacing: 0) {
                 let links = MessageLinks.urls(in: text)
-                if !links.isEmpty {
+                let blocks = MessageCodeBlocks.blocks(in: text)
+                if !links.isEmpty || !blocks.isEmpty {
                     VStack(spacing: 8) {
+                        ForEach(blocks, id: \.self) { block in codeRow(block) }
                         ForEach(links, id: \.self) { link in linkRow(link) }
                     }
                     .padding(16)
@@ -89,6 +91,27 @@ struct SelectableTextSheet: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(copied == link ? "Copied" : "Copy link \(MessageLinks.host(link))")
+    }
+
+    /// A fenced block (a command, config): shown as it is, one tap copies all of it.
+    private func codeRow(_ block: String) -> some View {
+        Button { copy(block, mark: block) } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Text(verbatim: block)
+                    .font(.system(.footnote, design: .monospaced)).foregroundStyle(Theme.ink)
+                    .lineLimit(6).multilineTextAlignment(.leading)
+                Spacer(minLength: 6)
+                Text(copied == block ? "Copied" : "Copy").font(.footnote.weight(.medium)).foregroundStyle(Theme.muted)
+                Lucide(copied == block ? .check : .copy, size: 15, color: Theme.muted)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(copied == block ? "Copied" : "Copy code block")
     }
 
     private func copy(_ string: String, mark: String) {
