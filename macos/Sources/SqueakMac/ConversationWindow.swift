@@ -26,6 +26,7 @@ struct ConversationView: View {
     var body: some View {
         @Bindable var model = model
         let showingSettings = model.settingsSection != nil
+        let showingCompose = !showingSettings && NewChatController.shared.page != nil
         let showingNeedsYou = !showingSettings && (model.navFilter ?? .home) == .needsYou
         NavigationSplitView(columnVisibility: $visibility) {
             if showingSettings {
@@ -38,7 +39,7 @@ struct ConversationView: View {
                     .toolbar(removing: .sidebarToggle)
             }
         } content: {
-            if showingSettings || showingNeedsYou {
+            if showingSettings || showingNeedsYou || showingCompose {
                 // Keep one stable three-column window shell; these full-width pages do not use the list column.
                 Color.clear
                     .frame(minWidth: 0, idealWidth: 0, maxWidth: 0, maxHeight: .infinity)
@@ -51,6 +52,8 @@ struct ConversationView: View {
         } detail: {
             if showingSettings {
                 SettingsDetail()
+            } else if showingCompose {
+                DesktopComposePage().squeakWindowCanvas()
             } else if showingNeedsYou {
                 NeedsYouPage().squeakWindowCanvas()
             } else {

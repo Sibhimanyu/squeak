@@ -261,6 +261,7 @@ describe("HookIngressServer control routes", () => {
     const harness = await startServer();
     const server = servers.at(-1)!;
     const replies: Array<{ id: string; text: string; mode?: string; answersTurn?: string | null }> = [];
+    const powerChoices: unknown[] = [];
     server.setControl({
       sessionMessage: (id) => ({ id, text: "A) yes\nB) no" }),
       transcript: (id, limit, before) => ({
@@ -275,11 +276,30 @@ describe("HookIngressServer control routes", () => {
         replies.push({ id, text, ...(mode ? { mode } : {}), ...(answersTurn ? { answersTurn } : {}) });
         return { status: "started", via: "conductor" };
       },
+      power: async (choice) => {
+        powerChoices.push(choice);
+        return choice === "auto" || choice === "low" || choice === "high"
+          ? { ok: true }
+          : { ok: false, reason: "That energy mode isn't available." };
+      },
     });
     const base = `http://127.0.0.1:${harness.port}/control/session/abc-123`;
     const auth = { "x-squeak-token": harness.token };
-    return { harness, base, auth, replies };
+    return { harness, base, auth, replies, powerChoices };
   }
+
+  it("applies only the energy mode choice provided by the authenticated Mac app", async () => {
+    const { harness, auth, powerChoices } = await withControl();
+    const url = `http://127.0.0.1:${harness.port}/control/power`;
+    expect((await fetch(url, { method: "POST", body: JSON.stringify({ choice: "high" }) })).status).toBe(403);
+    const applied = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ choice: "high" }) });
+    expect(applied.status).toBe(200);
+    expect(await applied.json()).toEqual({ ok: true });
+    const rejected = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ choice: "turbo" }) });
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toEqual({ error: "That energy mode isn't available." });
+    expect(powerChoices).toEqual(["high", "turbo"]);
+  });
 
   it("accepts a terminal agent's fleet key as the target, as /state hands it out", async () => {
     const { harness, auth, replies } = await withControl();

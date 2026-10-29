@@ -3,6 +3,35 @@ import SqueakMacCore
 import SwiftUI
 
 extension CaptureRunner {
+    /// Offline compose-page captures in the real desktop shell, including the minimum window size.
+    static func runComposeDemo(prefix: String, model: AppModel) async {
+        let win = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 1100, height: 720),
+                           styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        win.titlebarAppearsTransparent = true
+        win.titleVisibility = .hidden
+        win.contentView = NSHostingView(rootView: ConversationView().environment(model))
+        win.makeKeyAndOrderFront(nil)
+        let compose = NewChatController.shared
+        compose.state.prepare(model: model, preselect: nil)
+        compose.page = .newChat
+        try? await Task.sleep(for: .milliseconds(1400))
+        compose.state.form.text = "Add retries with backoff to the checkout call, and a test for the timeout case."
+        for customized in [false, true] {
+            compose.state.customizing = customized
+            try? await Task.sleep(for: .milliseconds(600))
+            snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-desktop-newchat\(customized ? "-customize" : "").png")
+        }
+        win.setContentSize(NSSize(width: 900, height: 600))
+        try? await Task.sleep(for: .milliseconds(600))
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-desktop-newchat-small.png")
+        compose.quickState.prepare(model: model, explicit: SessionKey(provider: "conductor", hostSessionId: "demo-3"))
+        compose.page = .quickMessage
+        try? await Task.sleep(for: .milliseconds(600))
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-desktop-quickmessage.png")
+        win.orderOut(nil)
+        NSApp.terminate(nil)
+    }
+
     /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=sidebar: capture collapsed and expanded
     /// main and Settings sidebars, exercising ⌘B and ⌘\\ between the states.
     static func runSidebarDemo(prefix: String, model: AppModel) async {

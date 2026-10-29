@@ -289,6 +289,7 @@ final class QuickState {
 struct QuickComposerView: View {
     var close: () -> Void
     var resize: (CGFloat) -> Void = { _ in }
+    var embedded = false
     @Environment(AppModel.self) private var model
     @Environment(QuickState.self) private var state
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -307,13 +308,13 @@ struct QuickComposerView: View {
     var body: some View {
         VStack(spacing: 10) {
             pill
-                .background(alignment: .bottom) { glow }
+                .background(alignment: .bottom) { if !embedded { glow } }
             hints
         }
-        .padding(.horizontal, Self.margin)
-        .padding(.top, 28)
-        .padding(.bottom, 40)
-        .frame(width: Self.windowWidth)
+        .padding(.horizontal, embedded ? 0 : Self.margin)
+        .padding(.top, embedded ? 0 : 28)
+        .padding(.bottom, embedded ? 0 : 40)
+        .frame(width: embedded ? nil : Self.windowWidth)
         .background(GeometryReader { Color.clear.preference(key: QuickHeightKey.self, value: $0.size.height) })
         .onPreferenceChange(QuickHeightKey.self) { resize($0) }
         // Follows the panel to another display, so the context's room is the screen it is on.
@@ -376,7 +377,7 @@ struct QuickComposerView: View {
             }
         }
         .padding(.horizontal, state.context.isVisible ? 22 : 16).padding(.top, 14).padding(.bottom, 12)
-        .frame(width: Self.width)
+        .frame(width: embedded ? nil : Self.width)
         .modifier(GlassPanel(radius: 26))
         // A barely-there warm tint along the lower edge, where the light comes from.
         .overlay {
@@ -386,7 +387,7 @@ struct QuickComposerView: View {
                     lineWidth: 1)
             }
         }
-        .shadow(color: .black.opacity(0.35), radius: 24, y: 14)
+        .shadow(color: .black.opacity(embedded ? 0 : 0.35), radius: 24, y: 14)
     }
 
     /// Warm light spilling from under the pill onto whatever is behind: duck yellow at the centre
@@ -464,7 +465,7 @@ struct QuickComposerView: View {
             Divider()
             Button("New chat in…") {
                 let ws = state.target.flatMap { model.session($0)?.conductorWorkspaceId }
-                QuickComposerController.shared.hide()
+                close()
                 NewChatController.shared.show(preselect: ws)
             }
         } label: {

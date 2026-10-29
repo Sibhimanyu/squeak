@@ -15,6 +15,7 @@ enum CaptureRunner {
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "awake" { await runAwakeOnly(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "update" { await AppUpdater.captureUpdateUI(prefix: prefix); return }
         if env["SQUEAK_MAC_CAPTURE_ONLY"] == "updatebadge" { await runUpdateBadge(prefix: prefix); return }
+        if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "compose" { await runComposeDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "sidebar" { await runSidebarDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "popup" { await runPopupOnly(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "popover" { await runPopoverOnly(prefix: prefix, model: model); return }
@@ -170,7 +171,7 @@ enum CaptureRunner {
         let nw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: NewChatSheet.width, height: 560), styleMask: [.borderless], backing: .buffered, defer: false)
         nw.isOpaque = false
         nw.backgroundColor = .clear
-        let nHost = NSHostingView(rootView: NewChatSheet(close: {}).panelSurface().environment(model).environment(ns))
+        let nHost = NSHostingView(rootView: NewChatSheet(close: {}).frame(width: NewChatSheet.width, height: 650).panelSurface().environment(model).environment(ns))
         nw.contentView = nHost
         nw.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(900))

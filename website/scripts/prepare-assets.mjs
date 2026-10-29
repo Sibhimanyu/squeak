@@ -11,6 +11,7 @@ const site = resolve(here, "..");
 const repo = resolve(site, "..");
 const brand = join(repo, "brand");
 const releasePage = join(repo, ".context/release-pages/squeak");
+const captures = join(site, "capture-sources");
 const out = join(site, "assets");
 
 const WEBP = { quality: 86, effort: 6 };
@@ -36,10 +37,10 @@ await webp(join(releasePage, "assets/duck-celebrating.png"), "duck-celebrating.w
 await webp(join(releasePage, "assets/duck-asleep.png"), "duck-asleep.webp");
 await webp(join(releasePage, "assets/duck-panel.png"), "duck-panel.webp");
 
-// Product captures, sized for display. Full-width screenshots are 1600w.
-await webp(join(releasePage, "assets/window-decision.jpg"), "mac-decision.webp", 1600);
-await webp(join(releasePage, "assets/window-doing.jpg"), "mac-activity.webp", 1600);
-await webp(join(releasePage, "assets/iphone-doing.jpg"), "iphone-activity.webp", 700);
+// Current product captures from the offline Mac and iPhone demo apps.
+await webp(join(captures, "mac-decision.png"), "mac-decision.webp", 1600);
+await webp(join(captures, "mac-activity.png"), "mac-activity.webp", 1600);
+await webp(join(captures, "iphone-activity.png"), "iphone-activity.webp", 700);
 
 // Vector brand artwork, copied byte for byte.
 await copy(join(brand, "logo/svg/squeak-duck-full-color.svg"), "duck-brand.svg");

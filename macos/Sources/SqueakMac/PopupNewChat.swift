@@ -234,7 +234,6 @@ struct PopupNewChatFooter: View {
                     .foregroundStyle(Theme.muted)
                     .padding(.horizontal, 12).frame(height: 26)
                     .popupCard(radius: 8, fill: 0.05, stroke: 0.11)
-                    Text("starts").font(.popup(12.5)).foregroundStyle(Theme.subtle)
                 }
                 Spacer(minLength: 4)
                 Button("Cancel") { PopupNav.shared.back() }
@@ -245,7 +244,7 @@ struct PopupNewChatFooter: View {
                             Image(nsImage: duck).renderingMode(.template).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
                                 .frame(width: 22, height: 19).foregroundStyle(Theme.primaryText)
                         }
-                        Text("Start chat")
+                        Text("Start chat").fixedSize()
                     }
                 }
                 .buttonStyle(PopupButtonStyle(kind: .primary, radius: 9, height: 28, hPad: 16, size: 13))

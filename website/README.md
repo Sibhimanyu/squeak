@@ -57,10 +57,12 @@ Requirements: Node 22 or later. `npm run verify` needs the Playwright Chromium b
 
 Regenerate with `node scripts/prepare-assets.mjs`. Sources:
 
-- Duck artwork and the product captures come from the read-only release page under
+- Duck artwork and the panel come from the read-only release page under
   `.context/release-pages/squeak/` (the mood PNGs are 240 px, the panel 760x1000).
-  Those are the only inputs outside this folder, and the page is not built from them: the
-  committed outputs are the inputs for `npm ci && npm run build`.
+- Product screenshots are captured from the offline Mac and iPhone demo apps and kept in
+  `capture-sources/`; they use demo content, not live user sessions. `prepare-assets.mjs`
+  resizes and converts them to WebP. The generated assets are the inputs for
+  `npm ci && npm run build`.
 - `duck-brand.svg` and `logo.svg` come from `brand/logo/svg/`.
 - `og.png` (1200x630) is rendered from the approved lockup and duck with Figtree from the
   installed brand font.

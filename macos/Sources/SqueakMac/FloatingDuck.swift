@@ -9,7 +9,6 @@ final class FloatingDuckController: NSObject {
     static let shared = FloatingDuckController()
     private let defaults = UserDefaults.standard
     private var panel: NSPanel?
-    private var moveObserver: NSObjectProtocol?
     private weak var model: AppModel?
 
     private let enabledKey = "floatingDuckEnabled"
@@ -21,7 +20,6 @@ final class FloatingDuckController: NSObject {
         self.model = model
         HotKeyCenter.shared.onDuckFire = { [weak self] in self?.toggleFromShortcut() }
         HotKeyCenter.shared.registerDuckShortcut()
-        track(model)
         if isEnabled { show() }
     }
 
@@ -44,12 +42,6 @@ final class FloatingDuckController: NSObject {
 
     func hide() { panel?.orderOut(nil) }
 
-    func dragOrigin() -> NSPoint? { panel?.frame.origin }
-
-    func move(from origin: NSPoint, by translation: CGSize) {
-        panel?.setFrameOrigin(NSPoint(x: origin.x + translation.width, y: origin.y - translation.height))
-    }
-
     private func makePanel(model: AppModel) -> NSPanel {
         let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 104, height: 104),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -59,14 +51,15 @@ final class FloatingDuckController: NSObject {
         p.level = .floating
         p.hidesOnDeactivate = false
         p.isReleasedWhenClosed = false
-        p.isMovableByWindowBackground = true
+        p.isMovableByWindowBackground = false
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         p.setAccessibilityLabel("Squeak floating duck")
-        p.contentView = NSHostingView(rootView: FloatingDuckView(controller: self).environment(model))
-        moveObserver = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: p, queue: .main) { [weak self, weak p] _ in
-            guard let p else { return }
-            MainActor.assumeIsolated { self?.savePosition(p.frame.origin) }
+        let content = FloatingDuckHostingView(rootView: FloatingDuckView(controller: self).environment(model))
+        content.onClick = { MenuBarController.shared.toggle() }
+        content.onDragEnded = { [weak self, weak p] in
+            if let p { self?.savePosition(p.frame.origin) }
         }
+        p.contentView = content
         return p
     }
 
@@ -85,18 +78,72 @@ final class FloatingDuckController: NSObject {
     private func savePosition(_ point: NSPoint) {
         defaults.set([Double(point.x), Double(point.y)], forKey: positionKey)
     }
+}
 
-    private func track(_ model: AppModel) {
-        withObservationTracking {
-            _ = model.attentionCount
-            _ = model.count(.working)
-            _ = model.isConnected
-        } onChange: { [weak self, weak model] in
-            Task { @MainActor in
-                guard let self, let model else { return }
-                self.panel?.contentView = NSHostingView(rootView: FloatingDuckView(controller: self).environment(model))
-                self.track(model)
-            }
+/// Window movement must use screen coordinates: a gesture in this view's moving
+/// local coordinate space feeds the window movement back into its own translation.
+/// Keep this host alive as the observed model changes, including during a drag.
+@MainActor
+private final class FloatingDuckHostingView<Content: View>: NSHostingView<Content> {
+    var onClick: (() -> Void)?
+    var onDragEnded: (() -> Void)?
+    private var mouseDownPoint: NSPoint?
+    private var windowOrigin: NSPoint?
+    private var isDragging = false
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Keep SwiftUI's context menu and accessibility button. Only the primary
+        // mouse sequence belongs to the window drag handler.
+        if let event = NSApp.currentEvent, event.type == .leftMouseDown,
+           !event.modifierFlags.contains(.control), super.hitTest(point) != nil {
+            return self
+        }
+        return super.hitTest(point)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) {
+            super.mouseDown(with: event)
+            return
+        }
+        guard let window else { return }
+        mouseDownPoint = window.convertPoint(toScreen: event.locationInWindow)
+        windowOrigin = window.frame.origin
+        isDragging = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = mouseDownPoint, let origin = windowOrigin else {
+            super.mouseDragged(with: event)
+            return
+        }
+        // Absolute AppKit screen points work across displays, including screens
+        // to the left of or below the primary display, without scale conversion.
+        let cursor = NSEvent.mouseLocation
+        let delta = NSPoint(x: cursor.x - start.x, y: cursor.y - start.y)
+        if !isDragging {
+            guard hypot(delta.x, delta.y) >= 4 else { return }
+            isDragging = true
+        }
+        window?.setFrameOrigin(NSPoint(x: origin.x + delta.x, y: origin.y + delta.y))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard mouseDownPoint != nil else {
+            super.mouseUp(with: event)
+            return
+        }
+        let didDrag = isDragging
+        mouseDownPoint = nil
+        windowOrigin = nil
+        isDragging = false
+        if didDrag {
+            onDragEnded?()
+        } else if bounds.contains(convert(event.locationInWindow, from: nil)) {
+            onClick?()
         }
     }
 }
@@ -104,7 +151,6 @@ final class FloatingDuckController: NSObject {
 private struct FloatingDuckView: View {
     @Environment(AppModel.self) private var model
     let controller: FloatingDuckController
-    @State private var dragStart: NSPoint?
 
     private var mood: String {
         guard model.isConnected else { return "duck-offline.png" }
@@ -128,13 +174,7 @@ private struct FloatingDuckView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .simultaneousGesture(DragGesture(minimumDistance: 4)
-            .onChanged { value in
-                if dragStart == nil { dragStart = controller.dragOrigin() }
-                if let dragStart { controller.move(from: dragStart, by: value.translation) }
-            }
-            .onEnded { _ in dragStart = nil })
-        .help("Open Squeak's session menu")
+        .help("Click to open Squeak’s session menu. Drag to move the duck.")
         .accessibilityLabel(accessibilityLabel)
         .contextMenu {
             Button(controller.isEnabled ? "Hide Floating Duck" : "Show Floating Duck") { controller.toggle() }

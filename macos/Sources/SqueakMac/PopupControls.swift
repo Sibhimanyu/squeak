@@ -232,7 +232,9 @@ struct PopupMacCard: View {
     let nav = PopupNav.shared
 
     private var power: DaemonPower? { model.demoMode ? nav.demoPower : model.power }
-    private var battery: Int? { model.demoMode ? 82 : PopupMac.batteryPercent() }
+    private var battery: PopupMac.BatteryStatus? {
+        model.demoMode ? PopupMac.BatteryStatus(percent: 82, isCharging: false) : PopupMac.batteryStatus()
+    }
     private var name: String { model.demoMode ? "Sibhi's MacBook" : PopupMac.name }
 
     var body: some View {
@@ -247,12 +249,19 @@ struct PopupMacCard: View {
                     Circle().fill(model.homeConnectionColor).frame(width: 7, height: 7)
                 }
                 Spacer(minLength: 4)
-                if let battery {
-                    HStack(spacing: 7) {
-                        PopupSymbol(name: battery > 66 ? "battery.100" : battery > 33 ? "battery.50" : "battery.25", size: 14, color: Theme.ink)
-                        Text("\(battery)%").font(.popup(13)).monospacedDigit().foregroundStyle(Theme.ink)
+                TimelineView(.periodic(from: .now, by: 30)) { _ in
+                    if let battery {
+                        HStack(spacing: 7) {
+                            PopupSymbol(name: battery.percent > 66 ? "battery.100" : battery.percent > 33 ? "battery.50" : "battery.25", size: 14, color: Theme.ink)
+                            if battery.isCharging {
+                                PopupSymbol(name: "bolt.fill", size: 10, color: Theme.done)
+                                    .accessibilityHidden(true)
+                            }
+                            Text("\(battery.percent)%").font(.popup(13)).monospacedDigit().foregroundStyle(Theme.ink)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Battery \(battery.percent) percent\(battery.isCharging ? ", charging" : "")")
                     }
-                    .accessibilityElement(children: .combine).accessibilityLabel("Battery \(battery) percent")
                 }
             }
             .frame(minHeight: 36)
@@ -260,15 +269,26 @@ struct PopupMacCard: View {
                 PopupDivider().padding(.leading, 36)
                 HStack(spacing: 14) {
                     PopupSymbol(name: "bolt", size: 14, color: Theme.muted)
-                    Text("Power mode").font(.popup(13)).foregroundStyle(Theme.ink)
-                    Spacer(minLength: 8)
-                    PopupSegmented(items: power.available.map { ($0, $0 == "auto" ? "Auto" : $0.capitalized) }, selection: mode,
-                                   height: 26, size: 13.5, enabled: false) { _ in }
-                        .frame(width: 200)
-                        .opacity(0.9)
-                        .help("Energy mode is picked on your iPhone; this shows what is in use.")
+                    Text("Power mode").font(.popup(13)).foregroundStyle(Theme.ink).fixedSize()
+                    PopupSegmented(items: power.available.map { ($0, $0 == "auto" ? "Auto" : $0.capitalized) },
+                                   selection: power.choice ?? mode, height: 26, size: 13.5,
+                                   enabled: !model.demoMode && power.ready && !model.settingUpPower && !model.settingPowerMode) { choice in
+                        Task { await model.setPowerMode(choice) }
+                    }
+                        .frame(maxWidth: .infinity)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("Power mode")
+                        .accessibilityHint(power.overridden
+                            ? "Your Mac is temporarily using Low Power for heat or battery safety. Your selected mode will return afterward."
+                            : power.ready ? "Changes your Mac energy mode." : "Set up energy mode in Squeak Settings before changing it.")
+                        .help(power.ready
+                            ? (power.overridden ? "Low Power is temporarily held for heat or battery safety; your selection returns afterward." : "Change your Mac energy mode.")
+                            : "Set up energy mode in Squeak Settings before changing it.")
                 }
                 .frame(minHeight: 40)
+                if let note = model.powerModeNote {
+                    Text(note).font(.popup(11.5)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.leading, 36)
+                }
             }
         }
         .padding(14)
