@@ -126,15 +126,19 @@ export async function runGateway(): Promise<number> {
     if (!relay || !voice) {
       throw new Error("Set the channel, key, SIP host, extension and password.");
     }
-    if (!voice.pin) {
-      throw new Error("Set a PIN: without one a call could not take an answer, and there would be no point.");
-    }
     const speaker = chooseSpeaker(env);
     const store = new RtdbRest(databaseUrl(env.SQUEAK_REMOTE_DATABASE_URL));
     // One phone, registered for as long as the gateway runs: it rings you for questions and answers when you call in.
     const phone = new SipPhone({ line: voice.line, speaker });
     // The pin: the add-on's option, until one is changed from an app (kept beside it, in the add-on's storage).
     const pins = new PinKeeper(voice.pin, path.join(voice.line.dir, "voice-pin.json"));
+    if (pins.status() === "none") {
+      logger.warn(
+        "no pin is set: calls will tell you what is waiting but cannot take a key answer, and calling in is refused. Set one in the Squeak app (Settings > Phone calls) or the add-on's pin option.",
+      );
+    } else if (pins.status() === "off") {
+      logger.info("the pin is turned off: a call takes a key answer without asking for one");
+    }
     const gateway = new VoiceGateway({
       store,
       channel: relay.channel,
@@ -142,6 +146,7 @@ export async function runGateway(): Promise<number> {
       line: phoneLine(phone),
       callee: voice.callee,
       pin: () => pins.current(),
+      pinRequired: () => pins.requiresPin(),
       pins,
     });
     // "skip": a call from the one allowed extension is proof enough. Squeak's own calls to you always ask.
@@ -154,6 +159,8 @@ export async function runGateway(): Promise<number> {
     phone.onIncoming((incoming) => {
       void handleIncoming(incoming, {
         pin: callInPin,
+        // With no pin ever set, a caller cannot be checked: only "skip" (the extension is the proof) lets one in.
+        allowed: () => skipPinOnCallIn || pins.answerable(),
         directory: async () => directory.current() ?? (await directory.refresh()),
         uplink,
         encode: encodeOpus,

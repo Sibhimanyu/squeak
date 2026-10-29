@@ -4,6 +4,7 @@ import type { CallResult } from "./baresip-line.js";
 import { CallDialog } from "./dialog.js";
 import {
   readPinChange,
+  readPinControl,
   readRequest,
   requestPath,
   REQUEST_KIND,
@@ -25,8 +26,10 @@ export interface GatewayDependencies {
   callee: string | null;
   /** Read at each call, so a pin changed from an app applies at once. Null: calls tell, never take an answer. */
   pin: () => string | null;
-  /** Answers "change the pin"; absent: such a request is refused. */
-  pins?: Pick<PinKeeper, "change"> | null;
+  /** Read at each call: false when the pin was turned off on purpose, so keys answer without one. Default true. */
+  pinRequired?: () => boolean;
+  /** Answers pin changes and controls; absent: such a request is refused. */
+  pins?: Pick<PinKeeper, "change" | "disable" | "enable" | "reset" | "status"> | null;
   now?: () => number;
 }
 
@@ -102,6 +105,7 @@ export class VoiceGateway {
       const read = readRequest(key, id, doc, this.now());
       // Not a call: it may be a pin change, which is also sealed with the key and needs the current pin.
       const pinChange = read.ok ? null : readPinChange(key, id, doc, this.now());
+      const pinControl = read.ok || pinChange?.ok ? null : readPinControl(key, id, doc, this.now());
       // Remember it first, synchronously: a second pass (the stream wakes one while another runs) must see
       // it as taken. Then claim: an undeletable document is left for the next pass, never run twice.
       this.handled.push(id);
@@ -126,6 +130,26 @@ export class VoiceGateway {
         await store.set(resultPath(channel, id), sealResult(key, answer));
         continue;
       }
+      if (pinControl?.ok) {
+        const request = pinControl.request;
+        const pins = this.deps.pins;
+        const outcome = !pins
+          ? { ok: false as const, reason: "This add-on cannot change its pin from an app." }
+          : request.action === "status"
+            ? { ok: true as const, state: pins.status() }
+            : request.action === "disable"
+              ? pins.disable(request.current)
+              : request.action === "enable"
+                ? pins.enable(request.next)
+                : pins.reset(request.next);
+        // The action and whether it worked, never a pin.
+        logger.info("voice pin control", { action: request.action, ok: outcome.ok });
+        const answer: CallResultDoc = outcome.ok
+          ? { v: 1, id, at: this.now(), status: "pinctl", ok: true, state: outcome.state }
+          : { v: 1, id, at: this.now(), status: "pinctl", ok: false, reason: outcome.reason };
+        await store.set(resultPath(channel, id), sealResult(key, answer));
+        continue;
+      }
       if (!read.ok) {
         logger.info("voice gateway dropped a request", { reason: read.reason });
         continue;
@@ -133,7 +157,15 @@ export class VoiceGateway {
       const { request } = read;
       const callee = request.callee ?? this.deps.callee;
       const result: CallResult = callee
-        ? await this.deps.line.call(callee, new CallDialog(request.script, request.answerable ? this.deps.pin() : null))
+        ? await this.deps.line.call(
+            callee,
+            // An unanswerable request is tell-only whatever the pin says; "pin off" only matters when keys are allowed.
+            new CallDialog(
+              request.script,
+              request.answerable ? this.deps.pin() : null,
+              request.answerable ? (this.deps.pinRequired?.() ?? true) : true,
+            ),
+          )
         : { status: "failed", reason: "No phone extension is set. Set it in Squeak's settings on your Mac." };
       const body: CallResultDoc =
         result.status === "answered"

@@ -3,7 +3,16 @@ import { describe, expect, it } from "vitest";
 
 import { generateChannel } from "../remote/remote-crypto.js";
 import type { CallRequest } from "./relay-protocol.js";
-import { readRequest, readResult, sealRequest, sealResult } from "./relay-protocol.js";
+import {
+  parsePinAction,
+  readPinControl,
+  readRequest,
+  readResult,
+  sealBody,
+  sealPinControl,
+  sealRequest,
+  sealResult,
+} from "./relay-protocol.js";
 
 const { key } = generateChannel();
 const NOW = 1_800_000_000_000;
@@ -82,5 +91,94 @@ describe("results", () => {
     const doc = sealResult(key, { v: 1, id: "abc", at: NOW, status: "unanswered" });
     const forged = { box: doc.box, sig: crypto.randomBytes(32).toString("hex") };
     expect(readResult(key, "abc", forged, offered)).toBeNull();
+  });
+});
+
+describe("pin actions", () => {
+  it("accepts exactly the keys each action takes, digits 4 to 12", () => {
+    expect(parsePinAction({ action: "change", current: "1234", next: "5678" })).toEqual({
+      action: "change",
+      current: "1234",
+      next: "5678",
+    });
+    expect(parsePinAction({ action: "disable", current: "1234" })).toEqual({ action: "disable", current: "1234" });
+    expect(parsePinAction({ action: "enable", next: "123456789012" })).toEqual({
+      action: "enable",
+      next: "123456789012",
+    });
+    expect(parsePinAction({ action: "reset", next: null })).toEqual({ action: "reset", next: null });
+    expect(parsePinAction({ action: "reset", next: "4321" })).toEqual({ action: "reset", next: "4321" });
+  });
+
+  it("refuses extra or missing keys and bad digits", () => {
+    for (const bad of [
+      null,
+      "x",
+      [],
+      { action: "status" },
+      { action: "change", current: "1234" },
+      { action: "change", current: "1234", next: "12" },
+      { action: "disable", current: "1234", next: "5678" },
+      { action: "disable" },
+      { action: "disable", current: 1234 },
+      { action: "enable", next: "12ab" },
+      { action: "enable", next: "1234567890123" },
+      { action: "enable", next: null },
+      { action: "reset" },
+      { action: "reset", next: "12" },
+      { action: "reset", next: "1234", current: "1234" },
+      { action: "explode", next: "1234" },
+    ]) {
+      expect(parsePinAction(bad)).toBeNull();
+    }
+  });
+});
+
+describe("pinctl", () => {
+  const base = { v: 1 as const, id: "c1", at: NOW, expiresAt: NOW + 25_000, kind: "pinctl" as const };
+
+  it("round-trips each action and hides the pin in the box", () => {
+    for (const action of [
+      { action: "status" as const },
+      { action: "disable" as const, current: "4821" },
+      { action: "enable" as const, next: "135790" },
+      { action: "reset" as const, next: null },
+      { action: "reset" as const, next: "135790" },
+    ]) {
+      const doc = sealPinControl(key, { ...base, ...action });
+      expect(doc.box).not.toContain("4821");
+      expect(readPinControl(key, "c1", doc, NOW + 1000)).toEqual({ ok: true, request: { ...base, ...action } });
+    }
+  });
+
+  it("rejects another key, another id, an expired request and malformed bodies", () => {
+    const doc = sealPinControl(key, { ...base, action: "status" });
+    expect(readPinControl(generateChannel().key, "c1", doc, NOW).ok).toBe(false);
+    expect(readPinControl(key, "other", doc, NOW).ok).toBe(false);
+    expect(readPinControl(key, "c1", doc, NOW + 10 * 60_000)).toEqual({ ok: false, reason: "expired" });
+    for (const body of [
+      { ...base, action: "status", next: "1234" },
+      { ...base, action: "disable" },
+      { ...base, action: "enable", next: "12" },
+      { ...base, action: "change", current: "1234", next: "5678" },
+      { ...base, action: "wipe" },
+    ]) {
+      expect(readPinControl(key, "c1", sealBody(key, "req", "c1", body, NOW), NOW).ok).toBe(false);
+    }
+  });
+
+  it("reads a pinctl result, and drops a bad state", () => {
+    const seal = (body: Record<string, unknown>) => sealResult(key, { v: 1, id: "c1", at: NOW, ...body } as never);
+    expect(readResult(key, "c1", seal({ status: "pinctl", ok: true, state: "off" }), [])).toEqual({
+      status: "pinctl",
+      ok: true,
+      state: "off",
+    });
+    expect(readResult(key, "c1", seal({ status: "pinctl", ok: false, reason: "no" }), [])).toEqual({
+      status: "pinctl",
+      ok: false,
+      reason: "no",
+    });
+    expect(readResult(key, "c1", seal({ status: "pinctl", ok: true, state: "maybe" }), [])).toBeNull();
   });
 });

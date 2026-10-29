@@ -49,6 +49,9 @@ mkdir -p "$BRAND"
 cp "$REPO"/brand/logo/png/squeak-duck-full-color-*.png "$REPO"/brand/logo/png/squeak-duck-compact-*.png \
    "$REPO"/brand/logo/png/squeak-lockup-horizontal-*.png "$BRAND/"
 cp "$REPO/brand/logo/png/duckTemplate.png" "$REPO/brand/logo/png/duckTemplate@2x.png" "$BRAND/"
+# Native floating duck mood sprites (the window reads these from the app bundle at runtime).
+mkdir -p "$BRAND/mood-sprites"
+cp "$REPO"/brand/mood-sprites/duck*.png "$BRAND/mood-sprites/"
 # The bot's profile picture (Telegram's "Use Squeak logo", Cliq's "Save logo"): the same JPG the daemon uploads.
 cp "$REPO/brand/logo/png/squeak-bot-avatar-640.jpg" "$BRAND/"
 

@@ -7,26 +7,35 @@ import SwiftUI
 /// Home | Needs you (red count) | Usage | Controls: a bordered track, the selected tab a raised pill.
 struct PopupTabBar: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let nav = PopupNav.shared
     var selected: PopupNav.Tab
+    var namespace: Namespace.ID
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 2) {
             ForEach(Array(PopupNav.Tab.allCases.enumerated()), id: \.element) { i, tab in
-                if i > 0 { Spacer(minLength: 0) }
                 let on = tab == selected
-                Button { nav.show(tab) } label: {
-                    HStack(spacing: 6) {
-                        icon(tab, on: on)
-                        Text(tab.title).font(.popup(12.5, on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted).lineLimit(1).fixedSize()
+                Button {
+                    if reduceMotion {
+                        nav.show(tab)
+                    } else {
+                        withAnimation(.snappy(duration: 0.24)) { nav.show(tab) }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        if tab != .needsYou { icon(tab, on: on) }
+                        Text(tab == .needsYou ? "Needs you" : tab.title).font(.popup(11, on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
                         if tab == .needsYou, needs > 0 { PopupBadge(count: needs) }
                     }
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 5)
                     .frame(height: 28)
+                    .frame(maxWidth: .infinity)
                     .background {
                         if on {
-                            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.selectedStrong)
-                                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Color.wash(0.10)))
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Theme.selectedStrong)
+                                .matchedGeometryEffect(id: "popup-selected-tab", in: namespace)
                         }
                     }
                     .contentShape(Rectangle())
@@ -39,7 +48,6 @@ struct PopupTabBar: View {
         .padding(2.5)
         .frame(height: 30)
         .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.wash(0.025)))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Color.wash(0.11)))
     }
 
     private var needs: Int { model.grouped.first(where: { $0.kind == .needsYou })?.sessions.count ?? 0 }
@@ -60,6 +68,7 @@ struct PopupTabBar: View {
 /// The top of every tab screen: a leading title (or the Home summary) and trailing controls, then the tab bar.
 struct PopupTabHeader<Leading: View, Trailing: View>: View {
     var selected: PopupNav.Tab
+    var namespace: Namespace.ID
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
@@ -73,9 +82,56 @@ struct PopupTabHeader<Leading: View, Trailing: View>: View {
             .frame(minHeight: 32)
             .padding(.top, 12)
             .padding(.bottom, 13)
-            PopupTabBar(selected: selected)
+            PopupTabBar(selected: selected, namespace: namespace)
                 .padding(.bottom, 12)
         }
+    }
+}
+
+/// The overflow menu shared by every tab. Search always opens Home before revealing its field.
+struct PopupMoreMenu: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Binding var searching: Bool
+    let isHome: Bool
+    let dismiss: () -> Void
+
+    var body: some View {
+        Menu {
+            Button("New chat…", systemImage: "plus") { PopupNav.shared.openNewChat() }
+                .keyboardShortcut("n", modifiers: .command)
+            Button(isHome && searching ? "Hide search" : "Search sessions…", systemImage: "magnifyingglass") {
+                if isHome && searching {
+                    searching = false
+                    model.query = ""
+                } else {
+                    if reduceMotion { PopupNav.shared.show(.home) }
+                    else { withAnimation(.snappy(duration: 0.24)) { PopupNav.shared.show(.home) } }
+                    searching = true
+                }
+            }
+            if model.setupNeedsAttention {
+                Button("Finish setting up…", systemImage: "checklist") { dismiss(); model.openSettings(.setup) }
+            }
+            Divider()
+            Button("Settings…", systemImage: "gearshape") { dismiss(); model.openSettings() }
+                .keyboardShortcut(",")
+            Button("Check for Updates…", systemImage: "arrow.down.circle") {
+                dismiss(); model.updater.checkForUpdates()
+            }
+            .disabled(!model.updater.canCheck)
+            Divider()
+            Button("Quit Squeak", systemImage: "power") { QuitIntent.shared.quitCompletely() }
+                .keyboardShortcut("q")
+        } label: {
+            Lucide(.ellipsis, size: 14, label: "More", color: Theme.ink).frame(width: 28, height: 26)
+                .background(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).fill(Color.wash(0.07)))
+                .overlay(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).strokeBorder(Color.wash(0.12)))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityLabel("More options")
     }
 }
 
@@ -83,16 +139,16 @@ struct PopupTabHeader<Leading: View, Trailing: View>: View {
 
 struct PopupHomeTop: View {
     @Environment(AppModel.self) private var model
-    @Binding var overflowOpen: Bool
     @Binding var searching: Bool
     let dismiss: () -> Void
+    var namespace: Namespace.ID
 
     var body: some View {
         @Bindable var model = model
         let working = model.grouped.first(where: { $0.kind == .working })?.sessions.count ?? 0
         let total = model.visibleSessions.count
         VStack(spacing: 0) {
-            PopupTabHeader(selected: .home) {
+            PopupTabHeader(selected: .home, namespace: namespace) {
                 HStack(spacing: 12) {
                     Circle().fill(model.isConnected ? Theme.done : Theme.offline).frame(width: 8, height: 8).padding(.leading, 2)
                         .accessibilityHidden(true)
@@ -105,16 +161,8 @@ struct PopupHomeTop: View {
             } trailing: {
                 Button { PopupNav.shared.openNewChat() } label: { Text("New chat") }
                     .buttonStyle(PopupButtonStyle(height: 26, hPad: 13, size: 12.5))
-                Button { overflowOpen.toggle() } label: {
-                    Lucide(.ellipsis, size: 14, label: "More", color: Theme.ink).frame(width: 28, height: 26)
-                        .background(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).fill(Color.wash(overflowOpen ? 0.12 : 0.07)))
-                        .overlay(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).strokeBorder(Color.wash(0.12)))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityValue(overflowOpen ? "expanded" : "collapsed")
+                PopupMoreMenu(searching: $searching, isHome: true, dismiss: dismiss)
             }
-            if overflowOpen { overflow }
             if searching {
                 SearchField(text: $model.query)
                     .padding(.bottom, 12)
@@ -123,30 +171,11 @@ struct PopupHomeTop: View {
         }
     }
 
-    private var overflow: some View {
-        VStack(spacing: 0) {
-            MenuRow(title: "New chat…", hint: "⌘N") { overflowOpen = false; PopupNav.shared.openNewChat() }
-            MenuRow(title: searching ? "Hide search" : "Search sessions…") {
-                searching.toggle()
-                if !searching { model.query = "" }
-                overflowOpen = false
-            }
-            if model.setupNeedsAttention {
-                MenuRow(title: "Finish setting up…") { dismiss(); model.openSettings(.setup) }
-            }
-            MenuRow(title: "Settings…", hint: "⌘,") { dismiss(); model.openSettings() }
-                .keyboardShortcut(",")
-            MenuRow(title: "Check for Updates…", disabled: !model.updater.canCheck) { dismiss(); model.updater.checkForUpdates() }
-            MenuRow(title: "Quit Squeak", hint: "⌘Q") { QuitIntent.shared.quitCompletely() }
-                .keyboardShortcut("q")
-        }
-        .padding(.bottom, 8)
-    }
-
     private func updateRow(_ text: String, action: String, perform: @escaping () -> Void) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Space.s) {
             Text(text).font(.system(size: 12)).foregroundStyle(Theme.muted)
-            Spacer(minLength: 0)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
             Button(action, action: perform).buttonStyle(.plain)
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
         }
@@ -157,7 +186,7 @@ struct PopupHomeTop: View {
         let updater = model.updater
         let showUpdate = updater.readyVersion != nil || updater.availableVersion != nil || model.updateNote != nil
         if showHelp || model.launchOfferPending || showUpdate {
-            VStack(alignment: .leading, spacing: Space.s) {
+            VStack(alignment: .leading, spacing: 4) {
                 if let ready = updater.readyVersion {
                     updateRow("Update \(ready) is ready", action: "Restart to update") { updater.installNow() }
                     UpdateNotesDisclosure(notes: updater.readyNotes)
@@ -175,7 +204,7 @@ struct PopupHomeTop: View {
                 }
                 LaunchOfferBanner()
             }
-            .padding(.bottom, 12)
+            .padding(.bottom, 8)
         }
     }
 }
@@ -183,6 +212,7 @@ struct PopupHomeTop: View {
 /// The Mac strip: the awake line and the usage line in one card. Each opens its tab.
 struct PopupMacStrip: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let awakeLine = model.panelAwakeLine
@@ -206,7 +236,10 @@ struct PopupMacStrip: View {
     }
 
     private func stripRow(icon: some View, text: String, tab: PopupNav.Tab, label: String) -> some View {
-        Button { PopupNav.shared.show(tab) } label: {
+        Button {
+            if reduceMotion { PopupNav.shared.show(tab) }
+            else { withAnimation(.snappy(duration: 0.24)) { PopupNav.shared.show(tab) } }
+        } label: {
             HStack(spacing: 14) {
                 icon.frame(width: 22)
                 Text(verbatim: text).font(.popup(13)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.85)
@@ -345,7 +378,7 @@ struct PopupHomeBand: View {
     }
 
     private func cards<C: View>(_ sessions: [HostSession], @ViewBuilder _ card: @escaping (HostSession) -> C) -> some View {
-        VStack(spacing: 7.5) {
+        VStack(spacing: 5) {
             ForEach(sessions) { s in
                 card(s).contextMenu {
                     Button(model.pinned.contains(s.key) ? "Unpin" : "Pin to top") { model.togglePin(s.key) }
@@ -410,6 +443,7 @@ struct PopupSessionCard: View {
     var detail: String?
     var showTime = false
     var unread = false
+    @State private var hovered = false
 
     var body: some View {
         let third = detail ?? (session.state == .working ? model.liveStep(session.key) : nil)
@@ -429,12 +463,13 @@ struct PopupSessionCard: View {
                     }
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, 10)
+            .padding(.horizontal, 12).padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .popupCard()
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.wash(hovered ? 0.08 : 0.025)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovered = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityLabel([SessionText.headline(session), SessionText.secondLine(session), SessionText.stateWord(session), third ?? ""].filter { !$0.isEmpty }.joined(separator: ", "))
     }
@@ -453,7 +488,7 @@ struct PopupAskCard: View {
         let choices = Array(model.choices(for: session.key).prefix(4))
         HStack(alignment: .top, spacing: 11) {
             Capsule().fill(Theme.needsYou).frame(width: 4.5).padding(.vertical, 1).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Button { PopupNav.shared.openSession(session.key) } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -463,7 +498,7 @@ struct PopupAskCard: View {
                         }
                         Text(verbatim: SessionText.secondLine(session)).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
                         if let q = model.question(for: session.key), !q.isEmpty {
-                            Text(verbatim: q).font(.popup(12.5)).foregroundStyle(Theme.ink).lineLimit(2)
+                            Text(verbatim: q).font(.popup(12.5)).foregroundStyle(Theme.ink).lineLimit(3)
                                 .multilineTextAlignment(.leading).padding(.top, 3)
                         }
                     }
@@ -472,7 +507,7 @@ struct PopupAskCard: View {
                 }
                 .buttonStyle(.plain)
                 if !choices.isEmpty {
-                    VStack(spacing: 6) {
+                    VStack(spacing: 4) {
                         ForEach(choices, id: \.letter) { c in PopupOptionRow(choice: c, busy: sending == c.letter, size: .compact) { send(c) }
                             .disabled(sending != nil)
                         }
@@ -481,7 +516,7 @@ struct PopupAskCard: View {
                 if let note { Text(verbatim: note).font(.popup(11.5)).foregroundStyle(Theme.muted).lineLimit(2) }
             }
         }
-        .padding(.leading, 10).padding(.trailing, 10).padding(.vertical, 10)
+        .padding(.leading, 9).padding(.trailing, 9).padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .popupCard()
         .accessibilityElement(children: .contain)
@@ -517,7 +552,7 @@ struct PopupOptionRow: View {
                 Text(choice.letter).font(.popup(large ? 14 : 12, .semibold)).foregroundStyle(Theme.ink)
                     .frame(width: large ? 28 : 20, height: large ? 28 : 20)
                     .background(Circle().fill(Color.wash(0.10)))
-                Text(verbatim: choice.label).font(.popup(large ? 14 : 12.5, large ? .semibold : .regular)).foregroundStyle(Theme.ink).lineLimit(2)
+                Text(verbatim: choice.label).font(.popup(large ? 14 : 12.5, large ? .semibold : .regular)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
             }

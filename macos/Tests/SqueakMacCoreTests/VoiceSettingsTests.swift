@@ -31,3 +31,45 @@ import Testing
         #expect(SettingsSection.groups.flatMap { $0 }.contains(.voice))
     }
 }
+
+@Suite struct PinControlTests {
+    private func json(_ a: PinAction) throws -> [String: Any] {
+        let o = try JSONSerialization.jsonObject(with: a.requestBody()) as? [String: Any]
+        return try #require(o?["pin"] as? [String: Any])
+    }
+
+    @Test func everyActionHasExactlyItsKeys() throws {
+        let c = try json(.change(current: "1111", next: "2222"))
+        #expect(c.count == 3 && c["action"] as? String == "change" && c["current"] as? String == "1111" && c["next"] as? String == "2222")
+        let d = try json(.disable(current: "1111"))
+        #expect(d.count == 2 && d["action"] as? String == "disable" && d["current"] as? String == "1111")
+        let e = try json(.enable(next: "2222"))
+        #expect(e.count == 2 && e["action"] as? String == "enable" && e["next"] as? String == "2222")
+        let r = try json(.reset(next: "3333"))
+        #expect(r.count == 2 && r["action"] as? String == "reset" && r["next"] as? String == "3333")
+        let off = try json(.reset(next: nil))
+        #expect(off.count == 2 && off["action"] as? String == "reset" && off["next"] is NSNull)
+    }
+
+    @Test func validationIsFourToTwelveDigits() {
+        for ok in ["1234", "123456789012"] { #expect(PinRules.isValid(ok)) }
+        for bad in ["", "123", "1234567890123", "12a4", "12 34", "١٢٣٤"] { #expect(!PinRules.isValid(bad)) }
+        #expect(PinRules.problem(new: "1234", repeated: "1234") == nil)
+        #expect(PinRules.problem(new: "1234", repeated: "1235") != nil)
+        #expect(PinRules.problem(new: "12", repeated: "12") != nil)
+    }
+
+    @Test func decodesThePinFieldAndItsAbsence() throws {
+        for (raw, state) in [("set", PinState.set), ("off", .off), ("none", .none), ("unknown", .unknown)] {
+            let v = try JSONDecoder().decode(VoiceSettings.self, from: Data(#"{"mode":"direct","pin":"\#(raw)"}"#.utf8))
+            #expect(v.pinState == state)
+        }
+        let old = try JSONDecoder().decode(VoiceSettings.self, from: Data(#"{"mode":"direct","callee":null}"#.utf8))
+        #expect(old.pin == nil && old.pinState == nil)
+    }
+
+    @Test func refusalReasonComesFromTheError() {
+        #expect(PinOutcome.reason(from: Data(#"{"error":"That is not your PIN."}"#.utf8)) == "That is not your PIN.")
+        #expect(PinOutcome.reason(from: Data("nope".utf8)) == "Squeak could not do that.")
+    }
+}

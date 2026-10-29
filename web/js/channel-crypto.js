@@ -95,5 +95,5 @@ export async function verify(publicKeyX963Base64, message, signatureBase64) {
   return subtle().verify({ name: "ECDSA", hash: "SHA-256" }, key, fromBase64(signatureBase64), utf8(message));
 }
 
-/** What this client tells the Mac it reads (its presence `caps`): same as the iPhone, so a phone and a browser never fight over the format. */
-export const CAPABILITIES = ["z", "split"];
+/** What this client tells the Mac it reads (its presence `caps`): same as the iPhone, so a phone and a browser never fight over the format. "films" asks the Mac to list RasanAI films (`films` in the view; it sends none to a client that does not say so). */
+export const CAPABILITIES = ["z", "split", "films"];

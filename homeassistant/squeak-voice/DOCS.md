@@ -11,21 +11,21 @@ PIN stays here: Squeak and Firebase never see it.
 
 Run `squeak voice-relay` on the Mac: it makes the channel and key and prints `database_url`, `channel` and `key`.
 
-| Option         | What                                                                                                                                                                                     |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `database_url` | Squeak's Firebase Realtime Database URL                                                                                                                                                  |
-| `channel`      | from `squeak voice-relay`                                                                                                                                                                |
-| `key`          | from `squeak voice-relay`                                                                                                                                                                |
-| `sip_host`     | 3CX's "Registrar Hostname" (e.g. `1348.3cx.cloud`)                                                                                                                                       |
-| `sip_proxy`    | 3CX's "Outbound Proxy (SBC) Address" with port (e.g. `192.168.68.114:5060`)                                                                                                              |
-| `extension`    | the extension made for Squeak (3CX: Extension Number)                                                                                                                                    |
-| `auth_id`      | 3CX's Authentication ID                                                                                                                                                                  |
-| `password`     | 3CX's Authentication password                                                                                                                                                            |
-| `callee`       | optional: the extension to ring when Squeak does not name one. Squeak's Settings on your Mac sets it                                                                                     |
-| `pin`          | 4 to 12 digits you key in to answer; required, or a call could never take an answer                                                                                                      |
-| `speech`       | `natural` (a local neural voice, about 300 MB of memory for a second or two per prompt) or `plain` for a small machine: robotic, but light                                               |
-| `call_in_pin`  | `ask` (default) or `skip`: whether a call you make into Squeak asks for the PIN. Squeak's calls to you always do. Only the one extension set in Squeak's Settings may call in either way |
-| `transport`    | `udp` unless your SBC says otherwise                                                                                                                                                     |
+| Option         | What                                                                                                                                                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `database_url` | Squeak's Firebase Realtime Database URL                                                                                                                                                                                      |
+| `channel`      | from `squeak voice-relay`                                                                                                                                                                                                    |
+| `key`          | from `squeak voice-relay`                                                                                                                                                                                                    |
+| `sip_host`     | 3CX's "Registrar Hostname" (e.g. `1348.3cx.cloud`)                                                                                                                                                                           |
+| `sip_proxy`    | 3CX's "Outbound Proxy (SBC) Address" with port (e.g. `192.168.68.114:5060`)                                                                                                                                                  |
+| `extension`    | the extension made for Squeak (3CX: Extension Number)                                                                                                                                                                        |
+| `auth_id`      | 3CX's Authentication ID                                                                                                                                                                                                      |
+| `password`     | 3CX's Authentication password                                                                                                                                                                                                |
+| `callee`       | optional: the extension to ring when Squeak does not name one. Squeak's Settings on your Mac sets it                                                                                                                         |
+| `pin`          | 4 to 12 digits you key in to answer. Optional: leave it empty and set, change, turn off or reset it from the Squeak app (Settings > Phone calls). With none, a call only tells you what is waiting and calling in is refused |
+| `speech`       | `natural` (a local neural voice, about 300 MB of memory for a second or two per prompt) or `plain` for a small machine: robotic, but light                                                                                   |
+| `call_in_pin`  | `ask` (default) or `skip`: whether a call you make into Squeak asks for the PIN. Squeak's calls to you always do. Only the one extension set in Squeak's Settings may call in either way                                     |
+| `transport`    | `udp` unless your SBC says otherwise                                                                                                                                                                                         |
 
 ## Notes
 

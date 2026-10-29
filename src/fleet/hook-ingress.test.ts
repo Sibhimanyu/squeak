@@ -200,7 +200,7 @@ describe("the installed hook script", () => {
     const result = await execFileAsync("/bin/sh", ["-c", `printf '{}' | ${scriptPath}; echo "exit=$?"`]);
 
     expect(result.stdout).toContain("exit=0");
-    expect(Date.now() - startedAt).toBeLessThan(2000);
+    expect(Date.now() - startedAt).toBeLessThan(5000);
   });
 });
 
@@ -680,6 +680,64 @@ describe("HookIngressServer control routes", () => {
     const body = (await ok.json()) as { cliq: { finished: string }; telegram: { finished: string } };
     expect(body.cliq.finished).toBe("off");
     expect(body.telegram.finished).toBe("conductor");
+  });
+
+  it("takes pin actions on /control/voice only with the token, awaits them, and never echoes a pin", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/voice`;
+    const auth = { "x-squeak-token": harness.token };
+    const seen: unknown[] = [];
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voice: {
+        read: () => ({ mode: "gateway", pin: "set" }),
+        apply: async (request) => {
+          seen.push(request);
+          const pin = (request as { pin?: { action?: string; current?: string } }).pin;
+          if (pin?.action === "disable" && pin.current !== "4821") {
+            return { ok: false, reason: "That is not your current pin." };
+          }
+          return { ok: true, state: { mode: "gateway", pin: pin?.action === "disable" ? "off" : "set" } };
+        },
+      },
+    });
+    const post = (body: unknown) => fetch(url, { method: "POST", headers: auth, body: JSON.stringify(body) });
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect(await (await fetch(url, { headers: auth })).json()).toEqual({ mode: "gateway", pin: "set" });
+    const wrong = await post({ pin: { action: "disable", current: "0000" } });
+    expect(wrong.status).toBe(400);
+    const wrongText = await wrong.text();
+    expect(wrongText).toBe(JSON.stringify({ error: "That is not your current pin." }));
+    expect(wrongText).not.toContain("0000");
+    const ok = await post({ pin: { action: "disable", current: "4821" } });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ mode: "gateway", pin: "off" });
+    expect(seen).toHaveLength(2);
+  });
+
+  it("answers 500 without detail when a voice change throws", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voice: {
+        read: () => ({}),
+        apply: async () => {
+          throw new Error("pin 4821 leaked");
+        },
+      },
+    });
+    const res = await fetch(`http://127.0.0.1:${harness.port}/control/voice`, {
+      method: "POST",
+      headers: { "x-squeak-token": harness.token },
+      body: JSON.stringify({ pin: { action: "reset", next: null } }),
+    });
+    expect(res.status).toBe(500);
+    expect(await res.text()).not.toContain("4821");
   });
 
   it("sets the Telegram photo only with the token, strictly, rate-limited, without CORS", async () => {

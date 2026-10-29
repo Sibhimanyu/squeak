@@ -148,9 +148,10 @@ struct SessionDetail: View {
             HStack(alignment: .center, spacing: 12) {
                 Text(verbatim: SessionText.headline(session))
                     .font(.system(size: 18, weight: .bold)).lineLimit(1).truncationMode(.tail)
+                    .frame(minWidth: 0, alignment: .leading)
                     .help(SessionText.headline(session))
                     .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 12)
+                tabStrip
                 if session.capabilities.openInHost.isSupported {
                     Button { model.openInHost() } label: {
                         Lucide(.externalLink, size: Metrics.icon, color: Theme.ink)
@@ -170,32 +171,37 @@ struct SessionDetail: View {
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras)
             }
-            tabStrip.padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
     }
 
-    /// Chat | Activity as one wide segmented control: a hairline-framed track, the chosen half raised.
+    /// Compact view switcher beside Open in Conductor, so it stays available without taking a full header row.
     private var tabStrip: some View {
-        HStack(spacing: 0) {
-            ForEach(DetailTab.allCases) { t in
-                Button { tab = t } label: {
-                    Text(t.rawValue).font(.system(size: 12, weight: tab == t ? .semibold : .regular))
-                        .foregroundStyle(tab == t ? Theme.ink : Theme.muted)
-                        .frame(maxWidth: .infinity, minHeight: 22)
-                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(tab == t ? Theme.selectedStrong : .clear))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(tab == t ? .isSelected : [])
-            }
+        HStack(spacing: 2) {
+            tabButton(.chat, symbol: "bubble.left")
+            tabButton(.activity, symbol: "list.bullet")
         }
         .padding(2)
         .background(Theme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.lineStrong))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chat or activity")
+    }
+
+    private func tabButton(_ value: DetailTab, symbol: String) -> some View {
+        Button { tab = value } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: tab == value ? .semibold : .regular))
+                .foregroundStyle(tab == value ? Theme.ink : Theme.muted)
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(tab == value ? Theme.selectedStrong : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(value.rawValue)
+        .accessibilityLabel(value.rawValue)
+        .accessibilityAddTraits(tab == value ? .isSelected : [])
     }
 
     /// `Claude · working · Conductor · repo · branch · +12 −3` (§8.2: the git line lives here, not in the list row).
@@ -397,7 +403,7 @@ struct SessionDetail: View {
         .padding(.top, 8)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity)
-        .background(Theme.bg)
+        .squeakWindowCanvas()
     }
 
     // MARK: Composer

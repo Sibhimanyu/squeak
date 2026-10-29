@@ -6,7 +6,7 @@ import SwiftUI
 struct ConductorSettings: View {
     var body: some View {
         ScrollView {
-            ConductorRelayCard().padding(.horizontal, 28).padding(.leading, 20).padding(.top, 8)
+            ConductorRelayCard().padding(.horizontal, 24).padding(.top, 8)
         }
     }
 }

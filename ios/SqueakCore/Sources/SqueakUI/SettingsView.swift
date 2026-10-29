@@ -246,6 +246,11 @@ struct SettingsView: View {
                         : "Needs your Mac on Squeak's faster channel. Until then, a working chat shows its latest six steps.")
                 }
                 Section {
+                    Toggle("Ask for Face ID to send", isOn: Binding(
+                        get: { model.asksForFaceID },
+                        set: { on in Task { _ = await model.setAsksForFaceID(on) } }))
+                        .tint(Theme.primaryFill)
+                        .frame(minHeight: 44)
                     if !model.hiddenHere.isEmpty {
                         Button("Show \(model.hiddenHere.count) hidden \(model.hiddenHere.count == 1 ? "chat" : "chats") again") { model.showHiddenAgain() }
                             .frame(minHeight: 44)
@@ -262,7 +267,7 @@ struct SettingsView: View {
                         .frame(minHeight: 44)
                 } header: { SettingsHeader("This iPhone", icon: "iphone") } footer: {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Replies are signed on this iPhone and checked by your Mac. Face ID is asked before the first one, and again after Squeak has been away for five minutes.")
+                        Text("Replies are signed on this iPhone and checked by your Mac. With Ask for Face ID to send on, Face ID is asked before the first one, and again after Squeak has been away for five minutes. Turning it off asks for Face ID once.")
                         if !model.hiddenHere.isEmpty {
                             Text("Hiding only tidies this iPhone. A hidden chat comes back by itself when it has news.")
                         }
@@ -327,9 +332,15 @@ private struct HotspotSection: View {
                 .frame(minHeight: 44)
             } else {
                 DisclosureGroup(hotspot.configured ? "Change name or password" : "Set up hotspot failover", isExpanded: Binding(get: { editing || setupOpen }, set: { if !editing { setupOpen = $0 } })) {
-                TextField("Hotspot name", text: $ssid).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("Hotspot name", text: $ssid)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .settingsInput()
+                    .accessibilityLabel("Hotspot name")
                     .frame(minHeight: 44)
-                SecureField("Hotspot password", text: $password).frame(minHeight: 44)
+                SecureField("Hotspot password", text: $password)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .settingsInput()
+                    .accessibilityLabel("Hotspot password")
                 Toggle("Switch if its Wi-Fi drops", isOn: $enabled).tint(Theme.primaryFill).frame(minHeight: 44)
                 Button(busy ? "Saving…" : "Save on your Mac") {
                     run(.configure(ssid: ssid.trimmingCharacters(in: .whitespaces), password: password, enabled: enabled)) { editing = false }

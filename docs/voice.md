@@ -47,7 +47,7 @@ SIP extension works.
 - Only `blocked_approval`, `blocked_question` and `asked_question` ring. Never a finish, a stall or an error.
 - One call per episode, at least 5 minutes between calls, and none in quiet hours.
 - **Answering needs `SQUEAK_VOICE_PIN`.** A call goes to whoever picks up, and an answer can start an agent that may run
-  with permissions off. Without a PIN a call can tell you but never takes an answer. Two wrong PINs hang up.
+  with permissions off. Without a PIN a call can tell you but never takes an answer, unless you turned the PIN off on purpose (see "Changing the pin"). Two wrong PINs hang up.
 
 1. `brew install baresip`.
 2. In 3CX, add an extension for Squeak (say 900). Note its extension number, Authentication ID and password.
@@ -86,11 +86,36 @@ Not tested against a real PBX: registration with 3CX, and the 3CX app's keypad s
 
 ## Changing the pin
 
-The pin starts as the add-on's `pin` option. From the iPhone app (Settings > Phone calls > Pin) you can change it: the
-app sends the current and the new pin, sealed in the phone's signed command; the Mac passes them to the add-on
-through the relay, and the add-on keeps the new one beside its options (`voice-pin.json`, 0600, in its own storage),
-where it wins over the option from then on. The Mac never stores it. A change needs the **current** pin, so someone
-who only holds the channel key cannot set their own, and five wrong guesses lock changes for ten minutes.
+The pin lives in a `PinKeeper` beside the line that places calls: in the add-on's storage (`voice-pin.json`, 0600) when
+the Home Assistant gateway calls, in `<support dir>/voice-pin.json` (0600) when this Mac calls directly. The add-on's
+`pin` option (or `SQUEAK_VOICE_PIN` on the Mac) is only the starting value; a saved file wins from then on. The Mac app
+never stores it. The file is `{ "pin": "4821" }` (a pin is required) or `{ "off": true }` (turned off); neither file
+nor option means "none". The add-on starts without a pin and says so in its log.
+
+From either app (Settings > Phone calls > Pin), or the iPhone's signed `voice` command, or `POST /control/voice` with
+`{ "pin": PinAction }`:
+
+- **Change** (`change`: current, next): needs the current pin.
+- **Turn off** (`disable`: current): needs the current pin. A call then takes a key answer without asking for one, so
+  anyone who picks the phone up can reply by key. Calling in also asks nothing.
+- **Turn on / set** (`enable`: next): from "off" or "none"; refused while a pin is on.
+- **Reset** (`reset`: next, or `null` to leave the requirement off): needs no current pin and is not subject to the
+  lockout, so a forgotten pin can be replaced. See the trust note.
+
+Wrong current pins from `change` and `disable` share one lockout: five wrong guesses lock them for ten minutes. A
+pin is never logged and never in `/state`; the view only says `pin: "set" | "off" | "none" | "unknown"`.
+
+Through the relay, `change` is the original `pin` request (so an old add-on keeps working); the rest are a sealed
+`pinctl` request (`disable` / `enable` / `reset` / `status`) answered with `{ status: "pinctl", ok, state | reason }`.
+An add-on from before `pinctl` never answers, and the Mac then says "The Home Assistant add-on is too old to do that:
+update it." The Mac asks `status` at start and when the voice view is read with a cache older than a minute; until
+the first answer the view says `unknown`.
+
+**Trust.** A reset without the old pin is authorised by the Mac, which holds the channel key: a paired device's signed
+command (the phone asks Face ID or the passcode first) or the Mac app (after Touch ID or the login password). So
+someone holding the channel key alone can reset the pin; the key lives only on the Mac and in the add-on's options, as
+before. The earlier rule, that a stolen channel key cannot switch the pin off, no longer holds for exactly this reason.
+Changing and turning off still need the current pin.
 
 ## Calling in
 
@@ -99,7 +124,8 @@ Dial Squeak's extension (the one in the add-on's options) from your 3CX app, fro
 1. It answers only if the call is from the extension set in Squeak for Mac, Settings > Phone calls: with none set
    nobody can call in. It then asks for the PIN (two tries), unless the add-on option `call_in_pin` is `skip`
    (a call from that one extension is then proof enough; Squeak's own calls to you always ask). The option lives in
-   the add-on, not the Mac app, so a stolen channel key cannot switch the PIN off.
+   the add-on, not the Mac app. With the pin turned off from an app it asks nothing; with no pin ever set, calling in is
+   refused (unless `call_in_pin` is `skip`).
 2. "Which chat?": the chats that can take a message now, those waiting on you first (up to six, by number).
 3. "Say your message after the beep, then press hash." (up to two minutes).
 4. The recording goes to the Mac as a small Opus file in a sealed, signed message (`voiceup`); the Mac transcribes

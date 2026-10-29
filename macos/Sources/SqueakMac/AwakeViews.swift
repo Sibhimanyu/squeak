@@ -182,7 +182,7 @@ struct AwakeSettings: View {
                 hotspotSection
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
         .task { await model.readAwake() }
     }
 

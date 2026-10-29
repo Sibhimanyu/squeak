@@ -4,6 +4,20 @@
 // to words (format.js), never parsed as HTML.
 
 import { MAX_REPLY_CHARS, RENAME_MAX_CHARS } from "./channel.js";
+import { canAnswer } from "./chat-extras-logic.js";
+import {
+  attachButton,
+  bindPhotoDrops,
+  earlierNode,
+  menuNode,
+  messageBody,
+  noticeLine,
+  overlays,
+  photoBar,
+  setupNode,
+  stuckNotice,
+  taskStrip,
+} from "./chat-extras-view.js";
 import { h } from "./dom.js";
 import {
   agentName,
@@ -17,7 +31,9 @@ import {
   setupLine,
   stripMarkdown,
 } from "./format.js";
+import { askCard } from "./plan-question-card.js";
 import { isFailed, statusLine } from "./send-state.js";
+import { stalled as readStalled } from "./view-model.js";
 
 const clock = (iso) => {
   const t = Date.parse(iso);
@@ -75,7 +91,8 @@ function titleBlock(session, env) {
 }
 
 function head(session, env) {
-  const setup = setupLine(session);
+  const x = env.extras ?? null;
+  const setup = x ? setupNode(x, session) : setupLine(session);
   const renamable = env.rename && session.conductorSessionId && session.open !== false && !env.rename.active;
   return h(
     "div",
@@ -86,9 +103,10 @@ function head(session, env) {
       { class: "grow" },
       titleBlock(session, env),
       h("div", { class: "meta" }, [session.label, session.git, session.agent].filter(Boolean).join(" · ")),
-      setup ? h("div", { class: "meta setup", "aria-label": `Runs ${setup}` }, setup) : null,
+      x ? setup : setup ? h("div", { class: "meta setup", "aria-label": `Runs ${setup}` }, setup) : null,
     ),
     renamable ? h("button", { class: "btn quiet", type: "button", onclick: env.rename.start }, "Rename") : null,
+    x ? menuNode(x, session) : null,
     h("span", { class: `chip ${sessionStateClass(session)}` }, sessionStateWord(session)),
   );
 }
@@ -97,14 +115,14 @@ function who(name, at) {
   return h("div", { class: "who" }, h("span", { class: "name" }, name), at ? h("span", { class: "at" }, at) : null);
 }
 
-function sentMessage(send, env, { line = true } = {}) {
+function sentMessage(send, env, session, { line = true } = {}) {
   const failed = isFailed(send.status);
   const text = statusLine(send.status);
   return h(
     "div",
     { class: "msg mine", "data-row": send.id },
     who("You", clock(new Date(send.date).toISOString())),
-    h("div", { class: "bubble" }, send.text),
+    ...messageBody(env.extras ?? null, session, send.text, (t) => h("div", { class: "bubble" }, t)),
     line ? h("div", { class: failed ? "line bad" : "line", role: failed ? "alert" : "status" }, text) : null,
     failed
       ? h(
@@ -139,16 +157,16 @@ function row(r, session, env) {
         "div",
         { class: r.muted ? "msg theirs muted" : "msg theirs", "data-row": r.id },
         who(name, clock(r.atISO)),
-        h("p", { class: "message" }, plain(r.text)),
+        ...messageBody(env.extras ?? null, session, r.text, (t) => h("p", { class: "message" }, plain(t))),
       );
     case "sent":
-      return sentMessage(r.send, env);
+      return sentMessage(r.send, env, session);
     case "steer":
       return h(
         "div",
         { class: "msg mine", "data-row": r.id },
         who("You", ""),
-        h("div", { class: "bubble" }, r.text),
+        ...messageBody(env.extras ?? null, session, r.text, (t) => h("div", { class: "bubble" }, t)),
         h("div", { class: "line" }, statusLine(r.status)),
       );
     case "history":
@@ -157,13 +175,13 @@ function row(r, session, env) {
             "div",
             { class: "msg mine", "data-row": r.id },
             who("You", r.at ? clock(r.at) : ""),
-            h("div", { class: "bubble" }, r.text),
+            ...messageBody(env.extras ?? null, session, r.text, (t) => h("div", { class: "bubble" }, t)),
           )
         : h(
             "div",
             { class: "msg theirs muted", "data-row": r.id },
             who(name, r.at ? clock(r.at) : ""),
-            h("p", { class: "message" }, plain(r.text)),
+            ...messageBody(env.extras ?? null, session, r.text, (t) => h("p", { class: "message" }, plain(t))),
           );
     case "worked":
       return h("div", { class: "worked", "data-row": r.id }, `Worked · ${r.steps} ${r.steps === 1 ? "step" : "steps"}`);
@@ -212,21 +230,11 @@ function row(r, session, env) {
   }
 }
 
-function questionCards(session) {
+function questionCards(session, env) {
   const nodes = [];
   if (session.failure) nodes.push(card("Why it failed", h("p", { class: "message" }, session.failure)));
-  const question = session.question;
-  if (question && (question.plan || question.questions?.length)) {
-    nodes.push(
-      card(
-        question.plan ? "Plan waiting for you" : "Question waiting for you",
-        question.plan
-          ? h("p", { class: "message" }, plain(question.plan))
-          : question.questions.map((prompt) => h("p", { class: "message" }, plain(prompt.question))),
-        h("p", { class: "note" }, "Answer it in Squeak on your Mac or iPhone. Squeak for Web only sends replies."),
-      ),
-    );
-  }
+  const asked = env.extras ? askCard(session, env.extras) : null;
+  if (asked) nodes.push(asked);
   return nodes;
 }
 
@@ -315,9 +323,39 @@ function queueStack(cards, session, env) {
   );
 }
 
+function footNotices(session, env) {
+  const x = env.extras;
+  if (!x) return [];
+  const nodes = [];
+  const stuck = readStalled(session);
+  if (stuck && session.state === "working") {
+    nodes.push(
+      stuckNotice({
+        stalled: stuck,
+        canStop: typeof session.conductorSessionId === "string" && session.conductorSessionId !== "",
+        stopping: env.stopping,
+        stop: () => void env.actions.stop(),
+      }),
+    );
+  }
+  const strip = taskStrip(x, session);
+  if (strip) nodes.push(strip);
+  const notice = noticeLine(x, session);
+  if (notice) nodes.push(notice);
+  return nodes;
+}
+
 function composer(session, env) {
+  const x = env.extras ?? null;
   const block = replyBlock(session);
-  if (block) return h("div", { class: "chat-foot" }, h("p", { class: "note" }, block));
+  if (block) {
+    return h(
+      "div",
+      { class: "chat-foot" },
+      ...footNotices(session, env),
+      h("p", { class: "note" }, x && canAnswer(session) ? "Waiting on you. Answer it above." : block),
+    );
+  }
   const name = agentName(session.agent);
   const working = session.state === "working";
   const area = h("textarea", {
@@ -346,8 +384,9 @@ function composer(session, env) {
     { class: "btn primary", type: "button", onclick: () => submit("queue") },
     working ? "Queue" : "Send",
   );
+  const photos = x ? x.photoState(session.key) : null;
   const refresh = () => {
-    const typed = area.value.trim() !== "";
+    const typed = area.value.trim() !== "" || (photos?.list.some((p) => p.state === "ready") ?? false);
     // While the agent works and nothing is typed, the one button is Stop; once you type it is Queue again.
     stopButton.hidden = !working || typed;
     sendButton.hidden = working && !typed;
@@ -356,7 +395,18 @@ function composer(session, env) {
   };
   const submit = (mode) => {
     const text = area.value;
-    if (!text.trim()) return;
+    const withPhotos = photos?.list.length > 0;
+    if (!text.trim() && !withPhotos) return;
+    if (withPhotos) {
+      // Photos first (each is saved on the Mac), then one message naming them; the words come back if it fails.
+      void x.sendWithPhotos(session, text, mode).then((handedOn) => {
+        if (!handedOn) return;
+        env.actions.draft("");
+        const box = document.getElementById("composer");
+        if (box) box.value = "";
+      });
+      return;
+    }
     area.value = "";
     env.actions.draft(area.value);
     refresh();
@@ -374,12 +424,14 @@ function composer(session, env) {
     }
   });
   refresh();
-  return h(
+  const foot = h(
     "div",
     { class: "chat-foot" },
+    ...footNotices(session, env),
     queueStack(env.cards, session, env),
+    x ? photoBar(x, session) : null,
     area,
-    h("div", { class: "actions" }, stopButton, steerButton, sendButton),
+    h("div", { class: "actions" }, x ? attachButton(x, session) : null, stopButton, steerButton, sendButton),
     working
       ? h(
           "p",
@@ -389,6 +441,8 @@ function composer(session, env) {
       : null,
     env.problem ? h("p", { class: "line bad", role: "alert" }, env.problem) : null,
   );
+  if (x) bindPhotoDrops(area, foot, x, session);
+  return foot;
 }
 
 /** The three parts of the chat pane: header, scrolling timeline, footer. */
@@ -399,7 +453,7 @@ export function chatNodes(session, env) {
     const asked = askLine(session);
     if (asked) body.append(card("Waiting on you", h("p", { class: "message" }, plain(asked))));
   }
-  body.append(...questionCards(session));
+  body.append(...questionCards(session, env));
   if (!env.verbose && !env.hasHistory && canReply(session)) {
     body.append(
       h(
@@ -411,9 +465,14 @@ export function chatNodes(session, env) {
       ),
     );
   }
-  body.append(...env.rows.map((r) => row(r, session, env)));
+  const x = env.extras ?? null;
+  const earlier = x ? earlierNode(x, session) : null;
+  if (earlier) body.append(earlier);
+  const older = x ? x.earlierRows(session) : [];
+  body.append(...[...older, ...env.rows].map((r) => row(r, session, env)));
   const options = optionsCard(session, env);
   if (options) body.append(options);
   nodes.push(body, composer(session, env));
+  if (x) nodes.push(...overlays(x, session, env));
   return nodes;
 }

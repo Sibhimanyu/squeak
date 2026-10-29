@@ -93,6 +93,17 @@ the Mac.
 
 The full design and setup are in [`remote-channel.md`](remote-channel.md).
 
+### No install: Squeak for Web
+
+If you would rather not sideload the app, open <https://squeak-mac.web.app/> in
+a phone browser. It has the same features as the iPhone app (new chats with
+presets and split, answering plans and questions, queue and steer, Mac
+controls, keep awake, notifications, usage, films review), except Face ID and
+the same-Wi-Fi direct route. It needs the same Firebase project
+(`SQUEAK_REMOTE_PROJECT`). Pair by choosing iPhone › Pair an iPhone in Squeak
+for Mac, then scan the code with the page's camera button or paste the link.
+The iPhone app is optional.
+
 ## Known limits
 
 - **Conductor's interface is undocumented.** Live replies depend on how

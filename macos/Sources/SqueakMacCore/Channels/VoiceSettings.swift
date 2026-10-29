@@ -9,9 +9,11 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public var callee: String?
     /// The extension the daemon's own config or the add-on falls back to.
     public var defaultCallee: String?
+    /// "set" / "off" / "none" / "unknown"; nil from a daemon that predates PIN management (hide the section).
+    public var pin: String?
 
-    public init(mode: String = "off", callee: String? = nil, defaultCallee: String? = nil) {
-        self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee
+    public init(mode: String = "off", callee: String? = nil, defaultCallee: String? = nil, pin: String? = nil) {
+        self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.pin = pin
     }
 
     public var isOn: Bool { mode != "off" }

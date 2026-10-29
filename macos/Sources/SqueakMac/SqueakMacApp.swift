@@ -64,6 +64,12 @@ struct SqueakCommands: Commands {
             Button("Check for updates…") { model.updater.checkForUpdates() }
                 .disabled(!model.updater.canCheck)
         }
+        CommandGroup(replacing: .sidebar) {
+            Button("Toggle Sidebar") {
+                NotificationCenter.default.post(name: .squeakToggleSidebar, object: nil)
+            }
+            .keyboardShortcut("b", modifiers: .command)
+        }
         CommandMenu("Sessions") {
             ForEach(0..<9, id: \.self) { i in
                 let list = model.ordered.flattened
@@ -96,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let model = AppModel.shared
         model.start()
         MenuBarController.shared.start(model: model)
+        FloatingDuckController.shared.start(model: model)
         let env = ProcessInfo.processInfo.environment
         if model.demoMode, let refinement = env["SQUEAK_MAC_REFINEMENT_DEMO"] {
             // Demo data only, left running for a person or a UI test. No onboarding and no ordinary window:

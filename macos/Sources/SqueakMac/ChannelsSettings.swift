@@ -68,7 +68,7 @@ struct TelegramSettings: View {
             botPicture
             telegramActions
         }
-        .formStyle(.grouped)
+        .settingsForm()
         .task { await m.refresh() }
         .sheet(isPresented: $linking) { LinkChatSheet().environment(app) }
         .confirmationDialog("Turn off Telegram?", isPresented: $confirmOff) {
@@ -100,7 +100,7 @@ struct TelegramSettings: View {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Restarting the Squeak service…").foregroundStyle(.secondary) }
             }
             if let n = m.notice { Footnote(n) }
-        } header: { Text("Status") }
+        } header: { SettingSubsectionHeader(title: "Status", symbol: "paperplane.fill", color: Color(red: 0.45, green: 0.62, blue: 1.0)) }
     }
 
     private func telegramToken(m: Bindable<ChannelsModel>) -> some View {
@@ -125,7 +125,7 @@ struct TelegramSettings: View {
                     Button("Cancel") { self.m.tokenDraft = ""; self.m.changingToken = false }.buttonStyle(QuietButtonStyle())
                 }
             }
-        } footer: {
+        } header: { SettingSubsectionHeader(title: "Bot token", symbol: "key.fill", color: Theme.needsYou) } footer: {
             Footnote("Create a bot with @BotFather, then paste its token here. The token stays on this Mac, in Squeak's settings file, and is never shown again.")
         }
     }
@@ -150,7 +150,7 @@ struct TelegramSettings: View {
             }
             Button("Link a chat…") { linking = true }.buttonStyle(SecondaryButtonStyle())
                 .disabled(!(m.tokenSet || !m.tokenDraft.trimmed.isEmpty) && !m.demo)
-        } header: { Text("Allowed chats") } footer: {
+        } header: { SettingSubsectionHeader(title: "Allowed chats", symbol: "person.2.fill", color: Theme.working) } footer: {
             if m.channels?.telegram.open == true && m.allowed.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Lucide(.triangleAlert, size: 13, color: Theme.muted)
@@ -238,7 +238,7 @@ struct CliqSettings: View {
             botLogo
             twoWaySection
         }
-        .formStyle(.grouped)
+        .settingsForm()
         .task { await m.refresh() }
     }
 
@@ -271,7 +271,7 @@ struct CliqSettings: View {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Restarting the Squeak service…").foregroundStyle(.secondary) }
             }
             if let n = self.m.notice { Footnote(n) }
-        } header: { Text("Webhook") } footer: {
+        } header: { SettingSubsectionHeader(title: "Webhook", symbol: "link", color: Color(red: 0.45, green: 0.62, blue: 1.0)) } footer: {
             Footnote("The webhook sends cards to Cliq. Find it in the bot's webhook settings.")
         }
     }
@@ -289,7 +289,7 @@ struct CliqSettings: View {
                     Button("Remove webhook") { Task { await self.m.removeWebhook() } }.buttonStyle(DestructiveButtonStyle()).disabled(self.m.restarting)
                 }
             }
-        } header: { Text("Owner") } footer: {
+        } header: { SettingSubsectionHeader(title: "Owner", symbol: "person.crop.circle.fill", color: Theme.working) } footer: {
             Footnote(self.m.cliqDirty ? "The owner email and ID say whose messages Squeak accepts. Saving restarts the Squeak service for a few seconds." : "The owner email and ID say whose messages Squeak accepts.")
         }
     }
@@ -306,7 +306,7 @@ struct CliqSettings: View {
                 }
                 Button("Save logo…") { saveLogo() }.buttonStyle(SecondaryButtonStyle())
             }
-        } header: { Text("Logo") } footer: {
+        } header: { SettingSubsectionHeader(title: "Bot logo", symbol: "photo.fill", color: Color(red: 0.72, green: 0.55, blue: 0.95)) } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 if let msg = m.logoMessage { Footnote(msg) }
                 Footnote("Zoho blocks setting it from Squeak. In Cliq: Bots → Squeak → Edit → upload the picture, crop to the circle, and Save.")
@@ -323,7 +323,7 @@ struct CliqSettings: View {
     }
 
     private var twoWaySection: some View {
-        Section { twoWay } header: { Text("Replies") }
+        Section { twoWay } header: { SettingSubsectionHeader(title: "Replies", symbol: "arrowshape.turn.up.left.fill", color: Theme.done) }
     }
 
     @ViewBuilder private var twoWay: some View {
@@ -415,20 +415,20 @@ struct IPhoneSettings: View {
                     StatusLine(dot: m.daemonReachable ? nil : Theme.needsYou,
                                text: m.daemonReachable ? "Update the Squeak service" : "Squeak service is off",
                                detail: m.daemonReachable ? "This service is older than the app and can't pair phones." : "Start it to see and pair iPhones.")
-                } header: { Text("Squeak for iPhone") }
+                } header: { SettingSubsectionHeader(title: "Squeak service", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) }
             } else if m.remote == nil {
-                Section { StatusLine(dot: nil, text: "Checking") } header: { Text("Squeak for iPhone") }
+                Section { StatusLine(dot: nil, text: "Checking") } header: { SettingSubsectionHeader(title: "Squeak service", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) }
             } else if !m.phoneEnabled {
                 Section {
                     StatusLine(dot: nil, text: "The iPhone channel is off")
-                } header: { Text("Squeak for iPhone") } footer: {
+                } header: { SettingSubsectionHeader(title: "Squeak service", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) } footer: {
                     Footnote("Squeak for iPhone talks to this Mac through a Firebase project you own. To turn it on, add SQUEAK_REMOTE_PROJECT=<your project id> to Squeak's settings file, then restart the Squeak service. docs/remote-channel.md has the steps.")
                 }
             } else {
                 enabledSections
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
         .task { await m.pollRemote() }
         .sheet(isPresented: $pairing, onDismiss: { m.endPairing() }) { PairSheet().environment(app) }
         .confirmationDialog("Disconnect this iPhone?", isPresented: Binding(get: { revoking != nil }, set: { if !$0 { revoking = nil } }), presenting: revoking) { d in
@@ -449,20 +449,35 @@ struct IPhoneSettings: View {
         if !pending.isEmpty {
             Section {
                 ForEach(pending) { PendingRow(request: $0) }
-            } header: { Text("Waiting for you") } footer: {
+            } header: { SettingSubsectionHeader(title: "Waiting for you", symbol: "person.crop.circle.badge.questionmark", color: Theme.needsYou) } footer: {
                 Footnote("Approve only if the code matches the one on your iPhone.")
             }
         }
         Section {
             if devices.isEmpty {
-                Text("No iPhone is paired").foregroundStyle(.secondary)
+                HStack(spacing: Space.m) {
+                    Image(systemName: "iphone.gen3")
+                        .font(.system(size: 19, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(width: 40, height: 40)
+                        .background(Theme.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("No iPhone paired yet").font(Typo.label).foregroundStyle(Theme.ink)
+                        Text("Pair your phone to keep up with sessions away from your Mac.")
+                            .font(Typo.body).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             ForEach(devices) { d in
-                HStack {
+                HStack(spacing: Space.m) {
+                    Image(systemName: "iphone.gen3")
+                        .font(.system(size: 17, weight: .medium)).foregroundStyle(Color(red: 0.45, green: 0.62, blue: 1.0))
+                        .frame(width: 38, height: 38)
+                        .background(Color(red: 0.45, green: 0.62, blue: 1.0).opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.control))
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(d.name).font(.system(size: 13, weight: .medium))
+                        Text(d.name).font(Typo.label).foregroundStyle(Theme.ink)
                         if let at = d.pairedAt {
-                            Text("Paired \(at.formatted(date: .abbreviated, time: .omitted))").font(.caption).foregroundStyle(.secondary)
+                            Text("Paired \(at.formatted(date: .abbreviated, time: .omitted))").font(Typo.meta).foregroundStyle(Theme.muted)
                         }
                     }
                     Spacer()
@@ -478,7 +493,7 @@ struct IPhoneSettings: View {
                     Button("Disconnect all…") { confirmReset = true }.buttonStyle(QuietButtonStyle())
                 }
             }
-        } header: { Text("Paired iPhones") } footer: {
+        } header: { SettingSubsectionHeader(title: "Paired iPhones", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) } footer: {
             Footnote("Pairing always waits for you to approve it here. A paired iPhone can read your sessions and send replies.")
         }
         if let n = m.notice { Section { Footnote(n) } }

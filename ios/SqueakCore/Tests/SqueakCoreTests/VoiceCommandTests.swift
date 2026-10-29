@@ -45,6 +45,28 @@ final class VoiceCommandTests: XCTestCase {
             .object(["pin": .object(["current": .string("4821"), "next": .string("135790")])]))
     }
 
+    func testPinActionsHaveExactlyTheContractKeys() throws {
+        func action(_ a: PinAction) throws -> J { try open(.pinAction(a))["change"]! }
+        XCTAssertEqual(try action(.change(current: "4821", next: "135790")),
+            .object(["pinAction": .object(["action": .string("change"), "current": .string("4821"), "next": .string("135790")])]))
+        XCTAssertEqual(try action(.disable(current: "4821")),
+            .object(["pinAction": .object(["action": .string("disable"), "current": .string("4821")])]))
+        XCTAssertEqual(try action(.enable(next: "135790")),
+            .object(["pinAction": .object(["action": .string("enable"), "next": .string("135790")])]))
+        XCTAssertEqual(try action(.reset(next: "135790")),
+            .object(["pinAction": .object(["action": .string("reset"), "next": .string("135790")])]))
+        // Reset to off is an explicit null, not a missing key.
+        XCTAssertEqual(try action(.reset(next: nil)),
+            .object(["pinAction": .object(["action": .string("reset"), "next": .null])]))
+    }
+
+    func testViewDecodesThePinStateAndToleratesItsAbsence() throws {
+        let with = try JSONDecoder().decode(VoiceView.self, from: Data(#"{"mode":"direct","pin":"off"}"#.utf8))
+        XCTAssertEqual(with.pin, "off")
+        let without = try JSONDecoder().decode(VoiceView.self, from: Data(#"{"mode":"gateway"}"#.utf8))
+        XCTAssertNil(without.pin)
+    }
+
     func testAPinIsFourToTwelveDigits() {
         for ok in ["1234", "135790", "123456789012"] { XCTAssertTrue(VoiceFormat.isPin(ok), ok) }
         for bad in ["", "123", "12ab", "1234567890123", "12 34", "+1234"] { XCTAssertFalse(VoiceFormat.isPin(bad), bad) }

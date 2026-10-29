@@ -27,7 +27,7 @@ const MAX_PIN_LENGTH = 12;
 /**
  * The keypad, as a small state machine. Answering needs the PIN: a call goes to whoever picks the
  * phone up, and an answer can start an agent that may run with permissions off. With no PIN set
- * nothing can be answered by key, only heard.
+ * nothing can be answered by key, only heard; with the PIN turned off on purpose, keys answer straight away.
  */
 export class CallDialog {
   private stage: "greeting" | "pin" | "question" | "done" = "greeting";
@@ -37,10 +37,17 @@ export class CallDialog {
   constructor(
     private readonly script: CallScript,
     private readonly pin: string | null,
+    /** False when the person turned the pin off: keys answer at once, with nothing to enter first. */
+    private readonly pinRequired = true,
   ) {}
 
   private get canAnswer(): boolean {
-    return this.script.options.length > 0 && this.pin !== null;
+    return this.script.options.length > 0 && (this.pin !== null || !this.pinRequired);
+  }
+
+  /** A pin is asked for before the question. */
+  private get asksPin(): boolean {
+    return this.canAnswer && this.pin !== null && this.pinRequired;
   }
 
   /**
@@ -48,7 +55,7 @@ export class CallDialog {
    * after pick-up is silence on the line.
    */
   prompts(): string[] {
-    const out = this.canAnswer
+    const out = this.asksPin
       ? [
           `${this.script.greeting} To answer, enter your pin, then hash.`,
           this.script.question,
@@ -61,7 +68,7 @@ export class CallDialog {
   }
 
   start(): DialogAction[] {
-    if (this.canAnswer) {
+    if (this.asksPin) {
       this.stage = "pin";
       return [{ type: "play", text: `${this.script.greeting} To answer, enter your pin, then hash.` }];
     }

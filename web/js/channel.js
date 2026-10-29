@@ -3,6 +3,7 @@
 // ios/SqueakCore Channel.swift and src/remote/remote-bridge.ts.
 
 import { CAPABILITIES, open, pairingCode, seal, sign } from "./channel-crypto.js";
+import { COMMAND_KINDS, shape } from "./command-shapes.js";
 import { toHex } from "./encoding.js";
 import { foldHistory, liveHandle, liveHistoryHandle, readTurn } from "./live.js";
 import { CHANNEL_ID } from "./pairing-link.js";
@@ -76,6 +77,8 @@ export class Channel {
       recentMore: recent?.recentMore,
       workspaces: recent?.workspaces,
       projectIcons: recent?.projectIcons,
+      chatModels: recent?.chatModels,
+      chatWorkers: recent?.chatWorkers,
     };
   }
 
@@ -215,6 +218,19 @@ export class Channel {
     return this.#signed({ v: 1, kind: "queue", sessionId, messageId, action, nonce, expiresAt }, privateKey);
   }
 
+  /**
+   * The signed document for any command kind in `command-shapes.js` (start, answer, attach, history,
+   * subagent, diff, close, workspace, setup, usage, stats, awake, lidActions, controls, notify, voice,
+   * telegramAvatar, hotspot, workflow, film, media, image). `input` is checked the way the Mac checks it
+   * (strict types, exactly its keys; a CommandInputError names what is wrong) before anything is sealed.
+   * Each kind also has a named method: `channel.startDocument(input, privateKey)`, and so on.
+   */
+  async commandDocument(kind, input, privateKey) {
+    const fields = shape(kind, input);
+    const { nonce, expiresAt } = this.#envelope();
+    return this.#signed({ v: 1, kind, ...fields, nonce, expiresAt }, privateKey);
+  }
+
   send(id, document) {
     return this.db.set(this.path("commands", id), document);
   }
@@ -238,4 +254,10 @@ export class Channel {
   async deleteResult(id) {
     await this.db.delete(this.path("results", id)).catch(() => undefined);
   }
+}
+
+for (const kind of COMMAND_KINDS) {
+  Channel.prototype[`${kind}Document`] = function commandOfKind(input, privateKey) {
+    return this.commandDocument(kind, input, privateKey);
+  };
 }

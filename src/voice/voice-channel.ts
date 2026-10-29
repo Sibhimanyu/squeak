@@ -18,8 +18,11 @@ export interface VoiceChannelDependencies {
   monitor: Pick<FleetMonitor, "onPush" | "snapshot" | "refresh">;
   replier: FleetReplier;
   line: VoiceLine;
-  /** Whether a PIN exists where the keys are taken; without one a call only tells you. */
-  canTakeKeys: boolean;
+  /**
+   * Whether keys can answer where the call is taken (a PIN is set, or was turned off on purpose); without one a call
+   * only tells you. A function is read at each call, since an app can change the pin at runtime.
+   */
+  canTakeKeys: boolean | (() => boolean);
   policy: CallPolicy;
   graceMs?: number;
   /** A one-off note to Telegram and Cliq: what an answer by phone did, or why a call failed. */
@@ -97,7 +100,9 @@ export class VoiceChannel {
     const target = replyTargetFor(current.session);
     const text = safely(() => this.deps.replier.lastTurnText(target));
     const stamp = turnStamp(text);
-    const canAnswer = canReplyFromCard(current, this.deps.replier) && this.deps.canTakeKeys;
+    const canAnswer =
+      canReplyFromCard(current, this.deps.replier) &&
+      (typeof this.deps.canTakeKeys === "function" ? this.deps.canTakeKeys() : this.deps.canTakeKeys);
     const script = composeScript(current, text, canAnswer);
 
     this.calling = true;

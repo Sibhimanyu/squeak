@@ -23,6 +23,11 @@ let (promoteId, promoteDocument) = try channel.queueDocument(
 let (hotspotId, hotspotDocument) = try channel.hotspotDocument(
     action: .configure, ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true, signer: signer, now: madeAt)
 let (lidId, lidDocument) = try channel.lidActionsDocument(.init(mute: false, freezeApps: true), signer: signer, now: madeAt)
+let (voicePinId, voicePinDocument) = try channel.voiceDocument(.pinAction(.disable(current: "4821")), signer: signer, now: madeAt)
+let (voiceResetId, voiceResetDocument) = try channel.voiceDocument(.pinAction(.reset(next: "135790")), signer: signer, now: madeAt)
+let (voiceResetOffId, voiceResetOffDocument) = try channel.voiceDocument(.pinAction(.reset(next: nil)), signer: signer, now: madeAt)
+let (voiceEnableId, voiceEnableDocument) = try channel.voiceDocument(.pinAction(.enable(next: "135790")), signer: signer, now: madeAt)
+let (voiceChangeId, voiceChangeDocument) = try channel.voiceDocument(.pinAction(.change(current: "4821", next: "135790")), signer: signer, now: madeAt)
 let (controlsId, controlsDocument) = try channel.controlsDocument(.fans("60"), signer: signer, now: madeAt)
 let (tabId, tabDocument) = try channel.controlsDocument(.selectTab(1, title: "Heresay"), signer: signer, now: madeAt)
 let (statsId, statsDocument) = try channel.statsDocument(range: "30d", agent: "codex", signer: signer, now: madeAt)
@@ -115,6 +120,17 @@ let fixture: [String: Any] = [
     // What a closed lid does: mute off, pause chat apps on.
     "lidActionsCommandId": lidId,
     "lidActionsCommand": ["box": lidDocument.box, "sig": lidDocument.sig!, "device": lidDocument.device!],
+    // Calling-PIN actions (voice command, change.pinAction): disable, reset to a PIN, reset to off, enable, change.
+    "voicePinDisableCommandId": voicePinId,
+    "voicePinDisableCommand": ["box": voicePinDocument.box, "sig": voicePinDocument.sig!, "device": voicePinDocument.device!],
+    "voicePinResetCommandId": voiceResetId,
+    "voicePinResetCommand": ["box": voiceResetDocument.box, "sig": voiceResetDocument.sig!, "device": voiceResetDocument.device!],
+    "voicePinResetOffCommandId": voiceResetOffId,
+    "voicePinResetOffCommand": ["box": voiceResetOffDocument.box, "sig": voiceResetOffDocument.sig!, "device": voiceResetOffDocument.device!],
+    "voicePinEnableCommandId": voiceEnableId,
+    "voicePinEnableCommand": ["box": voiceEnableDocument.box, "sig": voiceEnableDocument.sig!, "device": voiceEnableDocument.device!],
+    "voicePinChangeCommandId": voiceChangeId,
+    "voicePinChangeCommand": ["box": voiceChangeDocument.box, "sig": voiceChangeDocument.sig!, "device": voiceChangeDocument.device!],
     // A live control from the Mac controls page: fans to 60%.
     "controlsCommandId": controlsId,
     "controlsCommand": ["box": controlsDocument.box, "sig": controlsDocument.sig!, "device": controlsDocument.device!],

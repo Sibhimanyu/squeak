@@ -7,7 +7,13 @@ import { CallPolicy } from "./policy.js";
 import { VoiceChannel } from "./voice-channel.js";
 
 function setup(
-  options: { result?: CallResult; pin?: string | null; text?: () => string | null; attention?: AttentionItem[] } = {},
+  options: {
+    result?: CallResult;
+    pin?: string | null;
+    keys?: () => boolean;
+    text?: () => string | null;
+    attention?: AttentionItem[];
+  } = {},
 ) {
   const waiting = item("asked_question");
   const notes: string[] = [];
@@ -37,7 +43,7 @@ function setup(
         return options.result ?? { status: "answered", letter: "B" };
       },
     },
-    canTakeKeys: options.pin === undefined ? true : options.pin !== null,
+    canTakeKeys: options.keys ?? (options.pin === undefined ? true : options.pin !== null),
     policy: new CallPolicy({ minGapMs: 0, quiet: null }),
     graceMs: 10,
     note: (message) => notes.push(message),
@@ -46,6 +52,15 @@ function setup(
 }
 
 describe("VoiceChannel.ring", () => {
+  it("re-reads whether keys can answer at each call, since an app can change the pin", async () => {
+    let answerable = false;
+    const { channel, waiting, dialogs } = setup({ keys: () => answerable, result: { status: "unanswered" } });
+    await channel.ring(waiting);
+    answerable = true;
+    await channel.ring(waiting, "second-episode");
+    expect(dialogs).toEqual([false, true]);
+  });
+
   it("sends the pressed letter to the chat that was read out", async () => {
     const { channel, waiting, sent, notes } = setup();
     await channel.ring(waiting);

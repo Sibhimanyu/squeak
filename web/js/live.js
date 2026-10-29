@@ -55,6 +55,8 @@ export function readHistory(history) {
     .filter((entry) => entry && (entry.role === "user" || entry.role === "assistant") && typeof entry.text === "string")
     .map((entry) => {
       const out = { role: entry.role, text: entry.text, at: typeof entry.at === "string" ? entry.at : null };
+      // The message's cursor: where "Earlier messages" asks the Mac to continue from.
+      if (typeof entry.id === "string" && entry.id !== "") out.id = entry.id;
       if (typeof entry.workBefore === "number" && entry.workBefore > 0) out.workBefore = entry.workBefore;
       return out;
     });

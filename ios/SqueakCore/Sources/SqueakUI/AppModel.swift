@@ -90,6 +90,7 @@ final class AppModel {
     @ObservationIgnored private var channel: Channel?
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var unlock = SendUnlock()
+    var sendConfirmation = SendConfirmation(defaults: .standard)
     /// The session open on screen.
     @ObservationIgnored private var watching: String?
     @ObservationIgnored private var liveTask: Task<Void, Never>?
@@ -1466,6 +1467,13 @@ final class AppModel {
             switch change {
             case .callee(let value): snapshot?.voice?.callee = value
             case .pin: break
+            case .pinAction(let action):
+                switch action {
+                case .change: snapshot?.voice?.pin = "set"
+                case .disable: snapshot?.voice?.pin = "off"
+                case .enable: snapshot?.voice?.pin = "set"
+                case .reset(let next): snapshot?.voice?.pin = next == nil ? "off" : "set"
+                }
             case .test: snapshot?.voice?.lastTest = .init(at: Date().timeIntervalSince1970 * 1000, status: "answered", letter: "A")
             }
             return nil
@@ -2223,9 +2231,31 @@ final class AppModel {
         }
     }
 
+    /// "Ask for Face ID to send" (this phone only, default on). Turning it off asks Face ID / passcode once.
+    var asksForFaceID: Bool { sendConfirmation.asksForFaceID }
+
+    func setAsksForFaceID(_ on: Bool) async -> Bool {
+        if on == sendConfirmation.asksForFaceID { return true }
+        if SendConfirmation.needsOwnerCheck(turningOn: on), !(await confirmOwner(reason: "Stop asking for Face ID to send")) { return false }
+        sendConfirmation.asksForFaceID = on
+        sendConfirmation.save(to: .standard)
+        if on { unlock = SendUnlock() }
+        return true
+    }
+
+    /// Face ID or the passcode, always: independent of "Ask for Face ID to send". True in demo and when the phone
+    /// has neither set up (nothing to prove with, as `confirmWithBiometrics` treats it).
+    func confirmOwner(reason: String) async -> Bool {
+        if demo { return true }
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else { return false }
+        return (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
+    }
+
     /// Face ID once, then not again until the app has been away for a while (`SendUnlock`).
     func confirmWithBiometrics(reason: String) async -> Bool {
-        if demo || !unlock.needsAuthentication { return true }
+        if demo || !sendConfirmation.needsConfirmation(unlock) { return true }
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else { return true }

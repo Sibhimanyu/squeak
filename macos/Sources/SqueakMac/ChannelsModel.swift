@@ -172,6 +172,58 @@ final class ChannelsModel {
         voiceSaving = false
     }
 
+    // The call PIN: busy and error only; the PIN itself is never stored here.
+    private(set) var pinBusy = false
+    private(set) var pinError: String?
+    private(set) var pinNotice: String?
+
+    /// Runs one PIN action. Returns true when the daemon did it. Callers clear their fields afterwards.
+    func runPin(_ action: PinAction, done: String) async -> Bool {
+        pinError = nil; pinNotice = nil
+        if demo { return false }
+        pinBusy = true
+        defer { pinBusy = false }
+        do {
+            switch try await client.pinAction(action) {
+            case let .done(view):
+                if let view { voice = view }
+                pinNotice = done
+                await refreshVoice()
+                return true
+            case let .refused(reason): pinError = reason
+            case .outdated: pinError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            pinError = "Squeak on this Mac did not answer."
+        }
+        return false
+    }
+
+    func changePin(current: String, new: String, repeated: String) async -> Bool {
+        if let p = PinRules.problem(new: new, repeated: repeated) { pinError = p; pinNotice = nil; return false }
+        guard PinRules.isValid(current) else { pinError = "Type your current PIN."; pinNotice = nil; return false }
+        return await runPin(.change(current: current, next: new), done: "Your PIN is changed.")
+    }
+
+    func turnPinOff(current: String) async -> Bool {
+        guard PinRules.isValid(current) else { pinError = "Type your current PIN."; pinNotice = nil; return false }
+        return await runPin(.disable(current: current), done: "The PIN is off.")
+    }
+
+    func turnPinOn(new: String, repeated: String) async -> Bool {
+        if let p = PinRules.problem(new: new, repeated: repeated) { pinError = p; pinNotice = nil; return false }
+        return await runPin(.enable(next: new), done: "Your PIN is set.")
+    }
+
+    /// Only after the owner check passed (Touch ID or the Mac's login password).
+    func resetPin(new: String?, repeated: String) async -> Bool {
+        if let new, let p = PinRules.problem(new: new, repeated: repeated) { pinError = p; pinNotice = nil; return false }
+        return await runPin(.reset(next: new), done: new == nil ? "The PIN is off." : "Your new PIN is set.")
+    }
+
+    func clearPinMessages() { pinError = nil; pinNotice = nil }
+    func reportPinError(_ text: String) { pinError = text; pinNotice = nil }
+
     func refreshNotify() async {
         if demo || notifyInFlight > 0 { return }
         do {

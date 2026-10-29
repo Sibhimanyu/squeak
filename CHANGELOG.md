@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.19.5] - 2026-10-29 (iOS)
+
+- Make editable fields in Settings easier to identify and use, including
+  extension, PIN, and hotspot fields.
+
 ## [2.0.0] - 2026-09-25
 
 The project is now **Squeak**: a pager for coding agents, not a Telegram

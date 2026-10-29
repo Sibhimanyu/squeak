@@ -10,7 +10,7 @@ import SwiftUI
 /// close it first, so focus moves with nothing left behind.
 struct PopoverView: View {
     @Environment(AppModel.self) private var model
-    @State private var overflowOpen = false
+    @Namespace private var tabSelectionNamespace
     @State private var searching = false
     @State private var sessionStore = PopupSessionModel()
     let nav = PopupNav.shared
@@ -41,7 +41,7 @@ struct PopoverView: View {
         switch nav.screen {
         case .tab(.home):
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
-                PopupHomeTop(overflowOpen: $overflowOpen, searching: $searching, dismiss: dismissMenu)
+                PopupHomeTop(searching: $searching, dismiss: dismissMenu, namespace: tabSelectionNamespace)
             } band: {
                 PopupHomeBand()
             } footer: {
@@ -49,21 +49,21 @@ struct PopoverView: View {
             }
         case .tab(.needsYou):
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
-                PopupTabHeader(selected: .needsYou) {
+                PopupTabHeader(selected: .needsYou, namespace: tabSelectionNamespace) {
                     Text("Needs you").font(.popup(22, .bold)).foregroundStyle(Theme.ink)
-                } trailing: { EmptyView() }
+                } trailing: { PopupMoreMenu(searching: $searching, isHome: false, dismiss: dismissMenu) }
             } band: {
                 PopupHomeBand(onlyNeedsYou: true)
             }
         case .tab(.usage):
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
-                PopupUsageHeader()
+                PopupUsageHeader(namespace: tabSelectionNamespace, searching: $searching, dismiss: dismissMenu)
             } band: {
                 PopupUsageBand()
             }
         case .tab(.controls):
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
-                PopupControlsHeader()
+                PopupControlsHeader(namespace: tabSelectionNamespace, searching: $searching, dismiss: dismissMenu)
             } band: {
                 PopupControlsBand(dismiss: dismissMenu)
             }
