@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { notifyNetworkChanged, networkSignature } from "./network-change.js";
 import { readEvents, RtdbRest, toDoc } from "./rtdb-rest.js";
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -125,6 +126,53 @@ describe("RtdbRest", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("watch: a network change drops a silent stream and reconnects at once, not after the stall timer", async () => {
+    let opens = 0;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      opens += 1;
+      // Every stream opens fine and then says nothing, like one left dead by switching to a hotspot.
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            init?.signal?.addEventListener("abort", () => controller.error(new Error("aborted")));
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    });
+    const onOpen = vi.fn();
+    vi.useFakeTimers();
+    try {
+      const stop = new RtdbRest(BASE, fetchImpl).watch("channels/abc/state", () => undefined, { onOpen });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(opens).toBe(1);
+      // Well inside the 75 s stall timer: nothing reconnects by itself.
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(opens).toBe(1);
+      notifyNetworkChanged();
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(opens).toBe(2);
+      expect(onOpen).toHaveBeenCalledTimes(2);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("names the network by its non-internal IPv4 addresses only", () => {
+    const info = (address: string, family: "IPv4" | "IPv6", internal = false) =>
+      ({ address, family, internal }) as never;
+    expect(
+      networkSignature({
+        lo0: [info("127.0.0.1", "IPv4", true)],
+        en0: [info("172.20.10.6", "IPv4"), info("fe80::1", "IPv6")],
+      }),
+    ).toBe("en0=172.20.10.6");
+    expect(networkSignature({ en0: [info("192.168.1.5", "IPv4")] })).not.toBe(
+      networkSignature({ en0: [info("172.20.10.6", "IPv4")] }),
+    );
   });
 
   it("watch: a cancel from the server (rules changed) counts as a failure and reconnects", async () => {

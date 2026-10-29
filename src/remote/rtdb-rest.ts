@@ -16,6 +16,7 @@
  */
 
 import type { ChannelDoc } from "./firestore-rest.js";
+import { onNetworkChange } from "./network-change.js";
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -144,8 +145,21 @@ export class RtdbRest {
     };
 
     void connect();
+    // A new network leaves the held stream dead without a word: drop it and reconnect now, not after the stall timer.
+    const unsubscribe = onNetworkChange(() => {
+      if (stopped) return;
+      retryMs = RETRY_MIN_MS;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+        void connect();
+      } else {
+        controller?.abort();
+      }
+    });
     return () => {
       stopped = true;
+      unsubscribe();
       if (retryTimer) clearTimeout(retryTimer);
       controller?.abort();
     };
