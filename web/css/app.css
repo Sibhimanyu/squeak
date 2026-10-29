@@ -3261,3 +3261,17 @@ h2.dheading {
   }
 }
 /* === /usage-films === */
+.hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hint button {
+  background: transparent;
+  border: 1px solid var(--sq-line-strong);
+  border-radius: var(--sq-radius-control);
+  color: var(--sq-ink);
+  font: inherit;
+  padding: 4px 10px;
+  cursor: pointer;
+}

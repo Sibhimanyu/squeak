@@ -78,3 +78,24 @@ export function parsePairingLink(text) {
   }
   return { project: payload.p, channelId: payload.c, key: payload.k, macName: payload.n.slice(0, 60), databaseUrl };
 }
+
+/**
+ * The scanned-QR path: the Mac's QR opens `https://squeak-mac.web.app/#pair=<d>`,
+ * where `<d>` is the `d` of a `squeak://pair?d=` link. The payload holds the
+ * channel secret, so it is taken out of the address bar at once (the fragment
+ * never reaches the server; this keeps it out of history too). Returns the
+ * equivalent pasted-link text for the same validation (a malformed value gives text that fails it), or null when the page
+ * carries no pairing fragment. Never logs or sends the value.
+ */
+export function takePairingFragment(location, history) {
+  const hash = String(location?.hash ?? "");
+  if (!hash.startsWith("#pair=")) return null;
+  stripFragment(location, history);
+  const match = /^#pair=([A-Za-z0-9_-]+)$/.exec(hash);
+  // A malformed value still starts a pairing attempt, so the person sees the same "not a pairing code" sentence.
+  return match ? `squeak://pair?d=${match[1]}` : "squeak://pair";
+}
+
+function stripFragment(location, history) {
+  history.replaceState(history.state, "", location.pathname + location.search);
+}

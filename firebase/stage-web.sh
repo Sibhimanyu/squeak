@@ -7,5 +7,5 @@ set -euo pipefail
 cd "$(dirname "$0")"
 rm -rf web-public
 mkdir -p web-public
-cp ../web/index.html web-public/
+cp ../web/index.html ../web/manifest.webmanifest web-public/
 cp -R ../web/js ../web/css ../web/assets web-public/

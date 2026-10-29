@@ -20,7 +20,8 @@ import { compose as composeStrip, liveness, splashShows, SPLASH_CAP_MS } from ".
 import { navNodes } from "./nav-view.js";
 import { needsPane } from "./needs-you-view.js";
 import { awaitApproval, beginPairing, channelFor, deviceNameFor } from "./pairing.js";
-import { PairingError } from "./pairing-link.js";
+import { installHint, isStandalone, mobileKind, wasDismissed } from "./install-hint.js";
+import { PairingError, takePairingFragment } from "./pairing-link.js";
 import { duck, waitingScreen, welcomeScreen } from "./pairing-view.js";
 import { groupingPref, verbosePref } from "./prefs.js";
 import { displayTitle, isUnread, needsYouCount } from "./presentation.js";
@@ -45,6 +46,7 @@ const ui = {
   confirmForget: false,
   drafts: new Map(),
   pairing: null, // AbortController while waiting
+  installPrompt: null, // Chrome's beforeinstallprompt event, once it offers one
   rev: 0, // bumped by anything that changes what is drawn
   /** "Show thinking live": on, as on the iPhone, unless the owner turned it off; kept in this browser's database. */
   verbose: true,
@@ -119,6 +121,8 @@ function touch() {
 /* ---------- boot and pairing ---------- */
 
 async function boot() {
+  // A scanned QR opens `/#pair=<payload>`; the secret leaves the address bar before anything else runs.
+  const scanned = takePairingFragment(globalThis.location, globalThis.history);
   try {
     ui.record = await store.load();
   } catch {
@@ -127,6 +131,7 @@ async function boot() {
     return render(true);
   }
   if (ui.record?.state === "paired") return startPaired();
+  if (scanned) return pair(scanned);
   if (ui.record?.state === "pending") return resumePending();
   ui.screen = "unpaired";
   render(true);
@@ -779,6 +784,48 @@ function splashScreen() {
   return h("main", { class: "splash", role: "status" }, duck(), h("p", null, "Checking in with your Mac…"));
 }
 
+function homeScreenHint() {
+  const hint = installHint({
+    paired: ui.screen === "paired",
+    kind: mobileKind(navigator.userAgent, navigator.maxTouchPoints),
+    standalone: isStandalone(globalThis),
+    dismissed: wasDismissed(ui.prefs),
+    canInstall: ui.installPrompt !== null,
+  });
+  if (!hint) return null;
+  const dismiss = () => {
+    void savePrefs({ installHintDismissed: true });
+    render(true);
+  };
+  return h(
+    "div",
+    { class: "banner hint", role: "status" },
+    h("span", { class: "grow" }, hint.text),
+    hint.install
+      ? h(
+          "button",
+          {
+            type: "button",
+            onclick: () => {
+              const offer = ui.installPrompt;
+              ui.installPrompt = null;
+              void offer?.prompt?.();
+              dismiss();
+            },
+          },
+          "Install",
+        )
+      : null,
+    h("button", { type: "button", onclick: dismiss }, "Dismiss"),
+  );
+}
+
+globalThis.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  ui.installPrompt = event;
+  if (ui.screen === "paired") touch();
+});
+
 function pairedScreen() {
   // What the open chat's live turn says is newer than the view corrects it (its state, its turn).
   const live = ui.verbose && ui.syncState?.live?.key === ui.selected ? ui.syncState.live : null;
@@ -880,6 +927,7 @@ function pairedScreen() {
     { class: "app" },
     bar,
     ui.syncState?.error ? h("div", { class: "banner", role: "status" }, ui.syncState.error) : null,
+    homeScreenHint(),
     h("div", { class: session || ui.pane ? "layout open" : "layout" }, list, detail),
     tabs,
   );
