@@ -110,7 +110,7 @@ private struct SettingsFormPresentation: ViewModifier {
             // canvas instead of nesting the full Settings cards inside the guided window.
             content
                 .scrollContentBackground(.hidden)
-                .formStyle(.columns)
+                .formStyle(.grouped)
                 .controlSize(.small)
                 .background(Theme.bg)
         } else {

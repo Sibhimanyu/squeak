@@ -105,12 +105,20 @@ struct SetupWalkthroughView: View {
                         // ideal height. A geometry-bounded scroll viewport keeps the
                         // controls scrollable while the navigation stays pinned below.
                         GeometryReader { viewport in
-                            ScrollView {
+                            if hasNativeSetupForm(s) {
+                                // Form already owns the native scroll view. Nesting it in
+                                // another ScrollView lets AppKit draw rows past a short
+                                // viewport and over the pinned footer.
                                 content(s, w)
-                                    .frame(width: viewport.size.width, alignment: .topLeading)
+                                    .frame(width: viewport.size.width, height: viewport.size.height, alignment: .topLeading)
+                            } else {
+                                ScrollView {
+                                    content(s, w)
+                                        .frame(width: viewport.size.width, alignment: .topLeading)
+                                }
+                                .frame(width: viewport.size.width, height: viewport.size.height)
+                                .scrollIndicators(.automatic)
                             }
-                            .frame(width: viewport.size.width, height: viewport.size.height)
-                            .scrollIndicators(.automatic)
                         }
                         .padding(.bottom, 52)
                     }
@@ -214,6 +222,13 @@ struct SetupWalkthroughView: View {
     }
 
     // MARK: Step content
+
+    private func hasNativeSetupForm(_ step: WalkStep) -> Bool {
+        switch step {
+        case .iphone, .telegram, .cliq, .voice, .awake: true
+        default: false
+        }
+    }
 
     @ViewBuilder private func content(_ s: WalkStep, _ w: SetupWalkthrough) -> some View {
         switch s {

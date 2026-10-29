@@ -47,6 +47,7 @@ jobs:
           context: dist-addon/squeak-voice
           platforms: ${{ matrix.platform }}
           push: true
+          labels: org.opencontainers.image.source=https://github.com/Sibhimanyu/squeak
           tags: |
             ghcr.io/sibhimanyu/squeak-voice-${{ matrix.arch }}:${{ steps.version.outputs.value }}
             ghcr.io/sibhimanyu/squeak-voice-${{ matrix.arch }}:latest
