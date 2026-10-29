@@ -31,6 +31,14 @@ export interface GatewayDependencies {
   /** Answers pin changes and controls; absent: such a request is refused. */
   pins?: Pick<PinKeeper, "change" | "disable" | "enable" | "reset" | "status"> | null;
   now?: () => number;
+  /** A plain sentence for the apps' gateway log; never a pin, a question or a key. */
+  onEvent?: (level: "info" | "warn", text: string) => void;
+}
+
+function pinControlSentence(action: "disable" | "enable" | "reset", ok: boolean): string {
+  const done = { disable: "PIN turned off", enable: "PIN turned on", reset: "PIN reset" }[action];
+  const refused = { disable: "PIN turn-off", enable: "PIN turn-on", reset: "PIN reset" }[action];
+  return ok ? done : `${refused} refused`;
 }
 
 const SAFETY_POLL_MS = 60_000;
@@ -124,6 +132,7 @@ export class VoiceGateway {
           ? this.deps.pins.change(pinChange.request.current, pinChange.request.next)
           : { ok: false as const, reason: "This add-on cannot change its pin from an app." };
         logger.info("voice pin change", { ok: outcome.ok });
+        this.deps.onEvent?.(outcome.ok ? "info" : "warn", outcome.ok ? "PIN changed" : "PIN change refused");
         const answer: CallResultDoc = outcome.ok
           ? { v: 1, id, at: this.now(), status: "pin", ok: true }
           : { v: 1, id, at: this.now(), status: "pin", ok: false, reason: outcome.reason };
@@ -144,6 +153,8 @@ export class VoiceGateway {
                 : pins.reset(request.next);
         // The action and whether it worked, never a pin.
         logger.info("voice pin control", { action: request.action, ok: outcome.ok });
+        if (request.action !== "status")
+          this.deps.onEvent?.(outcome.ok ? "info" : "warn", pinControlSentence(request.action, outcome.ok));
         const answer: CallResultDoc = outcome.ok
           ? { v: 1, id, at: this.now(), status: "pinctl", ok: true, state: outcome.state }
           : { v: 1, id, at: this.now(), status: "pinctl", ok: false, reason: outcome.reason };

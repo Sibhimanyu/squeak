@@ -27,7 +27,8 @@ import { PinKeeper } from "./pin-keeper.js";
 import { runDialog, type Phone } from "./phone.js";
 import { SipPhone } from "./sip-phone.js";
 import { RelayUplink } from "./uplink.js";
-import { EspeakSpeaker, PiperSpeaker, type Speaker } from "./tts.js";
+import { EspeakSpeaker, PiperSpeaker, setSpeechSlowHook, type Speaker } from "./tts.js";
+import { GatewayEventLog, startLogPublisher } from "./addon-event-log.js";
 
 /** Where Home Assistant puts an add-on's options. */
 const ADDON_OPTIONS = "/data/options.json";
@@ -177,19 +178,48 @@ export async function resolveCredentials(
 }
 
 /** An outbound call on the shared phone: ring, then the dialog. */
-export function phoneLine(phone: Phone): {
+export function phoneLine(
+  phone: Phone,
+  onEvent?: (level: "info" | "warn", text: string) => void,
+  now: () => number = Date.now,
+): {
   call(callee: string, dialog: CallDialog): Promise<CallResult>;
 } {
+  const place = async (callee: string, dialog: CallDialog): Promise<CallResult> => {
+    // Make what it will say while the phone rings, so the first word is there the moment you pick up.
+    phone.prewarm?.(dialog.prompts());
+    const dialled = await phone.dial(callee);
+    if (dialled.status === "unanswered") return { status: "unanswered" };
+    if (dialled.status === "failed") return { status: "failed", reason: dialled.reason };
+    return runDialog(dialled.call, dialog);
+  };
   return {
     async call(callee, dialog) {
-      // Make what it will say while the phone rings, so the first word is there the moment you pick up.
-      phone.prewarm?.(dialog.prompts());
-      const dialled = await phone.dial(callee);
-      if (dialled.status === "unanswered") return { status: "unanswered" };
-      if (dialled.status === "failed") return { status: "failed", reason: dialled.reason };
-      return runDialog(dialled.call, dialog);
+      if (!onEvent) return place(callee, dialog);
+      const began = now();
+      // The extension is a number on the PBX, not a secret; the script (the question) never goes in.
+      onEvent("info", `Call placed to extension ${callee}`);
+      let result: CallResult;
+      try {
+        result = await place(callee, dialog);
+      } catch (error) {
+        onEvent(
+          "warn",
+          `Call failed after ${seconds(now() - began)}: ${error instanceof Error ? error.message : "error"}`,
+        );
+        throw error;
+      }
+      const took = seconds(now() - began);
+      if (result.status === "answered") onEvent("info", `Call answered with ${result.letter} (${took})`);
+      else if (result.status === "unanswered") onEvent("info", `Call not answered (${took})`);
+      else onEvent("warn", `Call failed: ${result.reason} (${took})`);
+      return result;
     },
   };
+}
+
+function seconds(ms: number): string {
+  return `${(ms / 1000).toFixed(1)} s`;
 }
 
 const run = promisify(execFile);
@@ -232,6 +262,9 @@ export async function runGateway(): Promise<number> {
     : process.env;
   let started: { stop(): void } = { stop: () => undefined };
   const version = addonVersion();
+  const events = new GatewayEventLog();
+  const note = (level: "info" | "warn", text: string): void => events.note(level, text);
+  events.note("info", `Add-on ${version} started`);
   let credentials: GatewayCredentials | null;
   try {
     credentials = await resolveCredentials(env, {
@@ -240,7 +273,13 @@ export async function runGateway(): Promise<number> {
       version,
       now: Date.now,
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-      log: (line) => logger.info(line),
+      log: (line) => {
+        logger.info(line);
+        // Only the outcomes: the "confirm 1234" line carries a code and stays in the Home Assistant log.
+        if (line === "Paired with your Mac") note("info", "Paired with your Mac");
+        else if (/ran out/.test(line)) note("warn", "The pairing code ran out before it was approved");
+        else if (/already used/.test(line)) note("warn", "The pairing code was already used or has run out");
+      },
       storeFor: (url) => new RtdbRest(url),
     });
   } catch (error) {
@@ -266,7 +305,17 @@ export async function runGateway(): Promise<number> {
       const speaker = chooseSpeaker(env);
       const store = new RtdbRest(databaseUrl(env.SQUEAK_REMOTE_DATABASE_URL));
       // One phone, registered for as long as the gateway runs: it rings you for questions and answers when you call in.
-      const phone = new SipPhone({ line: voice.line, speaker });
+      const phone = new SipPhone({
+        line: voice.line,
+        speaker,
+        onQuality: (stats) => note("info", `Line quality: ${stats}`),
+      });
+      setSpeechSlowHook((ms) =>
+        note(
+          "warn",
+          `Making a spoken prompt took ${(ms / 1000).toFixed(1)} s: the add-on's machine is slow, so the call may break up`,
+        ),
+      );
       // The pin lives in one place: set from the Squeak app, kept in the add-on's own storage. There is no option for
       // it (two places to set it was how a pin ended up in force that the settings did not show).
       const pins = new PinKeeper(null, path.join(voice.line.dir, "voice-pin.json"));
@@ -281,7 +330,8 @@ export async function runGateway(): Promise<number> {
         store,
         channel: relay.channel,
         key: relay.key,
-        line: phoneLine(phone),
+        line: phoneLine(phone, note),
+        onEvent: note,
         callee: voice.callee,
         pin: () => pins.current(),
         pinRequired: () => pins.requiresPin(),
@@ -315,12 +365,25 @@ export async function runGateway(): Promise<number> {
         key: relay.key,
         sources: { version, registration: () => phone.registration(), pin: () => pins.status() },
       });
-      phone.onRegistrationChange(() => status.poke());
+      const logs = startLogPublisher({ store, channel: relay.channel, key: relay.key, log: events });
+      let lastRegistration = "";
+      phone.onRegistrationChange(() => {
+        status.poke();
+        const r = phone.registration();
+        const text = r.registered
+          ? "Registered with the phone system"
+          : `Not registered with the phone system${r.error ? `: ${r.error}` : ""}`;
+        if (text === lastRegistration) return;
+        lastRegistration = text;
+        note(r.registered ? "info" : "warn", text);
+      });
       phone.start();
       gateway.start();
       started = {
         stop: () => {
           status.stop();
+          logs.stop();
+          setSpeechSlowHook(null);
           gateway.stop();
           directory.stop();
           phone.stop();

@@ -6,6 +6,7 @@ import type { AttentionItem } from "../fleet/types.js";
 import { turnStamp } from "../cliq/channel.js";
 import { logger } from "../utils/logger.js";
 import type { CallResult } from "./baresip-line.js";
+import type { CallHistory, CallReason } from "./call-history.js";
 import type { CallPolicy } from "./policy.js";
 import type { VoiceLine } from "./relay-line.js";
 import { composeScript, shouldCall } from "./script.js";
@@ -28,6 +29,8 @@ export interface VoiceChannelDependencies {
   /** A one-off note to Telegram and Cliq: what an answer by phone did, or why a call failed. */
   note: (text: string) => void;
   now?: () => number;
+  /** Where each call is written down (voice/call-history.ts); absent in tests that do not look. */
+  history?: Pick<CallHistory, "record">;
 }
 
 /**
@@ -107,13 +110,21 @@ export class VoiceChannel {
 
     this.calling = true;
     this.deps.policy.record(episode, now);
+    const placedAt = this.now();
     let result: CallResult;
     try {
       result = await this.deps.line.call(script, canAnswer);
+    } catch (error) {
+      this.writeDown(current, placedAt, {
+        outcome: "failed",
+        failure: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     } finally {
       this.calling = false;
     }
     if (result.status === "failed") {
+      this.writeDown(current, placedAt, { outcome: "failed", failure: result.reason });
       logger.warn("voice call could not be placed", { reason: result.reason });
       if (this.now() - this.lastFailureNote > FAILURE_NOTE_GAP_MS) {
         this.lastFailureNote = this.now();
@@ -122,27 +133,65 @@ export class VoiceChannel {
       return;
     }
     if (result.status === "answered" && result.letter) {
-      await this.answer(current, target, stamp, result.letter);
+      const what = await this.answer(current, target, stamp, result.letter);
+      this.writeDown(current, placedAt, {
+        outcome: what === "moved_on" ? "moved_on" : "answered",
+        letter: result.letter,
+        sent: what === "sent",
+      });
+      return;
+    }
+    this.writeDown(current, placedAt, { outcome: result.status === "answered" ? "answered" : "unanswered" });
+  }
+
+  /** One line in the call history: never the question, a PIN or any key but the answer letter. */
+  private writeDown(
+    item: AttentionItem,
+    placedAt: number,
+    what: {
+      outcome: "answered" | "unanswered" | "failed" | "moved_on";
+      letter?: string;
+      sent?: boolean;
+      failure?: string;
+    },
+  ): void {
+    try {
+      this.deps.history?.record({
+        at: placedAt,
+        kind: "agent",
+        reason: item.kind as CallReason,
+        label: cardLabel(item.session),
+        durationMs: Math.max(0, this.now() - placedAt),
+        ...what,
+      });
+    } catch (error) {
+      logger.warn("call history write failed", { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  private async answer(item: AttentionItem, target: string, stamp: string, letter: string): Promise<void> {
+  private async answer(
+    item: AttentionItem,
+    target: string,
+    stamp: string,
+    letter: string,
+  ): Promise<"sent" | "moved_on" | "not_sent"> {
     const label = cardLabel(item.session);
     // The call can last a minute: only answer the turn that was read out.
     if (turnStamp(safely(() => this.deps.replier.lastTurnText(target))) !== stamp) {
       this.deps.note(`You pressed ${letter} for ${label}, but it has moved on since the call, so I sent nothing.`);
-      return;
+      return "moved_on";
     }
     const outcome = await this.deps.replier.send(target, letter, (message) => {
       this.deps.note(`The ${letter} you pressed for ${label} did not go through: ${message}`);
     });
     if (outcome.status === "refused" || outcome.status === "unconfirmed") {
       this.deps.note(`The ${letter} you pressed for ${label} was not sent: ${outcome.reason}`);
-      return;
+      return "not_sent";
     }
     // Look again now, so the turn this starts registers and its finish pushes a card.
     void this.deps.monitor.refresh().catch(() => undefined);
     this.deps.note(`Answered by phone: sent ${letter} to ${label}.`);
+    return "sent";
   }
 }
 

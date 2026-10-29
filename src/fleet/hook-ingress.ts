@@ -163,6 +163,13 @@ export interface IngressControl {
     approve(approve: boolean): Promise<{ ok: true } | { ok: false; reason: string }>;
   };
   /**
+   * `GET /control/voice/calls` (token-gated, no CORS header, 405 for other methods, 503 when voice is unavailable):
+   * `{ calls: CallEntry[], gatewayLog: { at, lines: [{ at, level: "info" | "warn", text }] } | null }`. Calls are
+   * newest first, at most 100 (`{ id, at, kind: "agent" | "test", reason?, label?, outcome: "answered" | "unanswered" |
+   * "failed" | "moved_on", letter?, sent?, durationMs, failure? }`); gatewayLog is null without a relay or log.
+   */
+  voiceCalls?(): Promise<unknown> | unknown;
+  /**
    * `POST /control/telegram/avatar`: set the Telegram bot's profile photo to Squeak's logo (telegram/avatar.ts).
    * Body `{}` or `{ which: "logo" }`; answers `{ message }` or `{ error }` (429 when tried within 30 s).
    */
@@ -928,6 +935,24 @@ export class HookIngressServer {
       request.on("error", () => {
         aborted = true;
       });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/voice/calls") {
+      request.resume();
+      if (request.method !== "GET") {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      const calls = control.voiceCalls;
+      if (!calls) {
+        respond(response, 503, "call history unavailable");
+        return;
+      }
+      void Promise.resolve()
+        .then(() => calls.call(control))
+        .then((result) => respondJson(response, 200, result))
+        .catch(() => respond(response, 500, "call history failed"));
       return;
     }
 

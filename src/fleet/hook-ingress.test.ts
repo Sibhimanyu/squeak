@@ -1039,3 +1039,22 @@ describe("HookIngressServer gateway pairing routes", () => {
     expect((await fetch(`${base}/pair`, { method: "POST", headers: auth, body: "{}" })).status).toBe(503);
   });
 });
+
+describe("HookIngressServer call history route", () => {
+  it("gates, shapes and answers /control/voice/calls", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/voice/calls`;
+    const auth = { "x-squeak-token": harness.token };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(url, { headers: auth })).status).toBe(503);
+    const body = { calls: [{ id: "a", at: 1, kind: "test", outcome: "unanswered", durationMs: 5 }], gatewayLog: null };
+    server.setControl({ sessionMessage: () => null, reply: async () => null, voiceCalls: async () => body });
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", headers: auth, body: "{}" })).status).toBe(405);
+    const read = await fetch(url, { headers: auth });
+    expect(read.status).toBe(200);
+    expect(read.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await read.json()).toEqual(body);
+  });
+});

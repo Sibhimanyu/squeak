@@ -82,6 +82,8 @@ import { PinKeeper, type PinState } from "../voice/pin-keeper.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import { relayLineFor, type RelayLine } from "../voice/relay-line.js";
 import { GatewayPairing } from "../voice/pairing-window.js";
+import { CallHistory } from "../voice/call-history.js";
+import { GatewayLogReader } from "../voice/gateway-log.js";
 import { GatewayStatusReader } from "../voice/gateway-status.js";
 import { setEnvValues } from "../cliq/setup.js";
 import { resolveSqueakEnvPath } from "./paths.js";
@@ -641,6 +643,13 @@ export class SqueakApp {
             ? this.gatewayPairing.approve(approve)
             : Promise.resolve({ ok: false as const, reason: "No gateway is waiting to pair." }),
       },
+      voiceCalls: async () => ({
+        calls: this.callHistoryStore().list(100),
+        gatewayLog:
+          (await this.gatewayLogReader()
+            ?.read()
+            .catch(() => null)) ?? null,
+      }),
       telegramAvatar: (request) => this.telegramAvatar.apply(request),
       fanRule: () => {
         const rule = fansSudoersRule(os.userInfo().username);
@@ -1016,6 +1025,27 @@ export class SqueakApp {
 
   private gatewayPairing: GatewayPairing | null = null;
   private gatewayStatus: GatewayStatusReader | null = null;
+  private gatewayLog: GatewayLogReader | null = null;
+  private callHistory: CallHistory | null = null;
+
+  private callHistoryStore(): CallHistory {
+    this.callHistory ??= new CallHistory(path.join(this.config.supportDir, "voice-calls.json"));
+    return this.callHistory;
+  }
+
+  /** The add-on's log reader, or null without a relay (the call list is still served). */
+  private gatewayLogReader(): GatewayLogReader | null {
+    const { voiceRelay, remoteDatabaseUrl } = this.config;
+    if (!voiceRelay || !remoteDatabaseUrl) return null;
+    this.gatewayLog ??= new GatewayLogReader({
+      store: new RtdbRest(remoteDatabaseUrl),
+      relay: () => {
+        const { voiceRelay: relay, remoteDatabaseUrl: url } = this.config;
+        return relay && url ? { channel: relay.channel, key: relay.key } : null;
+      },
+    });
+    return this.gatewayLog;
+  }
 
   /** The pairing window's owner, made on first use; null unless the phone channel's own database is set up. */
   private gatewayPairingFor(): GatewayPairing | null {
@@ -1145,11 +1175,18 @@ export class SqueakApp {
     if (this.voiceTest && Date.now() - this.voiceTest.at < 15_000) {
       return { ok: false, reason: "Wait a few seconds before another test call." };
     }
-    this.voiceTest = { at: Date.now(), status: "ringing" };
+    const placedAt = Date.now();
+    this.voiceTest = { at: placedAt, status: "ringing" };
     this.remote?.changed();
+    const history = this.callHistoryStore();
+    const writeDown = (outcome: "answered" | "unanswered" | "failed", extra: { letter?: string; failure?: string }) =>
+      history.record({ at: placedAt, kind: "test", outcome, durationMs: Date.now() - placedAt, ...extra });
     void line
       .call(TEST_SCRIPT, true)
       .then((result) => {
+        if (result.status === "failed") writeDown("failed", { failure: result.reason });
+        else if (result.status === "unanswered") writeDown("unanswered", {});
+        else writeDown("answered", result.letter ? { letter: result.letter } : {});
         this.voiceTest =
           result.status === "failed"
             ? { at: Date.now(), status: "failed", reason: result.reason }
@@ -1158,11 +1195,9 @@ export class SqueakApp {
               : { at: Date.now(), status: "answered", ...(result.letter ? { letter: result.letter } : {}) };
       })
       .catch((error: unknown) => {
-        this.voiceTest = {
-          at: Date.now(),
-          status: "failed",
-          reason: error instanceof Error ? error.message : String(error),
-        };
+        const reason = error instanceof Error ? error.message : String(error);
+        writeDown("failed", { failure: reason });
+        this.voiceTest = { at: Date.now(), status: "failed", reason };
       })
       .finally(() => this.remote?.changed());
     return { ok: true };
@@ -1513,7 +1548,12 @@ export class SqueakApp {
    */
   private createVoice(): VoiceChannel | null {
     const { voice, voiceRelay, remoteDatabaseUrl } = this.config;
-    const base = { monitor: this.runtime.monitor, replier: this.router, note: (text: string) => this.announce(text) };
+    const base = {
+      monitor: this.runtime.monitor,
+      replier: this.router,
+      note: (text: string) => this.announce(text),
+      history: this.callHistoryStore(),
+    };
     if (voiceRelay && remoteDatabaseUrl) {
       const line = relayLineFor(new RtdbRest(remoteDatabaseUrl), voiceRelay, this.voiceSettings);
       this.voiceLine = line;

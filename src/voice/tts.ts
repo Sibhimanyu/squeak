@@ -108,6 +108,13 @@ export class EspeakSpeaker implements Speaker {
   }
 }
 
+let speechSlowHook: ((ms: number) => void) | null = null;
+
+/** Lets the gateway note a slow prompt where the apps can see it; the logger line stays. */
+export function setSpeechSlowHook(fn: ((ms: number) => void) | null): void {
+  speechSlowHook = fn;
+}
+
 /**
  * How long a prompt took to make, in the log: a slow machine shows here (and a long one during a live call is what
  * makes the line break up), so the cure is a number, not a guess. Never the words themselves.
@@ -115,8 +122,10 @@ export class EspeakSpeaker implements Speaker {
 function logSpeechTime(engine: "plain" | "natural", text: string, began: number): void {
   const ms = Date.now() - began;
   const fields = { engine, ms, chars: text.length };
-  if (ms > 3000) logger.warn("voice speech was slow to make: a call that speaks while this runs can break up", fields);
-  else logger.debug("voice speech made", fields);
+  if (ms > 3000) {
+    logger.warn("voice speech was slow to make: a call that speaks while this runs can break up", fields);
+    speechSlowHook?.(ms);
+  } else logger.debug("voice speech made", fields);
 }
 
 /** Longest Piper may take for one prompt. */
