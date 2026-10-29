@@ -109,7 +109,10 @@ export class RelayLine implements VoiceLine {
    */
   async pinControl(
     action: PinAction | { action: "status" },
-  ): Promise<{ ok: true; state: "set" | "off" | "none" } | { ok: false; reason: string }> {
+  ): Promise<
+    | { ok: true; state: "set" | "off" | "none"; policy?: { outgoing: "ask" | "skip"; incoming: "ask" | "skip" } }
+    | { ok: false; reason: string }
+  > {
     if (action.action === "change") {
       const done = await this.changePin(action.current, action.next);
       return done.ok ? { ok: true, state: "set" } : done;
@@ -127,7 +130,9 @@ export class RelayLine implements VoiceLine {
     });
     const result = await this.roundTrip(id, doc, [], at + PIN_WAIT_MS, OLD_ADDON);
     if (result.status === "pinctl")
-      return result.ok ? { ok: true, state: result.state } : { ok: false, reason: result.reason };
+      return result.ok
+        ? { ok: true, state: result.state, ...(result.policy ? { policy: result.policy } : {}) }
+        : { ok: false, reason: result.reason };
     return {
       ok: false,
       reason: result.status === "failed" ? result.reason : "The gateway answered with something else.",

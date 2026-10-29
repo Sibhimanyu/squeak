@@ -1,5 +1,9 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { incomingGate, PinKeeper } from "./pin-keeper.js";
 import { handleIncoming, inboundPrompts, type InboundDependencies } from "./inbound-flow.js";
 import type { DirectoryDoc, DownMessage } from "./memo-protocol.js";
 import type { IncomingCall, PhoneCall } from "./phone.js";
@@ -100,6 +104,23 @@ describe("call-in flow", () => {
     await handleIncoming(t.incoming, t.deps);
     expect(call.said.join(" ")).not.toMatch(/pin/i);
     expect(t.sends).toHaveLength(1);
+  });
+
+  it("accepts a call in without a pin when the keeper's incoming policy is skip, even with no pin set", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "inbound-pol-"));
+    const keeper = new PinKeeper(null, path.join(dir, "voice-pin.json"));
+    keeper.setPolicy({ outgoing: "ask", incoming: "skip" });
+    const call = new FakeCall(["1", "1"]);
+    const t = setup(call, incomingGate(keeper));
+    await handleIncoming(t.incoming, t.deps);
+    expect(t.state.answered).toBe(true);
+    expect(call.said.join(" ")).not.toMatch(/pin/i);
+    expect(t.sends).toHaveLength(1);
+    // And with ask and no pin it stays refused.
+    keeper.setPolicy({ outgoing: "ask", incoming: "ask" });
+    const refused = setup(new FakeCall(["1", "1"]), incomingGate(keeper));
+    await handleIncoming(refused.incoming, refused.deps);
+    expect(refused.state).toEqual({ rejected: true, answered: false });
   });
 
   it("refuses a call in, unanswered, when no pin was ever set", async () => {

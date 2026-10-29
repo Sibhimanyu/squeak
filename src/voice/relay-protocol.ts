@@ -34,7 +34,13 @@ export type CallResultBody =
   | { status: "pin"; ok: true }
   | { status: "pin"; ok: false; reason: string }
   /** The answer to a pin control (status, turn off, turn on, reset): the state the pin is in now, or why not. */
-  | { status: "pinctl"; ok: true; state: "set" | "off" | "none" }
+  | {
+      status: "pinctl";
+      ok: true;
+      state: "set" | "off" | "none";
+      /** When the pin is asked; an older add-on omits it. */
+      policy?: { outgoing: "ask" | "skip"; incoming: "ask" | "skip" };
+    }
   | { status: "pinctl"; ok: false; reason: string };
 
 /**
@@ -59,7 +65,8 @@ export type PinAction =
   | { action: "change"; current: string; next: string }
   | { action: "disable"; current: string }
   | { action: "enable"; next: string }
-  | { action: "reset"; next: string | null };
+  | { action: "reset"; next: string | null }
+  | { action: "policy"; outgoing: "ask" | "skip"; incoming: "ask" | "skip" };
 
 /** The actions that travel as a `pinctl` request (a change keeps its older `pin` request). */
 export type PinControlAction = Exclude<PinAction, { action: "change" }> | { action: "status" };
@@ -85,6 +92,12 @@ export function parsePinAction(value: unknown): PinAction | null {
       return keys === "action,next" && (value.next === null || digits(value.next))
         ? { action: "reset", next: value.next }
         : null;
+    case "policy": {
+      const choice = (v: unknown): v is "ask" | "skip" => v === "ask" || v === "skip";
+      return keys === "action,incoming,outgoing" && choice(value.outgoing) && choice(value.incoming)
+        ? { action: "policy", outgoing: value.outgoing, incoming: value.incoming }
+        : null;
+    }
     default:
       return null;
   }
@@ -310,9 +323,12 @@ export function readResult(
         : null;
     case "pinctl":
       if (body.ok === true) {
-        return body.state === "set" || body.state === "off" || body.state === "none"
-          ? { status: "pinctl", ok: true, state: body.state }
-          : null;
+        if (body.state !== "set" && body.state !== "off" && body.state !== "none") return null;
+        const p = body.policy;
+        const choice = (v: unknown): v is "ask" | "skip" => v === "ask" || v === "skip";
+        return isRecord(p) && choice(p.outgoing) && choice(p.incoming)
+          ? { status: "pinctl", ok: true, state: body.state, policy: { outgoing: p.outgoing, incoming: p.incoming } }
+          : { status: "pinctl", ok: true, state: body.state };
       }
       return body.ok === false && typeof body.reason === "string"
         ? { status: "pinctl", ok: false, reason: body.reason.slice(0, 200) }

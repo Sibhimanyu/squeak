@@ -23,7 +23,7 @@ import { readVoiceConfig, readVoiceRelayConfig, type VoiceEnv } from "./config.j
 import { VoiceGateway } from "./gateway.js";
 import { handleIncoming, inboundPrompts } from "./inbound-flow.js";
 import { DirectoryCache } from "./directory-cache.js";
-import { PinKeeper } from "./pin-keeper.js";
+import { incomingGate, PinKeeper } from "./pin-keeper.js";
 import { runDialog, type Phone } from "./phone.js";
 import { SipPhone } from "./sip-phone.js";
 import { RelayUplink } from "./uplink.js";
@@ -318,7 +318,9 @@ export async function runGateway(): Promise<number> {
       );
       // The pin lives in one place: set from the Squeak app, kept in the add-on's own storage. There is no option for
       // it (two places to set it was how a pin ended up in force that the settings did not show).
-      const pins = new PinKeeper(null, path.join(voice.line.dir, "voice-pin.json"));
+      // The legacy `call_in_pin: skip` option only seeds the incoming setting until the app saves a policy.
+      const legacyCallIn = env.SQUEAK_VOICE_CALLIN_PIN?.toLowerCase() === "skip" ? "skip" : "ask";
+      const pins = new PinKeeper(null, path.join(voice.line.dir, "voice-pin.json"), Date.now, legacyCallIn);
       if (pins.status() === "none") {
         logger.warn(
           "no pin is set: calls will tell you what is waiting but cannot take a key answer, and calling in is refused. Set one in the Squeak app (Settings > Phone calls).",
@@ -335,11 +337,12 @@ export async function runGateway(): Promise<number> {
         callee: voice.callee,
         pin: () => pins.current(),
         pinRequired: () => pins.requiresPin(),
+        canAnswer: () => pins.answerable(),
         pins,
       });
-      // "skip": a call from the one allowed extension is proof enough. Squeak's own calls to you always ask.
-      const skipPinOnCallIn = env.SQUEAK_VOICE_CALLIN_PIN?.toLowerCase() === "skip";
-      const callInPin = (): string | null => (skipPinOnCallIn ? null : pins.current());
+      // Incoming "skip": a call from the one allowed extension is proof enough (the keeper's policy, set from the app).
+      const gate = incomingGate(pins);
+      const callInPin = gate.pin;
       // Answered at once from memory, and the prompts made before anyone calls: a network read or a voice made after
       // pick-up is a silence on the line.
       const directory = new DirectoryCache(store, relay.channel, relay.key);
@@ -348,7 +351,7 @@ export async function runGateway(): Promise<number> {
         void handleIncoming(incoming, {
           pin: callInPin,
           // With no pin ever set, a caller cannot be checked: only "skip" (the extension is the proof) lets one in.
-          allowed: () => skipPinOnCallIn || pins.answerable(),
+          allowed: gate.allowed,
           directory: async () => directory.current() ?? (await directory.refresh()),
           uplink,
           encode: encodeOpus,

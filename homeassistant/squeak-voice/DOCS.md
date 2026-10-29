@@ -20,19 +20,19 @@ An older install that still has `database_url`, `channel` and `key` options keep
 
 ## Options
 
-| Option         | What                                                                                                                                                                                     |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pairing_code` | the code from Squeak for Mac (Settings > Phone calls > Add gateway); only needed once, and ignored after the add-on is paired                                                            |
-| `sip_host`     | 3CX's "Registrar Hostname" (e.g. `1348.3cx.cloud`)                                                                                                                                       |
-| `sip_proxy`    | 3CX's "Outbound Proxy (SBC) Address" with port (e.g. `192.168.68.114:5060`)                                                                                                              |
-| `extension`    | the extension made for Squeak (3CX: Extension Number)                                                                                                                                    |
-| `auth_id`      | 3CX's Authentication ID                                                                                                                                                                  |
-| `password`     | 3CX's Authentication password                                                                                                                                                            |
-| `speech`       | `natural` (a local neural voice, about 300 MB of memory for a second or two per prompt) or `plain` for a small machine: robotic, but light                                               |
-| `call_in_pin`  | `ask` (default) or `skip`: whether a call you make into Squeak asks for the PIN. Squeak's calls to you always do. Only the one extension set in Squeak's Settings may call in either way |
-| `transport`    | `udp` unless your SBC says otherwise                                                                                                                                                     |
+| Option         | What                                                                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pairing_code` | the code from Squeak for Mac (Settings > Phone calls > Add gateway); only needed once, and ignored after the add-on is paired              |
+| `sip_host`     | 3CX's "Registrar Hostname" (e.g. `1348.3cx.cloud`)                                                                                         |
+| `sip_proxy`    | 3CX's "Outbound Proxy (SBC) Address" with port (e.g. `192.168.68.114:5060`)                                                                |
+| `extension`    | the extension made for Squeak (3CX: Extension Number)                                                                                      |
+| `auth_id`      | 3CX's Authentication ID                                                                                                                    |
+| `password`     | 3CX's Authentication password                                                                                                              |
+| `speech`       | `natural` (a local neural voice, about 300 MB of memory for a second or two per prompt) or `plain` for a small machine: robotic, but light |
+| `transport`    | `udp` unless your SBC says otherwise                                                                                                       |
 
 ## Notes
 
+- When the PIN is asked is set in the Squeak app (Settings > Phone calls > When Squeak asks for the PIN): separately for calls Squeak makes to you and for calls you make to Squeak. Only the one extension set in Squeak's Settings may call in either way. An older `call_in_pin: skip` option, if still in your options, only sets the starting value for calls you make.
 - Create the extension in 3CX, then Add Phone > "I will configure the phone myself" to see its SIP details.
 - The log shows each call as it is placed and why one could not be.

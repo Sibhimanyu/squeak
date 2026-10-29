@@ -1,5 +1,5 @@
 name: Squeak Voice
-version: "0.7.2"
+version: "0.8.0"
 slug: squeak_voice
 image: ghcr.io/sibhimanyu/squeak-voice-{arch}
 description: Phones you when a coding agent waits on you, through your 3CX extension; Squeak on your Mac asks for each call through Firebase.
@@ -20,7 +20,6 @@ options:
   password: ""
   transport: udp
   speech: natural
-  call_in_pin: ask
 schema:
   pairing_code: password?
   sip_host: str
@@ -30,4 +29,3 @@ schema:
   password: password
   transport: list(udp|tcp|tls)
   speech: list(natural|plain)?
-  call_in_pin: list(ask|skip)?

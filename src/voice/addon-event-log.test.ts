@@ -109,6 +109,8 @@ describe("no secrets in the log", () => {
       enable: () => ({ ok: false as const, reason: "no" }),
       reset: () => ({ ok: true as const, state: "set" as const }),
       status: () => "set" as const,
+      policy: () => ({ outgoing: "ask" as const, incoming: "skip" as const }),
+      setPolicy: () => ({ ok: true as const, state: "set" as const }),
     };
     const gateway = new VoiceGateway({
       store,
@@ -136,6 +138,7 @@ describe("no secrets in the log", () => {
     for (const action of [
       { action: "disable", current: canaries.pin },
       { action: "enable", next: canaries.nextPin },
+      { action: "policy", outgoing: "ask", incoming: "skip" },
     ] as const) {
       const id = newCallId();
       await store.set(
@@ -153,6 +156,7 @@ describe("no secrets in the log", () => {
     expect(text).toContain("Call not answered");
     expect(text).toContain("PIN turned off");
     expect(text).toContain("PIN turn-on refused");
+    expect(text).toContain("PIN policy changed: outgoing ask, incoming skip");
     const raw = JSON.stringify(tree.get(resultPath(CHANNEL, "gwlog")));
     for (const secret of [...Object.values(canaries), CHANNEL, key]) {
       expect(text).not.toContain(secret);
