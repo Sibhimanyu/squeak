@@ -163,6 +163,8 @@ struct AwakeSettings: View {
     @AppStorage("awakeMinutes") private var minutes = 120
     @State private var hotspotName = ""
     @State private var hotspotPassword = ""
+    /// The walk-through's short version: the state, the lid and energy mode only.
+    var short = false
 
     var body: some View {
         Form {
@@ -173,13 +175,12 @@ struct AwakeSettings: View {
                 }
             } else {
                 stateSection
-                if model.awakeOpenActions != nil { modeSection }
+                if !short, model.awakeOpenActions != nil { modeSection }
                 lidSection
-                if model.awakeOpenActions == nil { actionsSection }
-                safetySection
-                heatSection
+                if !short, model.awakeOpenActions == nil { actionsSection }
+                if !short { safetySection; heatSection }
                 powerSection
-                hotspotSection
+                if !short { hotspotSection }
             }
         }
         .settingsForm()

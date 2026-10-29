@@ -320,7 +320,7 @@ private struct SectionFootnote: View {
 }
 
 /// Settings › Notifications: this Mac's banners, then what each set-up channel may push.
-private struct NotificationsSettings: View {
+struct NotificationsSettings: View {
     @Environment(AppModel.self) private var model
     @State private var bannersShown: Bool?
 

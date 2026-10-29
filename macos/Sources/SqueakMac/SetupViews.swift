@@ -3,59 +3,35 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// Settings › Setup.
+/// Settings › Setup: every walk-through step with its state. A skipped or unfinished one reopens its own
+/// screen of the walk-through.
 struct SetupSettings: View {
-    var body: some View {
-        ScrollView {
-            SetupChecklistView().padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 20)
-        }
-    }
-}
-
-/// The first-run checklist: one row per step, the first unfinished required step carrying the one yellow
-/// button, finished steps folded to a tick. Used by Settings › Setup and the Welcome window.
-struct SetupChecklistView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmRemove = false
-    @State private var showExtras = false
-
-    private var checklist: SetupChecklist { model.setupChecklist }
 
     var body: some View {
-        let c = checklist
-        VStack(alignment: .leading, spacing: Space.s) {
-            header(c)
-            ForEach(c.steps.filter(\.required)) { step in
-                stepRow(step, primary: c.primary)
-            }
-            if c.isComplete {
-                HStack(alignment: .top, spacing: Space.s) {
-                    Image(systemName: "menubar.rectangle").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    Text("Click the duck in your menu bar to see your agents. Start a new agent session to try it.")
-                        .font(Typo.body).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+        let w = model.walkthrough
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.s) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(w.isFinished ? "Ready when you are" : "Set up Squeak").font(Typo.title).foregroundStyle(Theme.ink)
+                    Spacer()
+                    Text("\(w.doneSteps.count) of \(w.total)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
                 }
-                .padding(.vertical, Space.s)
-            }
-            DisclosureGroup(isExpanded: $showExtras) {
-                VStack(alignment: .leading, spacing: Space.s) {
-                    ForEach(c.steps.filter { !$0.required }) { step in
-                        stepRow(step, primary: nil)
-                    }
-                    if let h = model.setup.hooks, h.state == .installed || h.state == .partial {
-                        Button("Remove agent hooks…") { confirmRemove = true }
-                            .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted).padding(.top, Space.xs)
-                    }
+                Text("Go through the steps one at a time. Anything you skip stays here.")
+                    .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Open the walk-through") { OnboardingController.shared.show(at: .step(w.firstOpen ?? .service)) }
+                        .buttonStyle(PrimaryButtonStyle())
                 }
-                .padding(.top, Space.s)
-            } label: {
-                VStack(alignment: .leading, spacing: Space.xs) {
-                    Text("Make it yours").font(Typo.label).foregroundStyle(Theme.ink)
-                    Text("Optional · Notifications, shortcuts and phone access")
-                        .font(Typo.meta).foregroundStyle(Theme.muted)
+                .padding(.vertical, Space.xs)
+                ForEach(w.steps) { step in row(step, w) }
+                if let h = model.setup.hooks, h.state == .installed || h.state == .partial {
+                    Button("Remove agent hooks…") { confirmRemove = true }
+                        .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted).padding(.top, Space.s)
                 }
             }
-            .padding(.top, Space.m)
+            .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 20)
         }
         .task { await model.setup.poll(model) }
         .confirmationDialog("Remove Squeak's agent hooks?", isPresented: $confirmRemove) {
@@ -66,78 +42,250 @@ struct SetupChecklistView: View {
         }
     }
 
-    private func header(_ c: SetupChecklist) -> some View {
-        let required = c.steps.filter(\.required)
-        let completed = required.filter { $0.state == .done }.count
-        return VStack(alignment: .leading, spacing: Space.s) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(c.isComplete ? "Ready when you are" : "Connect your agents")
-                    .font(Typo.title).foregroundStyle(Theme.ink)
-                Spacer()
-                Text("\(completed) of \(required.count)")
-                    .font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+    private func row(_ step: WalkStep, _ w: SetupWalkthrough) -> some View {
+        let state = w.state(step)
+        return HStack(spacing: Space.s) {
+            switch state {
+            case .done: Lucide(.check, size: 14, color: Theme.working)
+            case .skipped: Circle().strokeBorder(Theme.offline, lineWidth: 1.5).frame(width: 10, height: 10)
+            case .todo: Circle().fill(Theme.muted).frame(width: 8, height: 8)
             }
-            ProgressView(value: Double(completed), total: Double(max(required.count, 1)))
-                .tint(Theme.working)
-                .accessibilityLabel("Essential setup")
-                .accessibilityValue("\(completed) of \(required.count) steps complete")
-            Text(c.isComplete ? "The essentials are ready. Explore the extras below whenever you like." : "Follow the steps below. You can finish later in Settings › Setup.")
-                .font(Typo.body).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.title).font(Typo.label).foregroundStyle(state == .done ? Theme.muted : Theme.ink)
+                if state != .done { Text(step.why).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+            }
+            Spacer(minLength: 0)
+            switch state {
+            case .done: Text("Done").font(Typo.meta).foregroundStyle(Theme.muted)
+            case .skipped:
+                Text("Skipped").font(Typo.meta).foregroundStyle(Theme.muted)
+                Button("Set up") { OnboardingController.shared.show(at: .step(step)) }.buttonStyle(SecondaryButtonStyle())
+            case .todo:
+                Button(step.isRequired ? "Set up" : "Open") { OnboardingController.shared.show(at: .step(step)) }
+                    .buttonStyle(SecondaryButtonStyle())
+            }
         }
-        .padding(.bottom, Space.s)
+        .padding(.horizontal, Space.m).padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Where the walk-through is: one step's screen, or the closing summary.
+enum WalkScreen: Equatable {
+    case step(WalkStep)
+    case summary
+}
+
+/// The guided setup: one screen per step, each doing its setup right there, with Continue and Skip for now,
+/// ending on a summary. The order, skip state and what is done come from `SetupWalkthrough` (SqueakMacCore);
+/// every screen embeds the settings page or checklist row that already does that setup.
+struct SetupWalkthroughView: View {
+    @Environment(AppModel.self) private var model
+    @State private var screen: WalkScreen
+    /// Called on the summary's Finish.
+    var finish: () -> Void
+    /// "Finish later": leave with the state as it is; the next launch resumes.
+    var later: () -> Void
+
+    init(start: WalkScreen, finish: @escaping () -> Void, later: @escaping () -> Void) {
+        _screen = State(initialValue: start)
+        self.finish = finish
+        self.later = later
     }
 
-    @ViewBuilder private func stepRow(_ step: SetupStep, primary: SetupStepID?) -> some View {
-        if step.state == .done {
+    var body: some View {
+        let w = model.walkthrough
+        VStack(alignment: .leading, spacing: Space.m) {
+            switch screen {
+            case .step(let s):
+                header(s, w)
+                content(s, w).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                footer(s, w)
+            case .summary:
+                SetupSummaryView(walk: w, openStep: { s in
+                    model.unskipWalkStep(s)
+                    screen = .step(s)
+                })
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                summaryFooter(w)
+            }
+        }
+        .task {
+            async let a: Void = model.channels.refreshVoice()
+            async let b: Void = model.readAwake()
+            _ = await (a, b)
+        }
+        .task { await model.setup.poll(model) }
+        // Esc must never close the window or quit setup by accident.
+        .onExitCommand {}
+    }
+
+    // MARK: Chrome
+
+    private func header(_ s: WalkStep, _ w: SetupWalkthrough) -> some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(s.title).font(Typo.title).foregroundStyle(Theme.ink)
+                Spacer()
+                Text(w.progressLabel(s)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                    .accessibilityLabel("Step \(w.index(s) + 1) of \(w.total)")
+            }
+            HStack(spacing: 5) {
+                ForEach(w.steps) { d in
+                    Circle().fill(dotColor(w.state(d), current: d == s))
+                        .frame(width: d == s ? 9 : 6, height: d == s ? 9 : 6)
+                }
+                Spacer()
+                Button("Finish later", action: later).buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
+            }
+            .accessibilityHidden(true)
+            Text(s.why).font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func dotColor(_ st: WalkState, current: Bool) -> Color {
+        if current { return Theme.ink }
+        switch st {
+        case .done: return Theme.working
+        case .skipped: return Theme.offline
+        case .todo: return Theme.line
+        }
+    }
+
+    private func footer(_ s: WalkStep, _ w: SetupWalkthrough) -> some View {
+        HStack {
+            if let p = w.previous(before: s) {
+                Button("Back") { screen = .step(p) }.buttonStyle(.plain).foregroundStyle(Theme.muted)
+            }
+            Spacer()
+            if w.canSkip(s), !w.isDone(s) {
+                Button("Skip for now") { advance(s, w, skipping: true) }.buttonStyle(SecondaryButtonStyle())
+            }
+            Button("Continue") { advance(s, w, skipping: w.canSkip(s) && !w.isDone(s)) }
+                .buttonStyle(PrimaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+                .disabled(!w.canContinue(s))
+        }
+        .font(.system(size: 13))
+    }
+
+    private func advance(_ s: WalkStep, _ w: SetupWalkthrough, skipping: Bool) {
+        // Moving on from a step still undone counts as skipping it, so it shows in the summary and Settings.
+        if skipping { model.skipWalkStep(s) } else if w.skipped.contains(s.rawValue) { model.unskipWalkStep(s) }
+        screen = w.next(after: s).map { .step($0) } ?? .summary
+    }
+
+    private func summaryFooter(_ w: SetupWalkthrough) -> some View {
+        HStack {
+            Button("Back") { screen = .step(w.steps.last ?? .service) }.buttonStyle(.plain).foregroundStyle(Theme.muted)
+            Spacer()
+            Button("Finish", action: finish)
+                .buttonStyle(PrimaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+                .disabled(!w.isFinished)
+        }
+        .font(.system(size: 13))
+    }
+
+    // MARK: Step content
+
+    @ViewBuilder private func content(_ s: WalkStep, _ w: SetupWalkthrough) -> some View {
+        switch s {
+        case .service: rowScroll(.service, w)
+        case .hooks: rowScroll(.hooks, w)
+        case .conductor: rowScroll(.conductor, w)
+        case .hands: rowScroll(.hands, w)
+        case .hotkey: rowScroll(.hotkey, w)
+        case .notifications:
+            VStack(spacing: Space.s) {
+                checklistCard(.notifications, w)
+                NotificationsSettings()
+            }
+        case .iphone: IPhoneSettings()
+        case .telegram: TelegramSettings()
+        case .cliq: CliqSettings()
+        case .voice: VoiceSettingsPage()
+        case .awake: AwakeSettings(short: true)
+        }
+    }
+
+    private func rowScroll(_ id: SetupStepID, _ w: SetupWalkthrough) -> some View {
+        ScrollView { checklistCard(id, w) }
+    }
+
+    @ViewBuilder private func checklistCard(_ id: SetupStepID, _ w: SetupWalkthrough) -> some View {
+        let step = w.checklist.step(id)
+        if w.isDone(WalkStep(rawValue: id.rawValue) ?? .service) {
             doneRow(step)
         } else {
-            SetupStepRow(step: step, isPrimary: primary == step.id, run: run)
+            SetupStepRow(step: step, isPrimary: true, run: model.perform)
         }
     }
 
     private func doneRow(_ s: SetupStep) -> some View {
         HStack(spacing: Space.s) {
             Lucide(.check, size: 14, color: Theme.working)
-            Text(s.id == .hooks ? "Claude Code & Codex connected" : s.title).font(Typo.body).foregroundStyle(Theme.muted)
+            Text(s.state == .done ? s.why : s.title).font(Typo.body).foregroundStyle(Theme.muted)
             Spacer()
         }
         .padding(.horizontal, Space.m).padding(.vertical, 6)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(s.title), done")
     }
-
-    private func run(_ action: SetupAction) {
-        switch action {
-        case .installService:
-            model.daemon.repair()
-        case .repairService:
-            model.daemon.repair()
-        case .installHooks:
-            Task { await model.setup.installHooks() }
-        case .setUpConductor:
-            model.setup.conductorSkipped = false
-            Task { await model.relay.setUp() }
-        case .skipConductor:
-            model.setup.conductorSkipped = true
-        case .requestNotifications:
-            Notifier.shared.requestAuthorization()
-            Task { await model.setup.refresh(model) }
-        case .openNotificationSettings:
-            open("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
-        case .grantInputMonitoring:
-            HotKeyCenter.shared.requestInputMonitoring()
-        case .openAccessibility:
-            open("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-        case .openChannels:
-            model.openSettings(.connections)
-        }
-    }
-
-    private func open(_ s: String) { if let u = URL(string: s) { NSWorkspace.shared.open(u) } }
 }
 
-private struct SetupStepRow: View {
+/// The closing screen: what is set up, and every skipped or unreached step with "Set up".
+struct SetupSummaryView: View {
+    let walk: SetupWalkthrough
+    let openStep: (WalkStep) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.m) {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    Text(walk.isFinished ? "You're set" : "Almost there").font(Typo.title).foregroundStyle(Theme.ink)
+                    Text(walk.isFinished
+                         ? "Click the duck in your menu bar to see your agents. Anything skipped stays in Settings › Setup."
+                         : "Squeak still needs its service and agent hooks before it can work.")
+                        .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                if !walk.doneSteps.isEmpty {
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        Text("Set up").font(Typo.label).foregroundStyle(Theme.ink)
+                        ForEach(walk.doneSteps) { s in
+                            HStack(spacing: Space.s) {
+                                Lucide(.check, size: 14, color: Theme.working)
+                                Text(s.title).font(Typo.body).foregroundStyle(Theme.muted)
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("\(s.title), done")
+                        }
+                    }
+                }
+                let open = walk.steps.filter { walk.state($0) != .done }
+                if !open.isEmpty {
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        Text("Not set up yet").font(Typo.label).foregroundStyle(Theme.ink)
+                        ForEach(open) { s in
+                            HStack(spacing: Space.s) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(s.title).font(Typo.body).foregroundStyle(Theme.ink)
+                                    Text(walk.state(s) == .skipped ? "Skipped" : "Not done").font(Typo.meta).foregroundStyle(Theme.muted)
+                                }
+                                Spacer()
+                                Button("Set up") { openStep(s) }.buttonStyle(SecondaryButtonStyle())
+                            }
+                            .accessibilityElement(children: .contain)
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, Space.m)
+        }
+    }
+}
+
+struct SetupStepRow: View {
     let step: SetupStep
     let isPrimary: Bool
     let run: (SetupAction) -> Void
@@ -161,20 +309,14 @@ private struct SetupStepRow: View {
                     Spacer(minLength: 0)
                     if step.state == .blocked {
                         Text("Waiting").font(Typo.meta).foregroundStyle(Theme.muted)
-                    } else if isPrimary {
-                        Text(step.state == .error ? "Needs attention" : "Next step")
-                            .font(Typo.meta).foregroundStyle(Theme.muted)
-                    } else if step.state == .optional || (!step.required && step.state != .error) {
-                        Text("Optional").font(Typo.meta).foregroundStyle(Theme.subtle)
+                    } else if step.state == .error {
+                        Text("Needs attention").font(Typo.meta).foregroundStyle(Theme.muted)
                     }
                 }
                 Text(verbatim: step.why).font(Typo.body).foregroundStyle(step.state == .error ? Theme.error : Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                if step.id == .conductor, isPrimary, step.state == .todo || step.state == .error {
+                if step.id == .conductor, step.state == .todo || step.state == .error {
                     ConductorRelayCard()
-                    if let skip = step.secondaryAction, let title = step.secondaryTitle {
-                        Button(title) { run(skip) }.buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
-                    }
                 } else {
                     buttons
                 }
@@ -191,9 +333,6 @@ private struct SetupStepRow: View {
                 } else {
                     Button(title) { run(action) }.buttonStyle(SecondaryButtonStyle()).disabled(busy || step.state == .blocked)
                 }
-            }
-            if let skip = step.secondaryAction, let title = step.secondaryTitle {
-                Button(title) { run(skip) }.buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
             }
             if busy { ProgressView().controlSize(.small); Text("Working…").font(Typo.meta).foregroundStyle(Theme.muted) }
         }

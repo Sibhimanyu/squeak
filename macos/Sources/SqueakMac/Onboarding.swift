@@ -16,18 +16,22 @@ final class OnboardingController {
         show()
     }
 
-    func show() {
+    /// The Welcome screen, or, with `at`, straight into the walk-through on that screen (Settings › Setup).
+    func show(at screen: WalkScreen? = nil) {
         if window == nil {
             let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
+                contentRect: NSRect(x: 0, y: 0, width: 620, height: 720),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false
             )
             w.title = "Welcome to Squeak"
             w.isReleasedWhenClosed = false
-            w.contentView = NSHostingView(rootView: OnboardingView(finish: { [weak self] in self?.finish() }).environment(AppModel.shared))
             w.center()
             window = w
         }
+        window?.title = screen == nil ? "Welcome to Squeak" : "Set up Squeak"
+        window?.contentView = NSHostingView(
+            rootView: OnboardingView(step: screen == nil ? 0 : 1, walkStart: screen, finish: { [weak self] in self?.finish() })
+                .environment(AppModel.shared))
         ActivationPolicyController.shared.willShowWindow()
         window?.makeKeyAndOrderFront(nil)
     }
@@ -42,10 +46,12 @@ struct OnboardingView: View {
     var finish: () -> Void
     @Environment(AppModel.self) private var model
     @State private var step: Int
+    @State private var walkStart: WalkScreen?
 
-    /// Welcome, essential setup, then a walkthrough using the person's real sessions.
-    init(step: Int = 0, finish: @escaping () -> Void) {
+    /// Welcome, the guided setup, then a walkthrough using the person's real sessions.
+    init(step: Int = 0, walkStart: WalkScreen? = nil, finish: @escaping () -> Void) {
         _step = State(initialValue: step)
+        _walkStart = State(initialValue: walkStart)
         self.finish = finish
     }
 
@@ -56,11 +62,11 @@ struct OnboardingView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 welcomeFooter
             } else if step == 1 {
-                ScrollView { SetupChecklistView() }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                checklistFooter
+                SetupWalkthroughView(
+                    start: walkStart ?? model.walkthrough.firstOpen.map { .step($0) } ?? .summary,
+                    finish: { step = 2 }, later: finish)
             } else {
-                ScrollView { FirstSessionView(backToSetup: { step = 1 }) }
+                ScrollView { FirstSessionView(backToSetup: { walkStart = .summary; step = 1 }) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 firstSessionFooter
             }
@@ -68,7 +74,7 @@ struct OnboardingView: View {
         .padding(.horizontal, Space.xxl)
         .padding(.top, Space.xxl)
         .padding(.bottom, Space.xl)
-        .frame(width: 520, height: 600)
+        .frame(width: 620, height: 720)
         .background(Theme.bg)
     }
 
@@ -78,25 +84,12 @@ struct OnboardingView: View {
             Spacer()
             Button("Set up Squeak") {
                 model.setup.confirmInstallService()
+                walkStart = nil
                 step = 1
             }
             .buttonStyle(PrimaryButtonStyle())
             .keyboardShortcut(.defaultAction)
         }
-        .font(.system(size: 13))
-    }
-
-    private var checklistFooter: some View {
-        let done = model.setupChecklist.isComplete
-        return HStack {
-            Spacer()
-            if done {
-                Button("Try your first session") { step = 2 }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-            } else {
-                Button("Finish later") { finish() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(.top, Space.m)
         .font(.system(size: 13))
     }
 
@@ -158,7 +151,7 @@ struct OnboardingView: View {
 
             VStack(alignment: .leading, spacing: Space.s) {
                 Text("A quick setup. No terminal needed.").font(Typo.label).foregroundStyle(Theme.ink)
-                Text("First, install Squeak’s background service. Then connect your agents. Notifications, shortcuts and phone access are your choice.")
+                Text("One short screen per step: the service and agent hooks first, then Conductor, notifications, your phone and more. Skip anything you don’t want.")
                     .font(Typo.body).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }

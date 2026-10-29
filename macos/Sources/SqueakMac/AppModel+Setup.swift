@@ -17,6 +17,8 @@ final class SetupModel {
     /// True once a first reading finished, so the menu does not nag before it knows.
     private(set) var loaded = false
     var conductorSkipped: Bool { didSet { defaults.set(conductorSkipped, forKey: "setupConductorSkipped") } }
+    /// Walk-through step ids the person passed on, kept across launches.
+    var walkSkipped: Set<String> { didSet { defaults.set(Array(walkSkipped).sorted(), forKey: "setupWalkSkipped") } }
     /// The person pressed the one Welcome button: install the background service as soon as it is known to be missing.
     @ObservationIgnored private var installWhenReady = false
 
@@ -28,6 +30,7 @@ final class SetupModel {
         self.client = client
         self.demo = demo
         conductorSkipped = demo ? false : UserDefaults.standard.bool(forKey: "setupConductorSkipped")
+        walkSkipped = demo ? [] : Set(UserDefaults.standard.stringArray(forKey: "setupWalkSkipped") ?? [])
         if demo {
             hooks = DemoData.setupHooks
             notifications = .notDetermined
@@ -111,6 +114,56 @@ extension AppModel {
     }
 
     var setupChecklist: SetupChecklist { SetupChecklist(setupFacts) }
+
+    var walkFacts: WalkFacts {
+        let c = channels.channels
+        return WalkFacts(
+            setup: setupFacts,
+            iphone: (c?.phone.enabled ?? false) || !(channels.remote?.activeDevices.isEmpty ?? true),
+            telegram: c?.telegram.configured ?? false,
+            cliq: (c?.cliq.oneWay ?? false) || (c?.cliq.twoWay ?? false),
+            voice: channels.voice.map { $0.isOn && $0.callee != nil } ?? false,
+            awake: awakeLidReady)
+    }
+
+    var walkthrough: SetupWalkthrough { SetupWalkthrough(walkFacts, skipped: setup.walkSkipped) }
+
+    func skipWalkStep(_ s: WalkStep) {
+        setup.walkSkipped = SetupWalkthrough.skipping(s, in: setup.walkSkipped)
+        if s == .conductor { setup.conductorSkipped = true }
+    }
+
+    func unskipWalkStep(_ s: WalkStep) {
+        setup.walkSkipped = SetupWalkthrough.unskipping(s, in: setup.walkSkipped)
+        if s == .conductor { setup.conductorSkipped = false }
+    }
+
+    /// What a checklist button does; shared by every walk-through screen.
+    func perform(_ action: SetupAction) {
+        func open(_ s: String) { if let u = URL(string: s) { NSWorkspace.shared.open(u) } }
+        switch action {
+        case .installService, .repairService:
+            daemon.repair()
+        case .installHooks:
+            Task { await setup.installHooks() }
+        case .setUpConductor:
+            setup.conductorSkipped = false
+            Task { await relay.setUp() }
+        case .skipConductor:
+            skipWalkStep(.conductor)
+        case .requestNotifications:
+            Notifier.shared.requestAuthorization()
+            Task { await setup.refresh(self) }
+        case .openNotificationSettings:
+            open("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+        case .grantInputMonitoring:
+            HotKeyCenter.shared.requestInputMonitoring()
+        case .openAccessibility:
+            open("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        case .openChannels:
+            openSettings(.connections)
+        }
+    }
 
     /// The menu's "Finish setting up" row: only after a first reading, and only while a required step remains.
     var setupNeedsAttention: Bool { setup.loaded && !setupChecklist.isComplete }
