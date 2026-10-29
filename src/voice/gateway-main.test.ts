@@ -22,6 +22,10 @@ describe("envFromAddonOptions", () => {
     });
     expect(envFromAddonOptions(null)).toEqual({});
   });
+
+  it("ignores a leftover pin or callee option: both are set from the app", () => {
+    expect(envFromAddonOptions({ pin: "2008", callee: "101", sip_host: "h" })).toEqual({ SQUEAK_VOICE_HOST: "h" });
+  });
 });
 
 describe("wavDurationMs", () => {
