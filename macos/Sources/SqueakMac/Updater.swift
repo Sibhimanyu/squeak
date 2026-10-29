@@ -123,7 +123,7 @@ final class AppUpdater {
     /// "Restart to update": install the downloaded update now and relaunch.
     func installNow() {
         if let installHandler {
-            QuitIntent.shared.updating = true
+            QuitIntent.shared.beginUpdateQuit()
             installHandler()
         } else {
             checkForUpdates()
@@ -167,9 +167,9 @@ final class UpdateDelegate: NSObject, SPUUpdaterDelegate {
 
     // MARK: Quit must succeed
 
-    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) { onMain { QuitIntent.shared.updating = true } }
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) { onMain { QuitIntent.shared.beginUpdateQuit() } }
 
-    func updaterWillRelaunchApplication(_ updater: SPUUpdater) { onMain { QuitIntent.shared.updating = true } }
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) { onMain { QuitIntent.shared.beginUpdateQuit() } }
 
     /// The download is staged and installs on the next real quit. Nothing here holds Sparkle back,
     /// and the installer stays reachable from the panel ("Restart to update").

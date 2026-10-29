@@ -163,6 +163,14 @@ final class QuitIntent {
     /// Set when Sparkle has an update staged that installs on the next real quit.
     var installPending = false
 
+    /// Sparkle is about to quit the app to install an update. The quit must succeed, and the app must come back:
+    /// Sparkle's own relaunch sometimes does not, so a detached watcher reopens it (RelaunchWatchdog), unless the
+    /// person chose to quit.
+    func beginUpdateQuit() {
+        updating = true
+        if !explicitQuit { RelaunchWatchdog.arm() }
+    }
+
     func quitCompletely() {
         explicitQuit = true
         NSApp.terminate(nil)

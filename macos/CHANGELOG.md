@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.2
+
+- Updates: after "Restart to update" Squeak always comes back. When Sparkle's own relaunch doesn't happen, a small watcher reopens the app once the new version is installed (or after a minute and a half if the install failed).
+
 ## 2.12.1
 
 - Settings › About › Uninstall Squeak…: shows exactly what will be removed, hands Conductor back first, then removes Squeak's service, hooks, admin rules, Keychain items and files, and moves the app to the Trash. Also available as `squeak uninstall` (docs/uninstall.md).
