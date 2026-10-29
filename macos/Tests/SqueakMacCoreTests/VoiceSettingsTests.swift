@@ -72,4 +72,19 @@ import Testing
         #expect(PinOutcome.reason(from: Data(#"{"error":"That is not your PIN."}"#.utf8)) == "That is not your PIN.")
         #expect(PinOutcome.reason(from: Data("nope".utf8)) == "Squeak could not do that.")
     }
+
+    @Test func policyBodyIsByteExactWithSortedKeys() {
+        let b = PinAction.policy(outgoing: .skip, incoming: .ask).requestBody()
+        #expect(String(decoding: b, as: UTF8.self) == #"{"pin":{"action":"policy","incoming":"ask","outgoing":"skip"}}"#)
+    }
+
+    @Test func decodesPolicyAndToleratesUnknown() throws {
+        let d = JSONDecoder()
+        let v = try d.decode(VoiceSettings.self, from: Data(#"{"mode":"direct","policy":{"outgoing":"skip","incoming":"ask"}}"#.utf8))
+        #expect(v.policy == PinPolicy(outgoing: .skip, incoming: .ask))
+        let odd = try d.decode(VoiceSettings.self, from: Data(#"{"mode":"direct","policy":{"outgoing":"maybe","incoming":7}}"#.utf8))
+        #expect(odd.policy == PinPolicy(outgoing: .ask, incoming: .ask))
+        let none = try d.decode(VoiceSettings.self, from: Data(#"{"mode":"direct"}"#.utf8))
+        #expect(none.policy == nil)
+    }
 }

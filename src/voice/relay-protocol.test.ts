@@ -144,6 +144,7 @@ describe("pinctl", () => {
       { action: "enable" as const, next: "135790" },
       { action: "reset" as const, next: null },
       { action: "reset" as const, next: "135790" },
+      { action: "policy" as const, outgoing: "skip" as const, incoming: "ask" as const },
     ]) {
       const doc = sealPinControl(key, { ...base, ...action });
       expect(doc.box).not.toContain("4821");
@@ -162,6 +163,9 @@ describe("pinctl", () => {
       { ...base, action: "enable", next: "12" },
       { ...base, action: "change", current: "1234", next: "5678" },
       { ...base, action: "wipe" },
+      { ...base, action: "policy", outgoing: "skip" },
+      { ...base, action: "policy", outgoing: "never", incoming: "ask" },
+      { ...base, action: "policy", outgoing: "ask", incoming: "ask", next: "1234" },
     ]) {
       expect(readPinControl(key, "c1", sealBody(key, "req", "c1", body, NOW), NOW).ok).toBe(false);
     }
@@ -174,6 +178,22 @@ describe("pinctl", () => {
       ok: true,
       state: "off",
     });
+    expect(
+      readResult(
+        key,
+        "c1",
+        seal({ status: "pinctl", ok: true, state: "set", policy: { outgoing: "skip", incoming: "ask" } }),
+        [],
+      ),
+    ).toEqual({ status: "pinctl", ok: true, state: "set", policy: { outgoing: "skip", incoming: "ask" } });
+    expect(
+      readResult(
+        key,
+        "c1",
+        seal({ status: "pinctl", ok: true, state: "set", policy: { outgoing: "x", incoming: "ask" } }),
+        [],
+      ),
+    ).toEqual({ status: "pinctl", ok: true, state: "set" });
     expect(readResult(key, "c1", seal({ status: "pinctl", ok: false, reason: "no" }), [])).toEqual({
       status: "pinctl",
       ok: false,

@@ -78,7 +78,7 @@ import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-inst
 import { TelegramAvatar } from "../telegram/avatar.js";
 import { BaresipLine } from "../voice/baresip-line.js";
 import { DirectLine } from "../voice/direct-line.js";
-import { PinKeeper, type PinState } from "../voice/pin-keeper.js";
+import { PinKeeper, type PinPolicy, type PinState } from "../voice/pin-keeper.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import { relayLineFor, type RelayLine } from "../voice/relay-line.js";
 import { GatewayPairing } from "../voice/pairing-window.js";
@@ -192,6 +192,8 @@ export class SqueakApp {
   /** Gateway mode: the last state the add-on told us, and when; "unknown" until the first answer. */
   private voicePinCache: { state: PinState | "unknown"; at: number } = { state: "unknown", at: 0 };
   private voicePinAsking = false;
+  /** The add-on's last answer on when the pin is asked; null until it says (an older add-on never does). */
+  private voicePolicyCache: PinPolicy | null = null;
   /** How the last test call from an app went; shown in the phone view and the Mac app. */
   private voiceTest: {
     at: number;
@@ -1087,6 +1089,7 @@ export class SqueakApp {
       callee: this.voiceSettings.settings.callee,
       defaultCallee: voice?.callee ?? null,
       pin: this.voicePinState(),
+      ...this.voicePolicyView(),
       ...(mode === "gateway" ? { gateway: this.gatewayView() } : {}),
       // Absent until a test has been asked for.
       ...(this.voiceTest ? { lastTest: this.voiceTest } : {}),
@@ -1110,6 +1113,12 @@ export class SqueakApp {
     return this.voicePinCache.state;
   }
 
+  /** `policy` when known; absent from an older add-on. */
+  private voicePolicyView(): { policy?: PinPolicy } {
+    const policy = this.voicePins ? this.voicePins.policy() : this.voicePolicyCache;
+    return policy ? { policy: { outgoing: policy.outgoing, incoming: policy.incoming } } : {};
+  }
+
   /** Asks the add-on where the pin stands (fire and forget); a silent or old add-on leaves the last state. */
   private async refreshVoicePin(): Promise<void> {
     const line = this.voiceRelayLine;
@@ -1119,9 +1128,11 @@ export class SqueakApp {
     this.voicePinCache = { ...this.voicePinCache, at: Date.now() };
     try {
       const answer = await line.pinControl({ action: "status" });
-      if (answer.ok && answer.state !== this.voicePinCache.state) {
+      if (answer.ok) {
+        const before = `${this.voicePinCache.state}|${JSON.stringify(this.voicePolicyCache)}`;
         this.voicePinCache = { state: answer.state, at: Date.now() };
-        this.remote?.changed();
+        if (answer.policy) this.voicePolicyCache = answer.policy;
+        if (before !== `${answer.state}|${JSON.stringify(this.voicePolicyCache)}`) this.remote?.changed();
       }
     } catch {
       // Unknown stays unknown.
@@ -1140,11 +1151,13 @@ export class SqueakApp {
       const outcome =
         action.action === "change"
           ? keeper.change(action.current, action.next)
-          : action.action === "disable"
-            ? keeper.disable(action.current)
-            : action.action === "enable"
-              ? keeper.enable(action.next)
-              : keeper.reset(action.next);
+          : action.action === "policy"
+            ? keeper.setPolicy({ outgoing: action.outgoing, incoming: action.incoming })
+            : action.action === "disable"
+              ? keeper.disable(action.current)
+              : action.action === "enable"
+                ? keeper.enable(action.next)
+                : keeper.reset(action.next);
       if (outcome.ok) this.remote?.changed();
       return outcome.ok ? { ok: true } : outcome;
     }
@@ -1153,6 +1166,9 @@ export class SqueakApp {
     const outcome = await line.pinControl(action);
     if (outcome.ok) {
       this.voicePinCache = { state: outcome.state, at: Date.now() };
+      if (outcome.policy) this.voicePolicyCache = outcome.policy;
+      else if (action.action === "policy")
+        this.voicePolicyCache = { outgoing: action.outgoing, incoming: action.incoming };
       this.remote?.changed();
       return { ok: true };
     }

@@ -11,9 +11,11 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public var defaultCallee: String?
     /// "set" / "off" / "none" / "unknown"; nil from a daemon that predates PIN management (hide the section).
     public var pin: String?
+    /// When the PIN is asked; nil from a daemon that predates the policy (hide the section).
+    public var policy: PinPolicy?
 
-    public init(mode: String = "off", callee: String? = nil, defaultCallee: String? = nil, pin: String? = nil) {
-        self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.pin = pin
+    public init(mode: String = "off", callee: String? = nil, defaultCallee: String? = nil, pin: String? = nil, policy: PinPolicy? = nil) {
+        self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.pin = pin; self.policy = policy
     }
 
     public var isOn: Bool { mode != "off" }

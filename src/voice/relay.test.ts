@@ -219,17 +219,17 @@ describe("Mac and gateway through the relay", () => {
     it("turns the pin off, on, resets it and reports status through pinctl", async () => {
       const keeper = withKeeper();
       const line = new RelayLine({ store, channel, key });
-      expect(await line.pinControl({ action: "status" })).toEqual({ ok: true, state: "set" });
+      expect(await line.pinControl({ action: "status" })).toMatchObject({ ok: true, state: "set" });
       expect(await line.pinControl({ action: "disable", current: "0000" })).toEqual({
         ok: false,
         reason: "That is not your current pin.",
       });
-      expect(await line.pinControl({ action: "disable", current: "4821" })).toEqual({ ok: true, state: "off" });
+      expect(await line.pinControl({ action: "disable", current: "4821" })).toMatchObject({ ok: true, state: "off" });
       expect(keeper.status()).toBe("off");
-      expect(await line.pinControl({ action: "enable", next: "2468" })).toEqual({ ok: true, state: "set" });
+      expect(await line.pinControl({ action: "enable", next: "2468" })).toMatchObject({ ok: true, state: "set" });
       expect(keeper.current()).toBe("2468");
-      expect(await line.pinControl({ action: "reset", next: null })).toEqual({ ok: true, state: "off" });
-      expect(await line.pinControl({ action: "reset", next: "97531" })).toEqual({ ok: true, state: "set" });
+      expect(await line.pinControl({ action: "reset", next: null })).toMatchObject({ ok: true, state: "off" });
+      expect(await line.pinControl({ action: "reset", next: "97531" })).toMatchObject({ ok: true, state: "set" });
       expect(keeper.current()).toBe("97531");
       expect(await line.pinControl({ action: "change", current: "97531", next: "1357" })).toEqual({
         ok: true,
@@ -238,6 +238,58 @@ describe("Mac and gateway through the relay", () => {
       expect(db.tree.list(`channels/${channel}/voice`)).toEqual([]);
       expect(db.tree.list(`channels/${channel}/voiceresult`)).toEqual([]);
       expect(db.requests.join(" ")).not.toMatch(/2468|97531|1357/);
+    });
+
+    it("carries the policy in status, sets it without a pin, and the next call follows it", async () => {
+      const keeper = withKeeper();
+      const line = new RelayLine({ store, channel, key });
+      expect(await line.pinControl({ action: "status" })).toEqual({
+        ok: true,
+        state: "set",
+        policy: { outgoing: "ask", incoming: "ask" },
+      });
+      const set = await line.pinControl({ action: "policy", outgoing: "skip", incoming: "skip" });
+      expect(set).toEqual({ ok: true, state: "set", policy: { outgoing: "skip", incoming: "skip" } });
+      expect(keeper.policy()).toEqual({ outgoing: "skip", incoming: "skip" });
+      expect(db.requests.join(" ")).not.toContain("4821");
+    });
+
+    it("with outgoing skip a call takes a key without a pin; with ask and no pin it is tell-only", async () => {
+      const fresh = new PinKeeper(null, path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pol-")), "voice-pin.json"));
+      gateway.stop();
+      gateway = new VoiceGateway({
+        store,
+        channel,
+        key,
+        callee: "101",
+        pin: () => fresh.current(),
+        pinRequired: () => fresh.requiresPin(),
+        canAnswer: () => fresh.answerable(),
+        pins: fresh,
+        line: {
+          call: async (_c, dialog) => {
+            dialogs.push(dialog);
+            return outcome;
+          },
+        },
+      });
+      gateway.start();
+      const line = new RelayLine({ store, channel, key });
+      await line.call(script, true);
+      const tellOnly = dialogs.pop()!;
+      tellOnly.start();
+      expect(tellOnly.key("1")).toEqual([]);
+      await line.pinControl({ action: "policy", outgoing: "skip", incoming: "ask" });
+      await line.call(script, true);
+      const skip = dialogs.pop()!;
+      expect((skip.start()[0] as { text: string }).text).not.toContain("enter your pin");
+      expect(skip.key("1")[0]).toEqual({ type: "answer", letter: "A" });
+      // A set pin with outgoing skip also answers without asking.
+      fresh.enable("4821");
+      await line.call(script, true);
+      const withPin = dialogs.pop()!;
+      withPin.start();
+      expect(withPin.key("2")[0]).toEqual({ type: "answer", letter: "B" });
     });
 
     it("says the add-on is too old when a pinctl is never answered, but not for a plain change", async () => {

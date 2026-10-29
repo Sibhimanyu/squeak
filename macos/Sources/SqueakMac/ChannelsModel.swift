@@ -321,6 +321,11 @@ final class ChannelsModel {
         return await runPin(.reset(next: new), done: new == nil ? "The PIN is off." : "Your new PIN is set.")
     }
 
+    /// Sends both settings; the shown state is whatever the daemon answers (`runPin` re-reads the view).
+    func setPinPolicy(outgoing: PinPolicyChoice, incoming: PinPolicyChoice) async {
+        _ = await runPin(.policy(outgoing: outgoing, incoming: incoming), done: "Saved.")
+    }
+
     func clearPinMessages() { pinError = nil; pinNotice = nil }
     func reportPinError(_ text: String) { pinError = text; pinNotice = nil }
 

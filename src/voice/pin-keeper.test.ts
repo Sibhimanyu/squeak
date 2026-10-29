@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { PinKeeper } from "./pin-keeper.js";
+import { incomingGate, PinKeeper } from "./pin-keeper.js";
 
 function setup(optionPin: string | null = "4821") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pin-keeper-"));
@@ -139,5 +139,57 @@ describe("PinKeeper", () => {
     const keeper = t.make();
     const results = [keeper.change("0000", "135790"), keeper.disable("0000"), keeper.enable("135790")];
     for (const r of results) expect(JSON.stringify(r)).not.toMatch(/4821|135790|0000/);
+  });
+
+  describe("policy", () => {
+    it("defaults to ask/ask, seeds incoming from the legacy option, and a saved policy beats it", () => {
+      const t = setup();
+      expect(t.make().policy()).toEqual({ outgoing: "ask", incoming: "ask" });
+      const legacy = new PinKeeper("4821", t.file, () => 0, "skip");
+      expect(legacy.policy()).toEqual({ outgoing: "ask", incoming: "skip" });
+      expect(legacy.setPolicy({ outgoing: "ask", incoming: "ask" })).toEqual({ ok: true, state: "set" });
+      expect(new PinKeeper("4821", t.file, () => 0, "skip").policy()).toEqual({ outgoing: "ask", incoming: "ask" });
+    });
+
+    it("persists privately beside the pin, in both orders, and a file with only policy is valid", () => {
+      const t = setup(null);
+      const keeper = t.make();
+      keeper.setPolicy({ outgoing: "skip", incoming: "ask" });
+      expect(fs.statSync(t.file).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(fs.readFileSync(t.file, "utf8"))).toEqual({ policy: { outgoing: "skip", incoming: "ask" } });
+      expect(t.make().status()).toBe("none");
+      keeper.enable("4821");
+      expect(t.make().policy()).toEqual({ outgoing: "skip", incoming: "ask" });
+      expect(t.make().current()).toBe("4821");
+      t.make().setPolicy({ outgoing: "ask", incoming: "skip" });
+      expect(t.make().current()).toBe("4821");
+    });
+
+    it("applies the contract's answerable / requiresPin / incoming rules", () => {
+      const t = setup(null);
+      const k = t.make();
+      expect([k.answerable(), k.requiresPin(), k.incomingAllowed(), k.incomingAsksPin()]).toEqual([
+        false,
+        false,
+        false,
+        false,
+      ]);
+      k.setPolicy({ outgoing: "skip", incoming: "skip" });
+      expect([k.answerable(), k.requiresPin(), k.incomingAllowed()]).toEqual([true, false, true]);
+      k.enable("4821");
+      expect([k.answerable(), k.requiresPin(), k.incomingAsksPin()]).toEqual([true, false, false]);
+      k.setPolicy({ outgoing: "ask", incoming: "ask" });
+      expect([k.answerable(), k.requiresPin(), k.incomingAsksPin(), k.incomingAllowed()]).toEqual([
+        true,
+        true,
+        true,
+        true,
+      ]);
+      const gate = incomingGate(k);
+      expect(gate.pin()).toBe("4821");
+      k.setPolicy({ outgoing: "ask", incoming: "skip" });
+      expect(gate.pin()).toBeNull();
+      expect(gate.allowed()).toBe(true);
+    });
   });
 });

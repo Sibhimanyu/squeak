@@ -29,7 +29,9 @@ export interface GatewayDependencies {
   /** Read at each call: false when the pin was turned off on purpose, so keys answer without one. Default true. */
   pinRequired?: () => boolean;
   /** Answers pin changes and controls; absent: such a request is refused. */
-  pins?: Pick<PinKeeper, "change" | "disable" | "enable" | "reset" | "status"> | null;
+  /** Read at each call: whether a call can take a key answer at all (the keeper's rule); default true. */
+  canAnswer?: () => boolean;
+  pins?: Pick<PinKeeper, "change" | "disable" | "enable" | "reset" | "status" | "policy" | "setPolicy"> | null;
   now?: () => number;
   /** A plain sentence for the apps' gateway log; never a pin, a question or a key. */
   onEvent?: (level: "info" | "warn", text: string) => void;
@@ -39,6 +41,11 @@ function pinControlSentence(action: "disable" | "enable" | "reset", ok: boolean)
   const done = { disable: "PIN turned off", enable: "PIN turned on", reset: "PIN reset" }[action];
   const refused = { disable: "PIN turn-off", enable: "PIN turn-on", reset: "PIN reset" }[action];
   return ok ? done : `${refused} refused`;
+}
+
+/** Only the two words each; never a pin. */
+function policySentence(p: { outgoing: string; incoming: string }, ok: boolean): string {
+  return ok ? `PIN policy changed: outgoing ${p.outgoing}, incoming ${p.incoming}` : "PIN policy change refused";
 }
 
 const SAFETY_POLL_MS = 60_000;
@@ -146,17 +153,29 @@ export class VoiceGateway {
           ? { ok: false as const, reason: "This add-on cannot change its pin from an app." }
           : request.action === "status"
             ? { ok: true as const, state: pins.status() }
-            : request.action === "disable"
-              ? pins.disable(request.current)
-              : request.action === "enable"
-                ? pins.enable(request.next)
-                : pins.reset(request.next);
+            : request.action === "policy"
+              ? pins.setPolicy({ outgoing: request.outgoing, incoming: request.incoming })
+              : request.action === "disable"
+                ? pins.disable(request.current)
+                : request.action === "enable"
+                  ? pins.enable(request.next)
+                  : pins.reset(request.next);
         // The action and whether it worked, never a pin.
         logger.info("voice pin control", { action: request.action, ok: outcome.ok });
-        if (request.action !== "status")
+        if (request.action === "policy")
+          this.deps.onEvent?.(outcome.ok ? "info" : "warn", policySentence(request, outcome.ok));
+        else if (request.action !== "status")
           this.deps.onEvent?.(outcome.ok ? "info" : "warn", pinControlSentence(request.action, outcome.ok));
         const answer: CallResultDoc = outcome.ok
-          ? { v: 1, id, at: this.now(), status: "pinctl", ok: true, state: outcome.state }
+          ? {
+              v: 1,
+              id,
+              at: this.now(),
+              status: "pinctl",
+              ok: true,
+              state: outcome.state,
+              ...(pins ? { policy: pins.policy() } : {}),
+            }
           : { v: 1, id, at: this.now(), status: "pinctl", ok: false, reason: outcome.reason };
         await store.set(resultPath(channel, id), sealResult(key, answer));
         continue;
@@ -167,14 +186,16 @@ export class VoiceGateway {
       }
       const { request } = read;
       const callee = request.callee ?? this.deps.callee;
+      const answerable = request.answerable && (this.deps.canAnswer?.() ?? true);
       const result: CallResult = callee
         ? await this.deps.line.call(
             callee,
-            // An unanswerable request is tell-only whatever the pin says; "pin off" only matters when keys are allowed.
+            // An unanswerable request (the Mac's word, or the keeper's: no pin and outgoing "ask") is tell-only;
+            // "pin off" or outgoing "skip" only matters when keys are allowed.
             new CallDialog(
               request.script,
-              request.answerable ? this.deps.pin() : null,
-              request.answerable ? (this.deps.pinRequired?.() ?? true) : true,
+              answerable ? this.deps.pin() : null,
+              answerable ? (this.deps.pinRequired?.() ?? true) : true,
             ),
           )
         : { status: "failed", reason: "No phone extension is set. Set it in Squeak's settings on your Mac." };

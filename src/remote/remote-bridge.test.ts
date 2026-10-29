@@ -4417,6 +4417,7 @@ describe("RemoteBridge phone-call settings from the phone", () => {
       { action: "enable", next: "987654" },
       { action: "reset", next: null },
       { action: "reset", next: "987654" },
+      { action: "policy", outgoing: "skip", incoming: "ask" },
     ];
     for (const [i, pinAction] of actions.entries()) {
       const verdict = await t.bridge.handleCommand(t.config, `a${i}`, t.command({ change: { pinAction } }));
@@ -4447,6 +4448,8 @@ describe("RemoteBridge phone-call settings from the phone", () => {
       { change: { pinAction: { action: "enable", next: "1234567890123" } } },
       { change: { pinAction: { action: "change", current: "1234" } } },
       { change: { pinAction: { action: "status" } } },
+      { change: { pinAction: { action: "policy", outgoing: "skip" } } },
+      { change: { pinAction: { action: "policy", outgoing: "never", incoming: "ask" } } },
       { change: { pinAction: "reset" } },
       { change: { pinAction: null } },
       { change: { pinAction: { action: "reset", next: null }, callee: "101" } },

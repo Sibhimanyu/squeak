@@ -10,6 +10,31 @@ extension VoiceSettings {
     public var pinState: PinState? { pin.flatMap(PinState.init(rawValue:)) }
 }
 
+/// Whether the PIN is asked for one kind of call. Anything the daemon says that is not "skip" reads as ask.
+public enum PinPolicyChoice: String, Sendable, Equatable, CaseIterable {
+    case ask, skip
+
+    public init(daemon raw: String?) { self = raw == "skip" ? .skip : .ask }
+}
+
+/// The daemon's `policy: { outgoing, incoming }`: outgoing = calls Squeak makes to you, incoming = calls you make to Squeak.
+public struct PinPolicy: Sendable, Equatable, Decodable {
+    public var outgoing: PinPolicyChoice
+    public var incoming: PinPolicyChoice
+
+    public init(outgoing: PinPolicyChoice = .ask, incoming: PinPolicyChoice = .ask) {
+        self.outgoing = outgoing; self.incoming = incoming
+    }
+
+    private enum Keys: String, CodingKey { case outgoing, incoming }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        outgoing = PinPolicyChoice(daemon: try? c.decodeIfPresent(String.self, forKey: .outgoing))
+        incoming = PinPolicyChoice(daemon: try? c.decodeIfPresent(String.self, forKey: .incoming))
+    }
+}
+
 /// `POST /control/voice` body `{ "pin": { "action": ... } }`, exactly per the PIN contract.
 public enum PinAction: Sendable, Equatable {
     case change(current: String, next: String)
@@ -17,6 +42,8 @@ public enum PinAction: Sendable, Equatable {
     case enable(next: String)
     /// `next == nil` turns the PIN requirement off. Only after the owner check (Touch ID / login password).
     case reset(next: String?)
+    /// Needs no current PIN; "skip" only after the owner check.
+    case policy(outgoing: PinPolicyChoice, incoming: PinPolicyChoice)
 
     public func requestBody() -> Data {
         var inner: [String: Any]
@@ -24,6 +51,7 @@ public enum PinAction: Sendable, Equatable {
         case let .change(c, n): inner = ["action": "change", "current": c, "next": n]
         case let .disable(c): inner = ["action": "disable", "current": c]
         case let .enable(n): inner = ["action": "enable", "next": n]
+        case let .policy(o, i): inner = ["action": "policy", "outgoing": o.rawValue, "incoming": i.rawValue]
         case let .reset(n): inner = ["action": "reset", "next": n as Any? ?? NSNull()]
         }
         return (try? JSONSerialization.data(withJSONObject: ["pin": inner], options: [.sortedKeys])) ?? Data("{}".utf8)
