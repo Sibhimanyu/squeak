@@ -64,6 +64,7 @@ final class SidebarColumnSizerView: NSView {
 
     var configuration: Configuration
     private var applyScheduled = false
+    private var isApplying = false
     private weak var observedSplitView: NSSplitView?
 
     init(configuration: Configuration) {
@@ -94,7 +95,10 @@ final class SidebarColumnSizerView: NSView {
     }
 
     private func apply() {
+        guard !isApplying else { return }
         guard let controller = splitViewController else { return }
+        isApplying = true
+        defer { isApplying = false }
         observeResizes(in: controller.splitView)
         guard let sidebar = controller.splitViewItems.first(where: { $0.behavior == .sidebar }) else { return }
 
@@ -135,7 +139,12 @@ final class SidebarColumnSizerView: NSView {
     private static let didResizeSubviews = Notification.Name("NSSplitViewDidResizeSubviewsNotification")
 
     @objc private func splitViewDidResize(_ notification: Notification) {
-        applyWhenAttached()
+        // SwiftUI can restore its native 140pt sidebar minimum during layout. Deferring
+        // the correction to another task lets that wider rail render for a frame.
+        // Correct a collapsed rail in the same resize pass; our own resize reenters
+        // this observer, so `apply` guards against recursive corrections.
+        if configuration.isCollapsed { apply() }
+        else { applyWhenAttached() }
     }
 
     private var splitViewController: NSSplitViewController? {

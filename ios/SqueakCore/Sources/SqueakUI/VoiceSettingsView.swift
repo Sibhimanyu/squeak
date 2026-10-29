@@ -136,56 +136,113 @@ private struct PinSection: View {
             EmptyView()
         } else {
             Section {
-                content
+                VStack(alignment: .leading, spacing: 16) {
+                    statusCard
+                    content
+                }
+                .padding(.vertical, 8)
                 if let note { Text(note).font(.footnote).foregroundStyle(Theme.muted) }
-            } header: { Text("Pin") } footer: { Text(footer) }
-        }
-    }
-
-    private var footer: String {
-        switch state {
-        case "off": return "Anyone who answers a call can reply by key. Turn the pin on to ask for it again."
-        case "none": return "No pin is set, so Squeak only tells you on a call and takes no answer. A pin is 4 to 12 digits."
-        case "unknown": return "Your Home Assistant add-on hasn't said whether a pin is set. If this stays, update the Squeak Voice add-on (0.5.0 or newer) and check it is running."
-        default: return "The pin you key in on a call, 4 to 12 digits. It is kept with whatever places your calls, not shown here."
-        }
-    }
-
-    @ViewBuilder private var content: some View {
-        switch state {
-        case nil:
-            form(.change, title: "Change pin", needsCurrent: true, button: "Change pin")
-        case "set":
-            form(.change, title: "Change PIN", needsCurrent: true, button: "Change PIN")
-            turnOff
-            forgot
-        case "off":
-            Text("The pin is off. Anyone who answers a call can reply by key.").font(.footnote).foregroundStyle(Theme.muted)
-            form(.enable, title: "Turn PIN on", needsCurrent: false, button: "Turn PIN on")
-        case "none":
-            form(.enable, title: "Set a PIN", needsCurrent: false, button: "Set a PIN")
-        default:
-            Text("Waiting for your add-on…").font(.footnote).foregroundStyle(Theme.muted)
-            turnOff
-            forgot
-        }
-    }
-
-    /// Turning the PIN off needs you, not the old PIN: Face ID or the passcode, then one more tap to confirm.
-    @ViewBuilder private var turnOff: some View {
-        Button("Turn PIN off", role: .destructive) { confirmingOff = true }
-            .disabled(busy).frame(minHeight: 44)
+            } header: { Text("CALLING PIN") }
             .confirmationDialog("Turn the PIN off?", isPresented: $confirmingOff, titleVisibility: .visible) {
                 Button("Turn PIN off", role: .destructive) { turnOffTapped() }
                 Button("Keep the PIN", role: .cancel) {}
             } message: {
                 Text("Anyone who answers the call will then be able to reply by key.")
             }
+        }
     }
 
-    @ViewBuilder private var forgot: some View {
-        if verified {
-            Text("Choose a new PIN, or turn the requirement off.").font(.footnote).foregroundStyle(Theme.muted)
+    private var statusCard: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: state == "off" ? "lock.open.fill" : "lock.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(state == "off" ? Theme.muted : Theme.primaryText)
+                .frame(width: 42, height: 42)
+                .background(state == "off" ? Theme.line : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(statusTitle).font(.headline)
+                    Circle().fill(statusTint).frame(width: 7, height: 7).accessibilityHidden(true)
+                }
+                Text(statusDetail).font(.subheadline).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.line, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var statusTitle: String {
+        switch state {
+        case "set": return "Calling PIN is set"
+        case "off": return "PIN protection is off"
+        case "none": return "No PIN set"
+        case "unknown": return "Checking PIN status"
+        default: return "Calling PIN"
+        }
+    }
+
+    private var statusDetail: String {
+        switch state {
+        case "set": return "Your 4 to 12 digit PIN is ready. The call settings on your Mac decide when it is requested."
+        case "off": return "Anyone who answers a call can reply by key. Turn protection on whenever you like."
+        case "none": return "Set a 4 to 12 digit PIN to let callers reply by key."
+        case "unknown": return "Waiting for your add-on to report PIN status. Update Squeak Voice to 0.5.0 or newer if this persists."
+        default: return "Your PIN is kept with the service that places your calls."
+        }
+    }
+
+    private var statusTint: Color {
+        switch state {
+        case "set": return Theme.working
+        case "off": return Theme.muted
+        case "unknown": return Theme.done
+        default: return Theme.needsYou
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch state {
+        case nil:
+            form(.change, title: "Change PIN", needsCurrent: true, button: "Change PIN")
+        case "set":
+            if verified {
+                forgot
+            } else if open == .change {
+                form(.change, title: "Change PIN", needsCurrent: true, button: "Save new PIN")
+            } else {
+                actionRow("Change PIN", detail: "Choose a new calling PIN", icon: "arrow.triangle.2.circlepath") {
+                    closeAll(); open = .change; note = nil
+                }
+                .disabled(busy)
+                actionRow("Turn PIN off", detail: "Allow replies without a PIN", icon: "lock.open", destructive: true) {
+                    confirmingOff = true
+                }
+                .disabled(busy)
+                actionRow("Forgot your PIN?", detail: "Verify it’s you to reset protection", icon: "questionmark.circle") { forgotTapped() }
+                    .disabled(busy)
+            }
+        case "off":
+            form(.enable, title: "Turn PIN on", needsCurrent: false, button: "Turn PIN on")
+        case "none":
+            form(.enable, title: "Set a PIN", needsCurrent: false, button: "Set a PIN")
+        default:
+            if verified {
+                forgot
+            } else {
+                actionRow("Forgot your PIN?", detail: "Verify it’s you to reset protection", icon: "questionmark.circle") { forgotTapped() }
+                    .disabled(busy)
+            }
+        }
+    }
+
+    private var forgot: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Reset calling PIN").font(.headline)
+            Text("Choose a new PIN, or turn the requirement off.").font(.subheadline).foregroundStyle(Theme.muted)
             field("New PIN", text: $new, focus: .new, type: .newPassword)
             field("Repeat new PIN", text: $again, focus: .repeatPin, type: .newPassword)
             Button(busy ? "Saving…" : "Save new PIN") { run(.reset(next: new)) }
@@ -193,28 +250,64 @@ private struct PinSection: View {
             Button("Turn PIN off instead", role: .destructive) { run(.reset(next: nil)) }
                 .disabled(busy).frame(minHeight: 44)
             Button("Cancel") { closeAll() }.frame(minHeight: 44)
-        } else {
-            Button("Forgot your PIN?") { forgotTapped() }.disabled(busy).frame(minHeight: 44)
         }
+        .padding(16)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(Theme.line, lineWidth: 1))
+    }
+
+    private func actionRow(_ title: String, detail: String, icon: String, destructive: Bool = false,
+                           action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 13) {
+                Image(systemName: icon).font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(destructive ? Theme.needsYou : Theme.muted)
+                    .frame(width: 38, height: 38)
+                    .background(Theme.bg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.body.weight(.semibold)).foregroundStyle(destructive ? Theme.needsYou : Theme.ink)
+                    Text(detail).font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(Theme.subtle)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(Theme.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: 60)
     }
 
     @ViewBuilder
     private func form(_ kind: Form_, title: String, needsCurrent: Bool, button: String, destructive: Bool = false,
                       warning: String? = nil) -> some View {
         if open == kind {
-            if let warning { Text(warning).font(.footnote).foregroundStyle(Theme.muted) }
-            if needsCurrent { field("Current PIN", text: $current, focus: .current, type: .password) }
-            if kind != .disable {
-                field("New PIN", text: $new, focus: .new, type: .newPassword)
-                field("Repeat new PIN", text: $again, focus: .repeatPin, type: .newPassword)
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text(title).font(.headline)
+                    Spacer()
+                    Button("Cancel") { closeAll() }.font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                }
+                if let warning { Text(warning).font(.footnote).foregroundStyle(Theme.muted) }
+                if needsCurrent { field("Current PIN", text: $current, focus: .current, type: .password) }
+                if kind != .disable {
+                    field("New PIN", text: $new, focus: .new, type: .newPassword)
+                    field("Repeat new PIN", text: $again, focus: .repeatPin, type: .newPassword)
+                }
+                Button(busy ? "Working…" : button, role: destructive ? .destructive : nil) { submit(kind) }
+                    .disabled(!ready(kind) || busy)
+                    .buttonStyle(PrimaryButtonStyle())
             }
-            Button(busy ? "Working…" : button, role: destructive ? .destructive : nil) { submit(kind) }
-                .disabled(!ready(kind) || busy)
-                .buttonStyle(PrimaryButtonStyle())
-            Button("Cancel") { closeAll() }.frame(minHeight: 44)
+            .padding(16)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(Theme.line, lineWidth: 1))
         } else {
-            Button(title, role: destructive ? .destructive : nil) { closeAll(); open = kind; note = nil }
-                .frame(minHeight: 44)
+            actionRow(title, detail: needsCurrent ? "Enter your current PIN and choose a new one" : "Choose a 4 to 12 digit calling PIN", icon: "arrow.triangle.2.circlepath") {
+                closeAll(); open = kind; note = nil
+            }
+            .disabled(busy)
         }
     }
 

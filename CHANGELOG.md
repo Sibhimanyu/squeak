@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.20.4] - 2026-10-29 (iOS)
+
+- Phone calls: a clearer calling PIN status, with separate actions to change it, turn it off, or reset a forgotten PIN with Face ID or your passcode.
+
 ## [1.20.3] - 2026-10-29 (iOS)
 
 - Scanning the Mac's pairing QR with the Camera app now opens Squeak and starts pairing.

@@ -569,97 +569,201 @@ struct PairSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var copiedCode = false
-    @State private var target = PairTarget.app
+    @State private var target: PairTarget
+    // Offline captures use an inert, realistically sized payload, never a live pairing secret.
+    private let previewPairingURL: String?
     private var m: ChannelsModel { app.channels }
-    private var qrText: String? { m.pairingURL.flatMap { target.qrText(pairingURL: $0) } }
+    private var pairingURL: String? { app.demoMode ? previewPairingURL ?? m.pairingURL : m.pairingURL }
+    private var qrText: String? { pairingURL.flatMap { target.qrText(pairingURL: $0) } }
+
+    init(initialTarget: PairTarget = .app, previewPairingURL: String? = nil) {
+        _target = State(initialValue: initialTarget)
+        self.previewPairingURL = previewPairingURL
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Pair a phone").font(Typo.title)
-            Picker("Pair", selection: $target) {
-                ForEach(PairTarget.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden().accessibilityLabel("What to pair")
-            HStack(alignment: .top, spacing: 20) {
-                qr
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(target.steps, id: \.self) { Text($0) }
-                    if m.pairingURL != nil {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Button(copiedCode ? "Copied" : target.copyLabel) {
-                                guard let text = m.pairingURL.flatMap({ target.copyText(pairingURL: $0) }) else { return }
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(text, forType: .string)
-                                copiedCode = true
-                                Task { try? await Task.sleep(for: .seconds(2)); copiedCode = false }
-                            }.buttonStyle(SecondaryButtonStyle())
-                            if target == .web {
-                                Text("Or open \(RemotePairing.webAppAddress) and paste the link.")
-                                    .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .padding(.top, 6)
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 20) {
+                header
+                Picker("Pair", selection: $target) {
+                    ForEach(PairTarget.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().accessibilityLabel("What to pair")
+                ScrollView {
+                    let wide = geometry.size.width >= 700
+                    let layout = wide ? AnyLayout(HStackLayout(alignment: .center, spacing: 28))
+                        : AnyLayout(VStackLayout(alignment: .center, spacing: 24))
+                    layout {
+                        PairingCodeView(text: qrText, target: target, error: m.pairingError,
+                                        size: min(360, geometry.size.width - 56, max(240, geometry.size.height - 288)))
+                        instructions.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.vertical, 4)
+                    approval
+                    if let error = m.pairingError {
+                        Text(error).font(.callout).foregroundStyle(Theme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12)
                     }
                 }
-                .font(Typo.body).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
+                footer
             }
-            let pending = m.remote?.pending ?? []
-            if !pending.isEmpty {
-                Divider()
-                ForEach(pending) { PendingRow(request: $0) }
-            } else if let paired = m.remote?.activeDevices.last, m.pairingURL != nil, paired.pairedAt.map({ Date().timeIntervalSince($0) < 120 }) == true {
-                Divider()
-                HStack(spacing: 6) { Lucide(.check, size: 14, color: Theme.muted); Text("\(paired.name) is paired.").foregroundStyle(Theme.muted) }
-            }
-            if let e = m.pairingError { Text(e).font(.callout).foregroundStyle(Theme.muted) }
-            HStack {
-                Text("Keep this code private. Anyone who scans it can ask to pair, and you still approve.")
-                    .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 12)
-                Button("Done") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.defaultAction)
-            }
+            .padding(28)
         }
-        .padding(20)
-        .frame(width: 500)
+        .frame(minWidth: 420, idealWidth: 780, maxWidth: 820, minHeight: 560, idealHeight: 650, maxHeight: 760)
+        .background(Theme.bg)
         .task { await m.startPairing() }
         .task { await m.pollRemote() }
         .onDisappear { m.endPairing() }
+        .onChange(of: target) { copiedCode = false }
     }
 
-    @ViewBuilder private var qr: some View {
-        Group {
-            if let text = qrText, let image = QRCode.image(for: text, points: 176) {
-                Image(nsImage: image).interpolation(.none).resizable().frame(width: image.size.width, height: image.size.height)
-                    .accessibilityLabel(target == .app ? "Pairing code for the iPhone app" : "Pairing code for Squeak for Web")
-            } else if m.pairingError != nil {
-                Lucide(.circleAlert, size: 24, color: Theme.subtle)
-            } else {
-                ProgressView().controlSize(.small)
+    private var header: some View {
+        HStack(alignment: .center, spacing: 16) {
+            DuckMark(width: 56)
+                .frame(width: 76, height: 76)
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 20))
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Pair a phone").font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                Text("Your agents. Away from your desk.")
+                    .font(.body).foregroundStyle(Theme.muted)
             }
         }
-        .frame(width: 176, height: 176)
-        .padding(12)
-        // A QR needs a light ground in either appearance.
-        .background(Color.white, in: RoundedRectangle(cornerRadius: Radius.card))
-        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.lineStrong))
+    }
+
+    private var instructions: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(target == .app ? "Take Squeak with you" : "Squeak in your browser")
+                    .font(.title3.weight(.semibold)).foregroundStyle(Theme.ink)
+                    .accessibilityAddTraits(.isHeader)
+                Text(target == .app ? "Follow sessions and reply from your iPhone." : "Follow sessions and reply without installing an app.")
+                    .font(.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            if target == .app {
+                step("1", title: "Open Squeak on iPhone", detail: "Choose Pair with a Mac, then scan this code. Your Camera app works too.")
+                step("2", title: "Match the code and approve", detail: "Check that the code on your phone matches the one here on your Mac.")
+            } else {
+                step("1", title: "Scan with your camera", detail: "The code opens Squeak for Web in your browser.")
+                step("2", title: "Match the code and approve", detail: "Check that the code in your browser matches the one here on your Mac.")
+            }
+            if pairingURL != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button(action: copyPairingCode) {
+                        Label(copiedCode ? "Copied" : target.copyLabel, systemImage: copiedCode ? "checkmark" : "doc.on.doc")
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(qrText == nil)
+                    if target == .web {
+                        Text("Or open \(RemotePairing.webAppAddress) and paste the link.")
+                            .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private func step(_ number: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(number).font(.callout.weight(.semibold)).foregroundStyle(Theme.ink)
+                .frame(width: 28, height: 28).background(Theme.surfaceRaised, in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.body.weight(.semibold)).foregroundStyle(Theme.ink)
+                Text(detail).font(.callout).foregroundStyle(Theme.muted)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private var approval: some View {
+        let pending = m.remote?.pending ?? []
+        if !pending.isEmpty {
+            Divider().padding(.vertical, 14)
+            ForEach(pending) { PendingRow(request: $0) }
+        } else if let paired = m.remote?.activeDevices.last, pairingURL != nil,
+                  paired.pairedAt.map({ Date().timeIntervalSince($0) < 120 }) == true {
+            Divider().padding(.vertical, 14)
+            Label("\(paired.name) is paired.", systemImage: "checkmark.circle")
+                .foregroundStyle(Theme.muted)
+        }
+    }
+
+    private var footer: some View {
+        HStack(alignment: .center, spacing: 20) {
+            Label {
+                Text("Keep this code private. You approve every pairing on this Mac.")
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "lock.shield").accessibilityHidden(true)
+            }
+            .font(.caption).foregroundStyle(Theme.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+        }
+        .padding(.top, 16)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+
+    private func copyPairingCode() {
+        guard let text = pairingURL.flatMap({ target.copyText(pairingURL: $0) }) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        copiedCode = true
+        Task { try? await Task.sleep(for: .seconds(2)); copiedCode = false }
+    }
+}
+
+private struct PairingCodeView: View {
+    @Environment(\.displayScale) private var displayScale
+    let text: String?
+    let target: PairTarget
+    let error: String?
+    let size: CGFloat
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Group {
+                if let text, let image = QRCode.image(for: text, points: size - 24, displayScale: displayScale) {
+                    // Keep the exact raster size: each module occupies an integer number of backing pixels.
+                    Image(nsImage: image).interpolation(.none)
+                        .frame(width: image.size.width, height: image.size.height)
+                        .accessibilityLabel(target == .app ? "Pairing QR code for the iPhone app" : "Pairing QR code for Squeak for Web")
+                        .accessibilityHint("Scan with your phone, or use the copy button.")
+                } else if error != nil {
+                    Label("Code unavailable", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(Color.black)
+                } else {
+                    ProgressView("Preparing pairing code…").tint(.black).foregroundStyle(Color.black)
+                }
+            }
+            .frame(width: size, height: size)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Theme.lineStrong))
+            Label("Scan to pair", systemImage: "qrcode.viewfinder")
+                .font(.callout.weight(.medium)).foregroundStyle(Theme.muted)
+                .accessibilityHidden(true)
+        }
     }
 }
 
 // MARK: - QR
 
 enum QRCode {
-    /// A QR image scaled by whole pixels per module, so its edges stay hard.
-    static func image(for text: String, points: CGFloat) -> NSImage? {
+    /// Includes a four-module white quiet zone; every module occupies whole backing pixels.
+    static func image(for text: String, points: CGFloat, displayScale: CGFloat) -> NSImage? {
+        guard points > 0, displayScale > 0 else { return nil }
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(text.utf8)
         filter.correctionLevel = "M"
         guard let output = filter.outputImage else { return nil }
-        let modules = output.extent.width
-        let backing = NSScreen.main?.backingScaleFactor ?? 2
-        let scale = max(1, (points * backing / modules).rounded(.down))
-        let scaled = output.samplingNearest().transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let extent = output.extent.insetBy(dx: -4, dy: -4)
+        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: extent)
+        let padded = output.composited(over: white)
+        let scale = max(1, (points * displayScale / extent.width).rounded(.down))
+        let scaled = padded.samplingNearest().transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         guard let cg = CIContext(options: [.useSoftwareRenderer: true]).createCGImage(scaled, from: scaled.extent) else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / backing, height: CGFloat(cg.height) / backing))
+        return NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / displayScale, height: CGFloat(cg.height) / displayScale))
     }
 }

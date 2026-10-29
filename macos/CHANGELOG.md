@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.12.4
+
+- Pair a phone: a larger, sharper QR code with clear app and web instructions, layouts for smaller windows, and a copy button that matches your choice.
+- The collapsed sidebar stays narrow when switching between chats, projects, and Settings.
+- Phone calls: see call history and the voice add-on log, and choose when calls to you and calls you make ask for your calling PIN. Requires Squeak Voice 0.8.0 for the PIN choices.
+
 ## 2.12.3
 
 - Pair a phone: choose iPhone app or Web, and the QR code and Copy button match: the app code opens Squeak for iPhone, the web code opens Squeak for Web.

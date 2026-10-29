@@ -134,8 +134,8 @@ Dial Squeak's extension (the one in the add-on's options) from your 3CX app, fro
 
 1. It answers only if the call is from the extension set in Squeak for Mac, Settings > Phone calls: with none set
    nobody can call in. It then asks for the PIN (two tries), unless the app's PIN setting for calls you make is "Don't ask" (the old `call_in_pin: skip` option only seeds it)
-   (a call from that one extension is then proof enough; Squeak's own calls to you always ask). The option lives in
-   the add-on, not the Mac app. With the pin turned off from an app it asks nothing; with no pin ever set, calling in is
+   (a call from that one extension is then proof enough). The Mac app sets when each call direction asks for the PIN.
+   With the pin turned off from an app it asks nothing; with no pin ever set, calling in is
    refused (unless that setting is "Don't ask").
 2. "Which chat?": the chats that can take a message now, those waiting on you first (up to six, by number).
 3. "Say your message after the beep, then press hash." (up to two minutes).

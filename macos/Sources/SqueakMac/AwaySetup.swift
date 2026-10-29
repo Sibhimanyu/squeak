@@ -143,6 +143,7 @@ private struct PhoneChannelGate<Content: View>: View {
 
 /// The pairing code, as a QR of `text`, with the Mac's approval row below it.
 private struct PairPanel: View {
+    @Environment(\.displayScale) private var displayScale
     @Environment(AppModel.self) private var app
     let text: (String) -> String?
     let caption: String
@@ -166,7 +167,7 @@ private struct PairPanel: View {
 
     @ViewBuilder private var qr: some View {
         Group {
-            if let url = m.pairingURL, let t = text(url), let image = QRCode.image(for: t, points: 160) {
+            if let url = m.pairingURL, let t = text(url), let image = QRCode.image(for: t, points: 160, displayScale: displayScale) {
                 Image(nsImage: image).interpolation(.none).resizable().frame(width: image.size.width, height: image.size.height)
                     .accessibilityLabel("Pairing code")
             } else if m.pairingError != nil {
