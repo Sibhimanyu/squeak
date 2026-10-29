@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.12.0
+
+- A new first run: Welcome, Connect (the service, hooks into the agents it finds, and Conductor, in one step), a
+  first win with your own session, then where Squeak should reach you away from the Mac: the iPhone app, the web
+  version on any phone (scan a code, add it to your home screen), Telegram (guided through BotFather), or later.
+  Each phase has its own animated scene. It asks macOS for nothing but notifications.
+- Permissions are asked only when you turn on what needs them, with a screen that says what it's for and which app
+  to find, and ticks by itself once granted. Squeak Hands is now bundled and kept up to date by the app.
+- After setup, one tip at a time in the menu-bar panel offers the next useful thing (keep awake after pairing, the
+  shortcut, fewer notifications after a busy day). It needs the background service updated to this version.
+
 ## 2.11.11
 
 - Refined setup and onboarding: the first-run walkthrough, Setup checklist and channel settings read more clearly.
