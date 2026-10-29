@@ -1,4 +1,5 @@
 #if os(iOS)
+import SqueakCore
 import SqueakIcons
 import SwiftUI
 import UIKit
