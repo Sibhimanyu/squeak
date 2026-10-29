@@ -36,6 +36,22 @@ export function userOf(uri: string): string {
   return /sip:([^@;>\s]+)@/.exec(uri)?.[1] ?? "";
 }
 
+/**
+ * The lines of baresip's `callstat` reply that say how the line is doing (packets, loss, jitter, errors), squeezed
+ * to one short line for the log. The layout differs between baresip versions, so this keeps what matches rather than
+ * parsing numbers; null when the reply is not a stats block.
+ */
+export function summarizeCallStats(data: string): string | null {
+  const lines = data
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => /packets|lost|jitter|errors|bitrate|rtt/i.test(line));
+  return lines.length ? lines.join(" | ").slice(0, 400) : null;
+}
+
+/** How often a live call is asked for its stats; the last answer is logged when the call ends. */
+const STATS_EVERY_MS = 8_000;
+
 /** A 16-bit mono 8 kHz PCM WAV of `samples`. */
 export function wavOf(samples: Int16Array): Buffer {
   const data = Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);
@@ -242,6 +258,8 @@ export class SipPhone implements Phone {
   private readyWaiters: Array<() => void> = [];
   private incomingHandler: ((incoming: IncomingCall) => void) | null = null;
   private current: LiveCall | null = null;
+  private statsTimer: NodeJS.Timeout | null = null;
+  private lastStats: string | null = null;
   /** A call that is ringing or being answered: the next CALL_ESTABLISHED is its. */
   private awaiting: { peer: string; settle: (call: LiveCall | null) => void } | null = null;
 
@@ -340,6 +358,7 @@ export class SipPhone implements Phone {
         for (const payload of reader.push(chunk)) {
           const event = parseEvent(payload);
           if (event) this.onEvent(event.type, event.param);
+          else this.onReply(payload);
         }
       });
       socket.on("error", () => child.kill("SIGTERM"));
@@ -402,6 +421,7 @@ export class SipPhone implements Phone {
         this.awaiting = null;
         const call = new LiveCall(waiting.peer, this.context());
         this.current = call;
+        this.startStats();
         waiting.settle(call);
         return;
       }
@@ -409,12 +429,41 @@ export class SipPhone implements Phone {
         if (param) this.current?.pushKey(param.trim().slice(0, 1));
         return;
       case "CALL_CLOSED":
+        this.stopStats();
         this.current?.end();
         this.current = null;
         this.awaiting?.settle(null);
         this.awaiting = null;
         return;
       default:
+    }
+  }
+
+  /** Asks the live call for its line stats now and then, so a breaking call leaves a number in the log. */
+  private startStats(): void {
+    this.stopStats();
+    this.lastStats = null;
+    this.statsTimer = setInterval(() => this.send("callstat"), STATS_EVERY_MS);
+    this.statsTimer.unref();
+  }
+
+  private stopStats(): void {
+    if (this.statsTimer) clearInterval(this.statsTimer);
+    this.statsTimer = null;
+    if (this.lastStats) logger.info("voice call line quality", { stats: this.lastStats });
+    this.lastStats = null;
+  }
+
+  /** A command's answer (events are handled elsewhere): only the stats block is kept. */
+  private onReply(payload: string): void {
+    try {
+      const value = JSON.parse(payload) as { response?: unknown; data?: unknown };
+      if (value.response === true && typeof value.data === "string") {
+        const summary = summarizeCallStats(value.data);
+        if (summary) this.lastStats = summary;
+      }
+    } catch {
+      // Not JSON: nothing to keep.
     }
   }
 
