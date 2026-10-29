@@ -41,7 +41,7 @@ import {
   togglePick,
 } from "../js/chat-extras-logic.js";
 import { shape } from "../js/command-shapes.js";
-import { composeMessage } from "../js/images.js";
+import { composeMessage, imageLine } from "../js/images.js";
 import { stalled, tasks } from "../js/view-model.js";
 
 const session = (over = {}) => ({
@@ -264,8 +264,8 @@ describe("photos and pictures", () => {
 
   it("composes the message the way the iPhone does, naming each saved path", () => {
     const refs = [".context/attachments/ab12cd34/image-1.jpg", ".context/attachments/ab12cd34/image-2.png"];
-    expect(composeMessage("  look  ", refs)).toBe(`look\n\n[Image: ${refs[0]}]\n[Image: ${refs[1]}]`);
-    expect(composeMessage("", [refs[0]])).toBe(`See the attached image.\n\n[Image: ${refs[0]}]`);
+    expect(composeMessage("  look  ", refs)).toBe(`look\n\n${imageLine(refs[0])}\n${imageLine(refs[1])}`);
+    expect(composeMessage("", [refs[0]])).toBe(`See the attached image.\n\n${imageLine(refs[0])}`);
     expect(composeMessage("hi", [])).toBe("hi");
   });
 

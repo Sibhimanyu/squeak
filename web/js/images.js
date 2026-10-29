@@ -3,7 +3,7 @@
 // is shrunk to a JPEG of at most four 300,000-byte pieces, sent as signed
 // `attach` commands under one upload id, and the Mac saves it under the chat's
 // `.context/attachments/` and answers the last piece with its path (`ref`).
-// The message then names it as an `[Image: <ref>]` line, which the page shows
+// The message then names it as Conductor's image token for `<ref>`, which the page shows
 // as a photo, never as text. Everything here is pure except `prepareImage`
 // (canvas) and the two functions that take a `commands`.
 
@@ -49,8 +49,8 @@ export function checkPhoto(bytes) {
   return null;
 }
 
-/** `[Image: .context/attachments/ab12cd34/image-1.jpg]` */
-export const imageLine = (ref) => `[Image: ${ref}]`;
+/** Conductor's own image token: `@⟦image-1.jpg⟧(.context%2Fattachments%2Fab12cd34%2Fimage-1.jpg)` */
+export const imageLine = (ref) => `@⟦${ref.split("/").pop()}⟧(${encodeURIComponent(ref)})`;
 
 /** What is sent: the person's words, then one line per saved photo. With no words, a plain request to look. */
 export function composeMessage(words, refs) {
@@ -60,16 +60,34 @@ export function composeMessage(words, refs) {
   return [lead, "", ...refs.map(imageLine)].join("\n");
 }
 
+const SAVED_REF = /^\.context\/attachments\/[0-9a-f]{8}\/image-\d+\.(?:jpg|png)$/;
 const MARKER = /^\[Image: (\.context\/attachments\/[0-9a-f]{8}\/image-\d+\.(?:jpg|png))\]$/;
+const TOKEN = /@⟦[^⟦⟧\n]*⟧\(([^)\s]+)\)[ \t]*/g;
+const ATTACHMENT = /^\.context\/attachments\/[A-Za-z0-9_-]+\/[^/\\]+\.(?:jpe?g|png|gif|webp|heic)$/i;
 
-/** A message's words and the photos it names, for showing: the marker lines are taken out of the text. */
+/** A message's words and the photos it names, for showing: the marker lines and Conductor's tokens are taken out. */
 export function splitMessage(message) {
   const kept = [];
   const refs = [];
   for (const line of String(message ?? "").split("\n")) {
     const match = MARKER.exec(line);
-    if (match) refs.push(match[1]);
-    else kept.push(line);
+    if (match) {
+      refs.push(match[1]);
+      continue;
+    }
+    kept.push(
+      line.replace(TOKEN, (whole, encoded) => {
+        let decoded;
+        try {
+          decoded = decodeURIComponent(encoded);
+        } catch {
+          return whole;
+        }
+        if (!ATTACHMENT.test(decoded)) return whole;
+        refs.push(decoded);
+        return "";
+      }),
+    );
   }
   if (refs.length === 0) return { body: String(message ?? ""), refs: [] };
   return { body: kept.join("\n").trim(), refs };
@@ -163,7 +181,7 @@ export async function uploadPhoto(commands, target, bytes) {
       };
   }
   const ref = last?.result?.ref;
-  if (typeof ref !== "string" || !MARKER.test(imageLine(ref))) {
+  if (typeof ref !== "string" || !SAVED_REF.test(ref)) {
     return { ok: false, reason: "Your Mac didn't say where it saved the photo.", unconfirmed: true, retrySafe: false };
   }
   return { ok: true, ref };

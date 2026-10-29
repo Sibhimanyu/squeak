@@ -2493,7 +2493,9 @@ export class RemoteBridge {
       replier.lastTurnText(command.sessionId) ?? "",
       ...(replier.transcript?.(command.sessionId, 40).messages.map((message) => message.text) ?? []),
     ];
-    if (!texts.some((text) => text.includes(command.source))) {
+    // Conductor writes its own attachments url-encoded (`@⟦name⟧(.context%2Fattachments%2F…)`).
+    const encodedSource = encodeURIComponent(command.source);
+    if (!texts.some((text) => text.includes(command.source) || text.includes(encodedSource))) {
       return refuse("That image isn't in this chat.");
     }
     let outcome: PhoneImageResult;

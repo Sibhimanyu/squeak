@@ -38,8 +38,8 @@ import UniformTypeIdentifiers
 
     @Test func composeMatchesThePhone() {
         let r = ".context/attachments/0123abcd/image-1.png"
-        #expect(ImageAttachments.compose("  look  ", refs: [r]) == "look\n\n[Image: \(r)]")
-        #expect(ImageAttachments.compose("", refs: [r]) == "See the attached image.\n\n[Image: \(r)]")
+        #expect(ImageAttachments.compose("  look  ", refs: [r]) == "look\n\n@⟦image-1.png⟧(.context%2Fattachments%2F0123abcd%2Fimage-1.png)")
+        #expect(ImageAttachments.compose("", refs: [r]) == "See the attached image.\n\n@⟦image-1.png⟧(.context%2Fattachments%2F0123abcd%2Fimage-1.png)")
         #expect(ImageAttachments.compose("", refs: [r, r]).hasPrefix("See the attached images."))
         #expect(ImageAttachments.compose(" hi ", refs: []) == "hi")
     }

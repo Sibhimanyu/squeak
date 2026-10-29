@@ -212,7 +212,7 @@ describe("photos in the composer", () => {
     expect(uploads).toEqual([{ sessionId: "abc-123" }, { sessionId: "abc-123" }]);
     expect(w.state.sent).toEqual([
       {
-        text: "look\n\n[Image: .context/attachments/ab12cd34/image-1.jpg]\n[Image: .context/attachments/ab12cd34/image-2.jpg]",
+        text: "look\n\n@⟦image-1.jpg⟧(.context%2Fattachments%2Fab12cd34%2Fimage-1.jpg)\n@⟦image-2.jpg⟧(.context%2Fattachments%2Fab12cd34%2Fimage-2.jpg)",
         mode: "queue",
       },
     ]);

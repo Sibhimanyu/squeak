@@ -27,7 +27,7 @@ public enum ImageAttachmentError: Error, Equatable, LocalizedError {
 
 /// Images attached from the Mac. It does what the phone's photos do and what Conductor itself does: the image
 /// is saved under the chat's folder in `.context/attachments/<id>/image-N.<ext>` and the message names each
-/// path on its own `[Image: …]` line, which the agent reads. The same limits as the phone's photos
+/// path in Conductor's image token (`@⟦name⟧(path)`), which the agent reads. The same limits as the phone's photos
 /// (`PhotoAttachment` in SqueakCore on iOS): four images, 1600 px on the long edge, 1.2 MB each.
 public enum ImageAttachments {
     public static let maxImages = 4
@@ -38,7 +38,14 @@ public enum ImageAttachments {
 
     // MARK: Message wording (the phone's, character for character)
 
-    public static func line(for ref: String) -> String { "[Image: \(ref)]" }
+    /// Conductor's own image token, so its window draws the picture: `@⟦name⟧(url-encoded path)`.
+    public static func line(for ref: String) -> String {
+        let name = ref.split(separator: "/").last.map(String.init) ?? "image.jpg"
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        let encoded = ref.addingPercentEncoding(withAllowedCharacters: allowed) ?? ref
+        return "@⟦\(name)⟧(\(encoded))"
+    }
 
     /// What is sent: the person's words, then one line per saved image. With no words, a plain request to look.
     public static func compose(_ text: String, refs: [String]) -> String {

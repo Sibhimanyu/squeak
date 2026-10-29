@@ -131,7 +131,9 @@ describe("the request", () => {
 describe("messages and limits", () => {
   it("names the saved photos after the words", () => {
     const refs = [".context/attachments/ab12cd34/image-1.jpg"];
-    expect(composeMessage("  Fix this ", refs)).toBe("Fix this\n\n[Image: .context/attachments/ab12cd34/image-1.jpg]");
+    expect(composeMessage("  Fix this ", refs)).toBe(
+      "Fix this\n\n@⟦image-1.jpg⟧(.context%2Fattachments%2Fab12cd34%2Fimage-1.jpg)",
+    );
     expect(composeMessage("", refs)).toMatch(/^See the attached image\./);
   });
   it("validates what may be sent", () => {

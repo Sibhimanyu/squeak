@@ -60,15 +60,23 @@ describe("chunking and limits", () => {
 describe("the message", () => {
   it("is composed and split as the iPhone does", () => {
     const ref = ".context/attachments/ab12cd34/image-1.jpg";
-    expect(imageLine(ref)).toBe(`[Image: ${ref}]`);
-    expect(composeMessage("look", [ref])).toBe(`look\n\n[Image: ${ref}]`);
-    expect(composeMessage("  ", [ref])).toBe(`See the attached image.\n\n[Image: ${ref}]`);
+    const token = "@⟦image-1.jpg⟧(.context%2Fattachments%2Fab12cd34%2Fimage-1.jpg)";
+    expect(imageLine(ref)).toBe(token);
+    expect(composeMessage("look", [ref])).toBe(`look\n\n${token}`);
+    expect(composeMessage("  ", [ref])).toBe(`See the attached image.\n\n${token}`);
     expect(composeMessage("", [ref, ref])).toMatch(/^See the attached images\./);
     expect(composeMessage(" hi ", [])).toBe("hi");
     expect(splitMessage(composeMessage("look", [ref]))).toEqual({ body: "look", refs: [ref] });
     expect(splitMessage("no photos\nat all")).toEqual({ body: "no photos\nat all", refs: [] });
     // A marker that is not exactly a saved path is plain text.
     expect(splitMessage("[Image: /etc/passwd]").refs).toEqual([]);
+    // Conductor's own token, inline, and the older line.
+    expect(splitMessage("look @⟦image.png⟧(.context%2Fattachments%2FNnjfPT%2Fimage.png)  here")).toEqual({
+      body: "look here",
+      refs: [".context/attachments/NnjfPT/image.png"],
+    });
+    expect(splitMessage("@⟦x.png⟧(..%2Fetc%2Fpasswd)").refs).toEqual([]);
+    expect(splitMessage(`hi\n[Image: ${ref}]`).refs).toEqual([ref]);
     expect(splitMessage("[Image: .context/attachments/zz/image-1.jpg]").refs).toEqual([]);
   });
 });
