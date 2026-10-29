@@ -1,6 +1,7 @@
 #if os(iOS)
 import SqueakCore
 import SwiftUI
+import UIKit
 
 /// Settings › Phone calls: the extension Squeak rings when an agent is waiting on you, and a test call. The Mac
 /// owns the setting (`voice` in the phone view) and only accepts an internal extension; a test touches no chat.
@@ -16,7 +17,8 @@ struct VoiceSettingsView: View {
     @State private var repeatPin = ""
     @State private var changingPin = false
     @State private var pinNote: String?
-    @FocusState private var focused: Bool
+    private enum PinField: Hashable { case callee, current, new, repeatPin }
+    @FocusState private var focused: PinField?
 
     private var voice: VoiceView? { model.snapshot?.voice }
     private var shownCallee: String { voice?.callee ?? "" }
@@ -36,13 +38,12 @@ struct VoiceSettingsView: View {
                 Section {
                     HStack {
                         TextField(voice.defaultCallee ?? "101", text: $typed)
-                            .keyboardType(.numberPad).focused($focused)
-                            .font(.body.monospacedDigit())
-                            .frame(minHeight: 44)
+                            .keyboardType(.numberPad).focused($focused, equals: .callee)
+                            .settingsInput(isFocused: focused == .callee)
                             .accessibilityLabel("Extension to ring")
                         Button(saving ? "Saving…" : "Save", action: save)
                             .disabled(!changed || !valid || saving)
-                            .frame(minHeight: 44)
+                            .buttonStyle(.borderedProminent)
                     }
                 } header: { Text("Extension to ring") } footer: {
                     Text(valid
@@ -68,12 +69,12 @@ struct VoiceSettingsView: View {
                 // The pin lives in the Home Assistant add-on; the Mac only passes a change on, never keeps it.
                 if voice.mode == "gateway" {
                     Section {
-                        SecureField("Current pin", text: $currentPin).keyboardType(.numberPad).frame(minHeight: 44)
-                        SecureField("New pin", text: $newPin).keyboardType(.numberPad).frame(minHeight: 44)
-                        SecureField("New pin again", text: $repeatPin).keyboardType(.numberPad).frame(minHeight: 44)
+                        pinField("Current PIN", text: $currentPin, field: .current, contentType: .password)
+                        pinField("New PIN", text: $newPin, field: .new, contentType: .newPassword)
+                        pinField("Repeat new PIN", text: $repeatPin, field: .repeatPin, contentType: .newPassword)
                         Button(changingPin ? "Changing…" : "Change pin", action: changePin)
                             .disabled(!pinReady || changingPin)
-                            .frame(minHeight: 44)
+                            .buttonStyle(PrimaryButtonStyle())
                         if let pinNote { Text(pinNote).font(.footnote).foregroundStyle(Theme.muted) }
                     } header: { Text("Pin") } footer: {
                         Text("The pin you key in on a call, 4 to 12 digits. It needs your current pin, and is kept on Home Assistant, not on your Mac.")
@@ -100,7 +101,23 @@ struct VoiceSettingsView: View {
             if !loaded { typed = shownCallee; loaded = true }
         }
         .onChange(of: voice?.callee) { _, new in
-            if !focused { typed = new ?? "" }
+            if focused != .callee { typed = new ?? "" }
+        }
+    }
+
+    private func pinField(_ title: String, text: Binding<String>, field: PinField,
+                          contentType: UITextContentType?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
+            SecureField(title, text: text)
+                .keyboardType(.numberPad)
+                .textContentType(contentType)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focused, equals: field)
+                .settingsInput(isFocused: focused == field)
+                .accessibilityLabel(title)
+                .accessibilityHint("Enter 4 to 12 digits")
         }
     }
 
@@ -108,7 +125,7 @@ struct VoiceSettingsView: View {
         problem = nil
         let callee = VoiceFormat.normalized(typed)
         saving = true
-        focused = false
+        focused = nil
         Task {
             problem = await model.changeVoice(.callee(callee))
             saving = false
@@ -119,7 +136,7 @@ struct VoiceSettingsView: View {
     private func changePin() {
         pinNote = nil
         changingPin = true
-        focused = false
+        focused = nil
         Task {
             let failure = await model.changeVoice(.pin(current: currentPin, next: newPin))
             changingPin = false

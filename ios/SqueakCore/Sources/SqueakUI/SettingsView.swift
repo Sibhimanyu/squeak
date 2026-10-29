@@ -327,9 +327,15 @@ private struct HotspotSection: View {
                 .frame(minHeight: 44)
             } else {
                 DisclosureGroup(hotspot.configured ? "Change name or password" : "Set up hotspot failover", isExpanded: Binding(get: { editing || setupOpen }, set: { if !editing { setupOpen = $0 } })) {
-                TextField("Hotspot name", text: $ssid).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("Hotspot name", text: $ssid)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .settingsInput()
+                    .accessibilityLabel("Hotspot name")
                     .frame(minHeight: 44)
-                SecureField("Hotspot password", text: $password).frame(minHeight: 44)
+                SecureField("Hotspot password", text: $password)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .settingsInput()
+                    .accessibilityLabel("Hotspot password")
                 Toggle("Switch if its Wi-Fi drops", isOn: $enabled).tint(Theme.primaryFill).frame(minHeight: 44)
                 Button(busy ? "Saving…" : "Save on your Mac") {
                     run(.configure(ssid: ssid.trimmingCharacters(in: .whitespaces), password: password, enabled: enabled)) { editing = false }
