@@ -18,6 +18,7 @@ final class FirebaseSetupModel {
     var account: String?
     private(set) var addingAccount = false
     private(set) var saveError: String?
+    var projectName = FirebaseSetup.suggestedProjectName(userName: NSUserName())
 
     // By hand.
     var urlDraft = ""
@@ -41,6 +42,8 @@ final class FirebaseSetupModel {
         for s in FirebaseStep.allCases { if case .failed(let f)? = states[s] { return (s, f) } }
         return nil
     }
+
+    var nameProblem: String? { FirebaseSetup.projectNameProblem(projectName) }
 
     func state(_ s: FirebaseStep) -> StepState { states[s] ?? .pending }
 
@@ -82,6 +85,7 @@ final class FirebaseSetupModel {
         for s in FirebaseStep.allCases where s.rawValue >= step.rawValue { states[s] = .pending }
         Task {
             await runner.useAccount(account)
+            await runner.useName(projectName)
             let result = await runner.run(from: step) { s, st in Task { @MainActor [weak self] in self?.states[s] = st } }
             // The updates hop to the main actor one by one; let the last one land before reading them.
             await Task.yield()

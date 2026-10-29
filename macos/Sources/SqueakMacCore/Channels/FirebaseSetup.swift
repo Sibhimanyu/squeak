@@ -74,6 +74,8 @@ public struct StepFailure: Sendable, Equatable {
         case quota([FirebaseProjectInfo])
         /// The tool cannot run here at all: only the by-hand route is left.
         case needsHandSetup
+        /// Google already has a project with the chosen name; the person picks another.
+        case nameTaken
     }
     public var kind: Kind
     public var message: String
@@ -97,8 +99,8 @@ public enum FirebaseSetup {
     public static let databasePageURL = "https://console.firebase.google.com/project/_/database"
     public static let cliDownload = URL(string: "https://firebase.tools/bin/macos/latest")!
 
-    public static let sharedProject = "squeak-shared-ff4f21"
-    public static let sharedDatabase = "https://squeak-shared-ff4f21-default-rtdb.firebaseio.com"
+    public static let sharedProject = "squeak-shared"
+    public static let sharedDatabase = "https://squeak-shared-default-rtdb.firebaseio.com"
 
     public enum Keys {
         public static let project = "SQUEAK_REMOTE_PROJECT"
@@ -135,8 +137,30 @@ public enum FirebaseSetup {
         return label.hasSuffix("-default-rtdb") ? String(label.dropLast("-default-rtdb".count)) : label
     }
 
-    public static func newProjectId(randomByte: () -> UInt8 = { UInt8.random(in: 0...255) }) -> String {
-        "squeak-" + (0..<3).map { _ in String(format: "%02x", randomByte()) }.joined()
+    /// A plain starting name: "squeak-" and the Mac's short user name, made safe for a project id.
+    public static func suggestedProjectName(userName: String) -> String {
+        var out = ""
+        for ch in userName.lowercased() {
+            let ok = ch.isASCII && (ch.isLetter || ch.isNumber)
+            let c: Character = ok ? ch : "-"
+            if c == "-", out.last == "-" { continue }
+            out.append(c)
+        }
+        var name = String(("squeak-" + out).prefix(30))
+        while name.hasSuffix("-") { name.removeLast() }
+        return name
+    }
+
+    /// Google's project id rule. Nil when fine, else one plain sentence saying what to change.
+    public static func projectNameProblem(_ name: String) -> String? {
+        if name.count < 6 { return "Use at least 6 characters." }
+        if name.count > 30 { return "Use at most 30 characters." }
+        if !name.allSatisfy({ $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-") }) {
+            return "Use only lowercase letters, digits and hyphens."
+        }
+        if !(name.first?.isASCII == true && name.first?.isLetter == true) { return "Start with a letter." }
+        if name.hasSuffix("-") { return "Don't end with a hyphen." }
+        return nil
     }
 
     public static func randomChannelId(randomIndex: () -> Int = { Int.random(in: 0..<62) }) -> String {
@@ -191,7 +215,6 @@ public actor FirebaseSetupRunner {
         public var fileExists: @Sendable (String) -> Bool
         public var sleep: @Sendable (TimeInterval) async -> Void
         public var now: @Sendable () -> Date
-        public var randomByte: @Sendable () -> UInt8
         public var randomIndex: @Sendable () -> Int
         public var databaseWait: TimeInterval
         public var databaseRetryEvery: TimeInterval
@@ -203,7 +226,6 @@ public actor FirebaseSetupRunner {
             fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
             sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) },
             now: @escaping @Sendable () -> Date = Date.init,
-            randomByte: @escaping @Sendable () -> UInt8 = { UInt8.random(in: 0...255) },
             randomIndex: @escaping @Sendable () -> Int = { Int.random(in: 0..<62) },
             databaseWait: TimeInterval = 240,
             databaseRetryEvery: TimeInterval = 15
@@ -220,7 +242,6 @@ public actor FirebaseSetupRunner {
             self.fileExists = fileExists
             self.sleep = sleep
             self.now = now
-            self.randomByte = randomByte
             self.randomIndex = randomIndex
             self.databaseWait = databaseWait
             self.databaseRetryEvery = databaseRetryEvery
@@ -237,10 +258,12 @@ public actor FirebaseSetupRunner {
     private var cli: String?
     private var account: String?
     private var projectId: String?
+    private var projectName: String?
     private var databaseURL: String?
     private var signedInChecked = false
 
-    public init(commands: CommandRunning, http: HTTPSending, downloader: FileDownloading, config: Config = Config()) {
+    public init(commands: CommandRunning, http: HTTPSending, downloader: FileDownloading, config: Config = Config(), projectName: String? = nil) {
+        self.projectName = projectName
         self.commands = commands; self.http = http; self.downloader = downloader; self.config = config
     }
 
@@ -268,6 +291,8 @@ public actor FirebaseSetupRunner {
         if let added { account = added }
         return added
     }
+
+    public func useName(_ name: String) { projectName = name }
 
     public func useProject(_ id: String) { projectId = id; databaseURL = nil }
 
@@ -352,11 +377,16 @@ public actor FirebaseSetupRunner {
     private func createProject() async -> StepFailure? {
         if projectId != nil { return nil }
         guard let cli = await locateCLI() else { return StepFailure(.generic, "The Firebase tool is missing.") }
-        let id = FirebaseSetup.newProjectId(randomByte: config.randomByte)
+        guard let id = projectName, FirebaseSetup.projectNameProblem(id) == nil else {
+            return StepFailure(.nameTaken, "Pick a name for your project.")
+        }
         let r = await commands.run(cli, ["projects:create", id, "--display-name", "Squeak", "--non-interactive"] + accountArgs,
                                    directory: nil, declineYesNo: true, timeout: 180)
         if r.status == 0 { projectId = id; return nil }
         let text = FirebaseSetup.stripANSI(r.output).lowercased()
+        if text.contains("already exists") || text.contains("already_exists") || text.contains("is not available") {
+            return StepFailure(.nameTaken, "That name is taken across Google. Try another.")
+        }
         if text.contains("terms of service") || text.contains("accept the") && text.contains("terms") {
             return StepFailure(.terms, "Google needs you to accept Firebase's terms first. Open the Firebase console, accept them, then try again.")
         }

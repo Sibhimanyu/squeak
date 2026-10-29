@@ -42,7 +42,7 @@ describe("localPort", () => {
 });
 
 describe("sharedFlag", () => {
-  const url = "https://squeak-shared-ff4f21-default-rtdb.firebaseio.com";
+  const url = "https://squeak-shared-default-rtdb.firebaseio.com";
   it("reads 1/on/true in any case", () => {
     for (const on of ["1", "on", "TRUE", " On "]) {
       expect(sharedFlag(on, url), on).toBe(true);

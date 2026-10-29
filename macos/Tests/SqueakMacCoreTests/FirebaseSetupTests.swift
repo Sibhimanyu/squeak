@@ -69,7 +69,7 @@ private func config(_ home: URL, cliPresent: Bool = true) -> FirebaseSetupRunner
     FirebaseSetupRunner.Config(
         home: home, supportDirectory: home.appending(path: "support"), configDirectory: home.appending(path: ".config"),
         fileExists: { cliPresent && $0 == "/opt/homebrew/bin/firebase" }, sleep: { _ in }, now: { Date(timeIntervalSince1970: 1_000) },
-        randomByte: { 0xab }, randomIndex: { 3 })
+        randomIndex: { 3 })
 }
 
 private let signedIn = "Logged in as a@x.com\n"
@@ -90,11 +90,54 @@ private let signedIn = "Logged in as a@x.com\n"
         #expect(!FirebaseSetup.isValidDatabaseURL("https://evil.com"))
         #expect(!FirebaseSetup.isValidDatabaseURL("https://firebaseio.com.evil.com"))
         #expect(FirebaseSetup.projectId(fromDatabaseURL: "https://abc-default-rtdb.firebaseio.com") == "abc")
-        #expect(FirebaseSetup.newProjectId(randomByte: { 0x0f }) == "squeak-0f0f0f")
         #expect(FirebaseSetup.randomChannelId().count == 24)
         let changes = FirebaseSetup.ownChanges(projectId: "p", databaseURL: "u")
         #expect(changes["SQUEAK_REMOTE_SHARED"] == .some(nil))
         #expect(FirebaseSetup.sharedChanges["SQUEAK_REMOTE_SHARED"] == "1")
+    }
+
+    @Test func suggestsAPlainName() {
+        #expect(FirebaseSetup.suggestedProjectName(userName: "Sibhi") == "squeak-sibhi")
+        #expect(FirebaseSetup.suggestedProjectName(userName: "Jo.Ann  Lee_9") == "squeak-jo-ann-lee-9")
+        #expect(FirebaseSetup.suggestedProjectName(userName: "a-very-long-user-name-indeed-yes").count <= 30)
+        #expect(!FirebaseSetup.suggestedProjectName(userName: "abcdefghijklmnopqrstuvw-xyz").hasSuffix("-"))
+        #expect(FirebaseSetup.suggestedProjectName(userName: "") == "squeak")
+        #expect(FirebaseSetup.projectNameProblem(FirebaseSetup.suggestedProjectName(userName: "Sibhi")) == nil)
+    }
+
+    @Test func validatesProjectNames() {
+        #expect(FirebaseSetup.projectNameProblem("squeak-abc") == nil)
+        #expect(FirebaseSetup.projectNameProblem("abc12") != nil)
+        #expect(FirebaseSetup.projectNameProblem(String(repeating: "a", count: 31)) != nil)
+        #expect(FirebaseSetup.projectNameProblem(String(repeating: "a", count: 30)) == nil)
+        #expect(FirebaseSetup.projectNameProblem("Squeak-abc") != nil)
+        #expect(FirebaseSetup.projectNameProblem("squeak_abc") != nil)
+        #expect(FirebaseSetup.projectNameProblem("1squeak") != nil)
+        #expect(FirebaseSetup.projectNameProblem("squeak-") != nil)
+    }
+
+    @Test func takenNameAsksForAnotherAndNeverAppends() async throws {
+        let home = try tempHome()
+        let taken = Locked(true)
+        let cmds = FakeCommands { _, args in
+            if args.first == "login:list" { return CommandResult(status: 0, output: signedIn) }
+            if args.first == "projects:create" {
+                return taken.get ? CommandResult(status: 1, output: "Error: Request failed: project ALREADY_EXISTS") : CommandResult(status: 0, output: "")
+            }
+            return CommandResult(status: 0, output: "")
+        }
+        let runner = FirebaseSetupRunner(commands: cmds, http: FakeHTTP(), downloader: NoDownload(), config: config(home), projectName: "squeak-sibhi")
+        let states = States()
+        #expect(await runner.run { states.set($0, $1) } == nil)
+        guard case .failed(let f)? = states[.project] else { Issue.record("no failure"); return }
+        #expect(f.kind == .nameTaken)
+        #expect(f.message == "That name is taken across Google. Try another.")
+        #expect(cmds.calls.filter { $0.contains("projects:create") }.allSatisfy { $0.contains("squeak-sibhi") })
+        taken.set(false)
+        await runner.useName("squeak-sibhi-mac")
+        let result = await runner.run(from: .project) { states.set($0, $1) }
+        #expect(result?.projectId == "squeak-sibhi-mac")
+        #expect(cmds.calls.contains { $0.contains("projects:create") && $0.contains("squeak-sibhi-mac") })
     }
 
     @Test func happyPathWithDatabaseRetries() async throws {
@@ -104,10 +147,10 @@ private let signedIn = "Logged in as a@x.com\n"
             return CommandResult(status: 0, output: "")
         }
         let http = FakeHTTP(); http.createFailures = 3
-        let runner = FirebaseSetupRunner(commands: cmds, http: http, downloader: NoDownload(), config: config(home))
+        let runner = FirebaseSetupRunner(commands: cmds, http: http, downloader: NoDownload(), config: config(home), projectName: "squeak-test")
         let states = States()
         let result = await runner.run { states.set($0, $1) }
-        #expect(result == FirebaseSetupResult(projectId: "squeak-ababab", databaseURL: "https://p-default-rtdb.firebaseio.com"))
+        #expect(result == FirebaseSetupResult(projectId: "squeak-test", databaseURL: "https://p-default-rtdb.firebaseio.com"))
         for s in FirebaseStep.allCases { #expect(states[s] == .done) }
         #expect(http.requests.filter { $0.url.contains("/us-central1/instances") }.count == 4)
         #expect(http.requests.first { $0.url.contains("serviceusage") }?.bearer == "tok-1")
@@ -121,7 +164,7 @@ private let signedIn = "Logged in as a@x.com\n"
             args.first == "login:list" ? CommandResult(status: 0, output: "Logged in as a@x.com\nLogged in as b@x.com") : CommandResult(status: 0, output: "")
         }
         let http = FakeHTTP()
-        let runner = FirebaseSetupRunner(commands: cmds, http: http, downloader: NoDownload(), config: config(home))
+        let runner = FirebaseSetupRunner(commands: cmds, http: http, downloader: NoDownload(), config: config(home), projectName: "squeak-test")
         await runner.useAccount("b@x.com")
         _ = await runner.run { _, _ in }
         #expect(cmds.calls.contains { $0.contains("projects:create") && $0.contains("--account") && $0.contains("b@x.com") })
@@ -135,7 +178,7 @@ private let signedIn = "Logged in as a@x.com\n"
             if args.first == "projects:create" { return CommandResult(status: 1, output: "Error: You must accept the Terms of Service") }
             return CommandResult(status: 0, output: "")
         }
-        let runner = FirebaseSetupRunner(commands: cmds, http: FakeHTTP(), downloader: NoDownload(), config: config(home))
+        let runner = FirebaseSetupRunner(commands: cmds, http: FakeHTTP(), downloader: NoDownload(), config: config(home), projectName: "squeak-test")
         let states = States()
         #expect(await runner.run { states.set($0, $1) } == nil)
         guard case .failed(let f)? = states[.project] else { Issue.record("no failure"); return }
@@ -152,7 +195,7 @@ private let signedIn = "Logged in as a@x.com\n"
             return CommandResult(status: 0, output: "")
         }
         let http = FakeHTTP(); http.createStatusAfter = 409
-        let runner = FirebaseSetupRunner(commands: cmds, http: http, downloader: NoDownload(), config: config(home))
+        let runner = FirebaseSetupRunner(commands: cmds, http: http, downloader: NoDownload(), config: config(home), projectName: "squeak-test")
         let states = States()
         #expect(await runner.run { states.set($0, $1) } == nil)
         guard case .failed(let f)? = states[.project] else { Issue.record("no failure"); return }
@@ -165,7 +208,7 @@ private let signedIn = "Logged in as a@x.com\n"
     @Test func missingToolWithoutRosettaNeedsHandSetup() async throws {
         let home = try tempHome()
         let cmds = FakeCommands { exe, _ in CommandResult(status: exe == "/usr/bin/arch" ? 1 : 1, output: "") }
-        let runner = FirebaseSetupRunner(commands: cmds, http: FakeHTTP(), downloader: NoDownload(), config: config(home, cliPresent: false))
+        let runner = FirebaseSetupRunner(commands: cmds, http: FakeHTTP(), downloader: NoDownload(), config: config(home, cliPresent: false), projectName: "squeak-test")
         let states = States()
         #expect(await runner.run { states.set($0, $1) } == nil)
         guard case .failed(let f)? = states[.tool] else { Issue.record("no failure"); return }
@@ -179,7 +222,7 @@ private let signedIn = "Logged in as a@x.com\n"
             if args.first == "login:list" { return CommandResult(status: 0, output: signedIn) }
             return CommandResult(status: exe == "/bin/zsh" ? 1 : 0, output: "")
         }
-        let runner = FirebaseSetupRunner(commands: cmds, http: FakeHTTP(), downloader: NoDownload(), config: config(home, cliPresent: false))
+        let runner = FirebaseSetupRunner(commands: cmds, http: FakeHTTP(), downloader: NoDownload(), config: config(home, cliPresent: false), projectName: "squeak-test")
         let states = States()
         _ = await runner.run { states.set($0, $1) }
         #expect(states[.tool] == .done)
@@ -197,7 +240,7 @@ private let signedIn = "Logged in as a@x.com\n"
             if args.first == "login:list" { return CommandResult(status: 0, output: loggedIn.get ? signedIn : "No authorized accounts") }
             return CommandResult(status: 0, output: "")
         }
-        let runner = FirebaseSetupRunner(commands: cmds, http: FakeHTTP(), downloader: NoDownload(), config: config(home))
+        let runner = FirebaseSetupRunner(commands: cmds, http: FakeHTTP(), downloader: NoDownload(), config: config(home), projectName: "squeak-test")
         let result = await runner.run { _, _ in }
         #expect(result != nil)
         #expect(cmds.calls.contains { $0.starts(with: ["/usr/bin/script", "-q", "/dev/null"]) && $0.last == "login" })

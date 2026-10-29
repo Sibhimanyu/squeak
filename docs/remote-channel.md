@@ -809,14 +809,14 @@ A new install chooses where the channel lives in Squeak for Mac (Settings › iP
 - **Your own Firebase** (recommended, free Spark plan), set up by the Mac app through the Firebase CLI:
   find `firebase` (or download Google's standalone binary, x86_64, so it needs Rosetta), `firebase login`
   (it refuses without a TTY, so it runs under `script`, answering its Gemini/usage questions "n"),
-  `projects:create squeak-<hex>`, then the default database over REST with the CLI's own token, since
+  `projects:create <name>` (the person names it; the sheet suggests `squeak-<user name>` and asks again if Google says it is taken), then the default database over REST with the CLI's own token, since
   `database:instances:create` refuses the default instance and `init database` is interactive: enable
   `firebasedatabase.googleapis.com`, then `POST …/v1beta/projects/<id>/locations/us-central1/instances?databaseId=<id>-default-rtdb`
   with `{"type":"DEFAULT_DATABASE"}`. Right after the project is created that answers 403 for about a minute,
   so it is retried. Then `deploy --only database` with the bundled `firebase/database.rules.json`, and a check
   that a sealed write lands and a malformed write and a root read are refused. Measured end to end: ~45 s plus
   sign-in. Any failure offers the same steps by hand (console links, Copy rules, paste the URL, verify).
-- **Squeak's shared server**: `squeak-shared-ff4f21`, a separate project from the owner's own
+- **Squeak's shared server**: `squeak-shared`, a separate project from the owner's own
   (`squeak-5c9gvo`), kept on Spark so it can never bill anyone: strangers exhausting it pause only the
   shared users. `SQUEAK_REMOTE_SHARED=1`. Its rules (`firebase/shared/database.rules.json`) allow only
   `state`/`pairing`/`commands`/`results`, boxes under 64 KB and a current `at`; no live thinking, films,

@@ -90,6 +90,7 @@ private struct OwnFlow: View {
         VStack(alignment: .leading, spacing: Space.m) {
             Text("Your own Firebase").font(Typo.title).foregroundStyle(Theme.ink)
             if !started { account }
+            if !started || failedNameTaken { nameField }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(FirebaseStep.allCases, id: \.self) { step in
                     row(step)
@@ -102,10 +103,32 @@ private struct OwnFlow: View {
             if !started {
                 Button("Start") { model.start() }
                     .buttonStyle(PrimaryButtonStyle())
-                    .disabled(!model.checkedAccounts || model.addingAccount)
+                    .disabled(!model.checkedAccounts || model.addingAccount || model.nameProblem != nil)
             }
             if model.running, model.state(.signIn) == .running(nil) {
                 Footnote("Finish signing in in your browser.")
+            }
+        }
+    }
+
+    private var failedNameTaken: Bool {
+        if case .nameTaken? = model.failedStep?.1.kind { return true }
+        return false
+    }
+
+    @ViewBuilder private var nameField: some View {
+        @Bindable var model = model
+        VStack(alignment: .leading, spacing: Space.xs) {
+            Text("Project name").font(Typo.label).foregroundStyle(Theme.ink)
+            TextField("squeak-yourname", text: $model.projectName)
+                .textFieldStyle(.roundedBorder).font(Typo.code)
+                .autocorrectionDisabled()
+            if let p = model.nameProblem {
+                Text(p).font(Typo.meta).foregroundStyle(Theme.muted)
+            } else if failedNameTaken, let f = model.failedStep?.1 {
+                Text(f.message).font(Typo.meta).foregroundStyle(Theme.muted)
+            } else {
+                Text("Google keeps this name for your project.").font(Typo.meta).foregroundStyle(Theme.muted)
             }
         }
     }
@@ -184,6 +207,9 @@ private struct OwnFlow: View {
                 }
                 handFallback
             }
+        case .nameTaken:
+            Button("Create with this name") { model.retry() }
+                .buttonStyle(PrimaryButtonStyle()).disabled(model.nameProblem != nil)
         case .needsHandSetup:
             handFallback
         case .generic:
