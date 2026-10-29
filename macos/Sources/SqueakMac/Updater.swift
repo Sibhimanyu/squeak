@@ -105,6 +105,7 @@ final class AppUpdater {
             updateWindow = UpdateWindowController(owner: self)
             updateWindow?.present(focus: true)
         }
+        updateWindow?.resize(for: state)
     }
 
     fileprivate func closeUpdateWindow() { updateWindow?.close(); updateWindow = nil }
@@ -325,8 +326,12 @@ final class UpdateUserDriver: NSObject, SPUUserDriver {
 final class UpdateWindowController {
     private let window: NSWindow
     init(owner: AppUpdater) {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 280), styleMask: [.titled], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: UpdateStatusView.height(for: owner.presentation)), styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "Squeak Update"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = NSColor.windowBackgroundColor
         window.isReleasedWhenClosed = false
         // Every visible state has an explicit action that replies to Sparkle. A close button
         // could otherwise dismiss the window while Sparkle waits on a permission/acknowledgement.
@@ -339,50 +344,235 @@ final class UpdateWindowController {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
+    func resize(for state: UpdatePresentationState) {
+        let size = NSSize(width: 480, height: UpdateStatusView.height(for: state))
+        guard window.contentView?.frame.size != size else { return }
+        window.setContentSize(size)
+    }
     func close() { window.close() }
 }
 
+/// A little release card: the duck carries the warmth; the release and controls stay precise.
 private struct UpdateStatusView: View {
     let owner: AppUpdater
-    var body: some View {
-        VStack(spacing: 14) {
-            DuckMark(width: 48)
-            Text(title).font(.title3.bold()).multilineTextAlignment(.center)
-            Text(detail).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(4)
-            if owner.presentation == .available { UpdateNotesDisclosure(notes: owner.availableNotes, size: 12).frame(maxWidth: 310) }
-            if let progress = owner.progress { ProgressView(value: progress).frame(maxWidth: 260) }
-            else if owner.presentation == .checking || owner.presentation == .installing { ProgressView().controlSize(.small) }
-            HStack {
-                if owner.presentation == .permission {
-                    Button("Not now") { owner.respondToPermission(false) }
-                    Button("Enable Updates") { owner.respondToPermission(true) }.buttonStyle(.borderedProminent)
-                } else if owner.presentation == .available && owner.informationOnly {
-                    Button("Later") { owner.installChoice?(.dismiss); owner.installChoice = nil; owner.closeUpdateWindow() }
-                    Button("View Details") {
-                        if let url = owner.informationURL { NSWorkspace.shared.open(url) }
-                        owner.installChoice?(.dismiss); owner.installChoice = nil; owner.closeUpdateWindow()
-                    }.buttonStyle(.borderedProminent).disabled(owner.informationURL == nil)
-                } else if owner.presentation == .available {
-                    Button("Later") { owner.installChoice?(.dismiss); owner.installChoice = nil; owner.closeUpdateWindow() }
-                    Button("Skip") { owner.installChoice?(.skip); owner.installChoice = nil; owner.closeUpdateWindow() }
-                    Button("Install and Restart") { owner.installChoice?(.install); owner.installChoice = nil }.buttonStyle(.borderedProminent).disabled(owner.installChoice == nil)
-                } else if owner.presentation == .downloading {
-                    Button("Cancel Download") { owner.cancelUpdate(); owner.closeUpdateWindow() }
-                } else if owner.presentation == .checking {
-                    Button("Cancel") { owner.cancelUpdate(); owner.closeUpdateWindow() }
-                } else if owner.presentation == .installing && owner.retryInstallation != nil {
-                    Button("Try Again") { owner.retryInstallation?() }.buttonStyle(.borderedProminent)
-                } else if owner.presentation == .current || owner.presentation == .error || owner.presentation == .installed {
-                    Button("Done") { owner.acknowledgeAndClose() }.keyboardShortcut(.defaultAction)
-                } else { Button("Done") { owner.closeUpdateWindow() }.keyboardShortcut(.defaultAction) }
-            }
+
+    static func height(for state: UpdatePresentationState) -> CGFloat { state == .available ? 560 : 440 }
+
+    private var busy: Bool {
+        owner.presentation == .checking || owner.presentation == .downloading || owner.presentation == .installing
+    }
+    private var stateLabel: String {
+        switch owner.presentation {
+        case .available: "NEW RELEASE"
+        case .permission: "STAY UP TO DATE"
+        case .checking: "CHECKING FOR UPDATES"
+        case .downloading: "DOWNLOADING"
+        case .installing: "GETTING READY"
+        case .installed, .current: "ALL UP TO DATE"
+        case .error: "UPDATE PAUSED"
+        case .idle: "SQUEAK FOR MAC"
         }
-        .padding(28).frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    private var stateSymbol: String {
+        switch owner.presentation {
+        case .installed, .current: "checkmark"
+        case .error: "exclamationmark"
+        case .permission: "arrow.triangle.2.circlepath"
+        default: "arrow.down"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            illustration
+            VStack(alignment: .leading, spacing: 12) {
+                Text(stateLabel)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .tracking(1.6)
+                    .foregroundStyle(Theme.muted)
+                Text(owner.statusTitle)
+                    .font(.system(size: 26, weight: .semibold))
+                    .tracking(-0.7)
+                    .foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                if owner.presentation == .available, let version = owner.availableVersion {
+                    HStack(spacing: 10) {
+                        Text(AppModel.appVersion).foregroundStyle(Theme.muted)
+                        Image(systemName: "arrow.right").font(.system(size: 10, weight: .medium)).foregroundStyle(Theme.subtle)
+                        Text(version).foregroundStyle(Theme.ink)
+                    }
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Version \(AppModel.appVersion) to \(version)")
+                }
+                // Release notes already contain the first bullet; do not repeat it above the list.
+                if owner.presentation != .available || owner.availableNotes.isEmpty {
+                    ScrollView {
+                        Text(owner.statusDetail)
+                            .font(Typo.body).foregroundStyle(Theme.muted)
+                            .lineSpacing(4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: owner.presentation == .error ? 110 : 60)
+                } else {
+                    releaseNotes
+                }
+                if busy { progress }
+            }
+            .padding(.horizontal, 32)
+            .padding(.top, 10)
+            Spacer(minLength: 20)
+            footer
+        }
+        .frame(width: 480, height: Self.height(for: owner.presentation))
+        .background(Theme.surface)
         .accessibilityElement(children: .contain)
     }
-    private var title: String { owner.statusTitle }
-    private var detail: String { owner.statusDetail }
 
+    private var illustration: some View {
+        ZStack {
+            // A quiet pond, drawn around the original, unmodified brand artwork.
+            ForEach([140.0, 210.0, 280.0], id: \.self) { width in
+                Ellipse()
+                    .stroke(Theme.line, lineWidth: 1)
+                    .frame(width: width, height: width * 0.08)
+                    .offset(y: 82)
+            }
+            DuckMark(width: 108).offset(y: -8)
+            Image(systemName: stateSymbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(owner.presentation == .error ? Theme.error : Theme.ink)
+                .frame(width: 32, height: 32)
+                .background(Theme.surfaceRaised, in: Circle())
+                .overlay(Circle().strokeBorder(Theme.lineStrong))
+                .offset(x: 96, y: -24)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 190)
+        .accessibilityHidden(true)
+    }
+
+    private var uniqueNotes: [String] {
+        var seen = Set<String>()
+        return owner.availableNotes.filter { seen.insert($0).inserted }
+    }
+
+    private var releaseNotes: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("What’s new").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(uniqueNotes, id: \.self) { note in
+                        HStack(alignment: .firstTextBaseline, spacing: 9) {
+                            Circle().fill(Theme.subtle).frame(width: 4, height: 4).offset(y: -2)
+                            Text(note).font(Typo.body).foregroundStyle(Theme.muted)
+                                .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .padding(.trailing, 8)
+            }
+            .frame(maxHeight: 112)
+        }
+        .padding(16)
+        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line))
+    }
+
+    private var progress: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let value = owner.progress {
+                ProgressView(value: value).tint(Theme.primaryFill)
+                    .accessibilityLabel("Update progress")
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(owner.presentation == .checking ? "Looking for a newer version" : "This may take a moment")
+                        .font(Typo.meta).foregroundStyle(Theme.muted)
+                }
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private var footer: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Theme.line).frame(height: 1)
+            HStack(spacing: 8) {
+                actions
+            }
+            .padding(.horizontal, 24).padding(.vertical, 20)
+        }
+    }
+
+    @ViewBuilder private var actions: some View {
+        if owner.presentation == .permission {
+            Button("Not now") { owner.respondToPermission(false) }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Enable Updates") { owner.respondToPermission(true) }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+        } else if owner.presentation == .available && owner.informationOnly {
+            Button("Later") { dismiss() }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("View Details") {
+                if let url = owner.informationURL { NSWorkspace.shared.open(url) }
+                dismiss()
+            }.buttonStyle(UpdatePrimaryButtonStyle()).disabled(owner.informationURL == nil).keyboardShortcut(.defaultAction)
+        } else if owner.presentation == .available {
+            Menu {
+                Button("Skip This Version") { owner.installChoice?(.skip); owner.installChoice = nil; owner.closeUpdateWindow() }
+            } label: {
+                Image(systemName: "ellipsis").frame(width: 26, height: 26).accessibilityLabel("More update options")
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            Spacer()
+            Button("Later") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+            Button("Install and Restart") { owner.installChoice?(.install); owner.installChoice = nil }
+                .buttonStyle(UpdatePrimaryButtonStyle()).disabled(owner.installChoice == nil).keyboardShortcut(.defaultAction)
+        } else if owner.presentation == .downloading || owner.presentation == .checking {
+            Text("Squeak for Mac").font(Typo.meta).foregroundStyle(Theme.subtle)
+            Spacer()
+            Button(owner.presentation == .downloading ? "Cancel Download" : "Cancel") { owner.cancelUpdate(); owner.closeUpdateWindow() }
+                .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+        } else if owner.presentation == .installing {
+            Text("Squeak will reopen when it’s ready.").font(Typo.meta).foregroundStyle(Theme.muted)
+            Spacer()
+            if owner.retryInstallation != nil {
+                Button("Try Again") { owner.retryInstallation?() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+            }
+        } else {
+            Text("Squeak for Mac").font(Typo.meta).foregroundStyle(Theme.subtle)
+            Spacer()
+            Button("Done") {
+                if owner.presentation == .current || owner.presentation == .error || owner.presentation == .installed {
+                    owner.acknowledgeAndClose()
+                } else { owner.closeUpdateWindow() }
+            }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+        }
+    }
+
+    private func dismiss() {
+        owner.installChoice?(.dismiss)
+        owner.installChoice = nil
+        owner.closeUpdateWindow()
+    }
+}
+
+private struct UpdatePrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Typo.label)
+            .foregroundStyle(isEnabled ? Theme.primaryText : Theme.muted)
+            .padding(.horizontal, 16)
+            .frame(height: 34)
+            .background(isEnabled ? (configuration.isPressed ? Theme.primaryPressed : Theme.primaryFill) : Theme.surfaceRaised,
+                        in: RoundedRectangle(cornerRadius: Radius.control))
+            .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(isEnabled ? Color.clear : Theme.line))
+    }
 }
 
 /// "What's new" under an update banner: collapsed, and absent when the update carries no notes.
@@ -406,5 +596,47 @@ struct UpdateNotesDisclosure: View {
             }
             .font(.system(size: size)).foregroundStyle(.secondary)
         }
+    }
+}
+
+// Uses the same views and window chrome, with no live updater or install callbacks.
+extension AppUpdater {
+    /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=update: every update state, in both appearances.
+    static func captureUpdateUI(prefix: String) async {
+        let owner = AppUpdater()
+        owner.userDriver = UpdateUserDriver(owner: owner)
+        owner.installChoice = { _ in }
+        owner.demoFound("2.12.0", notes: [
+            "See which agents need you, straight from the menu bar.",
+            "Keep your place when switching between conversations.",
+            "More reliable replies when your Mac reconnects.",
+            "Updates download quietly and are ready on your next restart.",
+        ])
+        let states: [(String, UpdatePresentationState, String, String, Double?)] = [
+            ("available", .available, "Squeak 2.12.0 is ready", "A newer version is available.", nil),
+            ("permission", .permission, "Keep Squeak up to date?", "Squeak can check for updates and download them in the background. You can change this any time in Settings.", nil),
+            ("checking", .checking, "Checking for updates", "Looking for the latest version of Squeak.", nil),
+            ("downloading", .downloading, "Downloading update", "64% downloaded", 0.64),
+            ("installing", .installing, "Preparing update", "Verifying and unpacking Squeak.", nil),
+            ("current", .current, "You’re up to date", "Squeak is the latest version.", nil),
+            ("installed", .installed, "Update installed", "Squeak has reopened with the latest version.", nil),
+            ("error", .error, "Update couldn’t finish", "The download could not be completed. Check your internet connection and try again.", nil),
+        ]
+        for (tone, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+            NSApp.appearance = NSAppearance(named: appearance)
+            for (name, state, title, detail, progress) in states {
+                owner.show(state, title: title, detail: detail, progress: progress)
+                let host = NSHostingView(rootView: UpdateStatusView(owner: owner))
+                host.appearance = NSAppearance(named: appearance)
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: UpdateStatusView.height(for: state)),
+                                      styleMask: [.borderless], backing: .buffered, defer: false)
+                window.contentView = host
+                window.makeKeyAndOrderFront(nil)
+                try? await Task.sleep(for: .milliseconds(150))
+                CaptureRunner.write(host, to: "\(prefix)-\(name)-\(tone).png")
+                window.orderOut(nil)
+            }
+        }
+        QuitIntent.shared.quitCompletely()
     }
 }
