@@ -187,9 +187,10 @@ struct SettingsSidebar: View {
                     .foregroundStyle(Theme.ink)
                     .accessibilityAddTraits(.isHeader)
             }
-            Spacer(minLength: 0)
+            if !isCollapsed { Spacer(minLength: 0) }
             SidebarCollapseButton(isCollapsed: $isCollapsed)
         }
+        .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
         .padding(.horizontal, isCollapsed ? 16 : Metrics.sidebarInset + 4)
         .padding(.top, 36)
     }

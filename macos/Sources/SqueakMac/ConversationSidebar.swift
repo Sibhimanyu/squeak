@@ -188,7 +188,7 @@ struct SidebarBrandHeader: View {
                 Text("Squeak").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.ink)
                     .accessibilityAddTraits(.isHeader)
             }
-            Spacer(minLength: 0)
+            if !isCollapsed { Spacer(minLength: 0) }
             if !isCollapsed {
                 Button { NewChatController.shared.showQuickMessage() } label: {
                     Lucide(.squarePen, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())

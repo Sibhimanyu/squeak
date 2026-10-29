@@ -145,8 +145,8 @@ const content = {
     },
     c3: {
       n: "3",
-      title: "A reply that lands",
-      body: "Squeak sends to the correct Conductor chat, then checks delivery before reporting success.",
+      title: "Replies go to the right chat",
+      body: "The reply box routes your answer to this Conductor chat.",
     },
   },
 
