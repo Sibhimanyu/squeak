@@ -69,6 +69,7 @@ import { RtdbRest } from "../remote/rtdb-rest.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
 import { LocalAdvertiser, LocalChannelServer } from "../remote/local-channel.js";
 import { MirrorStore } from "../remote/mirror-store.js";
+import { BudgetedStore, CloudBudget } from "../remote/shared-limits.js";
 import { FilmService } from "../workflows/rasanai/films.js";
 import { RasanaiProvider } from "../workflows/rasanai/provider.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
@@ -166,6 +167,7 @@ export class SqueakApp {
   /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
   private readonly router: FleetReplyRouter;
   private readonly remote: RemoteBridge | null;
+  private readonly sharedBudget: CloudBudget | null;
   /** The direct same-Wi-Fi path to a paired phone (remote/local-channel.ts); null when off. */
   private readonly localChannel: LocalChannelServer | null;
   private readonly cliq: CliqChannel | null;
@@ -408,11 +410,17 @@ export class SqueakApp {
 
     // The phone channel, when a Firebase project is configured. Same replier,
     // same busy rules; the bridge adds pairing and signature checks on top.
-    const cloudStore = config.remoteProjectId
+    // Shared server: a daily byte budget under the cloud store (the direct path is above it and never pauses).
+    const sharedBudget = config.remoteShared
+      ? new CloudBudget(undefined, undefined, path.join(config.supportDir, "shared-budget.json"))
+      : null;
+    this.sharedBudget = sharedBudget;
+    const rawCloudStore = config.remoteProjectId
       ? config.remoteDatabaseUrl
         ? new RtdbRest(config.remoteDatabaseUrl)
         : new FirestoreRest(config.remoteProjectId)
       : null;
+    const cloudStore = rawCloudStore && sharedBudget ? new BudgetedStore(rawCloudStore, sharedBudget) : rawCloudStore;
     // The direct path mirrors every document the bridge writes, so both transports show the same sealed ones.
     const localMirror = cloudStore && config.remoteLocal ? new MirrorStore(cloudStore) : null;
     this.remote =
@@ -425,7 +433,8 @@ export class SqueakApp {
             localEndpoint: () => this.localChannel?.endpoint() ?? null,
             onDevicesChanged: () => void this.localChannel?.refresh(),
             databaseUrl: config.remoteDatabaseUrl,
-            announce: config.remoteDatabaseUrl ? new FirestoreRest(config.remoteProjectId) : null,
+            announce: config.remoteDatabaseUrl && !sharedBudget ? new FirestoreRest(config.remoteProjectId) : null,
+            shared: sharedBudget ? { budget: sharedBudget } : null,
             replier: this.replier,
             snapshot: () => this.runtime.monitor.snapshot,
             onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
@@ -802,6 +811,7 @@ export class SqueakApp {
     this.cliq?.stop();
     this.voice?.stop();
     this.stopMemoInbox();
+    this.sharedBudget?.flush();
     this.voiceSpeaker?.dispose();
     await this.conductorRelay.stop().catch(() => undefined);
     await this.replier.stop().catch(() => undefined);

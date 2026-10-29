@@ -1,0 +1,26 @@
+{
+  "rules": {
+    // Squeak's shared server (a separate Spark project, never billed): the phone channel for people who
+    // have not set up their own Firebase. Same untrusted pipe as ../database.rules.json, cut down hard so a
+    // stranger cannot use it as free storage: only the four kinds a phone needs to see sessions and reply
+    // (no live thinking, films, voice or Cliq), boxes under 64 KB, and a timestamp, when there is one,
+    // within minutes of now. The daemon's own shared-mode limits (src/remote/shared-limits.ts) keep honest
+    // installs far below this. Nothing else in the database is readable or writable.
+    "channels": {
+      "$channel": {
+        "$kind": {
+          ".read": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results')",
+          "$doc": {
+            ".write": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results') && $doc.matches(/^[A-Za-z0-9_-]{1,80}$/)",
+            ".validate": "newData.hasChild('box')",
+            "box": { ".validate": "newData.isString() && newData.val().length < 65536" },
+            "sig": { ".validate": "newData.isString() && newData.val().length < 512" },
+            "device": { ".validate": "newData.isString() && newData.val().length < 64" },
+            "at": { ".validate": "newData.isNumber() && newData.val() > now - 900000 && newData.val() < now + 300000" },
+            "$other": { ".validate": false }
+          }
+        }
+      }
+    }
+  }
+}

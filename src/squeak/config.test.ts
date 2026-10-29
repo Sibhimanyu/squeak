@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { databaseUrl, localPort } from "./config.js";
+import { databaseUrl, localPort, sharedFlag } from "./config.js";
 
 describe("databaseUrl", () => {
   it("accepts a Realtime Database instance root, normalized", () => {
@@ -38,5 +38,22 @@ describe("localPort", () => {
     for (const bad of [undefined, "", "0", "80", "70000", "abc", "1.5"]) {
       expect(localPort(bad)).toBe(0);
     }
+  });
+});
+
+describe("sharedFlag", () => {
+  const url = "https://squeak-shared-ff4f21-default-rtdb.firebaseio.com";
+  it("reads 1/on/true in any case", () => {
+    for (const on of ["1", "on", "TRUE", " On "]) {
+      expect(sharedFlag(on, url), on).toBe(true);
+    }
+    for (const off of [undefined, "", "0", "off", "no"]) {
+      expect(sharedFlag(off, url), String(off)).toBe(false);
+    }
+  });
+
+  it("needs the database URL", () => {
+    expect(() => sharedFlag("1", undefined)).toThrow(/SQUEAK_REMOTE_DATABASE_URL/);
+    expect(sharedFlag("off", undefined)).toBe(false);
   });
 });

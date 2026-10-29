@@ -36,6 +36,16 @@ import type { Activity } from "../fleet/activity.js";
 import type { DiffFile, WorkspaceDiff } from "../fleet/diff-view.js";
 import type { PhoneImageResult } from "./phone-image.js";
 import type { PhoneMediaResult } from "./phone-media.js";
+import {
+  SHARED_ACTIVE_POLL_MS,
+  SHARED_ACTIVE_PUBLISH_MS,
+  SHARED_BOX_MAX_CHARS,
+  SHARED_CHANGE_PUBLISH_MIN_GAP_MS,
+  SHARED_IDLE_POLL_MS,
+  SHARED_IDLE_PUBLISH_MS,
+  SHARED_RECENT_MIN_GAP_MS,
+  type CloudBudget,
+} from "./shared-limits.js";
 import { parseCursor, type TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
@@ -780,6 +790,11 @@ export interface RemoteBridgeDependencies {
   liveActivity?: ((session: FleetSession, limit: number, stepChars: number) => Activity | null) | null;
   verbose?: boolean;
   /**
+   * The shared server (SQUEAK_REMOTE_SHARED, shared-limits.ts): slower poll and publish, `recent` rarely and
+   * trimmed, no live turns or films, and cloud traffic stops while `budget` is exceeded (the direct path goes on).
+   */
+  shared?: { budget: CloudBudget } | null;
+  /**
    * One subagent's steps (fleet/subagent-activity.ts) for the phone's subagent feed; null when the session has
    * no such task. Same gates as `liveActivity`. Absent: the `subagent` command is refused.
    */
@@ -940,6 +955,8 @@ export class RemoteBridge {
   /** The counter every published document carries as `seq`, so a phone keeps only the newest. */
   private seq = 0;
   private lastRecentPublished = "";
+  private lastRecentWrittenAt = 0;
+  private budgetPaused = false;
   /** A history document may exist, so clearing the live turn deletes it too. */
   private historyWritten = false;
   private changeTimer: NodeJS.Timeout | null = null;
@@ -951,7 +968,7 @@ export class RemoteBridge {
     this.config = readConfig(deps.configPath);
     // Verbose needs the Realtime Database: a write a second is what it is
     // cheap at, and Firestore's rules have no `live` collection.
-    const liveActivity = deps.store.watch ? deps.liveActivity : null;
+    const liveActivity = deps.store.watch && !deps.shared ? deps.liveActivity : null;
     this.live = liveActivity
       ? new LiveTurnPublisher({
           read: (key) => {
@@ -1014,7 +1031,7 @@ export class RemoteBridge {
           },
         })
       : null;
-    const subagentActivity = deps.store.watch ? deps.subagentActivity : null;
+    const subagentActivity = deps.store.watch && !deps.shared ? deps.subagentActivity : null;
     this.subagentFeed = subagentActivity
       ? new SubagentFeedPublisher({
           read: (key, taskId) => {
@@ -1063,7 +1080,7 @@ export class RemoteBridge {
         if (changed) {
           this.nudgePublish(CHANGE_PUBLISH_DELAY_MS);
         } else if (stepped && this.phoneOpen()) {
-          this.nudgePublish(ACTIVE_PUBLISH_MS);
+          this.nudgePublish(this.activePublishMs());
         }
       }) ?? null;
   }
@@ -1099,7 +1116,10 @@ export class RemoteBridge {
     if (this.stopped || !config || !config.devices.some((device) => !device.revokedAt)) {
       return;
     }
-    const wait = this.lastPublishedAt + CHANGE_PUBLISH_MIN_GAP_MS - this.now();
+    const wait =
+      this.lastPublishedAt +
+      (this.deps.shared ? SHARED_CHANGE_PUBLISH_MIN_GAP_MS : CHANGE_PUBLISH_MIN_GAP_MS) -
+      this.now();
     if (wait > 0 || this.publishing) {
       this.nudgePublish(Math.max(wait, CHANGE_PUBLISH_DELAY_MS));
       return;
@@ -1118,6 +1138,28 @@ export class RemoteBridge {
       if (retry !== undefined) {
         this.nudgePublish(retry);
       }
+    }
+  }
+
+  private activePublishMs(): number {
+    return this.deps.shared ? SHARED_ACTIVE_PUBLISH_MS : ACTIVE_PUBLISH_MS;
+  }
+
+  /**
+   * Shared server: after the day's budget ran out nothing reaches the cloud (the store skips it), so what the
+   * bridge thinks it published is not there. When the budget is back, forget it, so the next pass writes again.
+   */
+  private watchBudget(): void {
+    const budget = this.deps.shared?.budget;
+    if (!budget) {
+      return;
+    }
+    if (budget.exceeded()) {
+      this.budgetPaused = true;
+    } else if (this.budgetPaused) {
+      this.budgetPaused = false;
+      this.lastPublished = "";
+      this.lastRecentPublished = "";
     }
   }
 
@@ -1182,6 +1224,14 @@ export class RemoteBridge {
       devices: (config?.devices ?? []).map(({ id, name, pairedAt, revokedAt }) => ({ id, name, pairedAt, revokedAt })),
       pending: [...this.pending.values()].map(({ id, name, code, requestedAt }) => ({ id, name, code, requestedAt })),
       activity: this.activity.slice(-20).reverse(),
+      ...(this.deps.shared
+        ? {
+            shared: true,
+            usedBytes: this.deps.shared.budget.usedBytes,
+            budgetBytes: this.deps.shared.budget.budgetBytes,
+            pausedUntil: this.deps.shared.budget.pausedUntil,
+          }
+        : {}),
     };
   }
 
@@ -1290,6 +1340,7 @@ export class RemoteBridge {
     try {
       const config = this.config;
       this.ensureWatches();
+      this.watchBudget();
       if (config) {
         await this.announceTransport(config);
         await this.readPresence(config);
@@ -1320,7 +1371,16 @@ export class RemoteBridge {
       } else if (this.watching) {
         this.schedule(STREAM_FALLBACK_MS);
       } else {
-        this.schedule(this.phoneOpen() || this.pairingOpenUntil > this.now() ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+        const active = this.phoneOpen() || this.pairingOpenUntil > this.now();
+        this.schedule(
+          this.deps.shared
+            ? active
+              ? SHARED_ACTIVE_POLL_MS
+              : SHARED_IDLE_POLL_MS
+            : active
+              ? ACTIVE_POLL_MS
+              : IDLE_POLL_MS,
+        );
       }
     }
   }
@@ -1335,6 +1395,7 @@ export class RemoteBridge {
   private updateLive(): void {
     const key = this.presenceWatching;
     const allowed =
+      !this.deps.shared &&
       this.deps.verbose !== false &&
       key !== null &&
       this.phoneOpen() &&
@@ -2718,6 +2779,9 @@ export class RemoteBridge {
     ) {
       return refuse("Not a request this Mac understands.");
     }
+    if (this.deps.shared) {
+      return refuse("The shared server doesn't carry films.");
+    }
     const prepare = this.deps.media;
     const workflows = this.deps.workflow;
     if (!prepare || !this.deps.store.watch || (byFilm ? !this.deps.films : !workflows?.allowsMedia)) {
@@ -3255,7 +3319,11 @@ export class RemoteBridge {
 
   /** The phone's whole view, encrypted. Written only when it changed. */
   private async publish(config: RemoteConfig, force = false): Promise<void> {
-    const interval = this.phoneOpen() ? ACTIVE_PUBLISH_MS : IDLE_PUBLISH_MS;
+    const interval = this.phoneOpen()
+      ? this.activePublishMs()
+      : this.deps.shared
+        ? SHARED_IDLE_PUBLISH_MS
+        : IDLE_PUBLISH_MS;
     if (this.publishing || (!force && this.now() - this.lastPublishedAt < interval)) {
       return;
     }
@@ -3310,21 +3378,26 @@ export class RemoteBridge {
       // The recent list and the workspaces change rarely and are most of the
       // view's size, so a phone that reads them apart gets them only when
       // they change. Written first, so the view never names a list not there.
-      if (kind + lists !== this.lastRecentPublished) {
-        const doc = {
-          v: 1,
-          recent,
-          recentMore,
-          ...(workspaces ? { workspaces } : {}),
-          ...(projectIcons ? { projectIcons } : {}),
-          ...(chatModels ? { chatModels } : {}),
-          ...(chatWorkers ? { chatWorkers } : {}),
-          seq: this.nextSeq(),
-        };
-        const box = this.sealForPhone(config, doc);
+      const recentDue = !this.deps.shared || this.now() - this.lastRecentWrittenAt >= SHARED_RECENT_MIN_GAP_MS;
+      if (kind + lists !== this.lastRecentPublished && recentDue) {
+        const box = this.sealTrimmed(
+          config,
+          (keep) => ({
+            v: 1,
+            recent: recent.slice(0, keep),
+            recentMore,
+            ...(workspaces ? { workspaces } : {}),
+            ...(projectIcons ? { projectIcons } : {}),
+            ...(chatModels ? { chatModels } : {}),
+            ...(chatWorkers ? { chatWorkers } : {}),
+            seq: this.nextSeq(),
+          }),
+          recent.length,
+        );
         await this.deps.store.set(this.channel(config, "state", "recent"), { box, at: this.now() });
         logger.debug("remote recent published", { bytes: box.length });
         this.lastRecentPublished = kind + lists;
+        this.lastRecentWrittenAt = this.now();
       }
     } else {
       this.lastRecentPublished = "";
@@ -3333,10 +3406,20 @@ export class RemoteBridge {
       return;
     }
     // The icons go only in the recent document: the whole format has size limits and no room for them.
-    const doc = format.split
-      ? { ...rest, split: true, seq: this.nextSeq() }
-      : { ...rest, recent, recentMore, ...(workspaces ? { workspaces } : {}), seq: this.nextSeq() };
-    const box = this.sealForPhone(config, doc);
+    const box = this.sealTrimmed(
+      config,
+      (keep) =>
+        format.split
+          ? { ...rest, split: true, seq: this.nextSeq() }
+          : {
+              ...rest,
+              recent: recent.slice(0, keep),
+              recentMore,
+              ...(workspaces ? { workspaces } : {}),
+              seq: this.nextSeq(),
+            },
+      recent.length,
+    );
     await this.deps.store.set(this.channel(config, "state", "snapshot"), { box, at: this.now() });
     logger.debug("remote snapshot published", {
       bytes: box.length,
@@ -3362,6 +3445,23 @@ export class RemoteBridge {
       compress: streaming && this.phoneCaps.includes("z"),
       split: streaming && this.phoneCaps.includes("split"),
     };
+  }
+
+  /**
+   * Seals a document, and on the shared server drops the oldest recent chats (the list is newest first) until the
+   * box is under SHARED_BOX_MAX_CHARS. Elsewhere it is one plain seal.
+   */
+  private sealTrimmed(config: RemoteConfig, build: (keep: number) => unknown, total: number): string {
+    let keep = total;
+    let box = this.sealForPhone(config, build(keep));
+    if (!this.deps.shared) {
+      return box;
+    }
+    while (box.length >= SHARED_BOX_MAX_CHARS && keep > 0) {
+      keep = Math.floor(keep * 0.8);
+      box = this.sealForPhone(config, build(keep));
+    }
+    return box;
   }
 
   private sealForPhone(config: RemoteConfig, value: unknown): string {

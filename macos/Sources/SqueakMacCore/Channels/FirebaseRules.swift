@@ -1,0 +1,63 @@
+// Generated from firebase/database.rules.json; FirebaseSetupTests asserts they stay byte-identical.
+// A string, not a SwiftPM resource: Bundle.module traps in the packaged app when its bundle is missing.
+enum FirebaseRules {
+    static let text = #"""
+{
+  "rules": {
+    // Squeak's remote channel and Cliq relay in the Realtime Database: the
+    // same untrusted pipe as firestore.rules (docs/remote-channel.md). Bodies
+    // are sealed with a key only the Mac and paired phones hold, commands are
+    // signed, and the Mac verifies both. These rules only keep the pipe to one
+    // shape under an unguessable id. Nothing above a channel's collections is
+    // readable, so channels cannot be listed. `live` carries verbose turns;
+    // `media` a workflow's film or soundtrack in sealed chunks, deleted after 30 min.
+    // `voice` and `voiceresult` carry phone-call requests to the Home Assistant gateway and its results,
+    // sealed and signed with a key only the Mac and the gateway hold (src/voice/relay-protocol.ts).
+    // `voicedir`, `voiceup` and `voicedown` carry calling in: the list of who can take a message, a recorded
+    // memo and the transcript back (src/voice/memo-protocol.ts), sealed the same way.
+    "channels": {
+      "$channel": {
+        "$kind": {
+          ".read": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results' || $kind === 'live' || $kind === 'media' || $kind === 'voice' || $kind === 'voiceresult' || $kind === 'voicedir' || $kind === 'voiceup' || $kind === 'voicedown')",
+          "$doc": {
+            ".write": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results' || $kind === 'live' || $kind === 'media' || $kind === 'voice' || $kind === 'voiceresult' || $kind === 'voicedir' || $kind === 'voiceup' || $kind === 'voicedown') && $doc.matches(/^[A-Za-z0-9_-]{1,80}$/)",
+            ".validate": "newData.hasChild('box')",
+            "box": { ".validate": "newData.isString() && newData.val().length < 900000" },
+            "sig": { ".validate": "newData.isString() && newData.val().length < 512" },
+            "device": { ".validate": "newData.isString() && newData.val().length < 64" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        }
+      }
+    },
+    "cliq": {
+      "$relay": {
+        "inbox": {
+          ".read": "$relay.matches(/^[A-Za-z0-9_-]{32,64}$/)",
+          "$doc": {
+            // Create or delete only, never rewrite in place.
+            ".write": "$relay.matches(/^[A-Za-z0-9_-]{32,64}$/) && $doc.matches(/^[A-Za-z0-9_-]{1,80}$/) && (!data.exists() || !newData.exists())",
+            ".validate": "newData.hasChildren(['box', 'sig', 'at'])",
+            "box": { ".validate": "newData.isString() && newData.val().length < 12000" },
+            "sig": { ".validate": "newData.isString() && newData.val().length === 64" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        }
+      }
+    }
+  }
+}
+"""#
+}
+
+extension FirebaseRules {
+    /// Exactly the bytes of firebase/database.rules.json.
+    static var fileContents: String { text + "\n" }
+}
+
+public enum FirebaseRulesText {
+    /// What the "Copy rules" button puts on the clipboard.
+    public static var value: String { FirebaseRules.fileContents }
+}

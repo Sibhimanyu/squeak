@@ -154,15 +154,22 @@ public struct RemoteStatus: Decodable, Sendable, Equatable {
     public var pairingOpen: Bool
     public var devices: [Device]
     public var pending: [Pending]
+    /// Only a daemon on Squeak's shared server says these.
+    public var shared: Bool?
+    public var usedBytes: Int?
+    public var budgetBytes: Int?
+    public var pausedUntil: Date?
 
     public var activeDevices: [Device] { devices.filter { $0.revokedAt == nil } }
 
-    public init(available: Bool = true, configured: Bool = false, phoneOpen: Bool = false, pairingOpen: Bool = false, devices: [Device] = [], pending: [Pending] = []) {
+    public init(available: Bool = true, configured: Bool = false, phoneOpen: Bool = false, pairingOpen: Bool = false, devices: [Device] = [], pending: [Pending] = [],
+                shared: Bool? = nil, usedBytes: Int? = nil, budgetBytes: Int? = nil, pausedUntil: Date? = nil) {
+        self.shared = shared; self.usedBytes = usedBytes; self.budgetBytes = budgetBytes; self.pausedUntil = pausedUntil
         self.available = available; self.configured = configured; self.phoneOpen = phoneOpen
         self.pairingOpen = pairingOpen; self.devices = devices; self.pending = pending
     }
 
-    enum CodingKeys: String, CodingKey { case available, configured, phoneOpen, pairingOpen, devices, pending }
+    enum CodingKeys: String, CodingKey { case available, configured, phoneOpen, pairingOpen, devices, pending, shared, usedBytes, budgetBytes, pausedUntil }
     public init(from decoder: Decoder) throws {
         struct Failable<T: Decodable>: Decodable {
             let value: T?
@@ -175,6 +182,14 @@ public struct RemoteStatus: Decodable, Sendable, Equatable {
         pairingOpen = c.lenient(Bool.self, .pairingOpen) ?? false
         devices = (c.lenient([Failable<Device>].self, .devices) ?? []).compactMap(\.value)
         pending = (c.lenient([Failable<Pending>].self, .pending) ?? []).compactMap(\.value)
+        shared = c.lenient(Bool.self, .shared)
+        usedBytes = c.lenient(Int.self, .usedBytes)
+        budgetBytes = c.lenient(Int.self, .budgetBytes)
+        if let text = c.lenient(String.self, .pausedUntil) {
+            pausedUntil = DaemonDate.parse(text)
+        } else if let n = c.lenient(Double.self, .pausedUntil) {
+            pausedUntil = Date(timeIntervalSince1970: n > 1e11 ? n / 1000 : n)
+        }
     }
 }
 

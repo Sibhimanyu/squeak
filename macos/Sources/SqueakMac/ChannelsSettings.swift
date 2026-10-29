@@ -404,6 +404,8 @@ struct LinkChatSheet: View {
 struct IPhoneSettings: View {
     @Environment(AppModel.self) private var app
     @State private var pairing = false
+    @State private var settingUp = false
+    @State private var setupFinished = false
     @State private var confirmReset = false
     @State private var revoking: RemoteStatus.Device?
     private var m: ChannelsModel { app.channels }
@@ -421,8 +423,9 @@ struct IPhoneSettings: View {
             } else if !m.phoneEnabled {
                 Section {
                     StatusLine(dot: nil, text: "The iPhone channel is off")
+                    HStack { Button("Set up…") { settingUp = true }.buttonStyle(PrimaryButtonStyle()); Spacer() }
                 } header: { SettingSubsectionHeader(title: "Squeak service", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) } footer: {
-                    Footnote("Squeak for iPhone talks to this Mac through a Firebase project you own. To turn it on, add SQUEAK_REMOTE_PROJECT=<your project id> to Squeak's settings file, then restart the Squeak service. docs/remote-channel.md has the steps.")
+                    Footnote("Squeak for iPhone talks to this Mac through Firebase. Squeak can set up your own, or use its shared server.")
                 }
             } else {
                 enabledSections
@@ -431,6 +434,11 @@ struct IPhoneSettings: View {
         .settingsForm()
         .task { await m.pollRemote() }
         .sheet(isPresented: $pairing, onDismiss: { m.endPairing() }) { PairSheet().environment(app) }
+        .sheet(isPresented: $settingUp, onDismiss: {
+            if setupFinished { setupFinished = false; pairing = true }
+        }) {
+            FirebaseSetupSheet(channels: m, finished: $setupFinished, movingFromShared: m.onSharedServer)
+        }
         .confirmationDialog("Disconnect this iPhone?", isPresented: Binding(get: { revoking != nil }, set: { if !$0 { revoking = nil } }), presenting: revoking) { d in
             Button("Disconnect \(d.name)", role: .destructive) { Task { await m.revoke(d.id) } }
         } message: { _ in
@@ -443,9 +451,26 @@ struct IPhoneSettings: View {
         }
     }
 
+    private var sharedDetail: String? {
+        if m.remote?.pausedUntil != nil { return "Paused until midnight. Your iPhone still works on the same Wi-Fi." }
+        guard let used = m.remote?.usedBytes, let budget = m.remote?.budgetBytes, budget > 0 else { return nil }
+        let f = ByteCountFormatter(); f.countStyle = .file
+        return "Used \(f.string(fromByteCount: Int64(used))) of \(f.string(fromByteCount: Int64(budget))) today."
+    }
+
     @ViewBuilder private var enabledSections: some View {
         let devices = m.remote?.activeDevices ?? []
         let pending = m.remote?.pending ?? []
+        if m.onSharedServer {
+            Section {
+                StatusLine(dot: m.remote?.pausedUntil == nil ? nil : Theme.needsYou,
+                           text: "On Squeak's shared server (limited)",
+                           detail: sharedDetail)
+                HStack { Button("Move to your own Firebase…") { settingUp = true }.buttonStyle(SecondaryButtonStyle()); Spacer() }
+            } header: { SettingSubsectionHeader(title: "Server", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) } footer: {
+                Footnote("Moving means pairing your iPhone again.")
+            }
+        }
         if !pending.isEmpty {
             Section {
                 ForEach(pending) { PendingRow(request: $0) }

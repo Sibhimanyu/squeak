@@ -46,6 +46,8 @@ final class ChannelsModel {
     private(set) var tokenSet = false
     private(set) var webhookSet = false
     private(set) var savedAllowed: [Int] = []
+    /// `.env` says the phone channel runs on Squeak's shared server.
+    private(set) var phoneSharedInEnv = false
 
     // Telegram draft.
     var tokenDraft = ""
@@ -107,6 +109,7 @@ final class ChannelsModel {
         let values = env.values()
         tokenSet = !(values[Keys.botToken] ?? "").trimmed.isEmpty
         webhookSet = !(values[Keys.cliqWebhook] ?? "").trimmed.isEmpty
+        phoneSharedInEnv = !(values[FirebaseSetup.Keys.shared] ?? "").trimmed.isEmpty
         let ids = (values[Keys.allowedChats] ?? "").split(separator: ",").compactMap { Int(String($0).trimmed) }
         if !telegramDirty { savedAllowed = ids; allowed = ids }
         if !cliqDirty {
@@ -402,6 +405,17 @@ final class ChannelsModel {
     }
 
     // MARK: iPhone
+
+    var onSharedServer: Bool { remote?.shared ?? phoneSharedInEnv }
+
+    /// Turns the iPhone channel on with these keys and restarts the daemon; the caller opens pairing.
+    @discardableResult func enablePhone(_ change: [String: String?]) async -> Bool {
+        if demo { return true }
+        guard write(change) else { return false }
+        AppLog.info("iphone channel saved")
+        await restartAndRefresh()
+        return true
+    }
 
     func startPairing() async {
         pairingError = nil
