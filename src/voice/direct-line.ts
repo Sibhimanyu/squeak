@@ -7,10 +7,15 @@ export class DirectLine implements VoiceLine {
   constructor(
     private readonly line: Pick<BaresipLine, "call">,
     private readonly callee: () => string,
-    private readonly pin: string | null,
+    /** Read at each call, so a pin changed or turned off from an app applies at once. */
+    private readonly pin: () => string | null,
+    private readonly pinRequired: () => boolean = () => true,
   ) {}
 
   call(script: CallScript, answerable: boolean): Promise<CallResult> {
-    return this.line.call(this.callee(), new CallDialog(script, answerable ? this.pin : null));
+    return this.line.call(
+      this.callee(),
+      new CallDialog(script, answerable ? this.pin() : null, answerable ? this.pinRequired() : true),
+    );
   }
 }

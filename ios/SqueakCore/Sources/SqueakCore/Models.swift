@@ -1681,6 +1681,9 @@ public struct VoiceView: Codable, Equatable, Sendable {
     /// What the Mac's config or the add-on falls back to.
     public var defaultCallee: String?
     public var lastTest: LastTest?
+    /// The calling PIN's state: "set", "off", "none" or "unknown" (never the PIN). Nil from a Mac that does not
+    /// send it: the page then keeps its old behaviour.
+    public var pin: String?
 
     public struct LastTest: Codable, Equatable, Sendable {
         /// Epoch milliseconds.
@@ -1694,11 +1697,50 @@ public struct VoiceView: Codable, Equatable, Sendable {
         }
     }
 
-    public init(mode: String, callee: String? = nil, defaultCallee: String? = nil, lastTest: LastTest? = nil) {
-        self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.lastTest = lastTest
+    public init(mode: String, callee: String? = nil, defaultCallee: String? = nil, lastTest: LastTest? = nil, pin: String? = nil) {
+        self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.lastTest = lastTest; self.pin = pin
     }
 
     public var isOn: Bool { mode != "off" }
+}
+
+/// A calling-PIN action (docs: .context/pin-contract.md). Exact keys per action; `reset` needs no current PIN, so the
+/// caller must have passed Face ID / passcode immediately before.
+public enum PinAction: Equatable, Sendable {
+    case change(current: String, next: String)
+    case disable(current: String)
+    case enable(next: String)
+    /// A new PIN, or nil to turn the requirement off (sent as an explicit `null`).
+    case reset(next: String?)
+}
+
+extension PinAction: Encodable {
+    private struct Key: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init(_ name: String) { stringValue = name }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Key.self)
+        switch self {
+        case .change(let current, let next):
+            try c.encode("change", forKey: Key("action"))
+            try c.encode(current, forKey: Key("current"))
+            try c.encode(next, forKey: Key("next"))
+        case .disable(let current):
+            try c.encode("disable", forKey: Key("action"))
+            try c.encode(current, forKey: Key("current"))
+        case .enable(let next):
+            try c.encode("enable", forKey: Key("action"))
+            try c.encode(next, forKey: Key("next"))
+        case .reset(let next):
+            try c.encode("reset", forKey: Key("action"))
+            if let next { try c.encode(next, forKey: Key("next")) } else { try c.encodeNil(forKey: Key("next")) }
+        }
+    }
 }
 
 /// One change to phone calls: the extension to ring (nil clears it, sent as an explicit `null`), or a test call.
@@ -1707,6 +1749,8 @@ public enum VoiceChange: Equatable, Sendable {
     case test
     /// A new pin for the gateway: the Mac needs the current one too, so a stolen channel key cannot set its own.
     case pin(current: String, next: String)
+    /// Any PIN action, as `{ "pinAction": {...} }`.
+    case pinAction(PinAction)
 }
 
 extension VoiceChange: Encodable {
@@ -1730,6 +1774,8 @@ extension VoiceChange: Encodable {
             var inner = c.nestedContainer(keyedBy: Key.self, forKey: Key("pin"))
             try inner.encode(current, forKey: Key("current"))
             try inner.encode(next, forKey: Key("next"))
+        case .pinAction(let action):
+            try c.encode(action, forKey: Key("pinAction"))
         }
     }
 }

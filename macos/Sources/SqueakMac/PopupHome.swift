@@ -88,6 +88,53 @@ struct PopupTabHeader<Leading: View, Trailing: View>: View {
     }
 }
 
+/// The overflow menu shared by every tab. Search always opens Home before revealing its field.
+struct PopupMoreMenu: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Binding var searching: Bool
+    let isHome: Bool
+    let dismiss: () -> Void
+
+    var body: some View {
+        Menu {
+            Button("New chat…", systemImage: "plus") { PopupNav.shared.openNewChat() }
+                .keyboardShortcut("n", modifiers: .command)
+            Button(isHome && searching ? "Hide search" : "Search sessions…", systemImage: "magnifyingglass") {
+                if isHome && searching {
+                    searching = false
+                    model.query = ""
+                } else {
+                    if reduceMotion { PopupNav.shared.show(.home) }
+                    else { withAnimation(.snappy(duration: 0.24)) { PopupNav.shared.show(.home) } }
+                    searching = true
+                }
+            }
+            if model.setupNeedsAttention {
+                Button("Finish setting up…", systemImage: "checklist") { dismiss(); model.openSettings(.setup) }
+            }
+            Divider()
+            Button("Settings…", systemImage: "gearshape") { dismiss(); model.openSettings() }
+                .keyboardShortcut(",")
+            Button("Check for Updates…", systemImage: "arrow.down.circle") {
+                dismiss(); model.updater.checkForUpdates()
+            }
+            .disabled(!model.updater.canCheck)
+            Divider()
+            Button("Quit Squeak", systemImage: "power") { QuitIntent.shared.quitCompletely() }
+                .keyboardShortcut("q")
+        } label: {
+            Lucide(.ellipsis, size: 14, label: "More", color: Theme.ink).frame(width: 28, height: 26)
+                .background(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).fill(Color.wash(0.07)))
+                .overlay(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).strokeBorder(Color.wash(0.12)))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityLabel("More options")
+    }
+}
+
 // MARK: Home
 
 struct PopupHomeTop: View {
@@ -114,35 +161,7 @@ struct PopupHomeTop: View {
             } trailing: {
                 Button { PopupNav.shared.openNewChat() } label: { Text("New chat") }
                     .buttonStyle(PopupButtonStyle(height: 26, hPad: 13, size: 12.5))
-                Menu {
-                    Button("New chat…", systemImage: "plus") { PopupNav.shared.openNewChat() }
-                        .keyboardShortcut("n", modifiers: .command)
-                    Button(searching ? "Hide search" : "Search sessions…", systemImage: "magnifyingglass") {
-                        searching.toggle()
-                        if !searching { model.query = "" }
-                    }
-                    if model.setupNeedsAttention {
-                        Button("Finish setting up…", systemImage: "checklist") { dismiss(); model.openSettings(.setup) }
-                    }
-                    Divider()
-                    Button("Settings…", systemImage: "gearshape") { dismiss(); model.openSettings() }
-                        .keyboardShortcut(",")
-                    Button("Check for Updates…", systemImage: "arrow.down.circle") {
-                        dismiss(); model.updater.checkForUpdates()
-                    }
-                    .disabled(!model.updater.canCheck)
-                    Divider()
-                    Button("Quit Squeak", systemImage: "power") { QuitIntent.shared.quitCompletely() }
-                        .keyboardShortcut("q")
-                } label: {
-                    Lucide(.ellipsis, size: 14, label: "More", color: Theme.ink).frame(width: 28, height: 26)
-                        .background(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).fill(Color.wash(0.07)))
-                        .overlay(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).strokeBorder(Color.wash(0.12)))
-                        .contentShape(Rectangle())
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .accessibilityLabel("More options")
+                PopupMoreMenu(searching: $searching, isHome: true, dismiss: dismiss)
             }
             if searching {
                 SearchField(text: $model.query)
@@ -193,6 +212,7 @@ struct PopupHomeTop: View {
 /// The Mac strip: the awake line and the usage line in one card. Each opens its tab.
 struct PopupMacStrip: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let awakeLine = model.panelAwakeLine
@@ -216,7 +236,10 @@ struct PopupMacStrip: View {
     }
 
     private func stripRow(icon: some View, text: String, tab: PopupNav.Tab, label: String) -> some View {
-        Button { PopupNav.shared.show(tab) } label: {
+        Button {
+            if reduceMotion { PopupNav.shared.show(tab) }
+            else { withAnimation(.snappy(duration: 0.24)) { PopupNav.shared.show(tab) } }
+        } label: {
             HStack(spacing: 14) {
                 icon.frame(width: 22)
                 Text(verbatim: text).font(.popup(13)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.85)

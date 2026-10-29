@@ -8,30 +8,35 @@ struct PopupUsageHeader: View {
     @Environment(AppModel.self) private var model
     let nav = PopupNav.shared
     var namespace: Namespace.ID
+    @Binding var searching: Bool
+    let dismiss: () -> Void
 
     var body: some View {
         PopupTabHeader(selected: .usage, namespace: namespace) {
             Text("Usage").font(.popup(16, .bold)).foregroundStyle(Theme.ink)
         } trailing: {
-            TimelineView(.periodic(from: .now, by: 5)) { ctx in
-                let waiting = nav.lastUsageRefresh.map { ctx.date.timeIntervalSince($0) < 60 } ?? false
-                Button {
-                    nav.lastUsageRefresh = Date()
-                    Task { await model.refreshClaude() }
-                } label: {
-                    HStack(spacing: 7) {
-                        if model.claudeRefreshing {
-                            ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 16, height: 16)
-                        } else {
-                            Lucide(.refreshCw, size: 14, color: Theme.ink)
+            HStack(spacing: 8) {
+                TimelineView(.periodic(from: .now, by: 5)) { ctx in
+                    let waiting = nav.lastUsageRefresh.map { ctx.date.timeIntervalSince($0) < 60 } ?? false
+                    Button {
+                        nav.lastUsageRefresh = Date()
+                        Task { await model.refreshClaude() }
+                    } label: {
+                        HStack(spacing: 7) {
+                            if model.claudeRefreshing {
+                                ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 16, height: 16)
+                            } else {
+                                Lucide(.refreshCw, size: 14, color: Theme.ink)
+                            }
+                            Text(model.claudeRefreshing ? "Fetching…" : "Refresh")
                         }
-                        Text(model.claudeRefreshing ? "Fetching…" : "Refresh")
                     }
+                    .buttonStyle(PopupButtonStyle(height: 26, hPad: 13, size: 12.5))
+                    .disabled(model.claudeRefreshing || waiting || !model.isConnected)
+                    .help(waiting ? "Squeak checks Claude's usage at most once a minute." : "Ask Claude for its current limits. Uses no tokens.")
+                    .accessibilityLabel("Refresh Claude usage")
                 }
-                .buttonStyle(PopupButtonStyle(height: 26, hPad: 13, size: 12.5))
-                .disabled(model.claudeRefreshing || waiting || !model.isConnected)
-                .help(waiting ? "Squeak checks Claude's usage at most once a minute." : "Ask Claude for its current limits. Uses no tokens.")
-                .accessibilityLabel("Refresh Claude usage")
+                PopupMoreMenu(searching: $searching, isHome: false, dismiss: dismiss)
             }
         }
     }

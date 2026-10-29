@@ -128,11 +128,18 @@ export interface IngressControl {
   };
   /**
    * Who a phone call rings (voice/settings.ts): `GET /control/voice` answers `{ mode, callee, defaultCallee }`;
-   * `POST` takes `{ callee }` (an internal extension, or null to clear it) and answers the same. Token-gated.
+   * `POST` takes `{ callee }` (an internal extension, or null to clear it) or `{ pin: PinAction }` (change, disable,
+   * enable, reset: exactly its keys; a reset is the Mac app's own path, after its Touch ID check) and answers the
+   * same, with the view's `pin` ("set" | "off" | "none" | "unknown", never the pin). Token-gated; a pin is never logged.
    */
   voice?: {
     read(): unknown;
-    apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
+    apply(
+      request: unknown,
+    ):
+      | { ok: true; state: unknown }
+      | { ok: false; reason: string }
+      | Promise<{ ok: true; state: unknown } | { ok: false; reason: string }>;
   };
   /**
    * `POST /control/telegram/avatar`: set the Telegram bot's profile photo to Squeak's logo (telegram/avatar.ts).
@@ -879,12 +886,16 @@ export class HookIngressServer {
           respond(response, 400, "bad json");
           return;
         }
-        const outcome = voice.apply(parsed);
-        if (!outcome.ok) {
-          respondJson(response, 400, { error: outcome.reason });
-          return;
-        }
-        respondJson(response, 200, outcome.state);
+        void Promise.resolve()
+          .then(() => voice.apply(parsed))
+          .then((outcome) => {
+            if (!outcome.ok) {
+              respondJson(response, 400, { error: outcome.reason });
+              return;
+            }
+            respondJson(response, 200, outcome.state);
+          })
+          .catch(() => respond(response, 500, "voice settings failed"));
       });
       request.on("error", () => {
         aborted = true;

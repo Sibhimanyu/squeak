@@ -11,6 +11,12 @@ export interface InboundDependencies {
    * in, from the one extension allowed to, which the PBX has already proved is you.
    */
   pin: () => string | null;
+  /**
+   * Whether a call in may be taken at all right now; absent: yes. False when no pin has ever been set (and calling in
+   * is not set to skip it): a caller could not be checked, so the call is refused. A pin turned off on purpose is
+   * allowed: `pin()` is then null and nothing is asked.
+   */
+  allowed?: () => boolean;
   /** Who can take a message now, and the one extension allowed to call in (read from the Mac's sealed list). */
   directory: () => Promise<DirectoryDoc | null>;
   uplink: Uplink;
@@ -70,6 +76,11 @@ export async function handleIncoming(incoming: IncomingCall, deps: InboundDepend
   // Only the extension set in Squeak's Settings may call in, and with none set nobody may: the PIN is the second lock.
   if (!directory?.caller || incoming.peer !== directory.caller) {
     logger.info("voice call-in refused", { from: incoming.peer || incoming.uri, allowed: directory?.caller ?? null });
+    await incoming.reject().catch(() => undefined);
+    return;
+  }
+  if (deps.allowed && !deps.allowed()) {
+    logger.info("voice call-in refused", { reason: "no pin is set" });
     await incoming.reject().catch(() => undefined);
     return;
   }

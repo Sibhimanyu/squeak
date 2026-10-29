@@ -9,6 +9,9 @@ import {
   requestPath,
   resultPath,
   sealPinChange,
+  sealPinControl,
+  type PinAction,
+  type PinControlAction,
   sealRequest,
   type CallResultBody,
 } from "./relay-protocol.js";
@@ -24,6 +27,9 @@ const MAX_CALL_MS = 4 * 60_000;
 const POLL_MS = 10_000;
 /** The gateway answers a pin change in a moment or not at all. */
 const PIN_WAIT_MS = 25_000;
+
+/** What a pin control says when nothing answers: an add-on from before `pinctl` ignores it. */
+export const OLD_ADDON = "The Home Assistant add-on is too old to do that: update it.";
 
 export type RelayStore = Pick<RtdbRest, "get" | "set" | "delete" | "watch">;
 
@@ -97,12 +103,44 @@ export class RelayLine implements VoiceLine {
     };
   }
 
+  /**
+   * Turn the pin off or on, reset it, or ask its state; a `change` goes the older way, byte for byte. A gateway that
+   * predates `pinctl` never answers, so a silent one is reported as too old rather than as unreachable.
+   */
+  async pinControl(
+    action: PinAction | { action: "status" },
+  ): Promise<{ ok: true; state: "set" | "off" | "none" } | { ok: false; reason: string }> {
+    if (action.action === "change") {
+      const done = await this.changePin(action.current, action.next);
+      return done.ok ? { ok: true, state: "set" } : done;
+    }
+    const id = newCallId();
+    const at = this.now();
+    const request: PinControlAction = action;
+    const doc = sealPinControl(this.options.key, {
+      v: 1,
+      id,
+      at,
+      expiresAt: at + PIN_WAIT_MS,
+      kind: "pinctl",
+      ...request,
+    });
+    const result = await this.roundTrip(id, doc, [], at + PIN_WAIT_MS, OLD_ADDON);
+    if (result.status === "pinctl")
+      return result.ok ? { ok: true, state: result.state } : { ok: false, reason: result.reason };
+    return {
+      ok: false,
+      reason: result.status === "failed" ? result.reason : "The gateway answered with something else.",
+    };
+  }
+
   /** Writes one request and waits for its result; never throws, and leaves nothing behind. */
   private async roundTrip(
     id: string,
     doc: ChannelDoc,
     offered: readonly string[],
     deadline: number,
+    silent = "The gateway did not answer. Is the Home Assistant add-on running?",
   ): Promise<CallResultBody> {
     const { store, channel, key } = this.options;
     try {
@@ -137,7 +175,7 @@ export class RelayLine implements VoiceLine {
             const result = got ? readResult(key, id, got, offered) : null;
             if (result) return finish(result);
             if (this.now() > deadline) {
-              finish({ status: "failed", reason: "The gateway did not answer. Is the Home Assistant add-on running?" });
+              finish({ status: "failed", reason: silent });
             }
           } catch {
             // The next event or poll tries again; the deadline ends it.

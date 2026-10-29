@@ -32,7 +32,10 @@ export type CallResultBody =
   | { status: "failed"; reason: string }
   /** The answer to a pin change: it took, or why not. */
   | { status: "pin"; ok: true }
-  | { status: "pin"; ok: false; reason: string };
+  | { status: "pin"; ok: false; reason: string }
+  /** The answer to a pin control (status, turn off, turn on, reset): the state the pin is in now, or why not. */
+  | { status: "pinctl"; ok: true; state: "set" | "off" | "none" }
+  | { status: "pinctl"; ok: false; reason: string };
 
 /**
  * Change the pin the gateway asks for. It needs the current pin: whoever only holds the channel key cannot set
@@ -50,6 +53,51 @@ export interface PinChangeRequest {
 
 /** 4 to 12 digits: what a keypad can enter before `#`. */
 export const PIN_FORMAT = /^\d{4,12}$/;
+
+/** What an app may ask of the pin. Exactly these keys per action; never carries more than digits. */
+export type PinAction =
+  | { action: "change"; current: string; next: string }
+  | { action: "disable"; current: string }
+  | { action: "enable"; next: string }
+  | { action: "reset"; next: string | null };
+
+/** The actions that travel as a `pinctl` request (a change keeps its older `pin` request). */
+export type PinControlAction = Exclude<PinAction, { action: "change" }> | { action: "status" };
+
+/**
+ * A pin action from untrusted input (the Mac app's route, a phone's signed command), or null: an object with exactly
+ * the keys its action takes, every pin 4 to 12 digits. Never echoes a value.
+ */
+export function parsePinAction(value: unknown): PinAction | null {
+  if (!isRecord(value) || typeof value.action !== "string") return null;
+  const keys = Object.keys(value).sort().join(",");
+  const digits = (v: unknown): v is string => typeof v === "string" && PIN_FORMAT.test(v);
+  switch (value.action) {
+    case "change":
+      return keys === "action,current,next" && digits(value.current) && digits(value.next)
+        ? { action: "change", current: value.current, next: value.next }
+        : null;
+    case "disable":
+      return keys === "action,current" && digits(value.current) ? { action: "disable", current: value.current } : null;
+    case "enable":
+      return keys === "action,next" && digits(value.next) ? { action: "enable", next: value.next } : null;
+    case "reset":
+      return keys === "action,next" && (value.next === null || digits(value.next))
+        ? { action: "reset", next: value.next }
+        : null;
+    default:
+      return null;
+  }
+}
+
+/** Turn the pin off or on, reset it, or ask where it stands: the gateway answers through its `PinKeeper`. */
+export type PinControlRequest = {
+  v: 1;
+  id: string;
+  at: number;
+  expiresAt: number;
+  kind: "pinctl";
+} & PinControlAction;
 
 /** A call result, as the gateway seals it. `id` is the request's. */
 export type CallResultDoc = CallResultBody & { v: 1; id: string; at: number };
@@ -107,6 +155,48 @@ export function sealRequest(keyBase64: string, request: CallRequest): ChannelDoc
 
 export function sealPinChange(keyBase64: string, request: PinChangeRequest): ChannelDoc {
   return sealBody(keyBase64, "req", request.id, request, request.at);
+}
+
+export function sealPinControl(keyBase64: string, request: PinControlRequest): ChannelDoc {
+  return sealBody(keyBase64, "req", request.id, request, request.at);
+}
+
+/** A `pinctl` request in a document, or why not. Checks the seal, id, exact keys, digits and age. */
+export function readPinControl(
+  keyBase64: string,
+  id: string,
+  doc: ChannelDoc,
+  now: number,
+): { ok: true; request: PinControlRequest } | { ok: false; reason: string } {
+  const body = openBody(keyBase64, "req", id, doc);
+  if (!isRecord(body)) return { ok: false, reason: "not sealed with this key" };
+  if (body.v !== 1 || body.kind !== "pinctl" || body.id !== id) return { ok: false, reason: "not a pin control" };
+  if (typeof body.at !== "number" || typeof body.expiresAt !== "number")
+    return { ok: false, reason: "not a pin control" };
+  if (
+    body.expiresAt < now ||
+    body.at > now + CLOCK_SKEW_MS ||
+    body.expiresAt - body.at > REQUEST_TTL_MS + CLOCK_SKEW_MS
+  ) {
+    return { ok: false, reason: "expired" };
+  }
+  const { v, id: _id, at, expiresAt, kind, ...rest } = body;
+  void v;
+  void _id;
+  void at;
+  void expiresAt;
+  void kind;
+  const action =
+    rest.action === "status"
+      ? Object.keys(rest).length === 1
+        ? { action: "status" as const }
+        : null
+      : parsePinAction(rest);
+  if (!action || action.action === "change") return { ok: false, reason: "not a pin control" };
+  return {
+    ok: true,
+    request: { v: 1, id, at: body.at, expiresAt: body.expiresAt, kind: "pinctl", ...action } as PinControlRequest,
+  };
 }
 
 export function readPinChange(
@@ -217,6 +307,15 @@ export function readResult(
       if (body.ok === true) return { status: "pin", ok: true };
       return body.ok === false && typeof body.reason === "string"
         ? { status: "pin", ok: false, reason: body.reason.slice(0, 200) }
+        : null;
+    case "pinctl":
+      if (body.ok === true) {
+        return body.state === "set" || body.state === "off" || body.state === "none"
+          ? { status: "pinctl", ok: true, state: body.state }
+          : null;
+      }
+      return body.ok === false && typeof body.reason === "string"
+        ? { status: "pinctl", ok: false, reason: body.reason.slice(0, 200) }
         : null;
     default:
       return null;

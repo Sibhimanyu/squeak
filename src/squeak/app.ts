@@ -76,6 +76,8 @@ import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-inst
 import { TelegramAvatar } from "../telegram/avatar.js";
 import { BaresipLine } from "../voice/baresip-line.js";
 import { DirectLine } from "../voice/direct-line.js";
+import { PinKeeper, type PinState } from "../voice/pin-keeper.js";
+import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import { relayLineFor, type RelayLine } from "../voice/relay-line.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker } from "../voice/tts.js";
@@ -174,6 +176,11 @@ export class SqueakApp {
   private voiceLine: VoiceLine | null = null;
   /** The relay line when the gateway places the calls: also how a pin change reaches it. */
   private voiceRelayLine: RelayLine | null = null;
+  /** Direct mode: the pin lives here, in the support directory (voice/pin-keeper.ts). */
+  private voicePins: PinKeeper | null = null;
+  /** Gateway mode: the last state the add-on told us, and when; "unknown" until the first answer. */
+  private voicePinCache: { state: PinState | "unknown"; at: number } = { state: "unknown", at: 0 };
+  private voicePinAsking = false;
   /** How the last test call from an app went; shown in the phone view and the Mac app. */
   private voiceTest: {
     at: number;
@@ -461,9 +468,13 @@ export class SqueakApp {
             telegramAvatar: { apply: (request) => this.telegramAvatar.apply(request) },
             voice: {
               state: () => this.voiceView(),
-              apply: (request) => this.applyVoice(request),
+              apply: (request) => this.applyVoiceSettings(request),
               test: () => this.testVoiceCall(),
               changePin: (current, next) => this.changeVoicePin(current, next),
+              pinAction: async (action) => {
+                const outcome = await this.runPinAction(action);
+                return outcome.ok ? { ok: true as const } : outcome;
+              },
             },
             notify: {
               state: () => this.notifyView(),
@@ -959,16 +970,71 @@ export class SqueakApp {
       mode,
       callee: this.voiceSettings.settings.callee,
       defaultCallee: voice?.callee ?? null,
+      pin: this.voicePinState(),
       // Absent until a test has been asked for.
       ...(this.voiceTest ? { lastTest: this.voiceTest } : {}),
     };
   }
 
+  /** Where the pin stands, never the pin. Gateway: the add-on's last answer, refreshed when older than a minute. */
+  private voicePinState(): PinState | "unknown" {
+    if (this.voicePins) return this.voicePins.status();
+    if (this.voiceRelayLine && Date.now() - this.voicePinCache.at > 60_000) void this.refreshVoicePin();
+    return this.voicePinCache.state;
+  }
+
+  /** Asks the add-on where the pin stands (fire and forget); a silent or old add-on leaves the last state. */
+  private async refreshVoicePin(): Promise<void> {
+    const line = this.voiceRelayLine;
+    if (!line || this.voicePinAsking) return;
+    this.voicePinAsking = true;
+    // Stamp first: a failure is retried in a minute, not on every read.
+    this.voicePinCache = { ...this.voicePinCache, at: Date.now() };
+    try {
+      const answer = await line.pinControl({ action: "status" });
+      if (answer.ok && answer.state !== this.voicePinCache.state) {
+        this.voicePinCache = { state: answer.state, at: Date.now() };
+        this.remote?.changed();
+      }
+    } catch {
+      // Unknown stays unknown.
+    } finally {
+      this.voicePinAsking = false;
+    }
+  }
+
+  /**
+   * One place a pin action ends: the Mac app's `POST /control/voice` and the phone's signed command. Direct mode asks
+   * the local keeper, gateway mode the add-on through the relay. A pin is never logged.
+   */
+  private async runPinAction(action: PinAction): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (this.voicePins) {
+      const keeper = this.voicePins;
+      const outcome =
+        action.action === "change"
+          ? keeper.change(action.current, action.next)
+          : action.action === "disable"
+            ? keeper.disable(action.current)
+            : action.action === "enable"
+              ? keeper.enable(action.next)
+              : keeper.reset(action.next);
+      if (outcome.ok) this.remote?.changed();
+      return outcome.ok ? { ok: true } : outcome;
+    }
+    const line = this.voiceRelayLine;
+    if (!line) return { ok: false, reason: "Phone calls are not set up on this Mac." };
+    const outcome = await line.pinControl(action);
+    if (outcome.ok) {
+      this.voicePinCache = { state: outcome.state, at: Date.now() };
+      this.remote?.changed();
+      return { ok: true };
+    }
+    return outcome;
+  }
+
   /** A new pin for the gateway, from an app: only through the relay, and only with the current pin. */
   private async changeVoicePin(current: string, next: string): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const line = this.voiceRelayLine;
-    if (!line) return { ok: false, reason: "The pin lives in the Home Assistant add-on: change it there." };
-    return line.changePin(current, next);
+    return this.runPinAction({ action: "change", current, next });
   }
 
   /**
@@ -1005,7 +1071,23 @@ export class SqueakApp {
     return { ok: true };
   }
 
+  /** The callee setting only (the phone's signed command, which handles pin actions itself). */
+  private applyVoiceSettings(request: unknown) {
+    const outcome = this.voiceSettings.apply(request);
+    if (outcome.ok) void this.memoInbox?.publish().catch(() => undefined);
+    return outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome;
+  }
+
   private applyVoice(request: unknown) {
+    // `{ pin: PinAction }`: the pin controls (the Mac app does Touch ID before a reset). Nothing else rides along.
+    if (typeof request === "object" && request !== null && !Array.isArray(request) && "pin" in request) {
+      const keys = Object.keys(request);
+      const action = keys.length === 1 ? parsePinAction((request as { pin: unknown }).pin) : null;
+      if (!action) return Promise.resolve({ ok: false as const, reason: "A pin is 4 to 12 digits." });
+      return this.runPinAction(action).then((outcome) =>
+        outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome,
+      );
+    }
     const outcome = this.voiceSettings.apply(request);
     // Who may call in is the same setting: tell the gateway now.
     if (outcome.ok) void this.memoInbox?.publish().catch(() => undefined);
@@ -1339,6 +1421,8 @@ export class SqueakApp {
       const line = relayLineFor(new RtdbRest(remoteDatabaseUrl), voiceRelay, this.voiceSettings);
       this.voiceLine = line;
       this.voiceRelayLine = line;
+      // Ask the add-on where the pin stands; the view says "unknown" until it answers.
+      void this.refreshVoicePin();
       return new VoiceChannel({
         ...base,
         line,
@@ -1357,16 +1441,19 @@ export class SqueakApp {
       return null;
     }
     this.voiceSpeaker = new MacSpeaker(voice.speechVoice);
+    const pins = new PinKeeper(voice.pin, path.join(this.config.supportDir, "voice-pin.json"));
+    this.voicePins = pins;
     const direct = new DirectLine(
       new BaresipLine(voice.line, this.voiceSpeaker),
       () => this.voiceSettings.settings.callee ?? voice.callee ?? "",
-      voice.pin,
+      () => pins.current(),
+      () => pins.requiresPin(),
     );
     this.voiceLine = direct;
     return new VoiceChannel({
       ...base,
       line: direct,
-      canTakeKeys: voice.pin !== null,
+      canTakeKeys: () => pins.answerable(),
       policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voice.quiet }),
     });
   }

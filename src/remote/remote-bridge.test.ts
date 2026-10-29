@@ -4325,13 +4325,18 @@ describe("RemoteBridge phone-call settings from the phone", () => {
         ? { ok: true as const }
         : { ok: false as const, reason: "That is not your current pin." };
     });
+    const pinAction = vi.fn(async (action: { action: string; current?: string }) =>
+      action.action === "disable" && action.current !== "1234"
+        ? { ok: false as const, reason: "That is not your current pin." }
+        : { ok: true as const },
+    );
     const bridge = new RemoteBridge({
       configPath: path.join(dir, "remote.json"),
       projectId: "squeak-test",
       store,
       replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
       snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
-      ...(options.offered === false ? {} : { voice: { state: view, apply, test, changePin } }),
+      ...(options.offered === false ? {} : { voice: { state: view, apply, test, changePin, pinAction } }),
       now: () => NOW,
     });
     const pairing = bridge.startPairing();
@@ -4351,7 +4356,7 @@ describe("RemoteBridge phone-call settings from the phone", () => {
       const box = seal(payload.k, { v: 1, kind: "voice", nonce, expiresAt: NOW + 60_000, ...fields });
       return { box, sig: signer.sign(box), device: "iphone-1" };
     };
-    return { bridge, config, command, apply, test, voice, changePin };
+    return { bridge, config, command, apply, test, voice, changePin, pinAction };
   }
 
   it("shows who it rings, sets the extension, and clears it", async () => {
@@ -4401,6 +4406,56 @@ describe("RemoteBridge phone-call settings from the phone", () => {
     const log = JSON.stringify((t.bridge.status() as { activity: unknown }).activity);
     expect(log).not.toContain("987654");
     expect(log).not.toContain("1234");
+    t.bridge.stop();
+  });
+
+  it("runs each pin action once, and a reset needs no current pin", async () => {
+    const t = await voiceT();
+    const actions = [
+      { action: "change", current: "1234", next: "987654" },
+      { action: "disable", current: "1234" },
+      { action: "enable", next: "987654" },
+      { action: "reset", next: null },
+      { action: "reset", next: "987654" },
+    ];
+    for (const [i, pinAction] of actions.entries()) {
+      const verdict = await t.bridge.handleCommand(t.config, `a${i}`, t.command({ change: { pinAction } }));
+      expect(verdict.result).toEqual({ id: `a${i}`, status: "sent" });
+    }
+    expect(t.pinAction.mock.calls.map((call) => call[0])).toEqual(actions);
+    const refused = await t.bridge.handleCommand(
+      t.config,
+      "a9",
+      t.command({ change: { pinAction: { action: "disable", current: "0000" } } }),
+    );
+    expect(refused.result).toEqual({ id: "a9", status: "refused", reason: "That is not your current pin." });
+    const log = JSON.stringify((t.bridge.status() as { activity: unknown }).activity);
+    expect(log).not.toMatch(/987654|1234|0000/);
+    t.bridge.stop();
+  });
+
+  it("refuses malformed pin actions, extra keys and bad digits without asking", async () => {
+    const t = await voiceT();
+    const bad: Record<string, unknown>[] = [
+      { change: { pinAction: { action: "reset" } } },
+      { change: { pinAction: { action: "reset", next: "12" } } },
+      { change: { pinAction: { action: "reset", next: "12ab" } } },
+      { change: { pinAction: { action: "reset", next: 1234 } } },
+      { change: { pinAction: { action: "reset", next: null, current: "1234" } } },
+      { change: { pinAction: { action: "disable", current: "123" } } },
+      { change: { pinAction: { action: "disable" } } },
+      { change: { pinAction: { action: "enable", next: "1234567890123" } } },
+      { change: { pinAction: { action: "change", current: "1234" } } },
+      { change: { pinAction: { action: "status" } } },
+      { change: { pinAction: "reset" } },
+      { change: { pinAction: null } },
+      { change: { pinAction: { action: "reset", next: null }, callee: "101" } },
+    ];
+    for (const fields of bad) {
+      const verdict = await t.bridge.handleCommand(t.config, "x", t.command(fields));
+      expect(verdict.result).toMatchObject({ status: "refused" });
+    }
+    expect(t.pinAction).not.toHaveBeenCalled();
     t.bridge.stop();
   });
 

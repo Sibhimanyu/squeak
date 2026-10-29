@@ -5,10 +5,12 @@ import SwiftUI
 /// The Controls tab's header.
 struct PopupControlsHeader: View {
     var namespace: Namespace.ID
+    @Binding var searching: Bool
+    let dismiss: () -> Void
     var body: some View {
         PopupTabHeader(selected: .controls, namespace: namespace) {
             Text("Controls").font(.popup(16, .bold)).foregroundStyle(Theme.ink)
-        } trailing: { EmptyView() }
+        } trailing: { PopupMoreMenu(searching: $searching, isHome: false, dismiss: dismiss) }
     }
 }
 

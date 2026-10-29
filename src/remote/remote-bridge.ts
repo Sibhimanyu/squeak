@@ -1,3 +1,4 @@
+import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import type { AwakeEnd, AwakeState } from "../fleet/awake-session.js";
 import {
   LID_ACTION_KEYS,
@@ -707,6 +708,8 @@ export interface RemoteBridgeDependencies {
     test(): { ok: true } | { ok: false; reason: string };
     /** Change the pin the gateway asks for: it needs the current one. Answers when the gateway has. */
     changePin(current: string, next: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+    /** Change, turn off, turn on or reset the pin (voice/pin-keeper.ts); a reset needs no current pin. */
+    pinAction(action: PinAction): Promise<{ ok: true } | { ok: false; reason: string }>;
   } | null;
   hotspot?: {
     state(): HotspotState;
@@ -3045,6 +3048,23 @@ export class RemoteBridge {
       return refuse("Not a phone-call setting this Mac understands.", "bad keys");
     }
     const change = command.change;
+    // `{ pinAction: PinAction }`: exactly that one key, and exactly the keys its action takes (voice/relay-protocol.ts).
+    // A reset needs no current pin: the device-key signature is what this Mac trusts, and the phone asks Face ID first.
+    // Its values are never logged.
+    if (
+      typeof change === "object" &&
+      change !== null &&
+      !Array.isArray(change) &&
+      Object.keys(change).join(",") === "pinAction"
+    ) {
+      const action = parsePinAction((change as Record<string, unknown>).pinAction);
+      if (!action) return refuse("A pin is 4 to 12 digits.", "bad pin action");
+      const outcome = await voice.pinAction(action);
+      if (!outcome.ok) return refuse(outcome.reason, `pin ${action.action} refused`);
+      this.nudgePublish(0);
+      this.log(device.name, "sent", `voice pin ${action.action}`);
+      return { write: true, result: { id, status: "sent" } };
+    }
     // A pin change: `{ pin: { current, next } }`, digits only. Its values are never logged.
     if (
       typeof change === "object" &&

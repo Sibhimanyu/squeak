@@ -222,6 +222,16 @@ public struct DaemonClient: Sendable {
         return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
     }
 
+    /// One PIN action (change, turn off, turn on, reset). The PIN is only in the request body, never logged or kept.
+    /// `.outdated` = a daemon without the route (404).
+    public func pinAction(_ action: PinAction) async throws -> PinOutcome {
+        let r = try await post("/control/voice", body: action.requestBody(), timeout: 30)
+        if r.status == 404 { return .outdated }
+        if r.status == 400 { return .refused(PinOutcome.reason(from: r.body)) }
+        try Self.check(r.status)
+        return .done(try? JSONDecoder().decode(VoiceSettings.self, from: r.body))
+    }
+
     public func telegramCandidates() async throws -> [TelegramCandidate]? {
         let r = try await get("/control/telegram/candidates", token: true)
         if r.status == 404 { return nil }

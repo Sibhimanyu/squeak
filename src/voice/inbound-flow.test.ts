@@ -94,6 +94,27 @@ describe("call-in flow", () => {
     expect(t.sends).toHaveLength(1);
   });
 
+  it("asks nothing and takes a message when the pin is turned off (pin() is null, calling in allowed)", async () => {
+    const call = new FakeCall(["1", "1"]);
+    const t = setup(call, { pin: () => null, allowed: () => true });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.join(" ")).not.toMatch(/pin/i);
+    expect(t.sends).toHaveLength(1);
+  });
+
+  it("refuses a call in, unanswered, when no pin was ever set", async () => {
+    const call = new FakeCall(["1", "1"]);
+    const t = setup(call, { pin: () => null, allowed: () => false });
+    await handleIncoming(t.incoming, t.deps);
+    expect(t.state).toEqual({ rejected: true, answered: false });
+    expect(t.memos).toEqual([]);
+  });
+
+  it("makes no pin prompts ahead of time when the pin is off", () => {
+    expect(inboundPrompts(directory, false).join(" ")).not.toMatch(/enter your pin/i);
+    expect(inboundPrompts(directory, true).join(" ")).toMatch(/enter your pin/i);
+  });
+
   it("still refuses another caller when the PIN is skipped", async () => {
     const t = setup(new FakeCall([]), { pin: () => null }, "99999");
     await handleIncoming(t.incoming, t.deps);

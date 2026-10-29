@@ -51,19 +51,19 @@ struct PopoverView: View {
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
                 PopupTabHeader(selected: .needsYou, namespace: tabSelectionNamespace) {
                     Text("Needs you").font(.popup(22, .bold)).foregroundStyle(Theme.ink)
-                } trailing: { EmptyView() }
+                } trailing: { PopupMoreMenu(searching: $searching, isHome: false, dismiss: dismissMenu) }
             } band: {
                 PopupHomeBand(onlyNeedsYou: true)
             }
         case .tab(.usage):
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
-                PopupUsageHeader(namespace: tabSelectionNamespace)
+                PopupUsageHeader(namespace: tabSelectionNamespace, searching: $searching, dismiss: dismissMenu)
             } band: {
                 PopupUsageBand()
             }
         case .tab(.controls):
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
-                PopupControlsHeader(namespace: tabSelectionNamespace)
+                PopupControlsHeader(namespace: tabSelectionNamespace, searching: $searching, dismiss: dismissMenu)
             } band: {
                 PopupControlsBand(dismiss: dismissMenu)
             }
