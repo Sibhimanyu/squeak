@@ -518,31 +518,34 @@ struct GeneralSettings: View {
             }
             TextField("Name shown in New chat", text: Binding(
                 get: { draftPresetNames[preset.rawValue] ?? preferences.title(for: preset) },
-                set: { draftPresetNames[preset.rawValue] = $0; preferences.setTitle($0, for: preset); presetRefresh += 1 }
+                set: { draftPresetNames[preset.rawValue] = $0; preferences.setTitle($0, for: preset) }
             ))
             if let initial {
-                Picker("Model", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
-                    ForEach(list) { model in Text(model.label).tag(Optional(model.id)) }
-                }
-                if let selected = list.first(where: { $0.id == initial.modelId }), !selected.levels.isEmpty {
-                    Picker("Thinking", selection: settingBinding(preset, initial: initial, keyPath: \.level)) {
-                        ForEach(selected.levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag(Optional($0)) }
+                VStack(alignment: .leading, spacing: 9) {
+                    Picker("Model", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
+                        ForEach(list) { model in Text(model.label).tag(Optional(model.id)) }
+                    }
+                    if let selected = list.first(where: { $0.id == initial.modelId }), !selected.levels.isEmpty {
+                        Picker("Thinking", selection: settingBinding(preset, initial: initial, keyPath: \.level)) {
+                            ForEach(selected.levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag(Optional($0)) }
+                        }
+                    }
+                    if presetAgent == .claude {
+                        Picker("Code", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
+                            Text("Same model").tag(String?.none)
+                            ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
+                        }
+                        Picker("Run commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
+                            Text("Same model").tag(String?.none)
+                            ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
+                        }
+                        Toggle("Ask before changes", isOn: Binding(
+                            get: { presetPreferences.setup(for: preset, agent: presetAgent, models: chatModels)?.planFirst ?? initial.planFirst },
+                            set: { value in updateSetup(preset, initial: initial) { $0.planFirst = value && ($0.code != nil || $0.run != nil) } }
+                        ))
                     }
                 }
-                if presetAgent == .claude {
-                    Picker("Code", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
-                        Text("Same model").tag(String?.none)
-                        ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
-                    }
-                    Picker("Run commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
-                        Text("Same model").tag(String?.none)
-                        ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
-                    }
-                    Toggle("Ask before changes", isOn: Binding(
-                        get: { presetPreferences.setup(for: preset, agent: presetAgent, models: chatModels)?.planFirst ?? initial.planFirst },
-                        set: { value in updateSetup(preset, initial: initial) { $0.planFirst = value && ($0.code != nil || $0.run != nil) } }
-                    ))
-                }
+                .id(presetRefresh)
             }
         }
         .padding(.vertical, 4)
