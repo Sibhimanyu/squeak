@@ -1,131 +1,237 @@
-# Squeak
+<p align="center">
+  <img src="brand/logo/svg/squeak-duck-full-color.svg" alt="Squeak duck" width="100">
+</p>
 
-A pager for your coding agents, with a duck.
+# Your agents. In view.
 
-Squeak watches every Claude Code and Codex session on your Mac — the ones
-[Conductor](https://conductor.build) runs and the ones in your terminal — and
-tells you, at a glance, which ones need you. When an agent finishes or stops
-to ask something, you can read what it said and answer it from your Mac, your
-iPhone, or Telegram.
+**An attention inbox for your coding agents, with a duck.**
 
-| Surface                                         | What it does                                                                                                                                                                                                                                    |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Squeak for Mac** (`/Applications/Squeak.app`) | A native menu-bar app: every session grouped by what needs you; the agent's full last message; one-tap answers to lettered questions; replies; a quick composer; Settings for Telegram, Zoho Cliq and iPhone pairing. Updates itself (Sparkle). |
-| **Squeak for iPhone**                           | The same list and answers, from anywhere. Installed through SideStore.                                                                                                                                                                          |
-| **Telegram**                                    | Push cards when an agent is blocked or a Conductor chat finishes, with buttons to answer.                                                                                                                                                       |
+Running a few Conductor chats should not mean checking a few Conductor chats.
+Squeak brings them into one native Mac app, puts the work that needs you first,
+and lets you read, reply and get back to what you were doing. Step away from the
+desk and keep the conversation going from your iPhone, a browser, Telegram or
+Zoho Cliq.
 
-The design system every surface follows is in [`DESIGN.md`](DESIGN.md).
+Squeak is a free, open-source, independent companion to
+[Conductor](https://conductor.build). It also watches local Claude Code and
+Codex sessions, with replies supported in Apple's Terminal.
 
-## Quick start
+**[Download for Mac](https://github.com/Sibhimanyu/squeak/releases/latest)** ·
+[Website](https://sibhimanyu.github.io/squeak/) ·
+[Getting started](docs/getting-started.md) ·
+[Report an issue](https://github.com/Sibhimanyu/squeak/issues)
 
-1. **Install.** Download `Squeak-<version>.dmg` from the GitHub releases and
-   drag Squeak to Applications. It needs an Apple-silicon Mac on macOS 14 or
-   later. The build is not notarized yet: right-click the app, choose Open
-   (or System Settings › Privacy & Security › Open Anyway).
-2. **Run the Setup checklist.** Squeak lives in the menu bar and bundles its
-   background service; the checklist installs the service and agent hooks and
-   offers notifications and the quick-message hotkey. Reading Conductor chats
-   already works at this point.
-3. **Reply to Conductor chats.** Settings › Conductor, set up the relay
-   (macOS may ask for Keychain access), then quit and reopen Conductor once.
-4. **Add a channel (optional).** Telegram needs your own bot token from
-   @BotFather. Zoho Cliq is specific to a Zoho org.
-5. **Add the iPhone (optional).** Installed through SideStore, and it needs
-   your own Firebase project (`SQUEAK_REMOTE_PROJECT`); there is no hosted
-   backend. See [`docs/remote-channel.md`](docs/remote-channel.md).
+<p align="center">
+  <img src="website/assets/mac-decision.webp" alt="Squeak for Mac: sessions grouped by attention, with an agent's question and answer choices open" width="920">
+  <br><sub>Product preview with example sessions.</sub>
+</p>
 
-More detail, known limits and troubleshooting:
-[`docs/getting-started.md`](docs/getting-started.md). The steps under Setup
-below are for building from a checkout.
+## Keep the work moving
 
-## How it works
+- **See what needs you.** Questions, approvals, finished work, errors and active
+  sessions have a place in one inbox. Read the agent's own messages and activity.
+- **Answer in context.** Pick a lettered answer, respond to a question or plan,
+  or write a message. Squeak checks delivery before calling a reply sent.
+- **Start and steer Conductor chats.** Start a chat, queue a follow-up, or steer
+  a running turn through the Conductor relay.
+- **Stay close without staying at the desk.** Pair an iPhone or browser; add
+  Telegram or Cliq cards when you want another way to hear about waiting work.
+- **Reach it quickly.** A menu-bar duck, notifications and a configurable
+  quick-message shortcut keep the inbox within reach.
 
-A small daemon (`squeak start`, run by launchd) reads agent transcripts,
-Conductor's database and live agent hooks, and serves the result on a
-loopback port (`127.0.0.1:8477`). Every surface draws from that one state, so
-they never disagree.
+Tool permission requests are shown as needing attention; granting those
+permissions stays in Conductor. Question and plan responses have different
+routes and limitations, explained in [Answering questions](docs/answering-questions.md).
 
-Replies go into Conductor's own window, so they show up and stream there
-live — typed by **Squeak Hands**, a tiny signed helper that is the only thing
-holding the Accessibility permission. When the Mac is locked or the chat is
-not open, the reply runs in the background instead and Conductor shows it the
-next time it loads the chat.
+## Install and set up your Mac
 
-An agent running in **Terminal** — `claude` or `codex` started by hand — is
-answered the same way, typed into its own tab by Squeak Hands. It only types
-at the agent's empty prompt, never into a question, a permission prompt, a
-picker or a shell, and confirms from the transcript that the agent took it.
-Sessions in other terminals, Claude Desktop and Cowork stay watch-only.
+**Requirements:** an Apple-silicon Mac running **macOS 14 or later**, plus the
+coding agents you already use. Conductor is required for Conductor chats; it is
+optional for watching terminal agents. The download includes Node and Squeak's
+background service, so normal installation needs no terminal or developer tools.
+There is no Windows, Linux or Intel Mac app in this repository's release builds.
 
-The iPhone talks to the Mac through Firebase, which only ever relays
-encrypted data: replies are signed by a key in the phone's Secure Enclave and
-the Mac acts only on signatures from phones you approved. See
-[`docs/remote-channel.md`](docs/remote-channel.md).
+1. **Download the DMG and checksum** from
+   [the latest release](https://github.com/Sibhimanyu/squeak/releases/latest).
+   Verify the download if desired:
 
-## Setup
+   ```bash
+   # Run in the folder containing your downloaded DMG.
+   shasum -a 256 Squeak-*.dmg
+   ```
 
-Requirements: macOS, Node 22, [Conductor](https://conductor.build) (for
-replies), and a Telegram bot token from @BotFather (for push cards).
+   Compare the result with `Squeak-<version>.dmg.sha256`.
+2. **Drag Squeak to Applications and open it.** Builds are signed with a
+   development certificate and **are not notarized**. On first launch, use
+   right-click → Open; if macOS blocks it, use **System Settings → Privacy &
+   Security → Open Anyway**. Look for the duck in the menu bar.
+3. **Choose “Set up Squeak” in Welcome.** Follow **Settings → Setup** to install
+   the background service and agent hooks. Hooks provide live state and waiting
+   signals; installation preserves other tools' hook entries. It also adds
+   removable instructions for agents to end questions with lettered choices.
+4. **Connect Conductor if you use it.** In **Settings → Conductor**, run relay
+   setup, allow the Keychain prompt, then **quit and reopen Conductor once**.
+   Return to that page to check the connection. Setup backs up Conductor's
+   database and offers an undo action.
+5. **Enable the conveniences you want.** The Setup checklist links to
+   notifications, the quick-message shortcut and live typing permissions.
+   You can add remote channels later.
+
+Reading Conductor chats works locally even before the service is installed.
+Sending and the other session sources need the service. Updates are delivered
+through Sparkle; use **Settings → About → Check for Updates** or adjust automatic
+checks there.
+
+### Which permissions do I need?
+
+| Feature | Permission or setup |
+| --- | --- |
+| macOS notifications | Allow Squeak notifications when prompted. |
+| Double-tap quick-message shortcut | Allow **Squeak** in **Privacy & Security → Input Monitoring**. The alternate keyboard shortcuts do not need it. |
+| Type into Conductor or Terminal | Allow **Squeak Hands** in **Privacy & Security → Accessibility**. Hands is Squeak's typing helper. |
+| Reply to a Terminal agent | Also allow Squeak Hands to control **Terminal** at the Automation prompt. |
+| Conductor relay | Allow its Keychain prompt and restart Conductor after setup. |
+
+### Supported sessions
+
+| Source on your Mac | Read and watch | Reply |
+| --- | --- | --- |
+| Conductor chats | Yes | Yes; relay enables remote replies, new chats and steering. |
+| Claude Code or Codex in Apple's Terminal | Yes | Yes, at an eligible empty agent prompt, with the permissions above. |
+| Other terminals, Claude Desktop and Cowork | Watch-only | No. |
+
+Conductor's relay interface is undocumented and compatibility is checked by
+version. A Conductor update can temporarily affect replies; see
+[the integration notes](docs/conductor-local-feasibility.md).
+
+## Take the inbox with you
+
+Your Mac must be awake, online and running Squeak for remote actions. You can
+use Squeak's keep-awake controls when stepping away.
+
+### iPhone and web browser
+
+The current public Mac release uses your own Firebase project. Create and
+configure the project, then set `SQUEAK_REMOTE_PROJECT` to its project ID in
+Squeak's settings file and restart the background service. Follow the
+[remote channel guide](docs/remote-channel.md) for the Firebase rules and
+configuration details.
+
+1. Choose your client:
+   - **Web:** open [Squeak for Web](https://squeak-mac.web.app/) in your browser;
+     no app installation is needed.
+   - **iPhone:** install through SideStore using the
+     [iPhone installation page](https://squeak-5c9gvo.web.app/). The native app
+     requires **iOS 18 or later** and is not distributed through the App Store.
+2. In **Settings → iPhone** on the Mac, choose **Pair an iPhone**. Scan the QR
+   code in the iPhone app or use the pairing link in Squeak for Web, then
+   approve the device on your Mac.
+
+The native iPhone app supports Face ID and a direct route on the same Wi-Fi;
+web uses the cloud route. Free Apple ID / SideStore installs do not receive
+native iPhone push notifications; Telegram and Cliq can provide alerts.
+
+The current source also includes a guided Firebase setup and a limited shared
+server option. These are not yet available in the latest public Mac release;
+see [the remote channel guide](docs/remote-channel.md) for details and limits.
+
+### Telegram
+
+Create a bot with [@BotFather](https://t.me/BotFather) using `/newbot`. In
+**Settings → Telegram**, enter its token and allow only the chats you want to
+use. The bot sends attention cards with answer buttons and accepts replies.
+Telegram uses its own bot service and does not require the iPhone channel.
+
+### Zoho Cliq and phone calls
+
+[Zoho Cliq setup](docs/cliq.md) covers the bot, owner restriction, webhook and
+three Deluge handlers for two-way cards. It requires your own Firebase relay.
+
+[Phone call setup](docs/voice.md) covers SIP/PBX calls that read a waiting
+question and accept a keypad answer. Use a direct PBX connection or the Home
+Assistant voice gateway. This is optional and needs additional infrastructure.
+
+## Privacy and control
+
+The Mac app reads local session data. Its background service listens on
+`127.0.0.1:8477`; local control routes require a token. Conductor relay setup
+changes Conductor's relay configuration and adds a Keychain item, and is
+reversible from Settings.
+
+The iPhone and web channel encrypt data end to end. The Mac accepts commands
+only from approved device keys and checks signatures, freshness and replay
+protection. You can disconnect devices from **Settings → iPhone**. Treat pairing
+codes as secrets: a paired device can read sessions and send instructions to
+your agents.
+
+Telegram and Cliq use their providers' messaging services; they do not have the
+phone channel's end-to-end encryption. Only connect channels you trust with
+your agent conversations. The Mac app's message cache is encrypted on disk,
+can be deleted in Settings, and expires after 14 days, with a 50 MB cap.
+
+## Troubleshooting
+
+| Symptom | Next step |
+| --- | --- |
+| Reading works, but sending is unavailable | Check **Settings → Connections** and **About → Background service**; install or repair the service. |
+| “Relay isn't connected” | Open **Settings → Conductor**, check its status, and quit and reopen Conductor after setup. An unsupported version may leave the relay disabled. |
+| Waiting states are missing or slow | Run **Agent hooks** again in **Settings → Setup**. |
+| Live typing fails | Check Squeak Hands' Accessibility grant and Terminal Automation permission. Other terminals are watch-only. |
+| A phone stops updating | Check that the Mac is awake and online, then check your connection in **Settings → iPhone**. |
+
+For a bug report, use the app's **Report** button or
+[GitHub Issues](https://github.com/Sibhimanyu/squeak/issues).
+**Settings → About → Copy diagnostics** provides a redacted connection report.
+The [getting-started guide](docs/getting-started.md) has more detail.
+
+## Build and contribute
+
+For daemon development, use **Node.js 22 or later**, npm and a native build
+toolchain for `better-sqlite3` (on macOS, Xcode Command Line Tools). The native
+Mac app additionally needs a Swift 6 toolchain. iPhone builds need Xcode and
+XcodeGen; see [`ios/project.yml`](ios/project.yml) and
+[`ios/scripts/release.sh`](ios/scripts/release.sh).
 
 ```bash
-npm install
+git clone https://github.com/Sibhimanyu/squeak.git
+cd squeak
+npm ci
 npm run build
-node dist/squeak/cli.js setup          # writes ~/Library/Application Support/squeak/.env
-node dist/squeak/cli.js install-hooks  # agent hooks: live state and approval prompts
-./scripts/install-squeak-agents.sh     # start the Squeak service at login
-helpers/squeak-hands/build.sh ~/Library/Application\ Support/squeak   # live replies
+node dist/squeak/cli.js help
+npm run ci
 ```
 
-Install **Squeak for Mac** from the DMG on the project's GitHub releases
-(`Sibhimanyu/squeak`; see [`macos/README.md`](macos/README.md)). It is a native
-menu-bar app, not run from this checkout, and updates itself. It builds from
-`macos/` with `macos/scripts/release.sh`.
+Run the daemon in the foreground with `node dist/squeak/cli.js start`. Stop an
+existing Squeak service first so both processes do not compete for the same
+port. Native development and packaging are described in
+[`macos/README.md`](macos/README.md); the marketing site has its own
+[`website/README.md`](website/README.md).
 
-Then grant **Squeak Hands** Accessibility in System Settings → Privacy &
-Security. The first reply to a Terminal agent asks to let Squeak Hands
-control Terminal (Privacy & Security → Automation). Rebuild Squeak Hands with
-the same command after pulling changes to `helpers/squeak-hands/`; `ship.sh`
-does not.
-
-### iPhone
-
-Set `SQUEAK_REMOTE_PROJECT` in Squeak's `.env` to your Firebase project id
-(see `firebase/`), open Squeak on the Mac, choose **iPhone → Pair an iPhone**,
-and scan the code with the iPhone app. Releases are built with
-`ios/scripts/release.sh` and installed through SideStore.
-
-### Squeak for Web (no install)
-
-<https://squeak-mac.web.app/> is the phone option that needs no install: open it
-in any browser. It has the same features as the iPhone app: new chats with
-presets and split the work, answering plans and questions, queue and steer,
-Mac controls, keep awake, notifications, usage and films review. It does not
-have Face ID or the direct same-Wi-Fi route. Pair by scanning the code from
-**iPhone** in Squeak for Mac's Settings with the page's camera button, or paste
-the pairing link. It uses the same Firebase project (`SQUEAK_REMOTE_PROJECT`)
-as the iPhone app, and the iPhone app stays optional (SideStore).
-
-### Zoho Cliq (optional)
-
-Squeak can post every push card to a personal Cliq bot, and take commands,
-button taps (letters, Reply, Full message) and replies back from it. Cliq
-cannot call the Mac, so the bot's handlers write to a Cliq database that
-Squeak polls. Setup, the three Deluge handlers to paste, and the checks each
-action passes are in [docs/cliq.md](docs/cliq.md).
-
-## Development
+Useful CLI commands from the repository root:
 
 ```bash
-npm run ci                      # typecheck, lint, format, tests
-(cd ios/SqueakCore && swift test)
-(cd macos && swift test)       # Squeak for Mac; macos/scripts/release.sh ships it
-npx tsx scripts/e2e-remote.ts   # phone channel end to end, over real Firebase
-./scripts/ship.sh               # from a worktree: CI, merge, build, restart
+node dist/squeak/cli.js config-path      # locate the .env file
+node dist/squeak/cli.js init             # create a template without prompts
+node dist/squeak/cli.js setup            # interactive Telegram configuration
+node dist/squeak/cli.js hooks-status
+node dist/squeak/cli.js install-hooks
+node dist/squeak/cli.js uninstall-hooks
 ```
 
-Working notes for anyone (or any agent) changing the code are in
-[`CLAUDE.md`](CLAUDE.md).
+Configuration and secrets normally live in
+`~/Library/Application Support/squeak/`; `SQUEAK_ENV_PATH` overrides the `.env`
+path. Local Mac development tests:
+
+```bash
+(cd macos && swift test)
+(cd ios/SqueakCore && swift test)
+```
+
+Read [`CLAUDE.md`](CLAUDE.md) for engineering context and [`DESIGN.md`](DESIGN.md)
+for the shared design system. Additional guides cover
+[the web client](docs/web-app.md), [questions and plans](docs/answering-questions.md)
+and [RasanAI workflow integration](docs/rasanai-plugin.md).
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+[Apache-2.0](LICENSE), with attribution in [NOTICE](NOTICE).
