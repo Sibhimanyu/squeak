@@ -43,8 +43,7 @@ struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @State private var step: Int
 
-    /// Step 0 is the welcome, the one place the person says yes to Squeak installing its background
-    /// service; any other step is the setup checklist.
+    /// Welcome, essential setup, then a walkthrough using the person's real sessions.
     init(step: Int = 0, finish: @escaping () -> Void) {
         _step = State(initialValue: step)
         self.finish = finish
@@ -53,12 +52,17 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: 0) {
             if step == 0 {
-                welcome.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                ScrollView { welcome }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 welcomeFooter
-            } else {
+            } else if step == 1 {
                 ScrollView { SetupChecklistView() }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 checklistFooter
+            } else {
+                ScrollView { FirstSessionView(backToSetup: { step = 1 }) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                firstSessionFooter
             }
         }
         .padding(.horizontal, Space.xxl)
@@ -70,7 +74,7 @@ struct OnboardingView: View {
 
     private var welcomeFooter: some View {
         HStack {
-            Button("Skip") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted).accessibilityLabel("Skip setup")
+            Button("Set up later") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted).accessibilityLabel("Set up Squeak later")
             Spacer()
             Button("Set up Squeak") {
                 model.setup.confirmInstallService()
@@ -87,7 +91,7 @@ struct OnboardingView: View {
         return HStack {
             Spacer()
             if done {
-                Button("Done") { finish() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                Button("Try your first session") { step = 2 }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
             } else {
                 Button("Finish later") { finish() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.defaultAction)
             }
@@ -96,18 +100,70 @@ struct OnboardingView: View {
         .font(.system(size: 13))
     }
 
-    private var welcome: some View {
-        VStack(spacing: Space.m) {
-            DuckMark(width: 72).padding(.top, Space.xxl).padding(.bottom, Space.s)
-            Text("Welcome to Squeak").font(.system(size: 22, weight: .semibold)).foregroundStyle(Theme.ink)
-            Text("Squeak lives in your menu bar. It shows your coding-agent sessions, tells you when one needs you, and lets you answer without switching apps.")
-                .font(.system(size: 14)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Setup takes a minute. Squeak installs its own background service, then you pick the rest. Nothing needs the terminal.")
-                .font(.system(size: 13)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true).padding(.top, Space.xs)
-            Text("You can skip this and finish later in Settings › Setup.")
-                .font(.system(size: 12)).foregroundStyle(Theme.subtle).padding(.top, Space.xs)
+    private var firstSessionFooter: some View {
+        HStack {
+            Button("Done for now", action: finish)
+                .buttonStyle(.plain).foregroundStyle(Theme.muted)
+            Spacer()
+            Button("Open Squeak") {
+                finish()
+                model.showConversationWindow()
+            }
+            .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
         }
+        .padding(.top, Space.m)
+        .font(.system(size: 13))
+    }
+
+    private var welcome: some View {
+        VStack(spacing: Space.l) {
+            VStack(spacing: Space.s) {
+                DuckMark(width: 68).padding(.top, Space.m).accessibilityHidden(true)
+                Text("Your agents. In view.")
+                    .font(.system(size: 26, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text("Know when your coding agents need you.\nAnswer without switching apps.")
+                    .font(.system(size: 14)).foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            }
+
+            // A small, explicitly labelled preview teaches where the app lives before installation.
+            VStack(spacing: 0) {
+                HStack(spacing: Space.s) {
+                    Text("In your menu bar").font(Typo.meta).foregroundStyle(Theme.muted)
+                    Spacer()
+                    Image(nsImage: MenuBarIcon.image(for: .normal))
+                        .renderingMode(.template).foregroundStyle(Theme.ink)
+                    Image(systemName: "wifi").foregroundStyle(Theme.muted)
+                    Image(systemName: "battery.100").foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, Space.m).padding(.vertical, Space.s)
+                .background(Theme.surfaceRaised)
+                Rectangle().fill(Theme.line).frame(height: 1)
+                HStack(spacing: Space.m) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 20)).foregroundStyle(Theme.muted)
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        Text("An agent needs your answer").font(Typo.label).foregroundStyle(Theme.ink)
+                        Text("See the question. Send your reply. Keep going.")
+                            .font(Typo.body).foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(Space.m)
+            }
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Preview: Squeak lives in your Mac's menu bar. Click the duck to see agents and answer their questions.")
+
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text("A quick setup. No terminal needed.").font(Typo.label).foregroundStyle(Theme.ink)
+                Text("First, install Squeak’s background service. Then connect your agents. Notifications, shortcuts and phone access are your choice.")
+                    .font(Typo.body).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.bottom, Space.l)
     }
 }

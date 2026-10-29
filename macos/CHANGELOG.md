@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.11.9
+
+- A clearer Mac setup with a menu-bar preview, progress through essential steps, and optional extras tucked away until needed.
+- A first-session walkthrough shows how to start an agent session, find it under the duck, and know when it needs an answer.
+- Empty session lists offer a fresh-session reminder, Check again, and a direct way back to Setup.
+
 ## 2.11.8
 
 - A redesigned Squeak update window with clearer release notes, progress and update actions in light and dark appearances.
