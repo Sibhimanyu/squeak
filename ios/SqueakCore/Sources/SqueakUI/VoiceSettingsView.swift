@@ -124,6 +124,7 @@ private struct PinSection: View {
     @State private var note: String?
     /// Set once the owner check passed for a reset; the new pin (or off) is then chosen.
     @State private var verified = false
+    @State private var confirmingOff = false
     @FocusState private var focused: Field?
 
     private var state: String? { voice.pin }
@@ -155,8 +156,7 @@ private struct PinSection: View {
             form(.change, title: "Change pin", needsCurrent: true, button: "Change pin")
         case "set":
             form(.change, title: "Change PIN", needsCurrent: true, button: "Change PIN")
-            form(.disable, title: "Turn PIN off", needsCurrent: true, button: "Turn PIN off", destructive: true,
-                 warning: "Anyone who answers the call will then be able to reply by key.")
+            turnOff
             forgot
         case "off":
             Text("The pin is off. Anyone who answers a call can reply by key.").font(.footnote).foregroundStyle(Theme.muted)
@@ -165,8 +165,21 @@ private struct PinSection: View {
             form(.enable, title: "Set a PIN", needsCurrent: false, button: "Set a PIN")
         default:
             Text("Checking…").font(.footnote).foregroundStyle(Theme.muted)
+            turnOff
             forgot
         }
+    }
+
+    /// Turning the PIN off needs you, not the old PIN: Face ID or the passcode, then one more tap to confirm.
+    @ViewBuilder private var turnOff: some View {
+        Button("Turn PIN off", role: .destructive) { confirmingOff = true }
+            .disabled(busy).frame(minHeight: 44)
+            .confirmationDialog("Turn the PIN off?", isPresented: $confirmingOff, titleVisibility: .visible) {
+                Button("Turn PIN off", role: .destructive) { turnOffTapped() }
+                Button("Keep the PIN", role: .cancel) {}
+            } message: {
+                Text("Anyone who answers the call will then be able to reply by key.")
+            }
     }
 
     @ViewBuilder private var forgot: some View {
@@ -242,6 +255,16 @@ private struct PinSection: View {
         case .disable: run(.disable(current: current))
         case .enable: run(.enable(next: new))
         case .forgot: break
+        }
+    }
+
+    private func turnOffTapped() {
+        note = nil
+        busy = true
+        Task {
+            let ok = await model.confirmOwner(reason: "Turn off your calling PIN")
+            busy = false
+            if ok { run(.reset(next: nil)) } else { note = "Face ID was cancelled. Your PIN is unchanged." }
         }
     }
 

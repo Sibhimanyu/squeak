@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.19.7] - 2026-10-29 (iOS)
+
+- Turn the calling PIN off from Phone calls with Face ID or your passcode: no need to remember the old PIN, and it works while the PIN state is still loading.
+
 ## [1.19.6] - 2026-10-29 (iOS)
 
 - Photos you send show up as real images in Conductor, and images sent from Conductor show as photos here.

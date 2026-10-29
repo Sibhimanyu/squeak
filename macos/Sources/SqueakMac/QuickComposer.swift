@@ -74,9 +74,6 @@ final class QuickComposerController {
             state.prepare(model: model, explicit: target)
             if let target { state.context.load(key: target, anchor: anchor, fromNotification: fromNotification, model: model) }
         }
-        // The panel is reused by the hot key, notifications and the menu-bar popup. Remember this
-        // opening's origin even when it retargets an already visible composer.
-        state.newChatInPopup = fromPopup
         if panel == nil {
             let p = QuickPanel(
                 contentRect: NSRect(x: 0, y: 0, width: QuickComposerView.windowWidth, height: 200),
@@ -94,7 +91,10 @@ final class QuickComposerController {
             // Opens on the desktop you are on (or beside a full-screen app) and stays there: a Space
             // swipe closes it rather than carrying it along.
             p.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-            p.onEscape = { [weak self] in self?.hide() }
+            p.onEscape = { [weak self] in
+                guard let self else { return }
+                if state.newChat != nil { state.backFromNewChat() } else { hide() }
+            }
             let host = NSHostingView(rootView: QuickComposerView(close: { [weak self] in self?.hide() }, resize: { [weak self] h in self?.resize(to: h) })
                 .environment(model).environment(state))
             host.sizingOptions = []
@@ -114,6 +114,7 @@ final class QuickComposerController {
     func hide() {
         removeDismissObservers()
         state.stashDraft()
+        state.newChat = nil
         state.epoch += 1
         state.context.clear()
         panel?.orderOut(nil)
@@ -216,8 +217,31 @@ final class QuickComposerController {
 @MainActor @Observable
 final class QuickState {
     var target: SessionKey?
-    /// A composer opened from the menu-bar popup starts new chats back in that same panel.
-    var newChatInPopup = false
+    /// New chat belongs to this composer, independent of which surface opened it.
+    var newChat: NewChatState?
+    var choosingNewChatWorkspace = false
+
+    func showNewChat(model: AppModel) {
+        stashDraft()
+        epoch += 1 // an earlier send must not dismiss the new-chat form
+        let form = NewChatState()
+        form.prepare(model: model, preselect: target.flatMap { model.session($0)?.conductorWorkspaceId })
+        choosingNewChatWorkspace = false
+        newChat = form
+    }
+
+    func backFromNewChat() {
+        if choosingNewChatWorkspace {
+            choosingNewChatWorkspace = false
+            newChat?.focus += 1
+        } else { backToMessage() }
+    }
+
+    func backToMessage() {
+        choosingNewChatWorkspace = false
+        newChat = nil
+        focus += 1
+    }
     var text = ""
     var focus = 0
     var result: SendResult?
@@ -239,6 +263,7 @@ final class QuickState {
     /// sent to: Send is then disabled rather than aimed at another chat. Each chat has its own draft.
     func prepare(model: AppModel, explicit: SessionKey? = nil) {
         epoch += 1
+        newChat = nil
         result = nil
         images.clear()
         context.clear()
@@ -312,9 +337,25 @@ struct QuickComposerView: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            pill
-                .background(alignment: .bottom) { if !embedded { glow } }
-            hints
+            Group {
+                if let newChat = state.newChat {
+                    QuickNewChatView(back: { state.backToMessage() }, complete: {
+                        guard state.newChat === newChat else { return }
+                        state.newChat = nil
+                        close()
+                    })
+                    .environment(newChat)
+                    .frame(height: min(
+                        state.choosingNewChatWorkspace ? 430 : (newChat.customizing ? 590 : 480),
+                        max(250, state.screenHeight - 120)))
+                } else {
+                    pill
+                }
+            }
+            .background(alignment: .bottom) { if !embedded { glow } }
+            if state.newChat == nil { hints } else {
+                Text("⌘↩ start chat · esc back").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            }
         }
         .padding(.horizontal, embedded ? 0 : Self.margin)
         .padding(.top, embedded ? 0 : 28)
@@ -469,14 +510,12 @@ struct QuickComposerView: View {
             }
             Divider()
             Button("New chat in…") {
-                let ws = state.target.flatMap { model.session($0)?.conductorWorkspaceId }
-                let inPopup = state.newChatInPopup
-                close()
-                if inPopup {
-                    PopupNav.shared.openNewChat(preselect: ws)
-                    MenuBarController.shared.open()
+                if embedded {
+                    let workspace = target?.conductorWorkspaceId
+                    close()
+                    NewChatController.shared.show(preselect: workspace)
                 } else {
-                    NewChatController.shared.show(preselect: ws)
+                    state.showNewChat(model: model)
                 }
             }
         } label: {
