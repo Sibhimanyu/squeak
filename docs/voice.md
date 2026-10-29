@@ -10,6 +10,10 @@ itself, which needs a route to it (home Wi-Fi or a VPN). The gateway wins when b
 2. `scripts/build-voice-addon.sh` builds `dist-addon/squeak-voice`. Copy that folder to Home Assistant's `/addons`
    share (Samba or SSH add-on), then Settings > Add-ons > Add-on store > menu > Check for updates, and install
    Squeak Voice under Local add-ons. Fill in its options (see its Documentation tab) and start it.
+   **Updates:** a local add-on never sees a new version until its folder is copied again. To get updates from Home
+   Assistant itself, add `https://github.com/Sibhimanyu/squeak` under Add-on store > menu > Repositories
+   (`repository.yaml` at the root makes the repo one); it pulls the prebuilt image for the `version` in
+   `config.yaml`, which the "Squeak Voice add-on image" workflow must have built first.
 3. Deploy the database rules once (`firebase deploy --only database`): they allow the `voice` and `voiceresult`
    kinds in the channel.
 4. Restart Squeak (`./scripts/ship.sh`).
