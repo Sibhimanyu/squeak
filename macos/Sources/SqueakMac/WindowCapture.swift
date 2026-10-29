@@ -4,7 +4,7 @@ import SwiftUI
 
 extension CaptureRunner {
     /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=sidebar: capture collapsed and expanded
-    /// main and Settings sidebars, exercising ⌘\\ between the states.
+    /// main and Settings sidebars, exercising ⌘B and ⌘\\ between the states.
     static func runSidebarDemo(prefix: String, model: AppModel) async {
         let win = NSWindow(
             contentRect: NSRect(x: 60, y: 60, width: 1200, height: 800),
@@ -20,6 +20,13 @@ extension CaptureRunner {
         if let content = win.contentView { logSidebarWidth(in: content, state: "collapsed") }
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-main.png")
 
+        await sendCommandB(to: win)
+        await waitForSidebarWidth(220, in: win)
+        if let content = win.contentView { logSidebarWidth(in: content, state: "main expanded with Cmd+B") }
+        await sendCommandB(to: win)
+        await waitForSidebarWidth(64, in: win)
+        if let content = win.contentView { logSidebarWidth(in: content, state: "main collapsed with Cmd+B") }
+
         await sendCommandBackslash(to: win)
         await waitForSidebarWidth(220, in: win)
         if let content = win.contentView { logSidebarWidth(in: content, state: "expanded") }
@@ -33,6 +40,12 @@ extension CaptureRunner {
         await waitForSidebarWidth(64, in: win)
         if let content = win.contentView { logSidebarWidth(in: content, state: "Settings collapsed") }
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-settings-collapsed.png")
+        await sendCommandB(to: win)
+        await waitForSidebarWidth(216, in: win)
+        if let content = win.contentView { logSidebarWidth(in: content, state: "Settings expanded with Cmd+B") }
+        await sendCommandB(to: win)
+        await waitForSidebarWidth(64, in: win)
+        if let content = win.contentView { logSidebarWidth(in: content, state: "Settings collapsed with Cmd+B") }
         win.orderOut(nil)
         NSApp.terminate(nil)
     }
@@ -49,6 +62,24 @@ extension CaptureRunner {
             with: .keyUp, location: .zero, modifierFlags: .command,
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
             context: nil, characters: "\\", charactersIgnoringModifiers: "\\", isARepeat: false, keyCode: 42
+        ) else { return }
+        NSApp.sendEvent(down)
+        NSApp.sendEvent(up)
+        try? await Task.sleep(for: .milliseconds(200))
+    }
+
+    private static func sendCommandB(to window: NSWindow) async {
+        NSApp.activate(ignoringOtherApps: true)
+        try? await Task.sleep(for: .milliseconds(200))
+        window.makeKeyAndOrderFront(nil)
+        guard let down = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, characters: "b", charactersIgnoringModifiers: "b", isARepeat: false, keyCode: 11
+        ), let up = NSEvent.keyEvent(
+            with: .keyUp, location: .zero, modifierFlags: .command,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, characters: "b", charactersIgnoringModifiers: "b", isARepeat: false, keyCode: 11
         ) else { return }
         NSApp.sendEvent(down)
         NSApp.sendEvent(up)

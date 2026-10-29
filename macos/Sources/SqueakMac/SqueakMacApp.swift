@@ -64,6 +64,12 @@ struct SqueakCommands: Commands {
             Button("Check for updates…") { model.updater.checkForUpdates() }
                 .disabled(!model.updater.canCheck)
         }
+        CommandGroup(replacing: .sidebar) {
+            Button("Toggle Sidebar") {
+                NotificationCenter.default.post(name: .squeakToggleSidebar, object: nil)
+            }
+            .keyboardShortcut("b", modifiers: .command)
+        }
         CommandMenu("Sessions") {
             ForEach(0..<9, id: \.self) { i in
                 let list = model.ordered.flattened

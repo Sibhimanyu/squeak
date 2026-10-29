@@ -63,6 +63,7 @@ final class SidebarColumnSizerView: NSView {
     }
 
     var configuration: Configuration
+    private var applyScheduled = false
 
     init(configuration: Configuration) {
         self.configuration = configuration
@@ -76,23 +77,74 @@ final class SidebarColumnSizerView: NSView {
         applyWhenAttached()
     }
 
+    override func layout() {
+        super.layout()
+        applyWhenAttached()
+    }
+
     func applyWhenAttached() {
-        Task { @MainActor [weak self] in self?.apply() }
+        guard !applyScheduled else { return }
+        applyScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            applyScheduled = false
+            apply()
+        }
     }
 
     private func apply() {
-        var responder: NSResponder? = self
-        while let current = responder {
-            if let controller = current as? NSSplitViewController,
-               let sidebar = controller.splitViewItems.first(where: { $0.behavior == .sidebar }) {
-                guard sidebar.minimumThickness != configuration.minimum || sidebar.maximumThickness != configuration.maximum else { return }
-                sidebar.minimumThickness = configuration.minimum
-                sidebar.maximumThickness = configuration.maximum
-                controller.splitView.setPosition(configuration.ideal, ofDividerAt: 0)
-                return
-            }
-            responder = current.nextResponder
+        guard let controller = splitViewController else { return }
+        guard let sidebar = controller.splitViewItems.first(where: { $0.behavior == .sidebar }) else { return }
+
+        // The SwiftUI representable's responder chain ends at its hosting view on some
+        // macOS releases. Resolve the owning controller through the view-controller tree,
+        // and keep enforcing after NavigationSplitView has completed its own layout pass.
+        let constraintsChanged = sidebar.minimumThickness != configuration.minimum
+            || sidebar.maximumThickness != configuration.maximum
+        if constraintsChanged {
+            sidebar.minimumThickness = configuration.minimum
+            sidebar.maximumThickness = configuration.maximum
+            sidebar.canCollapse = false
         }
+        let currentWidth = sidebar.viewController.view.frame.width
+        if constraintsChanged || abs(currentWidth - configuration.ideal) > 0.5 {
+            controller.view.layoutSubtreeIfNeeded()
+            controller.splitView.setPosition(configuration.ideal, ofDividerAt: 0)
+            controller.splitView.adjustSubviews()
+        }
+    }
+
+    private var splitViewController: NSSplitViewController? {
+        var view: NSView? = self
+        while let current = view {
+            var responder: NSResponder? = current
+            while let value = responder {
+                if let split = value as? NSSplitViewController { return split }
+                responder = value.nextResponder
+            }
+            view = current.superview
+        }
+
+        // SwiftUI may not expose the split controller as a parent of the representable.
+        // Search the current window's controller tree as a fallback.
+        func findSplit(in controller: NSViewController?) -> NSSplitViewController? {
+            guard let controller else { return nil }
+            if let split = controller as? NSSplitViewController { return split }
+            for child in controller.children {
+                if let split = findSplit(in: child) { return split }
+            }
+            return nil
+        }
+        if let split = findSplit(in: window?.contentViewController) { return split }
+        func findSplit(in view: NSView?) -> NSSplitViewController? {
+            guard let view else { return nil }
+            if let split = view.nextResponder as? NSSplitViewController { return split }
+            for child in view.subviews {
+                if let split = findSplit(in: child) { return split }
+            }
+            return nil
+        }
+        return findSplit(in: window?.contentView)
     }
 }
 
@@ -165,7 +217,7 @@ struct SidebarCollapseButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isCollapsed ? "Expand sidebar" : "Collapse sidebar")
-        .help(isCollapsed ? "Expand sidebar (⌘\\)" : "Collapse sidebar (⌘\\)")
+        .help(isCollapsed ? "Expand sidebar (⌘B or ⌘\\)" : "Collapse sidebar (⌘B or ⌘\\)")
     }
 }
 

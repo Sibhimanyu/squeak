@@ -155,6 +155,28 @@ extension View {
     func glassSurface<S: Shape>(in shape: S, interactive: Bool = false) -> some View {
         modifier(GlassSurface(shape: shape, interactive: interactive))
     }
+
+    /// A clearly editable control for the otherwise flat Form rows in Settings.
+    func settingsInput(isFocused: Bool = false) -> some View {
+        modifier(SettingsInputStyle(isFocused: isFocused))
+    }
+}
+
+private struct SettingsInputStyle: ViewModifier {
+    let isFocused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .font(.body.monospacedDigit())
+            .padding(.horizontal, 12)
+            .frame(minHeight: 48)
+            .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isFocused ? Theme.primaryFill : Theme.lineStrong, lineWidth: isFocused ? 2 : 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
 }
 
 /// The one loud control (DESIGN.md §8.9).

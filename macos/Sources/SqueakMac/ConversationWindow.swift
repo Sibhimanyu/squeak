@@ -62,6 +62,9 @@ struct ConversationView: View {
         .environment(\.glassWindowEnabled, glassWindowAppearance && !reduceTransparency)
         .environment(\.glassTransparency, glassTransparency)
         .environment(\.glassSidebarContrast, glassSidebarContrast)
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in
+            sidebarCollapsed.toggle()
+        }
         .background(ConversationWindowReader())
         .background {
             // ⌘\ collapses the navigation sidebar to an icon rail, wherever focus is.
@@ -77,6 +80,10 @@ struct ConversationView: View {
         }
         .frame(minWidth: 900, minHeight: 600)
     }
+}
+
+extension Notification.Name {
+    static let squeakToggleSidebar = Notification.Name("SqueakToggleSidebar")
 }
 
 /// Tells the model which NSWindow hosts the conversation, so "on screen" means this window and

@@ -7,8 +7,8 @@ enum WindowAppearancePreference {
     static let key = "squeakGlassWindowAppearance"
     static let transparencyKey = "squeakGlassTransparency"
     static let sidebarContrastKey = "squeakGlassSidebarContrast"
-    static let defaultTransparency = 62.0
-    static let defaultSidebarContrast = 22.0
+    static let defaultTransparency = 7.0
+    static let defaultSidebarContrast = 68.0
 }
 
 private struct GlassWindowEnabledKey: EnvironmentKey {
