@@ -90,7 +90,7 @@ private struct OwnFlow: View {
         VStack(alignment: .leading, spacing: Space.m) {
             Text("Your own Firebase").font(Typo.title).foregroundStyle(Theme.ink)
             if !started { account }
-            if !started || failedNameTaken { nameField }
+            if failedNameTaken { nameField }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(FirebaseStep.allCases, id: \.self) { step in
                     row(step)
@@ -103,7 +103,7 @@ private struct OwnFlow: View {
             if !started {
                 Button("Start") { model.start() }
                     .buttonStyle(PrimaryButtonStyle())
-                    .disabled(!model.checkedAccounts || model.addingAccount || model.nameProblem != nil)
+                    .disabled(!model.checkedAccounts || model.addingAccount)
             }
             if model.running, model.state(.signIn) == .running(nil) {
                 Footnote("Finish signing in in your browser.")

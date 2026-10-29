@@ -116,6 +116,27 @@ private let signedIn = "Logged in as a@x.com\n"
         #expect(FirebaseSetup.projectNameProblem("squeak-") != nil)
     }
 
+    @Test func automaticNamesArePlain() {
+        #expect(FirebaseSetup.automaticNames(userName: "sibhi-zstch1643") == ["squeak-sibhi-zstch1643", "squeak-sibhi-zstch1643-mac"])
+        #expect(FirebaseSetup.automaticNames(userName: "A Very Long User Name Indeed").allSatisfy { FirebaseSetup.projectNameProblem($0) == nil && $0.count <= 30 })
+    }
+
+    @Test func triesTheSecondNameBeforeAsking() async throws {
+        let home = try tempHome()
+        let cmds = FakeCommands { _, args in
+            if args.first == "login:list" { return CommandResult(status: 0, output: signedIn) }
+            if args.first == "projects:create", args.count > 1, args[1] == "squeak-sibhi" {
+                return CommandResult(status: 1, output: "Error: Request failed: project ALREADY_EXISTS")
+            }
+            return CommandResult(status: 0, output: "")
+        }
+        let runner = FirebaseSetupRunner(commands: cmds, http: FakeHTTP(), downloader: NoDownload(), config: config(home))
+        await runner.useNames(FirebaseSetup.automaticNames(userName: "sibhi"))
+        let result = await runner.run { _, _ in }
+        #expect(result?.projectId == "squeak-sibhi-mac")
+        #expect(!cmds.calls.contains { $0.contains("projects:create") && $0.contains { $0.count > 20 && $0.hasPrefix("squeak-") && $0.range(of: "[0-9a-f]{6}$", options: .regularExpression) != nil } })
+    }
+
     @Test func takenNameAsksForAnotherAndNeverAppends() async throws {
         let home = try tempHome()
         let taken = Locked(true)

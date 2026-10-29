@@ -19,6 +19,8 @@ final class FirebaseSetupModel {
     private(set) var addingAccount = false
     private(set) var saveError: String?
     var projectName = FirebaseSetup.suggestedProjectName(userName: NSUserName())
+    /// True once the automatic names were all taken: from then on the typed name is used.
+    private(set) var askName = false
 
     // By hand.
     var urlDraft = ""
@@ -85,11 +87,12 @@ final class FirebaseSetupModel {
         for s in FirebaseStep.allCases where s.rawValue >= step.rawValue { states[s] = .pending }
         Task {
             await runner.useAccount(account)
-            await runner.useName(projectName)
+            if askName { await runner.useName(projectName) } else { await runner.useNames(FirebaseSetup.automaticNames(userName: NSUserName())) }
             let result = await runner.run(from: step) { s, st in Task { @MainActor [weak self] in self?.states[s] = st } }
             // The updates hop to the main actor one by one; let the last one land before reading them.
             await Task.yield()
             running = false
+            if case .nameTaken? = failedStep?.1.kind { askName = true }
             if let result { await save(FirebaseSetup.ownChanges(projectId: result.projectId, databaseURL: result.databaseURL)) }
         }
     }

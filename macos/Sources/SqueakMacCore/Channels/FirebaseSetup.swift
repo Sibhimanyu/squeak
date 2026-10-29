@@ -151,6 +151,13 @@ public enum FirebaseSetup {
         return name
     }
 
+    /// The names tried without asking: the suggestion, then the same with "-mac". Only valid ones.
+    public static func automaticNames(userName: String) -> [String] {
+        let base = suggestedProjectName(userName: userName)
+        let withMac = String(base.prefix(26)).trimmingCharacters(in: CharacterSet(charactersIn: "-")) + "-mac"
+        return [base, withMac].filter { projectNameProblem($0) == nil }
+    }
+
     /// Google's project id rule. Nil when fine, else one plain sentence saying what to change.
     public static func projectNameProblem(_ name: String) -> String? {
         if name.count < 6 { return "Use at least 6 characters." }
@@ -258,12 +265,12 @@ public actor FirebaseSetupRunner {
     private var cli: String?
     private var account: String?
     private var projectId: String?
-    private var projectName: String?
+    private var projectNames: [String]
     private var databaseURL: String?
     private var signedInChecked = false
 
     public init(commands: CommandRunning, http: HTTPSending, downloader: FileDownloading, config: Config = Config(), projectName: String? = nil) {
-        self.projectName = projectName
+        self.projectNames = projectName.map { [$0] } ?? []
         self.commands = commands; self.http = http; self.downloader = downloader; self.config = config
     }
 
@@ -292,7 +299,9 @@ public actor FirebaseSetupRunner {
         return added
     }
 
-    public func useName(_ name: String) { projectName = name }
+    public func useName(_ name: String) { projectNames = [name] }
+    /// Names to try in order; a taken one moves on to the next, and only when all are taken does the step ask.
+    public func useNames(_ names: [String]) { projectNames = names }
 
     public func useProject(_ id: String) { projectId = id; databaseURL = nil }
 
@@ -377,15 +386,17 @@ public actor FirebaseSetupRunner {
     private func createProject() async -> StepFailure? {
         if projectId != nil { return nil }
         guard let cli = await locateCLI() else { return StepFailure(.generic, "The Firebase tool is missing.") }
-        guard let id = projectName, FirebaseSetup.projectNameProblem(id) == nil else {
-            return StepFailure(.nameTaken, "Pick a name for your project.")
-        }
-        let r = await commands.run(cli, ["projects:create", id, "--display-name", "Squeak", "--non-interactive"] + accountArgs,
-                                   directory: nil, declineYesNo: true, timeout: 180)
-        if r.status == 0 { projectId = id; return nil }
-        let text = FirebaseSetup.stripANSI(r.output).lowercased()
-        if text.contains("already exists") || text.contains("already_exists") || text.contains("is not available") {
-            return StepFailure(.nameTaken, "That name is taken across Google. Try another.")
+        let names = projectNames.filter { FirebaseSetup.projectNameProblem($0) == nil }
+        guard !names.isEmpty else { return StepFailure(.nameTaken, "Pick a name for your project.") }
+        var text = ""
+        for id in names {
+            let r = await commands.run(cli, ["projects:create", id, "--display-name", "Squeak", "--non-interactive"] + accountArgs,
+                                       directory: nil, declineYesNo: true, timeout: 180)
+            if r.status == 0 { projectId = id; return nil }
+            text = FirebaseSetup.stripANSI(r.output).lowercased()
+            let taken = text.contains("already exists") || text.contains("already_exists") || text.contains("is not available")
+            if !taken { break }
+            if id == names.last { return StepFailure(.nameTaken, "That name is taken across Google. Try another.") }
         }
         if text.contains("terms of service") || text.contains("accept the") && text.contains("terms") {
             return StepFailure(.terms, "Google needs you to accept Firebase's terms first. Open the Firebase console, accept them, then try again.")
