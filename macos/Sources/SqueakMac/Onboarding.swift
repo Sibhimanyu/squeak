@@ -10,71 +10,74 @@ final class OnboardingController {
 
     var isShowing: Bool { window?.isVisible ?? false }
 
+    /// Only for someone who has not finished first run. Updates never bring it back.
     func showIfNeeded() {
         let model = AppModel.shared
-        guard !model.onboardingDone, !model.captureMode else { return }
+        guard !model.onboardingDone, !model.setup.progress.finished, !model.captureMode else { return }
         show()
     }
 
-    /// The Welcome screen, or, with `at`, straight into the walk-through on that screen (Settings › Setup).
-    func show(at screen: WalkScreen? = nil) {
+    /// First run from the start (resuming at the first unfinished screen), or with `at`, straight to that
+    /// screen (Settings › Setup).
+    func show(at stage: SetupStage? = nil) {
         if window == nil {
             let w = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 850, height: 640),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false
             )
-            w.title = "Welcome to Squeak"
             w.minSize = NSSize(width: 760, height: 540)
             w.isReleasedWhenClosed = false
             w.center()
             window = w
         }
-        window?.title = screen == nil ? "Welcome to Squeak" : "Set up Squeak"
+        window?.title = stage == nil ? "Welcome to Squeak" : "Set up Squeak"
         window?.contentView = NSHostingView(
-            rootView: OnboardingView(step: screen == nil ? 0 : 1, walkStart: screen, finish: { [weak self] in self?.finish() })
+            rootView: OnboardingView(stage: stage, finish: { [weak self] in self?.window?.close() })
                 .environment(AppModel.shared))
         ActivationPolicyController.shared.willShowWindow()
         window?.makeKeyAndOrderFront(nil)
     }
-
-    private func finish() {
-        AppModel.shared.onboardingDone = true
-        window?.close()
-    }
 }
 
+/// First run: Welcome, Connect, See your agents, Away from this Mac, Done. `SetupFlow` (SqueakMacCore) decides
+/// the order, what is done and where to resume; each screen runs the app's existing actions.
 struct OnboardingView: View {
     var finish: () -> Void
     @Environment(AppModel.self) private var model
-    @State private var step: Int
-    @State private var walkStart: WalkScreen?
+    @State private var stage: SetupStage?
+    @State private var awayChoice: AwayChoice?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Welcome, the guided setup, then a walkthrough using the person's real sessions.
-    init(step: Int = 0, walkStart: WalkScreen? = nil, finish: @escaping () -> Void) {
-        _step = State(initialValue: step)
-        _walkStart = State(initialValue: walkStart)
+    /// `stage` nil: work out where to start from what is already set up.
+    init(stage: SetupStage? = nil, finish: @escaping () -> Void) {
+        _stage = State(initialValue: stage)
         self.finish = finish
     }
 
     var body: some View {
+        let flow = model.setupFlow
         HStack(spacing: 0) {
-            SetupBrandRail(step: step, screen: currentScreen, walk: model.walkthrough)
+            SetupBrandRail(stage: stage, flow: flow)
                 .frame(width: 238)
             Rectangle().fill(Theme.line).frame(width: 1)
             VStack(spacing: 0) {
-                if step == 0 {
-                    ScrollView { welcome }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    welcomeFooter
-                } else if step == 1 {
-                    SetupWalkthroughView(
-                        start: walkStart ?? model.walkthrough.firstOpen.map { .step($0) } ?? .summary,
-                        finish: { step = 2 }, later: finish)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                SetupTrack(current: stage).padding(.bottom, Space.m)
+                if let stage {
+                    SetupHero(plan: plan(stage, flow), rows: SetupDirector.revealedRows(flow.connectRows),
+                              doneStages: SetupStage.listed.filter { flow.state($0) == .done })
+                        .padding(.bottom, Space.m)
+                    ScrollView {
+                        content(stage, flow)
+                            .id(stage)
+                            .transition(.opacity)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(.bottom, Space.m)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    footer(stage, flow)
+                        .padding(.top, Space.m)
                 } else {
-                    ScrollView { FirstSessionView(backToSetup: { walkStart = .summary; step = 1 }) }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    firstSessionFooter
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .padding(.horizontal, 30)
@@ -84,133 +87,177 @@ struct OnboardingView: View {
             .background(Theme.bg)
         }
         .background(Theme.bg)
-        .environment(\.setupWalkthroughForm, step == 1)
+        // Esc must never close the window or quit setup by accident.
+        .onExitCommand {}
+        .task { await prepare() }
+        .task { await poll() }
+        .onChange(of: flow.isReturning) { _, returning in
+            // The service answered a moment after Welcome showed: someone who already has Squeak skips ahead.
+            if returning, stage == .welcome, !model.setup.progress.started { go(.done) }
+        }
     }
 
-    private var currentScreen: WalkScreen? {
-        guard step == 1 else { return nil }
-        return walkStart ?? model.walkthrough.firstOpen.map { .step($0) } ?? .summary
+    // MARK: Moving
+
+    private func prepare() async {
+        guard stage == nil else { return }
+        model.setup.redetect()
+        await model.setup.refresh(model)
+        await model.channels.refresh()
+        go(model.setupFlow.startStage)
     }
 
-    private var welcomeFooter: some View {
+    private func poll() async {
+        var tick = 0
+        while !Task.isCancelled {
+            if stage != nil {
+                await model.setup.refresh(model)
+                model.stepConnect()
+                model.recordSetupProgress()
+                if tick % 2 == 0 { await model.channels.refresh() }
+                tick += 1
+            }
+            try? await Task.sleep(for: .seconds(1.5))
+        }
+    }
+
+    private func plan(_ s: SetupStage, _ flow: SetupFlow) -> SetupScenePlan {
+        var i = SetupSceneInput(stage: s)
+        i.started = model.setup.progress.started || s != .welcome
+        i.connectReady = flow.connectReady
+        i.connectFailed = flow.connectFailure != nil
+        i.connectRunning = model.setup.connectRunning
+        if let active = model.sessions.first(where: { $0.state == .working || $0.state == .blocked || $0.state == .finished || $0.alive == true }) {
+            i.sessionTitle = active.distinctTitle ?? active.title
+        }
+        i.notificationsGranted = model.setup.notifications == .authorized
+        i.awayChoice = awayChoice.map { $0 == .iphone ? AwayKind.iphone : $0 == .web ? .web : .telegram }
+        let paired = !(model.channels.remote?.activeDevices.isEmpty ?? true)
+        i.awaySucceeded = awayChoice == .telegram ? model.channels.testResult?.hasPrefix("Sent") == true : paired
+        i.awayWaiting = awayChoice != nil && !i.awaySucceeded
+        return SetupDirector.plan(i)
+    }
+
+    private func go(_ s: SetupStage) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: SetupMotion.standard)) {
+            awayChoice = nil
+            stage = s
+        }
+        // Reaching Done is finishing: setup never comes back on its own.
+        if s == .done { model.finishSetup() }
+    }
+
+    private func advance(from s: SetupStage, skipping: Bool) {
+        if skipping { model.skipSetupStage(s) } else { model.unskipSetupStage(s) }
+        go(model.setupFlow.next(after: s) ?? .done)
+    }
+
+    // MARK: Screens
+
+    @ViewBuilder private func content(_ s: SetupStage, _ flow: SetupFlow) -> some View {
+        switch s {
+        case .welcome: WelcomeStage()
+        case .connect: ConnectStage()
+        case .firstWin: FirstWinStage()
+        case .away: AwayStage(choice: $awayChoice)
+        case .done: DoneStage()
+        }
+    }
+
+    private func footer(_ s: SetupStage, _ flow: SetupFlow) -> some View {
         HStack {
-            Button("Set up later") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted).accessibilityLabel("Set up Squeak later")
-            Spacer()
-            Button("Set up Squeak") {
-                model.setup.confirmInstallService()
-                walkStart = nil
-                step = 1
-            }
-            .buttonStyle(PrimaryButtonStyle())
-            .keyboardShortcut(.defaultAction)
-        }
-        .font(.system(size: 13))
-    }
-
-    private var firstSessionFooter: some View {
-        HStack {
-            Button("Done for now", action: finish)
-                .buttonStyle(.plain).foregroundStyle(Theme.muted)
-            Spacer()
-            Button("Open Squeak") {
-                finish()
-                model.showConversationWindow()
-            }
-            .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-        }
-        .padding(.top, Space.m)
-        .font(.system(size: 13))
-    }
-
-    private var welcome: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Your agents. In view.")
-                    .font(.system(size: 28, weight: .semibold)).tracking(-0.7).foregroundStyle(Theme.ink)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Know when your coding agents need you. Answer without switching apps.")
-                    .font(Typo.body).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            menuBarPreview
-            VStack(alignment: .leading, spacing: 8) {
-                Label("A quick setup. No terminal needed.", systemImage: "sparkle")
-                    .font(Typo.label).foregroundStyle(Theme.ink)
-                Text("One short screen per step: the service and agent hooks first, then Conductor, notifications, your phone and more. Skip anything you don’t want.")
-                    .font(Typo.body).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
-    }
-
-    private var menuBarPreview: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: Space.s) {
-                Text("IN YOUR MENU BAR").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1).foregroundStyle(Theme.muted)
+            switch s {
+            case .welcome:
+                Button("Skip for now") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted)
+                    .accessibilityLabel("Set up Squeak later")
                 Spacer()
-                Image(nsImage: MenuBarIcon.image(for: .normal)).renderingMode(.template).foregroundStyle(Theme.ink)
-                Image(systemName: "wifi").foregroundStyle(Theme.muted)
-                Image(systemName: "battery.100").foregroundStyle(Theme.muted)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 13)
-            Rectangle().fill(Theme.line).frame(height: 1)
-            HStack(spacing: 14) {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 19)).foregroundStyle(Theme.duck)
-                    .frame(width: 36, height: 36)
-                    .background(Theme.duck.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("An agent needs your answer").font(Typo.label).foregroundStyle(Theme.ink)
-                    Text("See the question. Send your reply. Keep going.")
-                        .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                Button("Get started") {
+                    model.startSetup()
+                    // The duck wakes first, then the screen moves on.
+                    Task { try? await Task.sleep(for: .milliseconds(Int(SetupMotion.emphasis * 1000))); go(.connect) }
                 }
-                Spacer(minLength: 0)
+                    .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+            case .connect:
+                Spacer()
+                ConnectButton(next: { go(.firstWin) })
+            case .firstWin:
+                back(s, flow)
+                Spacer()
+                Button("Skip for now") { advance(from: s, skipping: true) }.buttonStyle(SecondaryButtonStyle())
+                Button("Continue") { advance(from: s, skipping: false) }
+                    .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+            case .away:
+                Button("Back") {
+                    if awayChoice != nil { awayChoice = nil } else if let p = flow.previous(before: s) { go(p) }
+                }
+                .buttonStyle(.plain).foregroundStyle(Theme.muted)
+                Spacer()
+                Button("Skip for now") { advance(from: s, skipping: true) }.buttonStyle(SecondaryButtonStyle())
+                if flow.facts.awayConfigured {
+                    Button("Continue") { advance(from: s, skipping: false) }
+                        .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                }
+            case .done:
+                back(s, flow)
+                Spacer()
+                Button("Finish", action: finish).buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
             }
-            .padding(16)
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Preview: Squeak lives in your Mac's menu bar. Click the duck to see agents and answer their questions.")
+        .font(.system(size: 13))
+    }
+
+    @ViewBuilder private func back(_ s: SetupStage, _ flow: SetupFlow) -> some View {
+        if let p = flow.previous(before: s) {
+            Button("Back") { go(p) }.buttonStyle(.plain).foregroundStyle(Theme.muted)
+        }
     }
 }
 
-/// A persistent brand and progress anchor makes each setup screen feel like part of one guided experience.
+/// Connect's one button: Connect, then a disabled "Connecting…", "Try again" on a failure, Continue once it worked.
+private struct ConnectButton: View {
+    @Environment(AppModel.self) private var model
+    let next: () -> Void
+
+    var body: some View {
+        let flow = model.setupFlow
+        if flow.connectReady, !model.setup.connectRunning {
+            Button("Continue", action: next).buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+        } else if model.setup.connectRunning, flow.connectFailure == nil {
+            HStack(spacing: Space.s) {
+                ProgressView().controlSize(.small)
+                Text("Connecting…").font(Typo.body).foregroundStyle(Theme.muted)
+            }
+        } else if flow.connectFailure != nil {
+            Button("Try again") { model.startConnect() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+        } else {
+            Button("Connect") { model.startConnect() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+        }
+    }
+}
+
+/// The brand anchor and where you are in the five screens.
 private struct SetupBrandRail: View {
-    let step: Int
-    let screen: WalkScreen?
-    let walk: SetupWalkthrough
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var drift = false
-
-    private var activeStep: WalkStep? {
-        guard case let .step(value)? = screen else { return nil }
-        return value
-    }
-
-    private var stepNumber: Int? {
-        guard let activeStep else { return nil }
-        return walk.index(activeStep) + 1
-    }
+    let stage: SetupStage?
+    let flow: SetupFlow
 
     private var railTitle: String {
-        if step == 0 { return "A clearer view of work in motion." }
-        if step == 2 { return "Your first session is ready." }
-        if step == 1 { return "A few small steps." }
-        return walk.isFinished ? "All set." : "Your setup, at a glance."
+        switch stage {
+        case .welcome, nil: "A clearer view of work in motion."
+        case .connect: "One quick connection."
+        case .firstWin: "Your agents, in the menu bar."
+        case .away: "Stay close from afar."
+        case .done: "All set."
+        }
     }
 
     private var railDetail: String {
-        if step == 0 { return "A small duck. A little more peace of mind." }
-        if step == 2 { return "Bring your conversations together in one place." }
-        if step == 1 { return "Choose what Squeak can watch and where it can reach you." }
-        return "Connect the pieces once. Squeak keeps watch from your menu bar."
+        switch stage {
+        case .welcome, nil: "A small duck. A little more peace of mind."
+        case .connect: "Squeak links to your agents and keeps watch."
+        case .firstWin: "See a session appear, then choose how it tells you."
+        case .away: "Get pinged when you're not at your Mac."
+        case .done: "Squeak keeps watch from your menu bar."
+        }
     }
 
     var body: some View {
@@ -218,21 +265,7 @@ private struct SetupBrandRail: View {
             let compact = geometry.size.height < 610
             VStack(alignment: .leading, spacing: 0) {
                 LogoLockup(height: 24)
-                Spacer(minLength: compact ? 10 : 20)
-                SetupOrbitArtwork(isMoving: !reduceMotion, drift: drift)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: compact ? 142 : 204)
-                    .accessibilityHidden(true)
-                Spacer(minLength: compact ? 10 : 20)
-                if let stepNumber {
-                    Text("STEP \(String(format: "%02d", stepNumber))  /  \(String(format: "%02d", walk.total))")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1.1).foregroundStyle(Theme.muted)
-                        .padding(.bottom, 10)
-                } else {
-                    Text(step == 0 ? "MEET SQUEAK" : "WELCOME ABOARD")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1.1).foregroundStyle(Theme.muted)
-                        .padding(.bottom, 10)
-                }
+                Spacer(minLength: compact ? 14 : 40)
                 Text(railTitle)
                     .font(.system(size: 23, weight: .semibold)).tracking(-0.5).foregroundStyle(Theme.ink)
                     .fixedSize(horizontal: false, vertical: true)
@@ -242,98 +275,39 @@ private struct SetupBrandRail: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 8)
                 Spacer(minLength: compact ? 12 : 16)
-                if step == 1 {
-                    if compact {
-                        compactProgress
-                    } else {
-                        stepList
-                    }
-                }
+                if !compact { stageList }
             }
             .padding(.horizontal, 22)
             .padding(.vertical, compact ? 18 : 24)
             .frame(maxHeight: .infinity, alignment: .topLeading)
             .background(Theme.sidebar)
         }
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) { drift = true }
-        }
-        .onChange(of: reduceMotion) { _, reduced in
-            guard !reduced else { drift = false; return }
-            withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) { drift = true }
-        }
     }
 
-    private var stepList: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 7) {
-                ForEach(walk.steps) { item in
-                    HStack(spacing: 8) {
-                        Circle().fill(progressColor(item)).frame(width: item == activeStep ? 7 : 5, height: item == activeStep ? 7 : 5)
-                        Text(item.title).font(.system(size: 11, weight: item == activeStep ? .semibold : .regular))
-                            .foregroundStyle(item == activeStep ? Theme.ink : Theme.muted)
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                        if walk.state(item) == .done { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.working) }
+    private var stageList: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(SetupStage.allCases) { item in
+                HStack(spacing: 8) {
+                    Circle().fill(color(item)).frame(width: item == stage ? 7 : 5, height: item == stage ? 7 : 5)
+                    Text(item.title).font(.system(size: 11, weight: item == stage ? .semibold : .regular))
+                        .foregroundStyle(item == stage ? Theme.ink : Theme.muted)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if item != .welcome, item != .done, flow.state(item) == .done {
+                        Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.working)
                     }
-                    .accessibilityHidden(true)
                 }
+                .accessibilityHidden(true)
             }
         }
-        .frame(maxHeight: .infinity, alignment: .top)
-        .scrollIndicators(.hidden)
-        .padding(.top, 12)
     }
 
-    private var compactProgress: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ProgressView(value: Double(walk.doneSteps.count), total: Double(walk.total)).tint(Theme.duck)
-            HStack {
-                Text("\(walk.doneSteps.count) complete")
-                Spacer()
-                Text("\(walk.total - walk.doneSteps.count) left")
-            }
-            .font(Typo.meta.monospacedDigit())
-            .foregroundStyle(Theme.muted)
-        }
-        .accessibilityHidden(true)
-    }
-
-    private func progressColor(_ step: WalkStep) -> Color {
-        if step == activeStep { return Theme.duck }
-        switch walk.state(step) {
+    private func color(_ s: SetupStage) -> Color {
+        if s == stage { return Theme.duck }
+        switch flow.state(s) {
         case .done: return Theme.working
         case .skipped: return Theme.offline
         case .todo: return Theme.lineStrong
         }
-    }
-}
-
-private struct SetupOrbitArtwork: View {
-    let isMoving: Bool
-    let drift: Bool
-
-    var body: some View {
-        ZStack {
-            Circle().fill(Theme.duck.opacity(0.08)).frame(width: 154, height: 154)
-            ForEach([122.0, 158.0], id: \.self) { size in
-                Circle().stroke(Theme.lineStrong, lineWidth: 1).frame(width: size, height: size)
-            }
-            Circle().stroke(Theme.duck.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [3, 5]))
-                .frame(width: 188, height: 188)
-                .rotationEffect(.degrees(drift ? 14 : -14))
-            DuckMark(width: 72)
-                .offset(y: isMoving && drift ? -5 : 3)
-                .rotationEffect(.degrees(isMoving && drift ? -2 : 2))
-            Image(systemName: "sparkle")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.duck)
-                .offset(x: 69, y: -44)
-                .scaleEffect(isMoving && drift ? 1.12 : 0.86)
-            Circle().fill(Theme.working).frame(width: 8, height: 8).offset(x: -78, y: 32)
-            Circle().fill(Theme.duck).frame(width: 6, height: 6).offset(x: 61, y: 64)
-        }
-        .animation(isMoving ? .easeInOut(duration: 3.2).repeatForever(autoreverses: true) : nil, value: drift)
     }
 }
