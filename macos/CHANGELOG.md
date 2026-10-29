@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.11
+
+- Refined setup and onboarding: the first-run walkthrough, Setup checklist and channel settings read more clearly.
+- Menu-bar popup, sidebar and quick composer polish.
+
 ## 2.11.10
 
 - Set up the iPhone channel from your Mac with your own Firebase project (automatically or by hand), or choose Squeak's limited shared server.

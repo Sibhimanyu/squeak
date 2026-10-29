@@ -53,6 +53,7 @@ struct StatusLine: View {
 
 struct TelegramSettings: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.setupWalkthroughForm) private var walkthrough
     @State private var linking = false
     @State private var confirmOff = false
     @State private var copied = false
@@ -61,14 +62,32 @@ struct TelegramSettings: View {
 
     var body: some View {
         @Bindable var m = app.channels
-        Form {
-            telegramStatus
-            telegramToken(m: $m)
-            allowedChats
-            botPicture
-            telegramActions
+        Group {
+            if walkthrough {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Space.m) {
+                        telegramStatus
+                        telegramToken(m: $m)
+                        allowedChats
+                        botPicture
+                        telegramActions
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, Space.m)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+            } else {
+                Form {
+                    telegramStatus
+                    telegramToken(m: $m)
+                    allowedChats
+                    botPicture
+                    telegramActions
+                }
+                .settingsForm()
+            }
         }
-        .settingsForm()
         .task { await m.refresh() }
         .sheet(isPresented: $linking) { LinkChatSheet().environment(app) }
         .confirmationDialog("Turn off Telegram?", isPresented: $confirmOff) {

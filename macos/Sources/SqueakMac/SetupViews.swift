@@ -96,31 +96,24 @@ struct SetupWalkthroughView: View {
     var body: some View {
         let w = model.walkthrough
         GeometryReader { available in
-            Group {
+            let contentHeight = max(120, available.size.height - 176)
+            VStack(alignment: .leading, spacing: Space.m) {
                 switch screen {
                 case .step(let s):
-                    VStack(alignment: .leading, spacing: Space.m) {
-                        header(s, w)
-                        // Form-based settings pages can report an effectively unbounded
-                        // ideal height. A geometry-bounded scroll viewport keeps the
-                        // controls scrollable while the navigation stays pinned below.
-                        GeometryReader { viewport in
-                            if hasNativeSetupForm(s) {
-                                // Form already owns the native scroll view. Nesting it in
-                                // another ScrollView lets AppKit draw rows past a short
-                                // viewport and over the pinned footer.
-                                content(s, w)
-                                    .frame(width: viewport.size.width, height: viewport.size.height, alignment: .topLeading)
-                            } else {
-                                ScrollView {
-                                    content(s, w)
-                                        .frame(width: viewport.size.width, alignment: .topLeading)
-                                }
-                                .frame(width: viewport.size.width, height: viewport.size.height)
-                                .scrollIndicators(.automatic)
-                            }
+                    header(s, w)
+                    if hasNativeSetupForm(s) || s == .telegram {
+                        // Native Form owns its scrolling; bound it to the reserved region.
+                        content(s, w)
+                            .frame(width: available.size.width, height: contentHeight, alignment: .topLeading)
+                            .clipped()
+                    } else {
+                        // Long custom setup stacks scroll in this fixed viewport.
+                        ScrollView {
+                            content(s, w).frame(width: available.size.width, alignment: .topLeading)
                         }
-                        .padding(.bottom, 52)
+                        .frame(width: available.size.width, height: contentHeight, alignment: .top)
+                        .scrollIndicators(.automatic)
+                        .clipped()
                     }
                 case .summary:
                     SetupSummaryView(walk: w, openStep: { s in
@@ -128,20 +121,9 @@ struct SetupWalkthroughView: View {
                         screen = .step(s)
                     })
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .padding(.bottom, 52)
                 }
             }
             .frame(width: available.size.width, height: available.size.height, alignment: .topLeading)
-            .overlay(alignment: .bottom) {
-                Group {
-                    switch screen {
-                    case .step(let s): footer(s, w)
-                    case .summary: summaryFooter(w)
-                    }
-                }
-                .padding(.top, 10)
-                .background(Theme.bg)
-            }
         }
         .task {
             async let a: Void = model.channels.refreshVoice()
@@ -152,6 +134,16 @@ struct SetupWalkthroughView: View {
         // Esc must never close the window or quit setup by accident.
         .onExitCommand {}
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .bottom) {
+            Group {
+                switch screen {
+                case .step(let s): footer(s, w)
+                case .summary: summaryFooter(w)
+                }
+            }
+            .padding(.top, 10)
+            .background(Theme.bg)
+        }
     }
 
     // MARK: Chrome
@@ -225,7 +217,7 @@ struct SetupWalkthroughView: View {
 
     private func hasNativeSetupForm(_ step: WalkStep) -> Bool {
         switch step {
-        case .iphone, .telegram, .cliq, .voice, .awake: true
+        case .iphone, .cliq, .voice, .awake: true
         default: false
         }
     }
