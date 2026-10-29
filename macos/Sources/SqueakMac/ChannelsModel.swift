@@ -132,6 +132,7 @@ final class ChannelsModel {
         }
         await refreshNotify()
         await refreshVoice()
+        await refreshGateway()
         await refreshRemote()
     }
 
@@ -173,6 +174,74 @@ final class ChannelsModel {
             voiceError = "Could not save: Squeak on this Mac did not answer."
         }
         voiceSaving = false
+    }
+
+    // The phone-call gateway (nil until the daemon answers; unavailable hides the section).
+    private(set) var gateway: GatewayView?
+    private(set) var gatewayAvailable = true
+    private(set) var gatewayCode: GatewayPairResponse?
+    private(set) var gatewayError: String?
+    private(set) var gatewayBusy = false
+    private var gatewayPoll: Task<Void, Never>?
+
+    func refreshGateway() async {
+        if demo { return }
+        do {
+            let v = try await client.gatewayView()
+            gatewayAvailable = v != nil
+            if let v { gateway = v }
+        } catch {
+            // Keep what is shown.
+        }
+    }
+
+    /// Makes a new code and polls every 2 s until `endGatewayPairing()`.
+    func startGatewayPairing() async {
+        gatewayError = nil
+        if demo { return }
+        gatewayBusy = true
+        defer { gatewayBusy = false }
+        do {
+            guard let r = try await client.startGatewayPairing() else {
+                gatewayAvailable = false
+                gatewayError = "Squeak on this Mac is older than this setting. Update it and try again."
+                return
+            }
+            gatewayCode = r
+            await refreshGateway()
+            gatewayPoll?.cancel()
+            gatewayPoll = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(2))
+                    if Task.isCancelled { break }
+                    await self?.refreshGateway()
+                }
+            }
+        } catch {
+            gatewayError = "Squeak on this Mac did not answer, so no code was made."
+        }
+    }
+
+    func approveGateway(_ approve: Bool) async {
+        gatewayError = nil
+        if demo { return }
+        gatewayBusy = true
+        defer { gatewayBusy = false }
+        do {
+            if try await client.approveGateway(approve) {
+                await refreshGateway()
+            } else {
+                gatewayError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            gatewayError = "Squeak on this Mac did not answer."
+        }
+    }
+
+    func endGatewayPairing() {
+        gatewayPoll?.cancel(); gatewayPoll = nil
+        gatewayCode = nil; gatewayError = nil
+        Task { await refreshGateway() }
     }
 
     // The call PIN: busy and error only; the PIN itself is never stored here.

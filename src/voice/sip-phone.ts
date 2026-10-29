@@ -237,6 +237,8 @@ export class SipPhone implements Phone {
   private socket: { write(data: Buffer): unknown } | null = null;
   private stopped = true;
   private registered = false;
+  private registerError: string | null = null;
+  private registrationListener: (() => void) | null = null;
   private readyWaiters: Array<() => void> = [];
   private incomingHandler: ((incoming: IncomingCall) => void) | null = null;
   private current: LiveCall | null = null;
@@ -261,6 +263,18 @@ export class SipPhone implements Phone {
   /** Queued behind any earlier warm-up, one prompt at a time. */
   prewarm(texts: readonly string[]): void {
     this.warming = this.warming.then(() => this.speaker.prewarm(texts)).catch(() => undefined);
+  }
+
+  /** Whether the PBX has accepted the registration, and why not when it has not (a fixed-length reason from baresip). */
+  registration(): { registered: boolean; error?: string } {
+    return this.registered
+      ? { registered: true }
+      : { registered: false, ...(this.registerError ? { error: this.registerError } : {}) };
+  }
+
+  /** Called when registration comes or goes, so the gateway can report it at once. */
+  onRegistrationChange(listener: () => void): void {
+    this.registrationListener = listener;
   }
 
   onIncoming(handler: (incoming: IncomingCall) => void): void {
@@ -334,7 +348,10 @@ export class SipPhone implements Phone {
       child.kill("SIGKILL");
       this.child = null;
       this.socket = null;
-      this.registered = false;
+      if (this.registered) {
+        this.registered = false;
+        this.registrationListener?.();
+      }
       this.current?.end();
       this.current = null;
       this.awaiting?.settle(null);
@@ -361,13 +378,19 @@ export class SipPhone implements Phone {
 
   private onEvent(type: string, param: string): void {
     switch (type) {
-      case "REGISTER_OK":
-        if (!this.registered) logger.info("voice phone registered");
+      case "REGISTER_OK": {
+        const changed = !this.registered;
+        if (changed) logger.info("voice phone registered");
         this.registered = true;
+        this.registerError = null;
+        if (changed) this.registrationListener?.();
         for (const wake of this.readyWaiters.splice(0)) wake();
         return;
+      }
       case "REGISTER_FAIL":
         this.registered = false;
+        this.registerError = (param || "no reason").slice(0, 200);
+        this.registrationListener?.();
         logger.warn("voice phone could not register", { reason: param || "no reason" });
         return;
       case "CALL_INCOMING":

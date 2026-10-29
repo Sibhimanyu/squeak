@@ -10,6 +10,7 @@ import SwiftUI
 /// also what tells the Mac to publish and poll faster.
 public struct SqueakRootView: View {
     @State private var model = AppModel()
+    @ObservedObject private var router = SqueakRouter.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false
     /// When the splash began (cold launch, or a return after a long absence); nil once it is gone.
@@ -57,6 +58,12 @@ public struct SqueakRootView: View {
             .onChange(of: scenePhase) { _, phase in update(); phaseChanged(phase) }
             .onChange(of: model.freshSnapshotAt) { _, _ in evaluateSplash() }
             .onChange(of: model.phase) { _, _ in evaluateSplash() }
+            // The Mac's QR scanned with the Camera app opens Squeak here: pair with it as if it had been scanned in the app.
+            .onChange(of: router.pendingPairing, initial: true) { _, link in
+                guard let link else { return }
+                router.consumePairing()
+                if model.phase == .unpaired { Task { await model.pair(with: link) } }
+            }
             .task(id: splashSince) {
                 guard let since = splashSince else { return }
                 try? await Task.sleep(for: .seconds(max(0, Splash.cap - Date().timeIntervalSince(since))))

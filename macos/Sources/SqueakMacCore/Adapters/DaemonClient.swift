@@ -240,6 +240,30 @@ public struct DaemonClient: Sendable {
         return .done(try? JSONDecoder().decode(VoiceSettings.self, from: r.body))
     }
 
+    // MARK: Phone-call gateway (nil means the daemon predates the routes: 404 or 503)
+
+    public func gatewayView() async throws -> GatewayView? {
+        let r = try await get("/control/voice/gateway", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(GatewayView.self, r.body)
+    }
+
+    public func startGatewayPairing() async throws -> GatewayPairResponse? {
+        let r = try await post("/control/voice/gateway/pair", timeout: 15)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(GatewayPairResponse.self, r.body)
+    }
+
+    /// Returns false when the daemon has no such route.
+    public func approveGateway(_ approve: Bool) async throws -> Bool {
+        let r = try await post("/control/voice/gateway/approve", body: GatewayText.approveBody(approve), timeout: 15)
+        if r.status == 404 || r.status == 503 { return false }
+        try Self.check(r.status)
+        return true
+    }
+
     public func telegramCandidates() async throws -> [TelegramCandidate]? {
         let r = try await get("/control/telegram/candidates", token: true)
         if r.status == 404 { return nil }

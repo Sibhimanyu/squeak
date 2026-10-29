@@ -149,6 +149,20 @@ export interface IngressControl {
       | Promise<{ ok: true; state: unknown } | { ok: false; reason: string }>;
   };
   /**
+   * Pairing the Home Assistant gateway (voice/pairing-window.ts), all token-gated, no CORS header:
+   * `GET /control/voice/gateway` answers `{ pairing: null | { state: "waiting" | "request" | "done" | "expired",
+   * expiresAt, name?, version?, verify? }, status: { state: "none" | "stale" | "ok" | "sipDown", version?,
+   * sipRegistered?, sipError?, at? } }`; `POST /control/voice/gateway/pair` (`{}`) opens the window and answers
+   * `{ ok: true, code, expiresAt }` (a new call replaces the old window; the code is a secret and is never logged);
+   * `POST /control/voice/gateway/approve` takes exactly `{ approve: boolean }` and answers `{ ok: true }`. A refusal is
+   * 400 `{ error }`; 503 when the phone channel's database is not set up.
+   */
+  voiceGateway?: {
+    read(): unknown;
+    pair(): { ok: true; code: string; expiresAt: number } | { ok: false; reason: string; unavailable?: boolean };
+    approve(approve: boolean): Promise<{ ok: true } | { ok: false; reason: string }>;
+  };
+  /**
    * `POST /control/telegram/avatar`: set the Telegram bot's profile photo to Squeak's logo (telegram/avatar.ts).
    * Body `{}` or `{ which: "logo" }`; answers `{ message }` or `{ error }` (429 when tried within 30 s).
    */
@@ -910,6 +924,82 @@ export class HookIngressServer {
           return;
         }
         respondJson(response, 200, outcome.state);
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    const gatewayUrl = (request.url ?? "").split("?")[0];
+    if (
+      gatewayUrl === "/control/voice/gateway" ||
+      gatewayUrl === "/control/voice/gateway/pair" ||
+      gatewayUrl === "/control/voice/gateway/approve"
+    ) {
+      const gateway = control.voiceGateway;
+      const wanted = gatewayUrl === "/control/voice/gateway" ? "GET" : "POST";
+      if (request.method !== wanted) {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!gateway) {
+        request.resume();
+        respond(response, 503, "gateway pairing unavailable");
+        return;
+      }
+      if (wanted === "GET") {
+        request.resume();
+        respondJson(response, 200, gateway.read());
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        if (gatewayUrl === "/control/voice/gateway/pair") {
+          const made = gateway.pair();
+          if (!made.ok) {
+            respondJson(response, made.unavailable ? 503 : 400, { error: made.reason });
+            return;
+          }
+          respondJson(response, 200, { ok: true, code: made.code, expiresAt: made.expiresAt });
+          return;
+        }
+        const keys = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.keys(parsed) : [];
+        const approve = (parsed as { approve?: unknown } | null)?.approve;
+        if (keys.length !== 1 || typeof approve !== "boolean") {
+          respondJson(response, 400, { error: "Say whether to approve or decline." });
+          return;
+        }
+        void Promise.resolve()
+          .then(() => gateway.approve(approve))
+          .then((outcome) => {
+            if (!outcome.ok) {
+              respondJson(response, 400, { error: outcome.reason });
+              return;
+            }
+            respondJson(response, 200, { ok: true });
+          })
+          .catch(() => respond(response, 500, "gateway pairing failed"));
       });
       request.on("error", () => {
         aborted = true;

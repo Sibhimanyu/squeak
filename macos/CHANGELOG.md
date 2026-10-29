@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.3
+
+- Pair a phone: choose iPhone app or Web, and the QR code and Copy button match: the app code opens Squeak for iPhone, the web code opens Squeak for Web.
+
 ## 2.12.2
 
 - Updates: after "Restart to update" Squeak always comes back. When Sparkle's own relaunch doesn't happen, a small watcher reopens the app once the new version is installed (or after a minute and a half if the install failed).

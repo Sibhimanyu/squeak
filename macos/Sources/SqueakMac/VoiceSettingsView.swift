@@ -13,6 +13,7 @@ struct VoiceSettingsPage: View {
     @State private var newPin = ""
     @State private var repeatPin = ""
     @State private var ownerChecking = false
+    @State private var pairingGateway = false
 
     private var m: ChannelsModel { app.channels }
 
@@ -35,6 +36,7 @@ struct VoiceSettingsPage: View {
                 } header: { Text("Phone calls") } footer: {
                     Footnote(footnote(v))
                 }
+                if m.gatewayAvailable { gatewaySection }
                 if let state = v.pinState { pinSection(state) }
             } else if m.voiceOutdated {
                 Section { Footnote("Squeak on this Mac is older than phone calls. Update it, then come back.") } header: { Text("Phone calls") }
@@ -42,9 +44,11 @@ struct VoiceSettingsPage: View {
                 Section {
                     Footnote("Phone calls are not set up. Squeak can ring your phone through 3CX when an agent is waiting on you: see docs/voice.md.")
                 } header: { Text("Phone calls") }
+                if m.gatewayAvailable { gatewaySection }
             }
         }
         .settingsForm()
+        .sheet(isPresented: $pairingGateway, onDismiss: { m.endGatewayPairing() }) { GatewayPairSheet().environment(app) }
         .task {
             await m.refreshVoice()
             if !loaded { typed = m.voice?.callee ?? ""; loaded = true }
@@ -60,6 +64,23 @@ struct VoiceSettingsPage: View {
         let who = v.callee ?? v.defaultCallee
         let ringing = who.map { "Squeak rings \($0)." } ?? "No extension is set yet, so no call can be placed."
         return "\(ringing) \(how) Only an extension is accepted here, never an outside number."
+    }
+
+    // MARK: Gateway
+
+    private var gatewaySection: some View {
+        Section {
+            let g = m.gateway ?? GatewayView()
+            TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                Text(g.statusLine(now: ctx.date)).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack {
+                Button(g.isPaired ? "Pair again" : "Add gateway") { pairingGateway = true }
+                Spacer()
+            }
+        } header: { Text("Phone-call gateway") } footer: {
+            Footnote("The Home Assistant add-on that places the call. Pairing needs no keys or addresses: just a short code.")
+        }
     }
 
     // MARK: Pin
@@ -172,6 +193,73 @@ struct VoiceSettingsPage: View {
                 ownerChecking = false
                 if ok { pinForm = .forgotNew } else { m.reportPinError("It was not confirmed that it is you, so the PIN is unchanged.") }
             }
+        }
+    }
+}
+
+/// Pairs the Home Assistant add-on: a short code to paste into the add-on, then a confirmation here.
+struct GatewayPairSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
+    private var m: ChannelsModel { app.channels }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Add a phone-call gateway").font(Typo.title)
+            content
+            if let e = m.gatewayError { Footnote(e) }
+        }
+        .padding(24).frame(width: 440)
+        .task { if m.gatewayCode == nil { await m.startGatewayPairing() } }
+    }
+
+    @ViewBuilder private var content: some View {
+        let p = m.gateway?.pairing
+        switch p?.state {
+        case .request:
+            Text(GatewayText.requestSentence(p!)).font(Typo.body).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Approve") { Task { await m.approveGateway(true) } }
+                    .buttonStyle(PrimaryButtonStyle()).disabled(m.gatewayBusy)
+                Button("Decline") { Task { await m.approveGateway(false) } }
+                    .buttonStyle(SecondaryButtonStyle()).disabled(m.gatewayBusy)
+            }
+        case .done:
+            Text("Paired").font(Typo.body)
+            Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle())
+        case .expired:
+            Text("The code expired").font(Typo.body)
+            HStack {
+                Button("New code") { Task { await m.startGatewayPairing() } }
+                    .buttonStyle(PrimaryButtonStyle()).disabled(m.gatewayBusy)
+                Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle())
+            }
+        default:
+            if let c = m.gatewayCode {
+                Text(c.code)
+                    .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
+                HStack {
+                    Button(copied ? "Copied" : "Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(c.code, forType: .string)
+                        copied = true
+                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+                    }.buttonStyle(SecondaryButtonStyle())
+                    Spacer()
+                    TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                        Text(GatewayText.countdown(expiresAt: p?.expiresAt ?? c.expiresAt, now: ctx.date).map { "Expires in \($0)" } ?? "Expired")
+                            .font(.caption.monospacedDigit()).foregroundStyle(Theme.muted)
+                    }
+                }
+                Text("Paste this into the add-on's Pairing code option in Home Assistant. It works for 10 minutes.")
+                    .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            } else if m.gatewayError == nil {
+                Text("Making a code…").font(Typo.body).foregroundStyle(Theme.muted)
+            }
+            Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle())
         }
     }
 }

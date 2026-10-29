@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.20.3] - 2026-10-29 (iOS)
+
+- Scanning the Mac's pairing QR with the Camera app now opens Squeak and starts pairing.
+
 ## [1.20.2] - 2026-10-29 (iOS)
 
 - Code blocks in messages are easier to select and copy.

@@ -981,3 +981,61 @@ describe("HookIngressServer chat actions and workspaces", () => {
     expect(calls).toHaveLength(3);
   });
 });
+
+describe("HookIngressServer gateway pairing routes", () => {
+  it("gates, shapes and answers /control/voice/gateway*", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const approvals: boolean[] = [];
+    const base = `http://127.0.0.1:${harness.port}/control/voice/gateway`;
+    const auth = { "x-squeak-token": harness.token };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(base, { headers: auth })).status).toBe(503);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voiceGateway: {
+        read: () => ({ pairing: null, status: { state: "none" } }),
+        pair: () => ({ ok: true, code: "SQ1-abc", expiresAt: 42 }),
+        approve: async (approve) => {
+          approvals.push(approve);
+          return approve ? { ok: true } : { ok: false, reason: "No gateway has asked to pair yet." };
+        },
+      },
+    });
+    for (const url of [base, `${base}/pair`, `${base}/approve`]) {
+      expect((await fetch(url, url === base ? { method: "GET" } : { method: "POST", body: "{}" })).status).toBe(403);
+    }
+    expect((await fetch(`${base}/pair`, { headers: auth })).status).toBe(405);
+    expect((await fetch(base, { method: "POST", headers: auth, body: "{}" })).status).toBe(405);
+    const read = await fetch(base, { headers: auth });
+    expect(read.status).toBe(200);
+    expect(read.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await read.json()).toEqual({ pairing: null, status: { state: "none" } });
+    const pair = await fetch(`${base}/pair`, { method: "POST", headers: auth, body: "{}" });
+    expect(pair.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await pair.json()).toEqual({ ok: true, code: "SQ1-abc", expiresAt: 42 });
+    expect((await fetch(`${base}/pair`, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
+    const approve = (body: unknown) =>
+      fetch(`${base}/approve`, { method: "POST", headers: auth, body: JSON.stringify(body) });
+    for (const bad of [{}, { approve: "yes" }, { approve: true, extra: 1 }]) {
+      expect((await approve(bad)).status).toBe(400);
+    }
+    expect(approvals).toEqual([]);
+    expect(await (await approve({ approve: true })).json()).toEqual({ ok: true });
+    const declined = await approve({ approve: false });
+    expect(declined.status).toBe(400);
+    expect(await declined.json()).toEqual({ error: "No gateway has asked to pair yet." });
+    expect(approvals).toEqual([true, false]);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voiceGateway: {
+        read: () => null,
+        pair: () => ({ ok: false, reason: "needs a database", unavailable: true }),
+        approve: async () => ({ ok: true }),
+      },
+    });
+    expect((await fetch(`${base}/pair`, { method: "POST", headers: auth, body: "{}" })).status).toBe(503);
+  });
+});

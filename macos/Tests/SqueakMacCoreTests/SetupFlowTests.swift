@@ -200,3 +200,24 @@ final class PermissionFlowTests: XCTestCase {
         XCTAssertFalse(f.reading(.granted).offersRelaunch)
     }
 }
+
+final class PairTargetTests: XCTestCase {
+    private let link = "squeak://pair?d=eyJ2IjoxfQ"
+
+    func testTheAppCodeIsTheDaemonsLinkAndTheWebCodeOpensTheWebApp() {
+        XCTAssertEqual(PairTarget.app.qrText(pairingURL: link), link)
+        XCTAssertEqual(PairTarget.web.qrText(pairingURL: link), "https://squeak-mac.web.app/#pair=eyJ2IjoxfQ")
+    }
+
+    func testCopyIsExactlyWhatTheCodeCarries() {
+        for target in PairTarget.allCases {
+            XCTAssertEqual(target.copyText(pairingURL: link), target.qrText(pairingURL: link))
+        }
+    }
+
+    func testSomethingThatIsNotAPairingLinkMakesNoCode() {
+        XCTAssertNil(PairTarget.app.qrText(pairingURL: "https://example.com/?d=abc"))
+        XCTAssertNil(PairTarget.web.qrText(pairingURL: "https://example.com/?d=abc"))
+        XCTAssertNil(PairTarget.web.qrText(pairingURL: "squeak://pair?d="))
+    }
+}

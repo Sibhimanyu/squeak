@@ -15,12 +15,14 @@ enum FirebaseRules {
     // sealed and signed with a key only the Mac and the gateway hold (src/voice/relay-protocol.ts).
     // `voicedir`, `voiceup` and `voicedown` carry calling in: the list of who can take a message, a recorded
     // memo and the transcript back (src/voice/memo-protocol.ts), sealed the same way.
+    // `voicepair` carries pairing a gateway (src/voice/pair-protocol.ts): a request and a grant on a rendezvous id
+    // derived from a one-time code, both sealed under a key derived from it; the grant is written only after the Mac's owner approves.
     "channels": {
       "$channel": {
         "$kind": {
-          ".read": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results' || $kind === 'live' || $kind === 'media' || $kind === 'voice' || $kind === 'voiceresult' || $kind === 'voicedir' || $kind === 'voiceup' || $kind === 'voicedown')",
+          ".read": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results' || $kind === 'live' || $kind === 'media' || $kind === 'voice' || $kind === 'voiceresult' || $kind === 'voicedir' || $kind === 'voiceup' || $kind === 'voicedown' || $kind === 'voicepair')",
           "$doc": {
-            ".write": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results' || $kind === 'live' || $kind === 'media' || $kind === 'voice' || $kind === 'voiceresult' || $kind === 'voicedir' || $kind === 'voiceup' || $kind === 'voicedown') && $doc.matches(/^[A-Za-z0-9_-]{1,80}$/)",
+            ".write": "$channel.matches(/^[A-Za-z0-9_-]{22,64}$/) && ($kind === 'state' || $kind === 'pairing' || $kind === 'commands' || $kind === 'results' || $kind === 'live' || $kind === 'media' || $kind === 'voice' || $kind === 'voiceresult' || $kind === 'voicedir' || $kind === 'voiceup' || $kind === 'voicedown' || $kind === 'voicepair') && $doc.matches(/^[A-Za-z0-9_-]{1,80}$/)",
             ".validate": "newData.hasChild('box')",
             "box": { ".validate": "newData.isString() && newData.val().length < 900000" },
             "sig": { ".validate": "newData.isString() && newData.val().length < 512" },

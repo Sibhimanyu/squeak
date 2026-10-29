@@ -6,17 +6,24 @@ itself, which needs a route to it (home Wi-Fi or a VPN). The gateway wins when b
 
 ## Gateway setup
 
-1. `squeak voice-relay` on the Mac makes the channel and key (saved to `.env`) and prints the add-on options.
+1. Build and install the add-on (step 2), then in Squeak for Mac: Settings > Phone calls > Add gateway. Copy the code
+   (valid 10 minutes), paste it into the add-on's `pairing_code` option and start it. The add-on logs
+   `Pairing: confirm NNNN on your Mac`; approve in Squeak when the digits match. The Mac makes the channel and key and
+   hands them to the add-on sealed under a key derived from the code (`pair-protocol.ts`); the add-on keeps them in
+   `/data/pairing.json`. The old way, still working: `squeak voice-relay` makes the channel and key (saved to `.env`)
+   and prints `database_url`, `channel` and `key` for the add-on's options.
 2. `scripts/build-voice-addon.sh` builds `dist-addon/squeak-voice`. Copy that folder to Home Assistant's `/addons`
    share (Samba or SSH add-on), then Settings > Add-ons > Add-on store > menu > Check for updates, and install
-   Squeak Voice under Local add-ons. Fill in its options (see its Documentation tab) and start it.
+   Squeak Voice under Local add-ons. Fill in its SIP options (see its Documentation tab) and start it.
    **Updates:** a local add-on never sees a new version until its folder is copied again. To get updates from Home
    Assistant itself, add `https://github.com/Sibhimanyu/squeak` under Add-on store > menu > Repositories
    (`repository.yaml` at the root makes the repo one); it pulls the prebuilt image for the `version` in
    `config.yaml`, which the "Squeak Voice add-on image" workflow must have built first.
-3. Deploy the database rules once (`firebase deploy --only database`): they allow the `voice` and `voiceresult`
+3. Deploy the database rules once (`firebase deploy --only database`): they allow the `voice`, `voiceresult` and `voicepair`
    kinds in the channel.
-4. Restart Squeak (`./scripts/ship.sh`).
+4. The add-on reports to the Mac every 30 s (a sealed `voiceresult/gwstatus` document: version, whether the PBX accepted
+   its registration and why not, the PIN state), which Settings > Phone calls shows.
+5. Restart Squeak (`./scripts/ship.sh`).
 
 **Who it rings** is set in Squeak for Mac, Settings > Phone calls (`GET/POST /control/voice`, saved in
 `voice-settings.json`), and travels in each sealed request. Only an internal extension (2 to 6 digits) is accepted,
@@ -153,3 +160,20 @@ without a device key. The key lives only on the Mac and in the add-on's options.
 
 Asking questions out loud ("what needs me?") on the same call, through the Cliq assistant; ending a message on
 silence instead of hash.
+
+## Pairing a gateway (daemon side)
+
+The Mac makes one code (`src/voice/pair-protocol.ts`: the phone channel's database address and a one-time secret,
+valid 10 minutes). Control routes, token-gated like `/control/voice`, no CORS header:
+
+- `POST /control/voice/gateway/pair` `{}` opens the window and answers `{ ok, code, expiresAt }`; a second call
+  replaces the first. It needs the phone channel's own `SQUEAK_REMOTE_DATABASE_URL` (503 on the shared server).
+- `GET /control/voice/gateway` answers `{ pairing: null | { state: waiting|request|done|expired, expiresAt, name?,
+version?, verify? }, status: { state: none|stale|ok|sipDown, version?, sipRegistered?, sipError?, at? } }`.
+- `POST /control/voice/gateway/approve` `{ approve: boolean }`: yes seals the Mac's channel and key for the add-on
+  (`src/voice/pairing-window.ts`); no deletes the request.
+
+If the grant made a new channel and key they are saved to `.env` and the daemon exits about 1.5 s later so launchd
+restarts it with the relay; an unchanged pair restarts nothing. Status comes from the add-on's `gwstatus` document
+(`gateway-status.ts`, fresh within 90 s), also in `GET /control/voice` as `gateway`. The `voicepair` rules kind
+carries the request and grant.

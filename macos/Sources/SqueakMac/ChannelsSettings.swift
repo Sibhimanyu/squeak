@@ -569,26 +569,34 @@ struct PairSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var copiedCode = false
+    @State private var target = PairTarget.app
     private var m: ChannelsModel { app.channels }
+    private var qrText: String? { m.pairingURL.flatMap { target.qrText(pairingURL: $0) } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Pair an iPhone").font(Typo.title)
+            Text("Pair a phone").font(Typo.title)
+            Picker("Pair", selection: $target) {
+                ForEach(PairTarget.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden().accessibilityLabel("What to pair")
             HStack(alignment: .top, spacing: 20) {
                 qr
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("1. Open Squeak on your iPhone.")
-                    Text("2. Choose Pair with a Mac, then scan this code.")
-                    Text("3. Check the code on the phone matches the one here, then approve.")
+                    ForEach(target.steps, id: \.self) { Text($0) }
                     if m.pairingURL != nil {
                         VStack(alignment: .leading, spacing: 4) {
-                            Button(copiedCode ? "Copied" : "Copy pairing code") {
-                                guard m.copyPairingCode() else { return }
+                            Button(copiedCode ? "Copied" : target.copyLabel) {
+                                guard let text = m.pairingURL.flatMap({ target.copyText(pairingURL: $0) }) else { return }
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(text, forType: .string)
                                 copiedCode = true
                                 Task { try? await Task.sleep(for: .seconds(2)); copiedCode = false }
                             }.buttonStyle(SecondaryButtonStyle())
-                            Text("For Squeak for Web, paste it at \(RemotePairing.webAppAddress)")
-                                .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                            if target == .web {
+                                Text("Or open \(RemotePairing.webAppAddress) and paste the link.")
+                                    .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                         .padding(.top, 6)
                     }
@@ -621,9 +629,9 @@ struct PairSheet: View {
 
     @ViewBuilder private var qr: some View {
         Group {
-            if let url = m.pairingURL, let image = QRCode.image(for: url, points: 176) {
+            if let text = qrText, let image = QRCode.image(for: text, points: 176) {
                 Image(nsImage: image).interpolation(.none).resizable().frame(width: image.size.width, height: image.size.height)
-                    .accessibilityLabel("Pairing code for your iPhone")
+                    .accessibilityLabel(target == .app ? "Pairing code for the iPhone app" : "Pairing code for Squeak for Web")
             } else if m.pairingError != nil {
                 Lucide(.circleAlert, size: 24, color: Theme.subtle)
             } else {

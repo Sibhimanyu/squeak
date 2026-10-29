@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=baresip /usr/local /usr/local
 RUN ldconfig
 WORKDIR /app
-COPY gateway.mjs run.sh ./
+COPY gateway.mjs run.sh config.yaml ./
 ENV SQUEAK_PIPER_BIN=/opt/piper/piper \
     SQUEAK_PIPER_MODEL=/opt/piper-voices/en_US-lessac-medium.onnx \
     SQUEAK_VOICE_BARESIP=/usr/local/bin/baresip \

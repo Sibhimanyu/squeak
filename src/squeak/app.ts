@@ -81,6 +81,10 @@ import { DirectLine } from "../voice/direct-line.js";
 import { PinKeeper, type PinState } from "../voice/pin-keeper.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import { relayLineFor, type RelayLine } from "../voice/relay-line.js";
+import { GatewayPairing } from "../voice/pairing-window.js";
+import { GatewayStatusReader } from "../voice/gateway-status.js";
+import { setEnvValues } from "../cliq/setup.js";
+import { resolveSqueakEnvPath } from "./paths.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker } from "../voice/tts.js";
 import type { VoiceLine } from "../voice/relay-line.js";
@@ -614,6 +618,29 @@ export class SqueakApp {
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
       voice: { read: () => this.voiceView(), apply: (request) => this.applyVoice(request) },
+      // Not behind voiceRelay: pairing is how the Mac gets one.
+      voiceGateway: {
+        read: () => ({
+          pairing: this.gatewayPairing?.view() ?? null,
+          status: this.gatewayStatusReader().peek(),
+        }),
+        pair: () => {
+          const pairing = this.gatewayPairingFor();
+          if (!pairing) {
+            return {
+              ok: false as const,
+              unavailable: true,
+              reason:
+                "Pairing needs the phone channel's own Firebase database (not the shared server) to be set up first.",
+            };
+          }
+          return { ok: true as const, ...pairing.start() };
+        },
+        approve: (approve) =>
+          this.gatewayPairing
+            ? this.gatewayPairing.approve(approve)
+            : Promise.resolve({ ok: false as const, reason: "No gateway is waiting to pair." }),
+      },
       telegramAvatar: (request) => this.telegramAvatar.apply(request),
       fanRule: () => {
         const rule = fansSudoersRule(os.userInfo().username);
@@ -987,6 +1014,40 @@ export class SqueakApp {
     this.memoInbox?.stop();
   }
 
+  private gatewayPairing: GatewayPairing | null = null;
+  private gatewayStatus: GatewayStatusReader | null = null;
+
+  /** The pairing window's owner, made on first use; null unless the phone channel's own database is set up. */
+  private gatewayPairingFor(): GatewayPairing | null {
+    const { remoteDatabaseUrl, remoteShared } = this.config;
+    if (!remoteDatabaseUrl || remoteShared) return null;
+    this.gatewayPairing ??= new GatewayPairing({
+      store: new RtdbRest(remoteDatabaseUrl),
+      databaseUrl: remoteDatabaseUrl,
+      current: () =>
+        this.config.voiceRelay ? { channel: this.config.voiceRelay.channel, key: this.config.voiceRelay.key } : null,
+      save: (channel, key) =>
+        setEnvValues(resolveSqueakEnvPath(), { SQUEAK_VOICE_RELAY_CHANNEL: channel, SQUEAK_VOICE_RELAY_KEY: key }),
+      // launchd's KeepAlive starts the daemon again, now with the relay.
+      restart: () => {
+        logger.info("gateway paired; restarting to use it");
+        process.exit(0);
+      },
+    });
+    return this.gatewayPairing;
+  }
+
+  private gatewayStatusReader(): GatewayStatusReader {
+    this.gatewayStatus ??= new GatewayStatusReader({
+      store: new RtdbRest(this.config.remoteDatabaseUrl ?? "https://unset.firebaseio.com"),
+      relay: () => {
+        const { voiceRelay, remoteDatabaseUrl } = this.config;
+        return voiceRelay && remoteDatabaseUrl ? { channel: voiceRelay.channel, key: voiceRelay.key } : null;
+      },
+    });
+    return this.gatewayStatus;
+  }
+
   /** Whether voice is set up and who it rings: what `GET /control/voice` carries. */
   private voiceView() {
     const { voice, voiceRelay, remoteDatabaseUrl } = this.config;
@@ -996,8 +1057,19 @@ export class SqueakApp {
       callee: this.voiceSettings.settings.callee,
       defaultCallee: voice?.callee ?? null,
       pin: this.voicePinState(),
+      ...(mode === "gateway" ? { gateway: this.gatewayView() } : {}),
       // Absent until a test has been asked for.
       ...(this.voiceTest ? { lastTest: this.voiceTest } : {}),
+    };
+  }
+
+  private gatewayView() {
+    const { state, version, sipRegistered, sipError } = this.gatewayStatusReader().peek();
+    return {
+      state,
+      ...(version !== undefined ? { version } : {}),
+      ...(sipRegistered !== undefined ? { sipRegistered } : {}),
+      ...(sipError ? { sipError } : {}),
     };
   }
 
