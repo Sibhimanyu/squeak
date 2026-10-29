@@ -6,7 +6,7 @@ extension CaptureRunner {
     static func runFirstSession(prefix: String, model: AppModel) async {
         for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
             for (screen, view, size) in [
-                ("walkthrough", AnyView(OnboardingView(step: 2, finish: {}).environment(model)), NSSize(width: 520, height: 600)),
+                ("walkthrough", AnyView(OnboardingView(stage: .firstWin, finish: {}).environment(model)), NSSize(width: 520, height: 600)),
                 ("empty", AnyView(SessionEmptyView().environment(model).frame(width: 380).background(Theme.bg)), NSSize(width: 380, height: 240)),
             ] {
                 let host = NSHostingView(rootView: view)

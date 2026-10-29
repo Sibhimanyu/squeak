@@ -218,9 +218,9 @@ enum CaptureRunner {
             write(fw.contentView, to: "\(prefix)-\(name).png")
             fw.orderOut(nil)
         }
-        for n in 0..<4 {
-            let ow = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 480, height: 420), styleMask: [.titled], backing: .buffered, defer: false)
-            ow.contentView = NSHostingView(rootView: OnboardingView(step: n, finish: {}).environment(model))
+        for (n, stage) in SetupStage.allCases.enumerated() {
+            let ow = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 850, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
+            ow.contentView = NSHostingView(rootView: OnboardingView(stage: stage, finish: {}).environment(model))
             ow.makeKeyAndOrderFront(nil)
             try? await Task.sleep(for: .milliseconds(700))
             write(ow.contentView, to: "\(prefix)-onboarding-\(n + 1).png")

@@ -355,27 +355,17 @@ private struct SectionFootnote: View {
 struct NotificationsSettings: View {
     @Environment(AppModel.self) private var model
     @State private var bannersShown: Bool?
-    var walkthrough = false
-    var permissionStep: SetupStep?
-    var runSetupAction: (SetupAction) -> Void = { _ in }
 
     var body: some View {
         Group {
-            if walkthrough {
-                setupContent
-            } else {
+            do {
                 @Bindable var model = model
                 Form {
                     Section {
                         Toggle("Notify me on this Mac when a session needs me or finishes", isOn: $model.notificationsEnabled)
                             .disabled(!Bundled.isApp)
                         if model.notificationsEnabled, bannersShown == false {
-                            LabeledContent {
-                                Button("Open Notification Settings") { GeneralSettings.openNotificationSettings() }
-                            } label: {
-                                Text("macOS isn't showing Squeak's banners")
-                                Text("They only land in Notification Center. Set Squeak's alert style to Banners or Alerts.")
-                            }
+                            PermissionExplainer(kind: .notifications)
                         }
                     } footer: {
                         SectionFootnote("Approvals, questions, plans to review, errors, and finished Conductor chats. Reply to a finished chat from the notification itself.")
@@ -393,70 +383,9 @@ struct NotificationsSettings: View {
             Task { bannersShown = await Notifier.shared.bannersShown() }
         }
     }
-
-    private var setupContent: some View {
-        @Bindable var model = model
-        return VStack(alignment: .leading, spacing: Space.m) {
-            if let step = permissionStep, step.state != .done {
-                HStack(spacing: Space.s) {
-                    Image(systemName: step.state == .error ? "exclamationmark.circle.fill" : "bell.badge.fill")
-                        .foregroundStyle(step.state == .error ? Theme.error : Theme.needsYou)
-                    Text(step.state == .error ? step.why : "Allow Squeak to show notifications on this Mac.")
-                        .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: Space.s)
-                    if let action = step.action, let title = step.actionTitle {
-                        Button(title) { runSetupAction(action) }.buttonStyle(PrimaryButtonStyle())
-                    }
-                }
-                .padding(Space.m)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-                .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
-            }
-
-            VStack(alignment: .leading, spacing: Space.s) {
-                HStack(spacing: Space.s) {
-                    Image(systemName: "macbook.and.iphone").foregroundStyle(Theme.duck)
-                    Text("On this Mac").font(Typo.label).foregroundStyle(Theme.ink)
-                    Spacer()
-                    Toggle("Notifications on this Mac", isOn: $model.notificationsEnabled)
-                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
-                        .disabled(!Bundled.isApp)
-                }
-                Text("Approvals, questions, plans, errors, and finished chats.")
-                    .font(Typo.meta).foregroundStyle(Theme.muted)
-                if model.notificationsEnabled, bannersShown == false {
-                    HStack(spacing: 8) {
-                        Image(systemName: "bell.slash").foregroundStyle(Theme.needsYou)
-                        Text("Banners are off in macOS settings.").font(Typo.meta).foregroundStyle(Theme.muted)
-                        Spacer()
-                        Button("Open Settings") { GeneralSettings.openNotificationSettings() }
-                            .buttonStyle(SecondaryButtonStyle())
-                    }
-                    .padding(.top, Space.xs)
-                }
-            }
-            .padding(Space.m)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
-
-            let configured = model.channels.notify?.shown ?? []
-            if configured.isEmpty {
-                HStack(spacing: Space.s) {
-                    Image(systemName: "paperplane").foregroundStyle(Theme.muted)
-                    Text("Connect Telegram or Zoho Cliq in the next steps to choose what they send.")
-                        .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, Space.xs)
-            } else {
-                ForEach(NotifyChannel.allCases.filter { model.channels.notify?.isSetUp($0) == true }, id: \.self) {
-                    NotificationSetupChannel(channel: $0)
-                }
-            }
-        }
-    }
 }
 
-private struct GeneralSettings: View {
+struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage(WindowAppearancePreference.key) private var glassWindowAppearance = true
@@ -535,15 +464,7 @@ private struct GeneralSettings: View {
                     Text("None").tag("")
                 }
                 if hotKeys.needsInputMonitoring {
-                    LabeledContent {
-                        HStack {
-                            Button("Allow Input Monitoring") { hotKeys.requestInputMonitoring() }
-                            if hotKeys.requestedThisRun { Button("Relaunch Squeak") { hotKeys.relaunch() } }
-                        }
-                    } label: {
-                        Text("Squeak needs Input Monitoring")
-                        Text("Double-tap needs Input Monitoring so Squeak can notice Control taps. It never reads what you type.")
-                    }
+                    PermissionExplainer(kind: .inputMonitoring, onGranted: { hotKeys.recheck() })
                 }
             } footer: {
                 if let error = hotKeys.registrationError {

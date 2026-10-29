@@ -1,27 +1,16 @@
 import AppKit
+import SqueakMacCore
 import SwiftUI
 
 extension CaptureRunner {
     /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=setup: the welcome, step and summary layouts
     /// in both appearances, using offline demo facts. Writes `<prefix>-<screen>-<appearance>.png`.
     static func runSetupDemo(prefix: String, model: AppModel) async {
-        let screens: [(String, Int, WalkScreen?)] = [
-            ("welcome", 0, nil),
-            ("service", 1, .step(.service)),
-            ("hooks", 1, .step(.hooks)),
-            ("notifications", 1, .step(.notifications)),
-            ("iphone", 1, .step(.iphone)),
-            ("telegram", 1, .step(.telegram)),
-            ("cliq", 1, .step(.cliq)),
-            ("voice", 1, .step(.voice)),
-            ("awake", 1, .step(.awake)),
-            ("summary", 1, .summary),
-            ("first-session", 2, nil),
-        ]
+        let screens: [(String, SetupStage)] = SetupStage.allCases.map { ($0.rawValue, $0) }
 
         for (tone, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
-            for (name, step, start) in screens {
-                let root = OnboardingView(step: step, walkStart: start, finish: {})
+            for (name, stage) in screens {
+                let root = OnboardingView(stage: stage, finish: {})
                     .environment(model)
                     .frame(width: 850, height: 640)
                 let host = NSHostingView(rootView: root)
@@ -35,9 +24,8 @@ extension CaptureRunner {
                 window.orderOut(nil)
             }
 
-            for name in ["notifications", "iphone", "telegram", "cliq", "voice", "awake"] {
-                guard let screen = screens.first(where: { $0.0 == name }) else { continue }
-                let compactRoot = OnboardingView(step: screen.1, walkStart: screen.2, finish: {})
+            for (name, stage) in screens where stage == .away || stage == .firstWin {
+                let compactRoot = OnboardingView(stage: stage, finish: {})
                     .environment(model)
                     .frame(width: 760, height: 540)
                 let compactHost = NSHostingView(rootView: compactRoot)

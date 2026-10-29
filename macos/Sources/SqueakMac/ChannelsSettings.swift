@@ -552,7 +552,7 @@ private struct PrimaryUnless: ViewModifier {
     }
 }
 
-private struct PendingRow: View {
+struct PendingRow: View {
     @Environment(AppModel.self) private var app
     let request: RemoteStatus.Pending
     var body: some View {
