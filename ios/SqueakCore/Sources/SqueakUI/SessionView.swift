@@ -1412,7 +1412,7 @@ struct SentBubble: View, Equatable {
                         ShareLink(item: parts.body) { Label("Share", systemImage: "square.and.arrow.up") }
                     }
             }
-            if !parts.refs.isEmpty { PhotoPills(count: parts.refs.count) }
+            if !parts.refs.isEmpty { SentPhotoStrip(refs: parts.refs) }
             // Exactly one muted line per message this phone sent.
             if let line { Text(line).font(.footnote).foregroundStyle(failed ? Theme.error : Theme.muted).multilineTextAlignment(.trailing) }
         }

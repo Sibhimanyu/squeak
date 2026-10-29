@@ -295,6 +295,7 @@ final class AppModel {
         earlierPrependedAt = [:]
         historyStore?.clear()
         outboxStore?.clear()
+        SentPhotos.clear()
         outbox = [:]
         unreconciled = true
     }
@@ -2321,6 +2322,7 @@ extension AppModel {
                     if index == chunks.count - 1 {
                         guard let ref = result.ref else { return .failed("Your Mac didn't say where it saved the photo.") }
                         refs.append(ref)
+                        SentPhotos.save(photo.jpeg, for: ref)
                     }
                 } catch {
                     return .failed("Couldn't reach your Mac.")

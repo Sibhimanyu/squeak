@@ -159,6 +159,100 @@ struct PhotoTray: View {
 }
 
 /// What a message's photos look like in the chat: small labelled pills, since the picture itself stays on the Mac.
+/// The photos this phone sent, kept by the path the Mac saved each at, so a sent message shows the picture and
+/// opens it larger. Only what this phone sent is here: a photo that came from elsewhere stays a pill. Memory first,
+/// then a file in Caches (not backed up, complete file protection), cleared on unpair.
+enum SentPhotos {
+    private static let memory = NSCache<NSString, UIImage>()
+    private static var folder: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("SentPhotos", isDirectory: true)
+    }
+
+    private static func file(for ref: String) -> URL? {
+        let name = Data(ref.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_").prefix(120)
+        return folder?.appendingPathComponent("\(name).jpg")
+    }
+
+    static func save(_ jpeg: Data, for ref: String) {
+        if let image = UIImage(data: jpeg) { memory.setObject(image, forKey: ref as NSString) }
+        guard let folder, let url = file(for: ref) else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? jpeg.write(to: url, options: [.atomic, .completeFileProtection])
+    }
+
+    static func image(for ref: String) -> UIImage? {
+        if let hit = memory.object(forKey: ref as NSString) { return hit }
+        guard let url = file(for: ref), let data = try? Data(contentsOf: url), let image = UIImage(data: data) else { return nil }
+        memory.setObject(image, forKey: ref as NSString)
+        return image
+    }
+
+    static func clear() {
+        memory.removeAllObjects()
+        if let folder { try? FileManager.default.removeItem(at: folder) }
+    }
+}
+
+/// A sent message's photos: the picture itself where this phone has it (tap for a larger one), else the pill.
+struct SentPhotoStrip: View {
+    let refs: [String]
+    @State private var opened: UIImage?
+
+    var body: some View {
+        let known = refs.compactMap { ref in SentPhotos.image(for: ref).map { (ref, $0) } }
+        VStack(alignment: .trailing, spacing: 6) {
+            if !known.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(known, id: \.0) { _, image in
+                        Button { opened = image } label: {
+                            Image(uiImage: image).resizable().scaledToFill()
+                                .frame(width: 96, height: 96).clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Photo you sent. Open it larger")
+                    }
+                }
+            }
+            if known.count < refs.count { PhotoPills(count: refs.count - known.count) }
+        }
+        .fullScreenCover(item: Binding(get: { opened.map(OpenedPhoto.init) }, set: { if $0 == nil { opened = nil } })) { photo in
+            PhotoViewer(image: photo.image)
+        }
+    }
+}
+
+private struct OpenedPhoto: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
+/// One photo, full screen: pinch to zoom, share or save from the share sheet, close at the top.
+private struct PhotoViewer: View {
+    let image: UIImage
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var base: CGFloat = 1
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            Image(uiImage: image).resizable().scaledToFit()
+                .scaleEffect(scale)
+                .gesture(MagnifyGesture().onChanged { scale = max(1, base * $0.magnification) }.onEnded { _ in base = scale })
+                .onTapGesture(count: 2) { withAnimation { scale = 1; base = 1 } }
+            HStack(spacing: 4) {
+                ShareLink(item: Image(uiImage: image), preview: SharePreview("Photo", image: Image(uiImage: image))) {
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 18)).foregroundStyle(Color.white)
+                        .frame(width: 44, height: 44).accessibilityLabel("Share or save")
+                }
+                Button { dismiss() } label: { Lucide(.x, size: 18, label: "Close", color: Color.white).frame(width: 44, height: 44) }
+            }
+            .padding(8)
+        }
+    }
+}
+
 struct PhotoPills: View {
     let count: Int
 

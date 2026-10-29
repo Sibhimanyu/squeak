@@ -16,6 +16,9 @@ export interface CodexRolloutObserverOptions {
 
 const DEFAULT_ACTIVE_WITHIN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_IDLE_AFTER_MS = 10 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** How many days back a day folder is still read: a chat can keep going long after the day it began. */
+const ROLLOUT_LOOKBACK_DAYS = 14;
 
 /**
  * Codex records each thread as a "rollout" JSONL file. Unlike Claude's
@@ -67,44 +70,47 @@ export class CodexRolloutObserver {
   }
 
   /**
-   * Walk `sessions/YYYY/MM/DD` but prune by directory mtime, so years of
-   * archived rollouts cost one stat per directory rather than one per file.
+   * Walk `sessions/YYYY/MM/DD` and keep the rollouts written within the window. Folders are pruned by the date in
+   * their names, never by their own mtime: a folder's mtime moves only when a file is created or removed in it, so
+   * `2026/` looked a month stale and the whole tree was skipped, leaving every Codex chat with no transcript (and a
+   * working one saying "Starting…" on the phone for good). A chat can run for days in the folder of the day it began,
+   * so a day folder is read for `ROLLOUT_LOOKBACK_DAYS`, and the file's own mtime says whether it is recent.
    */
   private listRecentRollouts(cutoffMs: number): string[] {
     const root = path.join(this.codexHome, "sessions");
+    const oldestDay = cutoffMs - ROLLOUT_LOOKBACK_DAYS * DAY_MS;
     const found: string[] = [];
 
-    const walk = (dir: string, depth: number): void => {
-      let entries: fs.Dirent[];
+    const children = (dir: string): fs.Dirent[] => {
       try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
+        return fs.readdirSync(dir, { withFileTypes: true });
       } catch {
-        return;
-      }
-      for (const entry of entries) {
-        const entryPath = path.join(dir, entry.name);
-        let mtimeMs: number;
-        try {
-          mtimeMs = fs.statSync(entryPath).mtimeMs;
-        } catch {
-          continue;
-        }
-        if (mtimeMs < cutoffMs) {
-          continue;
-        }
-        if (entry.isDirectory()) {
-          if (depth < 3) {
-            walk(entryPath, depth + 1);
-          }
-          continue;
-        }
-        if (entry.name.endsWith(".jsonl")) {
-          found.push(entryPath);
-        }
+        return [];
       }
     };
+    const numbered = (dir: string, width: number): Array<{ n: number; path: string }> =>
+      children(dir)
+        .filter((entry) => entry.isDirectory() && new RegExp(`^\\d{${width}}$`).test(entry.name))
+        .map((entry) => ({ n: Number(entry.name), path: path.join(dir, entry.name) }));
 
-    walk(root, 0);
+    for (const year of numbered(root, 4)) {
+      for (const month of numbered(year.path, 2)) {
+        // The last moment of the month: a month wholly before the window holds nothing in it.
+        if (Date.UTC(year.n, month.n, 1) < oldestDay) continue;
+        for (const day of numbered(month.path, 2)) {
+          if (Date.UTC(year.n, month.n - 1, day.n + 1) < oldestDay) continue;
+          for (const entry of children(day.path)) {
+            if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+            const file = path.join(day.path, entry.name);
+            try {
+              if (fs.statSync(file).mtimeMs >= cutoffMs) found.push(file);
+            } catch {
+              // Gone since the listing.
+            }
+          }
+        }
+      }
+    }
     return found;
   }
 

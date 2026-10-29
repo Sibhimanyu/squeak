@@ -123,6 +123,22 @@ describe("CodexRolloutObserver", () => {
     expect(session?.title).toBe("Fix the parser");
   });
 
+  it("finds a rollout whose folders are old: a folder's mtime moves only when a file is added or removed in it", () => {
+    const codexHome = makeCodexHome();
+    const filePath = writeRollout(codexHome, "thread-long", [meta("thread-long")]);
+    const old = new Date(now - 30 * 24 * 60 * 60 * 1000);
+    // Every folder above the file looks a month stale; the file itself is being written now.
+    for (let dir = path.dirname(filePath); dir !== path.join(codexHome, ".."); dir = path.dirname(dir)) {
+      if (path.basename(dir) === ".codex" || dir === codexHome) break;
+      fs.utimesSync(dir, old, old);
+    }
+    fs.utimesSync(filePath, new Date(now - 60_000), new Date(now - 60_000));
+
+    const sessions = new CodexRolloutObserver({ codexHome, now: () => now }).observe();
+
+    expect(sessions.map((s) => s.agentSessionId)).toEqual(["thread-long"]);
+  });
+
   it("skips rollouts outside the active window", () => {
     const codexHome = makeCodexHome();
     const filePath = writeRollout(codexHome, "thread-f", [meta("thread-f")]);
