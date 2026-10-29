@@ -244,6 +244,8 @@ export interface SipPhoneOptions {
   speaker: Speaker;
   /** `ip:port` to listen on instead of a random port: for a test where the caller has no PBX to find us. */
   listen?: string;
+  /** Told each call's line-quality summary when the call ends (the same text the log line carries). */
+  onQuality?: (stats: string) => void;
 }
 
 export class SipPhone implements Phone {
@@ -450,7 +452,10 @@ export class SipPhone implements Phone {
   private stopStats(): void {
     if (this.statsTimer) clearInterval(this.statsTimer);
     this.statsTimer = null;
-    if (this.lastStats) logger.info("voice call line quality", { stats: this.lastStats });
+    if (this.lastStats) {
+      logger.info("voice call line quality", { stats: this.lastStats });
+      this.options.onQuality?.(this.lastStats);
+    }
     this.lastStats = null;
   }
 

@@ -195,6 +195,34 @@ final class ChannelsModel {
         }
     }
 
+    // Call history and the gateway log: loaded when the sheet opens, refreshed every 10 s only while it is open.
+    private(set) var calls: CallsView?
+    private(set) var callsAvailable = true
+    private var callsPoll: Task<Void, Never>?
+
+    func refreshCalls() async {
+        if demo { return }
+        do {
+            let v = try await client.voiceCalls()
+            callsAvailable = v != nil
+            if let v { calls = v }
+        } catch {
+            // Keep what is shown.
+        }
+    }
+
+    func startCallsRefresh() {
+        callsPoll?.cancel()
+        callsPoll = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refreshCalls()
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
+
+    func stopCallsRefresh() { callsPoll?.cancel(); callsPoll = nil }
+
     /// Makes a new code and polls every 2 s until `endGatewayPairing()`.
     func startGatewayPairing() async {
         gatewayError = nil

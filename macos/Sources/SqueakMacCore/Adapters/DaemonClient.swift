@@ -264,6 +264,14 @@ public struct DaemonClient: Sendable {
         return true
     }
 
+    /// Call history and the gateway's log; nil when the daemon predates the route or phone calls are not set up.
+    public func voiceCalls() async throws -> CallsView? {
+        let r = try await get("/control/voice/calls", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(CallsView.self, r.body)
+    }
+
     public func telegramCandidates() async throws -> [TelegramCandidate]? {
         let r = try await get("/control/telegram/candidates", token: true)
         if r.status == 404 { return nil }

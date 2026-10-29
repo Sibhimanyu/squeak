@@ -14,6 +14,7 @@ struct VoiceSettingsPage: View {
     @State private var repeatPin = ""
     @State private var ownerChecking = false
     @State private var pairingGateway = false
+    @State private var showingCalls = false
 
     private var m: ChannelsModel { app.channels }
 
@@ -36,6 +37,7 @@ struct VoiceSettingsPage: View {
                 } header: { Text("Phone calls") } footer: {
                     Footnote(footnote(v))
                 }
+                callsSection
                 if m.gatewayAvailable { gatewaySection }
                 if let state = v.pinState { pinSection(state) }
             } else if m.voiceOutdated {
@@ -49,6 +51,7 @@ struct VoiceSettingsPage: View {
         }
         .settingsForm()
         .sheet(isPresented: $pairingGateway, onDismiss: { m.endGatewayPairing() }) { GatewayPairSheet().environment(app) }
+        .sheet(isPresented: $showingCalls) { CallsSheet().environment(app) }
         .task {
             await m.refreshVoice()
             if !loaded { typed = m.voice?.callee ?? ""; loaded = true }
@@ -64,6 +67,19 @@ struct VoiceSettingsPage: View {
         let who = v.callee ?? v.defaultCallee
         let ringing = who.map { "Squeak rings \($0)." } ?? "No extension is set yet, so no call can be placed."
         return "\(ringing) \(how) Only an extension is accepted here, never an outside number."
+    }
+
+    // MARK: Calls
+
+    private var callsSection: some View {
+        Section {
+            HStack {
+                Button("Call history & log") { showingCalls = true }
+                Spacer()
+            }
+        } header: { Text("History") } footer: {
+            Footnote("Every call Squeak made, what happened, and what the gateway has been doing.")
+        }
     }
 
     // MARK: Gateway
@@ -260,6 +276,109 @@ struct GatewayPairSheet: View {
                 Text("Making a code…").font(Typo.body).foregroundStyle(Theme.muted)
             }
             Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle())
+        }
+    }
+}
+
+/// Call history and the gateway's log: Calls | Gateway log, refreshed every 10 s while open.
+struct CallsSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab = Tab.calls
+    @State private var copied = false
+    private var m: ChannelsModel { app.channels }
+
+    private enum Tab: String, CaseIterable { case calls = "Calls", log = "Gateway log" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Call history & log").font(Typo.title)
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented).labelsHidden()
+            content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            HStack {
+                Button(copied ? "Copied" : "Copy") { copy() }
+                    .buttonStyle(SecondaryButtonStyle()).disabled(exportText.isEmpty)
+                Spacer()
+                Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle())
+            }
+        }
+        .padding(24).frame(width: 560, height: 480)
+        .onAppear { m.startCallsRefresh() }
+        .onDisappear { m.stopCallsRefresh() }
+    }
+
+    private var exportText: String {
+        guard let v = m.calls else { return "" }
+        switch tab {
+        case .calls: return CallText.callsExport(v.calls)
+        case .log: return v.gatewayLog.map { CallText.logExport($0) } ?? ""
+        }
+    }
+
+    private func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(exportText, forType: .string)
+        copied = true
+        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+    }
+
+    @ViewBuilder private var content: some View {
+        if !m.callsAvailable {
+            Footnote(CallText.unavailable)
+        } else if let v = m.calls {
+            switch tab {
+            case .calls: callsList(v.calls)
+            case .log: logList(v.gatewayLog)
+            }
+        } else {
+            Text("Loading…").font(Typo.body).foregroundStyle(Theme.muted)
+        }
+    }
+
+    @ViewBuilder private func callsList(_ calls: [CallEntry]) -> some View {
+        if calls.isEmpty {
+            Footnote("No calls yet. When an agent is waiting on you, or you place a test call, it shows here.")
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(calls) { e in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(CallText.what(e)).font(Typo.body).lineLimit(1)
+                                Spacer()
+                                Text(CallText.when(ms: e.at)).font(.caption.monospacedDigit()).foregroundStyle(Theme.muted)
+                            }
+                            Text("\(CallText.outcomeSentence(e)) · \(CallText.duration(ms: e.durationMs))")
+                                .font(Typo.meta).foregroundStyle(e.outcome == .failed ? Theme.error : Theme.muted)
+                                .fontWeight(e.outcome == .failed ? .semibold : .regular)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 8)
+                        Divider().overlay(Theme.line)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func logList(_ log: GatewayLog?) -> some View {
+        if let log, !log.lines.isEmpty {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(log.lines.reversed()) { l in
+                        Text(CallText.logLine(l))
+                            .font(.system(.caption, design: .monospaced))
+                            .fontWeight(l.level == .warn ? .bold : .regular)
+                            .foregroundStyle(l.level == .warn ? Theme.error : Theme.ink)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        } else {
+            Footnote("Nothing from the gateway yet. Once the Home Assistant add-on is paired and running, what it does shows here.")
         }
     }
 }

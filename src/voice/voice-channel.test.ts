@@ -1,9 +1,14 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { AttentionItem } from "../fleet/types.js";
 import type { CallResult } from "./baresip-line.js";
 import { item, QUESTION } from "./fixtures.js";
 import { CallPolicy } from "./policy.js";
+import { CallHistory } from "./call-history.js";
 import { VoiceChannel } from "./voice-channel.js";
 
 function setup(
@@ -13,6 +18,8 @@ function setup(
     keys?: () => boolean;
     text?: () => string | null;
     attention?: AttentionItem[];
+    history?: Pick<CallHistory, "record">;
+    send?: () => Promise<unknown>;
   } = {},
 ) {
   const waiting = item("asked_question");
@@ -33,6 +40,7 @@ function setup(
     replier: {
       lastTurnText: () => text(),
       send: async (_target, message) => {
+        if (options.send) return options.send() as never;
         sent.push(message);
         return { status: "started", via: "conductor", delivery: "sent" } as never;
       },
@@ -46,6 +54,7 @@ function setup(
     canTakeKeys: options.keys ?? (options.pin === undefined ? true : options.pin !== null),
     policy: new CallPolicy({ minGapMs: 0, quiet: null }),
     graceMs: 10,
+    ...(options.history ? { history: options.history } : {}),
     note: (message) => notes.push(message),
   });
   return { channel, waiting, notes, sent, dialogs, push: (items: AttentionItem[]) => pushed?.(items) };
@@ -111,5 +120,78 @@ describe("VoiceChannel.start", () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(dialogs).toHaveLength(1);
     channel.stop();
+  });
+});
+
+describe("VoiceChannel call history", () => {
+  function recorder() {
+    const calls: Array<Record<string, unknown>> = [];
+    return {
+      calls,
+      history: { record: (c: never) => (calls.push(c), null) } as unknown as Pick<CallHistory, "record">,
+    };
+  }
+
+  it("records an answered call whose letter was sent", async () => {
+    const { calls, history } = recorder();
+    const { channel, waiting } = setup({ history });
+    await channel.ring(waiting);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      kind: "agent",
+      reason: "asked_question",
+      label: "squeak · voice",
+      outcome: "answered",
+      letter: "B",
+      sent: true,
+    });
+    expect(typeof calls[0]!.durationMs).toBe("number");
+  });
+
+  it("records an unanswered call and a failed one", async () => {
+    const a = recorder();
+    const one = setup({ history: a.history, result: { status: "unanswered" } });
+    await one.channel.ring(one.waiting);
+    expect(a.calls[0]).toMatchObject({ outcome: "unanswered" });
+    expect(a.calls[0]).not.toHaveProperty("letter");
+    const b = recorder();
+    const two = setup({ history: b.history, result: { status: "failed", reason: "no route" } });
+    await two.channel.ring(two.waiting);
+    expect(b.calls[0]).toMatchObject({ outcome: "failed", failure: "no route" });
+  });
+
+  it("records moved_on and a refused send as not sent", async () => {
+    let reads = 0;
+    const a = recorder();
+    const one = setup({ history: a.history, text: () => (reads++ === 0 ? QUESTION : "something else?") });
+    await one.channel.ring(one.waiting);
+    expect(a.calls[0]).toMatchObject({ outcome: "moved_on", letter: "B", sent: false });
+    const b = recorder();
+    const two = setup({ history: b.history, send: async () => ({ status: "refused", reason: "busy" }) });
+    await two.channel.ring(two.waiting);
+    expect(b.calls[0]).toMatchObject({ outcome: "answered", letter: "B", sent: false });
+  });
+
+  it("never stores the question, a PIN or a digit (canary)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "calls-canary-"));
+    const f = path.join(dir, "voice-calls.json");
+    try {
+      const history = new CallHistory(f);
+      const { channel, waiting } = setup({
+        history,
+        result: { status: "answered", letter: "B", pin: "424242" } as never,
+      });
+      await channel.ring(waiting);
+      const raw = fs.readFileSync(f, "utf8");
+      expect(raw).not.toContain("424242");
+      expect(raw).not.toContain(QUESTION.slice(0, 30));
+      expect(Object.keys(history.list()[0]!).sort()).toEqual(
+        ["at", "durationMs", "id", "kind", "label", "letter", "outcome", "reason", "sent"].sort(),
+      );
+      expect(history.list()[0]!.letter).toBe("B");
+      expect(history.list()).toHaveLength(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
