@@ -11,9 +11,9 @@ APP="$HERE/build/Squeak.app"
 NAME="Squeak"
 VOLNAME="Squeak $VERSION"
 OUT="$HERE/build/Squeak-$VERSION.dmg"
-WIN_W=620; WIN_H=400
-APP_X=160; APP_Y=198
-DEST_X=460; DEST_Y=198
+WIN_W=680; WIN_H=460
+APP_X=170; APP_Y=224
+DEST_X=510; DEST_Y=224
 
 [ -d "$APP" ] || { echo "build the app first: scripts/build-app.sh" >&2; exit 1; }
 
