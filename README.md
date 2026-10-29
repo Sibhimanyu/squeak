@@ -111,11 +111,11 @@ use Squeak's keep-awake controls when stepping away.
 
 ### iPhone and web browser
 
-The current public Mac release uses your own Firebase project. Create and
-configure the project, then set `SQUEAK_REMOTE_PROJECT` to its project ID in
-Squeak's settings file and restart the background service. Follow the
-[remote channel guide](docs/remote-channel.md) for the Firebase rules and
-configuration details.
+In Squeak for Mac, open **Settings › iPhone** and choose **Set up…**. Squeak
+can create and configure a Firebase project in your Google account, or use its
+limited shared server; a by-hand route is also offered. Follow the
+[remote channel guide](docs/remote-channel.md) for the Firebase rules, the
+shared-server limits and configuration details.
 
 1. Choose your client:
    - **Web:** open [Squeak for Web](https://squeak-mac.web.app/) in your browser;

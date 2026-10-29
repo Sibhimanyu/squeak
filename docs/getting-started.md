@@ -27,20 +27,15 @@ page is the longer version of the README's Quick start.
 Squeak updates itself (Sparkle). You can turn automatic checks off in
 Settings › About.
 
-## 2. Run the first-run Setup checklist
+## 2. Run the guided Setup walkthrough
 
-Squeak bundles its background service (the "daemon"). Nothing is installed
-silently: the Setup checklist installs each piece when you ask. It lists:
-
-| Item                                          | What it does                                                                              | Required      |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------- |
-| Background service                            | Watches your sessions and serves them to the app, the phone and Telegram.                 | Yes           |
-| Agent hooks                                   | Lets Squeak know at once when an agent finishes or waits for an approval.                 | Yes           |
-| Conductor                                     | Connects to Conductor (see step 3).                                                       | If you use it |
-| Notifications                                 | macOS notifications when a session needs you.                                             | Recommended   |
-| Quick-message hotkey                          | The double-tap shortcut that opens the quick composer.                                    | Optional      |
-| Reply into Conductor's window (Accessibility) | Lets Squeak Hands type a reply into Conductor's own window so it shows and streams there. | Optional      |
-| Channels                                      | Telegram, Zoho Cliq, iPhone (steps 4 to 6).                                               | Optional      |
+On first launch, choose **Set up Squeak** on the Welcome screen. That starts
+the guided setup and installs Squeak's background service. It walks through
+the service and agent hooks first; both are required. The remaining steps cover
+Conductor, replies into Conductor's window, notifications, the quick-message
+shortcut, iPhone, Telegram, Zoho Cliq, phone calls and Keep awake. You can skip
+optional steps, and the summary and **Settings › Setup** show what is done or
+still needs attention. Reopen any skipped or unfinished step there.
 
 Reading Conductor chats works with nothing else set up.
 
@@ -78,18 +73,20 @@ a personal Zoho OAuth app, so taps and replies come back through three Deluge
 handlers you paste into a Cliq bot and a relay in your own Firebase project.
 If you are not in a Zoho org, skip it. Follow [`cliq.md`](cliq.md).
 
-## 6. iPhone (optional, needs your own Firebase project)
+## 6. iPhone (optional)
 
 The iPhone app is installed through SideStore, not the App Store. It reaches
-your Mac through a Firebase project that **you** create (the free plan is
-enough); there is no hosted backend you can sign up for. The data stored there
-is encrypted, and replies are signed by a key on the phone that you approve on
-the Mac.
+your Mac through Firebase. In Squeak for Mac, open **Settings › iPhone** and
+choose **Set up…**. The recommended option creates and configures a Firebase
+project in your Google account. You can also choose Squeak's limited shared
+server, which needs no project of your own; its feature and usage limits are
+listed in [`remote-channel.md`](remote-channel.md#setting-up-firebase-and-the-shared-server-2026-10-29).
+The data stored there is encrypted, and replies are signed by a key on the
+phone that you approve on the Mac.
 
-1. Create the Firebase project and set `SQUEAK_REMOTE_PROJECT` to its id in
-   Squeak's `.env`.
-2. In the Mac app, choose iPhone › Pair an iPhone and scan the code with the
-   iPhone app.
+After setup, the pairing sheet opens. Scan its code with the iPhone app and
+approve the request on the Mac. If you move from the shared server to your own
+Firebase later, pair the iPhone again.
 
 The full design and setup are in [`remote-channel.md`](remote-channel.md).
 
@@ -100,8 +97,8 @@ a phone browser. It has the same features as the iPhone app (new chats with
 presets and split, answering plans and questions, queue and steer, Mac
 controls, keep awake, notifications, usage, films review), except Face ID and
 the same-Wi-Fi direct route. It needs the same Firebase project
-(`SQUEAK_REMOTE_PROJECT`). Pair by choosing iPhone › Pair an iPhone in Squeak
-for Mac, then scan the code with the page's camera button or paste the link.
+(`SQUEAK_REMOTE_PROJECT`). Pair by choosing **Pair an iPhone** in Squeak for
+Mac, then scan the code with the page's camera button or paste the link.
 The iPhone app is optional.
 
 ## Known limits
@@ -126,8 +123,8 @@ error. Reply typing into Conductor's window still works with the Accessibility
 step.
 
 **Sessions never show as "needs you" or never update instantly.**
-The agent hooks are missing. Re-run the **Agent hooks** item in the Setup
-checklist. Squeak merges them into `~/.claude/settings.json` without removing
+The agent hooks are missing. Open **Settings › Setup** and reopen **Agent
+hooks**. Squeak merges them into `~/.claude/settings.json` without removing
 other tools' entries.
 
 **The app says the background service is not running.**

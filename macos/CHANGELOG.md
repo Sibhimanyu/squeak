@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.11.10
+
+- Set up the iPhone channel from your Mac with your own Firebase project (automatically or by hand), or choose Squeak's limited shared server.
+- Replace the setup checklist with a guided walkthrough that tracks progress, lets you skip optional steps, and shows what remains.
+- Refine the floating duck, menu-bar controls, chat setup, and window layout.
+
 ## 2.11.9
 
 - A clearer Mac setup with a menu-bar preview, progress through essential steps, and optional extras tucked away until needed.

@@ -10,41 +10,42 @@ Cliq cannot call the Mac: button taps, messages and forms run _handlers_
 The first design had the handlers write to a Cliq database the Mac read
 with Zoho OAuth, but a managed Zoho org refuses a personal Self Client
 (`oauth_app_blocked`, seen on zohocorp). Handlers can still post _out_, so
-they post to Squeak's own Firebase project instead:
+they write to the Firebase project used by the phone channel:
 
 ```
 card ──► bot /message ──► you tap / reply / type
                                │
              bot handler (Deluge) signs the record, posts it
                                ▼
-      Firestore cliq/<relay>/inbox   (project SQUEAK_REMOTE_PROJECT)
+      Realtime Database cliq/<relay>/inbox
+                         (project SQUEAK_REMOTE_PROJECT)
                                │
-      Squeak polls it every 5s, verifies, deletes each record, then acts
+      Squeak streams it, verifies, deletes each record, then acts
 ```
 
-**Streamed, with the Realtime Database.** With `SQUEAK_REMOTE_DATABASE_URL`
-set, `squeak cliq-relay` writes handlers that post plain JSON to
+The current Mac setup sets `SQUEAK_REMOTE_DATABASE_URL`, so
+`squeak cliq-relay` writes handlers that post plain JSON to
 `<database>/cliq/<relay>/inbox.json` (it answers with a `name` too, so the
 handlers' success check is unchanged), and Squeak streams that inbox: a tap
-runs within a fraction of a second instead of up to five, and it polls only
-once a minute as a safety net. Until the new handlers are pasted into Cliq,
-records still arriving in Firestore are read as well (`legacy` in
-`CliqRelayInbox`), so nothing is stranded by the move. The rules for the
-inbox (`firebase/database.rules.json`) are the Firestore ones: create or
-delete only, `{box, sig, at}`, a 64-character signature.
+runs within a fraction of a second, with a once-a-minute poll as a safety
+net. Until these handlers are pasted into Cliq, records still arriving in
+Firestore are read as well, so nothing is stranded by the move. Older
+configurations without `SQUEAK_REMOTE_DATABASE_URL` continue to use Firestore
+and poll it every five seconds.
 
 - **Cards go out** through the bot's `/message` endpoint with the webhook
   token (`SQUEAK_CLIQ_WEBHOOK_URL`). Not `/incoming`: that runs the bot's
   incoming-webhook handler, and with none written it answers 200 with the
   subscriber list and shows nothing.
-- **Firestore is an untrusted pipe**, as for the phone. The rules
-  (`firebase/firestore.rules`) only allow creating `{box, sig, at}` records
-  under a relay id of 32+ random characters, never updating one. Each
-  record's `box` carries an HMAC-SHA256 from a secret that exists only in
-  Squeak's `.env` and in the three handlers; the Mac deletes anything
-  unsigned, altered or already seen (`cliq_seen`) without reading it.
-  Unlike the phone channel the text is not encrypted, so the words of a
-  command sit in the Firebase project until the next poll deletes them.
+- **Firebase is an untrusted pipe.** Realtime Database rules
+  (`firebase/database.rules.json`) let a handler create a `{box, sig, at}`
+  record under a relay id of 32+ random characters, and let Squeak read and
+  delete it. Legacy Firestore rules (`firebase/firestore.rules`) likewise
+  allow record creation, not updates. Each `box` carries an HMAC-SHA256 from
+  a secret that exists only in Squeak's `.env` and the three handlers; the
+  Mac deletes anything unsigned, altered or already seen (`cliq_seen`)
+  without reading it. Unlike the phone channel the text is not encrypted, so
+  a command remains in Firebase until Squeak deletes it.
 - **Each card's message id is kept** (`cliq_card` in Squeak's state db,
   from `sync_message: true`) with the session it answers and a hash of the
   turn it was about. A tap or a reply names the card it came from, never a
@@ -119,8 +120,15 @@ That alone gives you cards. The rest makes them answerable.
 
 ### 2. The relay
 
-On the Mac, with `SQUEAK_REMOTE_PROJECT` already set (the phone channel's
-Firebase project):
+Answerable Cliq commands and replies need a Firebase project with the Cliq
+relay rules. Squeak's shared server intentionally permits only the phone's
+`state`, `pairing`, `commands` and `results` paths; it rejects the Cliq relay
+path. One-way cards from the bot still work on the shared server, but its
+two-way relay does not. To use the relay, choose your own Firebase in **Settings
+› iPhone** or move from the shared server to your own project first. Moving
+means pairing the iPhone again.
+
+With your own Firebase project configured on the Mac:
 
 ```bash
 node ~/conductor/repos/squeak/dist/squeak/cli.js cliq-relay
@@ -132,6 +140,14 @@ handlers with both filled in to `Application Support/squeak/cliq-handlers.txt`
 (0600). The secret is never printed. `--rotate` makes a new pair; paste the
 handlers again after it.
 
+With the current Mac setup, `SQUEAK_REMOTE_DATABASE_URL` is set and the
+handlers post to the Realtime Database. Its rules include the Cliq relay and
+are deployed during Firebase setup. If you manage an existing personal project,
+deploy the current rules with
+`(cd firebase && firebase deploy --only database --project <project>)`.
+Older configurations without `SQUEAK_REMOTE_DATABASE_URL` use the legacy
+Firestore relay; those handlers need the Firestore rules deployed instead.
+
 Add who may act, to `.env`:
 
 ```
@@ -141,8 +157,9 @@ SQUEAK_CLIQ_OWNER_EMAIL=<your Cliq login email>
 
 Your user id is the number the bot's `/message` call returns in `user_ids`.
 
-The rules for the relay deploy with the rest of Firebase:
-`(cd firebase && firebase deploy --only firestore:rules --project <project>)`.
+The current Realtime Database rules allow the handler to create a signed relay
+record and Squeak to read and delete it. Keep the project and rules in sync
+before pasting new handlers.
 
 ### 3. The three handlers
 
@@ -158,19 +175,22 @@ Paste each block of `cliq-handlers.txt` where its heading says:
 
 Each builds a record, signs it with `zoho.encryption.hmacsha256(secret,
 box, "hex")`, and posts it with `invokeurl`. No Cliq connection is needed:
-Firestore takes the post unauthenticated, and the signature is what counts.
+the Firebase rules allow the post, and the signature is what Squeak verifies.
+Current handlers write to Realtime Database; existing handlers keep writing to
+Firestore until you paste the regenerated ones.
 
 ### 4. Restart Squeak
 
 `launchctl kickstart -k gui/$(id -u)/com.squeak.daemon`, or `ship.sh` when
-the code changed. Type `radar` to the bot: the answer comes back within five
+the code changed. Type `radar` to the bot: the Realtime Database relay usually
+answers within a second; the legacy Firestore relay can take up to five
 seconds. `grep -i cliq ~/Library/Logs/squeak/squeak.log` shows any failure.
 
 ## Limits
 
-- Firestore's free tier is far above this: a poll every five seconds is
-  about 17,000 reads a day, against 50,000 free.
-- A poll every five seconds means up to five seconds before anything happens.
+- The legacy Firestore relay polls every five seconds (about 17,000 reads a
+  day, against 50,000 free). The current Realtime Database relay streams
+  changes and polls once a minute as a safety net.
 - A card's buttons stay visible after use (a message posted through the API
   cannot be edited from here); the turn check is what stops a second tap.
 - More than three lettered options do not fit as buttons (Cliq's five-button
