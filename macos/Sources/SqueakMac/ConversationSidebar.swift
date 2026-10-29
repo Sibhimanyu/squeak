@@ -21,29 +21,182 @@ private struct SidebarGlass: NSViewRepresentable {
     func updateNSView(_ v: NSVisualEffectView, context: Context) {}
 }
 
-private struct SidebarBackground: View {
+/// NavigationSplitView assigns its AppKit sidebar item a 140pt minimum even when the
+/// SwiftUI column-width preference is lower. Update that native constraint alongside
+/// the sidebar content so the entire column, including its material, becomes an icon rail.
+struct SidebarColumnSizer: NSViewRepresentable {
+    let isCollapsed: Bool
+    let expandedMinimum: CGFloat
+    let expandedIdeal: CGFloat
+    let expandedMaximum: CGFloat
+
+    func makeNSView(context: Context) -> SidebarColumnSizerView {
+        SidebarColumnSizerView(configuration: configuration)
+    }
+
+    func updateNSView(_ view: SidebarColumnSizerView, context: Context) {
+        view.configuration = configuration
+        view.applyWhenAttached()
+    }
+
+    private var configuration: SidebarColumnSizerView.Configuration {
+        .init(
+            isCollapsed: isCollapsed,
+            expandedMinimum: expandedMinimum,
+            expandedIdeal: expandedIdeal,
+            expandedMaximum: expandedMaximum
+        )
+    }
+}
+
+@MainActor
+final class SidebarColumnSizerView: NSView {
+    struct Configuration: Equatable {
+        let isCollapsed: Bool
+        let expandedMinimum: CGFloat
+        let expandedIdeal: CGFloat
+        let expandedMaximum: CGFloat
+
+        var minimum: CGFloat { isCollapsed ? 64 : expandedMinimum }
+        var ideal: CGFloat { isCollapsed ? 64 : expandedIdeal }
+        var maximum: CGFloat { isCollapsed ? 64 : expandedMaximum }
+    }
+
+    var configuration: Configuration
+
+    init(configuration: Configuration) {
+        self.configuration = configuration
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyWhenAttached()
+    }
+
+    func applyWhenAttached() {
+        Task { @MainActor [weak self] in self?.apply() }
+    }
+
+    private func apply() {
+        var responder: NSResponder? = self
+        while let current = responder {
+            if let controller = current as? NSSplitViewController,
+               let sidebar = controller.splitViewItems.first(where: { $0.behavior == .sidebar }) {
+                guard sidebar.minimumThickness != configuration.minimum || sidebar.maximumThickness != configuration.maximum else { return }
+                sidebar.minimumThickness = configuration.minimum
+                sidebar.maximumThickness = configuration.maximum
+                controller.splitView.setPosition(configuration.ideal, ofDividerAt: 0)
+                return
+            }
+            responder = current.nextResponder
+        }
+    }
+}
+
+struct SidebarBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduce
-    @Environment(\.colorScheme) private var scheme
+    @Environment(\.glassWindowEnabled) private var glassEnabled
+    @Environment(\.glassTransparency) private var transparency
+    @Environment(\.glassSidebarContrast) private var sidebarContrast
 
     var body: some View {
         Group {
-            if reduce {
+            if reduce || !glassEnabled {
                 Theme.sidebar
             } else {
                 ZStack {
                     SidebarGlass()
-                    // Conductor's #24211E at ~60% in dark; a light veil in light mode.
-                    (scheme == .dark ? Color(red: 36 / 255, green: 33 / 255, blue: 30 / 255).opacity(0.6) : Color.white.opacity(0.35))
+                    Theme.sidebar.opacity(sidebarWashOpacity)
                 }
             }
         }
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.line).frame(width: 1) }
         .ignoresSafeArea()
     }
+
+    /// Matches the main material tint, with a separate user controlled amount for the sidebar.
+    private var sidebarWashOpacity: Double {
+        let mainWash = (1 - min(max(transparency, 0), 100) / 100) * 0.42
+        let addedContrast = min(max(sidebarContrast, 0), 100) / 100 * 0.42
+        return min(mainWash + addedContrast, 0.72)
+    }
+}
+
+/// Shared brand/search chrome for the conversation and Settings sidebars.
+struct SidebarBrandHeader: View {
+    @Binding var isCollapsed: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if !isCollapsed {
+                DuckMark(width: 28)
+                Text("Squeak").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.ink)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            Spacer(minLength: 0)
+            if !isCollapsed {
+                Button { QuickComposerController.shared.show() } label: {
+                    Lucide(.squarePen, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Quick message")
+                .help("Quick message")
+            }
+            SidebarCollapseButton(isCollapsed: $isCollapsed)
+        }
+        .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+        .padding(.horizontal, isCollapsed ? 16 : Metrics.sidebarInset + 4).padding(.top, 36)
+    }
+}
+
+struct SidebarCollapseButton: View {
+    @Binding var isCollapsed: Bool
+
+    var body: some View {
+        Button { isCollapsed.toggle() } label: {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: Metrics.sidebarIcon, weight: .regular))
+                .foregroundStyle(Theme.muted)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isCollapsed ? "Expand sidebar" : "Collapse sidebar")
+        .help(isCollapsed ? "Expand sidebar (⌘\\)" : "Collapse sidebar (⌘\\)")
+    }
+}
+
+struct SidebarSearchField: View {
+    let prompt: String
+    @Binding var text: String
+    var focused: FocusState<Bool>.Binding
+    let accessibilityLabel: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Lucide(.search, size: Metrics.iconSmall, color: Theme.muted)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain).font(.system(size: Metrics.sidebarText)).focused(focused)
+                .accessibilityLabel(accessibilityLabel)
+            if text.isEmpty {
+                Text("⌘ K").font(.system(size: 11)).foregroundStyle(Theme.subtle).accessibilityHidden(true)
+            } else {
+                Button { text = "" } label: { Lucide(.x, size: 12, color: Theme.muted) }
+                    .buttonStyle(.plain).accessibilityLabel("Clear \(accessibilityLabel.lowercased())")
+            }
+        }
+        .padding(.horizontal, 10).frame(height: Metrics.sidebarField)
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous).strokeBorder(focused.wrappedValue ? Theme.lineStrong : Theme.line))
+    }
 }
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @Binding var isCollapsed: Bool
     @FocusState private var searchFocused: Bool
     @State private var showConnection = false
 
@@ -52,28 +205,42 @@ struct SidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             brand
-            searchField.padding(.horizontal, Metrics.sidebarInset).padding(.top, 14)
+            if !isCollapsed { searchField.padding(.horizontal, Metrics.sidebarInset).padding(.top, 14) }
             ScrollView {
                 VStack(alignment: .leading, spacing: Metrics.sidebarRowGap) {
                     row(.home, "Home", .house)
                     row(.all, "Sessions", .messageSquare)
                     row(.needsYou, "Needs you", .circleAlert)
                     row(.usage, "Usage", .gauge)
-                    Text("SOURCES").font(.system(size: Metrics.sectionLabel, weight: .medium)).tracking(0.4).foregroundStyle(Theme.subtle)
-                        .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 0)
-                        .accessibilityAddTraits(.isHeader)
+                    if !isCollapsed {
+                        Text("SOURCES").font(.system(size: Metrics.sectionLabel, weight: .medium)).tracking(0.4).foregroundStyle(Theme.subtle)
+                            .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 0)
+                            .accessibilityAddTraits(.isHeader)
+                    }
                     row(.source(.conductor), SessionSource.conductor.title, .gitBranch)
                     row(.source(.terminal), SessionSource.terminal.title, .squareTerminal)
                     row(.source(.claudeDesktop), SessionSource.claudeDesktop.title, .monitor)
                     if model.hasCodexApp { row(.source(.codexApp), SessionSource.codexApp.title, .code) }
                 }
-                .padding(.horizontal, Metrics.sidebarInset).padding(.top, 14)
+                .padding(.horizontal, isCollapsed ? 8 : Metrics.sidebarInset).padding(.top, 14)
             }
             .scrollContentBackground(.hidden)
             footer
         }
-        .frame(minWidth: Metrics.sidebarWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Give the split view an actual narrow fitting view when collapsed. A minimum width
+        // alone still lets NavigationSplitView keep the last expanded sidebar width.
+        .frame(width: isCollapsed ? 64 : Metrics.sidebarWidth, alignment: .topLeading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(SidebarBackground())
+        .background {
+            SidebarColumnSizer(
+                isCollapsed: isCollapsed,
+                expandedMinimum: Metrics.sidebarWidth,
+                expandedIdeal: Metrics.sidebarWidth,
+                expandedMaximum: Metrics.sidebarWidth
+            )
+            .frame(width: 0, height: 0)
+        }
         .background {
             // ⌘K focuses the search field, wherever focus is.
             Button("Search") { searchFocused = true }
@@ -95,18 +262,21 @@ struct SidebarView: View {
         return Button { model.navFilter = f; model.projectFilter = nil } label: {
             HStack(spacing: 12) {
                 Lucide(symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted).frame(width: 20)
-                Text(verbatim: title).font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular)).foregroundStyle(Theme.ink)
-                Spacer(minLength: 4)
-                if f == .needsYou, n > 0 {
+                if !isCollapsed {
+                    Text(verbatim: title).font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular)).foregroundStyle(Theme.ink)
+                    Spacer(minLength: 4)
+                }
+                if !isCollapsed, f == .needsYou, n > 0 {
                     HStack(spacing: 6) {
                         Circle().fill(Theme.needsYou).frame(width: 7, height: 7)
                         Text("\(n)").font(.system(size: 13)).monospacedDigit().foregroundStyle(Theme.ink)
                     }
-                } else if n > 0 {
+                } else if !isCollapsed, n > 0 {
                     Text("\(n)").font(.system(size: 13)).monospacedDigit().foregroundStyle(Theme.muted)
                 }
             }
-            .padding(.horizontal, 12).frame(height: Metrics.navRow)
+            .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+            .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow)
             .background(RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous).fill(selected ? Color.white.opacity(0.10) : .clear))
             .contentShape(Rectangle())
         }
@@ -114,54 +284,32 @@ struct SidebarView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(count(for: f).map { "\(title), \($0)" } ?? title)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .help(title)
     }
 
     /// Duck and wordmark at the left, Quick message (compose) at the right, centred below the traffic lights.
     private var brand: some View {
-        HStack(spacing: 8) {
-            DuckMark(width: 28)
-            Text("Squeak").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.ink)
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 0)
-            Button { QuickComposerController.shared.show() } label: {
-                Lucide(.squarePen, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Quick message").help("Quick message")
-        }
-        .padding(.horizontal, Metrics.sidebarInset + 4).padding(.top, 36)
+        SidebarBrandHeader(isCollapsed: $isCollapsed)
     }
 
     private var searchField: some View {
         @Bindable var model = model
-        return HStack(spacing: 8) {
-            Lucide(.search, size: Metrics.iconSmall, color: Theme.muted)
-            TextField("Search sessions…", text: $model.query)
-                .textFieldStyle(.plain).font(.system(size: Metrics.sidebarText)).focused($searchFocused)
-            if model.query.isEmpty {
-                Text("\u{2318} K").font(.system(size: 11)).foregroundStyle(Theme.subtle).accessibilityHidden(true)
-            } else {
-                Button { model.query = "" } label: {
-                    Lucide(.x, size: 12, color: Theme.muted)
-                }
-                .buttonStyle(.plain).accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 10).frame(height: Metrics.sidebarField)
-        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous).strokeBorder(searchFocused ? Theme.lineStrong : Theme.line))
+        return SidebarSearchField(prompt: "Search sessions…", text: $model.query, focused: $searchFocused, accessibilityLabel: "Search sessions")
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: Metrics.sidebarRowGap) {
+        VStack(alignment: isCollapsed ? .center : .leading, spacing: Metrics.sidebarRowGap) {
             Button { showConnection.toggle() } label: {
                 HStack(spacing: 12) {
                     Circle().strokeBorder(model.homeConnectionColor, lineWidth: 2.5).frame(width: 16, height: 16).frame(width: 20)
-                    Text(model.homeConnectionText).font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink).lineLimit(1)
-                    Spacer(minLength: 0)
-                    Lucide(.chevronRight, size: Metrics.iconSmall, color: Theme.muted)
+                    if !isCollapsed {
+                        Text(model.homeConnectionText).font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Spacer(minLength: 0)
+                        Lucide(.chevronRight, size: Metrics.iconSmall, color: Theme.muted)
+                    }
                 }
-                .padding(.horizontal, 12).frame(height: Metrics.navRow).contentShape(Rectangle())
+                .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+                .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Connection: \(model.homeConnectionText)")
@@ -169,14 +317,14 @@ struct SidebarView: View {
             Button { model.openSettings() } label: {
                 HStack(spacing: 12) {
                     Lucide(.settings, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 20)
-                    Text("Settings").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink)
-                    Spacer(minLength: 0)
+                    if !isCollapsed { Text("Settings").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink); Spacer(minLength: 0) }
                 }
-                .padding(.horizontal, 12).frame(height: Metrics.navRow).contentShape(Rectangle())
+                .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+                .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, Metrics.sidebarInset).padding(.vertical, 12)
+        .padding(.horizontal, isCollapsed ? 8 : Metrics.sidebarInset).padding(.vertical, 12)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, Metrics.sidebarInset) }
     }
 }

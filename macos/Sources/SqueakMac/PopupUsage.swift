@@ -7,9 +7,10 @@ import SwiftUI
 struct PopupUsageHeader: View {
     @Environment(AppModel.self) private var model
     let nav = PopupNav.shared
+    var namespace: Namespace.ID
 
     var body: some View {
-        PopupTabHeader(selected: .usage) {
+        PopupTabHeader(selected: .usage, namespace: namespace) {
             Text("Usage").font(.popup(16, .bold)).foregroundStyle(Theme.ink)
         } trailing: {
             TimelineView(.periodic(from: .now, by: 5)) { ctx in

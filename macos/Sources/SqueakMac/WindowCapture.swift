@@ -3,6 +3,97 @@ import SqueakMacCore
 import SwiftUI
 
 extension CaptureRunner {
+    /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=sidebar: capture collapsed and expanded
+    /// main and Settings sidebars, exercising ⌘\\ between the states.
+    static func runSidebarDemo(prefix: String, model: AppModel) async {
+        let win = NSWindow(
+            contentRect: NSRect(x: 60, y: 60, width: 1200, height: 800),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false
+        )
+        win.titlebarAppearsTransparent = true
+        win.titleVisibility = .hidden
+        win.contentView = NSHostingView(rootView: ConversationView(initiallySidebarCollapsed: true).environment(model))
+        NSApp.activate(ignoringOtherApps: true)
+        win.makeKeyAndOrderFront(nil)
+        model.select(SessionKey(provider: "conductor", hostSessionId: "demo-1"))
+        try? await Task.sleep(for: .milliseconds(1800))
+        if let content = win.contentView { logSidebarWidth(in: content, state: "collapsed") }
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-main.png")
+
+        await sendCommandBackslash(to: win)
+        await waitForSidebarWidth(220, in: win)
+        if let content = win.contentView { logSidebarWidth(in: content, state: "expanded") }
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-main-expanded.png")
+
+        model.openSettingsInPlace(.general)
+        await waitForSidebarWidth(216, in: win)
+        if let content = win.contentView { logSidebarWidth(in: content, state: "Settings expanded") }
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-settings.png")
+        await sendCommandBackslash(to: win)
+        await waitForSidebarWidth(64, in: win)
+        if let content = win.contentView { logSidebarWidth(in: content, state: "Settings collapsed") }
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-settings-collapsed.png")
+        win.orderOut(nil)
+        NSApp.terminate(nil)
+    }
+
+    private static func sendCommandBackslash(to window: NSWindow) async {
+        NSApp.activate(ignoringOtherApps: true)
+        try? await Task.sleep(for: .milliseconds(200))
+        window.makeKeyAndOrderFront(nil)
+        guard let down = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, characters: "\\", charactersIgnoringModifiers: "\\", isARepeat: false, keyCode: 42
+        ), let up = NSEvent.keyEvent(
+            with: .keyUp, location: .zero, modifierFlags: .command,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, characters: "\\", charactersIgnoringModifiers: "\\", isARepeat: false, keyCode: 42
+        ) else { return }
+        NSApp.sendEvent(down)
+        NSApp.sendEvent(up)
+        try? await Task.sleep(for: .milliseconds(200))
+    }
+
+    private static func waitForSidebarWidth(_ expected: CGFloat, in window: NSWindow) async {
+        for _ in 0..<30 {
+            if let content = window.contentView,
+               abs((sidebarWidth(in: content) ?? -1) - expected) < 1 { return }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    private static func logSidebarWidth(in view: NSView, state: String) {
+        guard let width = sidebarWidth(in: view), let split = findSplitView(in: view) else { return }
+        var responder: NSResponder? = split
+        var controller: NSSplitViewController?
+        while let current = responder {
+            if let value = current as? NSSplitViewController { controller = value; break }
+            responder = current.nextResponder
+        }
+        guard let item = controller?.splitViewItems.first(where: { $0.behavior == .sidebar }) else { return }
+        print("CaptureRunner sidebar (\(state)): \(width)pt, constraints \(item.minimumThickness)...\(item.maximumThickness)pt")
+    }
+
+    private static func sidebarWidth(in view: NSView) -> CGFloat? {
+        guard let split = findSplitView(in: view) else { return nil }
+        var responder: NSResponder? = split
+        var controller: NSSplitViewController?
+        while let current = responder {
+            if let value = current as? NSSplitViewController { controller = value; break }
+            responder = current.nextResponder
+        }
+        return controller?.splitViewItems.first(where: { $0.behavior == .sidebar })?.viewController.view.frame.width
+    }
+
+    private static func findSplitView(in view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView { return split }
+        for child in view.subviews {
+            if let split = findSplitView(in: child) { return split }
+        }
+        return nil
+    }
+
     /// SQUEAK_MAC_DEMO=1: the conversation window from DemoData at 1100x720.
     /// Writes <prefix>-window.png (a chat that needs you) and <prefix>-window-working.png
     /// (a working chat with the "What it's doing" pill). Never sends: the model refuses in demo mode.

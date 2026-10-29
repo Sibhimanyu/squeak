@@ -4,8 +4,9 @@ import SwiftUI
 
 /// The Controls tab's header.
 struct PopupControlsHeader: View {
+    var namespace: Namespace.ID
     var body: some View {
-        PopupTabHeader(selected: .controls) {
+        PopupTabHeader(selected: .controls, namespace: namespace) {
             Text("Controls").font(.popup(16, .bold)).foregroundStyle(Theme.ink)
         } trailing: { EmptyView() }
     }
@@ -19,6 +20,7 @@ struct PopupControlsBand: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            if !model.demoMode && !model.captureMode { FloatingDuckCard() }
             if model.awakeOffered { PopupAwakeCard() }
             PopupNotifyCard()
             PopupMacCard()
@@ -34,6 +36,28 @@ struct PopupControlsBand: View {
         .padding(.bottom, 16)
         .task { await model.readAwake() }
         .task { if !model.demoMode { await model.channels.refresh() } }
+    }
+}
+
+private struct FloatingDuckCard: View {
+    private let duck = FloatingDuckController.shared
+    private let hotKeys = HotKeyCenter.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PopupIconRow(icon: AnyView(Text("🦆").font(.system(size: 16))), title: "Floating duck") {
+                PopupSwitch(label: "Show floating duck", isOn: Binding(
+                    get: { duck.isEnabled }, set: { duck.setEnabled($0) }
+                ))
+            }
+            Text("Drag it between Spaces. Press ⌃⌥ H to show or hide it.")
+                .font(.popup(12)).foregroundStyle(Theme.muted).padding(.leading, 36)
+            if let error = hotKeys.duckShortcutError {
+                Text(error).font(.popup(12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.leading, 36)
+            }
+        }
+        .padding(14)
+        .popupCard(radius: 13)
     }
 }
 

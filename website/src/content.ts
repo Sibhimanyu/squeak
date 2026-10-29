@@ -17,13 +17,13 @@ const moreProjects = "https://sibhimanyu.github.io/";
 const content = {
   site: {
     lang: "en",
-    title: "Squeak: your agents, in view",
+    title: "Squeak: your Conductor chats, in view",
     description:
-      "Squeak watches every Claude Code and Codex session on your Mac, shows which one needs you, and lets you answer from the Mac, an iPhone or Telegram. A menu-bar duck, a Mac app and an iPhone app.",
+      "Squeak brings Conductor chats to a Mac attention inbox, with replies in Conductor, iPhone, web browser, Telegram or Zoho Cliq. It can also watch Claude Code and Codex sessions, with replies supported in Apple's Terminal.",
     canonical,
-    ogTitle: "Squeak: your agents, in view",
+    ogTitle: "Squeak: your Conductor chats, in view",
     ogDescription:
-      "Every Claude Code and Codex session on your Mac, ranked by what needs you. Answer from your Mac, your iPhone or Telegram.",
+      "Your Conductor chats, ranked by what needs you. Reply from your Mac, iPhone, a web browser, Telegram or Zoho Cliq.",
     ogImage: `${canonical}assets/og.png`,
     ogImageAlt: "Squeak: Your agents. In view. A yellow rubber duck beside the headline.",
     themeColor: "#F8F7F3",
@@ -42,24 +42,26 @@ const content = {
     skip: "Skip to content",
     homeLabel: "Squeak home",
     mainLabel: "Main",
-    how: "How it works",
-    how_href: "#moment",
-    mac: "Mac + iPhone",
-    mac_href: "#mac",
+    calls: "Phone calls",
+    calls_href: "#calls",
+    conductor: "Conductor",
+    conductor_href: "#conductor",
+    mac: "Mobile + web",
+    mac_href: "#away",
     download: "Download",
     download_href: "#install",
     logoAlt: "Squeak",
   },
 
   hero: {
-    kicker: "Your local agent desk",
+    kicker: "Your Conductor attention inbox",
     line1: "Your agents.",
     line2: "In view.",
-    lede: "Squeak watches every Claude Code and Codex session on your Mac, shows which one needs you, and lets you answer from the Mac, your iPhone or Telegram.",
+    lede: "See every Conductor chat in one attention-first inbox. Read the question, reply or steer the work, then keep up from your Mac, iPhone, Squeak for Web, Telegram or Zoho Cliq.",
     cta: "Download for Mac",
     ctaHref: download,
-    secondary: "See an example",
-    secondaryHref: "#moment",
+    secondary: "Explore Conductor features",
+    secondaryHref: "#conductor",
     meta: `Version ${version} · ${minMacOS} · Apple silicon · Free`,
     duckAlt:
       "Squeak's mascot, a yellow rubber duck with an orange bill, looking to the right.",
@@ -72,6 +74,22 @@ const content = {
     signalNote: "needs your input",
     stageDescription:
       "Decoration: a pile of Squeak's rubber duck mascot drops into view and settles beside an example Squeak window. Moving a pointer over it nudges the ducks.",
+  },
+
+  conductor: {
+    kicker: "01 / Made for Conductor",
+    heading: "Your Conductor chats, with you wherever you work.",
+    lede: "Squeak is an independent companion to Conductor. It reads your chats into one attention-first inbox, puts questions and approvals up front, and sends your reply back to the right conversation.",
+    mark: "Built for Conductor",
+    markAlt: "Conductor",
+    markHref: "https://www.conductor.build/",
+    p1: { title: "See the whole queue", body: "Find chats that need you, are working, finished or hit an error, with the latest activity and message." },
+    p2: { title: "Reply in the same chat", body: "Answer a choice or write your own message. Squeak checks that the reply reached Conductor before showing it as sent." },
+    p3: { title: "Start and steer work", body: "Create a Conductor chat, queue a message for later, or steer a message into a running turn. Model and thinking controls stay in sync with Conductor." },
+    thanks: "With personal thanks to",
+    person: "Charlie Holtz",
+    personHref: "https://x.com/charlieholtz",
+    thanksBody: "for building Conductor. Squeak is made independently by Sibhimanyu.",
   },
 
   sessions: {
@@ -104,88 +122,10 @@ const content = {
     },
   },
 
-  moment: {
-    kicker: "01 / The moment",
-    heading: "One needs you. You know which.",
-    intro:
-      "An illustrative example, one step at a time. The sessions, the question and the choice are made up, and scrolling never sends anything.",
-    stateLabel: "Example",
-    stepsLabel: "The example in four steps",
-    replay: "Replay example",
-    statusDone: "3 working · 1 done",
-    panel: {
-      listTitle: "Sessions",
-      detailLabel: "Session detail",
-      stepsTitle: "What it's doing",
-    },
-    beats: {
-      working: {
-        step: "01",
-        label: "Working",
-        title: "Four sessions are working.",
-        body: "Nothing is waiting on you, so the duck gets on with its own work too.",
-        status: "4 working",
-        detail: {
-          meta: "storefront · payment-retries",
-          state: "claude · working",
-          step1: "Read retry.ts",
-          step2: "Editing 3 files",
-          step3: "Run npm test",
-        },
-      },
-      needs: {
-        step: "02",
-        label: "Needs you",
-        title: "One stops and asks.",
-        body: "storefront · payment-retries needs an answer. Squeak moves it to the top and the duck's eyes go wide.",
-        status: "1 needs you",
-        detail: {
-          meta: "storefront · payment-retries",
-          state: "claude · needs an answer",
-          message:
-            "I found the retry path and added an idempotency check. One decision needs your input.",
-        },
-      },
-      choose: {
-        step: "03",
-        label: "A person chooses",
-        title: "You read the question and choose.",
-        body: "Claude asks how temporary failures should be retried. Option A is marked as recommended but is never chosen for you. In this example, a person picks A.",
-        status: "1 needs you",
-        detail: {
-          meta: "storefront · payment-retries",
-          state: "claude · needs an answer",
-          question: "How should temporary failures be retried?",
-          optionA: "Retry automatically",
-          optionADetail: "Up to 3 attempts with exponential backoff.",
-          optionB: "Let the customer retry",
-          optionBDetail: "Show a clear error and keep checkout available.",
-          recommended: "recommended",
-          chosenTag: "A person chooses A",
-          demoNote: "Example only. Nothing is sent.",
-        },
-      },
-      sent: {
-        step: "04",
-        label: "Confirmed",
-        title: "Confirmed in the chat, then back to work.",
-        body: "Squeak checks that the reply landed before it says so. The agent carries on, and the duck goes back to work.",
-        status: "4 working",
-        detail: {
-          meta: "storefront · payment-retries",
-          state: "claude · working",
-          receipt: "Reply A confirmed in the Conductor chat",
-          step1: "Applying the retry policy",
-          step2: "Run npm test -- retry",
-        },
-      },
-    },
-  },
-
   mac: {
     kicker: "02 / Squeak for Mac",
     heading: "The whole picture. One window.",
-    lede: "Every session on your Mac, grouped by what it needs from you.",
+    lede: "See sessions grouped by what they need from you: questions and approvals, finished work, active work, errors and idle sessions. Squeak also watches Claude Code and Codex sessions in supported local apps.",
     viewFull: "View full screenshot",
     viewFullHref: "./assets/mac-decision.webp",
     imageAlt:
@@ -196,51 +136,24 @@ const content = {
     c1: {
       n: "1",
       title: "What needs you comes first",
-      body: "Grouped by need, not by which app they run in.",
+      body: "Sessions are grouped by state, across Conductor and supported local agent sessions.",
     },
     c2: {
       n: "2",
       title: "The agent's own words",
-      body: "Its last message in full, one button per option. The recommended one is marked, never pre-selected.",
+      body: "The latest message and parsed choices. A recommendation is marked, never pre-selected.",
     },
     c3: {
       n: "3",
       title: "A reply that lands",
-      body: "Typed into that chat's own window, then checked before Squeak says it went.",
-    },
-  },
-
-  duck: {
-    kicker: "03 / The duck",
-    heading: "Quiet until it matters.",
-    lede: "A rubber duck sits in a corner of your screen and in the menu bar. Click it for the list.",
-    moodsLabel: "The duck's four moods",
-    working: {
-      name: "Working",
-      body: "A quick bob while any agent is mid-turn.",
-      alt: "The duck with a focused look, mid-bob.",
-    },
-    needs: {
-      name: "Needs you",
-      body: "Wide eyes and a red badge. Something is blocked until you act.",
-      alt: "The duck with wide eyes.",
-    },
-    done: {
-      name: "Done",
-      body: "Celebrates for a short while after a turn really ends.",
-      alt: "The duck mid-hop, celebrating.",
-    },
-    asleep: {
-      name: "Asleep",
-      body: "Nothing running. The duck rests.",
-      alt: "The duck asleep with closed eyes.",
+      body: "Squeak sends to the correct Conductor chat, then checks delivery before reporting success.",
     },
   },
 
   away: {
-    kicker: "04 / Away from the desk",
+    kicker: "03 / Away from the desk",
     heading: "Step away. Stay in the loop.",
-    lede: "Squeak for iPhone shows the same list and lets you reply. Telegram gets a short card with a button per option.",
+    lede: "Pair an iPhone or use Squeak for Web in any browser to see your chats and reply while away. Telegram and Zoho Cliq can send cards and take replies too. Replies travel through Squeak on your Mac, which needs to be awake and running.",
     phoneAlt:
       "Squeak for iPhone showing the session squeak · session-hub at work. A What it's doing list shows the latest five of seventeen steps, with a message box at the bottom.",
     phoneCaption: "A working turn, on the phone.",
@@ -259,25 +172,42 @@ const content = {
     },
     p1: {
       title: "Paired on your Mac",
-      body: "A phone joins only after you approve it on the Mac.",
-    },
-    p3: {
-      title: "Quiet by default",
-      body: "Blocked agents push. A finish pushes only for a Conductor chat.",
+      body: "A phone joins only after you approve it on the Mac. The iPhone app syncs through a Firebase project you create; free SideStore installs do not receive push notifications.",
     },
     requirement: "Replies go through your Mac, so it needs to be on with Squeak running.",
     link: "Set up the iPhone app",
     linkHref: iphoneSetup,
-    linkNote: "Installs through SideStore.",
+    linkNote: "Installs through SideStore, or",
+    webLink: "open Squeak for Web—no install needed.",
+    webHref: "https://squeak-mac.web.app/",
+  },
+
+  calls: {
+    kicker: "Optional / Phone calls",
+    heading: "A call when a chat is waiting. A way back in, too.",
+    lede: "Connect Squeak to a SIP phone system when you want an audible prompt away from your screen. Calling is optional and requires a configured PBX connection.",
+    outbound: {
+      label: "Squeak calls you",
+      title: "Hear the question. Answer by keypad.",
+      body: "For a waiting question or approval, Squeak can call your configured extension, read the prompt aloud and accept a keypad choice. An approval itself still needs your confirmation in the Mac or iPhone app.",
+    },
+    inbound: {
+      label: "You call Squeak",
+      title: "Dictate a message into a chat.",
+      body: "Call Squeak’s extension, choose an available chat and dictate a message. Your Mac transcribes the recording locally, reads it back for confirmation, then sends it if the chat can still take a message.",
+    },
+    setup: "Setup options: a direct SIP extension on your network or VPN, or a Home Assistant voice gateway for a Mac and PBX on separate networks. Configure SIP credentials and extensions yourself. Answering a call requires a PIN; calling in to dictate also needs Whisper and ffmpeg on the Mac.",
+    docs: "Calling setup and requirements",
+    docsHref: "https://github.com/Sibhimanyu/squeak/blob/main/docs/voice.md",
   },
 
   trust: {
-    kicker: "05 / Trust and compatibility",
+    kicker: "05 / Supported sessions and privacy",
     heading: "Your Mac stays in charge.",
-    lede: "Answering an agent means pressing keys in another app's window, so Squeak proves each step before it types.",
+    lede: "Squeak can reply to Conductor chats through its relay. For Claude Code or Codex in Apple's Terminal, it types only when the right agent tab is active and ready. Other integrations are for monitoring.",
     t1: {
-      title: "Only approved phones",
-      body: "A phone joins after you approve it on the Mac.",
+      title: "Only approved devices",
+      body: "A phone or browser joins after you approve it on the Mac.",
     },
     t2: {
       title: "The right session",
@@ -288,18 +218,18 @@ const content = {
       body: "A reply is confirmed in the chat, and never sent twice.",
     },
     more: {
-      summary: "How each check works, and what Squeak can answer",
+      summary: "How reply checks work and which sessions support replies",
       d1: {
         title: "The Mac trusts a key, not a server",
-        body: "Each phone reply is signed by the paired phone, expires after ten minutes, and can answer only the chat's current question.",
+        body: "Each paired device signs its replies. They expire after ten minutes and can answer only the chat's current question.",
       },
       d2: {
         title: "The agent must be in front",
-        body: "Squeak reads which chat is on screen from Conductor's own route, never from a tab label. In Terminal, the agent must own the tab and show its own empty prompt, so text never lands in a shell or over your draft.",
+        body: "Squeak identifies the target Conductor chat before sending. In Terminal, the supported Claude Code or Codex process must own the tab and show its empty prompt, so text does not land in a shell or over your draft.",
       },
       d3: {
         title: "Confirmed, never retyped",
-        body: "A reply that may have gone is checked against the chat's history. If Squeak cannot confirm it, it says so.",
+        body: "A reply that may have gone is checked against the chat history. If Squeak cannot confirm delivery, it says so instead of retrying blindly.",
       },
     },
     table: {
@@ -342,7 +272,7 @@ const content = {
 
   install: {
     kicker: "06 / Install",
-    heading: "Keep your agents in view.",
+    heading: "Keep Conductor close.",
     pondDescription:
       "Decoration: a small pile of Squeak's rubber duck mascot pours into a box and settles. Moving a pointer over it nudges the ducks.",
     lede: `Squeak ${version} for Mac, as a disk image. It is free and ad-hoc signed rather than notarized, so macOS asks once before the first launch. After that, Squeak updates itself.`,
@@ -367,7 +297,7 @@ const content = {
     s3: {
       n: "3",
       title: "Find it in the menu bar",
-      body: "Squeak lists your Conductor chats on its own. Answering them also needs the Squeak service running on the Mac.",
+      body: "Squeak connects to Conductor and lists your chats. Replies from any device go through the Squeak service on your Mac, which must be awake and running.",
     },
   },
 
@@ -379,6 +309,8 @@ const content = {
     moreHref: moreProjects,
     releases: "Releases",
     releasesHref: releases,
+    web: "Squeak for Web",
+    webHref: "https://squeak-mac.web.app/",
     note: "Sessions shown on this page are examples.",
   },
 };

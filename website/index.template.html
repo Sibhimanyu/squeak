@@ -30,7 +30,6 @@
 <script src="./assets/vendor/gsap.min.js" defer></script>
 <script src="./assets/vendor/ScrollTrigger.min.js" defer></script>
 <script src="./assets/vendor/SplitText.min.js" defer></script>
-<script src="./assets/vendor/Flip.min.js" defer></script>
 <script src="./assets/vendor/lenis.min.js" defer></script>
 <script src="./webgl.js" defer></script>
 <script src="./ducks.js" defer></script>
@@ -78,7 +77,8 @@
       <nav class="nav" aria-label="{{nav.mainLabel}}">
         <a class="nav__brand" href="./" aria-label="{{nav.homeLabel}}"><img src="./assets/logo-paper.svg" width="100" height="30" alt="{{nav.logoAlt}}"></a>
         <ul class="nav__links">
-          <li><a href="{{nav.how_href}}">{{nav.how}}</a></li>
+          <li><a href="{{nav.conductor_href}}">{{nav.conductor}}</a></li>
+          <li><a href="{{nav.calls_href}}">{{nav.calls}}</a></li>
           <li><a href="{{nav.mac_href}}">{{nav.mac}}</a></li>
           <li><a class="nav__cta" href="{{nav.download_href}}" data-magnet>{{nav.download}}<span class="nav__dot" aria-hidden="true"></span></a></li>
         </ul>
@@ -116,108 +116,28 @@
 
 <main id="content">
 
-<!-- 1. The moment: a pinned, scrubbed story. The copy is real text; the demo is a picture of it. -->
-<section class="moment" id="moment" aria-labelledby="moment-h">
-  <div class="wrap moment__head">
-    <p class="kicker">{{moment.kicker}}</p>
-    <h2 id="moment-h">{{moment.heading}}</h2>
-    <p class="moment__intro">{{moment.intro}}</p>
-  </div>
-  <div class="moment__pin" data-moment>
-    <div class="wrap moment__inner">
-      <ol class="beats" aria-label="{{moment.stepsLabel}}">
-        <li class="beat" data-beat="working">
-          <p class="beat__step"><span>{{moment.beats.working.step}}</span>{{moment.beats.working.label}}</p>
-          <h3>{{moment.beats.working.title}}</h3>
-          <p>{{moment.beats.working.body}}</p>
-        </li>
-        <li class="beat" data-beat="needs">
-          <p class="beat__step"><span>{{moment.beats.needs.step}}</span>{{moment.beats.needs.label}}</p>
-          <h3>{{moment.beats.needs.title}}</h3>
-          <p>{{moment.beats.needs.body}}</p>
-        </li>
-        <li class="beat" data-beat="choose">
-          <p class="beat__step"><span>{{moment.beats.choose.step}}</span>{{moment.beats.choose.label}}</p>
-          <h3>{{moment.beats.choose.title}}</h3>
-          <p>{{moment.beats.choose.body}}</p>
-        </li>
-        <li class="beat" data-beat="sent">
-          <p class="beat__step"><span>{{moment.beats.sent.step}}</span>{{moment.beats.sent.label}}</p>
-          <h3>{{moment.beats.sent.title}}</h3>
-          <p>{{moment.beats.sent.body}}</p>
-        </li>
-      </ol>
-
-      <div class="demo" data-demo data-mode="needs" aria-hidden="true">
-        <div class="demo__win">
-          <div class="demo__list">
-            <p class="window__title"><span>{{moment.panel.listTitle}}</span><em><span data-s="working">{{moment.beats.working.status}}</span><span data-s="needs">{{moment.beats.needs.status}}</span><span data-s="done">{{moment.statusDone}}</span></em></p>
-            <ul class="demo__rows" data-rows>
-              <li class="row" data-row="payment"><span class="dot"></span><span class="row__text"><b>{{sessions.payment.name}}</b><span data-s="working">{{sessions.payment.working}}</span><span data-s="needs">{{sessions.payment.needs}}</span><span data-s="done">{{sessions.payment.done}}</span></span></li>
-              <li class="row row--working" data-row="atlas"><span class="dot"></span><span class="row__text"><b>{{sessions.atlas.name}}</b><span>{{sessions.atlas.working}}</span></span></li>
-              <li class="row row--working" data-row="compass"><span class="dot"></span><span class="row__text"><b>{{sessions.compass.name}}</b><span>{{sessions.compass.working}}</span></span></li>
-              <li class="row row--working" data-row="squeak"><span class="dot"></span><span class="row__text"><b>{{sessions.squeak.name}}</b><span>{{sessions.squeak.working}}</span></span></li>
-            </ul>
-          </div>
-          <div class="demo__detail">
-            <p class="detail__name">{{sessions.payment.title}}</p>
-            <p class="detail__meta">{{moment.beats.needs.detail.meta}}</p>
-            <p class="detail__state"><span data-s="working">{{moment.beats.working.detail.state}}</span><span data-s="needs">{{moment.beats.needs.detail.state}}</span><span data-s="done">{{sessions.payment.done}}</span></p>
-            <div class="demo__panes">
-              <div class="pane pane--working" data-pane="working">
-                <p class="detail__h">{{moment.panel.stepsTitle}}</p>
-                <ul class="steps">
-                  <li>{{moment.beats.working.detail.step1}}</li>
-                  <li>{{moment.beats.working.detail.step2}}</li>
-                  <li>{{moment.beats.working.detail.step3}}</li>
-                </ul>
-              </div>
-              <div class="pane pane--needs" data-pane="needs">
-                <p class="detail__message">{{moment.beats.needs.detail.message}}</p>
-              </div>
-              <div class="pane pane--sent" data-pane="sent">
-                <p class="detail__receipt"><span class="tick"></span>{{moment.beats.sent.detail.receipt}}</p>
-                <ul class="steps">
-                  <li>{{moment.beats.sent.detail.step1}}</li>
-                  <li>{{moment.beats.sent.detail.step2}}</li>
-                </ul>
-              </div>
-            </div>
-            <div class="card" data-card>
-              <p class="detail__question">{{moment.beats.choose.detail.question}}</p>
-              <div class="option option--chosen" data-opt="a">
-                <span class="option__key">A</span>
-                <span class="option__text"><b>{{moment.beats.choose.detail.optionA}}</b><span>{{moment.beats.choose.detail.optionADetail}}</span></span>
-                <span class="option__tag">{{moment.beats.choose.detail.recommended}}</span>
-              </div>
-              <div class="option" data-opt="b">
-                <span class="option__key">B</span>
-                <span class="option__text"><b>{{moment.beats.choose.detail.optionB}}</b><span>{{moment.beats.choose.detail.optionBDetail}}</span></span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <p class="demo__foot"><span class="chip" data-chip>{{moment.beats.choose.detail.chosenTag}}</span><span>{{moment.beats.choose.detail.demoNote}}</span></p>
-        <img class="demo__duck" data-mood="working" src="./assets/duck-working.webp" width="240" height="240" alt="" loading="lazy">
-        <img class="demo__duck" data-mood="needs" src="./assets/duck-needs_you.webp" width="240" height="240" alt="" loading="lazy">
-        <img class="demo__duck" data-mood="done" src="./assets/duck-celebrating.webp" width="240" height="240" alt="" loading="lazy">
+<section class="conductor" id="conductor" aria-labelledby="conductor-h">
+  <div class="wrap">
+    <header class="conductor__head">
+      <div>
+        <p class="kicker">{{conductor.kicker}}</p>
+        <h2 id="conductor-h">{{conductor.heading}}</h2>
+        <p class="conductor__lede">{{conductor.lede}}</p>
       </div>
-
-      <div class="rail" aria-hidden="true">
-        <span class="rail__track"><span class="rail__fill"></span></span>
-        <ol class="rail__steps">
-          <li class="rail__step"><span>{{moment.beats.working.step}}</span><i>{{moment.beats.working.label}}</i></li>
-          <li class="rail__step"><span>{{moment.beats.needs.step}}</span><i>{{moment.beats.needs.label}}</i></li>
-          <li class="rail__step"><span>{{moment.beats.choose.step}}</span><i>{{moment.beats.choose.label}}</i></li>
-          <li class="rail__step"><span>{{moment.beats.sent.step}}</span><i>{{moment.beats.sent.label}}</i></li>
-        </ol>
-      </div>
-      <button class="replay" type="button" hidden>{{moment.replay}}</button>
-    </div>
+      <a class="conductor__brand" href="{{conductor.markHref}}" aria-label="{{conductor.mark}} — {{conductor.markHref}}">
+        <img src="./assets/conductor-wordmark-light.webp" width="2400" height="369" alt="{{conductor.markAlt}}" loading="lazy">
+      </a>
+    </header>
+    <ol class="conductor__points">
+      <li><span>01</span><h3>{{conductor.p1.title}}</h3><p>{{conductor.p1.body}}</p></li>
+      <li><span>02</span><h3>{{conductor.p2.title}}</h3><p>{{conductor.p2.body}}</p></li>
+      <li><span>03</span><h3>{{conductor.p3.title}}</h3><p>{{conductor.p3.body}}</p></li>
+    </ol>
+    <p class="conductor__thanks">{{conductor.thanks}} <a href="{{conductor.personHref}}">{{conductor.person}}</a> {{conductor.thanksBody}}</p>
   </div>
 </section>
 
-<!-- 2. The Mac app: a window that tilts flat as you arrive -->
+<!-- The Mac app: a window that tilts flat as you arrive -->
 <section class="section mac" id="mac" aria-labelledby="mac-h">
   <div class="wrap">
     <header class="section__head">
@@ -247,26 +167,7 @@
   </div>
 </section>
 
-<!-- 3. The duck: a strip you scroll through, each mood moving when it is centred -->
-<section class="duck" id="duck" aria-labelledby="duck-h">
-  <div class="duck__pin" data-duckscene>
-    <div class="wrap duck__head">
-      <p class="kicker">{{duck.kicker}}</p>
-      <h2 id="duck-h">{{duck.heading}}</h2>
-      <p class="section__lede">{{duck.lede}}</p>
-    </div>
-    <div class="duck__view">
-      <ul class="moods" aria-label="{{duck.moodsLabel}}" data-track>
-        <li class="mood mood--asleep" data-mood="asleep"><img src="./assets/duck-asleep.webp" width="240" height="240" alt="{{duck.asleep.alt}}" loading="lazy"><div class="mood__text"><h3>{{duck.asleep.name}}</h3><p>{{duck.asleep.body}}</p></div></li>
-        <li class="mood mood--working" data-mood="working"><img src="./assets/duck-working.webp" width="240" height="240" alt="{{duck.working.alt}}" loading="lazy"><div class="mood__text"><h3>{{duck.working.name}}</h3><p>{{duck.working.body}}</p></div></li>
-        <li class="mood mood--needs" data-mood="needs"><img src="./assets/duck-needs_you.webp" width="240" height="240" alt="{{duck.needs.alt}}" loading="lazy"><div class="mood__text"><h3>{{duck.needs.name}}</h3><p>{{duck.needs.body}}</p></div></li>
-        <li class="mood mood--done" data-mood="done"><img src="./assets/duck-celebrating.webp" width="240" height="240" alt="{{duck.done.alt}}" loading="lazy"><div class="mood__text"><h3>{{duck.done.name}}</h3><p>{{duck.done.body}}</p></div></li>
-      </ul>
-    </div>
-  </div>
-</section>
-
-<!-- 4. Away from the desk: cards that stack and settle -->
+<!-- Away from the desk: cards that stack and settle -->
 <section class="away" id="away" aria-labelledby="away-h">
   <div class="away__pin" data-away>
     <div class="wrap away__grid">
@@ -302,12 +203,27 @@
       <div class="away__more">
         <ul class="points">
           <li data-point><h3>{{away.p1.title}}</h3><p>{{away.p1.body}}</p></li>
-          <li data-point><h3>{{away.p3.title}}</h3><p>{{away.p3.body}}</p></li>
         </ul>
         <p class="away__req" data-point>{{away.requirement}}</p>
-        <p class="away__link" data-point><a class="textlink" href="{{away.linkHref}}">{{away.link}}</a> <span>{{away.linkNote}}</span></p>
+      <p class="away__link" data-point><a class="textlink" href="{{away.linkHref}}">{{away.link}}</a> <span>{{away.linkNote}}</span><a class="textlink" href="{{away.webHref}}">{{away.webLink}}</a></p>
       </div>
     </div>
+  </div>
+</section>
+
+<section class="calls" id="calls" aria-labelledby="calls-h">
+  <div class="wrap calls__grid">
+    <header class="calls__head">
+      <p class="kicker">{{calls.kicker}}</p>
+      <h2 id="calls-h">{{calls.heading}}</h2>
+      <p>{{calls.lede}}</p>
+    </header>
+    <div class="calls__cards">
+      <article><span class="calls__label">{{calls.outbound.label}}</span><h3>{{calls.outbound.title}}</h3><p>{{calls.outbound.body}}</p></article>
+      <article><span class="calls__label">{{calls.inbound.label}}</span><h3>{{calls.inbound.title}}</h3><p>{{calls.inbound.body}}</p></article>
+    </div>
+    <p class="calls__setup">{{calls.setup}}</p>
+    <p class="calls__docs"><a class="textlink" href="{{calls.docsHref}}">{{calls.docs}}</a></p>
   </div>
 </section>
 
@@ -396,6 +312,7 @@
       <li><a href="{{footer.moreHref}}">{{footer.more}}</a></li>
       <li><a href="{{footer.releasesHref}}">{{footer.releases}}</a></li>
       <li><a href="{{install.iphoneHref}}">{{install.iphone}}</a></li>
+      <li><a href="{{footer.webHref}}">{{footer.web}}</a></li>
     </ul>
     <p>{{footer.note}}</p>
   </div>

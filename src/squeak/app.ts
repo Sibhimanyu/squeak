@@ -1124,6 +1124,10 @@ export class SqueakApp {
   }
 
   private async checkAwakeSafety(): Promise<void> {
+    // Home's Mac status strip shows the current energy mode from `/state`.
+    // Refresh it with the existing minute power check so a change made in
+    // macOS (outside Squeak) does not leave the strip showing an old mode.
+    void this.energy.refresh();
     const before = JSON.stringify(this.power && phonePower(this.power));
     this.power = await readPower();
     if (JSON.stringify(phonePower(this.power)) !== before) this.remote?.changed();
