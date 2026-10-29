@@ -181,7 +181,10 @@ enum ChatQueue {
         }
         let known = Set(cards.map(\.id))
         cards += mine.filter { !known.contains($0.messageId) }.map {
-            Card(id: $0.messageId, text: $0.text, pending: live?.queue != nil || $0.status == .sending, actionable: false)
+            // When the Mac cannot list Conductor's queue (its relay is reconnecting, a read ran long) a message the
+            // phone itself queued can still be steered or deleted by its id: the Mac answers why if it cannot.
+            Card(id: $0.messageId, text: $0.text, pending: live?.queue != nil || $0.status == .sending,
+                 actionable: live?.queue == nil && $0.status != .sending)
         }
         return cards.filter { !hidden.contains($0.id) }
     }

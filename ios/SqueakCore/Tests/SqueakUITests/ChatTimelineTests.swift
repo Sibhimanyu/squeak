@@ -255,8 +255,12 @@ final class ChatTimelineTests: XCTestCase {
         let q = queuedSend()
         XCTAssertTrue(ChatQueue.isQueued(q, session: session("working", turn: "t1"), live: nil, now: now))
         XCTAssertFalse(ChatQueue.isQueued(q, session: session("finished", turn: "t2", message: "Done"), live: nil, now: now))
+        // It can still be steered or deleted by its own id: the Mac says why if its relay cannot.
         let card = ChatQueue.cards(session: session("working", turn: "t1"), live: nil, sends: [q], now: now).first
-        XCTAssertEqual(card?.actionable, false)
+        XCTAssertEqual(card?.actionable, true)
+        // Not while it is still being sent.
+        let sending = ChatQueue.cards(session: session("working", turn: "t1"), live: nil, sends: [queuedSend(.sending)], now: now).first
+        XCTAssertEqual(sending?.actionable, false)
     }
 
     func testASteerLandsInsideTheTurnAndFoldsWhatCameBefore() {

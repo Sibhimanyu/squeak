@@ -236,12 +236,31 @@ describe("LiveTurnPublisher", () => {
       ]) {
         const t = withQueue(read);
         t.publisher.watch("s1");
-        await vi.advanceTimersByTimeAsync(2_100);
+        await vi.advanceTimersByTimeAsync(4_100);
         const turn = t.docs.get(liveHandle("s1"));
         expect(turn).toBeDefined();
         expect(turn).not.toHaveProperty("queue");
         t.publisher.stop();
       }
+    });
+
+    it("keeps the last queue it read for a while when one read fails, then lets it go", async () => {
+      vi.useFakeTimers();
+      let fail = false;
+      const t = withQueue(async () => {
+        if (fail) throw new Error("relay reconnecting");
+        return [{ id: "q1", text: "keep me", mode: "queue", position: 0 }];
+      });
+      t.publisher.watch("s1");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.docs.get(liveHandle("s1"))!.queue).toHaveLength(1);
+      fail = true;
+      // A step must change for it to write again: the queue survives that write.
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(t.docs.get(liveHandle("s1"))!.queue).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(t.docs.get(liveHandle("s1"))).not.toHaveProperty("queue");
+      t.publisher.stop();
     });
   });
 });

@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.19.8] - 2026-10-29 (iOS)
+
+- Steer now, Edit and Delete stay on a message you queued even when your Mac can't list Conductor's queue for a moment (its relay reconnecting); they say why if the Mac can't act.
+
 ## [1.19.7] - 2026-10-29 (iOS)
 
 - Turn the calling PIN off from Phone calls with Face ID or your passcode: no need to remember the old PIN, and it works while the PIN state is still loading.

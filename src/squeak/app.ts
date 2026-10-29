@@ -22,7 +22,7 @@ import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
 import { preparePhoneMedia } from "../remote/phone-media.js";
 import { channelFilter, NotifySettingsStore, PushCounter, wantsAllFinishes } from "../fleet/notify-settings.js";
-import { HotspotFailover, macHotspotSystem, readHotspotRequest } from "../fleet/hotspot.js";
+import { HOTSPOT_PHONE_RECENT_MS, HotspotFailover, macHotspotSystem, readHotspotRequest } from "../fleet/hotspot.js";
 import {
   FANS_HELPER_PRIVILEGED,
   FANS_SUDOERS_PATH,
@@ -271,9 +271,12 @@ export class SqueakApp {
     this.hotspot = new HotspotFailover({
       settingsPath: path.join(config.supportDir, "hotspot.json"),
       system: macHotspotSystem(config.handsAppPath),
-      // An awake session, or an agent at work: the times a lost connection costs something.
+      // An awake session, an agent at work, or a phone that looked at this Mac lately: the times a lost connection
+      // costs something. A phone that was just here is the one that will want to reach it again.
       wanted: () =>
-        this.awake.active || this.runtime?.monitor.snapshot.active.some((s) => s.state === "working") === true,
+        this.awake.active ||
+        this.runtime?.monitor.snapshot.active.some((s) => s.state === "working") === true ||
+        this.remote?.phoneSeenWithin(HOTSPOT_PHONE_RECENT_MS) === true,
       onChange: () => this.remote?.changed(),
       notify: (text) => this.announce(text),
     });

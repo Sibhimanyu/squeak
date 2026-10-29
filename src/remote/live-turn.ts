@@ -37,7 +37,9 @@ export const HISTORY_CHARS = 2_000;
 export const LIVE_INTERVAL_MS = 1_000;
 export const LIVE_QUEUE_TEXT_CHARS = 2_000;
 /** The relay is loopback; a read slower than this is treated as unreadable so the turn still publishes. */
-const QUEUE_READ_TIMEOUT_MS = 2_000;
+const QUEUE_READ_TIMEOUT_MS = 4_000;
+/** A queue that cannot be read for a moment (the relay reconnecting) keeps showing the last one read this long. */
+const QUEUE_STALE_OK_MS = 30_000;
 
 export interface LiveTurn {
   v: 1;
@@ -195,6 +197,7 @@ export class LiveTurnPublisher {
   private last = "";
   private lastHistory = "";
   private running = false;
+  private lastQueue: { key: string; items: QueueItem[]; at: number } | null = null;
 
   constructor(deps: LiveTurnDependencies) {
     this.deps = deps;
@@ -318,8 +321,9 @@ export class LiveTurnPublisher {
       return null;
     }
     let timer: NodeJS.Timeout | undefined;
+    let items: QueueItem[] | null = null;
     try {
-      return await Promise.race([
+      items = await Promise.race([
         read(key),
         new Promise<null>((resolve) => {
           timer = setTimeout(() => resolve(null), QUEUE_READ_TIMEOUT_MS);
@@ -328,10 +332,18 @@ export class LiveTurnPublisher {
       ]);
     } catch (error) {
       logger.debug("live turn queue read failed", { error: error instanceof Error ? error.message : String(error) });
-      return null;
     } finally {
       clearTimeout(timer);
     }
+    const now = Date.now();
+    if (items) {
+      this.lastQueue = { key, items, at: now };
+      return items;
+    }
+    // One failed read must not take Steer and Delete off the phone's card: keep the last good list for a while.
+    return this.lastQueue && this.lastQueue.key === key && now - this.lastQueue.at < QUEUE_STALE_OK_MS
+      ? this.lastQueue.items
+      : null;
   }
 }
 

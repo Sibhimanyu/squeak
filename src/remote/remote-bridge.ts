@@ -1498,6 +1498,11 @@ export class RemoteBridge {
     return this.now() - this.phoneSeenAt < PRESENCE_WINDOW_MS;
   }
 
+  /** Whether a phone looked at this Mac in the last `ms`: someone who may want to reach it. */
+  phoneSeenWithin(ms: number): boolean {
+    return this.phoneSeenAt > 0 && this.now() - this.phoneSeenAt < ms;
+  }
+
   private channel(config: RemoteConfig, kind: string, id?: string): string {
     return id ? `channels/${config.channelId}/${kind}/${id}` : `channels/${config.channelId}/${kind}`;
   }

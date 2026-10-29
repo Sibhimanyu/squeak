@@ -34,6 +34,8 @@ const execFileAsync = promisify(execFile);
 export const HOTSPOT_KEYCHAIN_SERVICE = "Squeak hotspot";
 /** How often the internet is looked at while failover is armed. */
 export const HOTSPOT_CHECK_MS = 10_000;
+/** A phone that looked at the Mac this recently counts as someone who wants it reachable. */
+export const HOTSPOT_PHONE_RECENT_MS = 15 * 60_000;
 /** Consecutive failed looks before switching: 10–20 seconds offline. */
 export const HOTSPOT_FAILURES_TO_SWITCH = 2;
 /**
@@ -165,6 +167,8 @@ export class HotspotFailover {
   private quietUntil = Number.NEGATIVE_INFINITY;
   /** When the current outage began; null when online. */
   private outageSince: number | null = null;
+  /** Why this outage has not switched, once said, so it is logged once rather than every look. */
+  private skippedFor: string | null = null;
   /**
    * The newest failed automatic try of this outage. Said when the Mac is
    * back online, not when it happens: with no internet, Telegram and Cliq
@@ -267,12 +271,22 @@ export class HotspotFailover {
       return;
     }
     this.failures += 1;
-    if (
-      this.failures >= HOTSPOT_FAILURES_TO_SWITCH &&
-      this.options.wanted() &&
-      this.now() >= this.nextTryAt &&
-      this.now() >= this.quietUntil
-    ) {
+    const ready = this.failures >= HOTSPOT_FAILURES_TO_SWITCH;
+    const wanted = this.options.wanted();
+    // An outage that never switches is a silent failure: say once why, so "it didn't switch" can be answered.
+    if (ready && (!wanted || this.now() < this.quietUntil)) {
+      const why = !wanted
+        ? "nothing needs the Mac (no awake session, no agent working, no phone in the last 15 minutes)"
+        : "a manual switch was made a moment ago";
+      if (this.skippedFor !== why) {
+        this.skippedFor = why;
+        logger.info("hotspot: offline, not switching", {
+          reason: why,
+          offlineSeconds: Math.round((this.now() - (this.outageSince ?? this.now())) / 1000),
+        });
+      }
+    }
+    if (ready && wanted && this.now() >= this.nextTryAt && this.now() >= this.quietUntil) {
       const wait = HOTSPOT_RETRY_BACKOFF_MS[Math.min(this.tries, HOTSPOT_RETRY_BACKOFF_MS.length - 1)]!;
       this.tries += 1;
       this.nextTryAt = this.now() + wait;
@@ -293,6 +307,7 @@ export class HotspotFailover {
   }
 
   private resetOutage(): void {
+    this.skippedFor = null;
     this.outageSince = null;
     this.failedTry = null;
     this.failures = 0;
