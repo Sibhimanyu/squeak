@@ -157,12 +157,16 @@ public struct NotifySettings: Sendable, Equatable, Decodable {
     public var cliq: ChannelNotify?
     public var telegramSetUp = false
     public var cliqSetUp = false
+    /// Cards each channel pushed today (nil from a daemon that does not count).
+    public var pushedToday: [String: Int]?
 
-    public init(telegram: ChannelNotify? = nil, cliq: ChannelNotify? = nil, telegramSetUp: Bool = false, cliqSetUp: Bool = false) {
+    public init(telegram: ChannelNotify? = nil, cliq: ChannelNotify? = nil, telegramSetUp: Bool = false, cliqSetUp: Bool = false,
+                pushedToday: [String: Int]? = nil) {
         self.telegram = telegram; self.cliq = cliq; self.telegramSetUp = telegramSetUp; self.cliqSetUp = cliqSetUp
+        self.pushedToday = pushedToday
     }
 
-    enum CodingKeys: String, CodingKey { case telegram, cliq, channels }
+    enum CodingKeys: String, CodingKey { case telegram, cliq, channels, pushedToday }
     struct Channels: Decodable { var telegram: Bool?; var cliq: Bool? }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -171,7 +175,11 @@ public struct NotifySettings: Sendable, Equatable, Decodable {
         let ch = c.lenient(Channels.self, .channels)
         telegramSetUp = ch?.telegram ?? false
         cliqSetUp = ch?.cliq ?? false
+        pushedToday = c.lenient([String: Int].self, .pushedToday)
     }
+
+    /// The most cards one set-up channel pushed today; 0 when unknown.
+    public var mostPushedToday: Int { shown.compactMap { pushedToday?[$0.rawValue] }.max() ?? 0 }
 
     public subscript(channel: NotifyChannel) -> ChannelNotify? {
         get { channel == .telegram ? telegram : cliq }

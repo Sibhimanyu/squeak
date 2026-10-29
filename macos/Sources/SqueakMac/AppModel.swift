@@ -25,6 +25,10 @@ final class AppModel {
 
     // MARK: Wiring
     let client: DaemonClient
+    /// The after-setup tip in the menu-bar panel (TipsModel.swift).
+    let tips: TipsModel
+    /// A permission the explainer sheet is showing over the conversation window (a tip opened it).
+    var permissionSheet: PermissionKind?
     let broker: Broker
     let cache: EncryptedCache?
     let captureMode: Bool
@@ -140,7 +144,11 @@ final class AppModel {
         let env = ProcessInfo.processInfo.environment
         captureMode = env["SQUEAK_MAC_CAPTURE"] != nil
         demoMode = env["SQUEAK_MAC_DEMO"] == "1"
-        client = DaemonClient.live()
+        let tips = TipsModel(demo: demoMode || captureMode)
+        self.tips = tips
+        var live = DaemonClient.live()
+        live.onReplySignal = { signal in Task { @MainActor in tips.note(signal) } }
+        client = live
         // The capture run never touches the real cache file or its key.
         if captureMode || demoMode {
             cache = nil
@@ -201,6 +209,14 @@ final class AppModel {
         if demoMode { installDemo(); return }
         updater.start(enabled: !captureMode)
         daemon.reconcileAtLaunch()
+        if !captureMode {
+            let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/squeak")
+            let outcome = HandsInstaller.reconcile(
+                bundled: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/Squeak Hands.app"),
+                installed: support.appendingPathComponent("Squeak Hands.app"))
+            if case .installed(let v) = outcome { AppLog.info("Squeak Hands \(v) installed") }
+            if case .failed(let why) = outcome { AppLog.error("Squeak Hands install: \(why)") }
+        }
         Task { [weak self] in await self?.relay.refresh() }
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(4))
@@ -223,6 +239,7 @@ final class AppModel {
         Task { [weak self] in
             while !Task.isCancelled {
                 self?.tokenPresent = self?.client.hasToken ?? true
+                if let self { await tips.refresh(self) }
                 try? await Task.sleep(for: .seconds(3))
             }
         }
@@ -1151,6 +1168,13 @@ final class AppModel {
     func openSettingsInPlace(_ section: SettingsSection) {
         NewChatController.shared.hide()
         settingsSection = section
+    }
+
+    /// Shows the permission explainer in the conversation window (a menu-bar tip's destination).
+    func openPermission(_ kind: PermissionKind) {
+        NewChatController.shared.hide()
+        permissionSheet = kind
+        showConversationWindow()
     }
 
     func closeSettings() {

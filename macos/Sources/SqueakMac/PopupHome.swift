@@ -185,7 +185,7 @@ struct PopupHomeTop: View {
         let showHelp = model.health != nil && model.connectionHelp != nil
         let updater = model.updater
         let showUpdate = updater.readyVersion != nil || updater.availableVersion != nil || model.updateNote != nil
-        if showHelp || model.launchOfferPending || showUpdate {
+        if showHelp || model.launchOfferPending || showUpdate || model.tips.tip != nil {
             VStack(alignment: .leading, spacing: 4) {
                 if let ready = updater.readyVersion {
                     updateRow("Update \(ready) is ready", action: "Restart to update") { updater.installNow() }
@@ -203,6 +203,7 @@ struct PopupHomeTop: View {
                     }
                 }
                 LaunchOfferBanner()
+                SetupTipCard()
             }
             .padding(.bottom, 8)
         }

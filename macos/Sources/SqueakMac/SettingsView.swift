@@ -89,36 +89,12 @@ extension View {
     }
 }
 
-private struct SetupWalkthroughFormKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
-extension EnvironmentValues {
-    var setupWalkthroughForm: Bool {
-        get { self[SetupWalkthroughFormKey.self] }
-        set { self[SetupWalkthroughFormKey.self] = newValue }
-    }
-}
-
 private struct SettingsFormPresentation: ViewModifier {
-    @Environment(\.setupWalkthroughForm) private var walkthrough
-
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if walkthrough {
-            // Setup is a compact task surface: align controls and section labels directly on the
-            // canvas instead of nesting the full Settings cards inside the guided window.
-            content
-                .scrollContentBackground(.hidden)
-                .formStyle(.grouped)
-                .controlSize(.small)
-                .background(Theme.bg)
-        } else {
-            content
-                .scrollContentBackground(.hidden)
-                .formStyle(.grouped)
-                .squeakWindowCanvas()
-        }
+        content
+            .scrollContentBackground(.hidden)
+            .formStyle(.grouped)
+            .squeakWindowCanvas()
     }
 }
 

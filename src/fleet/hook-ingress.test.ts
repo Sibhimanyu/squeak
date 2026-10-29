@@ -493,6 +493,23 @@ describe("HookIngressServer control routes", () => {
     expect(calls).toBe(1);
   });
 
+  it("serves Squeak Hands' grants only to a caller with the token, by GET", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      handsGrants: async () => ({ outdated: true }),
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/hands/grants`;
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", headers: { "x-squeak-token": harness.token } })).status).toBe(405);
+    const ok = await fetch(url, { headers: { "x-squeak-token": harness.token } });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ outdated: true });
+  });
+
   it("changes the awake session only for a caller with the token, and says why not", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;

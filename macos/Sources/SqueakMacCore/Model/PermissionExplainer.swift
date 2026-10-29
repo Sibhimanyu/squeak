@@ -99,9 +99,13 @@ public struct PermissionFlow: Sendable, Equatable {
     public var grant: PermissionGrant
     /// The person confirmed a grant Squeak cannot read.
     public var confirmed: Bool
+    /// Squeak Hands answered, but it is a build from before it reported its own grants.
+    public var handsOutdated: Bool
 
-    public init(kind: PermissionKind, requested: Bool = false, grant: PermissionGrant = .notGranted, confirmed: Bool = false) {
+    public init(kind: PermissionKind, requested: Bool = false, grant: PermissionGrant = .notGranted, confirmed: Bool = false,
+                handsOutdated: Bool = false) {
         self.kind = kind; self.requested = requested; self.grant = grant; self.confirmed = confirmed
+        self.handsOutdated = handsOutdated
     }
 
     public var isGranted: Bool { grant == .granted || (grant == .unreadable && confirmed) }
@@ -119,8 +123,14 @@ public struct PermissionFlow: Sendable, Equatable {
         return !kind.hasSystemPrompt || (requested && kind != .notifications)
     }
 
-    /// Hands' grant cannot be read, so once the pane was opened the person says when it is on.
+    /// Hands' grant is read from the daemon; only when that cannot be (an old Hands or daemon) does the
+    /// person say when it is on, once the pane was opened.
     public var offersConfirm: Bool { grant == .unreadable && requested && !confirmed }
+
+    /// Shown while Hands cannot report: the fix is a newer helper, not another click.
+    public var outdatedLine: String? {
+        handsOutdated && !isGranted ? "Update Squeak Hands: this copy is older than Squeak, so it can't say what it holds. Reopening Squeak installs the new one." : nil
+    }
 
     /// Input Monitoring only takes effect in a new process.
     public var offersRelaunch: Bool { kind == .inputMonitoring && requested && !isGranted }
@@ -138,4 +148,18 @@ public struct PermissionFlow: Sendable, Equatable {
     public func pressed() -> PermissionFlow { var f = self; f.requested = true; return f }
     public func confirmedByPerson() -> PermissionFlow { var f = self; f.confirmed = true; return f }
     public func reading(_ g: PermissionGrant) -> PermissionFlow { var f = self; f.grant = g; return f }
+
+    /// A reading of what Squeak Hands holds. A grant it reports replaces the manual confirmation; an old Hands
+    /// (or none) leaves the grant unreadable and says so.
+    public func readingHands(_ hands: HandsGrants?) -> PermissionFlow {
+        var f = self
+        if let hands {
+            f.handsOutdated = hands.outdated
+            f.grant = hands.grant(for: kind) ?? .unreadable
+        } else {
+            f.handsOutdated = false
+            f.grant = .unreadable
+        }
+        return f
+    }
 }

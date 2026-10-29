@@ -68,6 +68,11 @@ export interface IngressControl {
    * endpoint (no model call), and is only ever reached by the owner pressing Refresh.
    */
   refreshClaudeUsage?(): Promise<unknown>;
+  /**
+   * `GET /control/hands/grants`: what Squeak Hands holds (fleet/hands-grants.ts), cached 2 s. An old Hands
+   * answers `{ outdated: true }`.
+   */
+  handsGrants?(): Promise<unknown>;
   /** The sudoers file lid-closed sessions need, for the Mac app to install with an admin prompt. */
   lidRule?(): { path: string; rule: string } | null;
   /**
@@ -819,6 +824,23 @@ export class HookIngressServer {
       request.on("error", () => {
         aborted = true;
       });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/hands/grants") {
+      request.resume();
+      if (request.method !== "GET") {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!control.handsGrants) {
+        respond(response, 503, "hands grants unavailable");
+        return;
+      }
+      control
+        .handsGrants()
+        .then((value) => respondJson(response, 200, value))
+        .catch(() => respond(response, 500, "grants failed"));
       return;
     }
 

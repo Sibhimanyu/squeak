@@ -21,7 +21,7 @@ import { LidActions, readOpenSettings, readSettings as readLidActionSettings } f
 import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
 import { preparePhoneMedia } from "../remote/phone-media.js";
-import { channelFilter, NotifySettingsStore, wantsAllFinishes } from "../fleet/notify-settings.js";
+import { channelFilter, NotifySettingsStore, PushCounter, wantsAllFinishes } from "../fleet/notify-settings.js";
 import { HotspotFailover, macHotspotSystem, readHotspotRequest } from "../fleet/hotspot.js";
 import {
   FANS_HELPER_PRIVILEGED,
@@ -40,6 +40,7 @@ import { HooksSetup } from "../fleet/hooks-setup.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
 import { SqueakHandsSender } from "../fleet/conductor-ui.js";
+import { HandsGrantsReader } from "../fleet/hands-grants.js";
 import { closeChat } from "../fleet/close-chat.js";
 import { readActivity } from "../fleet/activity.js";
 import { BackgroundWorkReader } from "../fleet/background-work.js";
@@ -149,6 +150,8 @@ export class SqueakApp {
   private readonly telegramStatus: TelegramStatus;
   /** What Telegram and Cliq may push (notify-settings.json), edited from the Mac app and the phone. */
   private readonly notifySettings: NotifySettingsStore;
+  /** Cards each channel pushed today, for the Mac app's "Fewer?" tip. */
+  private readonly pushCounter = new PushCounter();
   private readonly runtime: FleetRuntime;
   /** RasanAI films waiting on a call, answered the way RasanAI Studio does (src/workflows/rasanai/). */
   private readonly rasanai = new RasanaiProvider();
@@ -205,6 +208,8 @@ export class SqueakApp {
   private readonly backgroundWork = new BackgroundWorkReader();
   private readonly subagents = new SubagentActivityReader(this.backgroundWork);
   private readonly claudeRefresher: ClaudeLimitsRefresher;
+  /** What Squeak Hands holds, for the Mac app's permission explainer (GET /control/hands/grants). */
+  private readonly handsGrants = new HandsGrantsReader();
   /** Keeps the Mac awake while an agent works, and while plugged in (SQUEAK_CAFFEINATE). */
   private readonly caffeinator: Caffeinator;
   /** Joins the iPhone's hotspot when the Mac's internet drops while something needs it. */
@@ -596,6 +601,7 @@ export class SqueakApp {
         return { text, choices: parseChoices(text) };
       },
       refreshClaudeUsage: () => this.claudeRefresher.refresh(),
+      handsGrants: () => this.handsGrants.read(),
       awake: (request) => this.applyAwake(request),
       power: (choice) =>
         isPowerChoice(choice)
@@ -697,7 +703,7 @@ export class SqueakApp {
         this.remote?.hasPairedPhone() && config.remoteProjectId
           ? `https://${config.remoteProjectId}.web.app/open/#s=${encodeURIComponent(conductorSessionId)}`
           : null,
-      notify: channelFilter(this.notifySettings, "telegram"),
+      notify: channelFilter(this.notifySettings, "telegram", Date.now, this.pushCounter),
       fallbackChatIds: config.allowedChatIds ? Array.from(config.allowedChatIds) : [],
     });
   }
@@ -905,6 +911,7 @@ export class SqueakApp {
     return {
       ...this.notifySettings.snapshot(),
       channels: { telegram: Boolean(this.config.botToken), cliq: Boolean(this.config.cliqWebhookUrl) },
+      pushedToday: this.pushCounter.today(),
     };
   }
 
@@ -1381,7 +1388,7 @@ export class SqueakApp {
         monitor: this.runtime.monitor,
         store: this.runtime.store,
         claudeLimits: () => this.claudeLimits.latest(),
-        notify: channelFilter(this.notifySettings, "cliq"),
+        notify: channelFilter(this.notifySettings, "cliq", Date.now, this.pushCounter),
         inbound: twoWay
           ? {
               inbox: new CliqRelayInbox({

@@ -615,6 +615,7 @@ struct QuickComposerView: View {
         Task {
             let r = await model.send(outgoing, to: key, mode: mode)
             if state.endSend(of: text, to: key, epoch: epoch, result: r) {
+                model.tips.noteComposerUse()
                 if state.epoch == epoch { state.images.clear() }
                 try? await Task.sleep(for: .milliseconds(900))
                 // Closes only the composer this send was made from, not one reopened since.

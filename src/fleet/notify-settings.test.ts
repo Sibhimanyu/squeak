@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { shouldPush } from "./attention.js";
 import {
   channelFilter,
+  PushCounter,
   defaultNotifySettings,
   inQuietHours,
   NotifySettingsStore,
@@ -181,6 +182,20 @@ describe("channelFilter and wantsAllFinishes", () => {
     current = settings("telegram", { muted: true });
     expect(filter.item({ kind: "stalled", session: conductor })).toBe(false);
     expect(filter.quota()).toBe(false);
+  });
+
+  it("counts the cards a channel may push today, and starts again tomorrow", () => {
+    let t = at(12).getTime();
+    const counter = new PushCounter(() => t);
+    const filter = channelFilter({ settings: defaultNotifySettings() }, "cliq", () => t, counter);
+    filter.item({ kind: "stalled", session: conductor });
+    filter.item({ kind: "stalled", session: conductor });
+    expect(counter.today()).toEqual({ telegram: 0, cliq: 2 });
+    const muted = channelFilter({ settings: settings("cliq", { muted: true }) }, "cliq", () => t, counter);
+    muted.item({ kind: "stalled", session: conductor });
+    expect(counter.today().cliq).toBe(2);
+    t += 24 * 3600 * 1000;
+    expect(counter.today()).toEqual({ telegram: 0, cliq: 0 });
   });
 
   it("asks the monitor to widen only for an unmuted channel on all", () => {

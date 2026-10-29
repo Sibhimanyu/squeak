@@ -196,14 +196,51 @@ export interface NotifyFilter {
   quota(): boolean;
 }
 
+/**
+ * How many cards each channel was let push on the current local day, in memory (a restart starts at 0):
+ * the Mac app offers "Fewer?" when one channel is noisy. Counts cards, never their content.
+ */
+export class PushCounter {
+  private day = "";
+  private counts: Record<NotifyChannel, number> = { telegram: 0, cliq: 0 };
+
+  constructor(private readonly now: () => number = Date.now) {}
+
+  private roll(): void {
+    const d = new Date(this.now());
+    const day = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    if (day !== this.day) {
+      this.day = day;
+      this.counts = { telegram: 0, cliq: 0 };
+    }
+  }
+
+  record(channel: NotifyChannel): void {
+    this.roll();
+    this.counts[channel] += 1;
+  }
+
+  today(): Record<NotifyChannel, number> {
+    this.roll();
+    return { ...this.counts };
+  }
+}
+
 /** The two checks a channel makes, read live from the store so an edit applies to the next push. */
 export function channelFilter(
   store: Pick<NotifySettingsStore, "settings">,
   channel: NotifyChannel,
   now: () => number = Date.now,
+  counter?: PushCounter,
 ): NotifyFilter {
   return {
-    item: (item) => shouldPushTo(channel, item.kind, item.session, store.settings, now()),
+    item: (item) => {
+      const allowed = shouldPushTo(channel, item.kind, item.session, store.settings, now());
+      if (allowed) {
+        counter?.record(channel);
+      }
+      return allowed;
+    },
     quota: () => {
       const mine = store.settings[channel];
       return !mine.muted && mine.quota;

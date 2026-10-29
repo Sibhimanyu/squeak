@@ -82,6 +82,23 @@ struct ConversationView: View {
             .opacity(0).accessibilityHidden(true)
         }
         .frame(minWidth: 900, minHeight: 600)
+        .sheet(item: $model.permissionSheet) { kind in PermissionSheet(kind: kind) }
+    }
+}
+
+/// A permission's explainer over the window, opened by a menu-bar tip. Ticks by itself once macOS says yes.
+private struct PermissionSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let kind: PermissionKind
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: Space.m) {
+            PermissionExplainer(kind: kind, handsReader: { await model.client.handsGrants() })
+            Button("Done") { dismiss() }.buttonStyle(SecondaryButtonStyle())
+        }
+        .padding(Space.l)
+        .frame(width: 420)
     }
 }
 

@@ -16,6 +16,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>squeak-hands</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>2</string>
   <key>LSUIElement</key><true/>
   <key>NSLocationUsageDescription</key><string>Squeak Hands finds your iPhone's hotspot by name when your Mac's Wi-Fi drops. macOS hides Wi-Fi names from apps without Location Services.</string>
   <key>NSLocationWhenInUseUsageDescription</key><string>Squeak Hands finds your iPhone's hotspot by name when your Mac's Wi-Fi drops. macOS hides Wi-Fi names from apps without Location Services.</string>

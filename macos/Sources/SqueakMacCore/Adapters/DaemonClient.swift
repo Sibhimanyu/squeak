@@ -8,11 +8,15 @@ public struct DaemonClient: Sendable {
     public let baseURL: URL
     private let transport: any HTTPTransport
     let tokenProvider: @Sendable () -> String?
+    /// Told when a reply's result shows Squeak Hands lacked a grant (the menu-bar tips listen); never changes the result.
+    public var onReplySignal: (@Sendable (ReplyGrantSignal) -> Void)?
 
-    public init(baseURL: URL, transport: any HTTPTransport = URLSessionTransport(), tokenProvider: @escaping @Sendable () -> String?) {
+    public init(baseURL: URL, transport: any HTTPTransport = URLSessionTransport(), tokenProvider: @escaping @Sendable () -> String?,
+                onReplySignal: (@Sendable (ReplyGrantSignal) -> Void)? = nil) {
         self.baseURL = baseURL
         self.transport = transport
         self.tokenProvider = tokenProvider
+        self.onReplySignal = onReplySignal
     }
 
     /// Port from `SQUEAK_DAEMON_PORT`, else 8477; token from the daemon's token file.
@@ -155,6 +159,10 @@ public struct DaemonClient: Sendable {
         }
         if response.status == 401 || response.status == 403 { return .notSent(reason: "Squeak rejected the access token") }
         let parsed = try? JSONDecoder().decode(DaemonReplyBody.self, from: response.body)
+        if let signal = ReplyGrantSignal.read(
+            via: parsed?.via, fallbackReason: parsed?.fallbackReason, refusedReason: parsed?.status == "refused" ? parsed?.reason : nil) {
+            onReplySignal?(signal)
+        }
         switch parsed?.status {
         case "started":
             return .accepted(via: parsed?.via ?? "conductor", delivery: parsed?.delivery.flatMap(Delivery.init(rawValue:)), note: parsed?.note)

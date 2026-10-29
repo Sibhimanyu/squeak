@@ -12,15 +12,19 @@ final class PermissionExplainerModel {
     let kind: PermissionKind
     private(set) var flow: PermissionFlow
     @ObservationIgnored private let demo: Bool
+    /// Asks the daemon what Squeak Hands holds (nil: daemon unreachable or too old).
+    @ObservationIgnored private let handsReader: (() async -> HandsGrants?)?
 
-    init(kind: PermissionKind, demo: Bool = false) {
+    init(kind: PermissionKind, demo: Bool = false, handsReader: (() async -> HandsGrants?)? = nil) {
         self.kind = kind
         self.demo = demo
+        self.handsReader = handsReader
         flow = PermissionFlow(kind: kind, grant: kind.isReadable ? .notGranted : .unreadable)
     }
 
-    /// One reading. Squeak Hands holds Accessibility, Automation and Location itself, which Squeak cannot see,
-    /// so those stay `unreadable` until the person says they are on.
+    /// One reading. Squeak Hands holds Accessibility, Automation and Location itself; the daemon asks it
+    /// (`GET /control/hands/grants`). Only when that gives nothing (an old daemon or Hands) do they stay
+    /// `unreadable` until the person says they are on.
     func refresh() async {
         guard !demo else { return }
         switch kind {
@@ -33,7 +37,8 @@ final class PermissionExplainerModel {
         case .inputMonitoring:
             flow = flow.reading(CGPreflightListenEventAccess() ? .granted : .notGranted)
         case .accessibility, .automation, .location:
-            break
+            guard let handsReader else { break }
+            flow = flow.readingHands(await handsReader())
         }
     }
 
@@ -56,6 +61,8 @@ final class PermissionExplainerModel {
 
 private extension PermissionKind {
     var isReadable: Bool { self == .notifications || self == .inputMonitoring }
+    /// Held by Squeak Hands, read through the daemon every 2 s.
+    var holdsInHands: Bool { !isReadable }
 }
 
 /// "What it is for, what Squeak never does, which app to find, one button", ticking by itself once macOS says yes.
@@ -65,8 +72,8 @@ struct PermissionExplainer: View {
     var onGranted: (() -> Void)?
     @State private var announced = false
 
-    init(kind: PermissionKind, onGranted: (() -> Void)? = nil) {
-        _model = State(initialValue: PermissionExplainerModel(kind: kind))
+    init(kind: PermissionKind, handsReader: (() async -> HandsGrants?)? = nil, onGranted: (() -> Void)? = nil) {
+        _model = State(initialValue: PermissionExplainerModel(kind: kind, handsReader: handsReader))
         self.onGranted = onGranted
     }
 
@@ -95,6 +102,9 @@ struct PermissionExplainer: View {
                         if f.offersConfirm { Button("It's on") { model.confirm() }.buttonStyle(SecondaryButtonStyle()) }
                         if f.offersRelaunch { Button("Relaunch Squeak") { model.relaunch() }.buttonStyle(SecondaryButtonStyle()) }
                     }
+                    if let line = f.outdatedLine {
+                        Text(line).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    }
                     if let line = f.denialLine {
                         Text(line).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
@@ -109,7 +119,7 @@ struct PermissionExplainer: View {
         .task {
             while !Task.isCancelled {
                 await model.refresh()
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .seconds(model.kind.holdsInHands ? 2 : 1))
             }
         }
         .onChange(of: model.flow.isGranted) { _, granted in

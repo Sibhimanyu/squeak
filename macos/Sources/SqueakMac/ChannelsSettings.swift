@@ -53,7 +53,6 @@ struct StatusLine: View {
 
 struct TelegramSettings: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.setupWalkthroughForm) private var walkthrough
     @State private var linking = false
     @State private var confirmOff = false
     @State private var copied = false
@@ -63,30 +62,14 @@ struct TelegramSettings: View {
     var body: some View {
         @Bindable var m = app.channels
         Group {
-            if walkthrough {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Space.m) {
-                        telegramStatus
-                        telegramToken(m: $m)
-                        allowedChats
-                        botPicture
-                        telegramActions
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.bottom, Space.m)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-            } else {
-                Form {
-                    telegramStatus
-                    telegramToken(m: $m)
-                    allowedChats
-                    botPicture
-                    telegramActions
-                }
-                .settingsForm()
+            Form {
+                telegramStatus
+                telegramToken(m: $m)
+                allowedChats
+                botPicture
+                telegramActions
             }
+            .settingsForm()
         }
         .task { await m.refresh() }
         .sheet(isPresented: $linking) { LinkChatSheet().environment(app) }
@@ -252,6 +235,7 @@ struct CliqSettings: View {
     var body: some View {
         @Bindable var m = app.channels
         Form {
+            cliqAbout
             cliqConnection(m: $m)
             cliqOwner(m: $m)
             botLogo
@@ -259,6 +243,16 @@ struct CliqSettings: View {
         }
         .settingsForm()
         .task { await m.refresh() }
+    }
+
+    /// What the bot is and what it needs, so nobody has to leave the app for a repository page.
+    private var cliqAbout: some View {
+        Section {
+            Text("Squeak talks to Zoho Cliq through a bot you create in Cliq. It posts a card when an agent needs you or finishes, and your taps and replies come back to the agent.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Cards go out through the bot's webhook URL. Replies come back through the Replies setup below.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        } header: { SettingSubsectionHeader(title: "How it works", symbol: "info.circle.fill", color: Theme.muted) }
     }
 
     private func cliqConnection(m: Bindable<ChannelsModel>) -> some View {
@@ -363,7 +357,7 @@ struct CliqSettings: View {
                 }
                 .padding(8)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.control))
-                Text("It needs the iPhone channel's Firebase project, and prints the handlers to paste into the bot. The steps are in docs/cliq.md.")
+                Text("It needs the iPhone channel's Firebase project, and prints the handlers to paste into the bot.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }

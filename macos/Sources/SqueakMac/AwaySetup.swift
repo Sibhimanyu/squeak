@@ -60,8 +60,8 @@ struct AwayStage: View {
             option("Telegram", tag: nil, "Cards in a private Telegram chat, with alerts on any phone.") { choice = .telegram }
             DisclosureGroup("More", isExpanded: $showMore) {
                 VStack(alignment: .leading, spacing: Space.s) {
-                    more("Zoho Cliq", "For teams. Needs a Cliq bot, which you create in Zoho.", docs: true) { model.openSettings(.cliq) }
-                    more("Phone calls", "Needs a SIP phone such as 3CX. Squeak rings you when an agent is waiting.", docs: false) { model.openSettings(.voice) }
+                    more("Zoho Cliq", "For teams. Needs a Cliq bot, which you create in Zoho.") { model.openSettings(.cliq) }
+                    more("Phone calls", "Needs a SIP phone such as 3CX. Squeak rings you when an agent is waiting.") { model.openSettings(.voice) }
                 }
                 .padding(.top, Space.s)
             }
@@ -89,17 +89,13 @@ struct AwayStage: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func more(_ title: String, _ detail: String, docs: Bool, settings: @escaping () -> Void) -> some View {
+    private func more(_ title: String, _ detail: String, settings: @escaping () -> Void) -> some View {
         Card {
             VStack(alignment: .leading, spacing: Space.s) {
                 Text(title).font(Typo.label).foregroundStyle(Theme.ink)
                 Text(detail).font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: Space.s) {
                     Button("Open Settings › \(title)", action: settings).buttonStyle(SecondaryButtonStyle())
-                    if docs {
-                        Button("Read the steps") { open("https://github.com/Sibhimanyu/squeak/blob/master/docs/cliq.md") }
-                            .buttonStyle(QuietButtonStyle())
-                    }
                 }
             }
         }

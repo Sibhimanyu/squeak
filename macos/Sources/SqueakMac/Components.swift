@@ -74,3 +74,28 @@ struct SendFeedback {
     /// Nil when the send went through, so the card goes quiet again.
     var failureText: String? { succeeded ? nil : text }
 }
+
+/// One after-setup suggestion at the top of the menu-bar panel (TipsModel): what it gives, one button that
+/// opens it, "Not now" for 14 days and "Don't show again". Never shown during first run.
+struct SetupTipCard: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let tip = model.tips.tip {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(tip.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text(tip.detail).font(.system(size: 12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button(tip.actionTitle) { model.tips.open(model) }.buttonStyle(PrimaryButtonStyle())
+                    Button("Not now") { model.tips.dismiss(forever: false) }.buttonStyle(QuietButtonStyle())
+                    Spacer(minLength: 0)
+                    Button("Don't show again") { model.tips.dismiss(forever: true) }.buttonStyle(QuietButtonStyle())
+                }
+            }
+            .padding(10)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+            .accessibilityElement(children: .contain)
+        }
+    }
+}

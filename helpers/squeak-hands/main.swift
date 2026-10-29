@@ -544,6 +544,42 @@ func ensureLocation(wait: TimeInterval) -> CLAuthorizationStatus {
     return manager.authorizationStatus
 }
 
+/// Accessibility, Location Services and Automation of Terminal, as this process holds them. Nothing here
+/// prompts: Accessibility is `AXIsProcessTrusted()`, Automation asks `askUserIfNeeded: false`.
+func runGrants(resultPath: String) {
+    let manager = CLLocationManager()
+    let settle = Date().addingTimeInterval(1.5)
+    while manager.authorizationStatus == .notDetermined, Date() < settle {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+    }
+    let location: String
+    switch manager.authorizationStatus {
+    case .authorizedAlways: location = "granted"
+    case .denied, .restricted: location = "denied"
+    case .notDetermined: location = "notDetermined"
+    @unknown default: location = "notDetermined"
+    }
+    var automation = "notRunning"
+    let bundleId = "com.apple.Terminal"
+    if !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty {
+        var desc = AEAddressDesc()
+        let made = bundleId.withCString { AECreateDesc(DescType(typeApplicationBundleID), $0, strlen($0), &desc) }
+        if made == noErr {
+            let status = AEDeterminePermissionToAutomateTarget(&desc, typeWildCard, typeWildCard, false)
+            AEDisposeDesc(&desc)
+            switch status {
+            case noErr: automation = "granted"
+            case OSStatus(errAEEventNotPermitted): automation = "denied"
+            case OSStatus(errAEEventWouldRequireUserConsent): automation = "notDetermined"
+            case OSStatus(procNotFound): automation = "notRunning"
+            default: automation = "notDetermined"
+            }
+        }
+    }
+    write(["ok": true, "accessibility": AXIsProcessTrusted(), "location": location, "automationTerminal": automation],
+          to: resultPath)
+}
+
 func runWifi(mode: String, requestPath: String, resultPath: String) {
     if mode == "wifi-location" {
         let status = ensureLocation(wait: 120)
@@ -636,10 +672,12 @@ let outPath = args.count > 2 ? args[2] : "/tmp/squeak-hands.json"
 let errorPath = (mode == "send" || mode == "close" || mode == "press" || mode == "choose-file" || mode == "system-key" || mode == "tabs" || mode == "show-chat") ? (args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json") : outPath
 let terminalModes: Set<String> = ["terminal-read", "terminal-type"]
 let wifiModes: Set<String> = ["wifi-join", "wifi-location", "wifi-scan"]
+// Reports this helper's own grants, so it must run (and answer) without them.
+let exemptModes: Set<String> = ["grants"]
 
 // Terminal is driven by Apple Events, which need Automation, not Accessibility;
 // Wi-Fi needs Location Services.
-if !terminalModes.contains(mode), !wifiModes.contains(mode),
+if !terminalModes.contains(mode), !wifiModes.contains(mode), !exemptModes.contains(mode),
    !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
     write(["ok": false, "error": "not-trusted"], to: errorPath)
     exit(2)
@@ -930,6 +968,9 @@ case "show-chat":
         exit(3)
     }
     write(["ok": conductor.sessionId == request.sessionId], to: resultPath)
+case "grants":
+    // grants <result.json>: what this helper may do, read without ever prompting.
+    runGrants(resultPath: outPath)
 case "terminal-read", "terminal-type":
     // terminal-read|terminal-type <request.json> <result.json>
     runTerminal(mode: mode, requestPath: outPath, resultPath: args.count > 3 ? args[3] : "/tmp/squeak-hands-result.json")

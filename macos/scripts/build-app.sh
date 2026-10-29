@@ -42,6 +42,10 @@ mkdir -p "$APP/Contents/Helpers"
 # squeak-apps (helpers/squeak-apps): the running and installed apps, and a polite quit, for the iPhone's
 # Mac controls page. No permission needed.
 "$REPO/helpers/squeak-apps/build.sh" "$APP/Contents/Helpers" >/dev/null
+# Squeak Hands (helpers/squeak-hands): types replies into Conductor/Terminal and reports its own grants.
+# It signs itself with the Apple Development identity (the grant is tied to it). The app copies it to
+# ~/Library/Application Support/squeak/Squeak Hands.app when that is missing or older (HandsInstaller).
+"$REPO/helpers/squeak-hands/build.sh" "$APP/Contents/Helpers" >/dev/null
 
 # The brand's own duck files (DESIGN.md 6.1) and the menu-bar template; the app never redraws them.
 BRAND="$APP/Contents/Resources/brand"
