@@ -95,19 +95,44 @@ struct SetupWalkthroughView: View {
 
     var body: some View {
         let w = model.walkthrough
-        VStack(alignment: .leading, spacing: Space.m) {
-            switch screen {
-            case .step(let s):
-                header(s, w)
-                content(s, w).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                footer(s, w)
-            case .summary:
-                SetupSummaryView(walk: w, openStep: { s in
-                    model.unskipWalkStep(s)
-                    screen = .step(s)
-                })
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                summaryFooter(w)
+        GeometryReader { available in
+            Group {
+                switch screen {
+                case .step(let s):
+                    VStack(alignment: .leading, spacing: Space.m) {
+                        header(s, w)
+                        // Form-based settings pages can report an effectively unbounded
+                        // ideal height. A geometry-bounded scroll viewport keeps the
+                        // controls scrollable while the navigation stays pinned below.
+                        GeometryReader { viewport in
+                            ScrollView {
+                                content(s, w)
+                                    .frame(width: viewport.size.width, alignment: .topLeading)
+                            }
+                            .frame(width: viewport.size.width, height: viewport.size.height)
+                            .scrollIndicators(.automatic)
+                        }
+                        .padding(.bottom, 52)
+                    }
+                case .summary:
+                    SetupSummaryView(walk: w, openStep: { s in
+                        model.unskipWalkStep(s)
+                        screen = .step(s)
+                    })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.bottom, 52)
+                }
+            }
+            .frame(width: available.size.width, height: available.size.height, alignment: .topLeading)
+            .overlay(alignment: .bottom) {
+                Group {
+                    switch screen {
+                    case .step(let s): footer(s, w)
+                    case .summary: summaryFooter(w)
+                    }
+                }
+                .padding(.top, 10)
+                .background(Theme.bg)
             }
         }
         .task {
@@ -118,6 +143,7 @@ struct SetupWalkthroughView: View {
         .task { await model.setup.poll(model) }
         // Esc must never close the window or quit setup by accident.
         .onExitCommand {}
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: Chrome
@@ -197,10 +223,10 @@ struct SetupWalkthroughView: View {
         case .hands: rowScroll(.hands, w)
         case .hotkey: rowScroll(.hotkey, w)
         case .notifications:
-            VStack(spacing: Space.s) {
-                checklistCard(.notifications, w)
-                NotificationsSettings()
-            }
+            NotificationsSettings(
+                walkthrough: true,
+                permissionStep: w.checklist.step(.notifications),
+                runSetupAction: model.perform)
         case .iphone: IPhoneSettings()
         case .telegram: TelegramSettings()
         case .cliq: CliqSettings()
@@ -210,7 +236,7 @@ struct SetupWalkthroughView: View {
     }
 
     private func rowScroll(_ id: SetupStepID, _ w: SetupWalkthrough) -> some View {
-        ScrollView { checklistCard(id, w) }
+        checklistCard(id, w)
     }
 
     @ViewBuilder private func checklistCard(_ id: SetupStepID, _ w: SetupWalkthrough) -> some View {

@@ -24,7 +24,7 @@ final class OnboardingController {
                 styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false
             )
             w.title = "Welcome to Squeak"
-            w.minSize = NSSize(width: 720, height: 540)
+            w.minSize = NSSize(width: 760, height: 540)
             w.isReleasedWhenClosed = false
             w.center()
             window = w
@@ -70,6 +70,7 @@ struct OnboardingView: View {
                     SetupWalkthroughView(
                         start: walkStart ?? model.walkthrough.firstOpen.map { .step($0) } ?? .summary,
                         finish: { step = 2 }, later: finish)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                     ScrollView { FirstSessionView(backToSetup: { walkStart = .summary; step = 1 }) }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -83,6 +84,7 @@ struct OnboardingView: View {
             .background(Theme.bg)
         }
         .background(Theme.bg)
+        .environment(\.setupWalkthroughForm, step == 1)
     }
 
     private var currentScreen: WalkScreen? {
@@ -200,69 +202,102 @@ private struct SetupBrandRail: View {
     private var railTitle: String {
         if step == 0 { return "A clearer view of work in motion." }
         if step == 2 { return "Your first session is ready." }
-        if let activeStep { return activeStep.title }
+        if step == 1 { return "A few small steps." }
         return walk.isFinished ? "All set." : "Your setup, at a glance."
     }
 
     private var railDetail: String {
         if step == 0 { return "A small duck. A little more peace of mind." }
         if step == 2 { return "Bring your conversations together in one place." }
-        if let activeStep { return activeStep.why }
+        if step == 1 { return "Choose what Squeak can watch and where it can reach you." }
         return "Connect the pieces once. Squeak keeps watch from your menu bar."
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            LogoLockup(height: 24)
-            Spacer(minLength: 20)
-            SetupOrbitArtwork(isMoving: !reduceMotion, drift: drift)
-                .frame(maxWidth: .infinity)
-                .frame(height: 204)
-                .accessibilityHidden(true)
-            Spacer(minLength: 20)
-            if let stepNumber {
-                Text("STEP \(String(format: "%02d", stepNumber))  /  \(String(format: "%02d", walk.total))")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1.1).foregroundStyle(Theme.muted)
-                    .padding(.bottom, 10)
-            } else {
-                Text(step == 0 ? "MEET SQUEAK" : "WELCOME ABOARD")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1.1).foregroundStyle(Theme.muted)
-                    .padding(.bottom, 10)
-            }
-            Text(railTitle)
-                .font(.system(size: 23, weight: .semibold)).tracking(-0.5).foregroundStyle(Theme.ink)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-            Text(railDetail)
-                .font(Typo.body).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 8)
-            Spacer(minLength: 16)
-            if step == 1 {
-                VStack(alignment: .leading, spacing: 7) {
-                    ForEach(Array(walk.steps.enumerated()), id: \.element.id) { index, item in
-                        HStack(spacing: 8) {
-                            Circle().fill(progressColor(item)).frame(width: item == activeStep ? 7 : 5, height: item == activeStep ? 7 : 5)
-                            Text(item.title).font(.system(size: 11, weight: item == activeStep ? .semibold : .regular))
-                                .foregroundStyle(item == activeStep ? Theme.ink : Theme.muted)
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                            if walk.state(item) == .done { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.working) }
-                        }
-                        .accessibilityHidden(true)
+        GeometryReader { geometry in
+            let compact = geometry.size.height < 610
+            VStack(alignment: .leading, spacing: 0) {
+                LogoLockup(height: 24)
+                Spacer(minLength: compact ? 10 : 20)
+                SetupOrbitArtwork(isMoving: !reduceMotion, drift: drift)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: compact ? 142 : 204)
+                    .accessibilityHidden(true)
+                Spacer(minLength: compact ? 10 : 20)
+                if let stepNumber {
+                    Text("STEP \(String(format: "%02d", stepNumber))  /  \(String(format: "%02d", walk.total))")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1.1).foregroundStyle(Theme.muted)
+                        .padding(.bottom, 10)
+                } else {
+                    Text(step == 0 ? "MEET SQUEAK" : "WELCOME ABOARD")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1.1).foregroundStyle(Theme.muted)
+                        .padding(.bottom, 10)
+                }
+                Text(railTitle)
+                    .font(.system(size: 23, weight: .semibold)).tracking(-0.5).foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Text(railDetail)
+                    .font(Typo.body).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
+                Spacer(minLength: compact ? 12 : 16)
+                if step == 1 {
+                    if compact {
+                        compactProgress
+                    } else {
+                        stepList
                     }
                 }
-                .padding(.top, 12)
             }
+            .padding(.horizontal, 22)
+            .padding(.vertical, compact ? 18 : 24)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .background(Theme.sidebar)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 24)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.sidebar)
         .onAppear {
             guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) { drift = true }
         }
+        .onChange(of: reduceMotion) { _, reduced in
+            guard !reduced else { drift = false; return }
+            withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) { drift = true }
+        }
+    }
+
+    private var stepList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(walk.steps) { item in
+                    HStack(spacing: 8) {
+                        Circle().fill(progressColor(item)).frame(width: item == activeStep ? 7 : 5, height: item == activeStep ? 7 : 5)
+                        Text(item.title).font(.system(size: 11, weight: item == activeStep ? .semibold : .regular))
+                            .foregroundStyle(item == activeStep ? Theme.ink : Theme.muted)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        if walk.state(item) == .done { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.working) }
+                    }
+                    .accessibilityHidden(true)
+                }
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .scrollIndicators(.hidden)
+        .padding(.top, 12)
+    }
+
+    private var compactProgress: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ProgressView(value: Double(walk.doneSteps.count), total: Double(walk.total)).tint(Theme.duck)
+            HStack {
+                Text("\(walk.doneSteps.count) complete")
+                Spacer()
+                Text("\(walk.total - walk.doneSteps.count) left")
+            }
+            .font(Typo.meta.monospacedDigit())
+            .foregroundStyle(Theme.muted)
+        }
+        .accessibilityHidden(true)
     }
 
     private func progressColor(_ step: WalkStep) -> Color {

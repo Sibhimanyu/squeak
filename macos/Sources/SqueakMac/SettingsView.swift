@@ -85,9 +85,40 @@ private extension SettingsSection {
 extension View {
     /// Keep the page on the app canvas while retaining native Form controls and section behavior.
     func settingsForm() -> some View {
-        scrollContentBackground(.hidden)
-            .formStyle(.grouped)
-            .squeakWindowCanvas()
+        modifier(SettingsFormPresentation())
+    }
+}
+
+private struct SetupWalkthroughFormKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var setupWalkthroughForm: Bool {
+        get { self[SetupWalkthroughFormKey.self] }
+        set { self[SetupWalkthroughFormKey.self] = newValue }
+    }
+}
+
+private struct SettingsFormPresentation: ViewModifier {
+    @Environment(\.setupWalkthroughForm) private var walkthrough
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if walkthrough {
+            // Setup is a compact task surface: align controls and section labels directly on the
+            // canvas instead of nesting the full Settings cards inside the guided window.
+            content
+                .scrollContentBackground(.hidden)
+                .formStyle(.columns)
+                .controlSize(.small)
+                .background(Theme.bg)
+        } else {
+            content
+                .scrollContentBackground(.hidden)
+                .formStyle(.grouped)
+                .squeakWindowCanvas()
+        }
     }
 }
 
@@ -324,33 +355,103 @@ private struct SectionFootnote: View {
 struct NotificationsSettings: View {
     @Environment(AppModel.self) private var model
     @State private var bannersShown: Bool?
+    var walkthrough = false
+    var permissionStep: SetupStep?
+    var runSetupAction: (SetupAction) -> Void = { _ in }
 
     var body: some View {
-        @Bindable var model = model
-        Form {
-            Section {
-                Toggle("Notify me on this Mac when a session needs me or finishes", isOn: $model.notificationsEnabled)
-                    .disabled(!Bundled.isApp)
-                if model.notificationsEnabled, bannersShown == false {
-                    LabeledContent {
-                        Button("Open Notification Settings") { GeneralSettings.openNotificationSettings() }
-                    } label: {
-                        Text("macOS isn't showing Squeak's banners")
-                        Text("They only land in Notification Center. Set Squeak's alert style to Banners or Alerts.")
+        Group {
+            if walkthrough {
+                setupContent
+            } else {
+                @Bindable var model = model
+                Form {
+                    Section {
+                        Toggle("Notify me on this Mac when a session needs me or finishes", isOn: $model.notificationsEnabled)
+                            .disabled(!Bundled.isApp)
+                        if model.notificationsEnabled, bannersShown == false {
+                            LabeledContent {
+                                Button("Open Notification Settings") { GeneralSettings.openNotificationSettings() }
+                            } label: {
+                                Text("macOS isn't showing Squeak's banners")
+                                Text("They only land in Notification Center. Set Squeak's alert style to Banners or Alerts.")
+                            }
+                        }
+                    } footer: {
+                        SectionFootnote("Approvals, questions, plans to review, errors, and finished Conductor chats. Reply to a finished chat from the notification itself.")
+                    }
+                    ForEach(NotifyChannel.allCases, id: \.self) { NotificationsSection(channel: $0) }
+                    if model.channels.notify?.shown.isEmpty ?? true {
+                        Section { SectionFootnote("Set up Telegram or Zoho Cliq to choose what each one pushes.") }
                     }
                 }
-            } footer: {
-                SectionFootnote("Approvals, questions, plans to review, errors, and finished Conductor chats. Reply to a finished chat from the notification itself.")
-            }
-            ForEach(NotifyChannel.allCases, id: \.self) { NotificationsSection(channel: $0) }
-            if model.channels.notify?.shown.isEmpty ?? true {
-                Section { SectionFootnote("Set up Telegram or Zoho Cliq to choose what each one pushes.") }
+                .settingsForm()
             }
         }
-        .settingsForm()
         .task { bannersShown = await Notifier.shared.bannersShown(); await model.channels.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { bannersShown = await Notifier.shared.bannersShown() }
+        }
+    }
+
+    private var setupContent: some View {
+        @Bindable var model = model
+        return VStack(alignment: .leading, spacing: Space.m) {
+            if let step = permissionStep, step.state != .done {
+                HStack(spacing: Space.s) {
+                    Image(systemName: step.state == .error ? "exclamationmark.circle.fill" : "bell.badge.fill")
+                        .foregroundStyle(step.state == .error ? Theme.error : Theme.needsYou)
+                    Text(step.state == .error ? step.why : "Allow Squeak to show notifications on this Mac.")
+                        .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: Space.s)
+                    if let action = step.action, let title = step.actionTitle {
+                        Button(title) { runSetupAction(action) }.buttonStyle(PrimaryButtonStyle())
+                    }
+                }
+                .padding(Space.m)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+                .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+            }
+
+            VStack(alignment: .leading, spacing: Space.s) {
+                HStack(spacing: Space.s) {
+                    Image(systemName: "macbook.and.iphone").foregroundStyle(Theme.duck)
+                    Text("On this Mac").font(Typo.label).foregroundStyle(Theme.ink)
+                    Spacer()
+                    Toggle("Notifications on this Mac", isOn: $model.notificationsEnabled)
+                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                        .disabled(!Bundled.isApp)
+                }
+                Text("Approvals, questions, plans, errors, and finished chats.")
+                    .font(Typo.meta).foregroundStyle(Theme.muted)
+                if model.notificationsEnabled, bannersShown == false {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bell.slash").foregroundStyle(Theme.needsYou)
+                        Text("Banners are off in macOS settings.").font(Typo.meta).foregroundStyle(Theme.muted)
+                        Spacer()
+                        Button("Open Settings") { GeneralSettings.openNotificationSettings() }
+                            .buttonStyle(SecondaryButtonStyle())
+                    }
+                    .padding(.top, Space.xs)
+                }
+            }
+            .padding(Space.m)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+
+            let configured = model.channels.notify?.shown ?? []
+            if configured.isEmpty {
+                HStack(spacing: Space.s) {
+                    Image(systemName: "paperplane").foregroundStyle(Theme.muted)
+                    Text("Connect Telegram or Zoho Cliq in the next steps to choose what they send.")
+                        .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, Space.xs)
+            } else {
+                ForEach(NotifyChannel.allCases.filter { model.channels.notify?.isSetUp($0) == true }, id: \.self) {
+                    NotificationSetupChannel(channel: $0)
+                }
+            }
         }
     }
 }
