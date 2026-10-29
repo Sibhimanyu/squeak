@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
@@ -33,7 +34,7 @@ FLEET_CODEX_QUOTA_WARN_PERCENT=85
 `;
 
 function printUsage(): void {
-  console.log(`Usage: squeak [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|cliq-relay|voice-test|voice-relay|voice-gateway|help]
+  console.log(`Usage: squeak [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|cliq-relay|voice-test|voice-relay|voice-gateway|help]
 
 Commands:
   start            Start squeaking (default)
@@ -43,6 +44,7 @@ Commands:
   install-hooks    Report agent state live, for every session on this Mac
   uninstall-hooks  Remove the hooks this tool installed
   hooks-status     Show whether the hooks are installed
+  uninstall        Remove Squeak from this Mac: [--dry-run] [--keep-data] [--yes] [--json] (docs/uninstall.md)
   cliq-relay       Set up two-way Zoho Cliq; writes the handlers to paste (--rotate: new secret)
   voice-relay      Make the key Squeak and the Home Assistant voice gateway share; prints the add-on options
   voice-gateway    Run the voice gateway (the Home Assistant add-on runs this)
@@ -196,6 +198,16 @@ export async function main(argv: string[]): Promise<void> {
       const paths = hookPaths();
       console.log(fleetHooksInstalled(paths) ? "Hooks: installed" : "Hooks: not installed");
       console.log(`Ingress: 127.0.0.1:${hookPort()}`);
+      return;
+    }
+    case "uninstall": {
+      const { realUninstallSystem, runUninstallCommand, terminalIO } = await import("./uninstall.js");
+      const supportDir = path.dirname(resolveSqueakEnvPath());
+      process.exitCode = await runUninstallCommand(
+        argv.slice(1),
+        terminalIO(),
+        realUninstallSystem(process.env, os.homedir(), supportDir),
+      );
       return;
     }
     case "cliq-relay": {

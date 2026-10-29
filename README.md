@@ -18,7 +18,7 @@ Codex sessions, with replies supported in Apple's Terminal.
 
 **[Download for Mac](https://github.com/Sibhimanyu/squeak/releases/latest)** ·
 [Website](https://sibhimanyu.github.io/squeak/) ·
-[Getting started](docs/getting-started.md) ·
+[Getting started](docs/getting-started.md) · [Uninstall](docs/uninstall.md) ·
 [Report an issue](https://github.com/Sibhimanyu/squeak/issues)
 
 <p align="center">
@@ -61,6 +61,7 @@ There is no Windows, Linux or Intel Mac app in this repository's release builds.
    ```
 
    Compare the result with `Squeak-<version>.dmg.sha256`.
+
 2. **Drag Squeak to Applications and open it.** Builds are signed with a
    development certificate and **are not notarized**. On first launch, use
    right-click → Open; if macOS blocks it, use **System Settings → Privacy &
@@ -84,21 +85,21 @@ checks there.
 
 ### Which permissions do I need?
 
-| Feature | Permission or setup |
-| --- | --- |
-| macOS notifications | Allow Squeak notifications when prompted. |
+| Feature                           | Permission or setup                                                                                             |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| macOS notifications               | Allow Squeak notifications when prompted.                                                                       |
 | Double-tap quick-message shortcut | Allow **Squeak** in **Privacy & Security → Input Monitoring**. The alternate keyboard shortcuts do not need it. |
-| Type into Conductor or Terminal | Allow **Squeak Hands** in **Privacy & Security → Accessibility**. Hands is Squeak's typing helper. |
-| Reply to a Terminal agent | Also allow Squeak Hands to control **Terminal** at the Automation prompt. |
-| Conductor relay | Allow its Keychain prompt and restart Conductor after setup. |
+| Type into Conductor or Terminal   | Allow **Squeak Hands** in **Privacy & Security → Accessibility**. Hands is Squeak's typing helper.              |
+| Reply to a Terminal agent         | Also allow Squeak Hands to control **Terminal** at the Automation prompt.                                       |
+| Conductor relay                   | Allow its Keychain prompt and restart Conductor after setup.                                                    |
 
 ### Supported sessions
 
-| Source on your Mac | Read and watch | Reply |
-| --- | --- | --- |
-| Conductor chats | Yes | Yes; relay enables remote replies, new chats and steering. |
-| Claude Code or Codex in Apple's Terminal | Yes | Yes, at an eligible empty agent prompt, with the permissions above. |
-| Other terminals, Claude Desktop and Cowork | Watch-only | No. |
+| Source on your Mac                         | Read and watch | Reply                                                               |
+| ------------------------------------------ | -------------- | ------------------------------------------------------------------- |
+| Conductor chats                            | Yes            | Yes; relay enables remote replies, new chats and steering.          |
+| Claude Code or Codex in Apple's Terminal   | Yes            | Yes, at an eligible empty agent prompt, with the permissions above. |
+| Other terminals, Claude Desktop and Cowork | Watch-only     | No.                                                                 |
 
 Conductor's relay interface is undocumented and compatibility is checked by
 version. A Conductor update can temporarily affect replies; see
@@ -171,13 +172,13 @@ can be deleted in Settings, and expires after 14 days, with a 50 MB cap.
 
 ## Troubleshooting
 
-| Symptom | Next step |
-| --- | --- |
-| Reading works, but sending is unavailable | Check **Settings → Connections** and **About → Background service**; install or repair the service. |
-| “Relay isn't connected” | Open **Settings → Conductor**, check its status, and quit and reopen Conductor after setup. An unsupported version may leave the relay disabled. |
-| Waiting states are missing or slow | Run **Agent hooks** again in **Settings → Setup**. |
-| Live typing fails | Check Squeak Hands' Accessibility grant and Terminal Automation permission. Other terminals are watch-only. |
-| A phone stops updating | Check that the Mac is awake and online, then check your connection in **Settings → iPhone**. |
+| Symptom                                   | Next step                                                                                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Reading works, but sending is unavailable | Check **Settings → Connections** and **About → Background service**; install or repair the service.                                              |
+| “Relay isn't connected”                   | Open **Settings → Conductor**, check its status, and quit and reopen Conductor after setup. An unsupported version may leave the relay disabled. |
+| Waiting states are missing or slow        | Run **Agent hooks** again in **Settings → Setup**.                                                                                               |
+| Live typing fails                         | Check Squeak Hands' Accessibility grant and Terminal Automation permission. Other terminals are watch-only.                                      |
+| A phone stops updating                    | Check that the Mac is awake and online, then check your connection in **Settings → iPhone**.                                                     |
 
 For a bug report, use the app's **Report** button or
 [GitHub Issues](https://github.com/Sibhimanyu/squeak/issues).

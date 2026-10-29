@@ -665,6 +665,7 @@ private struct PrivacySettings: View {
 private struct AboutSettings: View {
     @Environment(AppModel.self) private var model
     @State private var copied = false
+    @State private var uninstalling = false
 
     var body: some View {
         @Bindable var model = model
@@ -719,7 +720,13 @@ private struct AboutSettings: View {
                         SectionFootnote("Tell us what's broken, confusing or could be better. A person reads every report. Also in Help › Report a problem (⌥⌘R).")
                     }
                 }
+                Section {
+                    Button("Uninstall Squeak…", role: .destructive) { uninstalling = true }
+                } footer: {
+                    SectionFootnote("Hands Conductor back, removes Squeak's service, hooks and files from this Mac. You see everything first.")
+                }
         }
         .settingsForm()
+        .sheet(isPresented: $uninstalling) { UninstallSheet() }
     }
 }

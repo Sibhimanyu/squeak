@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.1
+
+- Settings › About › Uninstall Squeak…: shows exactly what will be removed, hands Conductor back first, then removes Squeak's service, hooks, admin rules, Keychain items and files, and moves the app to the Trash. Also available as `squeak uninstall` (docs/uninstall.md).
+
 ## 2.12.0
 
 - A new first run: Welcome, Connect (the service, hooks into the agents it finds, and Conductor, in one step), a

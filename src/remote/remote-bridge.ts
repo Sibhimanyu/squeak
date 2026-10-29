@@ -3124,7 +3124,8 @@ export class RemoteBridge {
       const action = parsePinAction((change as Record<string, unknown>).pinAction);
       if (!action) return refuse("A pin is 4 to 12 digits.", "bad pin action");
       const outcome = await voice.pinAction(action);
-      if (!outcome.ok) return refuse(outcome.reason, `pin ${action.action} refused`);
+      // The reason is a fixed sentence (the keeper's or the add-on's), never a pin, so it is safe to log.
+      if (!outcome.ok) return refuse(outcome.reason, `pin ${action.action} refused: ${outcome.reason}`);
       this.nudgePublish(0);
       this.log(device.name, "sent", `voice pin ${action.action}`);
       return { write: true, result: { id, status: "sent" } };

@@ -138,3 +138,5 @@ that first.
 
 **Copy diagnostics.** Settings › About › Copy diagnostics gives a redacted
 report you can attach to a bug report.
+
+To remove Squeak again, see [Uninstalling Squeak](uninstall.md).
