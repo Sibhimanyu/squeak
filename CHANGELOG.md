@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.19.8] - 2026-10-29 (iOS)
+## [1.20.1] - 2026-10-29 (iOS)
 
 - Steer now, Edit and Delete stay on a message you queued even when your Mac can't list Conductor's queue for a moment (its relay reconnecting); they say why if the Mac can't act.
 
