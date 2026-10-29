@@ -2494,12 +2494,7 @@ export class RemoteBridge {
       return { write: true, result: { id, status: "sent" } };
     }
     const found = this.watchableSession(command.key);
-    if (
-      !found?.active ||
-      found.session.agent !== "claude" ||
-      command.key !== this.presenceWatching ||
-      !this.phoneOpen()
-    ) {
+    if (!found?.active || command.key !== this.presenceWatching || !this.phoneOpen()) {
       return refuse("Open that chat first.");
     }
     if (!this.deps.subagentActivity?.(found.session, command.taskId, 1, 1)) {
@@ -3788,7 +3783,7 @@ export class RemoteBridge {
 
   /** Read once per step: the key moves with the session's activity. */
   private backgroundFor(session: FleetSession): { background?: PhoneBackgroundTask[] } {
-    if (session.state !== "working" || session.agent !== "claude" || !this.deps.background) return {};
+    if (session.state !== "working" || !this.deps.background) return {};
     try {
       const tasks = this.deps.background(session);
       if (tasks.length === 0) return {};

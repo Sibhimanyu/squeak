@@ -441,10 +441,10 @@ export class SqueakApp {
             activity: (session) =>
               session.transcriptPath ? readActivity(session.agent, session.transcriptPath) : null,
             background: (session) =>
-              session.transcriptPath ? this.subagents.tasks(session.transcriptPath, Date.now()) : [],
+              session.transcriptPath ? this.subagents.tasks(session.transcriptPath, Date.now(), session.agent) : [],
             subagentActivity: (session, taskId, limit, stepChars) =>
-              session.agent === "claude" && session.transcriptPath
-                ? this.subagents.read(session.transcriptPath, taskId, Date.now(), { limit, stepChars })
+              session.transcriptPath
+                ? this.subagents.read(session.transcriptPath, taskId, Date.now(), { limit, stepChars }, session.agent)
                 : null,
             // A question's prompts, or a plan waiting on approval with its text (the phone's plan card).
             question: (session) =>
@@ -622,14 +622,15 @@ export class SqueakApp {
       activity: (key) => {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
         if (!session?.transcriptPath) return { steps: [], total: 0 };
-        // Subagents and background shells ride along for a Claude chat (fleet/background-work.ts).
-        const background = session.agent === "claude" ? this.subagents.tasks(session.transcriptPath, Date.now()) : [];
+        // Subagents and background shells ride along for a Claude chat (fleet/background-work.ts), and a Codex chat's
+        // subagents too (fleet/codex-subagents.ts).
+        const background = this.subagents.tasks(session.transcriptPath, Date.now(), session.agent);
         return { ...readActivity(session.agent, session.transcriptPath), ...(background.length ? { background } : {}) };
       },
       subagentActivity: (key, taskId) => {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
-        if (session?.agent !== "claude" || !session.transcriptPath) return null;
-        return this.subagents.read(session.transcriptPath, taskId, Date.now());
+        if (!session?.transcriptPath) return null;
+        return this.subagents.read(session.transcriptPath, taskId, Date.now(), {}, session.agent);
       },
       chatModels: () => listChatModels(config.conductorDbPath),
       sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),

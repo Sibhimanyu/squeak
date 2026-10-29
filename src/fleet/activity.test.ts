@@ -275,4 +275,32 @@ describe("describing tools", () => {
     const patch = { name: "apply_patch", input: "*** Begin Patch\n*** Update File: src/app.ts\n@@" };
     expect(describeCodexTool(patch)).toBe("Edit app.ts");
   });
+
+  it('names what Codex\'s exec script really does, not just "exec"', () => {
+    const run = (input: string) => describeCodexTool({ name: "exec", input });
+    expect(
+      run('const r = await tools.exec_command({cmd:"npm run ci",workdir:"/x",yield_time_ms:10000}); text(r.output);'),
+    ).toBe("Run npm run ci");
+    expect(run('text(await tools.apply_patch("*** Begin Patch\\n*** Update File: work/plan.py\\n@@"))')).toBe(
+      "Edit plan.py",
+    );
+    expect(run('await tools.view_image({path:"/tmp/shots/home.png"})')).toBe("View home.png");
+    expect(run("await tools.write_stdin({session_id: 1, chars: ''})")).toBe("Send input to a running command");
+    expect(run("await tools.web__run({search_query:[{q:'x'}]})")).toBe("Search the web");
+    expect(run("await tools.mcp__codex_apps__github_fetch({})")).toBe("Use codex_apps github_fetch");
+    expect(run("const keys = [1,2]; text(keys.length)")).toBe("Run a script");
+  });
+
+  it("says what Codex's subagent tools do", () => {
+    const call = (name: string, args: Record<string, unknown>) =>
+      describeCodexTool({ name, arguments: JSON.stringify(args) });
+    expect(call("spawn_agent", { task_name: "popover_redesign", model: "x", message: "gAAAA" })).toBe(
+      "Start subagent popover redesign",
+    );
+    expect(call("send_message", { target: "settings_redesign", message: "gAAAA" })).toBe("Message settings redesign");
+    expect(call("followup_task", { target: "/root/web_copy", message: "gAAAA" })).toBe("Follow up with web copy");
+    expect(call("wait_agent", { timeout_ms: 20000 })).toBe("Wait for subagents");
+    expect(call("list_agents", {})).toBe("List subagents");
+    expect(call("send_message", { target: "/root", message: "gAAAA" })).toBe("Report to the main agent");
+  });
 });

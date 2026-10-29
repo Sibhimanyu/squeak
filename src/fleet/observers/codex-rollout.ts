@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { CodexSubagentReader } from "../codex-subagents.js";
 import type { FleetState, ObservedSession, SessionOrigin } from "../types.js";
 import { asArray, asRecord, asString, parseJsonLines, readHeadLines, readTailLines, summarize } from "./tail.js";
 
@@ -112,6 +113,11 @@ export class CodexRolloutObserver {
     const meta = head.find((entry) => asString(entry.type) === "session_meta");
     const metaPayload = meta ? asRecord(meta.payload) : null;
     if (!metaPayload) {
+      return null;
+    }
+
+    // A subagent's own rollout belongs to its parent chat (fleet/codex-subagents.ts), not on the radar as a chat.
+    if (CodexSubagentReader.isSubagentMeta(metaPayload)) {
       return null;
     }
 

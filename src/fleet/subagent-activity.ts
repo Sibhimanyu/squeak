@@ -8,7 +8,9 @@ import {
   type BackgroundStatus,
   type BackgroundTask,
 } from "./background-work.js";
+import { CodexSubagentReader } from "./codex-subagents.js";
 import { asString, parseJsonLines, readTailLines } from "./observers/tail.js";
+import type { AgentKind } from "./types.js";
 
 /**
  * What one Claude subagent is doing, read from its own transcript.
@@ -100,10 +102,16 @@ export function agentIdFromMeta(transcriptPath: string, taskId: string): string 
 export class SubagentActivityReader {
   private readonly cache = new Map<string, { size: number; mtimeMs: number; entries: Record<string, unknown>[] }>();
 
+  private readonly codex = new CodexSubagentReader();
+
   constructor(private readonly background: BackgroundWorkReader = new BackgroundWorkReader()) {}
 
-  /** The parent's task list with `hasSteps` set where the subagent's transcript can be read. */
-  tasks(transcriptPath: string, nowMs: number): BackgroundTask[] {
+  /**
+   * The parent's task list with `hasSteps` set where the subagent's transcript can be read. A Codex chat's
+   * subagents are their own rollout files (codex-subagents.ts); everything else is a Claude transcript.
+   */
+  tasks(transcriptPath: string, nowMs: number, agent: AgentKind = "claude"): BackgroundTask[] {
+    if (agent === "codex") return this.codex.tasks(transcriptPath, nowMs);
     return this.background.read(transcriptPath, nowMs).map((task) => {
       if (task.kind !== "agent") return task;
       const agentId = task.agentId ?? agentIdFromMeta(transcriptPath, task.id) ?? undefined;
@@ -121,7 +129,9 @@ export class SubagentActivityReader {
     taskId: string,
     nowMs: number,
     options: { limit?: number; stepChars?: number } = {},
+    agent: AgentKind = "claude",
   ): SubagentActivity | null {
+    if (agent === "codex") return this.codex.read(transcriptPath, taskId, nowMs, options);
     if (!TASK_ID_PATTERN.test(taskId)) return null;
     const task = this.tasks(transcriptPath, nowMs).find((candidate) => candidate.id === taskId);
     if (!task || task.kind !== "agent") return null;

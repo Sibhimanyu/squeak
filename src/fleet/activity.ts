@@ -202,7 +202,7 @@ export function describeClaudeTool(name: string, input: Record<string, unknown>)
   }
 }
 
-function codexSteps(entries: Record<string, unknown>[], max: number): ActivityStep[] {
+export function codexSteps(entries: Record<string, unknown>[], max: number): ActivityStep[] {
   let steps: ActivityStep[] = [];
   // Between task_started and task_complete a turn is running. Its first real
   // user message starts it; one sent after the agent has begun answering is a
@@ -269,23 +269,78 @@ function codexSteps(entries: Record<string, unknown>[], max: number): ActivitySt
 export function describeCodexTool(payload: Record<string, unknown>): string {
   const name = asString(payload.name) ?? "tool";
   const raw = asString(payload.arguments) ?? asString(payload.input) ?? "";
-  // Shell calls carry the command as `cmd` (JSON arguments) or inside the
-  // exec tool's script; either way the command is what a person would name.
-  const cmd = /"cmd"\s*:\s*(\[[^\]]*\]|"(?:[^"\\]|\\.)*")/.exec(raw)?.[1];
+  const collaboration = describeCodexCollaboration(name, raw);
+  if (collaboration) return collaboration;
+  // Codex's `exec` tool runs a little script that calls `tools.exec_command({cmd: "…"})`, `tools.apply_patch(…)`
+  // and the like; what the script does is what a person would name, not "exec".
+  const inner = /tools\.([A-Za-z0-9_]+)/.exec(raw)?.[1];
+  const tool = name === "exec" && inner ? inner : name;
+  // Shell calls carry the command as `cmd` (a JSON key, or a JS key in the exec script).
+  const cmd = /\bcmd"?\s*:\s*(\[[^\]]*\]|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`)/.exec(raw)?.[1];
   if (cmd) {
     try {
-      const parsed = JSON.parse(cmd) as unknown;
+      const parsed = (
+        cmd.startsWith("'") || cmd.startsWith("`") ? cmd.slice(1, -1) : (JSON.parse(cmd) as unknown)
+      ) as unknown;
       const command = Array.isArray(parsed) ? parsed.map(String).join(" ") : String(parsed);
       return clip(`Run ${firstLine(command.replace(/^(bash|zsh|sh) -lc /, ""))}`, 120);
     } catch {
       // Fall through to the tool's name.
     }
   }
-  if (name === "apply_patch" || raw.includes("*** Begin Patch")) {
-    const file = /\*\*\* (?:Update|Add) File: (.+)/.exec(raw)?.[1];
+  if (tool === "apply_patch" || raw.includes("*** Begin Patch")) {
+    const file = /\*\*\* (?:Update|Add) File: ([^\n\\"]+)/.exec(raw)?.[1];
     return file ? `Edit ${path.basename(file.trim())}` : "Edit files";
   }
-  return clip(`Use ${name}`, 120);
+  if (tool === "view_image") {
+    const file = /(?:path|image_path)"?\s*:\s*["'`]([^"'`]+)["'`]/.exec(raw)?.[1];
+    return file ? `View ${path.basename(file)}` : "View an image";
+  }
+  if (tool === "write_stdin") return "Send input to a running command";
+  if (tool.startsWith("web__") || tool === "web_search") return "Search the web";
+  if (tool.startsWith("image_gen")) return "Generate an image";
+  if (tool.startsWith("mcp__")) return clip(`Use ${tool.split("__").slice(1).join(" ")}`, 120);
+  if ((name === "exec" && !inner) || name === "js") return "Run a script";
+  return clip(`Use ${tool}`, 120);
+}
+
+/** Codex's subagent tools: the task's name is plain, its message is encrypted. */
+function describeCodexCollaboration(name: string, raw: string): string | null {
+  const field = (key: string): string | null => {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      const value = asString(asRecord(parsed)?.[key]);
+      return value ? value.replace(/^\/root\//, "") : null;
+    } catch {
+      return null;
+    }
+  };
+  switch (name) {
+    case "spawn_agent": {
+      const task = field("task_name");
+      return task ? clip(`Start subagent ${task.replace(/_/g, " ")}`, 120) : "Start a subagent";
+    }
+    case "send_message": {
+      const target = field("target");
+      if (target === "root" || target === "/root") return "Report to the main agent";
+      return target ? clip(`Message ${target.replace(/_/g, " ")}`, 120) : "Message a subagent";
+    }
+    case "followup_task": {
+      const target = field("target");
+      return target ? clip(`Follow up with ${target.replace(/_/g, " ")}`, 120) : "Follow up with a subagent";
+    }
+    case "wait_agent":
+    case "wait":
+      return "Wait for subagents";
+    case "list_agents":
+      return "List subagents";
+    case "close_agent": {
+      const target = field("target");
+      return target ? clip(`Close ${target.replace(/_/g, " ")}`, 120) : "Close a subagent";
+    }
+    default:
+      return null;
+  }
 }
 
 function firstLine(text: string): string {
