@@ -146,6 +146,7 @@ private struct PinSection: View {
         switch state {
         case "off": return "Anyone who answers a call can reply by key. Turn the pin on to ask for it again."
         case "none": return "No pin is set, so Squeak only tells you on a call and takes no answer. A pin is 4 to 12 digits."
+        case "unknown": return "Your Home Assistant add-on hasn't said whether a pin is set. If this stays, update the Squeak Voice add-on (0.5.0 or newer) and check it is running."
         default: return "The pin you key in on a call, 4 to 12 digits. It is kept with whatever places your calls, not shown here."
         }
     }
@@ -164,7 +165,7 @@ private struct PinSection: View {
         case "none":
             form(.enable, title: "Set a PIN", needsCurrent: false, button: "Set a PIN")
         default:
-            Text("Checking…").font(.footnote).foregroundStyle(Theme.muted)
+            Text("Waiting for your add-on…").font(.footnote).foregroundStyle(Theme.muted)
             turnOff
             forgot
         }
