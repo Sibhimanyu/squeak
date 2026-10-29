@@ -57,7 +57,7 @@ struct PopupNewChatBand: View {
                 ForEach(f.presets + (f.preset == .custom ? [.custom] : []), id: \.self) { p in
                     let on = f.preset == p
                     Button { if p != .custom { state.form.apply(preset: p) } } label: {
-                        Text(p.title).font(.popup(13, on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted)
+                        Text(state.form.presetTitle(p)).font(.popup(13, on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted)
                             .frame(maxWidth: .infinity).frame(height: 28)
                             .background(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).fill(on ? Theme.selected : Color.wash(0.025)))
                             .overlay(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).strokeBorder(Color.wash(on ? 0.2 : 0.10)))

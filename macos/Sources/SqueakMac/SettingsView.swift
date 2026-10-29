@@ -376,6 +376,7 @@ struct GeneralSettings: View {
         @Bindable var model = model
         Form {
             macCard
+            chatPresetSettings
             Section {
                 Picker("Style", selection: $glassWindowAppearance) {
                     Text("Glass").tag(true)
@@ -466,6 +467,98 @@ struct GeneralSettings: View {
             return "Glass controls are unavailable while Solid is selected. Glass uses the native macOS window material when enabled."
         }
         return "Glass uses native macOS material with a subtle tint. Higher transparency reveals more of the material; sidebar contrast sets how much more opaque the sidebar feels than the main area. Reduce Transparency automatically switches to Solid."
+    }
+
+    private var presetPreferences: ChatPresetPreferences { ChatPresetPreferences() }
+    @State private var chatModels: [DaemonChatModel] = []
+    @State private var presetAgent: NewChatAgent = .claude
+    @State private var presetRefresh = 0
+    @State private var draftPresetNames: [String: String] = [:]
+
+    private var chatPresetSettings: some View {
+        Section {
+            Picker("Agent", selection: $presetAgent) {
+                ForEach(NewChatAgent.allCases) { agent in Text(agent.displayName).tag(agent) }
+            }.pickerStyle(.segmented)
+            if chatModels.isEmpty {
+                SectionFootnote("Connect Conductor to load the models this Mac can use.")
+            } else {
+                ForEach([ChatPreset.best, .balanced, .save], id: \.self) { preset in
+                    presetEditor(preset)
+                }
+            }
+        } header: { Text("New chat presets") } footer: {
+            SectionFootnote("Preset names and settings are saved on this Mac. Each agent has its own model choices.")
+        }
+        .task {
+            chatModels = await model.newChatModels()
+            for preset in [ChatPreset.best, .balanced, .save] where draftPresetNames[preset.rawValue] == nil {
+                draftPresetNames[preset.rawValue] = presetPreferences.title(for: preset)
+            }
+        }
+    }
+
+    private func presetEditor(_ preset: ChatPreset) -> some View {
+        let list = ChatPresets.models(chatModels, presetAgent)
+        let preferences = presetPreferences
+        let initial = preferences.setup(for: preset, agent: presetAgent, models: chatModels)
+            ?? ChatPresets.setup(for: preset, agent: presetAgent, models: chatModels)
+            ?? ChatPresets.setup(for: .best, agent: presetAgent, models: chatModels)
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(preset.title).font(.headline)
+                Spacer()
+                Button("Restore defaults") {
+                    preferences.restoreDefaults(for: preset, agent: presetAgent)
+                    draftPresetNames[preset.rawValue] = preset.title
+                    presetRefresh += 1
+                }
+                .buttonStyle(.link)
+                .accessibilityLabel("Restore \(preset.title) defaults")
+            }
+            TextField("Name shown in New chat", text: Binding(
+                get: { draftPresetNames[preset.rawValue] ?? preferences.title(for: preset) },
+                set: { draftPresetNames[preset.rawValue] = $0; preferences.setTitle($0, for: preset); presetRefresh += 1 }
+            ))
+            if let initial {
+                Picker("Model", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
+                    ForEach(list) { model in Text(model.label).tag(Optional(model.id)) }
+                }
+                if let selected = list.first(where: { $0.id == initial.modelId }), !selected.levels.isEmpty {
+                    Picker("Thinking", selection: settingBinding(preset, initial: initial, keyPath: \.level)) {
+                        ForEach(selected.levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag(Optional($0)) }
+                    }
+                }
+                if presetAgent == .claude {
+                    Picker("Code", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
+                        Text("Same model").tag(String?.none)
+                        ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
+                    }
+                    Picker("Run commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
+                        Text("Same model").tag(String?.none)
+                        ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
+                    }
+                    Toggle("Ask before changes", isOn: Binding(
+                        get: { presetPreferences.setup(for: preset, agent: presetAgent, models: chatModels)?.planFirst ?? initial.planFirst },
+                        set: { value in updateSetup(preset, initial: initial) { $0.planFirst = value && ($0.code != nil || $0.run != nil) } }
+                    ))
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func settingBinding<Value>(_ preset: ChatPreset, initial: ChatSetup, keyPath: WritableKeyPath<ChatSetup, Value>) -> Binding<Value> {
+        Binding(get: { presetPreferences.setup(for: preset, agent: presetAgent, models: chatModels).map { $0[keyPath: keyPath] } ?? initial[keyPath: keyPath] }, set: { value in
+            updateSetup(preset, initial: initial) { $0[keyPath: keyPath] = value }
+        })
+    }
+
+    private func updateSetup(_ preset: ChatPreset, initial: ChatSetup, mutate: (inout ChatSetup) -> Void) {
+        var setup = presetPreferences.setup(for: preset, agent: presetAgent, models: chatModels) ?? initial
+        mutate(&setup)
+        presetPreferences.setSetup(setup, for: preset, agent: presetAgent, models: chatModels)
+        presetRefresh += 1
     }
 
     private var macCard: some View {

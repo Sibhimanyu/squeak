@@ -128,7 +128,7 @@ struct QuickNewChatView: View {
                 HStack(spacing: 8) {
                     ForEach(f.presets + (f.preset == .custom ? [.custom] : []), id: \.self) { preset in
                         Button { if preset != .custom { state.form.apply(preset: preset) } } label: {
-                            Text(preset.title).font(.system(size: 13, weight: preset == f.preset ? .semibold : .regular))
+                            Text(f.presetTitle(preset)).font(.system(size: 13, weight: preset == f.preset ? .semibold : .regular))
                                 .foregroundStyle(preset == f.preset ? Theme.ink : Theme.muted)
                                 .frame(maxWidth: .infinity).padding(.vertical, 8)
                                 .background(preset == f.preset ? Theme.selected : Theme.surfaceRaised.opacity(0.3), in: Capsule())

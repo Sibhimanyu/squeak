@@ -192,13 +192,15 @@ public struct NewChatForm: Sendable, Equatable {
 
     public var agentModels: [DaemonChatModel] { ChatPresets.models(models, agent) }
     public var chosenModel: DaemonChatModel? { agentModels.first { $0.id == setup.modelId } }
-    public var presets: [ChatPreset] { ChatPresets.available(agent: agent, models: models) }
-    public var preset: ChatPreset { ChatPresets.preset(of: setup, agent: agent, models: models) }
+    public var presets: [ChatPreset] { [ChatPreset.best, .balanced, .save].filter { presetSetup($0) != nil }.count > 1 ? [ChatPreset.best, .balanced, .save].filter { presetSetup($0) != nil } : [] }
+    public var preset: ChatPreset { [ChatPreset.best, .balanced, .save].first { presetSetup($0) == setup } ?? .custom }
+    public func presetTitle(_ preset: ChatPreset) -> String { store?.preferences.title(for: preset) ?? preset.title }
+    public func presetSetup(_ preset: ChatPreset) -> ChatSetup? { store?.preferences.setup(for: preset, agent: agent, models: models) ?? ChatPresets.setup(for: preset, agent: agent, models: models) }
     public var summary: String { ChatPresets.summary(of: setup, agent: agent, models: models) }
     public var canSplit: Bool { agent == .claude && !models.isEmpty }
 
     public mutating func apply(preset: ChatPreset) {
-        guard let s = ChatPresets.setup(for: preset, agent: agent, models: models) else { return }
+        guard let s = presetSetup(preset) else { return }
         setup = s
         remember()
     }

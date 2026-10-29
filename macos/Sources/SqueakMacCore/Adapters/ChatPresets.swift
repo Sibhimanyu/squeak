@@ -59,6 +59,45 @@ public enum ChatPreset: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// Editable preset labels and per-agent setup overrides. Missing or stale choices fall back to the
+/// built-in preset after being checked against the daemon's current model list.
+public struct ChatPresetPreferences: Equatable, @unchecked Sendable {
+    private let defaults: UserDefaults
+    private let key = "squeak.mac.newchat.presets"
+    private struct Saved: Codable { var names: [String: String] = [:]; var setups: [String: ChatSetup] = [:] }
+    public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    private func value() -> Saved { defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) } ?? Saved() }
+    private func store(_ value: Saved) { defaults.set(try? JSONEncoder().encode(value), forKey: key) }
+    public func title(for preset: ChatPreset) -> String { value().names[preset.rawValue]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? preset.title }
+    public func setTitle(_ title: String, for preset: ChatPreset) {
+        guard preset != .custom else { return }; var saved = value()
+        let clean = String(title.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
+        if clean.isEmpty || clean == preset.title { saved.names.removeValue(forKey: preset.rawValue) } else { saved.names[preset.rawValue] = clean }
+        store(saved)
+    }
+    public func setup(for preset: ChatPreset, agent: NewChatAgent, models: [DaemonChatModel]) -> ChatSetup? {
+        guard preset != .custom else { return nil }
+        let builtIn = ChatPresets.setup(for: preset, agent: agent, models: models)
+        let chosen = value().setups["\(agent.rawValue).\(preset.rawValue)"] ?? builtIn
+        guard let chosen else { return nil }
+        let safe = ChatPresets.sanitised(chosen, agent: agent, models: models)
+        return safe.modelId == nil ? builtIn : safe
+    }
+    public func setSetup(_ setup: ChatSetup, for preset: ChatPreset, agent: NewChatAgent, models: [DaemonChatModel]) {
+        guard preset != .custom else { return }; var saved = value()
+        saved.setups["\(agent.rawValue).\(preset.rawValue)"] = ChatPresets.sanitised(setup, agent: agent, models: models)
+        store(saved)
+    }
+    public func restoreDefaults(for preset: ChatPreset, agent: NewChatAgent) {
+        guard preset != .custom else { return }; var saved = value()
+        saved.names.removeValue(forKey: preset.rawValue)
+        saved.setups.removeValue(forKey: "\(agent.rawValue).\(preset.rawValue)")
+        store(saved)
+    }
+}
+
+private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
+
 /// Preset to settings, worked out only from the models the daemon listed: a preset it cannot back is not offered.
 public enum ChatPresets {
     public static func models(_ all: [DaemonChatModel], _ agent: NewChatAgent) -> [DaemonChatModel] {
@@ -145,6 +184,12 @@ public enum ChatPresets {
         if chat.levels.isEmpty { s.level = nil }
         else if s.level == nil || !chat.levels.contains(s.level!) { s.level = chat.defaultLevel ?? chat.levels.first }
         if agent != .claude { s.code = nil; s.run = nil; s.planFirst = false }
+        else {
+            let workerIDs = Set(ChatWorker.all.map(\.id))
+            if let code = s.code, !workerIDs.contains(code) { s.code = nil }
+            if let run = s.run, !workerIDs.contains(run) { s.run = nil }
+            if s.code == nil && s.run == nil { s.planFirst = false }
+        }
         return s
     }
 }
@@ -156,6 +201,7 @@ public struct ChatChoiceStore: Equatable, @unchecked Sendable {
     private let key = "squeak.mac.newchat.choice"
 
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    public var preferences: ChatPresetPreferences { ChatPresetPreferences(defaults: defaults) }
 
     private struct Saved: Codable { var preset: ChatPreset; var setup: ChatSetup? }
 
@@ -174,7 +220,7 @@ public struct ChatChoiceStore: Equatable, @unchecked Sendable {
         let fallback = ChatPresets.setup(for: .best, agent: agent, models: models)
             ?? ChatSetup(modelId: list.first?.id, level: list.first?.defaultLevel ?? list.first?.levels.first)
         guard let saved = all()[agent.rawValue] else { return fallback }
-        if saved.preset != .custom { return ChatPresets.setup(for: saved.preset, agent: agent, models: models) ?? fallback }
+        if saved.preset != .custom { return preferences.setup(for: saved.preset, agent: agent, models: models) ?? fallback }
         guard let setup = saved.setup, list.contains(where: { $0.id == setup.modelId }) else { return fallback }
         return ChatPresets.sanitised(setup, agent: agent, models: models)
     }

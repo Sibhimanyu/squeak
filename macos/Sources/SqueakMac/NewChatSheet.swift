@@ -267,7 +267,7 @@ struct NewChatSheet: View {
                     ForEach(f.presets + (f.preset == .custom ? [.custom] : []), id: \.self) { p in
                         let on = f.preset == p
                         Button { if p != .custom { state.form.apply(preset: p) } } label: {
-                            Text(p.title)
+                            Text(state.form.presetTitle(p))
                                 .font(.system(size: 13, weight: on ? .semibold : .regular))
                                 .foregroundStyle(on ? Theme.ink : Theme.muted)
                                 .frame(maxWidth: .infinity, minHeight: Metrics.field, maxHeight: Metrics.field)

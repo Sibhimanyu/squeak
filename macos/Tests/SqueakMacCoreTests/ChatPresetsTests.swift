@@ -65,6 +65,37 @@ struct ChatPresetsTests {
         #expect(g.setup.code == "sonnet" && g.setup.run == "haiku" && g.preset == .custom)
     }
 
+    @Test func presetPreferencesPersistNamesAndAgentSpecificSetupsSafely() {
+        let defaults = UserDefaults(suiteName: "squeak.presets.\(UUID().uuidString)")!
+        let prefs = ChatPresetPreferences(defaults: defaults)
+        prefs.setTitle("Budget", for: .save)
+        var setup = ChatPresets.setup(for: .save, agent: .claude, models: models)!
+        setup.run = "opus"
+        prefs.setSetup(setup, for: .save, agent: .claude, models: models)
+        let restored = ChatPresetPreferences(defaults: defaults)
+        #expect(restored.title(for: .save) == "Budget")
+        #expect(restored.setup(for: .save, agent: .claude, models: models)?.run == "opus")
+        #expect(restored.setup(for: .save, agent: .codex, models: models) == nil)
+        #expect(restored.setup(for: .save, agent: .claude, models: [models[0]]) == ChatPresets.setup(for: .save, agent: .claude, models: [models[0]]))
+        let codexCustom = ChatSetup(modelId: "gpt-5.5", level: "low")
+        restored.setSetup(codexCustom, for: .balanced, agent: .codex, models: models)
+        #expect(restored.setup(for: .balanced, agent: .codex, models: models) == codexCustom)
+        restored.restoreDefaults(for: .balanced, agent: .codex)
+        #expect(restored.title(for: .balanced) == ChatPreset.balanced.title)
+        #expect(restored.setup(for: .balanced, agent: .codex, models: models) == nil)
+    }
+
+    @Test func savedPresetNamesAreVisibleToNewFormsAfterRecreation() {
+        let defaults = UserDefaults(suiteName: "squeak.preset-titles.\(UUID().uuidString)")!
+        let store = ChatChoiceStore(defaults: defaults)
+        store.preferences.setTitle("Budget", for: .save)
+        var windowForm = NewChatForm(store: store)
+        windowForm.setModels(models)
+        #expect(windowForm.presetTitle(.save) == "Budget")
+        let popupForm = NewChatForm(store: ChatChoiceStore(defaults: defaults))
+        #expect(popupForm.presetTitle(.save) == "Budget")
+    }
+
     @Test func startChatSendsModelThinkingSplit() async throws {
         let t = FakeTransport()
         await t.json("POST", "/control/chats", #"{"ok":true,"sessionId":"s"}"#)
