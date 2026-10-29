@@ -190,7 +190,7 @@ struct SidebarBrandHeader: View {
             }
             Spacer(minLength: 0)
             if !isCollapsed {
-                Button { QuickComposerController.shared.show() } label: {
+                Button { NewChatController.shared.showQuickMessage() } label: {
                     Lucide(.squarePen, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -260,6 +260,23 @@ struct SidebarView: View {
             if !isCollapsed { searchField.padding(.horizontal, Metrics.sidebarInset).padding(.top, 14) }
             ScrollView {
                 VStack(alignment: .leading, spacing: Metrics.sidebarRowGap) {
+                    Button { NewChatController.shared.show() } label: {
+                        HStack(spacing: 12) {
+                            Lucide(.plus, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 20)
+                            if !isCollapsed {
+                                Text("New chat").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink)
+                                Spacer(minLength: 0)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+                        .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow)
+                        .background(RoundedRectangle(cornerRadius: Metrics.sidebarRadius).fill(NewChatController.shared.page == .newChat ? Color.white.opacity(0.10) : .clear))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(NewChatController.shared.page == .newChat ? .isSelected : [])
+                    .accessibilityLabel("New chat")
+                    .help("New chat (⌘N)")
                     row(.home, "Home", .house)
                     row(.all, "Sessions", .messageSquare)
                     row(.needsYou, "Needs you", .circleAlert)
@@ -309,9 +326,9 @@ struct SidebarView: View {
     }
 
     private func row(_ f: NavFilter, _ title: String, _ symbol: LucideName) -> some View {
-        let selected = current == f
+        let selected = NewChatController.shared.page == nil && current == f
         let n = count(for: f) ?? 0
-        return Button { model.navFilter = f; model.projectFilter = nil } label: {
+        return Button { NewChatController.shared.hide(); model.navFilter = f; model.projectFilter = nil } label: {
             HStack(spacing: 12) {
                 Lucide(symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted).frame(width: 20)
                 if !isCollapsed {

@@ -3,69 +3,69 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// Opens New chat from anywhere: ⌘N, the popover footer, the quick composer. A borderless panel with the
-/// menu-bar panel's own glass surface, dropped under the status item where that panel opens, so starting a
-/// chat stays in the panel's look instead of opening a titled window.
-@MainActor
-final class NewChatController: NSObject {
+/// The desktop window owns its compose pages. The menu-bar popup uses PopupNav and its own state.
+@MainActor @Observable
+final class NewChatController {
     static let shared = NewChatController()
-    private var panel: QuickPanel?
-    private var clickMonitor: Any?
+    enum Page { case newChat, quickMessage }
+    var page: Page?
     let state = NewChatState()
+    let quickState = QuickState()
 
     func show(preselect workspaceId: String? = nil) {
         let model = AppModel.shared
-        if panel == nil {
-            let p = QuickPanel(
-                contentRect: NSRect(x: 0, y: 0, width: NewChatSheet.width, height: 640),
-                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            p.isOpaque = false
-            p.backgroundColor = .clear
-            p.hasShadow = true
-            p.level = .floating
-            p.hidesOnDeactivate = false
-            p.isReleasedWhenClosed = false
-            p.isMovableByWindowBackground = true
-            p.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-            p.onEscape = { [weak self] in self?.hide() }
-            let host = NSHostingView(rootView: NewChatSheet(close: { [weak self] in self?.hide() })
-                .panelSurface()
-                .environment(model).environment(state))
-            host.sizingOptions = [.intrinsicContentSize]
-            p.contentView = host
-            panel = p
-        }
+        hide()
+        model.closeSettings()
         state.prepare(model: model, preselect: workspaceId)
-        guard let panel else { return }
-        if !panel.isVisible { place(panel) }
-        panel.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        watchOutsideClicks()
+        page = .newChat
+        model.showConversationWindow()
+    }
+
+    func showQuickMessage() {
+        let model = AppModel.shared
+        hide()
+        model.closeSettings()
+        quickState.prepare(model: model, explicit: model.selected)
+        quickState.focus += 1
+        page = .quickMessage
+        model.showConversationWindow()
     }
 
     func hide() {
-        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
-        clickMonitor = nil
-        panel?.orderOut(nil)
-    }
-
-    /// Under the status item, like the menu-bar panel; on the pointer's screen, high, when there is none.
-    private func place(_ panel: NSPanel) {
-        let size = panel.contentView?.fittingSize ?? panel.frame.size
-        if let frame = MenuBarController.shared.dropFrame(size: size) {
-            panel.setFrame(frame, display: false)
-            return
+        if page == .quickMessage {
+            quickState.stashDraft()
+            quickState.epoch += 1
+            quickState.context.clear()
         }
-        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
-        guard let v = screen?.visibleFrame else { return panel.center() }
-        panel.setFrame(CGRect(x: v.midX - size.width / 2, y: v.maxY - 12 - size.height, width: size.width, height: size.height), display: false)
+        page = nil
     }
+}
 
-    /// A click in another app closes it, as it does the menu-bar panel.
-    private func watchOutsideClicks() {
-        guard clickMonitor == nil else { return }
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            Task { @MainActor in self?.hide() }
+/// An integrated desktop page, with the form scrolling independently of its action bar.
+struct DesktopComposePage: View {
+    let controller = NewChatController.shared
+
+    var body: some View {
+        switch controller.page {
+        case .newChat:
+            NewChatSheet(close: { controller.hide() })
+                .environment(controller.state)
+        case .quickMessage:
+            VStack(alignment: .leading, spacing: 20) {
+                HStack {
+                    Text("Quick message").font(.system(size: Metrics.pageTitle, weight: .bold))
+                    Spacer()
+                    Button("Done") { controller.hide() }.buttonStyle(SecondaryButtonStyle())
+                }
+                Text("Send a message to an existing chat.").font(Typo.body).foregroundStyle(Theme.muted)
+                QuickComposerView(close: { controller.hide() }, embedded: true)
+                    .environment(controller.quickState)
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        case nil:
+            EmptyView()
         }
     }
 }
@@ -161,24 +161,29 @@ struct NewChatSheet: View {
     @Environment(NewChatState.self) private var state
 
     var body: some View {
-        @Bindable var state = state
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
             Text("New chat").font(.system(size: Metrics.pageTitle, weight: .bold))
-            switch state.phase {
-            case .loading:
-                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading workspaces…").foregroundStyle(Theme.muted) }
-                    .frame(maxWidth: .infinity, minHeight: 200)
-            case .offline:
-                notice("Squeak can't reach its service, so there is nowhere to start a chat. Open Squeak for the fix.")
-            case .outdated:
-                notice("This version of the Squeak service can't start chats yet. Update the service in Settings.")
-            case .ready, .starting:
-                form
+                .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 18)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    switch state.phase {
+                    case .loading:
+                        HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading workspaces…").foregroundStyle(Theme.muted) }
+                            .frame(maxWidth: .infinity, minHeight: 200)
+                    case .offline:
+                        notice("Squeak can't reach its service, so there is nowhere to start a chat. Open Settings for the fix.")
+                    case .outdated:
+                        notice("This version of the Squeak service can't start chats yet. Update the service in Settings.")
+                    case .ready, .starting:
+                        form
+                    }
+                }
+                .padding(.horizontal, 24).padding(.bottom, 20)
             }
-            footer
+            .scrollBounceBehavior(.basedOnSize)
+            footer.padding(.horizontal, 24).padding(.bottom, 18)
         }
-        .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 16)
-        .frame(width: Self.width)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func notice(_ text: String) -> some View {

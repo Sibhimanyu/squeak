@@ -622,6 +622,7 @@ final class AppModel {
     // MARK: Selection
 
     func select(_ key: SessionKey?) {
+        if key != nil { NewChatController.shared.hide() }
         if key != nil, navFilter == .usage { navFilter = .all }
         // Opening a chat from anywhere (a notification, ⌘1…9) leaves Settings.
         if key != nil { closeSettings() }
@@ -687,6 +688,8 @@ final class AppModel {
     private(set) var settingUpLid = false
     private(set) var settingUpFans = false
     private(set) var settingUpPower = false
+    private(set) var settingPowerMode = false
+    private(set) var powerModeNote: String?
     /// The Mac's energy mode, and whether its rule is in; nil from an older daemon or a Mac with none.
     private(set) var power: DaemonPower?
     private(set) var heat: DaemonHeat?
@@ -890,6 +893,15 @@ final class AppModel {
         case .cancelled: awakeNote = nil
         case .failed(let reason): awakeNote = "Energy mode wasn't set up. \(reason)"
         }
+    }
+
+    /// Applies a choice through the daemon's existing energy-mode guard and refreshes `/state` afterward.
+    func setPowerMode(_ choice: String) async {
+        guard !settingPowerMode, !demoMode else { return }
+        settingPowerMode = true
+        defer { settingPowerMode = false }
+        powerModeNote = await client.setPowerMode(choice)
+        await readAwake()
     }
 
     /// Installs fan control (the root-owned helper and its rule) with macOS's admin prompt, once per Mac.
@@ -1130,12 +1142,16 @@ final class AppModel {
 
     /// Opens the main window on a Settings page (⌘, , the menu-bar panel, the sidebar's Settings row).
     func openSettings(_ section: SettingsSection? = nil) {
+        NewChatController.shared.hide()
         settingsSection = section ?? lastSettingsSection
         showConversationWindow()
     }
 
     /// Switches the page without opening a window (captures, which host the window themselves).
-    func openSettingsInPlace(_ section: SettingsSection) { settingsSection = section }
+    func openSettingsInPlace(_ section: SettingsSection) {
+        NewChatController.shared.hide()
+        settingsSection = section
+    }
 
     func closeSettings() {
         if let s = settingsSection { lastSettingsSection = s }

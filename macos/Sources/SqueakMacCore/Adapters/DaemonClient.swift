@@ -408,6 +408,20 @@ public struct DaemonClient: Sendable {
         return json["rule"] as? String
     }
 
+    /// Applies an Automatic, Low Power or High Power choice through the daemon's existing PowerMode guard.
+    public func setPowerMode(_ choice: String) async -> String? {
+        guard ["auto", "low", "high"].contains(choice) else { return "That energy mode isn't available." }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["choice": choice]) else { return "Couldn't send that." }
+        do {
+            let r = try await post("/control/power", body: data)
+            if (200..<300).contains(r.status) { return nil }
+            if r.status == 401 || r.status == 403 { return "Squeak rejected the access token" }
+            let reason = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any]
+            return (reason?["error"] as? String) ?? "Squeak couldn't change the energy mode."
+        } catch AdapterError.tokenMissing { return "Squeak's access token was not found" }
+        catch { return "Squeak isn't running." }
+    }
+
     /// Asks the daemon to look for the energy mode rule again, right after it was installed.
     public func recheckPower() async {
         _ = try? await post("/control/keep-awake", body: Data(#"{"action":"recheck-power"}"#.utf8))

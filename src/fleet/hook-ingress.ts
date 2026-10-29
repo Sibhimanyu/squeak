@@ -76,6 +76,8 @@ export interface IngressControl {
    */
   /** The energy mode sudoers file (fleet/power-mode.ts), for the Mac app to install with an admin prompt. */
   powerRule?(): { path: string; rule: string } | null;
+  /** Applies one of the three energy mode choices through the existing PowerMode guard. */
+  power?(choice: unknown): Promise<{ ok: true } | { ok: false; reason: string }>;
   fanRule?(): { path: string; rule: string; helperPath: string } | null;
   /**
    * Starts, extends or ends an awake session (fleet/awake-session.ts,
@@ -533,6 +535,51 @@ export class HookIngressServer {
         return;
       }
       respondJson(response, 200, rule);
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/power") {
+      if (request.method !== "POST" || !control.power) {
+        request.resume();
+        respond(response, control.power ? 405 : 503, control.power ? "method not allowed" : "power unavailable");
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        const choice = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).choice : undefined;
+        control.power!(choice)
+          .then((outcome) => {
+            if (!outcome.ok) {
+              respondJson(response, 400, { error: outcome.reason });
+              return;
+            }
+            respondJson(response, 200, { ok: true });
+          })
+          .catch((error: unknown) => {
+            logger.warn("control power failed", { error: error instanceof Error ? error.message : String(error) });
+            respond(response, 500, "power change failed");
+          });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
       return;
     }
 

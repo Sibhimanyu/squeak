@@ -78,7 +78,7 @@ struct SqueakCommands: Commands {
                     .disabled(!list.indices.contains(i))
             }
             Divider()
-            Button("Quick message") { QuickComposerController.shared.show() }
+            Button("Quick message") { NewChatController.shared.showQuickMessage() }
             Button("Open in Conductor") { model.openInHost() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(model.openURL == nil)

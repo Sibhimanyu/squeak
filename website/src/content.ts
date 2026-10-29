@@ -155,8 +155,8 @@ const content = {
     heading: "Step away. Stay in the loop.",
     lede: "Pair an iPhone or use Squeak for Web in any browser to see your chats and reply while away. Telegram and Zoho Cliq can send cards and take replies too. Replies travel through Squeak on your Mac, which needs to be awake and running.",
     phoneAlt:
-      "Squeak for iPhone showing the session squeak · session-hub at work. A What it's doing list shows the latest five of seventeen steps, with a message box at the bottom.",
-    phoneCaption: "A working turn, on the phone.",
+      "Squeak for iPhone showing Projects with eight sessions across workspaces, including a project with an approval request and a working session. Home, Sessions, Needs you, and Settings tabs appear at the bottom.",
+    phoneCaption: "Your projects and sessions at a glance on iPhone.",
     telegramLabel: "A Telegram card for the example session",
     telegram: {
       from: "Squeak",

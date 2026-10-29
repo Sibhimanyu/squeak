@@ -40,7 +40,7 @@ final class PopupNav {
         }
     }
 
-    /// The popup's own New chat form state (the New chat window has its own).
+    /// The popup's own New chat form state (the desktop page has its own).
     let newChat = NewChatState()
     var screen: Screen = .tab(.home)
     /// The tab to go back to from a sub-screen.
@@ -48,7 +48,7 @@ final class PopupNav {
 
     func show(_ tab: Tab) { lastTab = tab; screen = .tab(tab) }
 
-    /// New chat in the panel itself: the same state and Core form as the New chat window.
+    /// New chat in the panel itself: the same state and Core form as the desktop page.
     func openNewChat(preselect workspaceId: String? = nil) {
         if case .tab(let t) = screen { lastTab = t }
         newChat.prepare(model: AppModel.shared, preselect: workspaceId)
@@ -108,8 +108,13 @@ final class PopupNav {
 enum PopupMac {
     static var name: String { Host.current().localizedName ?? "This Mac" }
 
-    /// The battery's charge in percent, read from the system's power sources; nil on a desktop Mac.
-    static func batteryPercent() -> Int? {
+    struct BatteryStatus {
+        let percent: Int
+        let isCharging: Bool
+    }
+
+    /// The battery's charge and charging state, read from the system's power sources; nil on a desktop Mac.
+    static func batteryStatus() -> BatteryStatus? {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let list = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
         for source in list {
@@ -117,7 +122,10 @@ enum PopupMac {
                   (d[kIOPSTypeKey] as? String) == kIOPSInternalBatteryType,
                   let current = d[kIOPSCurrentCapacityKey] as? Int, let max = d[kIOPSMaxCapacityKey] as? Int, max > 0
             else { continue }
-            return Int((Double(current) / Double(max) * 100).rounded())
+            return BatteryStatus(
+                percent: Int((Double(current) / Double(max) * 100).rounded()),
+                isCharging: d[kIOPSIsChargingKey] as? Bool ?? false
+            )
         }
         return nil
     }

@@ -34,7 +34,7 @@ import {
 import { MacControls, macControlsSystem } from "../fleet/mac-controls.js";
 import { macTabsSystem, WindowTabs } from "../fleet/window-tabs.js";
 import { UsageStats } from "../fleet/usage-stats.js";
-import { POWER_SUDOERS_PATH, PowerMode, powerSudoersRule, powerSystem } from "../fleet/power-mode.js";
+import { POWER_SUDOERS_PATH, PowerMode, isPowerChoice, powerSudoersRule, powerSystem } from "../fleet/power-mode.js";
 import { AnswerService, answerControl } from "../fleet/answer.js";
 import { HooksSetup } from "../fleet/hooks-setup.js";
 import { answerRelayFrom } from "../fleet/answer-relay.js";
@@ -597,6 +597,10 @@ export class SqueakApp {
       },
       refreshClaudeUsage: () => this.claudeRefresher.refresh(),
       awake: (request) => this.applyAwake(request),
+      power: (choice) =>
+        isPowerChoice(choice)
+          ? this.energy.apply(choice)
+          : Promise.resolve({ ok: false, reason: "That energy mode isn't available." }),
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
@@ -807,11 +811,11 @@ export class SqueakApp {
     this.hotspot.stop();
     this.caffeinator.stop();
     this.remote?.stop();
+    this.sharedBudget?.flush();
     await this.localChannel?.stop().catch(() => undefined);
     this.cliq?.stop();
     this.voice?.stop();
     this.stopMemoInbox();
-    this.sharedBudget?.flush();
     this.voiceSpeaker?.dispose();
     await this.conductorRelay.stop().catch(() => undefined);
     await this.replier.stop().catch(() => undefined);
