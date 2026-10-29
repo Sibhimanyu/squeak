@@ -1,10 +1,52 @@
 # Changelog
 
+## 2.11.9
+
+- A clearer Mac setup with a menu-bar preview, progress through essential steps, and optional extras tucked away until needed.
+- A first-session walkthrough shows how to start an agent session, find it under the duck, and know when it needs an answer.
+- Empty session lists offer a fresh-session reminder, Check again, and a direct way back to Setup.
+
+## 2.11.8
+
+- A redesigned Squeak update window with clearer release notes, progress and update actions in light and dark appearances.
+- Collapse and expand the sidebar reliably with ⌘B, ⌘\ or the sidebar button, in both chats and Settings.
+- Refined default Glass appearance: 7% transparency and 68% sidebar contrast.
+
 ## 2.11.7
 
 - Photos you attach are sent as Conductor's own image, so Conductor shows them inline.
 - Settings > Phone calls > Pin: change the calling PIN, turn it off or on, or reset a forgotten one with Touch ID or your password.
 
+## 2.11.6
+
+- Adjust Glass transparency and sidebar contrast independently in Settings, General; Reduce Transparency still forces the solid canvas.
+- Fix the collapsed sidebar so the native macOS column and its material shrink to the icon rail.
+- Replace Sparkle’s standard update dialogs with a Squeak update window for permission, progress, install choices and errors.
+
+## 2.11.5
+
+- Collapse the shared sidebar to an icon rail from either Sessions or Settings, with aligned navigation, headers, and scrolling in the shared window shell.
+- Choose Glass or Solid for the main window; Reduce Transparency always uses the solid canvas.
+- Switch between Chat and Activity from a compact control beside Open in Conductor.
+- Refresh the daemon's energy mode during its periodic power check so `/state` reflects changes made in macOS Settings.
+
+## 2.11.4
+
+- Animate the selected menu-bar tab between Home, Needs you, Usage, and Controls; respect Reduce Motion.
+
+## 2.11.3
+
+- Show a draggable floating duck that follows you between Spaces, reflects Squeak’s current state, and opens the session menu. Toggle it in Settings or with Control-Option-H.
+- Refresh Settings with clearer section navigation, grouped content, and more consistent forms; improve sidebar search and navigation.
+
+## 2.11.2
+
+- Redesigned Settings with a cleaner, consistent background and clearer connection status, channels, and service details.
+
+## 2.11.1
+
+- Refined the menu-bar popover: clearer session rows, readable answer choices, and a compact menu that no longer shifts the content.
+- Fixed the settings background so the desktop no longer shows through the page.
 ## 2.11.0
 
 - Phone calls: Settings, Phone calls sets the extension Squeak rings when an agent is waiting on you (your phone
