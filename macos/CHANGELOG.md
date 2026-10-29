@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.7
+
+- Photos you attach are sent as Conductor's own image, so Conductor shows them inline.
+- Settings > Phone calls > Pin: change the calling PIN, turn it off or on, or reset a forgotten one with Touch ID or your password.
+
 ## 2.10.0
 
 - A first-run Setup checklist: Squeak installs its background service (after one click), installs the agent

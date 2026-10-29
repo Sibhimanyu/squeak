@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.19.6] - 2026-10-29 (iOS)
+
+- Photos you send show up as real images in Conductor, and images sent from Conductor show as photos here.
+- Calling PIN: change it, turn it off or on, and reset a forgotten one with Face ID or your passcode.
+- New Settings switch to stop asking for Face ID before each send.
+
 ## [1.19.5] - 2026-10-29 (iOS)
 
 - Make editable fields in Settings easier to identify and use, including
