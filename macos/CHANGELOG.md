@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.12.5
+
+- Codex chats are found even when their folders have been pruned by modification time, so they no longer stay stuck on “Starting…”.
+- Edit the built-in new-chat presets in Settings and use the updated choices wherever you start a chat.
+- A redesigned Mac installer makes it clearer how to drag Squeak into Applications.
+
 ## 2.12.4
 
 - Pair a phone: a larger, sharper QR code with clear app and web instructions, layouts for smaller windows, and a copy button that matches your choice.

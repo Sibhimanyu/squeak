@@ -160,6 +160,11 @@ popover and menus opens the conversation. Nothing here quits the app.
 
 ### Menu-bar panel
 
+New chat presets can be renamed and configured in **Settings › Mac › New chat presets**.
+Choose Claude or Codex to edit that agent's model and thinking choices; Claude also
+offers worker choices. Changes save on this Mac and apply to the New chat window,
+quick composer and menu-bar popup. Restore defaults resets the selected preset.
+
 The menu-bar panel is a native `MenuBarExtra` window, 360pt wide, with a 24pt
 outer radius. `MenuWindowAccessor` clears the window's backing and clips its
 layers to that radius, so the material, highlight and shadow share one outline.
