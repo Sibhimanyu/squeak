@@ -179,7 +179,7 @@ private struct FloatingDuckView: View {
         .contextMenu {
             Button(controller.isEnabled ? "Hide Floating Duck" : "Show Floating Duck") { controller.toggle() }
             Divider()
-            Button("Open Squeak") { model.openConversationWindow?() }
+            Button("Open Squeak") { model.showConversationWindow() }
             Button("Settings…") { model.openSettings() }
         }
     }

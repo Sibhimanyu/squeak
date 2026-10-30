@@ -9,6 +9,11 @@ final class ActivationPolicyController {
     static let shared = ActivationPolicyController()
     private var tokens: [NSObjectProtocol] = []
     private(set) var policy: NSApplication.ActivationPolicy = .accessory
+    /// When code last asked for a window. A window made a moment later is not on screen yet, and must not be
+    /// mistaken for "no window" (which would take the Dock icon straight back).
+    private var showRequestedAt: Date?
+    private var safetyTimer: Timer?
+    private static let windowGrace: TimeInterval = 3
 
     func start() {
         guard tokens.isEmpty else { return }
@@ -21,6 +26,14 @@ final class ActivationPolicyController {
             tokens.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.update(closing: nil) }
             })
+        }
+        // A window can be hidden without closing, which posts none of the above: while Squeak shows its Dock icon,
+        // look again now and then so the icon never outlives the last window (or misses the first).
+        safetyTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.policy == .regular else { return }
+                self.update(closing: nil)
+            }
         }
         tokens.append(nc.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { [weak self] note in
             let closing = note.object as? NSWindow
@@ -35,9 +48,10 @@ final class ActivationPolicyController {
     /// Call just before a window is shown by code. The window is not key yet (an accessory app
     /// cannot activate), so no notification would tell us; settle it once the window had time to appear.
     func willShowWindow() {
+        showRequestedAt = Date()
         apply(.regular)
         takeMenuBar()
-        for delay in [0.3, 1.0] {
+        for delay in [0.3, 1.0, Self.windowGrace + 0.3] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.update(closing: nil) }
         }
     }
@@ -76,9 +90,9 @@ final class ActivationPolicyController {
 
     func update(closing: NSWindow?) {
         for w in NSApp.windows where Self.isAppWindow(w) { Self.makeOrdinary(w) }
-        let wanted: NSApplication.ActivationPolicy =
-            NSApp.windows.contains { $0 !== closing && Self.isAppWindow($0) } ? .regular : .accessory
-        apply(wanted)
+        let hasWindow = NSApp.windows.contains { $0 !== closing && Self.isAppWindow($0) }
+        let waitingForWindow = showRequestedAt.map { Date().timeIntervalSince($0) < Self.windowGrace } ?? false
+        apply(hasWindow || (waitingForWindow && closing == nil) ? .regular : .accessory)
     }
 
     private func apply(_ wanted: NSApplication.ActivationPolicy) {
