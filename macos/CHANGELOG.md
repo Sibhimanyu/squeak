@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.17
+
+- Phone calls: Settings now shows when a newer Squeak Voice add-on is available and offers the Update add-on button (the daemon behind it was not sending the version, so a new add-on never showed up).
+
 ## 2.12.16
 
 - Calling Squeak: after your message is read back, press 1 to send it and hang up, 2 to ask it as a question and hear the answer, 3 to record again.
