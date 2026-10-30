@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.26
+
+- Check for updates now always answers: from the menu-bar popup, Settings or the app menu it opens the update window on what is happening (checking, an update ready to restart into, up to date, or a problem), instead of doing nothing when an update is already waiting.
+
 ## 2.12.25
 
 - Phone calls: the add-on now remembers the Mac's recordings of the call prompts across restarts, so the first call after an update starts talking at once (needs Squeak Voice add-on 0.11.4: update it once in Home Assistant).
