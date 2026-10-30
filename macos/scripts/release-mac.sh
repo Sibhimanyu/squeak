@@ -21,6 +21,9 @@ SRC="$(cd "$HERE/.." && pwd)"
 REL="${SQUEAK_RELEASE_DIR:-$HOME/.squeak-release}"
 LOCK="/tmp/squeak-mac-release.lock"
 START=$SECONDS
+# Every step's timing is kept next to the build log, so "why did this one take 9 minutes" has an answer.
+mkdir -p "$HOME/.squeak-release-logs"
+exec > >(tee -a "$HOME/.squeak-release-logs/release-$VERSION.log") 2>&1
 step() { echo; echo "==> $* ($((SECONDS - START)) s)"; }
 
 mkdir "$LOCK" 2>/dev/null || { echo "Another Mac release is running (or died: rm -r $LOCK). Not starting a second." >&2; exit 1; }
