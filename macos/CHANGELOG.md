@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.12.11
+## 2.12.12
 
 - Calling Squeak: every step now says "Press star to hear this again", and star repeats it, including what it heard from you.
 - Calling Squeak: it asks which workspace first even before you set favourites (workspaces are numbered by recent activity); favourites in Settings › Phone calls › Quick workspaces keep their own numbers.
