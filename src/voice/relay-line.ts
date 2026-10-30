@@ -26,6 +26,8 @@ export interface VoiceLine {
 const MAX_CALL_MS = 4 * 60_000;
 /** The stream only wakes a pass; this is the safety net and the way to notice a lost event. */
 const POLL_MS = 10_000;
+/** A request that carries the Mac's recorded voice: ~370 KB, at 28-65 KB/s behind this Mac's proxy. */
+const AUDIO_WRITE_MS = 90_000;
 /** The gateway answers a pin change in a moment or not at all. */
 const PIN_WAIT_MS = 25_000;
 
@@ -68,21 +70,18 @@ export class RelayLine implements VoiceLine {
     const audio = await this.options.clips?.(script, answerable).catch(() => undefined);
     const at = this.now();
     const callee = this.options.callee?.() ?? null;
-    const doc = sealRequest(key, {
-      v: 1,
-      id,
-      at,
-      expiresAt: at + REQUEST_TTL_MS,
-      answerable,
-      script,
-      ...(audio ? { audio } : {}),
-      ...(callee ? { callee } : {}),
-    });
+    const base = { v: 1 as const, id, at, expiresAt: at + REQUEST_TTL_MS, answerable, script };
+    const doc = sealRequest(key, { ...base, ...(audio ? { audio } : {}), ...(callee ? { callee } : {}) });
+    // The clips make the request big and this Mac's uplink is slow: a long write, and if it still fails the call
+    // goes without them rather than not at all.
+    const plain = audio ? sealRequest(key, { ...base, ...(callee ? { callee } : {}) }) : undefined;
     const result = await this.roundTrip(
       id,
       doc,
       script.options.map((option) => option.letter),
       at + REQUEST_TTL_MS + MAX_CALL_MS,
+      undefined,
+      plain,
     );
     if (result.status === "answered" || result.status === "unanswered" || result.status === "failed") return result;
     return { status: "failed", reason: "The gateway answered with something else." };
@@ -155,10 +154,16 @@ export class RelayLine implements VoiceLine {
     offered: readonly string[],
     deadline: number,
     silent = "The gateway did not answer. Is the Home Assistant add-on running?",
+    withoutAudio?: ChannelDoc,
   ): Promise<CallResultBody> {
     const { store, channel, key } = this.options;
     try {
-      await store.set(requestPath(channel, id), doc);
+      try {
+        await store.set(requestPath(channel, id), doc, withoutAudio ? { timeoutMs: AUDIO_WRITE_MS } : {});
+      } catch (error) {
+        if (!withoutAudio) throw error;
+        await store.set(requestPath(channel, id), withoutAudio);
+      }
     } catch (error) {
       return {
         status: "failed",

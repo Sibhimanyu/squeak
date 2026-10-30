@@ -118,3 +118,34 @@ describe("NaturalSettingsStore", () => {
     expect(new NaturalSettingsStore(file).settings).toEqual({ enabled: false, voice: "am_michael" });
   });
 });
+
+describe("RelayLine with clips", () => {
+  it("writes the audio with a long timeout, and sends the call without it if that write fails", async () => {
+    const { RelayLine } = await import("./relay-line.js");
+    const key = randomBytes(32).toString("base64");
+    const writes: Array<{ audio: boolean; timeoutMs?: number }> = [];
+    const store = {
+      set: async (_path: string, doc: { box: string }, options: { timeoutMs?: number } = {}) => {
+        const body = openBody(key, "req", _path.split("/").pop()!, doc as never) as { audio?: unknown };
+        writes.push({ audio: Boolean(body.audio), ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}) });
+        if (body.audio) throw new Error("timed out");
+      },
+      get: async () => null,
+      delete: async () => undefined,
+      watch: (_path: string, onChange: () => void) => {
+        setTimeout(onChange, 0);
+        return () => undefined;
+      },
+    };
+    let t = 0;
+    const line = new RelayLine({
+      store: store as never,
+      channel: "c".repeat(22),
+      key,
+      clips: async () => [{ text: "hi", mulaw: "AAAA" }],
+      now: () => (t += 400_000),
+    });
+    await line.call(script, true);
+    expect(writes).toEqual([{ audio: true, timeoutMs: 90_000 }, { audio: false }]);
+  });
+});

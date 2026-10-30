@@ -8,6 +8,7 @@ import { TEST_SCRIPT } from "./test-script.js";
 import { RelayLine } from "./relay-line.js";
 import { VoiceSettingsStore } from "./settings.js";
 import { MacSpeaker } from "./tts.js";
+import { naturalPaths, NaturalSettingsStore, NaturalVoice, renderCallClips } from "./natural-voice.js";
 
 /**
  * `squeak voice-test`: rings your phone with a made-up question and prints the key you pressed.
@@ -20,12 +21,18 @@ export async function runVoiceTest(): Promise<number> {
   if (config.voiceRelay && config.remoteDatabaseUrl) {
     const callee = new VoiceSettingsStore(path.join(config.supportDir, "voice-settings.json")).settings.callee;
     console.log(`Asking the gateway to ring ${callee ?? "its default extension"}...`);
+    const natural = new NaturalVoice(
+      naturalPaths(config.supportDir),
+      () => new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json")).settings,
+    );
     const result = await new RelayLine({
       store: new RtdbRest(config.remoteDatabaseUrl),
       channel: config.voiceRelay.channel,
       key: config.voiceRelay.key,
       callee: () => callee,
+      clips: (script) => renderCallClips(natural, script, "both"),
     }).call(TEST_SCRIPT, true);
+    natural.stop();
     if (result.status === "failed") {
       console.error(`The call failed: ${result.reason}`);
       return 1;
