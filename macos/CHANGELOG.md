@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.12.6
+
+- Phone calls: add a Home Assistant gateway by typing the short code its panel shows; no keys or addresses to copy.
+- Phone calls: pause calls for an hour, four hours, until tomorrow morning, or until you turn them back on.
+- The Dock icon stays up while a window is opening, and no longer lingers after the last window closes.
+
 ## 2.12.4
 
 - Pair a phone: a larger, sharper QR code with clear app and web instructions, layouts for smaller windows, and a copy button that matches your choice.
