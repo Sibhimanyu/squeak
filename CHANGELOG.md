@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.20.5] - 2026-10-29 (iOS)
+
+- Photos you send now remain visible in your chat as tappable thumbnails; open them full screen to zoom, share, or save.
+
 ## [1.20.4] - 2026-10-29 (iOS)
 
 - Phone calls: a clearer calling PIN status, with separate actions to change it, turn it off, or reset a forgotten PIN with Face ID or your passcode.
