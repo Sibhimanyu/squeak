@@ -44,7 +44,7 @@ Commands:
   install-hooks    Report agent state live, for every session on this Mac
   uninstall-hooks  Remove the hooks this tool installed
   hooks-status     Show whether the hooks are installed
-  uninstall        Remove Squeak from this Mac: [--dry-run] [--keep-data] [--yes] [--json] (docs/uninstall.md)
+  uninstall        Remove Squeak from this Mac: [--dry-run] [--keep-data] [--yes] [--json] [--orphan] (docs/uninstall.md)
   cliq-relay       Set up two-way Zoho Cliq; writes the handlers to paste (--rotate: new secret)
   voice-relay      Make the key Squeak and the Home Assistant voice gateway share; prints the add-on options
   voice-gateway    Run the voice gateway (the Home Assistant add-on runs this)

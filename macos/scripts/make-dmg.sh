@@ -14,6 +14,8 @@ OUT="$HERE/build/Squeak-$VERSION.dmg"
 WIN_W=680; WIN_H=460
 APP_X=170; APP_Y=224
 DEST_X=510; DEST_Y=224
+UNINST_X=340; UNINST_Y=372
+UNINST="Uninstall Squeak.app"
 
 [ -d "$APP" ] || { echo "build the app first: scripts/build-app.sh" >&2; exit 1; }
 
@@ -23,11 +25,13 @@ trap 'hdiutil detach "$MOUNT" -force >/dev/null 2>&1 || true; rm -rf "$WORK"' EX
 swift "$HERE/scripts/dmg-background.swift" "$WORK"
 tiffutil -cathidpicheck "$WORK/bg.png" "$WORK/bg@2x.png" -out "$WORK/background.tiff" >/dev/null
 
-SIZE_MB=$(( $(du -sm "$APP" | cut -f1) + 64 ))
+SIZE_MB=$(( $(du -sm "$APP" | cut -f1) + 70 ))
 hdiutil create -size "${SIZE_MB}m" -fs HFS+ -volname "$VOLNAME" -type UDIF "$RW" >/dev/null
 hdiutil attach "$RW" -noautoopen -mountpoint "$MOUNT" >/dev/null
 
 ditto "$APP" "$MOUNT/$NAME.app"
+"$HERE/scripts/build-uninstall-applet.sh" "$WORK" >/dev/null
+ditto "$WORK/$UNINST" "$MOUNT/$UNINST"
 ln -s /Applications "$MOUNT/Applications"
 mkdir "$MOUNT/.background"
 cp "$WORK/background.tiff" "$MOUNT/.background/background.tiff"
@@ -49,6 +53,7 @@ tell application "Finder"
   set background picture of viewOptions to file ".background:background.tiff" of theDisk
   set position of item "$NAME.app" of theDisk to {$APP_X, $APP_Y}
   set position of item "Applications" of theDisk to {$DEST_X, $DEST_Y}
+  set position of item "$UNINST" of theDisk to {$UNINST_X, $UNINST_Y}
   close theWindow
   open theDisk
   update theDisk without registering applications
@@ -71,6 +76,7 @@ hdiutil verify "$OUT" >/dev/null
 V="$WORK/verify"; mkdir "$V"
 hdiutil attach "$OUT" -nobrowse -noautoopen -mountpoint "$V" >/dev/null
 codesign --verify --deep --strict "$V/$NAME.app"
+codesign --verify --deep --strict "$V/$UNINST"
 hdiutil detach "$V" -force >/dev/null
 
 (cd "$HERE/build" && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256")

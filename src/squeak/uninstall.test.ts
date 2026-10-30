@@ -9,6 +9,7 @@ import { defaultAskFormatPaths, installAskFormat } from "../fleet/ask-format.js"
 import { installFleetHooks, defaultHookInstallPaths } from "../fleet/hook-install.js";
 import { ENABLE_KEY, OVERRIDE_KEY, realEffects, type RelayEffects } from "../fleet/conductor-relay/setup.js";
 import {
+  ADMIN_SKIPPED_NOTE,
   KEYCHAIN_ITEMS,
   filesToRemove,
   runUninstall,
@@ -400,6 +401,54 @@ describe("uninstall command", () => {
     const t = io();
     expect(await runUninstallCommand(["--dry-run", "--json"], t.io, rig.sys)).toBe(0);
     expect(rig.calls).toEqual([]);
+  });
+});
+
+describe("--orphan and skipAdmin", () => {
+  it("skipAdmin leaves the administrator rules and says why", async () => {
+    const events: UninstallEvent[] = [];
+    const result = await runUninstall(rig.sys, { skipAdmin: true }, (e) => events.push(e));
+    expect(result.statuses.admin).toBe("skipped");
+    expect(rig.calls.some((c) => c.startsWith("admin"))).toBe(false);
+    for (const f of rig.adminFiles) expect(fs.existsSync(f)).toBe(true);
+    const note = events.find((e) => e.event === "step" && e.id === "admin" && e.status === "skipped");
+    expect(note).toMatchObject({ note: ADMIN_SKIPPED_NOTE });
+  });
+
+  it("--orphan asks nothing, keeps data, skips admin and the app step, and notifies", async () => {
+    const notes: Array<[string, string]> = [];
+    rig.sys.notify = async (t, b) => void notes.push([t, b]);
+    const t = io({ tty: false });
+    expect(await runUninstallCommand(["--orphan", "--yes"], t.io, rig.sys)).toBe(0);
+    expect(fs.existsSync(path.join(rig.support, "remote.json"))).toBe(true);
+    for (const f of rig.adminFiles) expect(fs.existsSync(f)).toBe(true);
+    expect(t.out.join("\n")).not.toContain("Squeak.app (moved");
+    expect(t.out.join("\n")).toContain("Needs your password");
+    expect(notes).toEqual([
+      [
+        "Squeak was removed",
+        "Squeak was moved to the Trash, so its background service is cleaned up. Your settings were kept. Administrator rules remain: see docs/uninstall.md.",
+      ],
+    ]);
+  });
+
+  it("--orphan needs no --yes and leaves out the last sentence when no rules exist", async () => {
+    for (const f of rig.adminFiles) fs.rmSync(f);
+    const notes: Array<[string, string]> = [];
+    rig.sys.notify = async (t, b) => void notes.push([t, b]);
+    expect(await runUninstallCommand(["--orphan"], io({ tty: false }).io, rig.sys)).toBe(0);
+    expect(notes[0]![1]).toBe(
+      "Squeak was moved to the Trash, so its background service is cleaned up. Your settings were kept.",
+    );
+  });
+
+  it("--orphan does not notify when Conductor's step fails", async () => {
+    rig.cfg.conductorBroken = true;
+    const notes: string[] = [];
+    rig.sys.notify = async (t) => void notes.push(t);
+    expect(await runUninstallCommand(["--orphan"], io().io, rig.sys)).toBe(1);
+    expect(rig.calls).toEqual([]);
+    expect(notes).toEqual([]);
   });
 });
 

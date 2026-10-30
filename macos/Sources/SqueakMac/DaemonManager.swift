@@ -21,7 +21,10 @@ final class DaemonManager {
     }
 
     /// Called once at launch (after an update, the relaunched app lands here too).
-    func reconcileAtLaunch() { run(userRequested: false) }
+    func reconcileAtLaunch() {
+        AppInstall.writeForRunningApp()
+        run(userRequested: false)
+    }
 
     /// The Install, Repair and Restart button.
     func repair() { run(userRequested: true) }
@@ -41,6 +44,7 @@ final class DaemonManager {
             default: break
             }
             busy = false
+            AppInstall.writeForRunningApp()
             AppLog.info("background service: \(result.label)")
             if case .failed(let reason, _) = result { AppLog.error("background service: \(reason)") }
         }

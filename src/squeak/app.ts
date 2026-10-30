@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
@@ -89,6 +91,7 @@ import { CallTrace } from "../voice/call-trace.js";
 import { GatewayLogReader } from "../voice/gateway-log.js";
 import { GatewayStatusReader } from "../voice/gateway-status.js";
 import { isNewer } from "../voice/addon-update.js";
+import { claimPath, OrphanWatch, realOrphanWatchDeps } from "./orphan-watch.js";
 import { AddonVersionCheck } from "../voice/addon-version-check.js";
 import { setEnvValues } from "../cliq/setup.js";
 import { resolveSqueakEnvPath } from "./paths.js";
@@ -273,6 +276,8 @@ export class SqueakApp {
   private stopped = false;
   /** The newest add-on version, looked up by the daemon itself (the add-on's own look is 6-hourly). */
   private readonly addonVersions = new AddonVersionCheck();
+  /** Cleans up if Squeak.app is dragged to the Trash; armed only for an app-managed daemon (app-install.json). */
+  private orphanWatch: OrphanWatch | null = null;
 
   constructor(config: SqueakConfig) {
     this.config = config;
@@ -881,6 +886,14 @@ export class SqueakApp {
       logger.info("telegram is off: no SQUEAK_BOT_TOKEN; the fleet, phone channel and Cliq still run");
     }
 
+    if (fs.existsSync(claimPath(this.config.supportDir))) {
+      const cliJs = fileURLToPath(new URL("./cli.js", import.meta.url));
+      this.orphanWatch = new OrphanWatch(
+        realOrphanWatchDeps(this.config.supportDir, cliJs, (message) => logger.info(message)),
+      );
+      this.orphanWatch.start();
+    }
+
     process.on("SIGINT", () => void this.stop());
     process.on("SIGTERM", () => void this.stop());
 
@@ -921,6 +934,7 @@ export class SqueakApp {
     }
     this.stopped = true;
     this.unwatchCaffeinate?.();
+    this.orphanWatch?.stop();
     if (this.lidRuleTimer) clearInterval(this.lidRuleTimer);
     if (this.safetyTimer) clearInterval(this.safetyTimer);
     if (this.heatTimer) clearInterval(this.heatTimer);

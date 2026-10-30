@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.15
+
+- Removing Squeak: if you drag Squeak to the Trash, its background service now notices and cleans up after itself (hands Conductor back, stops, removes its hooks) and keeps your settings. The download also has an Uninstall Squeak item.
+
 ## 2.12.14
 
 - Phone calls: Settings now always shows whether the Home Assistant add-on is up to date, with a Check for updates button, and an Update add-on button when a newer version exists. Squeak looks up the newest version itself, so a new version shows up straight away.

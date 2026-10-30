@@ -94,11 +94,17 @@ export interface UninstallSystem {
   keychainDelete(item: KeychainItem): Promise<boolean>;
   /** Where Squeak.app may be. */
   appCandidates: string[];
+  /** One macOS notification (`--orphan` only). Optional so a test system can leave it out. */
+  notify?(title: string, body: string): Promise<void>;
 }
 
 export interface UninstallOptions {
   dryRun?: boolean;
   keepData?: boolean;
+  /** Leave the administrator rules (they need a password nobody is there to type). */
+  skipAdmin?: boolean;
+  /** The app is already gone: no app step. */
+  orphan?: boolean;
 }
 
 export interface UninstallResult {
@@ -349,7 +355,9 @@ function hooksStep(sys: UninstallSystem): Step {
 // ---------------------------------------------------------------------------------------------
 // 5. admin
 
-function adminStep(sys: UninstallSystem): Step {
+export const ADMIN_SKIPPED_NOTE = "Needs your password: run squeak uninstall to remove the administrator rules.";
+
+function adminStep(sys: UninstallSystem, skip = false): Step {
   const items = sys.adminPaths.filter(exists);
   return {
     id: "admin",
@@ -360,6 +368,7 @@ function adminStep(sys: UninstallSystem): Step {
     items,
     async run() {
       if (items.length === 0) return { status: "skipped", note: "No administrator rules were installed." };
+      if (skip) return { status: "skipped", note: ADMIN_SKIPPED_NOTE };
       const result = await sys.adminRemove(items).catch(() => ({ ok: false, cancelled: false }) as AdminResult);
       if (result.ok) return { status: "done", note: "Administrator rules are removed.", acted: items };
       return {
@@ -535,10 +544,10 @@ async function buildSteps(
     await stopStep(sys),
     systemStep(sys),
     hooksStep(sys),
-    adminStep(sys),
+    adminStep(sys, options.skipAdmin === true),
     await keychainStep(sys),
     filesStep(sys, options.keepData === true),
-    appStep(sys),
+    ...(options.orphan === true ? [] : [appStep(sys)]),
   ];
 }
 
@@ -616,13 +625,19 @@ export interface UninstallIO {
   confirm(question: string): Promise<boolean>;
 }
 
-const USAGE = "Usage: squeak uninstall [--dry-run] [--keep-data] [--yes] [--json]";
+export const ORPHAN_NOTIFY_TITLE = "Squeak was removed";
+export const ORPHAN_NOTIFY_BODY =
+  "Squeak was moved to the Trash, so its background service is cleaned up. Your settings were kept.";
+export const ORPHAN_NOTIFY_ADMIN = " Administrator rules remain: see docs/uninstall.md.";
 
-function humanPlan(steps: PlanStep[]): string[] {
+const USAGE = "Usage: squeak uninstall [--dry-run] [--keep-data] [--yes] [--json] [--orphan]";
+
+function humanPlan(steps: PlanStep[], skippedAdmin = false): string[] {
   const lines: string[] = ["Squeak will be removed from this Mac:"];
   steps.forEach((step, i) => {
     lines.push(`${i + 1}. ${step.title}${step.needsAdmin ? " (asks for your administrator password)" : ""}`);
     lines.push(`   ${step.detail}`);
+    if (step.id === "admin" && skippedAdmin) lines.push(`   Skipped this time. ${ADMIN_SKIPPED_NOTE}`);
     for (const item of step.items) lines.push(`   - ${item}`);
   });
   return lines;
@@ -630,7 +645,7 @@ function humanPlan(steps: PlanStep[]): string[] {
 
 /** Exit code: 0 done or skipped, 1 a step failed, 2 bad usage or not confirmed. */
 export async function runUninstallCommand(args: string[], io: UninstallIO, sys: UninstallSystem): Promise<number> {
-  const known = new Set(["--dry-run", "--keep-data", "--yes", "--json"]);
+  const known = new Set(["--dry-run", "--keep-data", "--yes", "--json", "--orphan"]);
   const bad = args.filter((a) => !known.has(a));
   if (bad.length > 0) {
     io.stderr(`Unknown option: ${bad[0]}`);
@@ -638,27 +653,29 @@ export async function runUninstallCommand(args: string[], io: UninstallIO, sys: 
     return 2;
   }
   const dryRun = args.includes("--dry-run");
-  const keepData = args.includes("--keep-data");
+  const orphan = args.includes("--orphan");
+  const keepData = orphan || args.includes("--keep-data");
+  const options: UninstallOptions = { keepData, skipAdmin: orphan, orphan };
   const json = args.includes("--json");
   const human = json ? io.stderr : io.stdout;
 
-  if (!dryRun && !args.includes("--yes")) {
+  if (!dryRun && !orphan && !args.includes("--yes")) {
     if (!io.isTTY) {
       io.stderr("Not confirmed: pass --yes to uninstall without a prompt, or --dry-run to see the plan.");
       return 2;
     }
-    for (const line of humanPlan(await planUninstall(sys, { keepData }))) io.stderr(line);
+    for (const line of humanPlan(await planUninstall(sys, options))) io.stderr(line);
     if (!(await io.confirm("Remove Squeak? [y/N] "))) {
       io.stderr("Nothing was changed.");
       return 2;
     }
   }
 
-  const result = await runUninstall(sys, { dryRun, keepData }, (event) => {
+  const result = await runUninstall(sys, { ...options, dryRun }, (event) => {
     if (json) {
       io.stdout(JSON.stringify(event));
     } else if (event.event === "plan") {
-      for (const line of humanPlan(event.steps)) human(line);
+      for (const line of humanPlan(event.steps, orphan)) human(line);
       if (event.dryRun) human("Dry run: nothing was changed.");
     } else if (event.event === "step" && event.status !== "start") {
       human(`${event.id}: ${event.status} - ${event.note}`);
@@ -672,6 +689,12 @@ export async function runUninstallCommand(args: string[], io: UninstallIO, sys: 
       }
     }
   });
+  if (orphan && !dryRun && result.ok && sys.notify) {
+    const rulesRemain = sys.adminPaths.some(exists);
+    await sys
+      .notify(ORPHAN_NOTIFY_TITLE, ORPHAN_NOTIFY_BODY + (rulesRemain ? ORPHAN_NOTIFY_ADMIN : ""))
+      .catch(() => undefined);
+  }
   return result.ok ? 0 : 1;
 }
 
@@ -746,6 +769,10 @@ export function realUninstallSystem(
         ])
       ).ok,
     appCandidates: ["/Applications/Squeak.app", path.join(home, "Applications/Squeak.app")],
+    notify: async (title, body) => {
+      const q = (v: string) => `"${v.replace(/[\\"]/g, "")}"`;
+      await run("/usr/bin/osascript", ["-e", `display notification ${q(body)} with title ${q(title)}`]);
+    },
   };
 }
 

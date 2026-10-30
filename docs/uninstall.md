@@ -64,11 +64,38 @@ squeak uninstall [--dry-run] [--keep-data] [--yes] [--json]
 
 - `--dry-run` changes nothing and prints the plan.
 - `--keep-data` leaves the three Application Support folders so a reinstall resumes.
+- `--orphan` is the Trash cleanup above; it implies `--keep-data` and `--yes` and skips the administrator step.
 - `--yes` skips the y/N question (needed when there is no terminal).
 - `--json` prints one JSON object per line on stdout (`plan`, `step` start/done/skipped/failed,
   `done`); text for people goes to stderr. Notes are fixed sentences; no secret is ever printed.
 
 Exit codes: 0 every step done or skipped, 1 a step failed, 2 bad usage or not confirmed.
+
+## If the app is dragged to the Trash
+
+Squeak for Mac writes `app-install.json` in its support folder (`~/Library/Application Support/squeak`)
+every time it launches. A daemon with that file is "app-managed" and watches for its app; a dev checkout
+or CLI-only install has no file and never watches.
+
+- Every 5 minutes (first look 2 minutes after the daemon starts) the daemon checks that the recorded app
+  path is a folder with `Contents/Info.plist` whose bundle id is `com.squeak.mac`.
+- Not there: it looks for another copy (`/Applications`, `~/Applications`, Spotlight), ignoring the Trash,
+  mounted disk images (`/Volumes`) and build folders. A copy elsewhere means the app was moved, and the
+  file is rewritten to point at it.
+- A miss counts only with proof the app is really gone: a `Squeak*.app` in `~/.Trash`, or Spotlight
+  demonstrably working and finding no copy. Otherwise the daemon logs "can't prove it was removed" once
+  and does nothing.
+- Three counted misses in a row (about 10 minutes, so an update swap or a re-copy never triggers it) start
+  `squeak uninstall --orphan --yes`, detached. The app launching again rewrites the file and resets the
+  count. One run per daemon start; if it cannot start, the next try is 24 hours later.
+- `--orphan` means: keep your settings (`--keep-data`), ask no questions, skip the app step (it is gone),
+  and skip the administrator rules, because nobody is there to type a password. When it finishes you get
+  one notification, "Squeak was removed", which mentions the remaining rules only if they exist. Conductor
+  is handed back first as always, and if that fails nothing else is touched.
+
+To remove the administrator rules afterwards, run `squeak uninstall` (it asks for your password once), or
+by hand: `sudo rm -f /etc/sudoers.d/squeak /etc/sudoers.d/squeak-fans /etc/sudoers.d/squeak-power
+/Library/PrivilegedHelperTools/com.squeak.fans`.
 
 ## What is left on purpose
 
