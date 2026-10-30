@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.18
+
+- Phone calls: Check for updates now also makes Home Assistant refresh its own add-on list, and Update add-on refreshes it first, so a newly published add-on version is seen straight away (needs Squeak Voice 0.11.1).
+
 ## 2.12.17
 
 - Phone calls: Settings now shows when a newer Squeak Voice add-on is available and offers the Update add-on button (the daemon behind it was not sending the version, so a new add-on never showed up).
