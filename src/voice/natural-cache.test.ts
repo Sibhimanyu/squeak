@@ -21,7 +21,7 @@ function tmp(): string {
 
 /** A fake Kokoro worker: 24 kHz audio 100 samples per character, a per-request log, optional delay and crash. */
 function fakeVoice(
-  opts: { delayMs?: number; model?: string } = {},
+  opts: { delayMs?: number; model?: string; slowWord?: string; slowMs?: number } = {},
   settings: NaturalSettings = { enabled: true, voice: "af_heart" },
 ) {
   const dir = tmp();
@@ -43,7 +43,7 @@ function fakeVoice(
       wav.write("data", 36);
       wav.writeUInt32LE(n * 2, 40);
       for (let i = 0; i < n; i++) wav.writeInt16LE(8000, 44 + i * 2);
-      setTimeout(() => { fs.writeFileSync(r.out, wav); console.log(JSON.stringify({id:r.id,ok:true})); }, ${opts.delayMs ?? 0});
+      setTimeout(() => { fs.writeFileSync(r.out, wav); console.log(JSON.stringify({id:r.id,ok:true})); }, ${opts.slowWord ? `r.text.includes(${JSON.stringify(opts.slowWord)}) ? ${opts.slowMs ?? 0} : ` : ""}${opts.delayMs ?? 0});
     });
   `,
   );
@@ -295,7 +295,8 @@ describe("priority and warm-up", () => {
   });
 
   it("does not make an urgent call wait behind background renders", async () => {
-    const { natural } = fakeVoice({ delayMs: 80 });
+    // Only the background sentences are slow (600 ms each, one after the other), so the urgent line has 1.2 s of slack.
+    const { natural } = fakeVoice({ slowWord: "Background", slowMs: 600 });
     let backgroundDone = false;
     const background = natural
       .prewarm(["Background one is long enough.", "Background two is long enough."])
