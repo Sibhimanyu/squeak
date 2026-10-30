@@ -51,6 +51,8 @@ final class UninstallModel {
 
 /// Settings › About › "Uninstall Squeak…": plan first, then confirm, then live per-step state.
 struct UninstallSheet: View {
+    var availableSize = CGSize(width: 500, height: 560)
+
     @Environment(\.dismiss) private var dismiss
     @State private var model = UninstallModel()
     @State private var confirming = false
@@ -58,11 +60,22 @@ struct UninstallSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
             Text("Uninstall Squeak").font(Typo.title).foregroundStyle(Theme.ink)
-            content
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.l) {
+                    content
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollIndicators(.visible)
+            .frame(maxHeight: .infinity)
+            Hairline()
+            if model.phase == .plan {
+                Toggle("Keep my Squeak settings", isOn: $model.keepData).font(Typo.body)
+            }
             footer
         }
         .padding(20)
-        .frame(width: 500)
+        .frame(width: availableSize.width, height: availableSize.height)
         .task { await model.loadPlan() }
         .confirmationDialog("Uninstall Squeak?", isPresented: $confirming) {
             Button("Uninstall", role: .destructive) { Task { await model.start() } }
@@ -86,7 +99,6 @@ struct UninstallSheet: View {
             Text("Nothing is changed until you confirm. Conductor is handed back first.")
                 .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             stepList(plan: true)
-            Toggle("Keep my Squeak settings", isOn: $model.keepData).font(Typo.body)
         case .running:
             stepList(plan: false)
             Footnote("Don't quit Squeak while this runs. macOS may ask for your password once.")
@@ -119,7 +131,11 @@ struct UninstallSheet: View {
                 }
                 Text(step.detail).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 if plan {
-                    ForEach(step.items, id: \.self) { Text($0).font(Typo.code).foregroundStyle(Theme.muted).textSelection(.enabled) }
+                    ForEach(step.items, id: \.self) {
+                        Text($0).font(Typo.code).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
                 }
                 if !plan, let note = state?.note, !note.isEmpty, state?.status != .start {
                     Text(note).font(Typo.meta).foregroundStyle(state?.status == .failed ? Theme.needsYou : Theme.muted)

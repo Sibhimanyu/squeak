@@ -94,6 +94,9 @@ private struct SettingsFormPresentation: ViewModifier {
         content
             .scrollContentBackground(.hidden)
             .formStyle(.grouped)
+            .toggleStyle(.switch)
+            // Native grouped Forms inset their sections by 20 points; cards use 24.
+            .padding(.horizontal, 4)
             .squeakWindowCanvas()
     }
 }
@@ -109,7 +112,8 @@ struct SettingSubsectionHeader: View {
         } icon: {
             Image(systemName: symbol).foregroundStyle(color)
         }
-        .font(Typo.label)
+        .font(Typo.heading)
+        .padding(.vertical, 4)
         .accessibilityAddTraits(.isHeader)
     }
 }
@@ -288,10 +292,13 @@ private struct SettingsPage: View {
                 }
                 Spacer(minLength: 0)
             }
-            .frame(maxWidth: 680, alignment: .leading)
-            .padding(.leading, 61).padding(.trailing, 24).padding(.top, 18).padding(.bottom, 16)
-            page.frame(maxWidth: 680)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 16)
+            page
         }
+        // Constrain the whole page once, so title and content receive the same width.
+        // Capping the title before padding makes it 48 points wider than the cards.
+        .frame(maxWidth: 680)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .id(section)
     }
@@ -336,22 +343,30 @@ struct NotificationsSettings: View {
         Group {
             do {
                 @Bindable var model = model
-                Form {
-                    Section {
-                        Toggle("Notify me on this Mac when a session needs me or finishes", isOn: $model.notificationsEnabled)
+                VStack(alignment: .leading, spacing: 22) {
+                    SettingsCard(title: "On this Mac", subtitle: "A timely nudge when your attention can move work forward.", symbol: "bell.badge") {
+                        Toggle(isOn: $model.notificationsEnabled) {
+                            Text("Session alerts").font(Typo.label).frame(maxWidth: .infinity, alignment: .leading)
+                        }
                             .disabled(!Bundled.isApp)
                         if model.notificationsEnabled, bannersShown == false {
                             PermissionExplainer(kind: .notifications)
                         }
-                    } footer: {
                         SectionFootnote("Approvals, questions, plans to review, errors, and finished Conductor chats. Reply to a finished chat from the notification itself.")
                     }
                     ForEach(NotifyChannel.allCases, id: \.self) { NotificationsSection(channel: $0) }
                     if model.channels.notify?.shown.isEmpty ?? true {
-                        Section { SectionFootnote("Set up Telegram or Zoho Cliq to choose what each one pushes.") }
+                        SettingsCard(title: "Take updates with you", subtitle: "Connect a channel to choose which moments reach you away from this Mac.", symbol: "paperplane") {
+                            HStack {
+                                Button("Set up Telegram") { model.settingsSection = .telegram }.buttonStyle(SecondaryButtonStyle())
+                                Button("Set up Zoho Cliq") { model.settingsSection = .cliq }.buttonStyle(SecondaryButtonStyle())
+                            }
+                        }
                     }
                 }
-                .settingsForm()
+                .toggleStyle(.switch)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 28)
             }
         }
         .task { bannersShown = await Notifier.shared.bannersShown(); await model.channels.refresh() }
@@ -374,10 +389,10 @@ struct GeneralSettings: View {
 
     var body: some View {
         @Bindable var model = model
-        Form {
+        VStack(alignment: .leading, spacing: 22) {
             macCard
             chatPresetSettings
-            Section {
+            SettingsCard(title: "Window appearance", subtitle: "Set the texture and contrast of your workspace.", symbol: "macwindow") {
                 Picker("Style", selection: $glassWindowAppearance) {
                     Text("Glass").tag(true)
                     Text("Solid").tag(false)
@@ -393,13 +408,10 @@ struct GeneralSettings: View {
                     .accessibilityLabel("Sidebar contrast")
                     .accessibilityValue("\(Int(glassSidebarContrast.rounded())) percent")
                     .disabled(!glassWindowAppearance || reduceTransparency)
-            } header: {
-                Text("Window appearance")
-            } footer: {
                 SectionFootnote(appearanceFootnote)
             }
-            Section {
-                Toggle("Open Squeak when I log in", isOn: Binding(
+            SettingsCard(title: "Always close by", subtitle: "Choose how Squeak fits into your day.", symbol: "sun.max") {
+                Toggle(isOn: Binding(
                     get: { loginOn },
                     set: { on in
                         do {
@@ -411,30 +423,25 @@ struct GeneralSettings: View {
                             loginError = error.localizedDescription
                         }
                     }
-                ))
-                .disabled(!Bundled.isApp)
-            } footer: {
-                if let loginError {
-                    SectionFootnote(loginError)
-                } else if !Bundled.isApp {
-                    SectionFootnote("Available when running the Squeak app, not from a build folder.")
+                )) {
+                    SettingsControlLabel(title: "Open at login", detail: "Have Squeak ready when you sign in to this Mac.")
                 }
-            }
-            Section {
-                Toggle("Show the floating duck", isOn: Binding(
+                .disabled(!Bundled.isApp)
+                if let loginError { SectionFootnote(loginError) }
+                else if !Bundled.isApp { SectionFootnote("Available when running the Squeak app, not from a build folder.") }
+                Divider().overlay(Theme.line)
+                Toggle(isOn: Binding(
                     get: { floatingDuck.isEnabled },
                     set: { floatingDuck.setEnabled($0) }
-                ))
+                )) {
+                    SettingsControlLabel(title: "Floating duck", detail: "A movable shortcut to your sessions, across every Space.")
+                }
                 .disabled(model.captureMode || model.demoMode)
                 LabeledContent("Show or hide duck", value: "⌃⌥ H")
-                if let error = hotKeys.duckShortcutError {
-                    SectionFootnote(error)
-                }
-            } footer: {
-                SectionFootnote("Drag the duck anywhere on your screen. It follows you between Spaces; click it to open Squeak's session menu. The shortcut needs no permission.")
+                if let error = hotKeys.duckShortcutError { SectionFootnote(error) }
             }
-            Section {
-                Picker("Quick message shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
+            SettingsCard(title: "Quick message", subtitle: "Reach a session from any app, without losing your place.", symbol: "keyboard") {
+                Picker("Keyboard shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
                     ForEach(HotKeyPreset.all) { preset in
                         Text(preset.title).tag(preset.id).accessibilityLabel(preset.title)
                     }
@@ -443,7 +450,6 @@ struct GeneralSettings: View {
                 if hotKeys.needsInputMonitoring {
                     PermissionExplainer(kind: .inputMonitoring, onGranted: { hotKeys.recheck() })
                 }
-            } footer: {
                 if let error = hotKeys.registrationError {
                     SectionFootnote(error)
                 } else if hotKeys.needsInputMonitoring {
@@ -456,7 +462,9 @@ struct GeneralSettings: View {
                 }
             }
         }
-        .settingsForm()
+        .toggleStyle(.switch)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
     }
 
     private var appearanceFootnote: String {
@@ -474,9 +482,10 @@ struct GeneralSettings: View {
     @State private var presetAgent: NewChatAgent = .claude
     @State private var presetRefresh = 0
     @State private var draftPresetNames: [String: String] = [:]
+    @State private var expandedPresets: Set<ChatPreset> = []
 
     private var chatPresetSettings: some View {
-        Section {
+        SettingsCard(title: "New chat presets", subtitle: "Give each kind of work a familiar starting point.", symbol: "sparkles") {
             Picker("Agent", selection: $presetAgent) {
                 ForEach(NewChatAgent.allCases) { agent in Text(agent.displayName).tag(agent) }
             }.pickerStyle(.segmented)
@@ -487,8 +496,7 @@ struct GeneralSettings: View {
                     presetEditor(preset)
                 }
             }
-        } header: { Text("New chat presets") } footer: {
-            SectionFootnote("Preset names and settings are saved on this Mac. Each agent has its own model choices.")
+            SectionFootnote("Saved on this Mac. Each agent has its own model choices.")
         }
         .task {
             chatModels = await model.newChatModels()
@@ -504,51 +512,67 @@ struct GeneralSettings: View {
         let initial = preferences.setup(for: preset, agent: presetAgent, models: chatModels)
             ?? ChatPresets.setup(for: preset, agent: presetAgent, models: chatModels)
             ?? ChatPresets.setup(for: .best, agent: presetAgent, models: chatModels)
-        return VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(preset.title).font(.headline)
-                Spacer()
-                Button("Restore defaults") {
-                    preferences.restoreDefaults(for: preset, agent: presetAgent)
-                    draftPresetNames[preset.rawValue] = preset.title
-                    presetRefresh += 1
+        return DisclosureGroup(isExpanded: Binding(
+            get: { expandedPresets.contains(preset) },
+            set: { if $0 { expandedPresets.insert(preset) } else { expandedPresets.remove(preset) } }
+        )) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("Customize this preset").font(Typo.label).foregroundStyle(Theme.muted)
+                    Spacer()
+                    Button("Restore defaults") {
+                        preferences.restoreDefaults(for: preset, agent: presetAgent)
+                        draftPresetNames[preset.rawValue] = preset.title
+                        presetRefresh += 1
+                    }
+                    .buttonStyle(.link)
+                    .accessibilityLabel("Restore \(preset.title) defaults")
                 }
-                .buttonStyle(.link)
-                .accessibilityLabel("Restore \(preset.title) defaults")
-            }
-            TextField("Name shown in New chat", text: Binding(
-                get: { draftPresetNames[preset.rawValue] ?? preferences.title(for: preset) },
-                set: { draftPresetNames[preset.rawValue] = $0; preferences.setTitle($0, for: preset) }
-            ))
-            if let initial {
-                VStack(alignment: .leading, spacing: 9) {
-                    Picker("Model", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
-                        ForEach(list) { model in Text(model.label).tag(Optional(model.id)) }
-                    }
-                    if let selected = list.first(where: { $0.id == initial.modelId }), !selected.levels.isEmpty {
-                        Picker("Thinking", selection: settingBinding(preset, initial: initial, keyPath: \.level)) {
-                            ForEach(selected.levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag(Optional($0)) }
-                        }
-                    }
-                    if presetAgent == .claude {
-                        Picker("Code", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
-                            Text("Same model").tag(String?.none)
-                            ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
-                        }
-                        Picker("Run commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
-                            Text("Same model").tag(String?.none)
-                            ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
-                        }
-                        Toggle("Ask before changes", isOn: Binding(
-                            get: { presetPreferences.setup(for: preset, agent: presetAgent, models: chatModels)?.planFirst ?? initial.planFirst },
-                            set: { value in updateSetup(preset, initial: initial) { $0.planFirst = value && ($0.code != nil || $0.run != nil) } }
-                        ))
-                    }
+                LabeledContent("Name") {
+                    TextField("Name shown in New chat", text: Binding(
+                        get: { draftPresetNames[preset.rawValue] ?? preferences.title(for: preset) },
+                        set: { draftPresetNames[preset.rawValue] = $0; preferences.setTitle($0, for: preset) }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Name shown in New chat")
                 }
-                .id(presetRefresh)
+                if let initial {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Picker("Model", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
+                            ForEach(list) { model in Text(model.label).tag(Optional(model.id)) }
+                        }
+                        if let selected = list.first(where: { $0.id == initial.modelId }), !selected.levels.isEmpty {
+                            Picker("Thinking", selection: settingBinding(preset, initial: initial, keyPath: \.level)) {
+                                ForEach(selected.levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag(Optional($0)) }
+                            }
+                        }
+                        if presetAgent == .claude {
+                            Picker("Code", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
+                                Text("Same model").tag(String?.none)
+                                ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
+                            }
+                            Picker("Run commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
+                                Text("Same model").tag(String?.none)
+                                ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
+                            }
+                            Toggle(isOn: Binding(
+                                get: { presetPreferences.setup(for: preset, agent: presetAgent, models: chatModels)?.planFirst ?? initial.planFirst },
+                                set: { value in updateSetup(preset, initial: initial) { $0.planFirst = value && ($0.code != nil || $0.run != nil) } }
+                            )) {
+                                SettingsControlLabel(title: "Ask before changes", detail: "Review the plan before delegated work begins.")
+                            }
+                        }
+                    }
+                    .id(presetRefresh)
+                }
             }
+            .padding(.top, 16)
+        } label: {
+            ChatPresetSummary(preset: preset, name: preferences.title(for: preset), model: list.first(where: { $0.id == initial?.modelId })?.label)
         }
-        .padding(.vertical, 4)
+        .padding(16)
+        .background(Theme.surfaceRaised.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
+        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line) }
     }
 
     private func settingBinding<Value>(_ preset: ChatPreset, initial: ChatSetup, keyPath: WritableKeyPath<ChatSetup, Value>) -> Binding<Value> {
@@ -566,14 +590,12 @@ struct GeneralSettings: View {
 
     private var macCard: some View {
         let r = model.connectionsReport
-        return Section {
-            VStack(alignment: .leading, spacing: Space.s) {
+        return SettingsCard(title: "Ready on this Mac", subtitle: "Your local connection at a glance. Find more under Connections.", symbol: "desktopcomputer") {
+            VStack(alignment: .leading, spacing: 12) {
                 macRow("Conductor", r.database)
                 macRow("Squeak service", r.daemon)
                 macRow("Sending", r.sending)
             }
-        } footer: {
-            SectionFootnote("Details are under Connections.")
         }
     }
 
@@ -657,7 +679,7 @@ private struct ConnectionsSettings: View {
                     }
                 }
             }
-            .padding(.horizontal, 28)
+            .padding(.horizontal, 24)
             .padding(.bottom, Space.xxl)
         }
         .scrollIndicators(.automatic)
@@ -735,21 +757,22 @@ private struct PrivacySettings: View {
 
     var body: some View {
         @Bindable var model = model
-        Form {
-            Section {
-                Toggle("Show session names in notifications", isOn: $model.notificationsShowNames)
-            } footer: {
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsCard(title: "Notification privacy", subtitle: "Choose how much a glance at your screen reveals.", symbol: "eye.slash") {
+                Toggle(isOn: $model.notificationsShowNames) {
+                    Text("Show session names in notifications").font(Typo.label).frame(maxWidth: .infinity, alignment: .leading)
+                }
                 SectionFootnote("Off by default. With this off, notifications don't name the session. With it on, they also show what an agent is asking; never other message text.")
             }
-            Section {
-                Button("Purge cache…", role: .destructive) { confirm = true }
-            } header: {
-                Text("Message cache")
-            } footer: {
+            SettingsCard(title: "Message cache", subtitle: "Your local history stays encrypted on this Mac.", symbol: "lock.shield") {
                 SectionFootnote(model.cacheNotice ?? "Messages are encrypted on this Mac, kept 14 days, up to 50 MB.")
+                Button("Purge cache…", role: .destructive) { confirm = true }
+                    .buttonStyle(DestructiveButtonStyle())
             }
         }
-        .settingsForm()
+        .toggleStyle(.switch)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
         .confirmationDialog("Delete the message cache and its encryption key?", isPresented: $confirm) {
             Button("Delete cache", role: .destructive) { Task { await model.purgeCache() } }
         } message: {
@@ -762,11 +785,12 @@ private struct AboutSettings: View {
     @Environment(AppModel.self) private var model
     @State private var copied = false
     @State private var uninstalling = false
+    @State private var uninstallSize = CGSize(width: 500, height: 560)
 
     var body: some View {
         @Bindable var model = model
-        Form {
-            Section {
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsCard(title: "Made for your agents", subtitle: "A little duck that keeps work moving.", symbol: "heart") {
                 VStack(spacing: 6) {
                     DuckMark(width: 56)
                     Text("Squeak").font(.title2.bold())
@@ -776,11 +800,17 @@ private struct AboutSettings: View {
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 8)
             }
-                Section {
-                    Toggle("Automatically check for updates", isOn: Binding(get: { model.updater.automaticallyChecks }, set: { model.updater.automaticallyChecks = $0 }))
+                SettingsCard(title: "Keep Squeak up to date", subtitle: "Choose how new versions arrive on this Mac.", symbol: "arrow.triangle.2.circlepath") {
+                    Toggle(isOn: Binding(get: { model.updater.automaticallyChecks }, set: { model.updater.automaticallyChecks = $0 })) {
+                        Text("Automatically check for updates").frame(maxWidth: .infinity, alignment: .leading)
+                    }
                         .disabled(!model.updater.isActive)
-                    Toggle("Tell me when an update is available", isOn: $model.updateAlertsEnabled)
-                    Toggle("Download and install updates automatically", isOn: Binding(get: { model.updater.automaticallyInstalls }, set: { model.updater.automaticallyInstalls = $0 }))
+                    Toggle(isOn: $model.updateAlertsEnabled) {
+                        Text("Tell me when an update is available").frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Toggle(isOn: Binding(get: { model.updater.automaticallyInstalls }, set: { model.updater.automaticallyInstalls = $0 })) {
+                        Text("Download and install updates automatically").frame(maxWidth: .infinity, alignment: .leading)
+                    }
                         .disabled(!model.updater.isActive)
                     if let ready = model.updater.readyVersion {
                         LabeledContent("Update \(ready) is ready") { Button("Restart to update") { model.updater.installNow() } }
@@ -792,37 +822,38 @@ private struct AboutSettings: View {
                     if let note = model.updateNote { Text(note).foregroundStyle(.secondary) }
                     Button("Check for updates…") { model.updater.checkForUpdates() }
                         .disabled(!model.updater.canCheck)
-                } footer: {
                     SectionFootnote("Squeak checks once a day, and installs a new version for you when you quit or relaunch it, then reopens what you had open. Nothing about your chats is sent.")
                 }
-                Section {
+                SettingsCard(title: "Background service", subtitle: "The local connection that follows your sessions.", symbol: "gearshape.2") {
                     BackgroundServiceRow(daemon: model.daemon)
-                } footer: {
                     SectionFootnote(BackgroundServiceRow.footnote(model.daemon.status))
                 }
-                Section {
+                SettingsCard(title: "Diagnostics", subtitle: "Useful details when you need a hand.", symbol: "stethoscope") {
                     Button(copied ? "Copied" : "Copy diagnostics") {
                         model.copyDiagnostics()
                         copied = true
                         Task { try? await Task.sleep(for: .seconds(2)); copied = false }
                     }
-                } footer: {
                     SectionFootnote("Versions, source status, session counts and recent log lines. No message text, titles, paths or ids.")
                 }
                 if SqueakMacApp.reportsEnabled {
-                    Section {
+                    SettingsCard(title: "Help make Squeak better", subtitle: "Your feedback reaches a person.", symbol: "bubble.left") {
                         Button("Report a problem…") { Heresay.present() }
-                    } footer: {
                         SectionFootnote("Tell us what's broken, confusing or could be better. A person reads every report. Also in Help › Report a problem (⌥⌘R).")
                     }
                 }
-                Section {
+                SettingsCard(title: "Remove Squeak", subtitle: "Review everything before removing it from this Mac.", symbol: "trash") {
                     Button("Uninstall Squeak…", role: .destructive) { uninstalling = true }
-                } footer: {
                     SectionFootnote("Hands Conductor back, removes Squeak's service, hooks and files from this Mac. You see everything first.")
                 }
         }
-        .settingsForm()
-        .sheet(isPresented: $uninstalling) { UninstallSheet() }
+        .toggleStyle(.switch)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
+        .background {
+            UninstallPresentationSizeReader { uninstallSize = $0 }
+                .frame(width: 0, height: 0)
+        }
+        .sheet(isPresented: $uninstalling) { UninstallSheet(availableSize: uninstallSize) }
     }
 }

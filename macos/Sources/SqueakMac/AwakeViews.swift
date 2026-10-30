@@ -167,9 +167,9 @@ struct AwakeSettings: View {
     var short = false
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: 22) {
             if !model.awakeOffered {
-                Section {
+                SettingsCard(title: "Keep awake session", subtitle: "Keep your Mac reachable for as long as you need.", symbol: "moon") {
                     Text("This version of the Squeak service can't keep your Mac awake. Update it and this page fills in.")
                         .foregroundStyle(.secondary)
                 }
@@ -183,7 +183,9 @@ struct AwakeSettings: View {
                 if !short { hotspotSection }
             }
         }
-        .settingsForm()
+        .toggleStyle(.switch)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
         .task { await model.readAwake() }
     }
 
@@ -192,7 +194,7 @@ struct AwakeSettings: View {
     // MARK: State and start
 
     private var stateSection: some View {
-        Section {
+        SettingsCard(title: "Keep awake session", subtitle: "Keep your Mac reachable for as long as you need.", symbol: "moon") {
             AwakeStatusLines(title: "Keep Mac awake")
             if let awake = model.awake {
                 HStack(spacing: Space.s) {
@@ -213,7 +215,9 @@ struct AwakeSettings: View {
                     if !lidOn { Text("Until I end it").tag(0) }
                 }
                 if model.awakeLidReady && model.awakeOpenActions == nil {
-                    Toggle("With the lid closed", isOn: $withLid)
+                    Toggle(isOn: $withLid) {
+                        Text("With the lid closed").frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 HStack {
                     Spacer(minLength: 0)
@@ -225,7 +229,7 @@ struct AwakeSettings: View {
                 }
             }
             if let note = model.awakeNote { Footnote(note) }
-        } footer: {
+
             Footnote("Stops your Mac sleeping, on battery too, so Squeak can reach it from your iPhone while you are away. It ends by itself at the time shown.")
         }
     }
@@ -233,7 +237,7 @@ struct AwakeSettings: View {
     // MARK: Lid closed
 
     private var lidSection: some View {
-        Section {
+        SettingsCard(title: "Lid closed", subtitle: "Prepare your Mac to keep working with its lid shut.", symbol: "laptopcomputer") {
             if model.awakeLidReady {
                 StatusLine(dot: Theme.working, text: "Ready", detail: "Your Mac can stay awake with the lid closed.")
             } else {
@@ -248,7 +252,7 @@ struct AwakeSettings: View {
             if let problem = model.awakeSleepProblem {
                 StatusLine(dot: Theme.error, text: "Sleep is still turned off", detail: problem)
             }
-        } header: { Text("Lid closed") } footer: {
+
             Footnote(model.awakeLidReady
                 ? "A hard, open surface keeps it coolest; in a bag, Squeak watches its heat (below). A lid closed session always has an end, and Squeak turns sleep back on when it ends or when Squeak quits."
                 : "A one-time setup that asks for your Mac password, so Squeak can switch sleep off for a session. Nothing else is changed.")
@@ -263,7 +267,7 @@ struct AwakeSettings: View {
     /// The two modes, each with its own switches, kept apart: changing one never touches the other. With
     /// nothing running the tab picks the next session's mode; while one runs it switches the session, keeping its end.
     private var modeSection: some View {
-        Section {
+        SettingsCard(title: "Mode", subtitle: "Choose how your Mac stays reachable.", symbol: "rectangle.split.2x1") {
             Picker("Mode", selection: Binding(get: { shownLid }, set: { closed in
                 withLid = closed
                 guard let awake = model.awake, awake.lid != closed else { return }
@@ -282,8 +286,7 @@ struct AwakeSettings: View {
                         get: { model.awakeLidActions.map { AwakeFormat.value(info.key, in: $0) } ?? false },
                         set: { on in Task { await model.setLidAction(info.key, on) } }
                     )) {
-                        Text(info.title)
-                        Text(info.detail)
+                        SettingsControlLabel(title: info.title, detail: info.detail)
                     }
                 }
             } else {
@@ -292,12 +295,11 @@ struct AwakeSettings: View {
                         get: { model.awakeOpenActions.map { AwakeFormat.value(info.key, in: $0) } ?? false },
                         set: { on in Task { await model.setOpenAction(info.key, on) } }
                     )) {
-                        Text(info.title)
-                        Text(info.detail)
+                        SettingsControlLabel(title: info.title, detail: info.detail)
                     }
                 }
             }
-        } header: { Text("Mode") } footer: {
+
             Footnote(shownLid
                 ? (model.awakeLidReady ? "When the lid closes in a lid closed session. Each one is undone when the lid opens or the session ends."
                                        : "Lid closed needs setting up once, below. These are saved for then.")
@@ -308,18 +310,17 @@ struct AwakeSettings: View {
     // MARK: When the lid closes
 
     private var actionsSection: some View {
-        Section {
+        SettingsCard(title: "When the lid closes", subtitle: "Set what changes during a lid-closed session.", symbol: "laptopcomputer") {
             ForEach(AwakeFormat.lidActionInfos) { info in
                 Toggle(isOn: Binding(
                     get: { model.awakeLidActions.map { AwakeFormat.value(info.key, in: $0) } ?? false },
                     set: { on in Task { await model.setLidAction(info.key, on) } }
                 )) {
-                    Text(info.title)
-                    Text(info.detail)
+                    SettingsControlLabel(title: info.title, detail: info.detail)
                 }
                 .disabled(model.awakeLidActions == nil)
             }
-        } header: { Text("When the lid closes") } footer: {
+
             Footnote(model.awakeLidActions == nil
                 ? "This version of the Squeak service doesn't offer these choices. Update it and they appear here."
                 : "Only during a lid closed session. Each one is undone when the lid opens or the session ends.")
@@ -329,13 +330,13 @@ struct AwakeSettings: View {
     // MARK: Safety
 
     private var safetySection: some View {
-        Section {
+        SettingsCard(title: "Safety", subtitle: "Automatic limits for peace of mind while you’re away.", symbol: "shield") {
             StatusLine(dot: nil, text: AwakeFormat.lowPowerTitle(model.awakeRules),
                        detail: AwakeFormat.lowPowerDetail(model.awakeRules))
             StatusLine(dot: nil, text: AwakeFormat.endTitle(model.awakeRules),
                        detail: AwakeFormat.endDetail(model.awakeRules))
             if let ended = AwakeFormat.ended(model.awakeLastEnd) { Footnote(ended) }
-        } header: { Text("Safety") } footer: {
+
             Footnote("These rules are always on. They protect the battery, and a Mac in a bag.")
         }
     }
@@ -344,7 +345,7 @@ struct AwakeSettings: View {
 
     private var heatSection: some View {
         let heat = model.heat
-        return Section {
+        return SettingsCard(title: "Heat", subtitle: "Let Squeak respond when your Mac gets warm.", symbol: "thermometer.medium") {
             if let heat {
                 StatusLine(
                     dot: heat.level == "hot" ? Theme.error : heat.level == "warm" ? Theme.needsYou : Theme.idle,
@@ -362,7 +363,7 @@ struct AwakeSettings: View {
                         .buttonStyle(SecondaryButtonStyle()).disabled(model.settingUpFans)
                 }
             }
-        } header: { Text("Heat") } footer: {
+
             Footnote("During a session Squeak watches the chip and battery. When it warms up (battery 40°C, or the chip 90°C with the lid shut) it turns on Low Power Mode and moves your agents to the efficiency cores, so they keep going but slower. If the battery reaches 45°C for two minutes, it lets your Mac sleep. A closed bag still traps heat; fans help only a little there.")
         }
     }
@@ -371,7 +372,7 @@ struct AwakeSettings: View {
 
     @ViewBuilder private var powerSection: some View {
         if let power = model.power, !power.available.isEmpty {
-            Section {
+            SettingsCard(title: "Energy mode", subtitle: "Choose how your Mac uses power while awake.", symbol: "bolt") {
                 if power.ready {
                     StatusLine(dot: nil, text: "Energy mode ready",
                                detail: power.mode.map { "Now \(DaemonPower.title($0))." + (power.overridden ? " Held on Low Power while your Mac is warm." : "") })
@@ -384,7 +385,7 @@ struct AwakeSettings: View {
                             .buttonStyle(SecondaryButtonStyle()).disabled(model.settingUpPower)
                     }
                 }
-            } header: { Text("Energy mode") } footer: {
+
                 Footnote("Automatic, Low Power or High Power, picked in Mac controls on your iPhone. This allows exactly those three settings, nothing else. Heat and the battery rules still switch to Low Power when they need to, and your pick returns afterwards.")
             }
         }
@@ -395,7 +396,7 @@ struct AwakeSettings: View {
     private var hotspotSection: some View {
         let hotspot = model.hotspot
         let configured = hotspot?.configured == true
-        return Section {
+        return SettingsCard(title: "Hotspot failover", subtitle: "Stay connected when your usual network drops.", symbol: "wifi") {
             if let hotspot, configured {
                 StatusLine(
                     dot: hotspot.onHotspot ? Theme.working : Theme.idle,
@@ -407,10 +408,16 @@ struct AwakeSettings: View {
             } else {
                 StatusLine(dot: Theme.idle, text: "Not set up", detail: "Add your iPhone hotspot's name and password.")
             }
-            TextField("iPhone hotspot name", text: $hotspotName)
-                .textContentType(.username)
-                .onAppear { if hotspotName.isEmpty { hotspotName = hotspot?.ssid ?? "" } }
-            SecureField(configured ? "Password (leave empty to keep it)" : "Password", text: $hotspotPassword)
+            LabeledContent("Hotspot name") {
+                TextField("iPhone hotspot name", text: $hotspotName)
+                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.username)
+                    .onAppear { if hotspotName.isEmpty { hotspotName = hotspot?.ssid ?? "" } }
+            }
+            LabeledContent("Password") {
+                SecureField(configured ? "Leave empty to keep it" : "Password", text: $hotspotPassword)
+                    .textFieldStyle(.roundedBorder)
+            }
             HStack(spacing: Space.s) {
                 if model.savingHotspot { ProgressView().controlSize(.small) }
                 Spacer(minLength: 0)
@@ -424,7 +431,7 @@ struct AwakeSettings: View {
                 .buttonStyle(PrimaryButtonStyle()).disabled(model.savingHotspot)
             }
             if let note = model.hotspotNote { Footnote(note).foregroundStyle(Theme.error) }
-        } header: { Text("Hotspot failover") } footer: {
+
             Footnote("When your Mac loses its internet for about 30 seconds during an awake session, or while an agent works, it joins your iPhone's Personal Hotspot, and goes back to its Wi-Fi when that returns. macOS hides Wi-Fi names from apps, so Squeak can't look the hotspot up: type its name as it shows in Settings, Personal Hotspot. The password stays in your Mac's Keychain. Turn the hotspot on before you leave: iOS doesn't let an app do that.")
         }
     }

@@ -62,14 +62,16 @@ struct TelegramSettings: View {
     var body: some View {
         @Bindable var m = app.channels
         Group {
-            Form {
+            VStack(alignment: .leading, spacing: 22) {
                 telegramStatus
                 telegramToken(m: $m)
                 allowedChats
                 botPicture
                 telegramActions
             }
-            .settingsForm()
+            .toggleStyle(.switch)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
         }
         .task { await m.refresh() }
         .sheet(isPresented: $linking) { LinkChatSheet().environment(app) }
@@ -83,7 +85,7 @@ struct TelegramSettings: View {
     // MARK: Telegram
 
     private var telegramStatus: some View {
-        Section {
+        SettingsCard(title: "Status", subtitle: "See whether your bot is ready to send updates.", symbol: "paperplane.fill") {
             if !m.daemonReachable {
                 StatusLine(dot: Theme.needsYou, text: "Squeak service is off", detail: "Changes are saved, and take effect when the service starts.")
             } else if m.channelsOutdated {
@@ -102,11 +104,11 @@ struct TelegramSettings: View {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Restarting the Squeak service…").foregroundStyle(.secondary) }
             }
             if let n = m.notice { Footnote(n) }
-        } header: { SettingSubsectionHeader(title: "Status", symbol: "paperplane.fill", color: Color(red: 0.45, green: 0.62, blue: 1.0)) }
+        }
     }
 
     private func telegramToken(m: Bindable<ChannelsModel>) -> some View {
-        Section {
+        SettingsCard(title: "Bot token", subtitle: "Connect the Telegram bot you want Squeak to use.", symbol: "key.fill") {
             if self.m.tokenSet && !self.m.changingToken {
                 HStack(spacing: 8) {
                     Text("Bot token")
@@ -116,7 +118,10 @@ struct TelegramSettings: View {
                 }
             } else {
                 HStack(spacing: 8) {
-                    SecureField("Bot token", text: m.tokenDraft, prompt: Text("123456789:ABC…")).multilineTextAlignment(.trailing)
+                    LabeledContent("Bot token") {
+                        SecureField("Bot token", text: m.tokenDraft, prompt: Text("123456789:ABC…"))
+                            .textFieldStyle(.roundedBorder)
+                    }
                     Button("Paste") { self.m.pasteToken() }.buttonStyle(SecondaryButtonStyle())
                 }
                 if !self.m.tokenDraft.trimmed.isEmpty && !self.m.tokenLooksValid {
@@ -127,13 +132,13 @@ struct TelegramSettings: View {
                     Button("Cancel") { self.m.tokenDraft = ""; self.m.changingToken = false }.buttonStyle(QuietButtonStyle())
                 }
             }
-        } header: { SettingSubsectionHeader(title: "Bot token", symbol: "key.fill", color: Theme.needsYou) } footer: {
+
             Footnote("Create a bot with @BotFather, then paste its token here. The token stays on this Mac, in Squeak's settings file, and is never shown again.")
         }
     }
 
     private var allowedChats: some View {
-        Section {
+        SettingsCard(title: "Allowed chats", subtitle: "Choose who can talk to your bot.", symbol: "person.2.fill") {
             if m.allowed.isEmpty {
                 Text("No chats linked").foregroundStyle(.secondary)
             }
@@ -152,7 +157,7 @@ struct TelegramSettings: View {
             }
             Button("Link a chat…") { linking = true }.buttonStyle(SecondaryButtonStyle())
                 .disabled(!(m.tokenSet || !m.tokenDraft.trimmed.isEmpty) && !m.demo)
-        } header: { SettingSubsectionHeader(title: "Allowed chats", symbol: "person.2.fill", color: Theme.working) } footer: {
+
             if m.channels?.telegram.open == true && m.allowed.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Lucide(.triangleAlert, size: 13, color: Theme.muted)
@@ -165,7 +170,7 @@ struct TelegramSettings: View {
     }
 
     private var botPicture: some View {
-        Section {
+        SettingsCard(title: "Bot picture", subtitle: "Give your Telegram bot a familiar face.", symbol: "photo") {
             HStack(spacing: 12) {
                 BotLogoPreview()
                 VStack(alignment: .leading, spacing: 2) {
@@ -178,7 +183,7 @@ struct TelegramSettings: View {
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(!m.avatarState.canSet(telegramConfigured: m.tokenSet))
             }
-        } footer: {
+
             if let line = BotAvatarText.line(m.avatarState) {
                 Text(line).font(.callout).foregroundStyle(m.avatarState.isError ? Theme.needsYou : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
@@ -189,7 +194,7 @@ struct TelegramSettings: View {
     }
 
     private var telegramActions: some View {
-        Section {
+        SettingsCard(title: "Save & test", subtitle: "Apply your changes, then check the connection.", symbol: "checkmark.circle") {
             HStack(spacing: 8) {
                 Button("Save") { Task { await m.saveTelegram() } }
                     .buttonStyle(PrimaryButtonStyle())
@@ -202,7 +207,7 @@ struct TelegramSettings: View {
                     Button("Turn off…") { confirmOff = true }.buttonStyle(DestructiveButtonStyle()).disabled(m.restarting)
                 }
             }
-        } footer: {
+
             if let r = m.testResult { Footnote(r) } else if m.telegramDirty { Footnote("Saving restarts the Squeak service for a few seconds.") }
         }
     }
@@ -234,29 +239,31 @@ struct CliqSettings: View {
 
     var body: some View {
         @Bindable var m = app.channels
-        Form {
+        VStack(alignment: .leading, spacing: 22) {
             cliqAbout
             cliqConnection(m: $m)
             cliqOwner(m: $m)
             botLogo
             twoWaySection
         }
-        .settingsForm()
+        .toggleStyle(.switch)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
         .task { await m.refresh() }
     }
 
     /// What the bot is and what it needs, so nobody has to leave the app for a repository page.
     private var cliqAbout: some View {
-        Section {
+        SettingsCard(title: "How it works", subtitle: "Updates out, replies back to your agents.", symbol: "info.circle.fill") {
             Text("Squeak talks to Zoho Cliq through a bot you create in Cliq. It posts a card when an agent needs you or finishes, and your taps and replies come back to the agent.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("Cards go out through the bot's webhook URL. Replies come back through the Replies setup below.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        } header: { SettingSubsectionHeader(title: "How it works", symbol: "info.circle.fill", color: Theme.muted) }
+        }
     }
 
     private func cliqConnection(m: Bindable<ChannelsModel>) -> some View {
-        Section {
+        SettingsCard(title: "Webhook", subtitle: "Send agent updates through your Cliq bot.", symbol: "link") {
             if let c = self.m.channels?.cliq {
                 StatusLine(dot: nil, text: c.twoWay ? "Two-way: cards go out and replies come back" : c.oneWay ? "One-way: cards go out to Cliq" : "Zoho Cliq is not set up")
             }
@@ -269,7 +276,10 @@ struct CliqSettings: View {
                 }
             } else {
                 HStack(spacing: 8) {
-                    SecureField("Webhook URL", text: m.webhookDraft, prompt: Text("https://cliq.zoho.in/…")).multilineTextAlignment(.trailing)
+                    LabeledContent("Webhook URL") {
+                        SecureField("Webhook URL", text: m.webhookDraft, prompt: Text("https://cliq.zoho.in/…"))
+                            .textFieldStyle(.roundedBorder)
+                    }
                     Button("Paste") { self.m.pasteWebhook() }.buttonStyle(SecondaryButtonStyle())
                 }
                 if !self.m.webhookDraft.trimmed.isEmpty && !self.m.webhookLooksValid {
@@ -284,15 +294,21 @@ struct CliqSettings: View {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Restarting the Squeak service…").foregroundStyle(.secondary) }
             }
             if let n = self.m.notice { Footnote(n) }
-        } header: { SettingSubsectionHeader(title: "Webhook", symbol: "link", color: Color(red: 0.45, green: 0.62, blue: 1.0)) } footer: {
+
             Footnote("The webhook sends cards to Cliq. Find it in the bot's webhook settings.")
         }
     }
 
     private func cliqOwner(m: Bindable<ChannelsModel>) -> some View {
-        Section {
-            TextField("Owner email", text: m.ownerEmail, prompt: Text("you@company.com")).multilineTextAlignment(.trailing)
-            TextField("Owner ID", text: m.ownerId, prompt: Text("Cliq user ID")).multilineTextAlignment(.trailing)
+        SettingsCard(title: "Owner", subtitle: "Choose who receives your agent updates.", symbol: "person.crop.circle.fill") {
+            LabeledContent("Owner email") {
+                TextField("Owner email", text: m.ownerEmail, prompt: Text("you@company.com"))
+                    .textFieldStyle(.roundedBorder)
+            }
+            LabeledContent("Owner ID") {
+                TextField("Owner ID", text: m.ownerId, prompt: Text("Cliq user ID"))
+                    .textFieldStyle(.roundedBorder)
+            }
             HStack(spacing: 8) {
                 Button("Save") { Task { await self.m.saveCliq() } }
                     .buttonStyle(PrimaryButtonStyle())
@@ -302,13 +318,13 @@ struct CliqSettings: View {
                     Button("Remove webhook") { Task { await self.m.removeWebhook() } }.buttonStyle(DestructiveButtonStyle()).disabled(self.m.restarting)
                 }
             }
-        } header: { SettingSubsectionHeader(title: "Owner", symbol: "person.crop.circle.fill", color: Theme.working) } footer: {
+
             Footnote(self.m.cliqDirty ? "The owner email and ID say whose messages Squeak accepts. Saving restarts the Squeak service for a few seconds." : "The owner email and ID say whose messages Squeak accepts.")
         }
     }
 
     private var botLogo: some View {
-        Section {
+        SettingsCard(title: "Bot logo", subtitle: "Give your bot a familiar face.", symbol: "photo.fill") {
             HStack(spacing: 12) {
                 BotLogoPreview()
                 Text("Bot logo")
@@ -319,7 +335,7 @@ struct CliqSettings: View {
                 }
                 Button("Save logo…") { saveLogo() }.buttonStyle(SecondaryButtonStyle())
             }
-        } header: { SettingSubsectionHeader(title: "Bot logo", symbol: "photo.fill", color: Color(red: 0.72, green: 0.55, blue: 0.95)) } footer: {
+
             VStack(alignment: .leading, spacing: 4) {
                 if let msg = m.logoMessage { Footnote(msg) }
                 Footnote("Zoho blocks setting it from Squeak. In Cliq: Bots → Squeak → Edit → upload the picture, crop to the circle, and Save.")
@@ -336,7 +352,7 @@ struct CliqSettings: View {
     }
 
     private var twoWaySection: some View {
-        Section { twoWay } header: { SettingSubsectionHeader(title: "Replies", symbol: "arrowshape.turn.up.left.fill", color: Theme.done) }
+        SettingsCard(title: "Replies", subtitle: "Bring your answers back into the agent’s chat.", symbol: "arrowshape.turn.up.left.fill") { twoWay }
     }
 
     @ViewBuilder private var twoWay: some View {
@@ -424,27 +440,29 @@ struct IPhoneSettings: View {
     private var m: ChannelsModel { app.channels }
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: 22) {
             if m.remoteOutdated || !m.daemonReachable {
-                Section {
+                SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") {
                     StatusLine(dot: m.daemonReachable ? nil : Theme.needsYou,
                                text: m.daemonReachable ? "Update the Squeak service" : "Squeak service is off",
                                detail: m.daemonReachable ? "This service is older than the app and can't pair phones." : "Start it to see and pair iPhones.")
-                } header: { SettingSubsectionHeader(title: "Squeak service", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) }
+                }
             } else if m.remote == nil {
-                Section { StatusLine(dot: nil, text: "Checking") } header: { SettingSubsectionHeader(title: "Squeak service", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) }
+                SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") { StatusLine(dot: nil, text: "Checking") }
             } else if !m.phoneEnabled {
-                Section {
+                SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") {
                     StatusLine(dot: nil, text: "The iPhone channel is off")
                     HStack { Button("Set up…") { settingUp = true }.buttonStyle(PrimaryButtonStyle()); Spacer() }
-                } header: { SettingSubsectionHeader(title: "Squeak service", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) } footer: {
+
                     Footnote("Squeak for iPhone talks to this Mac through Firebase. Squeak can set up your own, or use its shared server.")
                 }
             } else {
                 enabledSections
             }
         }
-        .settingsForm()
+        .toggleStyle(.switch)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
         .task { await m.pollRemote() }
         .sheet(isPresented: $pairing, onDismiss: { m.endPairing() }) { PairSheet().environment(app) }
         .sheet(isPresented: $settingUp, onDismiss: {
@@ -475,23 +493,23 @@ struct IPhoneSettings: View {
         let devices = m.remote?.activeDevices ?? []
         let pending = m.remote?.pending ?? []
         if m.onSharedServer {
-            Section {
+            SettingsCard(title: "Server", subtitle: "Choose where your phone connects to this Mac.", symbol: "iphone.gen3") {
                 StatusLine(dot: m.remote?.pausedUntil == nil ? nil : Theme.needsYou,
                            text: "On Squeak's shared server (limited)",
                            detail: sharedDetail)
                 HStack { Button("Move to your own Firebase…") { settingUp = true }.buttonStyle(SecondaryButtonStyle()); Spacer() }
-            } header: { SettingSubsectionHeader(title: "Server", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) } footer: {
+
                 Footnote("Moving means pairing your iPhone again.")
             }
         }
         if !pending.isEmpty {
-            Section {
+            SettingsCard(title: "Waiting for you", subtitle: "Match the code on your phone before approving.", symbol: "person.crop.circle.badge.questionmark") {
                 ForEach(pending) { PendingRow(request: $0) }
-            } header: { SettingSubsectionHeader(title: "Waiting for you", symbol: "person.crop.circle.badge.questionmark", color: Theme.needsYou) } footer: {
+
                 Footnote("Approve only if the code matches the one on your iPhone.")
             }
         }
-        Section {
+        SettingsCard(title: "Paired iPhones", subtitle: "Your trusted devices, connected to this Mac.", symbol: "iphone.gen3") {
             if devices.isEmpty {
                 HStack(spacing: Space.m) {
                     Image(systemName: "iphone.gen3")
@@ -531,10 +549,10 @@ struct IPhoneSettings: View {
                     Button("Disconnect all…") { confirmReset = true }.buttonStyle(QuietButtonStyle())
                 }
             }
-        } header: { SettingSubsectionHeader(title: "Paired iPhones", symbol: "iphone.gen3", color: Color(red: 0.45, green: 0.62, blue: 1.0)) } footer: {
+
             Footnote("Pairing always waits for you to approve it here. A paired iPhone can read your sessions and send replies.")
         }
-        if let n = m.notice { Section { Footnote(n) } }
+        if let n = m.notice { SettingsCard(title: "Channel notice", subtitle: "The latest update from this connection.", symbol: "info.circle") { Footnote(n) } }
     }
 }
 
