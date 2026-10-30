@@ -14,6 +14,11 @@ final class ActivationPolicyController {
     private var showRequestedAt: Date?
     private var safetyTimer: Timer?
     private static let windowGrace: TimeInterval = 3
+    /// When this process started. After an update Squeak relaunches itself while the Dock is still removing the old
+    /// copy's tile; asking for a tile of our own in that moment left a zero-width ghost in the Dock (the app was
+    /// running, its icon a speck). So the first seconds of a launch stay a menu-bar accessory.
+    private let launchedAt = Date()
+    private static let dockSettle: TimeInterval = 3
 
     func start() {
         guard tokens.isEmpty else { return }
@@ -97,6 +102,11 @@ final class ActivationPolicyController {
 
     private func apply(_ wanted: NSApplication.ActivationPolicy) {
         guard wanted != policy else { return }
+        let settling = Self.dockSettle - Date().timeIntervalSince(launchedAt)
+        if wanted == .regular, settling > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + settling + 0.05) { [weak self] in self?.update(closing: nil) }
+            return
+        }
         policy = wanted
         NSApp.setActivationPolicy(wanted)
         if wanted == .regular { takeMenuBar() }

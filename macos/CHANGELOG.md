@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.7
+
+- After Squeak updates itself, its Dock icon shows up properly instead of sometimes appearing as a speck.
+
 ## 2.12.6
 
 - Phone calls: add a Home Assistant gateway by typing the short code its panel shows; no keys or addresses to copy.
