@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.12.6
+
+- Phone calls: add a Home Assistant gateway by typing the short code its panel shows; no keys or addresses to copy.
+- Phone calls: pause calls for an hour, four hours, until tomorrow morning, or until you turn them back on.
+- The Dock icon stays up while a window is opening, and no longer lingers after the last window closes.
+- Settings has a cleaner layout, with clearer Telegram, Zoho Cliq and update rows, and the Uninstall dialog fits the window.
+
 ## 2.12.5
 
 - Codex chats are found even when their folders have been pruned by modification time, so they no longer stay stuck on “Starting…”.
