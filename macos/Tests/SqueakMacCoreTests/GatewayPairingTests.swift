@@ -61,3 +61,58 @@ import Testing
         #expect(String(decoding: GatewayText.approveBody(false), as: UTF8.self) == #"{"approve":false}"#)
     }
 }
+
+@Suite struct GatewayClaimTests {
+    @Test func bodyIsSortedAndNormalised() {
+        #expect(String(data: GatewayClaim.requestBody(code: " k7m2 qx9p "), encoding: .utf8) == #"{"code":"K7M2-QX9P"}"#)
+        #expect(String(data: GatewayClaim.requestBody(code: "k7m2-qx9p"), encoding: .utf8) == #"{"code":"K7M2-QX9P"}"#)
+    }
+
+    @Test func displayAsTyped() {
+        #expect(GatewayClaim.display("k7m") == "K7M")
+        #expect(GatewayClaim.display("k7m2q") == "K7M2-Q")
+        #expect(GatewayClaim.display("k7m2qx9pzz") == "K7M2-QX9P")
+        #expect(GatewayClaim.isComplete("K7M2QX9P") && !GatewayClaim.isComplete("K7M2-QX"))
+    }
+
+    @Test func outcomes() {
+        #expect(GatewayClaim.outcome(status: 200, body: Data(#"{"ok":true,"name":"Squeak Voice","version":"0.9.0"}"#.utf8)) == .found(name: "Squeak Voice", version: "0.9.0"))
+        #expect(GatewayClaim.outcome(status: 404, body: Data(#"{"error":"That code isn't showing on an add-on."}"#.utf8)) == .refused("That code isn't showing on an add-on."))
+        #expect(GatewayClaim.outcome(status: 404, body: Data("not found".utf8)) == .unavailable)
+        #expect(GatewayClaim.outcome(status: 503, body: Data(#"{"error":"Phone calls need your own Firebase"}"#.utf8)) == .refused("Phone calls need your own Firebase"))
+        #expect(GatewayClaim.outcome(status: 400, body: Data()) == .refused("Squeak could not use that code. Check it and try again."))
+    }
+
+    @Test func confirmSentence() {
+        #expect(GatewayClaimText.confirm(GatewayPairing(state: .request, name: "Squeak Voice", version: "0.9.0")) == "Squeak Voice (add-on 0.9.0) wants to connect.")
+    }
+}
+
+@Suite struct PauseTests {
+    @Test func bodies() {
+        let want: [(VoicePauseChoice, String)] = [(.oneHour, "1h"), (.fourHours, "4h"), (.tomorrow, "tomorrow"), (.forever, "forever"), (.resume, "resume")]
+        for (c, w) in want { #expect(String(data: c.requestBody(), encoding: .utf8) == #"{"pause":"\#(w)"}"#) }
+    }
+
+    @Test func decodesPauseTolerantly() throws {
+        func v(_ j: String) throws -> VoiceSettings { try JSONDecoder().decode(VoiceSettings.self, from: Data(j.utf8)) }
+        let old = try v(#"{"mode":"gateway"}"#)
+        #expect(!old.pauseKnown && old.pause == nil)
+        let off = try v(#"{"mode":"gateway","pause":null}"#)
+        #expect(off.pauseKnown && off.pause == nil)
+        let timed = try v(#"{"mode":"gateway","pause":{"until":5000}}"#)
+        #expect(timed.pauseKnown && timed.pause == VoicePause(until: 5000))
+        let forever = try v(#"{"mode":"gateway","pause":{"until":null}}"#)
+        #expect(forever.pause == VoicePause(until: nil))
+    }
+
+    @Test func statusLines() {
+        let now = Date(timeIntervalSince1970: 1000)
+        let t: (Date, Date) -> String = { _, _ in "3:40 PM" }
+        #expect(PauseText.statusLine(nil, now: now, time: t) == "Calls are on")
+        #expect(PauseText.statusLine(VoicePause(until: 2_000_000), now: now, time: t) == "Paused until 3:40 PM")
+        #expect(PauseText.statusLine(VoicePause(until: nil), now: now, time: t) == "Paused until you turn it back on")
+        #expect(PauseText.statusLine(VoicePause(until: 500_000), now: now, time: t) == "Calls are on")
+        #expect(PauseText.isPaused(VoicePause(until: nil)) && !PauseText.isPaused(nil))
+    }
+}

@@ -29,6 +29,9 @@ import { SipPhone } from "./sip-phone.js";
 import { RelayUplink } from "./uplink.js";
 import { EspeakSpeaker, PiperSpeaker, setSpeechSlowHook, type Speaker } from "./tts.js";
 import { GatewayEventLog, startLogPublisher } from "./addon-event-log.js";
+import { claimWithMac } from "./addon-claim.js";
+import { startPanel } from "./addon-panel.js";
+import { RENDEZVOUS_DATABASE } from "./claim-protocol.js";
 
 /** Where Home Assistant puts an add-on's options. */
 const ADDON_OPTIONS = "/data/options.json";
@@ -105,6 +108,11 @@ export interface CredentialDeps {
   log: (line: string) => void;
   /** The store the pairing rendezvous lives in; a test passes a fake. */
   storeFor: (databaseUrl: string) => PairingStore;
+  /**
+   * The default way to pair when nothing was set: shows a code and waits for the Mac. Absent (tests of the older
+   * flow), an unpaired add-on just says so and stays up. Resolves null if the add-on is stopping.
+   */
+  claim?: () => Promise<SavedPairing | null>;
 }
 
 /**
@@ -128,11 +136,21 @@ export async function resolveCredentials(
   if (saved && realtimeDatabaseOrigin(saved.databaseUrl)) return { ...saved, source: "pairing" };
 
   const notPaired =
-    "Not paired: in Squeak for Mac, Settings > Phone calls > Add gateway, then paste the code into this add-on's pairing_code option";
+    "Not paired: open the Squeak Voice panel in Home Assistant's sidebar and type the code it shows in Squeak for Mac (Settings > Phone calls > Add gateway)";
   const raw = env.SQUEAK_VOICE_PAIRING_CODE;
   if (!raw?.trim()) {
     deps.log(notPaired);
-    return null;
+    if (!deps.claim) return null;
+    let claimed: SavedPairing | null;
+    try {
+      claimed = await deps.claim();
+    } catch {
+      return null;
+    }
+    if (!claimed) return null;
+    writeSavedPairing(deps.pairingFile, claimed);
+    deps.log("Paired with your Mac");
+    return { ...claimed, source: "paired now" };
   }
   const code = readPairingCode(raw);
   if (!code) {
@@ -266,8 +284,47 @@ export async function runGateway(): Promise<number> {
   const note = (level: "info" | "warn", text: string): void => events.note(level, text);
   events.note("info", `Add-on ${version} started`);
   let credentials: GatewayCredentials | null;
+  // What the sidebar panel shows. It is up before pairing finishes so the code is visible while unpaired.
+  let panelCode: { code: string; expiresAt: number } | null = null;
+  let panelPaired = false;
+  let phoneLive: SipPhone | null = null;
+  let pinLive: PinKeeper | null = null;
+  const panel = await startPanel({
+    version,
+    paired: () => panelPaired,
+    code: () => panelCode,
+    registration: () => phoneLive?.registration() ?? { registered: false, error: "Not set up yet" },
+    pin: () => pinLive?.status() ?? "none",
+    log: () => events.doc(Date.now()).lines,
+  }).catch((error: unknown) => {
+    logger.warn(`the Squeak Voice panel could not start: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  });
+  const claimAbort = new AbortController();
+  const stopOnSignal = (): void => claimAbort.abort();
+  for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, stopOnSignal);
   try {
     credentials = await resolveCredentials(env, {
+      claim: async () => {
+        try {
+          return await claimWithMac({
+            store: new RtdbRest(RENDEZVOUS_DATABASE),
+            now: Date.now,
+            version,
+            name: "Squeak Voice",
+            sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+            signal: claimAbort.signal,
+            onCode: (code, expiresAt) => {
+              panelCode = { code, expiresAt };
+              logger.info(`Pairing code: ${code} (type it in Squeak for Mac, Settings > Phone calls > Add gateway)`);
+              note("info", `Waiting for the Mac: code ${code}`);
+            },
+            onTrouble: (text) => logger.warn(text),
+          });
+        } catch {
+          return null;
+        }
+      },
       pairingFile: PAIRING_FILE,
       triedFile: PAIR_TRIED_FILE,
       version,
@@ -285,6 +342,12 @@ export async function runGateway(): Promise<number> {
   } catch (error) {
     console.error(`Squeak voice gateway cannot start: ${error instanceof Error ? error.message : String(error)}`);
     return 1;
+  }
+  panelCode = null;
+  panelPaired = credentials !== null;
+  if (claimAbort.signal.aborted) {
+    panel?.stop();
+    return 0;
   }
   if (credentials) {
     const paired = credentials;
@@ -321,6 +384,8 @@ export async function runGateway(): Promise<number> {
       // The legacy `call_in_pin: skip` option only seeds the incoming setting until the app saves a policy.
       const legacyCallIn = env.SQUEAK_VOICE_CALLIN_PIN?.toLowerCase() === "skip" ? "skip" : "ask";
       const pins = new PinKeeper(null, path.join(voice.line.dir, "voice-pin.json"), Date.now, legacyCallIn);
+      phoneLive = phone;
+      pinLive = pins;
       if (pins.status() === "none") {
         logger.warn(
           "no pin is set: calls will tell you what is waiting but cannot take a key answer, and calling in is refused. Set one in the Squeak app (Settings > Phone calls).",
@@ -407,6 +472,7 @@ export async function runGateway(): Promise<number> {
       process.once(signal, () => {
         clearInterval(keepAlive);
         started.stop();
+        panel?.stop();
         resolve();
       });
     }

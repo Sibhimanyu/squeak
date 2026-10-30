@@ -176,6 +176,27 @@ final class ChannelsModel {
         voiceSaving = false
     }
 
+    private(set) var pauseBusy = false
+
+    /// Pauses or resumes calls and takes the daemon's answer as the truth.
+    func setPause(_ choice: VoicePauseChoice) async {
+        voiceError = nil
+        if demo { return }
+        pauseBusy = true
+        defer { pauseBusy = false }
+        do {
+            if let answered = try await client.setVoicePause(choice) {
+                voice = answered
+            } else {
+                voiceOutdated = true
+                voiceError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            voiceError = "Could not save: Squeak on this Mac did not answer."
+        }
+        await refreshVoice()
+    }
+
     // The phone-call gateway (nil until the daemon answers; unavailable hides the section).
     private(set) var gateway: GatewayView?
     private(set) var gatewayAvailable = true
@@ -266,7 +287,36 @@ final class ChannelsModel {
         }
     }
 
+    /// The typed-code flow. A found code moves the pairing view to a request; an old daemon sets `gatewayClaimUnavailable`.
+    private(set) var gatewayClaimUnavailable = false
+
+    func claimGateway(code: String) async {
+        gatewayError = nil
+        if demo { return }
+        gatewayBusy = true
+        defer { gatewayBusy = false }
+        do {
+            switch try await client.claimGateway(code: code) {
+            case .found:
+                await refreshGateway()
+                gatewayPoll?.cancel()
+                gatewayPoll = Task { [weak self] in
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(2))
+                        if Task.isCancelled { break }
+                        await self?.refreshGateway()
+                    }
+                }
+            case .refused(let sentence): gatewayError = sentence
+            case .unavailable: gatewayClaimUnavailable = true
+            }
+        } catch {
+            gatewayError = "Squeak on this Mac did not answer."
+        }
+    }
+
     func endGatewayPairing() {
+        gatewayClaimUnavailable = false
         gatewayPoll?.cancel(); gatewayPoll = nil
         gatewayCode = nil; gatewayError = nil
         Task { await refreshGateway() }

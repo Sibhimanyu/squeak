@@ -161,6 +161,14 @@ export interface IngressControl {
     read(): unknown;
     pair(): { ok: true; code: string; expiresAt: number } | { ok: false; reason: string; unavailable?: boolean };
     approve(approve: boolean): Promise<{ ok: true } | { ok: false; reason: string }>;
+    /**
+     * `POST /control/voice/gateway/claim` takes exactly `{ code: string }` (the short code the add-on shows) and answers
+     * `{ ok: true, name, version }`; a bad or unknown code is 400 `{ error }`, 503 when the database is not set up.
+     * Absent on an older daemon (404). It fills the same `pairing` view and the same approve route.
+     */
+    claim?(
+      code: string,
+    ): Promise<{ ok: true; name: string; version: string } | { ok: false; reason: string; status: 400 | 503 }>;
   };
   /**
    * `GET /control/voice/calls` (token-gated, no CORS header, 405 for other methods, 503 when voice is unavailable):
@@ -960,7 +968,8 @@ export class HookIngressServer {
     if (
       gatewayUrl === "/control/voice/gateway" ||
       gatewayUrl === "/control/voice/gateway/pair" ||
-      gatewayUrl === "/control/voice/gateway/approve"
+      gatewayUrl === "/control/voice/gateway/approve" ||
+      gatewayUrl === "/control/voice/gateway/claim"
     ) {
       const gateway = control.voiceGateway;
       const wanted = gatewayUrl === "/control/voice/gateway" ? "GET" : "POST";
@@ -1010,6 +1019,29 @@ export class HookIngressServer {
           return;
         }
         const keys = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.keys(parsed) : [];
+        if (gatewayUrl === "/control/voice/gateway/claim") {
+          const claim = gateway.claim;
+          if (!claim) {
+            respond(response, 404, "not found");
+            return;
+          }
+          const code = (parsed as { code?: unknown } | null)?.code;
+          if (keys.length !== 1 || typeof code !== "string" || code.length > 40) {
+            respondJson(response, 400, { error: "Type the code the add-on shows." });
+            return;
+          }
+          void Promise.resolve()
+            .then(() => claim(code))
+            .then((outcome) => {
+              if (!outcome.ok) {
+                respondJson(response, outcome.status, { error: outcome.reason });
+                return;
+              }
+              respondJson(response, 200, { ok: true, name: outcome.name, version: outcome.version });
+            })
+            .catch(() => respond(response, 500, "gateway pairing failed"));
+          return;
+        }
         const approve = (parsed as { approve?: unknown } | null)?.approve;
         if (keys.length !== 1 || typeof approve !== "boolean") {
           respondJson(response, 400, { error: "Say whether to approve or decline." });

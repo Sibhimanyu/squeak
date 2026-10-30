@@ -136,7 +136,7 @@ export function newCallId(): string {
 }
 
 /** Which way a document travels: bound into its signature so none can be replayed as another. */
-export type Direction = "req" | "res" | "dir" | "up" | "down" | "pairreq" | "pairgrant";
+export type Direction = "req" | "res" | "dir" | "up" | "down" | "pairreq" | "pairgrant" | "claimreq" | "claimgrant";
 
 function signature(keyBase64: string, direction: Direction, id: string, box: string): string {
   const key = crypto.hkdfSync("sha256", Buffer.from(keyBase64, "base64"), Buffer.alloc(0), "squeak-voice-v1-sign", 32);

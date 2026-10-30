@@ -37,6 +37,7 @@ struct VoiceSettingsPage: View {
                 } header: { Text("Phone calls") } footer: {
                     Footnote(footnote(v))
                 }
+                if v.pauseKnown { pauseSection(v) }
                 callsSection
                 if m.gatewayAvailable { gatewaySection }
                 if let state = v.pinState { pinSection(state) }
@@ -68,6 +69,32 @@ struct VoiceSettingsPage: View {
         let who = v.callee ?? v.defaultCallee
         let ringing = who.map { "Squeak rings \($0)." } ?? "No extension is set yet, so no call can be placed."
         return "\(ringing) \(how) Only an extension is accepted here, never an outside number."
+    }
+
+    // MARK: Pause
+
+    private func pauseSection(_ v: VoiceSettings) -> some View {
+        Section {
+            LabeledContent {
+                Menu("Pause calls") {
+                    ForEach([VoicePauseChoice.oneHour, .fourHours, .tomorrow, .forever], id: \.self) { c in
+                        Button(c.menuTitle) { Task { await m.setPause(c) } }
+                    }
+                    if PauseText.isPaused(v.pause) {
+                        Divider()
+                        Button(VoicePauseChoice.resume.menuTitle) { Task { await m.setPause(.resume) } }
+                    }
+                }
+                .fixedSize().disabled(m.pauseBusy)
+            } label: {
+                Text("Pause calls")
+                TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                    Text(PauseText.statusLine(v.pause, now: ctx.date))
+                }
+            }
+        } footer: {
+            Footnote("Cards still reach Telegram and the apps. A test call still rings.")
+        }
     }
 
     // MARK: Calls
@@ -258,34 +285,79 @@ struct VoiceSettingsPage: View {
     }
 }
 
-/// Pairs the Home Assistant add-on: a short code to paste into the add-on, then a confirmation here.
+/// Adds the Home Assistant add-on: type the code its panel shows, confirm here. The old code-making flow stays
+/// behind "Use a pairing code instead", and is what an older Squeak (no claim route) gets.
 struct GatewayPairSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
+    @State private var typed = ""
+    @State private var legacy = false
+    @FocusState private var codeFocused: Bool
     private var m: ChannelsModel { app.channels }
+
+    private var useLegacy: Bool { legacy || m.gatewayClaimUnavailable }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Add a phone-call gateway").font(Typo.title)
-            content
+            if useLegacy { legacyContent } else { claimContent }
             if let e = m.gatewayError { Footnote(e) }
         }
         .padding(24).frame(width: 440)
-        .task { if m.gatewayCode == nil { await m.startGatewayPairing() } }
+        .task(id: useLegacy) { if useLegacy && m.gatewayCode == nil { await m.startGatewayPairing() } }
     }
 
-    @ViewBuilder private var content: some View {
+    @ViewBuilder private var claimContent: some View {
+        let p = m.gateway?.pairing
+        switch p?.state {
+        case .request:
+            Text(GatewayClaimText.confirm(p!)).font(Typo.body).fixedSize(horizontal: false, vertical: true)
+            approveButtons
+        case .done:
+            Text("Paired").font(Typo.body)
+            Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle())
+        default:
+            Text("In Home Assistant, open the Squeak Voice panel in the sidebar. It shows a code. Type it here.")
+                .font(Typo.body).fixedSize(horizontal: false, vertical: true)
+            TextField("", text: $typed, prompt: Text("K7M2-QX9P"))
+                .textFieldStyle(.roundedBorder).font(.system(.body, design: .monospaced))
+                .focused($codeFocused).onSubmit(connect)
+                .onChange(of: typed) { _, new in
+                    let shown = GatewayClaim.display(new)
+                    if shown != new { typed = shown }
+                }
+                .onAppear { codeFocused = true }
+            HStack {
+                Button("Connect", action: connect)
+                    .buttonStyle(PrimaryButtonStyle()).disabled(!GatewayClaim.isComplete(typed) || m.gatewayBusy)
+                Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle())
+                Spacer()
+                Button("Use a pairing code instead") { legacy = true }.buttonStyle(.link).font(.caption)
+            }
+        }
+    }
+
+    private func connect() {
+        guard GatewayClaim.isComplete(typed) else { return }
+        Task { await m.claimGateway(code: typed) }
+    }
+
+    private var approveButtons: some View {
+        HStack {
+            Button("Approve") { Task { await m.approveGateway(true) } }
+                .buttonStyle(PrimaryButtonStyle()).disabled(m.gatewayBusy)
+            Button("Decline") { Task { await m.approveGateway(false) } }
+                .buttonStyle(SecondaryButtonStyle()).disabled(m.gatewayBusy)
+        }
+    }
+
+    @ViewBuilder private var legacyContent: some View {
         let p = m.gateway?.pairing
         switch p?.state {
         case .request:
             Text(GatewayText.requestSentence(p!)).font(Typo.body).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Approve") { Task { await m.approveGateway(true) } }
-                    .buttonStyle(PrimaryButtonStyle()).disabled(m.gatewayBusy)
-                Button("Decline") { Task { await m.approveGateway(false) } }
-                    .buttonStyle(SecondaryButtonStyle()).disabled(m.gatewayBusy)
-            }
+            approveButtons
         case .done:
             Text("Paired").font(Typo.body)
             Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle())
@@ -320,7 +392,13 @@ struct GatewayPairSheet: View {
             } else if m.gatewayError == nil {
                 Text("Making a code…").font(Typo.body).foregroundStyle(Theme.muted)
             }
-            Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle())
+            HStack {
+                Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle())
+                Spacer()
+                if !m.gatewayClaimUnavailable {
+                    Button("Type the add-on's code instead") { legacy = false }.buttonStyle(.link).font(.caption)
+                }
+            }
         }
     }
 }

@@ -1040,6 +1040,51 @@ describe("HookIngressServer gateway pairing routes", () => {
   });
 });
 
+describe("HookIngressServer gateway claim route", () => {
+  it("gates and shapes POST /control/voice/gateway/claim", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/voice/gateway/claim`;
+    const auth = { "x-squeak-token": harness.token };
+    const post = (body: string, headers: Record<string, string> = auth) =>
+      fetch(url, { method: "POST", headers, body });
+    const seen: string[] = [];
+    const base = {
+      read: () => null,
+      pair: () => ({ ok: false as const, reason: "x" }),
+      approve: async () => ({ ok: true as const }),
+    };
+    server.setControl({ sessionMessage: () => null, reply: async () => null, voiceGateway: base });
+    expect((await post(JSON.stringify({ code: "K7M2-QX9P" }))).status).toBe(404);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voiceGateway: {
+        ...base,
+        claim: async (code) => {
+          seen.push(code);
+          if (code === "NOPE") return { ok: false, status: 400, reason: "That code isn't showing on an add-on." };
+          if (code === "SHARED") return { ok: false, status: 503, reason: "Phone calls need your own Firebase" };
+          return { ok: true, name: "Squeak Voice", version: "0.9.0" };
+        },
+      },
+    });
+    expect((await post(JSON.stringify({ code: "K7M2-QX9P" }), {})).status).toBe(403);
+    expect((await fetch(url, { headers: auth })).status).toBe(405);
+    for (const bad of ["{nope", "{}", JSON.stringify({ code: 1 }), JSON.stringify({ code: "A", x: 1 })]) {
+      expect((await post(bad)).status).toBe(400);
+    }
+    expect(seen).toEqual([]);
+    const ok = await post(JSON.stringify({ code: "K7M2-QX9P" }));
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ ok: true, name: "Squeak Voice", version: "0.9.0" });
+    const bad = await post(JSON.stringify({ code: "NOPE" }));
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "That code isn't showing on an add-on." });
+    expect((await post(JSON.stringify({ code: "SHARED" }))).status).toBe(503);
+  });
+});
+
 describe("HookIngressServer call history route", () => {
   it("gates, shapes and answers /control/voice/calls", async () => {
     const harness = await startServer();

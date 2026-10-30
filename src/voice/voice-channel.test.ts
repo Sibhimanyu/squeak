@@ -20,6 +20,7 @@ function setup(
     attention?: AttentionItem[];
     history?: Pick<CallHistory, "record">;
     send?: () => Promise<unknown>;
+    paused?: () => boolean;
   } = {},
 ) {
   const waiting = item("asked_question");
@@ -54,6 +55,7 @@ function setup(
     canTakeKeys: options.keys ?? (options.pin === undefined ? true : options.pin !== null),
     policy: new CallPolicy({ minGapMs: 0, quiet: null }),
     graceMs: 10,
+    ...(options.paused ? { paused: options.paused } : {}),
     ...(options.history ? { history: options.history } : {}),
     note: (message) => notes.push(message),
   });
@@ -61,6 +63,16 @@ function setup(
 }
 
 describe("VoiceChannel.ring", () => {
+  it("places no call while paused, and rings again once resumed", async () => {
+    let paused = true;
+    const { channel, waiting, dialogs } = setup({ paused: () => paused, result: { status: "unanswered" } });
+    await channel.ring(waiting);
+    expect(dialogs).toEqual([]);
+    paused = false;
+    await channel.ring(waiting);
+    expect(dialogs).toEqual([true]);
+  });
+
   it("re-reads whether keys can answer at each call, since an app can change the pin", async () => {
     let answerable = false;
     const { channel, waiting, dialogs } = setup({ keys: () => answerable, result: { status: "unanswered" } });
