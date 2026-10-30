@@ -101,4 +101,40 @@ final class VoiceCommandTests: XCTestCase {
         XCTAssertEqual(line("unanswered"), "Nobody picked up.")
         XCTAssertEqual(line("failed", reason: "PBX refused"), "The call failed: PBX refused")
     }
+
+    func testPolicyAndPauseHaveExactlyTheContractKeys() throws {
+        XCTAssertEqual(try open(.pinAction(.policy(outgoing: .skip, incoming: .ask)))["change"],
+            .object(["pinAction": .object(["action": .string("policy"), "incoming": .string("ask"), "outgoing": .string("skip")])]))
+        XCTAssertEqual(try open(.pinAction(.policy(outgoing: .ask, incoming: .skip)))["change"],
+            .object(["pinAction": .object(["action": .string("policy"), "incoming": .string("skip"), "outgoing": .string("ask")])]))
+        for (c, w) in [(PauseChoice.hour, "1h"), (.fourHours, "4h"), (.tomorrow, "tomorrow"), (.forever, "forever"), (.resume, "resume")] {
+            XCTAssertEqual(try open(.pause(c))["change"], .object(["pause": .string(w)]))
+        }
+    }
+
+    func testViewDecodesPolicyAndPauseWithAndWithoutThem() throws {
+        func view(_ json: String) throws -> VoiceView { try JSONDecoder().decode(VoiceView.self, from: Data(json.utf8)) }
+        let old = try view(#"{"mode":"gateway"}"#)
+        XCTAssertNil(old.policy); XCTAssertNil(old.pause)
+        let v = try view(#"{"mode":"gateway","policy":{"outgoing":"skip","incoming":"weird"},"pause":null}"#)
+        XCTAssertEqual(v.policy, .init(outgoing: .skip, incoming: .ask))
+        XCTAssertEqual(v.pause, VoiceView.Pause(active: false))
+        XCTAssertEqual(try view(#"{"mode":"gateway","policy":{}}"#).policy, .init(outgoing: .ask, incoming: .ask))
+        XCTAssertEqual(try view(#"{"mode":"gateway","pause":{"until":1700000000000}}"#).pause, .init(active: true, until: 1_700_000_000_000))
+        XCTAssertEqual(try view(#"{"mode":"gateway","pause":{"until":null}}"#).pause, .init(active: true, until: nil))
+    }
+
+    func testPauseLine() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let loc = Locale(identifier: "en_US")
+        let now = Date(timeIntervalSince1970: 1_700_000_000) // 22:13 UTC
+        func line(_ p: VoiceView.Pause?) -> String { VoiceFormat.pauseLine(p, now: now, calendar: cal, locale: loc).replacingOccurrences(of: "\u{202F}", with: " ") }
+        XCTAssertEqual(line(nil), "Calls are on")
+        XCTAssertEqual(line(.init(active: false)), "Calls are on")
+        XCTAssertEqual(line(.init(active: true, until: nil)), "Paused until you turn it back on")
+        XCTAssertEqual(line(.init(active: true, until: (1_700_000_000 + 5_820) * 1000)), "Paused until 11:50 PM")
+        XCTAssertEqual(line(.init(active: true, until: (1_700_000_000 - 5) * 1000)), "Calls are on")
+        XCTAssertTrue(line(.init(active: true, until: (1_700_000_000 + 86_400) * 1000)).hasPrefix("Paused until Wed"))
+    }
 }

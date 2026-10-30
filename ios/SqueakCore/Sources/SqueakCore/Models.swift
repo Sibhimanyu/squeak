@@ -1684,6 +1684,79 @@ public struct VoiceView: Codable, Equatable, Sendable {
     /// The calling PIN's state: "set", "off", "none" or "unknown" (never the PIN). Nil from a Mac that does not
     /// send it: the page then keeps its old behaviour.
     public var pin: String?
+    /// When Squeak asks for the PIN; nil from a Mac that does not send it (the section is then hidden).
+    public var policy: PinPolicy?
+    /// Pause calls: nil from a Mac that does not send it (the row is hidden); present but not `active` = calls are on.
+    public var pause: Pause?
+
+    /// An unknown word reads as "ask", the safe side.
+    public struct PinPolicy: Codable, Equatable, Sendable {
+        public var outgoing: PinPolicyChoice
+        public var incoming: PinPolicyChoice
+        public init(outgoing: PinPolicyChoice = .ask, incoming: PinPolicyChoice = .ask) {
+            self.outgoing = outgoing; self.incoming = incoming
+        }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            outgoing = PinPolicyChoice(wire: try c.decodeIfPresent(String.self, forKey: .outgoing))
+            incoming = PinPolicyChoice(wire: try c.decodeIfPresent(String.self, forKey: .incoming))
+        }
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(outgoing.rawValue, forKey: .outgoing)
+            try c.encode(incoming.rawValue, forKey: .incoming)
+        }
+        enum CodingKeys: String, CodingKey { case outgoing, incoming }
+    }
+
+    public struct Pause: Codable, Equatable, Sendable {
+        /// Calls are paused now.
+        public var active: Bool
+        /// Epoch milliseconds the pause ends; nil while active = until turned back on.
+        public var until: Double?
+        public init(active: Bool = false, until: Double? = nil) { self.active = active; self.until = until }
+        public init(from decoder: Decoder) throws {
+            // `{"until": 123}` or `{"until": null}` is a pause; the view's `pause: null` is decoded by VoiceView.
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            active = true
+            until = try c.decodeIfPresent(Double.self, forKey: .until)
+        }
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(until, forKey: .until)
+        }
+        enum CodingKeys: String, CodingKey { case until }
+    }
+
+    enum CodingKeys: String, CodingKey { case mode, callee, defaultCallee, lastTest, pin, policy, pause }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try c.decode(String.self, forKey: .mode)
+        callee = try c.decodeIfPresent(String.self, forKey: .callee)
+        defaultCallee = try c.decodeIfPresent(String.self, forKey: .defaultCallee)
+        lastTest = try c.decodeIfPresent(LastTest.self, forKey: .lastTest)
+        pin = try c.decodeIfPresent(String.self, forKey: .pin)
+        policy = try? c.decodeIfPresent(PinPolicy.self, forKey: .policy)
+        if c.contains(.pause) {
+            pause = (try? c.decodeIfPresent(Pause.self, forKey: .pause)) ?? Pause(active: false)
+        } else {
+            pause = nil
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(mode, forKey: .mode)
+        try c.encode(callee, forKey: .callee)
+        try c.encode(defaultCallee, forKey: .defaultCallee)
+        try c.encodeIfPresent(lastTest, forKey: .lastTest)
+        try c.encodeIfPresent(pin, forKey: .pin)
+        try c.encodeIfPresent(policy, forKey: .policy)
+        if let pause {
+            if pause.active { try c.encode(pause, forKey: .pause) } else { try c.encodeNil(forKey: .pause) }
+        }
+    }
 
     public struct LastTest: Codable, Equatable, Sendable {
         /// Epoch milliseconds.
@@ -1697,11 +1770,25 @@ public struct VoiceView: Codable, Equatable, Sendable {
         }
     }
 
-    public init(mode: String, callee: String? = nil, defaultCallee: String? = nil, lastTest: LastTest? = nil, pin: String? = nil) {
+    public init(mode: String, callee: String? = nil, defaultCallee: String? = nil, lastTest: LastTest? = nil, pin: String? = nil,
+                policy: PinPolicy? = nil, pause: Pause? = nil) {
         self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.lastTest = lastTest; self.pin = pin
+        self.policy = policy; self.pause = pause
     }
 
     public var isOn: Bool { mode != "off" }
+}
+
+/// Whether a call asks for the PIN: "ask" or "skip" on the wire.
+public enum PinPolicyChoice: String, Equatable, Sendable {
+    case ask, skip
+    /// Absent or unknown reads as ask.
+    public init(wire: String?) { self = wire == "skip" ? .skip : .ask }
+}
+
+/// How long to pause calls: the Mac works out the end time.
+public enum PauseChoice: String, Equatable, Sendable {
+    case hour = "1h", fourHours = "4h", tomorrow, forever, resume
 }
 
 /// A calling-PIN action (docs: .context/pin-contract.md). Exact keys per action; `reset` needs no current PIN, so the
@@ -1712,6 +1799,8 @@ public enum PinAction: Equatable, Sendable {
     case enable(next: String)
     /// A new PIN, or nil to turn the requirement off (sent as an explicit `null`).
     case reset(next: String?)
+    /// When the PIN is asked, for calls Squeak makes and calls made to it. Needs the owner check for "skip".
+    case policy(outgoing: PinPolicyChoice, incoming: PinPolicyChoice)
 }
 
 extension PinAction: Encodable {
@@ -1739,6 +1828,10 @@ extension PinAction: Encodable {
         case .reset(let next):
             try c.encode("reset", forKey: Key("action"))
             if let next { try c.encode(next, forKey: Key("next")) } else { try c.encodeNil(forKey: Key("next")) }
+        case .policy(let outgoing, let incoming):
+            try c.encode("policy", forKey: Key("action"))
+            try c.encode(incoming.rawValue, forKey: Key("incoming"))
+            try c.encode(outgoing.rawValue, forKey: Key("outgoing"))
         }
     }
 }
@@ -1751,6 +1844,8 @@ public enum VoiceChange: Equatable, Sendable {
     case pin(current: String, next: String)
     /// Any PIN action, as `{ "pinAction": {...} }`.
     case pinAction(PinAction)
+    /// Pause or resume calls, as `{ "pause": "1h" }`.
+    case pause(PauseChoice)
 }
 
 extension VoiceChange: Encodable {
@@ -1776,6 +1871,8 @@ extension VoiceChange: Encodable {
             try inner.encode(next, forKey: Key("next"))
         case .pinAction(let action):
             try c.encode(action, forKey: Key("pinAction"))
+        case .pause(let choice):
+            try c.encode(choice.rawValue, forKey: Key("pause"))
         }
     }
 }
@@ -1819,6 +1916,19 @@ public enum VoiceFormat {
         case "failed": return "The call failed: \(test.reason ?? "no reason given")"
         default: return nil
         }
+    }
+
+    /// "Calls are on", "Paused until 3:40 PM" or "Paused until you turn it back on". The clock and zone are injectable.
+    public static func pauseLine(_ pause: VoiceView.Pause?, now: Date = Date(), calendar: Calendar = .current,
+                                 locale: Locale = .current) -> String {
+        guard let pause, pause.active else { return "Calls are on" }
+        guard let until = pause.until else { return "Paused until you turn it back on" }
+        let end = Date(timeIntervalSince1970: until / 1000)
+        if end <= now { return "Calls are on" }
+        let f = DateFormatter()
+        f.calendar = calendar; f.timeZone = calendar.timeZone; f.locale = locale
+        f.dateFormat = calendar.isDate(end, inSameDayAs: now) ? DateFormatter.dateFormat(fromTemplate: "jmm", options: 0, locale: locale) : DateFormatter.dateFormat(fromTemplate: "EEE jmm", options: 0, locale: locale)
+        return "Paused until \(f.string(from: end))"
     }
 
     public static func modeLine(_ view: VoiceView) -> String {

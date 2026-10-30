@@ -58,8 +58,10 @@ struct VoiceSettingsView: View {
                 } header: { Text("Test call") } footer: {
                     Text("Rings you with a made-up question. Nothing is sent to any chat.")
                 }
+                if voice.pause != nil { PauseSection(voice: voice) }
                 // The pin lives with the placer of the call (the add-on, or this Mac); the Mac never shows it.
                 PinSection(voice: voice)
+                if let policy = voice.policy { PolicySection(policy: policy) }
                 Section { Text(VoiceFormat.modeLine(voice)).font(.footnote).foregroundStyle(Theme.muted) }
             } else {
                 Section {
@@ -103,6 +105,106 @@ struct VoiceSettingsView: View {
         Task {
             problem = await model.changeVoice(.test)
             testing = false
+        }
+    }
+}
+
+/// Pause calls: a menu, no owner check (pausing is safe). Failures are plain sentences, as for the extension.
+private struct PauseSection: View {
+    @Environment(AppModel.self) private var model
+    let voice: VoiceView
+    @State private var busy = false
+    @State private var problem: String?
+
+    private var paused: Bool { voice.pause?.active == true }
+
+    var body: some View {
+        Section {
+            HStack {
+                Text("Pause calls")
+                Spacer()
+                Text(VoiceFormat.pauseLine(voice.pause)).font(.subheadline).foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.trailing)
+                Menu {
+                    Button("For 1 hour") { send(.hour) }
+                    Button("For 4 hours") { send(.fourHours) }
+                    Button("Until tomorrow morning") { send(.tomorrow) }
+                    Button("Until I turn it back on") { send(.forever) }
+                    if paused { Button("Resume calls") { send(.resume) } }
+                } label: {
+                    Image(systemName: busy ? "ellipsis.circle" : "pause.circle").font(.title3)
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .disabled(busy)
+                .accessibilityLabel("Pause calls options")
+            }
+            .frame(minHeight: 44)
+            if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+        } footer: {
+            Text("Cards still reach Telegram and your apps. “Call me now” still rings.")
+        }
+    }
+
+    private func send(_ choice: PauseChoice) {
+        problem = nil
+        busy = true
+        Task {
+            problem = await model.changeVoice(.pause(choice))
+            busy = false
+        }
+    }
+}
+
+/// Settings › Phone calls › When Squeak asks for the PIN. Choosing "Don't ask" is the owner check first (Face ID or
+/// passcode, always, whatever "Ask for Face ID to send" says); choosing "Ask" needs none.
+private struct PolicySection: View {
+    @Environment(AppModel.self) private var model
+    let policy: VoiceView.PinPolicy
+    @State private var busy = false
+    @State private var problem: String?
+
+    var body: some View {
+        Section {
+            row("Calls Squeak makes to you", current: policy.outgoing) {
+                change(outgoing: $0, incoming: policy.incoming,
+                       reason: "Stop asking for the PIN on calls Squeak makes to you. Anyone who answers your phone could then answer your agents.")
+            }
+            row("Calls you make to Squeak", current: policy.incoming) {
+                change(outgoing: policy.outgoing, incoming: $0,
+                       reason: "Stop asking for the PIN when you call Squeak")
+            }
+            if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+        } header: { Text("When Squeak asks for the PIN") } footer: {
+            Text("Anyone who answers your phone could then answer your agents.")
+        }
+    }
+
+    private func row(_ title: String, current: PinPolicyChoice, set: @escaping (PinPolicyChoice) -> Void) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Picker(title, selection: Binding(get: { current }, set: { if $0 != current { set($0) } })) {
+                Text("Ask for the PIN").tag(PinPolicyChoice.ask)
+                Text("Don’t ask").tag(PinPolicyChoice.skip)
+            }
+            .labelsHidden()
+            .disabled(busy)
+        }
+        .frame(minHeight: 44)
+    }
+
+    private func change(outgoing: PinPolicyChoice, incoming: PinPolicyChoice, reason: String) {
+        problem = nil
+        busy = true
+        let needsCheck = outgoing == .skip && outgoing != policy.outgoing || incoming == .skip && incoming != policy.incoming
+        Task {
+            if needsCheck, !(await model.confirmOwner(reason: reason)) {
+                problem = "Face ID was cancelled. Nothing changed."
+                busy = false
+                return
+            }
+            problem = await model.changeVoice(.pinAction(.policy(outgoing: outgoing, incoming: incoming)))
+            busy = false
         }
     }
 }

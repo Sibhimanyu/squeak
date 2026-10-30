@@ -48,6 +48,10 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   hotspotCommand: { box: string; sig: string; device: string };
   lidActionsCommandId: string;
   lidActionsCommand: { box: string; sig: string; device: string };
+  voicePauseCommandId: string;
+  voicePauseCommand: { box: string; sig: string; device: string };
+  voicePinPolicyCommandId: string;
+  voicePinPolicyCommand: { box: string; sig: string; device: string };
   controlsCommandId: string;
   controlsCommand: { box: string; sig: string; device: string };
   tabCommandId: string;
@@ -90,6 +94,8 @@ function bridge(turn: string) {
   const hotspotRequests: unknown[] = [];
   const awakeRequests: unknown[] = [];
   const controlChanges: unknown[] = [];
+  const voiceApplied: unknown[] = [];
+  const pinActions: unknown[] = [];
   const statsRanges: unknown[] = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string; split?: unknown }> = [];
   const answers: Array<[string, unknown]> = [];
@@ -132,6 +138,19 @@ function bridge(turn: string) {
       setSetup: async (sessionId, setup) => {
         setups.push([sessionId, setup]);
         return { ok: true };
+      },
+    },
+    voice: {
+      state: () => ({ mode: "gateway" }),
+      apply: (change: unknown) => {
+        voiceApplied.push(change);
+        return { ok: true as const, state: {} };
+      },
+      test: () => ({ ok: true as const }),
+      changePin: async () => ({ ok: true as const }),
+      pinAction: async (action) => {
+        pinActions.push(action);
+        return { ok: true as const };
       },
     },
     image: async (source, cwd) => {
@@ -269,6 +288,8 @@ function bridge(turn: string) {
     setups,
     hotspotRequests,
     awakeRequests,
+    voiceApplied,
+    pinActions,
     controlChanges,
     statsRanges,
     acts,
@@ -399,6 +420,16 @@ describe("a reply made on the iPhone", () => {
     const verdict = await remote.handleCommand(config, fixture.statsCommandId, fixture.statsCommand);
     expect(verdict.result).toEqual({ id: fixture.statsCommandId, status: "sent", stats: { range: "30d" } });
     expect(statsRanges).toEqual([["30d", "codex"]]);
+  });
+
+  it("pauses calls and sets when the PIN is asked when the phone signs those requests", async () => {
+    const { remote, config, voiceApplied, pinActions } = bridge("turn-1");
+    const pause = await remote.handleCommand(config, fixture.voicePauseCommandId, fixture.voicePauseCommand);
+    expect(pause.result).toEqual({ id: fixture.voicePauseCommandId, status: "sent" });
+    expect(voiceApplied).toEqual([{ pause: "4h" }]);
+    const policy = await remote.handleCommand(config, fixture.voicePinPolicyCommandId, fixture.voicePinPolicyCommand);
+    expect(policy.result).toEqual({ id: fixture.voicePinPolicyCommandId, status: "sent" });
+    expect(pinActions).toEqual([{ action: "policy", outgoing: "skip", incoming: "ask" }]);
   });
 
   it("sets the fans when the phone signs a controls request", async () => {

@@ -1490,7 +1490,11 @@ final class AppModel {
                 case .disable: snapshot?.voice?.pin = "off"
                 case .enable: snapshot?.voice?.pin = "set"
                 case .reset(let next): snapshot?.voice?.pin = next == nil ? "off" : "set"
+                case .policy(let outgoing, let incoming): snapshot?.voice?.policy = .init(outgoing: outgoing, incoming: incoming)
                 }
+            case .pause(let choice):
+                snapshot?.voice?.pause = choice == .resume ? .init(active: false)
+                    : .init(active: true, until: choice == .forever ? nil : Date().addingTimeInterval(choice == .hour ? 3600 : 14400).timeIntervalSince1970 * 1000)
             case .test: snapshot?.voice?.lastTest = .init(at: Date().timeIntervalSince1970 * 1000, status: "answered", letter: "A")
             }
             return nil

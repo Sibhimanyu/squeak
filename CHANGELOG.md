@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.20.6] - 2026-10-30 (iOS)
+
+- Phone calls: pause calls for an hour, four hours, until tomorrow morning, or until you turn them back on.
+- Phone calls: choose whether calls to you and calls you make ask for your calling PIN. Choosing "Don't ask" needs Face ID or your passcode first.
+
 ## [1.20.5] - 2026-10-29 (iOS)
 
 - Photos you send now remain visible in your chat as tappable thumbnails; open them full screen to zoom, share, or save.

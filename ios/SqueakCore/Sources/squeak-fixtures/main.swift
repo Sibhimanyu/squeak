@@ -27,6 +27,8 @@ let (voicePinId, voicePinDocument) = try channel.voiceDocument(.pinAction(.disab
 let (voiceResetId, voiceResetDocument) = try channel.voiceDocument(.pinAction(.reset(next: "135790")), signer: signer, now: madeAt)
 let (voiceResetOffId, voiceResetOffDocument) = try channel.voiceDocument(.pinAction(.reset(next: nil)), signer: signer, now: madeAt)
 let (voiceEnableId, voiceEnableDocument) = try channel.voiceDocument(.pinAction(.enable(next: "135790")), signer: signer, now: madeAt)
+let (voicePolicyId, voicePolicyDocument) = try channel.voiceDocument(.pinAction(.policy(outgoing: .skip, incoming: .ask)), signer: signer, now: madeAt)
+let (voicePauseId, voicePauseDocument) = try channel.voiceDocument(.pause(.fourHours), signer: signer, now: madeAt)
 let (voiceChangeId, voiceChangeDocument) = try channel.voiceDocument(.pinAction(.change(current: "4821", next: "135790")), signer: signer, now: madeAt)
 let (controlsId, controlsDocument) = try channel.controlsDocument(.fans("60"), signer: signer, now: madeAt)
 let (tabId, tabDocument) = try channel.controlsDocument(.selectTab(1, title: "Heresay"), signer: signer, now: madeAt)
@@ -129,6 +131,10 @@ let fixture: [String: Any] = [
     "voicePinResetOffCommand": ["box": voiceResetOffDocument.box, "sig": voiceResetOffDocument.sig!, "device": voiceResetOffDocument.device!],
     "voicePinEnableCommandId": voiceEnableId,
     "voicePinEnableCommand": ["box": voiceEnableDocument.box, "sig": voiceEnableDocument.sig!, "device": voiceEnableDocument.device!],
+    "voicePinPolicyCommandId": voicePolicyId,
+    "voicePinPolicyCommand": ["box": voicePolicyDocument.box, "sig": voicePolicyDocument.sig!, "device": voicePolicyDocument.device!],
+    "voicePauseCommandId": voicePauseId,
+    "voicePauseCommand": ["box": voicePauseDocument.box, "sig": voicePauseDocument.sig!, "device": voicePauseDocument.device!],
     "voicePinChangeCommandId": voiceChangeId,
     "voicePinChangeCommand": ["box": voiceChangeDocument.box, "sig": voiceChangeDocument.sig!, "device": voiceChangeDocument.device!],
     // A live control from the Mac controls page: fans to 60%.
