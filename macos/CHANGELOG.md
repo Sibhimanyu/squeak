@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.9
+
+- Phone calls: a realistic voice made on this Mac. Run `squeak voice-tts-setup` once, then Settings › Phone calls › Voice turns it on and picks the voice; the Home Assistant add-on (0.9.3) plays it in the call instead of its plainer one. If it fails, the plain voice speaks and the call still goes.
+- Phone calls: changing the PIN or when it is asked no longer gets overwritten by a refresh that was already in flight.
+
 ## 2.12.8
 
 - Phone calls: after you approve a gateway, Squeak shows "Connecting to the add-on…" with a progress indicator until the add-on reports in, instead of looking unchanged for a while.

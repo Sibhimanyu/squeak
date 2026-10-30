@@ -142,10 +142,15 @@ final class ChannelsModel {
     private(set) var voiceError: String?
     private(set) var voiceSaving = false
 
-    func refreshVoice() async {
-        if demo || voiceSaving { return }
+    private var voiceRefreshGeneration = 0
+
+    func refreshVoice(afterPinAction: Bool = false) async {
+        if demo || voiceSaving || (pinBusy && !afterPinAction) { return }
+        voiceRefreshGeneration += 1
+        let generation = voiceRefreshGeneration
         do {
             let v = try await client.voiceSettings()
+            guard generation == voiceRefreshGeneration else { return }
             voiceOutdated = v == nil
             if let v { voice = v }
         } catch {
@@ -370,6 +375,9 @@ final class ChannelsModel {
 
     /// Runs one PIN action. Returns true when the daemon did it. Callers clear their fields afterwards.
     func runPin(_ action: PinAction, done: String) async -> Bool {
+        guard !pinBusy else { return false }
+        // An earlier poll must not replace a PIN action's authoritative response.
+        voiceRefreshGeneration += 1
         pinError = nil; pinNotice = nil
         if demo { return false }
         pinBusy = true
@@ -379,7 +387,7 @@ final class ChannelsModel {
             case let .done(view):
                 if let view { voice = view }
                 pinNotice = done
-                await refreshVoice()
+                await refreshVoice(afterPinAction: true)
                 return true
             case let .refused(reason): pinError = reason
             case .outdated: pinError = "Squeak on this Mac is older than this setting. Update it and try again."

@@ -35,6 +35,34 @@ public struct PinPolicy: Sendable, Equatable, Decodable {
     }
 }
 
+/// Presentation of the effective requirement; the saved choice alone is not the current call behavior.
+/// Keep this derived from the daemon view so enabling/disabling a PIN never rewrites either policy.
+public enum PinPolicyText {
+    public static func effective(state: PinState?, choice: PinPolicyChoice, incoming: Bool) -> String {
+        switch state {
+        case .set: return choice == .ask ? "Ask for the PIN" : "Don't ask"
+        case .off: return "No PIN required (PIN is off)"
+        case .some(.none):
+            if choice == .skip { return "No PIN required" }
+            return incoming ? "Unavailable until a PIN is set" : "Read-only until a PIN is set"
+        case .unknown, nil: return "PIN status unavailable"
+        }
+    }
+
+    public static func saved(_ choice: PinPolicyChoice) -> String {
+        choice == .ask ? "Saved: Ask for the PIN" : "Saved: Don't ask"
+    }
+
+    public static func explanation(state: PinState?) -> String {
+        switch state {
+        case .set: return "Changing a call to Don't ask needs Touch ID or this Mac's password."
+        case .off: return "Neither kind of call asks for a PIN while it is off. Your saved choices apply again when you turn the PIN on."
+        case .some(.none): return "No PIN is set. Calls saved as Ask for the PIN cannot take replies; incoming calls with that choice are unavailable. Set a PIN to use or change these choices."
+        case .unknown, nil: return "The calling service has not reported a known PIN status. Your saved choices are shown; the current requirement cannot be confirmed."
+        }
+    }
+}
+
 /// `POST /control/voice` body `{ "pin": { "action": ... } }`, exactly per the PIN contract.
 public enum PinAction: Sendable, Equatable {
     case change(current: String, next: String)

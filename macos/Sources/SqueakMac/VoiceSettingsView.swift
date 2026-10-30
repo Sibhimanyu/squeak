@@ -42,7 +42,7 @@ struct VoiceSettingsPage: View {
                 callsSection
                 if m.gatewayAvailable { gatewaySection }
                 if let state = v.pinState { pinSection(state) }
-                if let policy = v.policy { policySection(policy) }
+                if let policy = v.policy { policySection(policy, state: v.pinState) }
             } else if m.voiceOutdated {
                 Section { Footnote("Squeak on this Mac is older than phone calls. Update it, then come back.") } header: { Text("Phone calls") }
             } else {
@@ -205,7 +205,7 @@ struct VoiceSettingsPage: View {
                     pinField("Repeat new PIN", $repeatPin)
                     pinActions("Set PIN", enabled: !newPin.isEmpty) { await m.turnPinOn(new: newPin, repeated: repeatPin) }
                 } else {
-                    Footnote("No PIN is set, so a call can only tell you, never take an answer.")
+                    Footnote("No PIN is set. Calls that require one cannot take replies.")
                     pinButtons(Button("Set a PIN") { open(.turnOn) })
                 }
             case .unknown:
@@ -230,38 +230,56 @@ struct VoiceSettingsPage: View {
             if let e = m.pinError { Footnote(e) }
             if let n = m.pinNotice { Footnote(n) }
         } header: { Text("Pin") } footer: {
-            Footnote("The PIN is asked on the call before a key answers it. It is kept by whatever places the call, never in this app.")
+            Footnote("When required, the PIN is asked before a key answers the call. It is kept by whatever places the call, never in this app.")
         }
     }
 
     // MARK: Policy
 
-    private func policySection(_ p: PinPolicy) -> some View {
+    private func policySection(_ p: PinPolicy, state: PinState?) -> some View {
         Section {
-            policyRow("Calls Squeak makes to you", p.outgoing) { setPolicy(PinPolicy(outgoing: $0, incoming: p.incoming), current: p) }
-            if p.outgoing == .skip { Footnote("Anyone who answers your phone could then answer your agents.") }
-            policyRow("Calls you make to Squeak", p.incoming) { setPolicy(PinPolicy(outgoing: p.outgoing, incoming: $0), current: p) }
+            policyRow("Calls Squeak makes to you", p.outgoing, state: state, incoming: false) { setPolicy(PinPolicy(outgoing: $0, incoming: p.incoming), current: p) }
+            if state == .off || ((state == .set || state == PinState.none) && p.outgoing == .skip) {
+                Footnote("Anyone who answers your phone could then answer your agents.")
+            }
+            policyRow("Calls you make to Squeak", p.incoming, state: state, incoming: true) { setPolicy(PinPolicy(outgoing: p.outgoing, incoming: $0), current: p) }
             if let e = m.pinError { Footnote(e) }
             if let n = m.pinNotice, pinForm == nil { Footnote(n) }
-        } header: { Text("When Squeak asks for the PIN") } footer: {
-            Footnote("Changing a call to Don't ask needs Touch ID or this Mac's password.")
+        } header: { Text("Call PIN requirements") } footer: {
+            Footnote(PinPolicyText.explanation(state: state))
         }
     }
 
-    private func policyRow(_ label: String, _ value: PinPolicyChoice, _ change: @escaping (PinPolicyChoice) -> Void) -> some View {
-        LabeledContent(label) {
-            Picker("", selection: Binding(get: { value }, set: { change($0) })) {
-                Text("Ask for the PIN").tag(PinPolicyChoice.ask)
-                Text("Don't ask").tag(PinPolicyChoice.skip)
-            }.labelsHidden().pickerStyle(.menu).fixedSize().disabled(m.pinBusy || ownerChecking)
+    private func policyRow(_ label: String, _ value: PinPolicyChoice, state: PinState?, incoming: Bool,
+                           _ change: @escaping (PinPolicyChoice) -> Void) -> some View {
+        LabeledContent {
+            if state == .set {
+                Picker(label, selection: Binding(get: { value }, set: { change($0) })) {
+                    Text("Ask for the PIN").tag(PinPolicyChoice.ask)
+                    Text("Don't ask").tag(PinPolicyChoice.skip)
+                }.labelsHidden().pickerStyle(.menu).fixedSize().disabled(m.pinBusy || ownerChecking)
+            } else {
+                Text(PinPolicyText.effective(state: state, choice: value, incoming: incoming))
+                    .foregroundStyle(.secondary)
+            }
+        } label: {
+            Text(label)
+            if state != .set { Text(PinPolicyText.saved(value)) }
         }
     }
 
     private func setPolicy(_ next: PinPolicy, current: PinPolicy) {
+        guard m.voice?.pinState == .set, m.voice?.policy == current, !m.pinBusy, !ownerChecking else { return }
         m.clearPinMessages()
         guard next != current else { return }
         let loosening = (next.outgoing == .skip && current.outgoing != .skip) || (next.incoming == .skip && current.incoming != .skip)
-        if !loosening { Task { await m.setPinPolicy(outgoing: next.outgoing, incoming: next.incoming) }; return }
+        if !loosening {
+            Task {
+                guard m.voice?.pinState == .set, m.voice?.policy == current, !m.pinBusy else { return }
+                await m.setPinPolicy(outgoing: next.outgoing, incoming: next.incoming)
+            }
+            return
+        }
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
@@ -272,7 +290,10 @@ struct VoiceSettingsPage: View {
         context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Stop asking for the Squeak call PIN") { ok, _ in
             Task { @MainActor in
                 ownerChecking = false
-                if ok { await m.setPinPolicy(outgoing: next.outgoing, incoming: next.incoming) }
+                if ok {
+                    guard m.voice?.pinState == .set, m.voice?.policy == current, !m.pinBusy else { return }
+                    await m.setPinPolicy(outgoing: next.outgoing, incoming: next.incoming)
+                }
                 else { m.reportPinError("It was not confirmed that it is you, so nothing changed.") }
             }
         }
