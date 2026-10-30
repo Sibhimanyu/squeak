@@ -168,3 +168,59 @@ import Testing
         if case .refused(let s) = GatewayCheck.outcome(status: 503, body: Data()) { #expect(!s.isEmpty) } else { Issue.record("expected refused") }
     }
 }
+
+@Suite struct GatewayUpdateWatchTests {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+    private func status(_ state: GatewayStatusState, _ version: String?) -> GatewayStatus { GatewayStatus(state: state, version: version) }
+    private func watch() -> GatewayUpdateWatch { GatewayUpdateWatch(target: "0.11.2", from: "0.11.1", requestedAt: t0) }
+
+    @Test func staysUpdatingWhileNothingChanges() {
+        var w = watch()
+        #expect(w.observe(status(.ok, "0.11.1"), now: t0.addingTimeInterval(30)) == .updating)
+        #expect(w.observe(status(.ok, "0.11.1"), now: t0.addingTimeInterval(119)) == .updating)
+    }
+
+    @Test func updatedWhenTheNewVersionReports() {
+        var w = watch()
+        #expect(w.observe(status(.stale, "0.11.1"), now: t0.addingTimeInterval(20)) == .updating)
+        #expect(w.sawRestart)
+        #expect(w.observe(status(.ok, "0.11.2"), now: t0.addingTimeInterval(70)) == .updated("0.11.2"))
+        // A later look cannot undo it.
+        #expect(w.observe(status(.ok, "0.11.1"), now: t0.addingTimeInterval(500)) == .updated("0.11.2"))
+        var newer = watch()
+        #expect(newer.observe(status(.sipDown, "0.12.0"), now: t0) == .updated("0.12.0"))
+    }
+
+    @Test func timesOutAtTwoMinutesWhenTheAddonNeverWentDown() {
+        var w = watch()
+        #expect(w.deadline == t0.addingTimeInterval(120))
+        #expect(w.observe(status(.ok, "0.11.1"), now: t0.addingTimeInterval(120)) == .timedOut)
+        // Stays timed out even if it arrives afterwards: the person has been told.
+        #expect(w.observe(status(.ok, "0.11.2"), now: t0.addingTimeInterval(130)) == .timedOut)
+    }
+
+    @Test func givesAnAddonThatWentDownThreeMinutesToComeBack() {
+        var w = watch()
+        #expect(w.observe(status(.stale, "0.11.1"), now: t0.addingTimeInterval(60)) == .updating)
+        #expect(w.deadline == t0.addingTimeInterval(180))
+        #expect(w.observe(status(.stale, "0.11.1"), now: t0.addingTimeInterval(150)) == .updating)
+        #expect(w.observe(status(.stale, "0.11.1"), now: t0.addingTimeInterval(180)) == .timedOut)
+        var back = watch()
+        _ = back.observe(status(.stale, "0.11.1"), now: t0.addingTimeInterval(60))
+        #expect(back.observe(status(.ok, "0.11.2"), now: t0.addingTimeInterval(170)) == .updated("0.11.2"))
+    }
+
+    @Test func aStaleOrUnpairedStatusNeverCountsAsArrived() {
+        var w = watch()
+        #expect(w.observe(status(.stale, "0.11.2"), now: t0.addingTimeInterval(5)) == .updating)
+        #expect(w.observe(status(.none, "0.11.2"), now: t0.addingTimeInterval(6)) == .updating)
+        #expect(GatewayUpdateWatch.version("0.11.10", atLeast: "0.11.2"))
+        #expect(!GatewayUpdateWatch.version("0.11.1", atLeast: "0.11.2"))
+    }
+
+    @Test func wordsAreFixed() {
+        #expect(GatewayText.updated("0.11.2") == "Updated to 0.11.2")
+        #expect(GatewayText.updateTimedOut.contains("Settings › Add-ons › Squeak Voice"))
+        #expect(GatewayText.updating.contains("restarts"))
+    }
+}

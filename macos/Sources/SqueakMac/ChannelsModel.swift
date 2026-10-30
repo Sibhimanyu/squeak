@@ -283,7 +283,7 @@ final class ChannelsModel {
     /// What the "Phone calls setup" list reads: only what the daemon already said.
     var phoneFacts: PhoneCallsFacts {
         PhoneCallsFacts(daemonReachable: daemonReachable, voice: voice, voiceOutdated: voiceOutdated, gateway: gateway,
-                        gatewayAvailable: gatewayAvailable, naturalSetup: naturalSetup, testPlacing: testPlacing)
+                        gatewayAvailable: gatewayAvailable, naturalSetup: naturalSetup, testPlacing: testPlacing, addonUpdate: gatewayUpdatePhase)
     }
 
     private(set) var testPlacing = false
@@ -346,8 +346,10 @@ final class ChannelsModel {
     private(set) var gatewayConnecting = false
     private var gatewayConnectWatch: Task<Void, Never>?
 
-    /// True from the press of "Update add-on" until the add-on reports the new version (or 3 min).
-    private(set) var gatewayUpdating = false
+    /// Where "Update add-on" stands: updating from the press until the add-on reports the new version, then
+    /// updated or timedOut (2 min, 3 when the add-on went down for it). Never an endless spinner.
+    private(set) var gatewayUpdatePhase: GatewayUpdateWatch.Phase?
+    var gatewayUpdating: Bool { gatewayUpdatePhase == .updating }
     private var gatewayUpdateWatch: Task<Void, Never>?
 
     /// Check for updates: spinner while it runs, "Checked just now" until the next refresh, hidden on an older daemon.
@@ -356,8 +358,9 @@ final class ChannelsModel {
     private(set) var gatewayCheckUnavailable = false
 
     func checkGatewayUpdate() async {
-        guard !gatewayChecking else { return }
+        guard !gatewayChecking, !gatewayUpdating else { return }
         gatewayError = nil
+        gatewayUpdatePhase = nil
         gatewayCheckedNow = false
         if demo { return }
         gatewayChecking = true
@@ -378,6 +381,7 @@ final class ChannelsModel {
     func updateGatewayAddon() async {
         guard !gatewayUpdating, !gatewayBusy, let target = gateway?.latestVersion, gateway?.updateAvailable == true else { return }
         gatewayError = nil
+        gatewayUpdatePhase = nil
         if demo { return }
         gatewayBusy = true
         defer { gatewayBusy = false }
@@ -387,6 +391,9 @@ final class ChannelsModel {
             case .refused(let sentence): gatewayError = sentence
             case .unavailable: gatewayError = "Squeak on this Mac is older than this setting. Update it and try again."
             }
+        } catch let error as URLError where error.code == .timedOut {
+            // The answer was lost, not refused: the add-on may well be updating, so watch for it like a yes.
+            watchGatewayUpdate(to: target)
         } catch {
             gatewayError = "Squeak on this Mac did not answer."
         }
@@ -394,19 +401,17 @@ final class ChannelsModel {
 
     private func watchGatewayUpdate(to target: String) {
         gatewayUpdateWatch?.cancel()
-        gatewayUpdating = true
+        var watch = GatewayUpdateWatch(target: target, from: gateway?.status.version, requestedAt: Date())
+        gatewayUpdatePhase = watch.phase
         gatewayUpdateWatch = Task { [weak self] in
-            let deadline = Date().addingTimeInterval(180)
-            var arrived = false
-            while !Task.isCancelled, Date() < deadline {
+            while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
-                guard let self else { return }
+                guard let self, !Task.isCancelled else { return }
                 await self.refreshGateway()
-                if self.gateway?.status.version == target { arrived = true; break }
+                let phase = watch.observe(self.gateway?.status ?? GatewayStatus(), now: Date())
+                self.gatewayUpdatePhase = phase
+                if phase != .updating { return }
             }
-            guard let self, !Task.isCancelled else { return }
-            if !arrived { self.gatewayError = GatewayText.updateSlow }
-            self.gatewayUpdating = false
         }
     }
 

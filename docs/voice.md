@@ -142,6 +142,28 @@ An add-on from before `pinctl` never answers, and the Mac then says "The Home As
 update it." The Mac asks `status` at start and when the voice view is read with a cache older than a minute; until
 the first answer the view says `unknown`.
 
+**Updating the add-on from the Mac** (`addon-update.ts`; Home Assistant docs: contributors.home-assistant.io/apps/guides/communication/,
+/apps/supervisor-api/, /apps/reference/configuration/). The Supervisor refuses any add-on updating itself
+(`POST /addons/self/update` and `/store/addons/self/update` answer 403 "can't update itself", whatever `hassio_role`;
+`supervisor/api/store.py`), so the add-on asks Home Assistant **Core** instead. The sequence, on the Mac's `gwcmd update`:
+`POST /store/reload` (role `manager`: re-pulls the repositories, so a version published minutes ago is seen; a failure
+is only noted) -> read the repo's config.yaml -> `GET /addons/self/info` (no permission: `slug`, `name`, `version`,
+`version_latest`, `update_available`) -> `GET /core/api/states` and pick the `update.*` entity by the add-on's icon path
+(`/addons/<slug>/icon`) or its title, for the installed version -> write the reply to the Mac -> `POST
+/core/api/services/update/install {entity_id}` (needs `homeassistant_api: true`; through the proxy the add-on acts as a
+Home Assistant administrator). Core's call never returns: the Supervisor stops the add-on. A dropped or timed-out install
+is "probably updating", reported as ok. Refusals (each one sentence of at most 200 characters, shown by the Mac as is):
+Home Assistant has not seen version X yet (reload the list, then Check again), already on the newest version (reload the
+list), the permission is missing (update once in Home Assistant, reinstall if it persists: the 0.11.3 add-on is the
+first to declare `homeassistant_api`, so 0.11.1 and older cannot be updated from the Mac), a local add-on (copy the files
+again), no update entity. The slug of a repository add-on is `<repo hash>_squeak_voice`, a local one `local_squeak_voice`.
+**The Mac** (`GatewayUpdateWatch`, pure, injectable clock) goes requested -> updating -> `Updated to X` when the gateway
+status reports that version (or newer), or "The add-on didn't update. Open Home Assistant > Settings > Add-ons > Squeak
+Voice and press Update (Home Assistant may not have seen the new version yet)." after 2 minutes, 3 once the add-on's
+status went quiet (it was seen going down for the update). The daemon treats no reply at all (the add-on was stopped
+before it could answer) as ok, so the Mac watches instead of failing. "Check again" runs the add-on's `check` (store
+reload, then re-read). Unverified against a real Home Assistant: the entity lookup and the 2-minute figure.
+
 **Trust.** A reset without the old pin is authorised by the Mac, which holds the channel key: a paired device's signed
 command (the phone asks Face ID or the passcode first) or the Mac app (after Touch ID or the login password). So
 someone holding the channel key alone can reset the pin; the key lives only on the Mac and in the add-on's options, as

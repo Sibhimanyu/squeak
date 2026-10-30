@@ -15,13 +15,16 @@ public struct PhoneCallsFacts: Sendable, Equatable {
     public var naturalSetup: NaturalSetupStatus?
     /// A test call is being placed right now (before the daemon has said "ringing").
     public var testPlacing: Bool
+    /// Where "Update add-on" stands, or nil when none was pressed.
+    public var addonUpdate: GatewayUpdateWatch.Phase?
 
     public init(daemonReachable: Bool = true, voice: VoiceSettings? = nil, voiceOutdated: Bool = false,
                 gateway: GatewayView? = nil, gatewayAvailable: Bool = true,
-                naturalSetup: NaturalSetupStatus? = nil, testPlacing: Bool = false) {
+                naturalSetup: NaturalSetupStatus? = nil, testPlacing: Bool = false,
+                addonUpdate: GatewayUpdateWatch.Phase? = nil) {
         self.daemonReachable = daemonReachable; self.voice = voice; self.voiceOutdated = voiceOutdated
         self.gateway = gateway; self.gatewayAvailable = gatewayAvailable
-        self.naturalSetup = naturalSetup; self.testPlacing = testPlacing
+        self.naturalSetup = naturalSetup; self.testPlacing = testPlacing; self.addonUpdate = addonUpdate
     }
 }
 
@@ -157,6 +160,10 @@ public struct PhoneCallsChecklist: Sendable, Equatable {
         if gatewayHere {
             if gateway.status.state == .none {
                 steps.append(step(.addonUpdate, "Add-on up to date", .blocked, waitForGateway))
+            } else if f.addonUpdate == .updating {
+                steps.append(step(.addonUpdate, "Add-on up to date", .working, GatewayText.updating))
+            } else if f.addonUpdate == .timedOut {
+                steps.append(step(.addonUpdate, "Add-on up to date", .todo, GatewayText.updateTimedOut, gateway.updateAvailable ? .updateAddon : nil))
             } else if gateway.updateAvailable {
                 steps.append(step(.addonUpdate, "Add-on up to date", .todo, GatewayText.updateLine(gateway) ?? "A newer add-on is available.", .updateAddon))
             } else {

@@ -18,11 +18,22 @@ private let readyVoice = #"""
 """#
 
 private func facts(_ v: VoiceSettings?, gateway g: GatewayView? = gateway(), setup: NaturalSetupStatus? = nil,
-                   reachable: Bool = true, outdated: Bool = false, placing: Bool = false) -> PhoneCallsFacts {
-    PhoneCallsFacts(daemonReachable: reachable, voice: v, voiceOutdated: outdated, gateway: g, naturalSetup: setup, testPlacing: placing)
+                   reachable: Bool = true, outdated: Bool = false, placing: Bool = false,
+                   update: GatewayUpdateWatch.Phase? = nil) -> PhoneCallsFacts {
+    PhoneCallsFacts(daemonReachable: reachable, voice: v, voiceOutdated: outdated, gateway: g, naturalSetup: setup, testPlacing: placing, addonUpdate: update)
 }
 
 @Suite("Phone calls checklist") struct PhoneCallsChecklistTests {
+    @Test func addonStepFollowsTheUpdateStates() {
+        let behind = gateway(latest: "0.12.0", update: true)
+        let working = PhoneCallsChecklist(facts(voice(readyVoice), gateway: behind, update: .updating)).step(.addonUpdate)
+        #expect(working?.state == .working && working?.detail == GatewayText.updating && working?.action == nil)
+        let slow = PhoneCallsChecklist(facts(voice(readyVoice), gateway: behind, update: .timedOut)).step(.addonUpdate)
+        #expect(slow?.state == .todo && slow?.detail == GatewayText.updateTimedOut && slow?.action == .updateAddon)
+        let done = PhoneCallsChecklist(facts(voice(readyVoice), gateway: gateway(), update: .updated("0.11.0"))).step(.addonUpdate)
+        #expect(done?.isDone == true)
+    }
+
     @Test func everythingDoneIsReady() {
         let c = PhoneCallsChecklist(facts(voice(readyVoice)))
         #expect(c.steps.map(\.id) == [.gateway, .addonUpdate, .extensionToRing, .pin, .realisticVoice, .testCall])

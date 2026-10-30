@@ -9,8 +9,15 @@ import {
   isNewer,
   LATEST_CONFIG_URL,
   parseConfigVersion,
+  ALREADY_REASON,
+  CORE_INSTALL_URL,
+  CORE_STATES_URL,
+  LOCAL_REASON,
+  notSeenReason,
+  PERMISSION_REASON,
+  pickUpdateEntity,
+  SUPERVISOR_INFO_URL,
   SUPERVISOR_RELOAD_URL,
-  SUPERVISOR_UPDATE_URL,
   type FetchLike,
 } from "./addon-update.js";
 import { panelState } from "./addon-panel.js";
@@ -33,33 +40,74 @@ import {
 const TOKEN = "CANARY-supervisor-token-9f3a";
 const config = (version: string) => `name: Squeak Voice\nversion: "${version}"\nslug: squeak_voice\n`;
 
-/** A fetch that answers the config look and the Supervisor call as told, and records every call. */
+type Reply = number | Error | { status: number; body: string };
+
+/** A fetch that answers the config look and the Supervisor/Core calls as told, and records every call. */
 function fakeFetch(options: {
   latest?: string | Error | { status: number; body?: string };
-  supervisor?: number | Error | { status: number; body: string };
-  reload?: number | Error;
+  reload?: Reply;
+  /** The version the Supervisor says is installed; default 0.10.0. */
+  running?: string;
+  info?: Reply | { available?: boolean; slug?: string; latest?: string };
+  states?: Reply | unknown[];
+  install?: Reply;
 }) {
-  const calls: Array<{ url: string; method: string | undefined; headers: Record<string, string> | undefined }> = [];
+  const calls: Array<{
+    url: string;
+    method: string | undefined;
+    headers: Record<string, string> | undefined;
+    body?: string | undefined;
+  }> = [];
+  const running = options.running ?? "0.10.0";
+  const answer = (reply: Reply) => {
+    if (reply instanceof Error) throw reply;
+    const status = typeof reply === "number" ? reply : reply.status;
+    const body = typeof reply === "number" ? `body ${TOKEN}` : reply.body;
+    return { ok: status >= 200 && status < 300, status, text: async () => body };
+  };
   const fetchFn: FetchLike = async (url, init) => {
-    calls.push({ url, method: init?.method, headers: init?.headers });
+    calls.push({ url, method: init?.method, headers: init?.headers, body: init?.body });
     if (url === LATEST_CONFIG_URL) {
       const latest = options.latest;
       if (latest instanceof Error) throw latest;
       if (typeof latest === "object") return { ok: false, status: latest.status, text: async () => latest.body ?? "" };
       return { ok: true, status: 200, text: async () => config(latest ?? "0.10.1") };
     }
-    if (url === SUPERVISOR_RELOAD_URL) {
-      const reload = options.reload ?? 200;
-      if (reload instanceof Error) throw reload;
-      return { ok: reload >= 200 && reload < 300, status: reload, text: async () => `body ${TOKEN}` };
+    if (url === SUPERVISOR_RELOAD_URL) return answer(options.reload ?? 200);
+    if (url === SUPERVISOR_INFO_URL) {
+      const info = options.info;
+      if (typeof info === "number" || info instanceof Error || (info && "status" in info)) return answer(info);
+      const data = {
+        slug: info?.slug ?? "abc_squeak_voice",
+        name: "Squeak Voice",
+        version: running,
+        version_latest: info?.latest ?? "0.10.1",
+        update_available: info?.available ?? true,
+      };
+      return answer({ status: 200, body: JSON.stringify({ result: "ok", data }) });
     }
-    if (url === SUPERVISOR_UPDATE_URL) {
-      const supervisor = options.supervisor ?? 200;
-      if (supervisor instanceof Error) throw supervisor;
-      if (typeof supervisor === "object")
-        return { ok: false, status: supervisor.status, text: async () => supervisor.body };
-      return { ok: supervisor >= 200 && supervisor < 300, status: supervisor, text: async () => `body ${TOKEN}` };
+    if (url === CORE_STATES_URL) {
+      const states = options.states;
+      if (typeof states === "number" || states instanceof Error || (states && !Array.isArray(states)))
+        return answer(states as Reply);
+      return answer({
+        status: 200,
+        body: JSON.stringify(
+          states ?? [
+            { entity_id: "update.other_update", attributes: { title: "Other", installed_version: "1.0.0" } },
+            {
+              entity_id: "update.squeak_voice_update",
+              attributes: {
+                title: "Squeak Voice",
+                installed_version: running,
+                entity_picture: "/api/hassio/addons/abc_squeak_voice/icon",
+              },
+            },
+          ],
+        ),
+      });
     }
+    if (url === CORE_INSTALL_URL) return answer(options.install ?? 200);
     throw new Error(`unexpected fetch ${url}`);
   };
   return { fetchFn, calls };
@@ -114,120 +162,207 @@ describe("AddonUpdater.look", () => {
 });
 
 describe("AddonUpdater.update", () => {
-  async function ready(version: string, latest: string, supervisor: number | Error, token: string | null = TOKEN) {
-    const f = fakeFetch({ latest, supervisor });
+  async function ready(version: string, options: Parameters<typeof fakeFetch>[0] = {}, token: string | null = TOKEN) {
+    const f = fakeFetch({ running: version, ...options });
     const updater = new AddonUpdater({ version, fetch: f.fetchFn, token: token ?? undefined });
-    await updater.look();
     return { updater, calls: f.calls };
   }
+  const urls = (calls: Array<{ url: string }>) => calls.map((c) => c.url);
 
-  it("asks the Supervisor only when the newest version it found is newer", async () => {
-    for (const [running, latest] of [
-      ["0.10.0", "0.10.0"],
-      ["0.10.1", "0.10.0"],
-      ["unknown", "0.10.0"],
-    ] as const) {
-      const { updater, calls } = await ready(running, latest, 200);
-      const started = vi.fn();
-      expect(await updater.update(started)).toEqual({ ok: false, reason: "Already on the newest version." });
-      expect(started).not.toHaveBeenCalled();
-      expect(calls.some((c) => c.url === SUPERVISOR_UPDATE_URL)).toBe(false);
-    }
-    // Never looked: nothing is known, so nothing is updated.
-    const blind = new AddonUpdater({
-      version: "0.10.0",
-      fetch: fakeFetch({ latest: new Error("offline") }).fetchFn,
-      token: TOKEN,
-    });
-    expect((await blind.update(vi.fn())).ok).toBe(false);
-    // Garbage in the config is not a version.
-    const garbage = new AddonUpdater({
-      version: "0.10.0",
-      fetch: fakeFetch({ latest: "latest" }).fetchFn,
-      token: TOKEN,
-    });
-    await garbage.look();
-    expect((await garbage.update(vi.fn())).ok).toBe(false);
-  });
-
-  it("looks again before deciding: a stale cache with a newer remote updates", async () => {
-    const f = fakeFetch({ latest: "0.10.1", supervisor: 200 });
-    const updater = new AddonUpdater({ version: "0.10.1", fetch: f.fetchFn, token: TOKEN });
-    await updater.look();
-    expect((await updater.update(vi.fn())).ok).toBe(false);
-    const g = fakeFetch({ latest: "0.10.2", supervisor: 200 });
-    (updater as unknown as { fetchFn: FetchLike }).fetchFn = g.fetchFn;
-    expect(await updater.update(vi.fn())).toEqual({ ok: true });
-    expect(updater.latest()).toBe("0.10.2");
-  });
-
-  it("falls back to the cached version when the fresh look fails", async () => {
-    const { updater } = await ready("0.10.0", "0.10.1", 200);
-    const g = fakeFetch({ latest: new Error("offline"), supervisor: 200 });
-    (updater as unknown as { fetchFn: FetchLike }).fetchFn = g.fetchFn;
-    expect(await updater.update(vi.fn())).toEqual({ ok: true });
-  });
-
-  it("posts to the fixed Supervisor address with the token from its options, after `started`", async () => {
-    const { updater, calls } = await ready("0.10.0", "0.10.1", 200);
+  it("reloads the store, reads its own info, then asks Core to install: in that order, after `started`", async () => {
+    const { updater, calls } = await ready("0.10.0", { latest: "0.10.1" });
     const order: string[] = [];
-    const f = fakeFetch({ latest: "0.10.1", supervisor: 200 });
-    const spy: FetchLike = async (url, init) => {
-      if (url === SUPERVISOR_UPDATE_URL) order.push("supervisor");
-      return f.fetchFn(url, init);
+    const inner = (updater as unknown as { fetchFn: FetchLike }).fetchFn;
+    (updater as unknown as { fetchFn: FetchLike }).fetchFn = async (url, init) => {
+      if (url === CORE_INSTALL_URL) order.push("install");
+      return inner(url, init);
     };
-    (updater as unknown as { fetchFn: FetchLike }).fetchFn = spy;
     expect(await updater.update(() => void order.push("started"))).toEqual({ ok: true });
-    expect(order).toEqual(["started", "supervisor"]);
-    void calls;
-    const post = f.calls.find((c) => c.url === SUPERVISOR_UPDATE_URL)!;
+    expect(order).toEqual(["started", "install"]);
+    expect(urls(calls)).toEqual([
+      SUPERVISOR_RELOAD_URL,
+      LATEST_CONFIG_URL,
+      SUPERVISOR_INFO_URL,
+      CORE_STATES_URL,
+      CORE_INSTALL_URL,
+    ]);
+    const post = calls.find((c) => c.url === CORE_INSTALL_URL)!;
     expect(post.method).toBe("POST");
     expect(post.headers?.authorization).toBe(`Bearer ${TOKEN}`);
-    expect(SUPERVISOR_UPDATE_URL).toBe("http://supervisor/addons/self/update");
+    expect(JSON.parse(post.body ?? "{}")).toEqual({ entity_id: "update.squeak_voice_update" });
+    expect(calls.find((c) => c.url === SUPERVISOR_RELOAD_URL)?.method).toBe("POST");
+    expect(JSON.stringify(calls)).not.toContain("self/update");
+    expect(SUPERVISOR_INFO_URL).toBe("http://supervisor/addons/self/info");
+    expect(CORE_INSTALL_URL).toBe("http://supervisor/core/api/services/update/install");
+    // The token goes only to the Supervisor, never to the version look.
+    expect(calls.find((c) => c.url === LATEST_CONFIG_URL)?.headers).toBeUndefined();
   });
 
-  it.each([
-    [401, /'manager' permission/],
-    [403, /'manager' permission/],
-    [500, /could not update the add-on/],
-    [404, /could not update the add-on/],
-  ])("turns a Supervisor %i into a plain sentence with no token and no body", async (status, pattern) => {
-    const { updater } = await ready("0.10.0", "0.10.1", status);
-    const outcome = await updater.update(vi.fn());
-    expect(outcome.ok).toBe(false);
-    const reason = (outcome as { reason: string }).reason;
-    expect(reason).toMatch(pattern);
-    expect(reason).not.toContain(TOKEN);
-    expect(reason).not.toContain("body");
+  it("Home Assistant's own word decides: update_available true installs even when the repo look is stale", async () => {
+    const { updater, calls } = await ready("0.10.0", { latest: "0.10.0", info: { available: true } });
+    expect(await updater.update(vi.fn())).toEqual({ ok: true });
+    expect(urls(calls)).toContain(CORE_INSTALL_URL);
   });
 
-  it("says the update service did not answer when the Supervisor is unreachable", async () => {
-    const { updater } = await ready("0.10.0", "0.10.1", new Error(`connect ECONNREFUSED ${TOKEN}`));
+  it("says already newest when neither Home Assistant nor the repo has more", async () => {
+    for (const running of ["0.10.0", "0.10.2"]) {
+      const { updater, calls } = await ready(running, { latest: "0.10.1", info: { available: false } });
+      const started = vi.fn();
+      const outcome = await updater.update(started);
+      if (running === "0.10.2") expect(outcome).toEqual({ ok: false, reason: ALREADY_REASON });
+      else expect(outcome).toEqual({ ok: false, reason: notSeenReason("0.10.1") });
+      expect(started).not.toHaveBeenCalled();
+      expect(urls(calls)).not.toContain(CORE_INSTALL_URL);
+    }
+    expect(ALREADY_REASON).toMatch(/Check for updates/);
+    expect(ALREADY_REASON.length).toBeLessThanOrEqual(200);
+  });
+
+  it("says Home Assistant has not seen the new version yet, naming it and how to reload the list", async () => {
+    const { updater } = await ready("0.11.1", { latest: "0.11.2", info: { available: false, latest: "0.11.1" } });
     const outcome = await updater.update(vi.fn());
-    expect(outcome).toEqual({
-      ok: false,
-      reason: "Home Assistant's update service did not answer. Update it in Home Assistant.",
+    expect(outcome).toEqual({ ok: false, reason: notSeenReason("0.11.2") });
+    expect(notSeenReason("0.11.2")).toMatch(/0\.11\.2.*Check for updates.*Check again/);
+    expect(notSeenReason("0.11.2").length).toBeLessThanOrEqual(200);
+  });
+
+  it("explains a local add-on that has nothing newer", async () => {
+    const { updater } = await ready("0.10.0", {
+      latest: "0.10.0",
+      info: { available: false, slug: "local_squeak_voice" },
     });
+    expect(await updater.update(vi.fn())).toEqual({ ok: false, reason: LOCAL_REASON });
+    expect(LOCAL_REASON.length).toBeLessThanOrEqual(200);
+  });
+
+  it("a blind look and an unreadable info change nothing", async () => {
+    const blind = await ready("0.10.0", { latest: new Error("offline"), info: 500 });
+    const started = vi.fn();
+    expect((await blind.updater.update(started)).ok).toBe(false);
+    expect(started).not.toHaveBeenCalled();
+    expect(urls(blind.calls)).not.toContain(CORE_INSTALL_URL);
+    const garbage = await ready("0.10.0", { latest: "latest", info: { status: 200, body: "{oops" } });
+    expect((await garbage.updater.update(vi.fn())).ok).toBe(false);
+  });
+
+  it("still updates when the reload fails (a note says so), but a 403 reload is told to the Mac log only", async () => {
+    for (const reload of [500, new Error("down"), 403] as const) {
+      const { updater, calls } = await ready("0.10.0", { reload });
+      const notes: string[] = [];
+      expect(await updater.update(vi.fn(), (t) => notes.push(t))).toEqual({ ok: true });
+      expect(urls(calls)).toContain(CORE_INSTALL_URL);
+      expect(notes).toHaveLength(1);
+      expect(JSON.stringify(notes)).not.toContain(TOKEN);
+    }
+  });
+
+  it("treats a dropped or timed-out install as the update stopping this process: ok, with a note", async () => {
+    for (const install of [new Error("socket hang up"), new Error("aborted")]) {
+      const { updater } = await ready("0.10.0", { install });
+      const notes: string[] = [];
+      const started = vi.fn();
+      expect(await updater.update(started, (t) => notes.push(t))).toEqual({ ok: true });
+      expect(started).toHaveBeenCalledTimes(1);
+      expect(notes.at(-1)).toMatch(/probably being updated/);
+    }
+    vi.useFakeTimers();
+    try {
+      const f = fakeFetch({});
+      const updater = new AddonUpdater({
+        version: "0.10.0",
+        token: TOKEN,
+        fetch: (url, init) =>
+          url === CORE_INSTALL_URL
+            ? new Promise((_resolve, reject) =>
+                init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+              )
+            : f.fetchFn(url, init),
+      });
+      const run = updater.update(vi.fn());
+      await vi.advanceTimersByTimeAsync(95_000);
+      expect(await run).toEqual({ ok: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([401, 403])(
+    "a %i from Core or the Supervisor is the permission sentence, with no token or body",
+    async (status) => {
+      for (const options of [{ install: status }, { states: status }, { info: status }] as const) {
+        const { updater } = await ready("0.10.0", options);
+        const outcome = await updater.update(vi.fn());
+        expect(outcome).toEqual({ ok: false, reason: PERMISSION_REASON });
+        expect(JSON.stringify(outcome)).not.toContain(TOKEN);
+      }
+      expect(PERMISSION_REASON.length).toBeLessThanOrEqual(200);
+    },
+  );
+
+  it("a Core error is a plain sentence; a missing update entity is told", async () => {
+    const failed = await ready("0.10.0", { install: 500 });
+    const outcome = await failed.updater.update(vi.fn());
+    expect(outcome).toMatchObject({ ok: false, reason: expect.stringContaining("could not update the add-on") });
+    expect(JSON.stringify(outcome)).not.toContain("body");
+    const none = await ready("0.10.0", { states: [{ entity_id: "update.other", attributes: { title: "Other" } }] });
+    const started = vi.fn();
+    expect(await none.updater.update(started)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("no update entry"),
+    });
+    expect(started).not.toHaveBeenCalled();
+  });
+
+  it("picks the update entity by the add-on's icon path, else its title, and only for the installed version", () => {
+    const info = { slug: "abc_squeak_voice", name: "Squeak Voice", version: "0.11.1" };
+    const state = (id: string, attributes: Record<string, unknown>) => ({ entity_id: id, attributes });
+    expect(
+      pickUpdateEntity(
+        [
+          state("update.by_title", { title: "Squeak Voice", installed_version: "0.11.1" }),
+          state("update.by_icon", {
+            entity_picture: "/api/hassio/addons/abc_squeak_voice/icon",
+            installed_version: "0.11.1",
+          }),
+        ],
+        info,
+      ),
+    ).toBe("update.by_icon");
+    expect(pickUpdateEntity([state("update.by_title", { title: "Squeak Voice" })], info)).toBe("update.by_title");
+    expect(
+      pickUpdateEntity([state("update.old", { title: "Squeak Voice", installed_version: "0.9.0" })], info),
+    ).toBeNull();
+    expect(pickUpdateEntity([state("light.squeak", { title: "Squeak Voice" })], info)).toBeNull();
+    expect(pickUpdateEntity([state("update.x; drop", { title: "Squeak Voice" })], info)).toBeNull();
+    expect(pickUpdateEntity("nope", info)).toBeNull();
   });
 
   it("refuses without a token, before replying or calling anything", async () => {
-    const { updater, calls } = await ready("0.10.0", "0.10.1", 200, null);
-    const started = vi.fn();
-    expect(await updater.update(started)).toEqual({
-      ok: false,
-      reason: "This add-on can't reach Home Assistant's update service. Update it in Home Assistant.",
-    });
-    expect(started).not.toHaveBeenCalled();
-    expect(calls.some((c) => c.url === SUPERVISOR_UPDATE_URL)).toBe(false);
-    const empty = await ready("0.10.0", "0.10.1", 200, "");
-    expect((await empty.updater.update(vi.fn())).ok).toBe(false);
+    for (const token of [null, ""]) {
+      const { updater, calls } = await ready("0.10.0", {}, token);
+      const started = vi.fn();
+      expect(await updater.update(started)).toEqual({
+        ok: false,
+        reason: "This add-on can't reach Home Assistant's update service. Update it in Home Assistant.",
+      });
+      expect(started).not.toHaveBeenCalled();
+      expect(calls).toHaveLength(0);
+    }
   });
 
   it("does not run two updates at once", async () => {
-    const { updater } = await ready("0.10.0", "0.10.1", 200);
+    const { updater } = await ready("0.10.0", {});
     let release: () => void = () => undefined;
-    const first = updater.update(() => new Promise<void>((resolve) => (release = resolve)));
+    let entered = false;
+    const first = updater.update(
+      () =>
+        new Promise<void>((resolve) => {
+          entered = true;
+          release = resolve;
+        }),
+    );
     expect(await updater.update(vi.fn())).toEqual({ ok: false, reason: "The update is already under way." });
+    await vi.waitFor(() => expect(entered).toBe(true));
     release();
     expect(await first).toEqual({ ok: true });
   });
@@ -381,21 +516,21 @@ describe("the Mac asking the add-on to update, through the relay", () => {
     return new RelayLine({ store, channel, key });
   }
 
-  async function updaterFor(version: string, latest: string, supervisor: number | Error, token = TOKEN) {
-    const f = fakeFetch({ latest, supervisor });
+  async function updaterFor(version: string, latest: string, install: number | Error, token = TOKEN) {
+    const f = fakeFetch({ latest, running: version, install, info: { available: isNewer(latest, version) } });
     const updater = new AddonUpdater({ version, fetch: f.fetchFn, token });
     await updater.look();
     return { updater, calls: f.calls };
   }
 
   it("writes the reply BEFORE it asks the Supervisor, and the event log names the version", async () => {
-    const f = fakeFetch({ latest: "0.10.1", supervisor: 200 });
+    const f = fakeFetch({ latest: "0.10.1", install: 200 });
     let replyWrittenWhenSupervisorCalled = false;
     const updater = new AddonUpdater({
       version: "0.10.0",
       token: TOKEN,
       fetch: async (url, init) => {
-        if (url === SUPERVISOR_UPDATE_URL) {
+        if (url === CORE_INSTALL_URL) {
           // The update kills the add-on here: by now the answer must already be in the database.
           const results = await store.list(`channels/${channel}/voiceresult`);
           replyWrittenWhenSupervisorCalled = results.some(({ doc }) => doc.box !== undefined);
@@ -415,10 +550,10 @@ describe("the Mac asking the add-on to update, through the relay", () => {
     const same = await updaterFor("0.10.1", "0.10.1", 200);
     expect(await (await start(same.updater)).gatewayCommand("update")).toEqual({
       ok: false,
-      reason: "Already on the newest version.",
+      reason: ALREADY_REASON,
     });
-    expect(same.calls.some((c) => c.url === SUPERVISOR_UPDATE_URL)).toBe(false);
-    expect(events).toEqual(["Update refused: Already on the newest version."]);
+    expect(same.calls.some((c) => c.url === CORE_INSTALL_URL)).toBe(false);
+    expect(events).toEqual([`Update refused: ${ALREADY_REASON}`]);
   });
 
   it("with no token the reply is the plain refusal", async () => {
@@ -437,7 +572,7 @@ describe("the Mac asking the add-on to update, through the relay", () => {
     const line = await start(t.updater);
     expect(await line.gatewayCommand("update")).toEqual({ ok: true });
     await vi.waitFor(() =>
-      expect(events.some((e) => e.startsWith("Update refused: Home Assistant refused"))).toBe(true),
+      expect(events.some((e) => e.startsWith("Update refused: Home Assistant did not let"))).toBe(true),
     );
     expect(JSON.stringify(events)).not.toContain(TOKEN);
   });
@@ -484,7 +619,7 @@ describe("the Mac asking the add-on to update, through the relay", () => {
     await send({ ...base, expiresAt: at - 1000 });
     await send(base, other);
     await gateway!.pass();
-    expect(t.calls.some((c) => c.url === SUPERVISOR_UPDATE_URL)).toBe(false);
+    expect(t.calls.some((c) => c.url === CORE_INSTALL_URL)).toBe(false);
     expect(events).toEqual([]);
   });
 
@@ -498,7 +633,7 @@ describe("the Mac asking the add-on to update, through the relay", () => {
     await gateway!.pass();
     await store.set(requestPath(channel, id), doc);
     await gateway!.pass();
-    expect(t.calls.filter((c) => c.url === SUPERVISOR_UPDATE_URL)).toHaveLength(1);
+    expect(t.calls.filter((c) => c.url === CORE_INSTALL_URL)).toHaveLength(1);
   });
 
   it("the token appears in no database document", async () => {
@@ -540,34 +675,10 @@ describe("reloading Home Assistant's store", () => {
     ];
     for (const a of answers) expect(a.ok).toBe(false);
     expect(JSON.stringify(answers)).not.toContain(TOKEN);
-    expect(answers[0]).toMatchObject({ reason: expect.stringContaining("manager") });
+    expect(answers[0]).toMatchObject({ reason: PERMISSION_REASON });
     const none = make(200, null);
     await none.updater.reloadStore();
     expect(none.calls).toHaveLength(0);
-  });
-
-  it("update() reloads before it asks for the update, and still updates when the reload fails", async () => {
-    for (const reload of [200, 500, new Error("down")]) {
-      const f = fakeFetch({ latest: "0.11.1", reload, supervisor: 200 });
-      const updater = new AddonUpdater({ version: "0.11.0", fetch: f.fetchFn, token: TOKEN });
-      const notes: string[] = [];
-      expect(await updater.update(vi.fn(), (t) => notes.push(t))).toEqual({ ok: true });
-      const urls = f.calls.map((c) => c.url);
-      expect(urls.indexOf(SUPERVISOR_RELOAD_URL)).toBeGreaterThanOrEqual(0);
-      expect(urls.indexOf(SUPERVISOR_RELOAD_URL)).toBeLessThan(urls.indexOf(SUPERVISOR_UPDATE_URL));
-      expect(notes.length).toBe(reload === 200 ? 0 : 1);
-      expect(JSON.stringify(notes)).not.toContain(TOKEN);
-    }
-  });
-
-  it("maps the Supervisor's 'no update available' to a plain sentence", async () => {
-    const f = fakeFetch({ latest: "0.11.1", supervisor: { status: 400, body: `No update available ${TOKEN}` } });
-    const updater = new AddonUpdater({ version: "0.11.0", fetch: f.fetchFn, token: TOKEN });
-    const outcome = await updater.update(vi.fn());
-    expect(outcome).toEqual({
-      ok: false,
-      reason: "Home Assistant has not seen the new version yet. Try again in a minute.",
-    });
   });
 });
 

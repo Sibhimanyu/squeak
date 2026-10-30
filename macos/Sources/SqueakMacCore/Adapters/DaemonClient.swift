@@ -348,7 +348,7 @@ public struct DaemonClient: Sendable {
 
     /// Asks the add-on to update itself through Home Assistant. `.unavailable` = a daemon without the route.
     public func updateGatewayAddon() async throws -> GatewayUpdateOutcome {
-        let r = try await post("/control/voice/gateway/update", body: GatewayUpdate.requestBody, timeout: 40)
+        let r = try await post("/control/voice/gateway/update", body: GatewayUpdate.requestBody, timeout: 75)
         return GatewayUpdate.outcome(status: r.status, body: r.body)
     }
 

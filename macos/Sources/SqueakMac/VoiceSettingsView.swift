@@ -342,8 +342,12 @@ struct VoiceSettingsPage: View {
             if m.gatewayUpdating {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Updating the add-on… it restarts in a minute").frame(maxWidth: .infinity, alignment: .leading)
+                    Text(GatewayText.updating).frame(maxWidth: .infinity, alignment: .leading)
                 }
+            } else if case .updated(let v) = m.gatewayUpdatePhase {
+                Text(GatewayText.updated(v)).frame(maxWidth: .infinity, alignment: .leading)
+            } else if m.gatewayUpdatePhase == .timedOut {
+                Footnote(GatewayText.updateTimedOut)
             } else if let line = g.versionLine {
                 Text(line)
                     .foregroundStyle(g.updateAvailable ? Color.primary : Color.secondary)
@@ -364,7 +368,7 @@ struct VoiceSettingsPage: View {
                     Button { Task { await m.checkGatewayUpdate() } } label: {
                         HStack(spacing: 6) {
                             if m.gatewayChecking { ProgressView().controlSize(.small) }
-                            Text("Check for updates")
+                            Text(m.gatewayUpdatePhase == .timedOut ? "Check again" : "Check for updates")
                         }
                     }
                     .buttonStyle(SecondaryButtonStyle())

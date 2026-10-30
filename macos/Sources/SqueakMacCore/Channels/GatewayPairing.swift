@@ -142,7 +142,13 @@ public enum GatewayText {
 
     public static let checkedJustNow = "Checked just now"
 
-    public static let updateSlow = "Home Assistant is taking long: check the add-on in Home Assistant."
+    public static let updating = "Updating the add-on… it restarts in a minute"
+
+    /// Shown instead of a spinner once the add-on neither restarted nor changed version in time.
+    public static let updateTimedOut =
+        "The add-on didn't update. Open Home Assistant › Settings › Add-ons › Squeak Voice and press Update (Home Assistant may not have seen the new version yet)."
+
+    public static func updated(_ version: String) -> String { "Updated to \(version)" }
 
     static func duration(minutes: Int) -> String {
         if minutes < 60 { return "\(minutes) min" }
@@ -260,5 +266,56 @@ public enum GatewayCheck {
         }
         if status == 404 && sentence == nil { return .unavailable }
         return .refused(sentence ?? "Squeak could not check for an add-on update. Try again in a moment.")
+    }
+}
+
+/// The add-on updating after "Update add-on", as a state machine over what the gateway reports. Pure: the caller feeds
+/// it the status and a clock, so the timeouts are testable. requested -> updating -> updated(version) | timedOut.
+/// Home Assistant stops the add-on to update it, so its status going quiet (`stale`) is the restart being seen: the
+/// wait is then longer (the add-on needs time to come back). Never an endless spinner.
+public struct GatewayUpdateWatch: Sendable, Equatable {
+    public enum Phase: Sendable, Equatable {
+        case updating
+        case updated(String)
+        case timedOut
+    }
+
+    /// Seconds from the request until "didn't update", when the add-on never went quiet.
+    public static let timeout: TimeInterval = 120
+    /// The same, once the add-on has gone down for the update: it gets this long to come back with the new version.
+    public static let comeBackTimeout: TimeInterval = 180
+
+    public let target: String
+    public let from: String?
+    public let requestedAt: Date
+    public private(set) var sawRestart = false
+    public private(set) var phase: Phase = .updating
+
+    public init(target: String, from: String?, requestedAt: Date) {
+        self.target = target; self.from = from; self.requestedAt = requestedAt
+    }
+
+    /// When the wait ends if nothing arrives.
+    public var deadline: Date { requestedAt.addingTimeInterval(sawRestart ? Self.comeBackTimeout : Self.timeout) }
+
+    /// Feeds one look at the gateway; returns the phase after it. Once done or timed out it stays so.
+    @discardableResult
+    public mutating func observe(_ status: GatewayStatus, now: Date) -> Phase {
+        guard phase == .updating else { return phase }
+        if status.state == .stale { sawRestart = true }
+        if status.state != .none, status.state != .stale, let v = status.version, Self.version(v, atLeast: target) {
+            phase = .updated(v)
+        } else if now >= deadline {
+            phase = .timedOut
+        }
+        return phase
+    }
+
+    /// `x.y.z` compared per part; false when either side is not that shape.
+    static func version(_ v: String, atLeast target: String) -> Bool {
+        let a = v.split(separator: ".").compactMap { Int($0) }, b = target.split(separator: ".").compactMap { Int($0) }
+        guard a.count == 3, b.count == 3 else { return v == target }
+        for i in 0..<3 where a[i] != b[i] { return a[i] > b[i] }
+        return true
     }
 }

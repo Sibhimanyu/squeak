@@ -90,7 +90,7 @@ import { BaresipLine } from "../voice/baresip-line.js";
 import { DirectLine } from "../voice/direct-line.js";
 import { PinKeeper, type PinPolicy, type PinState } from "../voice/pin-keeper.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
-import { relayLineFor, type RelayLine } from "../voice/relay-line.js";
+import { OLD_ADDON, relayLineFor, type RelayLine } from "../voice/relay-line.js";
 import { addonSupports, LATE_CLIPS_ADDON } from "../voice/addon-update.js";
 import { GatewayPairing } from "../voice/pairing-window.js";
 import { GatewayClaim } from "../voice/gateway-claim.js";
@@ -1492,8 +1492,13 @@ export class SqueakApp {
     if (!this.gatewayView().updateAvailable) {
       return { ok: false, reason: "The add-on is already on the newest version.", status: 400 };
     }
-    const outcome = await line.gatewayCommand("update");
-    return outcome.ok ? outcome : { ok: false, reason: outcome.reason, status: 400 };
+    // The add-on writes its reply BEFORE Home Assistant stops it, but the checks before that (reload the add-on list,
+    // read its record) take time, and the stop can cut the reply off. No reply at all is therefore "probably
+    // updating": the Mac confirms by the add-on coming back with the new version, and says so after ~2 minutes if not.
+    const outcome = await line.gatewayCommand("update", 60_000);
+    if (outcome.ok) return outcome;
+    if (outcome.reason === OLD_ADDON) return { ok: true };
+    return { ok: false, reason: outcome.reason, status: 400 };
   }
 
   /** Where the pin stands, never the pin. Gateway: the add-on's last answer, refreshed when older than a minute. */
