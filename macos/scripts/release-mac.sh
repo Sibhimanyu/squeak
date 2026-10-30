@@ -7,7 +7,8 @@
 #   2. GitHub release v<version>   notes and checksum only (the DMG is served from Pages: GitHub's asset host stalls
 #                                  for some networks, and uploading 50 MB twice was the slowest step on this uplink)
 #   3. macos/scripts/publish-pages.sh   appcast + DMG as one commit through the API (no 1.6 GB clone)
-#   4. waits until the live appcast and the DMG answer, updates website/release.json, pushes the version commit.
+#   4. waits until the live appcast and the DMG answer, updates website/release.json, pushes the version commit, then
+#      builds the site and republishes squeak/index.html (publish-site.sh; a failure there only warns: the app is live).
 # Only one release at a time (a lock). Needs: gh (logged in), Sparkle's private key (release.sh checks), the Apple
 # Development identity. The version needs a `## <version>` section in macos/CHANGELOG.md on origin/master.
 set -euo pipefail
@@ -95,6 +96,14 @@ for attempt in 1 2 3; do
   git -C "$REL" push -q origin HEAD:master && break
   git -C "$REL" fetch -q origin master && git -C "$REL" rebase -q origin/master || { echo "could not push the version commit: do it by hand from $REL" >&2; exit 1; }
 done
+
+step "Website page"
+if (cd "$REL/website" && { [ -d node_modules ] || npm ci --silent; } && npm run build --silent) >/dev/null 2>&1 \
+  && EXPECT_VERSION="$VERSION" "$REL/macos/scripts/publish-site.sh" "$REL/website/dist/index.html"; then
+  :
+else
+  echo "WARNING: the site page was not published (the app is live): run 'cd $REL/website && npm run build && EXPECT_VERSION=$VERSION $REL/macos/scripts/publish-site.sh $REL/website/dist/index.html'" >&2
+fi
 
 step "Done"
 echo "Squeak $VERSION is live: https://sibhimanyu.github.io/squeak/appcast.xml  (built from $COMMIT in $((SECONDS - START)) s)"

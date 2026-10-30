@@ -10,7 +10,7 @@ set -euo pipefail
 VERSION="${1:?usage: publish-pages.sh <version>}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$HERE/build"
-URL="https://github.com/Sibhimanyu/sibhimanyu.github.io.git"
+URL="https://github.com/Sibhimanyu/Sibhimanyu.github.io.git"
 BRANCH="${PAGES_BRANCH:-main}"
 KEEP="${KEEP_DMGS:-0}"
 DMG="Squeak-$VERSION.dmg"
