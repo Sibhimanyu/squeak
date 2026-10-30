@@ -1212,7 +1212,7 @@ final class AppModel {
 
     /// Written as the app quits for an update: what is open, so the next launch can put it back.
     /// The open chat's draft is saved with it (drafts live in the cache, not in the marker).
-    func saveUpdateRestore() {
+    func saveUpdateRestore(restartAttempt: Bool = false) {
         guard !demoMode, !captureMode else { return }
         if let selected { saveDraftNow(draft, for: selected) }
         let window: UpdateRestoreMarker.Window
@@ -1222,7 +1222,8 @@ final class AppModel {
         else { window = .none }
         let marker = UpdateRestoreMarker(
             fromVersion: Self.appVersion, window: window, session: selected?.stringValue,
-            settingsSection: settingsSection?.rawValue)
+            settingsSection: settingsSection?.rawValue,
+            restartAttempt: restartAttempt ? true : nil, restartTarget: restartAttempt ? updater.flow.knownVersion : nil)
         defaults.set(marker.encoded(), forKey: UpdateRestoreMarker.defaultsKey)
     }
 
@@ -1234,6 +1235,11 @@ final class AppModel {
         defaults.set(current, forKey: "lastRunVersion")
         let marker = UpdateRestoreMarker.decode(defaults.data(forKey: UpdateRestoreMarker.defaultsKey))
         defaults.removeObject(forKey: UpdateRestoreMarker.defaultsKey)
+        UpdateLog.standard.write("launch: version \(current), change=\(change), marker=\(marker.map { "restartAttempt=\($0.restartAttempt == true)" } ?? "none")")
+        if let marker, marker.restartDidNotApply(currentVersion: current) {
+            // "Restart to update" quit the app and it came back on the same version: the install did not happen.
+            updater.restartDidNotApply(target: marker.restartTarget, running: current)
+        }
         guard case .updated = change else { return }
         updateNote = "Updated to \(current)"
         guard let marker = marker?.usable(currentVersion: current), marker.window != .none else { return }
@@ -1275,7 +1281,8 @@ final class AppModel {
             adapters: adapters,
             stateCounts: DiagnosticsInput.counts(of: sessions),
             lastUpdateCheck: updater.lastCheck,
-            logLines: AppLog.buffer.last(50)))
+            logLines: AppLog.buffer.last(50),
+            updateLogLines: UpdateLog.standard.tail(80)))
     }
 
     func copyDiagnostics() {

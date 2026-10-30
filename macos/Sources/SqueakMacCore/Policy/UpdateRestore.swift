@@ -13,8 +13,15 @@ public struct UpdateRestoreMarker: Codable, Equatable, Sendable {
     /// `SettingsSection.rawValue`, when `window == .settings`.
     public var settingsSection: String?
     public var savedAt: Date
+    /// Set when the quit was "Restart to update" (not a plain quit with an update waiting), with the version
+    /// it was to install: a launch on the same version soon after means the install did not happen.
+    public var restartTarget: String?
+    public var restartAttempt: Bool?
 
-    public init(fromVersion: String, window: Window, session: String? = nil, settingsSection: String? = nil, savedAt: Date = Date()) {
+    public init(fromVersion: String, window: Window, session: String? = nil, settingsSection: String? = nil, savedAt: Date = Date(),
+                restartAttempt: Bool? = nil, restartTarget: String? = nil) {
+        self.restartAttempt = restartAttempt
+        self.restartTarget = restartTarget
         self.fromVersion = fromVersion
         self.window = window
         self.session = session
@@ -31,6 +38,14 @@ public struct UpdateRestoreMarker: Codable, Equatable, Sendable {
     public static func decode(_ data: Data?) -> UpdateRestoreMarker? {
         guard let data else { return nil }
         return try? JSONDecoder().decode(UpdateRestoreMarker.self, from: data)
+    }
+
+    /// How long after a "Restart to update" a launch on the same version still counts as that update not applying.
+    public static let restartWindow: TimeInterval = 15 * 60
+
+    /// True when this launch is the one after a "Restart to update" that did not change the version.
+    public func restartDidNotApply(currentVersion: String, now: Date = Date()) -> Bool {
+        restartAttempt == true && fromVersion == currentVersion && now.timeIntervalSince(savedAt) <= Self.restartWindow && savedAt <= now.addingTimeInterval(60)
     }
 
     /// The marker to act on at launch, or nil: only when the version really changed since it was

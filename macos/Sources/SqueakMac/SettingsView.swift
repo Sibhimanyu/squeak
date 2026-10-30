@@ -813,16 +813,9 @@ private struct AboutSettings: View {
                         Text("Download and install updates automatically").frame(maxWidth: .infinity, alignment: .leading)
                     }
                         .disabled(!model.updater.isActive)
-                    if let ready = model.updater.readyVersion {
-                        LabeledContent("Update \(ready) is ready") { Button("Restart to update") { model.updater.installNow() } }
-                        UpdateNotesDisclosure(notes: model.updater.readyNotes, size: 12)
-                    } else if let available = model.updater.availableVersion {
-                        LabeledContent("Update \(available) available") { Button("Install") { model.updater.checkForUpdates() } }
-                        UpdateNotesDisclosure(notes: model.updater.availableNotes, size: 12)
-                    }
+                    UpdateBanner(updater: model.updater, style: .settings)
                     if let note = model.updateNote { Text(note).foregroundStyle(.secondary) }
                     Button("Check for updates…") { model.updater.checkForUpdates() }
-                        .disabled(!model.updater.canCheck)
                     SectionFootnote("Squeak checks once a day, and installs a new version for you when you quit or relaunch it, then reopens what you had open. Nothing about your chats is sent.")
                 }
                 SettingsCard(title: "Background service", subtitle: "The local connection that follows your sessions.", symbol: "gearshape.2") {

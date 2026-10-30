@@ -8,25 +8,26 @@ import SwiftUI
 /// Sparkle 2, owned by the app. It only starts from the real bundle: a bare
 /// `swift run`, a capture or the demo has no feed to read and no place to install to.
 ///
-/// Squeak is a menu-bar app, so Sparkle's own scheduled alert would open behind whatever is in
-/// front and never be seen. Scheduled updates are therefore "gentle": a banner in the panel and
-/// Settings says "Update 2.x available", and the alert opens only when the app is already in focus
-/// or the person asks. With automatic installs on (the default), most updates never ask at all:
-/// they download quietly and install on the next quit, or from "Restart to update".
+/// This class is a thin adapter. What the update is doing, and when it has waited too long, lives in
+/// `UpdateFlow` (SqueakMacCore, pure and tested); every Sparkle callback, whoever started the session, and every tap
+/// goes in as an event, and the flow's commands come back here to be carried out. The popup banner, Settings and the
+/// update window all draw the same `flow`.
+///
+/// Squeak is a menu-bar app, so Sparkle's own scheduled alert would open behind whatever is in front and never be
+/// seen. Scheduled updates are therefore "gentle": a banner in the panel and Settings says "Update 2.x available".
+/// With automatic installs on (the default) Sparkle's automatic driver downloads without ever calling the user
+/// driver, so those sessions are followed through the updater delegate (`willDownloadUpdate`, `willExtractUpdate`,
+/// `willInstallUpdateOnQuit`, errors) and show the same progress. Sparkle gives no handle to cancel or join that
+/// kind of session, and `checkForUpdates()` is a silent no-op while one runs: so a press while it runs attaches to
+/// its progress, queues what the person asked for, and the flow's timeouts turn a hung session into a failure with a
+/// way out. Everything is written to `updates.log` (`UpdateLog`).
 @MainActor
 @Observable
 final class AppUpdater {
     private(set) var canCheck = false
-    private(set) var presentation = UpdatePresentationState.idle
+    private(set) var flow = UpdateFlow()
     fileprivate var permissionAction: ((Bool) -> Void)?
-    fileprivate var acknowledgementAction: (() -> Void)?
     fileprivate var retryInstallation: (() -> Void)?
-    fileprivate var applicationTerminated = false
-    private(set) var progress: Double?
-    private(set) var statusTitle = "Squeak Update"
-    private(set) var statusDetail = ""
-    fileprivate(set) var informationOnly = false
-    fileprivate(set) var informationURL: URL?
     private(set) var updateWindow: UpdateWindowController?
     /// Version string of an update Sparkle found and that is not installed yet.
     private(set) var availableVersion: String?
@@ -35,20 +36,34 @@ final class AppUpdater {
     /// What changed in those versions, as plain bullets (empty when the appcast item has none).
     fileprivate(set) var availableNotes: [String] = []
     private(set) var readyNotes: [String] = []
+    fileprivate(set) var informationOnly = false
+    fileprivate(set) var informationURL: URL?
+    /// Sparkle gave us something to cancel the running session with.
+    fileprivate(set) var cancellable = false
     @ObservationIgnored private var updater: SPUUpdater?
     @ObservationIgnored private var observation: NSKeyValueObservation?
-    @ObservationIgnored private var userDriver: UpdateUserDriver?
+    @ObservationIgnored fileprivate var userDriver: UpdateUserDriver?
     @ObservationIgnored private var delegate: UpdateDelegate?
     @ObservationIgnored fileprivate var installHandler: (() -> Void)?
+    /// The person pressed Install before Sparkle offered the update: reply "install" the moment it does.
+    @ObservationIgnored fileprivate var acceptOnOffer = false
+    @ObservationIgnored private var tickTask: Task<Void, Never>?
     /// Told after every change to what is found or ready, so the model can badge and notify.
     @ObservationIgnored var onChange: (() -> Void)?
     /// Version the person chose to skip (Sparkle also remembers it); never notified about.
     @ObservationIgnored fileprivate(set) var skippedVersion: String?
+    @ObservationIgnored fileprivate let updateLog = UpdateLog.standard
 
     /// Capture and demo only (`SQUEAK_MAC_DEMO_UPDATE`): shows an update with no Sparkle behind it.
-    func demoFound(_ version: String, notes: [String]) { found(version, notes: notes) }
+    func demoFound(_ version: String, notes: [String]) {
+        found(version, notes: notes)
+        dispatch(.updateFound(version: version))
+    }
 
     var isActive: Bool { updater != nil }
+
+    /// Anything running or waiting on the person: the menu's "Check for updates…" stays pressable to show it.
+    var isBusy: Bool { flow.phase != .idle }
 
     var lastCheck: Date? { updater?.lastUpdateCheckDate }
 
@@ -81,56 +96,272 @@ final class AppUpdater {
         let u = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: ui, delegate: d)
         updater = u
         do { try u.start() } catch {
-            show(.error, title: "Updates aren’t available", detail: error.localizedDescription)
+            log("start failed: \(error.localizedDescription)")
+            dispatch(.failed(stage: .check, reason: "Updates aren’t available in this copy of Squeak.", userInitiated: true))
             return
         }
         observation = u.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] _, change in
             let value = change.newValue ?? false
-            Task { @MainActor in self?.canCheck = value }
+            Task { @MainActor in self?.canCheckChanged(value) }
         }
-        AppLog.info("updates: Sparkle started")
+        log("Sparkle started: version \(AppModel.appVersion), checks=\(u.automaticallyChecksForUpdates), automaticDownloads=\(u.automaticallyDownloadsUpdates), interval=\(Int(u.updateCheckInterval))s")
     }
 
-    func checkForUpdates() {
-        guard let updater, canCheck else { return }
-        progress = nil
-        show(.checking, title: "Checking for updates", detail: "Looking for the latest version of Squeak.")
-        updater.checkForUpdates()
+    private func canCheckChanged(_ value: Bool) {
+        canCheck = value
+        log("canCheckForUpdates=\(value)")
+        if value { dispatch(.sparkleBecameIdle) }
     }
 
-    fileprivate func show(_ state: UpdatePresentationState, title: String, detail: String, progress: Double? = nil) {
-        presentation = state; self.progress = progress
-        statusTitle = title; statusDetail = detail
-        if updateWindow == nil {
-            updateWindow = UpdateWindowController(owner: self)
-            updateWindow?.present(focus: true)
+    // MARK: What the surfaces call
+
+    /// What Sparkle can take from us right now. `canCheckForUpdates` is read from Sparkle itself, not the KVO copy.
+    private var sparkleState: UpdateFlow.SparkleState {
+        if userDriver?.updateChoice != nil { return .awaitingChoice }
+        return (updater?.canCheckForUpdates ?? false) ? .idle : .busy
+    }
+
+    /// "Check for updates…". Never silent: it starts a check, attaches to the one running, or says why it cannot.
+    func checkForUpdates(presenting: Bool = false) {
+        log("tap: check (sparkle=\(sparkleState), phase=\(flow.phase))")
+        guard updater != nil else {
+            dispatch(.failed(stage: .check, reason: "Updates aren’t available in this copy of Squeak.", userInitiated: true))
+            if presenting { presentUpdateWindow() }
+            return
         }
-        updateWindow?.resize(for: state)
+        dispatch(.checkRequested(sparkle: sparkleState))
+        if presenting { presentUpdateWindow() }
     }
 
-    fileprivate func closeUpdateWindow() { updateWindow?.close(); updateWindow = nil }
-    fileprivate func cancelUpdate() { userDriver?.cancelCurrent?() }
-    fileprivate func respondToPermission(_ allow: Bool) { permissionAction?(allow); permissionAction = nil; closeUpdateWindow() }
-    fileprivate func acknowledgeAndClose() {
-        let acknowledge = acknowledgementAction
-        acknowledgementAction = nil
-        acknowledge?()
-        closeUpdateWindow()
+    /// The Install button.
+    func install() {
+        log("tap: install (sparkle=\(sparkleState), phase=\(flow.phase))")
+        if informationOnly {
+            if let informationURL { NSWorkspace.shared.open(informationURL) }
+            return
+        }
+        guard updater != nil else {
+            dispatch(.failed(stage: .check, reason: "Updates aren’t available in this copy of Squeak.", userInitiated: true))
+            return
+        }
+        dispatch(.installRequested(sparkle: sparkleState))
     }
-    fileprivate var installChoice: ((SPUUserUpdateChoice) -> Void)? { get { userDriver?.updateChoice } set { userDriver?.updateChoice = newValue } }
-
 
     /// "Restart to update": install the downloaded update now and relaunch.
     func installNow() {
-        if let installHandler {
-            QuitIntent.shared.beginUpdateQuit()
-            installHandler()
-        } else {
-            checkForUpdates()
+        log("tap: restart (handler=\(installHandler != nil), phase=\(flow.phase))")
+        dispatch(.restartRequested(canInstallNow: installHandler != nil))
+    }
+
+    func retry() {
+        log("tap: try again (sparkle=\(sparkleState), phase=\(flow.phase))")
+        dispatch(.retryRequested(sparkle: sparkleState, canInstallNow: installHandler != nil))
+    }
+
+    func cancel() {
+        log("tap: cancel (phase=\(flow.phase))")
+        dispatch(.cancelRequested)
+    }
+
+    func dismissStatus() { dispatch(.dismissRequested) }
+
+    func downloadManually() {
+        var version = flow.knownVersion
+        if case .failed(let f) = flow.phase, let v = f.version { version = v }
+        let url = UpdateFlowCopy.manualDownloadURL(version: version)
+        log("tap: download manually (\(version ?? "no version"))")
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Runs a button from `UpdateFlowCopy.actions`.
+    func perform(_ action: UpdateFlowCopy.Action) {
+        switch action {
+        case .install: install()
+        case .restart: installNow()
+        case .cancel: cancel()
+        case .tryAgain: retry()
+        case .downloadManually: downloadManually()
+        case .dismiss: dismissStatus()
         }
     }
 
-    // MARK: Called by the delegate (main thread)
+    /// The buttons for what is happening now; "Cancel" only when Sparkle gave us a way to cancel.
+    var actions: [UpdateFlowCopy.Action] {
+        UpdateFlowCopy.actions(flow.phase).filter { $0 != .cancel || cancellable }
+    }
+
+    /// The app reopened on the version it had before "Restart to update".
+    func restartDidNotApply(target: String?, running: String) {
+        log("launch: restart did not apply (running \(running), target \(target ?? "unknown"))")
+        dispatch(.restartDidNotApply(target: target, running: running))
+    }
+
+    // MARK: Flow
+
+    func dispatch(_ event: UpdateFlow.Event) {
+        let before = flow.phase
+        let commands = flow.handle(event, now: Date())
+        record(event, from: before)
+        for command in commands { perform(command) }
+        scheduleTick()
+        if flow.phase == .idle, permissionAction == nil, updateWindow != nil, !windowPinned { closeUpdateWindow() }
+        updateWindow?.resize(for: presentation)
+        onChange?()
+    }
+
+    private func record(_ event: UpdateFlow.Event, from before: UpdateFlow.Phase) {
+        switch event {
+        case .downloadProgress, .extractProgress, .tick:
+            if before.description != flow.phase.description { log("phase \(before) -> \(flow.phase)") }
+        default:
+            log("event \(event) | phase \(before) -> \(flow.phase)")
+        }
+    }
+
+    private func perform(_ command: UpdateFlow.Command) {
+        log("command \(command)")
+        switch command {
+        case .startCheck:
+            guard let updater, updater.canCheckForUpdates else {
+                log("check not started: Sparkle is busy or not started")
+                dispatch(.failed(stage: .check, reason: UpdateFlowCopy.cantStart, userInitiated: true))
+                return
+            }
+            updater.checkForUpdates()
+        case .acceptUpdate:
+            if let choice = userDriver?.updateChoice {
+                userDriver?.updateChoice = nil
+                choice(.install)
+            } else {
+                acceptOnOffer = true
+            }
+        case .installNow:
+            QuitIntent.shared.beginUserRestart()
+            if let installHandler {
+                installHandler()
+            } else {
+                log("installer handler missing at restart")
+                QuitIntent.shared.endUpdateAttempt()
+                dispatch(.failed(stage: .install, reason: UpdateFlowCopy.installerGone, userInitiated: true))
+            }
+        case .cancelSession:
+            acceptOnOffer = false
+            userDriver?.cancelCurrent?()
+            if let choice = userDriver?.updateChoice { userDriver?.updateChoice = nil; choice(.dismiss) }
+        case .endAttempt:
+            acceptOnOffer = false
+            QuitIntent.shared.endUpdateAttempt()
+        }
+    }
+
+    /// One tick a second while a phase has a deadline, so a hung session always ends.
+    private func scheduleTick() {
+        guard flow.deadline != nil else { tickTask?.cancel(); tickTask = nil; return }
+        guard tickTask == nil else { return }
+        tickTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, !Task.isCancelled else { return }
+                if self.flow.deadline == nil { self.tickTask = nil; return }
+                self.dispatch(.tick)
+            }
+        }
+    }
+
+    fileprivate func log(_ line: String) {
+        updateLog.write(line)
+        AppLog.info("updates: \(line)")
+    }
+
+    // MARK: Window (explicit "Check for updates…", the permission prompt, Sparkle asking for focus)
+
+    /// A window the person asked for stays until they press Done, even once the flow is idle.
+    @ObservationIgnored private var windowPinned = false
+
+    func presentUpdateWindow() {
+        if updateWindow == nil { updateWindow = UpdateWindowController(owner: self) }
+        windowPinned = true
+        updateWindow?.resize(for: presentation)
+        updateWindow?.present()
+    }
+
+    fileprivate func closeUpdateWindow() {
+        windowPinned = false
+        updateWindow?.close(); updateWindow = nil
+    }
+
+    fileprivate func respondToPermission(_ allow: Bool) {
+        permissionAction?(allow); permissionAction = nil
+        log("permission: \(allow ? "allowed" : "declined")")
+        closeUpdateWindow()
+    }
+
+    /// "Later": hand the offered update back to Sparkle (it can offer it again) and close.
+    fileprivate func later() {
+        if let choice = userDriver?.updateChoice { userDriver?.updateChoice = nil; choice(.dismiss) }
+        closeUpdateWindow()
+    }
+
+    fileprivate func closeUpdateWindowOnly() { closeUpdateWindow() }
+    /// "Skip This Version" needs Sparkle's pending offer to answer.
+    var canSkip: Bool { userDriver?.updateChoice != nil }
+
+    fileprivate func skipVersion() {
+        if let choice = userDriver?.updateChoice { userDriver?.updateChoice = nil; choice(.skip) }
+        closeUpdateWindow()
+    }
+
+    // MARK: What the window says
+
+    var presentation: UpdatePresentationState {
+        if permissionAction != nil { return .permission }
+        switch flow.phase {
+        case .idle: return .idle
+        case .checking: return .checking
+        case .available: return .available
+        case .downloading: return .downloading
+        case .extracting, .installing, .relaunching: return .installing
+        case .readyToInstall: return .ready
+        case .failed: return .error
+        case .upToDate: return .current
+        }
+    }
+
+    var statusTitle: String {
+        if permissionAction != nil { return "Keep Squeak up to date?" }
+        switch flow.phase {
+        case .idle: return "Squeak Update"
+        case .checking: return "Checking for updates"
+        case .available(let v): return "Squeak \(v) is available"
+        case .downloading: return "Downloading update"
+        case .extracting: return "Preparing update"
+        case .readyToInstall: return "Update is ready"
+        case .installing: return "Installing update"
+        case .relaunching: return "Restarting Squeak"
+        case .failed: return "Update couldn’t finish"
+        case .upToDate: return "You’re up to date"
+        }
+    }
+
+    var statusDetail: String {
+        if permissionAction != nil { return "Squeak can check for updates and download them in the background. You can change this any time in Settings." }
+        switch flow.phase {
+        case .idle: return ""
+        case .checking: return "Looking for the latest version of Squeak."
+        case .available: return availableNotes.first ?? (informationOnly ? "Read about this version." : "A newer version is available.")
+        case .downloading(_, let p): return p.map { "\(Int(($0 * 100).rounded()))% downloaded" } ?? "Downloading a verified update."
+        case .extracting: return "Verifying and unpacking Squeak."
+        case .readyToInstall: return "Squeak will restart to finish installing."
+        case .installing: return retryInstallation == nil ? "Squeak will reopen when the update is complete." : "Squeak needs to close before the update can finish."
+        case .relaunching: return "Squeak will reopen when the update is complete."
+        case .failed(let f): return f.reason
+        case .upToDate: return "Squeak \(AppModel.appVersion) is the latest version."
+        }
+    }
+
+    var progress: Double? { UpdateFlowCopy.progress(flow.phase) }
+
+    // MARK: Called by the delegate and the driver (main thread)
 
     fileprivate func found(_ version: String?, notes: [String]) {
         let changed = version != availableVersion
@@ -148,8 +379,21 @@ final class AppUpdater {
         readyVersion = version
         readyNotes = notes
         installHandler = handler
+        acceptOnOffer = false
+        dispatch(.staged(version: version ?? flow.knownVersion ?? "update"))
+    }
+    /// The session is over for good: its installer block is dead, so a press on "Restart" must not call it.
+    fileprivate func sessionOver() {
+        installHandler = nil; retryInstallation = nil; cancellable = false; acceptOnOffer = false
+    }
+    fileprivate func setCancellable(_ value: Bool) { if cancellable != value { cancellable = value } }
+    fileprivate func showWindowInFocus() { presentUpdateWindow() }
+    fileprivate func offerPermission(_ reply: @escaping (Bool) -> Void) {
+        permissionAction = reply
+        presentUpdateWindow()
         onChange?()
     }
+    fileprivate func setRetryInstallation(_ retry: (() -> Void)?) { retryInstallation = retry }
 }
 
 /// Sparkle ends an install by terminating the app without a `quit` Apple event, so it says so
@@ -165,18 +409,36 @@ final class UpdateDelegate: NSObject, SPUUpdaterDelegate {
         if Thread.isMainThread { MainActor.assumeIsolated(body) } else { DispatchQueue.main.sync { MainActor.assumeIsolated(body) } }
     }
 
+    private func note(_ line: String) { onMain { self.owner?.log("sparkle: \(line)") } }
+
     // MARK: Quit must succeed
 
-    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) { onMain { QuitIntent.shared.beginUpdateQuit() } }
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        let version = item.displayVersionString
+        onMain {
+            self.owner?.log("sparkle: willInstallUpdate \(version)")
+            QuitIntent.shared.beginUpdateQuit()
+            self.owner?.dispatch(.installBegan)
+        }
+    }
 
     /// Sparkle installing on a quit the person chose must not reopen the app.
     func updaterShouldRelaunchApplication(_ updater: SPUUpdater) -> Bool {
         var relaunch = true
-        onMain { relaunch = !(QuitIntent.shared.explicitQuit || QuitIntent.shared.userQuit) }
+        onMain {
+            relaunch = QuitPolicy.shouldRelaunchAfterUpdate(explicitQuit: QuitIntent.shared.explicitQuit, userQuit: QuitIntent.shared.userQuit)
+            self.owner?.log("sparkle: shouldRelaunchApplication -> \(relaunch)")
+        }
         return relaunch
     }
 
-    func updaterWillRelaunchApplication(_ updater: SPUUpdater) { onMain { QuitIntent.shared.beginUpdateQuit() } }
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        onMain {
+            self.owner?.log("sparkle: willRelaunchApplication")
+            QuitIntent.shared.beginUpdateQuit()
+            self.owner?.dispatch(.willRelaunch)
+        }
+    }
 
     /// The download is staged and installs on the next real quit. Nothing here holds Sparkle back,
     /// and the installer stays reachable from the panel ("Restart to update").
@@ -184,6 +446,7 @@ final class UpdateDelegate: NSObject, SPUUpdaterDelegate {
         let version = item.displayVersionString
         let notes = ReleaseNotes.bullets(fromHTML: item.itemDescription)
         onMain {
+            self.owner?.log("sparkle: willInstallUpdateOnQuit \(version)")
             QuitIntent.shared.installPending = true
             self.owner?.ready(version, notes: notes, handler: immediateInstallHandler)
         }
@@ -192,10 +455,22 @@ final class UpdateDelegate: NSObject, SPUUpdaterDelegate {
 
     /// A failed install must not leave the quit flag armed (the next Cmd-Q would quit instead of closing windows).
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        let ns = error as NSError
+        let benign = ns.domain == SUSparkleErrorDomain && (ns.code == Int(SUError.noUpdateError.rawValue) || ns.code == Int(SUError.installationCanceledError.rawValue))
         onMain {
-            QuitIntent.shared.updating = false
-            AppLog.info("updates: aborted: \(error.localizedDescription)")
+            self.owner?.log("sparkle: didAbortWithError domain=\(ns.domain) code=\(ns.code) \(error.localizedDescription)\(benign ? " (not a failure)" : "")")
+            guard !benign else { return }
+            QuitIntent.shared.endUpdateAttempt()
+            self.owner?.sessionOver()
+            let stage = self.owner?.flow.phase.failureStage ?? .check
+            self.owner?.dispatch(.failed(stage: stage, reason: UpdateFlowCopy.failureReason(stage, offline: Self.isOffline(error)), userInitiated: false))
         }
+    }
+
+    static func isOffline(_ error: Error) -> Bool {
+        let ns = error as NSError
+        guard ns.domain == NSURLErrorDomain else { return false }
+        return [NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost, NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost, NSURLErrorTimedOut, NSURLErrorDNSLookupFailed].contains(ns.code)
     }
 
     // MARK: What the panel shows
@@ -203,63 +478,137 @@ final class UpdateDelegate: NSObject, SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         let version = item.displayVersionString
         let notes = ReleaseNotes.bullets(fromHTML: item.itemDescription)
-        onMain { self.owner?.found(version, notes: notes) }
-    }
-
-    func updaterDidNotFindUpdate(_ updater: SPUUpdater) { onMain { self.owner?.cleared() } }
-
-    func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice, forUpdate updateItem: SUAppcastItem, state: SPUUserUpdateState) {
-        if choice == .skip {
-            let version = updateItem.displayVersionString
-            onMain { self.owner?.cleared(skipped: version) }
+        onMain {
+            self.owner?.log("sparkle: didFindValidUpdate \(version) (build \(item.versionString))")
+            self.owner?.found(version, notes: notes)
+            self.owner?.dispatch(.updateFound(version: version))
         }
     }
 
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        onMain {
+            self.owner?.log("sparkle: didNotFindUpdate")
+            self.owner?.cleared()
+            self.owner?.dispatch(.noUpdate)
+        }
+    }
+
+    func updater(_ updater: SPUUpdater, didFinishLoading appcast: SUAppcast) { note("appcast loaded, \(appcast.items.count) items") }
+
+    func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice, forUpdate updateItem: SUAppcastItem, state: SPUUserUpdateState) {
+        let version = updateItem.displayVersionString
+        let name = choice == .skip ? "skip" : (choice == .install ? "install" : "dismiss")
+        onMain {
+            self.owner?.log("sparkle: userDidMakeChoice \(name) \(version) (stage \(state.stage.rawValue), userInitiated \(state.userInitiated))")
+            if choice == .skip {
+                self.owner?.cleared(skipped: version)
+                self.owner?.dispatch(.skipped)
+            }
+        }
+    }
+
+    // MARK: Progress that user-driver callbacks never see (automatic sessions)
+
+    func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
+        let version = item.displayVersionString
+        onMain {
+            self.owner?.log("sparkle: willDownloadUpdate \(version)")
+            self.owner?.dispatch(.downloadBegan(version: version))
+        }
+    }
+
+    func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) { note("didDownloadUpdate \(item.displayVersionString)") }
+
+    func updater(_ updater: SPUUpdater, failedToDownloadUpdate item: SUAppcastItem, error: Error) {
+        let version = item.displayVersionString
+        let ns = error as NSError
+        onMain {
+            self.owner?.log("sparkle: failedToDownloadUpdate \(version) domain=\(ns.domain) code=\(ns.code) \(error.localizedDescription)")
+            self.owner?.dispatch(.failed(stage: .download, reason: UpdateFlowCopy.failureReason(.download, offline: Self.isOffline(error)), userInitiated: false))
+        }
+    }
+
+    func userDidCancelDownload(_ updater: SPUUpdater) {
+        onMain {
+            self.owner?.log("sparkle: userDidCancelDownload")
+            self.owner?.dispatch(.canceledByUser)
+        }
+    }
+
+    func updater(_ updater: SPUUpdater, willExtractUpdate item: SUAppcastItem) {
+        onMain {
+            self.owner?.log("sparkle: willExtractUpdate \(item.displayVersionString)")
+            self.owner?.dispatch(.extractBegan)
+        }
+    }
+
+    func updater(_ updater: SPUUpdater, didExtractUpdate item: SUAppcastItem) { note("didExtractUpdate \(item.displayVersionString)") }
+
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
+        let kind = updateCheck == .updates ? "user check" : (updateCheck == .updatesInBackground ? "background check" : "information check")
+        note("didFinishUpdateCycle (\(kind))\(error.map { ", error: \($0.localizedDescription)" } ?? "")")
+    }
+
+    func updater(_ updater: SPUUpdater, willScheduleUpdateCheckAfterDelay delay: TimeInterval) { note("next scheduled check in \(Int(delay)) s") }
+
+    func updaterWillNotScheduleUpdateCheck(_ updater: SPUUpdater) { note("no further check scheduled") }
 }
 
-enum UpdatePresentationState: Equatable { case idle, permission, checking, available, downloading, installing, installed, error, current }
+enum UpdatePresentationState: Equatable { case idle, permission, checking, available, ready, downloading, installing, error, current }
 
 /// Sparkle calls this for every user-facing update step. The UI owns the replies; Sparkle still
 /// owns appcast validation, EdDSA/archive signature checks, staging, authorization, and installation.
+/// Every step goes into the flow whether or not a person started the session.
 @MainActor
 final class UpdateUserDriver: NSObject, SPUUserDriver {
     weak var owner: AppUpdater?
-    var cancelCurrent: (() -> Void)?
+    var cancelCurrent: (() -> Void)? { didSet { owner?.setCancellable(cancelCurrent != nil) } }
     var updateChoice: ((SPUUserUpdateChoice) -> Void)?
     private var expected: UInt64 = 0
     private var received: UInt64 = 0
-    private var userInitiatedSession = false
+    private var lastPercent = -1
+    private var lastExtractPercent = -1
     init(owner: AppUpdater) { self.owner = owner }
+
+    private func log(_ line: String) { owner?.log("driver: \(line)") }
+
     func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+        log("permission request")
         guard let owner else {
             reply(SUUpdatePermissionResponse(automaticUpdateChecks: false, automaticUpdateDownloading: NSNumber(value: false), sendSystemProfile: false))
             return
         }
-        owner.permissionAction = { [weak owner] allow in
+        owner.offerPermission { [weak owner] allow in
             let checks = allow
             reply(SUUpdatePermissionResponse(automaticUpdateChecks: checks, automaticUpdateDownloading: NSNumber(value: checks && (owner?.automaticallyInstalls ?? true)), sendSystemProfile: false))
         }
-        owner.show(.permission, title: "Keep Squeak up to date?", detail: "Squeak can check for updates and download them in the background. You can change this any time in Settings.")
     }
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
-        userInitiatedSession = true
+        log("user-initiated check")
         cancelCurrent = cancellation
-        owner?.show(.checking, title: "Checking for updates", detail: "Looking for the latest version of Squeak.")
+        owner?.dispatch(.checkBegan(userInitiated: true))
     }
     func showUpdateFound(with item: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
         cancelCurrent = nil
         guard let owner else { reply(.dismiss); return }
         let version = item.displayVersionString
         let notes = ReleaseNotes.bullets(fromHTML: item.itemDescription)
+        log("update found \(version) (userInitiated \(state.userInitiated), stage \(state.stage.rawValue), infoOnly \(item.isInformationOnlyUpdate))")
         owner.found(version, notes: notes)
         owner.informationOnly = item.isInformationOnlyUpdate
         owner.informationURL = item.infoURL
-        // Scheduled checks update the app's existing quiet banner. Only a person asking to check
-        // opens the custom window; Sparkle's modal is never used.
-        userInitiatedSession = state.userInitiated
+        owner.dispatch(.updateFound(version: version))
+        // The person already pressed Install (it waited for this offer): say yes now.
+        if owner.acceptOnOffer, !item.isInformationOnlyUpdate {
+            owner.acceptOnOffer = false
+            log("accepting the offered update: the person asked for it")
+            reply(.install)
+            return
+        }
+        // A scheduled check only updates the app's quiet banner and gives the offer back; Sparkle's modal is never used.
         guard state.userInitiated else { reply(.dismiss); return }
+        // A person's check: hold the offer until they press Install (banner, Settings or the update window).
         updateChoice = reply
-        owner.show(.available, title: item.isInformationOnlyUpdate ? "Squeak \(version) is available" : "Squeak \(version) is ready", detail: notes.first ?? (item.isInformationOnlyUpdate ? "Read about this version." : "A newer version is available."))
     }
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {
         guard let html = String(data: downloadData.data, encoding: .utf8) else { return }
@@ -267,66 +616,80 @@ final class UpdateUserDriver: NSObject, SPUUserDriver {
         if !notes.isEmpty { owner?.availableNotes = notes }
     }
     func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {
-        guard userInitiatedSession else { return }
-        owner?.show(.available, title: "Update available", detail: error.localizedDescription)
+        log("release notes failed: \(error.localizedDescription)")
     }
     func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        log("no update found: \(error.localizedDescription)")
+        // Acknowledge at once: Sparkle's session stays open (and every later press is a no-op) until this is called.
+        acknowledgement()
         owner?.cleared()
-        let reason = error.localizedDescription
-        guard let owner else { acknowledgement(); return }
-        owner.acknowledgementAction = acknowledgement
-        owner.show(.current, title: "You’re up to date", detail: "Squeak \(AppModel.appVersion) is the latest version. \(reason)")
+        owner?.dispatch(.noUpdate)
     }
     func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
-        guard let owner else { acknowledgement(); return }
-        owner.acknowledgementAction = acknowledgement
-        let nsError = error as NSError
-        let detail = nsError.localizedRecoverySuggestion.map { "\(error.localizedDescription)\n\($0)" } ?? error.localizedDescription
-        owner.show(.error, title: "Update couldn’t finish", detail: detail)
+        let ns = error as NSError
+        log("error: domain=\(ns.domain) code=\(ns.code) \(error.localizedDescription) \(ns.localizedRecoverySuggestion ?? "")")
+        acknowledgement()
+        let stage = owner?.flow.phase.failureStage ?? .check
+        owner?.sessionOver()
+        owner?.dispatch(.failed(stage: stage, reason: UpdateFlowCopy.failureReason(stage, offline: UpdateDelegate.isOffline(error)), userInitiated: true))
     }
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
-        cancelCurrent = cancellation; expected = 0; received = 0
-        guard userInitiatedSession else { return }
-        owner?.show(.downloading, title: "Downloading update", detail: "Preparing a verified update.")
+        cancelCurrent = cancellation; expected = 0; received = 0; lastPercent = -1
+        log("download initiated")
+        owner?.dispatch(.downloadBegan(version: nil))
     }
-    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) { expected = expectedContentLength; updateDownloadProgress() }
+    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
+        expected = expectedContentLength
+        log("download size \(expectedContentLength) bytes")
+        updateDownloadProgress()
+    }
     func showDownloadDidReceiveData(ofLength length: UInt64) { received += length; updateDownloadProgress() }
     private func updateDownloadProgress() {
-        guard userInitiatedSession else { return }
         let value = expected > 0 ? min(1, Double(received) / Double(expected)) : nil
-        owner?.show(.downloading, title: "Downloading update", detail: value.map { "\(Int($0 * 100))% downloaded" } ?? "Downloading a verified update.", progress: value)
+        let percent = value.map { Int($0 * 100) } ?? -1
+        // A progress event per data chunk would redraw the banner hundreds of times a second.
+        guard percent != lastPercent else { return }
+        lastPercent = percent
+        owner?.dispatch(.downloadProgress(value))
     }
     func showDownloadDidStartExtractingUpdate() {
-        guard userInitiatedSession else { return }
-        owner?.show(.installing, title: "Preparing update", detail: "Verifying and unpacking Squeak.")
+        cancelCurrent = nil; lastExtractPercent = -1
+        log("extraction started")
+        owner?.dispatch(.extractBegan)
     }
     func showExtractionReceivedProgress(_ progress: Double) {
-        guard userInitiatedSession else { return }
-        owner?.show(.installing, title: "Preparing update", detail: "Getting Squeak ready to install.", progress: progress)
+        let percent = Int(progress * 100)
+        guard percent != lastExtractPercent else { return }
+        lastExtractPercent = percent
+        owner?.dispatch(.extractProgress(progress))
     }
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        guard userInitiatedSession else { reply(.dismiss); return }
-        updateChoice = reply
-        owner?.show(.available, title: "Update is ready", detail: "Squeak will restart to finish installing.")
+        log("ready to install and relaunch")
+        // Hold the reply: "Restart to update" answers it. Replying here would restart the app the moment
+        // the download ends, and dismissing would leave the person with no way to restart from the banner.
+        guard let owner else { reply(.dismiss); return }
+        let version = owner.flow.knownVersion ?? owner.availableVersion
+        owner.ready(version, notes: owner.availableNotes, handler: { reply(.install) })
     }
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
-        guard userInitiatedSession else { return }
-        owner?.applicationTerminated = applicationTerminated
-        owner?.retryInstallation = applicationTerminated ? nil : retryTerminatingApplication
-        owner?.show(.installing, title: "Installing update", detail: applicationTerminated ? "Squeak will reopen when the update is complete." : "Squeak needs to close before the update can finish.")
+        log("installing (applicationTerminated \(applicationTerminated))")
+        owner?.setRetryInstallation(applicationTerminated ? nil : retryTerminatingApplication)
+        owner?.dispatch(.installBegan)
     }
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
-        guard userInitiatedSession else { acknowledgement(); return }
-        guard let owner else { acknowledgement(); return }
-        owner.acknowledgementAction = acknowledgement
-        owner.show(.installed, title: "Update installed", detail: relaunched ? "Squeak has reopened with the latest version." : "Squeak is updated and ready to use.")
+        log("installed (relaunched \(relaunched))")
+        acknowledgement()
+        owner?.dispatch(.installed)
     }
     func dismissUpdateInstallation() {
-        cancelCurrent = nil; updateChoice = nil; userInitiatedSession = false
-        owner?.acknowledgementAction = nil; owner?.retryInstallation = nil
-        owner?.closeUpdateWindow()
+        log("session dismissed")
+        cancelCurrent = nil; updateChoice = nil
+        owner?.setRetryInstallation(nil)
     }
-    func showUpdateInFocus() { owner?.updateWindow?.present(focus: true) }
+    func showUpdateInFocus() {
+        log("show update in focus")
+        owner?.showWindowInFocus()
+    }
 }
 
 @MainActor
@@ -345,11 +708,15 @@ final class UpdateWindowController {
         window.standardWindowButton(.closeButton)?.isHidden = true
         window.contentView = NSHostingView(rootView: UpdateStatusView(owner: owner))
     }
-    func present(focus: Bool) {
-        if !window.isVisible { window.center(); window.orderFront(nil) }
-        guard focus else { return }
+    /// Brings the window to the front. Squeak is an accessory app: like every other window it first asks for the
+    /// regular activation policy (`willShowWindow`), or macOS 14+ may ignore the activation and the window opens
+    /// behind whatever is in front, which reads as "nothing happened".
+    func present() {
+        ActivationPolicyController.shared.willShowWindow()
+        if !window.isVisible { window.center() }
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        window.orderFrontRegardless()
+        if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
     }
     func resize(for state: UpdatePresentationState) {
         let size = NSSize(width: 480, height: UpdateStatusView.height(for: state))
@@ -377,14 +744,15 @@ private struct UpdateStatusView: View {
         case .checking: "CHECKING FOR UPDATES"
         case .downloading: "DOWNLOADING"
         case .installing: "GETTING READY"
-        case .installed, .current: "ALL UP TO DATE"
+        case .current: "ALL UP TO DATE"
+        case .ready: "READY TO INSTALL"
         case .error: "UPDATE PAUSED"
         case .idle: "SQUEAK FOR MAC"
         }
     }
     private var stateSymbol: String {
         switch owner.presentation {
-        case .installed, .current: "checkmark"
+        case .current: "checkmark"
         case .error: "exclamationmark"
         case .permission: "arrow.triangle.2.circlepath"
         default: "arrow.down"
@@ -528,54 +896,56 @@ private struct UpdateStatusView: View {
     }
 
     @ViewBuilder private var actions: some View {
-        if owner.presentation == .permission {
+        switch owner.presentation {
+        case .permission:
             Button("Not now") { owner.respondToPermission(false) }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
             Spacer()
             Button("Enable Updates") { owner.respondToPermission(true) }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-        } else if owner.presentation == .available && owner.informationOnly {
-            Button("Later") { dismiss() }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
+        case .available where owner.informationOnly:
+            Button("Later") { owner.later() }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
             Spacer()
-            Button("View Details") {
-                if let url = owner.informationURL { NSWorkspace.shared.open(url) }
-                dismiss()
-            }.buttonStyle(UpdatePrimaryButtonStyle()).disabled(owner.informationURL == nil).keyboardShortcut(.defaultAction)
-        } else if owner.presentation == .available {
+            Button("View Details") { owner.install(); owner.later() }
+                .buttonStyle(UpdatePrimaryButtonStyle()).disabled(owner.informationURL == nil).keyboardShortcut(.defaultAction)
+        case .available:
             Menu {
-                Button("Skip This Version") { owner.installChoice?(.skip); owner.installChoice = nil; owner.closeUpdateWindow() }
+                Button("Skip This Version") { owner.skipVersion() }.disabled(!owner.canSkip)
             } label: {
                 Image(systemName: "ellipsis").frame(width: 26, height: 26).accessibilityLabel("More update options")
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             Spacer()
-            Button("Later") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
-            Button("Install and Restart") { owner.installChoice?(.install); owner.installChoice = nil }
-                .buttonStyle(UpdatePrimaryButtonStyle()).disabled(owner.installChoice == nil).keyboardShortcut(.defaultAction)
-        } else if owner.presentation == .downloading || owner.presentation == .checking {
+            Button("Later") { owner.later() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+            Button("Install") { owner.install() }
+                .buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+        case .ready:
+            Button("Later") { owner.closeUpdateWindowOnly() }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Restart to update") { owner.installNow() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+        case .downloading, .checking:
             Text("Squeak for Mac").font(Typo.meta).foregroundStyle(Theme.subtle)
             Spacer()
-            Button(owner.presentation == .downloading ? "Cancel Download" : "Cancel") { owner.cancelUpdate(); owner.closeUpdateWindow() }
-                .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
-        } else if owner.presentation == .installing {
+            if owner.actions.contains(.cancel) {
+                Button("Cancel") { owner.cancel() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+            }
+            Button("Hide") { owner.closeUpdateWindowOnly() }.buttonStyle(SecondaryButtonStyle())
+        case .installing:
             Text("Squeak will reopen when it’s ready.").font(Typo.meta).foregroundStyle(Theme.muted)
             Spacer()
             if owner.retryInstallation != nil {
                 Button("Try Again") { owner.retryInstallation?() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+            } else {
+                Button("Hide") { owner.closeUpdateWindowOnly() }.buttonStyle(SecondaryButtonStyle())
             }
-        } else {
+        case .error:
+            Button("Done") { owner.dismissStatus(); owner.closeUpdateWindowOnly() }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Download manually") { owner.downloadManually() }.buttonStyle(SecondaryButtonStyle())
+            Button("Try again") { owner.retry() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+        case .current, .idle:
             Text("Squeak for Mac").font(Typo.meta).foregroundStyle(Theme.subtle)
             Spacer()
-            Button("Done") {
-                if owner.presentation == .current || owner.presentation == .error || owner.presentation == .installed {
-                    owner.acknowledgeAndClose()
-                } else { owner.closeUpdateWindow() }
-            }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+            Button("Done") { owner.dismissStatus(); owner.closeUpdateWindowOnly() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
         }
-    }
-
-    private func dismiss() {
-        owner.installChoice?(.dismiss)
-        owner.installChoice = nil
-        owner.closeUpdateWindow()
     }
 }
 
@@ -622,29 +992,32 @@ struct UpdateNotesDisclosure: View {
 extension AppUpdater {
     /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=update: every update state, in both appearances.
     static func captureUpdateUI(prefix: String) async {
-        let owner = AppUpdater()
-        owner.userDriver = UpdateUserDriver(owner: owner)
-        owner.installChoice = { _ in }
-        owner.demoFound("2.12.0", notes: [
+        let notes = [
             "See which agents need you, straight from the menu bar.",
             "Keep your place when switching between conversations.",
             "More reliable replies when your Mac reconnects.",
             "Updates download quietly and are ready on your next restart.",
-        ])
-        let states: [(String, UpdatePresentationState, String, String, Double?)] = [
-            ("available", .available, "Squeak 2.12.0 is ready", "A newer version is available.", nil),
-            ("permission", .permission, "Keep Squeak up to date?", "Squeak can check for updates and download them in the background. You can change this any time in Settings.", nil),
-            ("checking", .checking, "Checking for updates", "Looking for the latest version of Squeak.", nil),
-            ("downloading", .downloading, "Downloading update", "64% downloaded", 0.64),
-            ("installing", .installing, "Preparing update", "Verifying and unpacking Squeak.", nil),
-            ("current", .current, "You’re up to date", "Squeak is the latest version.", nil),
-            ("installed", .installed, "Update installed", "Squeak has reopened with the latest version.", nil),
-            ("error", .error, "Update couldn’t finish", "The download could not be completed. Check your internet connection and try again.", nil),
+        ]
+        let states: [(String, [UpdateFlow.Event], Bool)] = [
+            ("available", [.updateFound(version: "2.12.0")], false),
+            ("permission", [], true),
+            ("checking", [.checkBegan(userInitiated: true), .checkRequested(sparkle: .idle)], false),
+            ("downloading", [.updateFound(version: "2.12.0"), .downloadBegan(version: "2.12.0"), .downloadProgress(0.64)], false),
+            ("installing", [.updateFound(version: "2.12.0"), .extractBegan], false),
+            ("ready", [.staged(version: "2.12.0")], false),
+            ("current", [.checkRequested(sparkle: .idle), .noUpdate], false),
+            ("error", [.updateFound(version: "2.12.0"), .downloadBegan(version: "2.12.0"),
+                       .failed(stage: .download, reason: UpdateFlowCopy.failureReason(.download, offline: true), userInitiated: true)], false),
         ]
         for (tone, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
             NSApp.appearance = NSAppearance(named: appearance)
-            for (name, state, title, detail, progress) in states {
-                owner.show(state, title: title, detail: detail, progress: progress)
+            for (name, events, permission) in states {
+                let owner = AppUpdater()
+                owner.userDriver = UpdateUserDriver(owner: owner)
+                owner.found("2.12.0", notes: notes)
+                for e in events { owner.flow.handle(e, now: Date()) }
+                if permission { owner.permissionAction = { _ in } }
+                let state = owner.presentation
                 let host = NSHostingView(rootView: UpdateStatusView(owner: owner))
                 host.appearance = NSAppearance(named: appearance)
                 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: UpdateStatusView.height(for: state)),

@@ -20,6 +20,9 @@ public enum QuitPolicy {
         return hasAppWindows ? .closeWindows : .quit
     }
 
+    /// Whether Sparkle may reopen the app once it has installed: never after a quit the person chose.
+    public static func shouldRelaunchAfterUpdate(explicitQuit: Bool, userQuit: Bool) -> Bool { !(explicitQuit || userQuit) }
+
     /// Whether a marker for the next launch should be written as the app quits: for an update's
     /// quit, and for a plain quit while an update waits to install on it.
     public static func shouldSaveRestore(decision: Decision, updating: Bool, installPending: Bool) -> Bool {

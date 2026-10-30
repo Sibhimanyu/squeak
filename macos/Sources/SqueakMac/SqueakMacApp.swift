@@ -61,8 +61,8 @@ struct SqueakCommands: Commands {
                 .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(after: .appInfo) {
-            Button("Check for updates…") { model.updater.checkForUpdates() }
-                .disabled(!model.updater.canCheck)
+            Button("Check for updates…") { model.updater.checkForUpdates(presenting: true) }
+                .disabled(!model.updater.canCheck && !model.updater.isBusy)
         }
         CommandGroup(replacing: .sidebar) {
             Button("Toggle Sidebar") {
@@ -137,13 +137,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let decision = QuitPolicy.decide(
             explicitQuit: intent.explicitQuit, systemQuit: isQuitEvent && QuitPolicy.isSystemQuitReason(reason),
             updating: intent.updating, hasAppWindows: NSApp.windows.contains(where: ActivationPolicyController.isAppWindow))
+        UpdateLog.standard.write("quit: decision=\(decision == .quit ? "quit" : "closeWindows") explicit=\(intent.explicitQuit) system=\(isQuitEvent && QuitPolicy.isSystemQuitReason(reason)) updating=\(intent.updating) installPending=\(intent.installPending) userQuit=\(intent.userQuit)")
         switch decision {
         case .quit:
             // A quit the person chose (not Sparkle's own) must stay a quit: an update staged to install on it
             // installs, but never reopens the app or arms the relaunch watcher.
             if !intent.updating { intent.userQuit = true }
             if QuitPolicy.shouldSaveRestore(decision: decision, updating: intent.updating, installPending: intent.installPending) {
-                AppModel.shared.saveUpdateRestore()
+                AppModel.shared.saveUpdateRestore(restartAttempt: intent.updating)
             }
             return .terminateNow
         case .closeWindows:
@@ -174,7 +175,28 @@ final class QuitIntent {
     /// person chose to quit.
     func beginUpdateQuit() {
         updating = true
-        if !explicitQuit, !userQuit { RelaunchWatchdog.arm() }
+        let relaunch = QuitPolicy.shouldRelaunchAfterUpdate(explicitQuit: explicitQuit, userQuit: userQuit)
+        UpdateLog.standard.write("quit: update quit begins, relaunch=\(relaunch)")
+        if relaunch { RelaunchWatchdog.arm() }
+    }
+
+    /// The person pressed "Restart to update". That is a choice to restart, not to quit, so any earlier quit flags
+    /// (a quit that never completed) are cleared: the app must come back, and the watchdog is armed for this
+    /// attempt alone.
+    func beginUserRestart() {
+        explicitQuit = false
+        userQuit = false
+        beginUpdateQuit()
+    }
+
+    /// An update attempt ended without the app quitting (an error, a timeout, an aborted install). Put every flag
+    /// back so a later quit behaves, and cancel the watchdog so it cannot reopen the app after one.
+    func endUpdateAttempt() {
+        UpdateLog.standard.write("quit: update attempt ended, flags reset (updating=\(updating) userQuit=\(userQuit) explicit=\(explicitQuit))")
+        updating = false
+        userQuit = false
+        explicitQuit = false
+        RelaunchWatchdog.disarm()
     }
 
     func quitCompletely() {

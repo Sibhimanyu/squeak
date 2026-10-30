@@ -116,10 +116,8 @@ struct PopupMoreMenu: View {
             Divider()
             Button("Settings…", systemImage: "gearshape") { dismiss(); model.openSettings() }
                 .keyboardShortcut(",")
-            Button("Check for Updates…", systemImage: "arrow.down.circle") {
-                dismiss(); model.updater.checkForUpdates()
-            }
-            .disabled(!model.updater.canCheck)
+            // The result shows in the panel's banner, so the panel stays open.
+            Button("Check for Updates…", systemImage: "arrow.down.circle") { model.updater.checkForUpdates() }
             Divider()
             Button("Quit Squeak", systemImage: "power") { QuitIntent.shared.quitCompletely() }
                 .keyboardShortcut("q")
@@ -184,16 +182,10 @@ struct PopupHomeTop: View {
     @ViewBuilder private var banners: some View {
         let showHelp = model.health != nil && model.connectionHelp != nil
         let updater = model.updater
-        let showUpdate = updater.readyVersion != nil || updater.availableVersion != nil || model.updateNote != nil
+        let showUpdate = updater.flow.phase != .idle || model.updateNote != nil
         if showHelp || model.launchOfferPending || showUpdate || model.tips.tip != nil {
             VStack(alignment: .leading, spacing: 4) {
-                if let ready = updater.readyVersion {
-                    updateRow("Update \(ready) is ready", action: "Restart to update") { updater.installNow() }
-                    UpdateNotesDisclosure(notes: updater.readyNotes)
-                } else if let available = updater.availableVersion {
-                    updateRow("Update \(available) available", action: "Install") { dismiss(); updater.checkForUpdates() }
-                    UpdateNotesDisclosure(notes: updater.availableNotes)
-                }
+                UpdateBanner(updater: updater)
                 if let note = model.updateNote { updateRow(note, action: "Dismiss") { model.dismissUpdateNote() } }
                 if showHelp, let help = model.connectionHelp {
                     HStack(alignment: .top, spacing: Space.s) {

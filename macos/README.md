@@ -212,6 +212,31 @@ or `swift run`). Info.plist carries `SUFeedURL`
 `SUEnableAutomaticChecks`, `SUScheduledCheckInterval` (86400) and
 `SUAllowsAutomaticUpdates`; the user can turn automatic checks off in Settings, About.
 
+- **One state machine, three surfaces.** What the update is doing lives in `UpdateFlow` (`SqueakMacCore/Updates`,
+  pure, tested, injectable clock): idle, checking, available, downloading, extracting, readyToInstall, installing,
+  relaunching, failed(reason, recovery), upToDate. `AppUpdater` (`Updater.swift`) is a thin adapter: every Sparkle
+  callback (user driver and updater delegate, so Sparkle's silent automatic sessions show progress too) and every tap
+  goes in as an event; the flow's commands (start a check, accept the offer, install now, cancel, end the attempt)
+  come back out. The popup banner and Settings › About › Updates (`UpdateBanner`) and the update window (the app
+  menu's "Check for updates…", the permission prompt) all draw the same flow: Update X available [Install] >
+  Downloading X… 42% [Cancel] > Preparing X… > Update X is ready [Restart to update] > Restarting Squeak…; a failure
+  is one plain sentence with [Try again] [Download manually] [Dismiss] (the DMG at
+  `https://sibhimanyu.github.io/squeak/download/Squeak-<version>.dmg`).
+- **A press is never a silent no-op.** `SPUUpdater.checkForUpdates()` returns without a word while a session runs
+  (Sparkle's automatic driver holds one from the download until the app quits) and offers no way to join or cancel
+  it. So Install/Check while Sparkle is busy attach to the running progress and queue what was asked for (it runs when
+  `canCheckForUpdates` turns true), and a press that cannot start says so. Timeouts: checking 60 s, a download with no
+  progress for 90 s, extracting 120 s, installing 120 s, relaunching 120 s; each moves to `failed`, cancels what
+  Sparkle lets us cancel and resets the quit flags.
+- **Restart to update must come back.** `QuitIntent.beginUserRestart()` clears stale quit flags, then
+  `RelaunchWatchdog` is armed per attempt with its own token file (a new attempt replaces the old; a failed or
+  timed-out attempt is disarmed, so it can never reopen the app after a later quit the person chose). The script
+  opens Squeak if nothing reopened it (and once more a few seconds later), logging to `updates.log`. Sparkle 2.3+
+  lets the staged-install block run more than once, so it is kept until the session ends or aborts. If the app comes
+  back on the same version within 15 minutes of a "Restart to update", the flow says the install did not happen.
+  A quit the person chose never reopens the app (`QuitPolicy.shouldRelaunchAfterUpdate`).
+- **`~/Library/Logs/Squeak Mac/updates.log`** (capped at ~200 KB, redacted, only in the real app) records every
+  Sparkle callback, state change, tap, timeout, quit decision and watchdog step; "Copy diagnostics" includes its tail.
 - The update archive is the release DMG. Sparkle accepts it only if its EdDSA
   signature matches `SUPublicEDKey`; the app's own code signature is not what
   protects updates (it only keeps the Input Monitoring grant: see Signing).

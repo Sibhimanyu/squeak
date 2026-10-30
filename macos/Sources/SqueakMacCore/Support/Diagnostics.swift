@@ -64,12 +64,15 @@ public struct DiagnosticsInput: Sendable {
     public var stateCounts: [SessionState: Int]
     public var lastUpdateCheck: Date?
     public var logLines: [String]
+    /// The newest lines of `updates.log` (already plain wording and versions).
+    public var updateLogLines: [String]
     public var now: Date
 
     public init(
         appVersion: String, osVersion: String, adapters: [Adapter], stateCounts: [SessionState: Int],
-        lastUpdateCheck: Date?, logLines: [String], now: Date = Date()
+        lastUpdateCheck: Date?, logLines: [String], updateLogLines: [String] = [], now: Date = Date()
     ) {
+        self.updateLogLines = updateLogLines
         self.appVersion = appVersion; self.osVersion = osVersion; self.adapters = adapters
         self.stateCounts = stateCounts; self.lastUpdateCheck = lastUpdateCheck; self.logLines = logLines; self.now = now
     }
@@ -113,6 +116,9 @@ public enum DiagnosticsReport {
         out.append("")
         out.append("Log (last \(min(50, input.logLines.count)) lines, redacted)")
         for l in input.logLines.suffix(50) { out.append("  " + DiagnosticsRedactor.redact(l)) }
+        out.append("")
+        out.append("Update log (last \(min(80, input.updateLogLines.count)) lines, redacted)")
+        for l in input.updateLogLines.suffix(80) { out.append("  " + DiagnosticsRedactor.redact(l)) }
         return out.joined(separator: "\n")
     }
 }
