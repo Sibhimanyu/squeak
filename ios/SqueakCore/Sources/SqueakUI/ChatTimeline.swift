@@ -354,6 +354,9 @@ enum ChatTimeline {
         rows = merged(history, tail: rows, steerTexts: steps.filter { $0.kind == "you" }.map(\.text) + steers.map(\.text), isWorking: isWorking, pinned: pinned)
         if isWorking {
             rows += turn(steps: steps, steers: steers.map(settled), truncated: total > steps.count, total: total, agentName: agentName)
+            if session.compacting == true, let last = rows.indices.last, case .working(_, let shown) = rows[last] {
+                rows[last] = .working(label: "Compacting the conversation…", steps: shown)
+            }
         }
         return rows.isEmpty ? [.empty(emptyText(canReply: Presentation.replyBlock(session) == nil))] : rows
     }

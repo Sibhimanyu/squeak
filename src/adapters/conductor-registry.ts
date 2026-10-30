@@ -1348,6 +1348,44 @@ export class ConductorRegistryAdapter {
       .all(sessionId, afterRowId, limit) as Array<{ content: string; rowId: number; turnId: string | null }>;
   }
 
+  /**
+   * Claude is compacting this chat's context now: its newest row is the `status: "compacting"` event, with
+   * no `compact_boundary`, turn result or message after it (any of those means it is over or abandoned).
+   * Conductor's own `is_compacting` column read 0 while a chat compacted, so the rows are the evidence. A
+   * status older than `maxAgeMs` is a compaction nobody finished.
+   */
+  isCompacting(sessionId: string, now = Date.now(), maxAgeMs = 30 * 60_000): boolean {
+    const rows = this.db
+      .prepare(
+        `SELECT content, sent_at as sentAt FROM session_messages
+         WHERE session_id = ? AND cancelled_at IS NULL ORDER BY rowid DESC LIMIT 12`,
+      )
+      .all(sessionId) as Array<{ content: string; sentAt: string | null }>;
+    for (const row of rows) {
+      let type: unknown;
+      let subtype: unknown;
+      let status: unknown;
+      try {
+        const parsed = JSON.parse(row.content) as Record<string, unknown>;
+        ({ type, subtype, status } = parsed);
+      } catch {
+        return false;
+      }
+      if (type === "system") {
+        if (subtype === "compact_boundary") {
+          return false;
+        }
+        if (subtype === "status" && status === "compacting") {
+          const at = Date.parse(conductorTimestampToIso(row.sentAt) ?? "");
+          return Number.isFinite(at) && now - at < maxAgeMs;
+        }
+        continue;
+      }
+      return false;
+    }
+    return false;
+  }
+
   listSessionMessages(sessionId: string, limit: number): SessionMessageRecord[] {
     return this.db
       .prepare(

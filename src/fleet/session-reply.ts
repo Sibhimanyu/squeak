@@ -258,6 +258,11 @@ export class ConductorReplier {
     return this.deps.registry.listSessionMessages(sessionId, 1)[0]?.turnId ?? null;
   }
 
+  /** Claude is compacting this chat's context right now (see `ConductorRegistry.isCompacting`). */
+  isCompacting(sessionId: string): boolean {
+    return this.deps.registry.isCompacting(sessionId);
+  }
+
   isReplying(sessionId: string): boolean {
     return [...this.active.values()].some((reply) => reply.sessionId === sessionId);
   }

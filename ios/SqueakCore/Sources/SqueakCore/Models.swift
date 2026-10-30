@@ -117,6 +117,8 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Working, but nothing from the model (or only API retries) for long enough that it seems stuck: what
         /// it waits on ("model" or "api") and since when. Only from a Mac new enough to send it.
         public var stalled: Stalled? = nil
+        /// Claude is compacting the chat's context right now. Only from a Mac new enough to send it.
+        public var compacting: Bool? = nil
         /// The chat's Conductor workspace. Only from a Mac new enough to send it.
         public var workspaceId: String? = nil
         /// While it works: the chat's subagents and background shells, running or just ended. Only from a Mac
@@ -219,7 +221,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             switch state {
             case "awaiting_approval": return "needs approval"
             case "awaiting_input": return "needs an answer"
-            case "working": return stalled == nil ? "working" : "seems stuck"
+            case "working": return stalled != nil ? "seems stuck" : compacting == true ? "compacting" : "working"
             case "finished": return "done"
             case "error": return "error"
             default: return "idle"

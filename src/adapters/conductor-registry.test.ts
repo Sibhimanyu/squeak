@@ -808,6 +808,27 @@ describe("ConductorRegistryAdapter", () => {
     expect(byId.get("x")).toMatchObject({ effortLevel: "xhigh", fastMode: false });
   });
 
+  it("says a chat is compacting only while the compacting status is its newest row", () => {
+    const { adapter, db } = createRegistryFixture();
+    const insert = db.prepare(
+      `INSERT INTO session_messages (id, session_id, role, content, sent_at) VALUES (?, ?, ?, ?, ?);`,
+    );
+    const now = Date.parse("2026-10-30T10:00:00.000Z");
+    const compacting = '{"type":"system","subtype":"status","status":"compacting"}';
+    insert.run("a-1", "a", "assistant", '{"type":"assistant","message":{"content":[]}}', "2026-10-30T09:59:00.000Z");
+    insert.run("a-2", "a", "assistant", compacting, "2026-10-30T09:59:30.000Z");
+    insert.run("b-1", "b", "assistant", compacting, "2026-10-30T09:59:00.000Z");
+    insert.run("b-2", "b", "assistant", '{"type":"system","subtype":"compact_boundary"}', "2026-10-30T09:59:30.000Z");
+    insert.run("c-1", "c", "assistant", compacting, "2026-10-30T09:00:00.000Z");
+    insert.run("d-1", "d", "assistant", compacting, "2026-10-30T09:59:00.000Z");
+    insert.run("d-2", "d", "assistant", '{"type":"result","subtype":"success"}', "2026-10-30T09:59:30.000Z");
+    expect(adapter.isCompacting("a", now)).toBe(true);
+    expect(adapter.isCompacting("b", now)).toBe(false);
+    // Nobody finished it: too old to believe.
+    expect(adapter.isCompacting("c", now)).toBe(false);
+    expect(adapter.isCompacting("d", now)).toBe(false);
+  });
+
   it("reports how each chat's latest turn ended, from the row the agent writes at the end of it", () => {
     const { adapter, db } = createRegistryFixture();
     db.prepare(

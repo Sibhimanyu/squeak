@@ -607,6 +607,8 @@ export interface ChannelStore {
 export interface RemoteReplier {
   lastTurnText(sessionId: string): string | null;
   lastTurnId(sessionId: string): string | null;
+  /** Claude is compacting the chat's context now; absent on a replier that cannot tell. */
+  isCompacting?(sessionId: string): boolean;
   /** Why the newest turn failed, in the agent's words; absent or null when unknown. */
   lastTurnError?(sessionId: string): string | null;
   send(
@@ -3922,6 +3924,10 @@ export class RemoteBridge {
       // waits on and since when, so the phone can say so and offer Stop. Absent otherwise; older phones ignore it.
       ...(isStalled(session, this.now()) && session.waitingSince
         ? { stalled: { on: session.waitingOn === "api" ? "api" : "model", since: session.waitingSince } }
+        : {}),
+      // Claude is compacting this chat's context: the phone says so instead of a bare "working". Older phones ignore it.
+      ...(session.state === "working" && conductorSessionId && this.deps.replier.isCompacting?.(conductorSessionId)
+        ? { compacting: true }
         : {}),
       // A finished turn that closes on a question for you ("Want me to open a PR?"): the phone shows it as
       // needing you while the chat stays replyable. Absent otherwise; older phones ignore it and show "done".
