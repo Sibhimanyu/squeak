@@ -38,7 +38,7 @@ enum Metrics {
     static let sidebarRowGap: CGFloat = 8
     static let sidebarRadius: CGFloat = 10
     static let sidebarText: CGFloat = 14
-    static let sidebarIcon: CGFloat = 16
+    static let sidebarIcon: CGFloat = 20
     static let field: CGFloat = 28
     static let button: CGFloat = 26
     static let segmented: CGFloat = 26

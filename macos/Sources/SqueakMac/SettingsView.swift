@@ -214,7 +214,7 @@ struct SettingsSidebar: View {
                 Group { if section == .conductor { AgentMark(.conductor, size: Metrics.sidebarIcon) } else {
                     Lucide(section.symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted)
                 } }
-                    .frame(width: 20)
+                    .frame(width: Metrics.sidebarIcon)
                 if !isCollapsed {
                     Text(verbatim: section.title)
                         .font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular))
@@ -241,7 +241,7 @@ struct SettingsSidebar: View {
             Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, Metrics.sidebarInset)
             Button { model.closeSettings() } label: {
                 HStack(spacing: 12) {
-                    Lucide(.chevronLeft, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 20)
+                    Lucide(.chevronLeft, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: Metrics.sidebarIcon)
                     if !isCollapsed { Text("Back to sessions").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink); Spacer(minLength: 0) }
                 }
                 .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)

@@ -233,11 +233,6 @@ struct SettingsView: View {
                                 .frame(minHeight: 44)
                                 .accessibilityIdentifier("new-chat-presets")
                         }
-                        if snapshot.presets != nil, !(snapshot.chatModels ?? []).isEmpty {
-                            NavigationLink { ChatPresetsSettingsView() } label: { Label("New chat presets", systemImage: "sparkles") }
-                                .frame(minHeight: 44)
-                                .accessibilityIdentifier("new-chat-presets")
-                        }
                         if snapshot.voice != nil {
                             NavigationLink { VoiceSettingsView() } label: { Label("Phone calls", systemImage: "phone") }
                                 .frame(minHeight: 44)

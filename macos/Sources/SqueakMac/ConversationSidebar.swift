@@ -378,7 +378,7 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: Metrics.sidebarRowGap) {
                     Button { NewChatController.shared.show() } label: {
                         HStack(spacing: 12) {
-                            Lucide(.plus, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 20)
+                            Lucide(.plus, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: Metrics.sidebarIcon)
                             if !isCollapsed {
                                 Text("New chat").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink)
                                 Spacer(minLength: 0)
@@ -440,9 +440,9 @@ struct SidebarView: View {
         return Button { NewChatController.shared.hide(); model.navFilter = f; model.projectFilter = nil } label: {
             HStack(spacing: 12) {
                 if let mark {
-                    AgentMark(mark, size: Metrics.sidebarIcon).frame(width: 20)
+                    AgentMark(mark, size: Metrics.sidebarIcon).frame(width: Metrics.sidebarIcon)
                 } else {
-                    Lucide(symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted).frame(width: 20)
+                    Lucide(symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted).frame(width: Metrics.sidebarIcon)
                 }
                 if !isCollapsed {
                     Text(verbatim: title).font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular)).foregroundStyle(Theme.ink)
@@ -483,7 +483,7 @@ struct SidebarView: View {
         VStack(alignment: isCollapsed ? .center : .leading, spacing: Metrics.sidebarRowGap) {
             Button { showConnection.toggle() } label: {
                 HStack(spacing: 12) {
-                    Circle().strokeBorder(model.homeConnectionColor, lineWidth: 2.5).frame(width: 16, height: 16).frame(width: 20)
+                    Circle().strokeBorder(model.homeConnectionColor, lineWidth: 2.5).frame(width: Metrics.sidebarIcon, height: Metrics.sidebarIcon)
                     if !isCollapsed {
                         Text(model.homeConnectionText).font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 0)
@@ -498,7 +498,7 @@ struct SidebarView: View {
             .popover(isPresented: $showConnection, arrowEdge: .trailing) { ConnectionPopover(dismiss: { showConnection = false }) }
             Button { model.openSettings() } label: {
                 HStack(spacing: 12) {
-                    Lucide(.settings, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: 20)
+                    Lucide(.settings, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: Metrics.sidebarIcon)
                     if !isCollapsed { Text("Settings").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink); Spacer(minLength: 0) }
                 }
                 .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)

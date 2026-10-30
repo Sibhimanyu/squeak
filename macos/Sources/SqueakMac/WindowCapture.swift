@@ -96,11 +96,19 @@ extension CaptureRunner {
         await waitForSidebarWidth(220, in: win)
         if let content = win.contentView { logSidebarWidth(in: content, state: "expanded") }
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-main-expanded.png")
+        win.setContentSize(NSSize(width: 900, height: 600))
+        try? await Task.sleep(for: .milliseconds(500))
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-main-small.png")
+        win.setContentSize(NSSize(width: 1200, height: 800))
 
         model.openSettingsInPlace(.general)
         await waitForSidebarWidth(216, in: win)
         if let content = win.contentView { logSidebarWidth(in: content, state: "Settings expanded") }
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-settings.png")
+        win.setContentSize(NSSize(width: 900, height: 600))
+        try? await Task.sleep(for: .milliseconds(500))
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-settings-small.png")
+        win.setContentSize(NSSize(width: 1200, height: 800))
         await sendCommandBackslash(to: win)
         await waitForSidebarWidth(64, in: win)
         if let content = win.contentView { logSidebarWidth(in: content, state: "Settings collapsed") }

@@ -157,17 +157,17 @@ struct ProjectCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 Button { model.openProject(project.name) } label: {
                 HStack(spacing: 8) {
-                    Text(verbatim: project.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(verbatim: project.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                     Spacer(minLength: 8)
                     if project.needsYouCount > 0 {
-                        Text("\(project.needsYouCount) needs you").font(.system(size: 11, weight: .semibold))
+                        Text("\(project.needsYouCount) needs you").font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Theme.needsYou)
-                            .padding(.horizontal, 8).frame(height: 20)
+                            .padding(.horizontal, 8).frame(height: 22)
                             .background(Theme.needsYou.opacity(0.16), in: Capsule())
                     }
                     Lucide(.chevronRight, size: Metrics.iconSmall, color: Theme.muted)
                 }
-                .padding(.horizontal, 12).frame(height: 40).contentShape(Rectangle())
+                .padding(.horizontal, 12).frame(height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Open project \(project.name)")
@@ -203,24 +203,24 @@ struct HomeSessionRow: View {
         Button { model.select(session.key) } label: {
             HStack(alignment: .top, spacing: 10) {
                 StateDot(state: session.state).frame(width: 10, height: 18)
-                AgentAvatar(session: session, size: 20)
-                VStack(alignment: .leading, spacing: 2) {
+                AgentAvatar(session: session, size: 32)
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(verbatim: SessionText.headline(session)).font(.system(size: Metrics.rowTitle, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Text(verbatim: SessionText.headline(session)).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                         if model.pinned.contains(session.key) { Lucide(.pin, size: 12, label: "Pinned", color: Theme.subtle) }
                     }
-                    Text(verbatim: word).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(verbatim: word).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 TimelineView(.periodic(from: .now, by: 30)) { ctx in
                     if let at = session.lastActivityAt {
                         Text(verbatim: ShortRelativeTime.format(at, now: ctx.date))
-                            .font(.system(size: Metrics.rowMeta)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.muted)
                     }
                 }
                 .padding(.top, 1)
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
+            .padding(.horizontal, 10).padding(.vertical, 12)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selected ? Theme.selected : Theme.surfaceRaised.opacity(hovering ? 0.6 : 0)))
             .padding(.horizontal, 6)
             .contentShape(Rectangle())
