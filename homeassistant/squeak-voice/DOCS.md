@@ -23,6 +23,13 @@ options keeps working with them.
 **Old pairing code.** The `pairing_code` option still works: make a code in Squeak (Settings > Phone calls > Use a
 pairing code instead), paste it in the option and start the add-on, then confirm the four digits it logs.
 
+## Updates
+
+Choose **Open Home Assistant updates** in the Squeak Voice panel to open **Settings > Updates**.
+Use Home Assistant’s **Check for updates** action to refresh available versions, then choose Squeak Voice to review
+and install its update. Home Assistant manages installation and any backup options; the add-on cannot update itself.
+If you do not have permission to manage updates, ask your Home Assistant administrator.
+
 ## Options
 
 | Option         | What                                                                                                                                       |

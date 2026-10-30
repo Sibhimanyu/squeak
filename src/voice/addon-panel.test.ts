@@ -89,6 +89,17 @@ describe("addon panel", () => {
     expect(r.headers["set-cookie"]).toBeUndefined();
   });
 
+  it("opens Home Assistant updates outside the ingress frame, even from an ingress path", async () => {
+    const p = await startPanel(sources(false), { port: 0, host: "127.0.0.1" });
+    stops.push(p.stop);
+    const r = await get(p.port, "/api/hassio_ingress/session/");
+    expect(r.status).toBe(200);
+    expect(r.body).toMatch(/<a [^>]*href="\/config\/updates"[^>]*target="_top"[^>]*>Open Home Assistant updates<\/a>/);
+    // Update navigation requires no browser credentials, Supervisor API proxy or write route.
+    expect(r.body).not.toMatch(/SUPERVISOR_TOKEN|window\.parent|fetch\([^)]*store\//);
+    expect(r.headers["content-security-policy"]).toContain("connect-src 'self'");
+  });
+
   it("refuses an address that is not the Supervisor", async () => {
     const p = await startPanel(sources(false), { port: 0, host: "0.0.0.0" });
     stops.push(p.stop);
