@@ -136,3 +136,51 @@ public enum GatewayText {
         (try? JSONSerialization.data(withJSONObject: ["approve": approve], options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 }
+
+/// What typing the add-on's code came to.
+public enum GatewayClaimOutcome: Sendable, Equatable {
+    /// The add-on answered: now wait for Approve.
+    case found(name: String?, version: String?)
+    /// The daemon's own plain sentence.
+    case refused(String)
+    /// A daemon without the claim route: use the old code-making flow.
+    case unavailable
+}
+
+public enum GatewayClaim {
+    /// `{"code":"K7M2-QX9P"}` with the code normalised to its display form.
+    public static func requestBody(code: String) -> Data {
+        (try? JSONSerialization.data(withJSONObject: ["code": display(code)], options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+
+    /// Uppercase, spaces and dashes dropped, then a dash after 4 characters: "k7m2 qx9p" -> "K7M2-QX9P".
+    public static func display(_ typed: String) -> String {
+        let chars = typed.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(8)
+        let s = String(chars)
+        return s.count > 4 ? s.prefix(4) + "-" + s.dropFirst(4) : s
+    }
+
+    /// A full code is 8 characters.
+    public static func isComplete(_ typed: String) -> Bool {
+        typed.uppercased().filter { $0.isLetter || $0.isNumber }.count == 8
+    }
+
+    public static func outcome(status: Int, body: Data) -> GatewayClaimOutcome {
+        let o = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        let sentence = (o?["error"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        if (200..<300).contains(status), o?["ok"] as? Bool != false {
+            return .found(name: o?["name"] as? String, version: o?["version"] as? String)
+        }
+        // A 404 with a sentence is the daemon saying the code is unknown; without one the route is missing.
+        if status == 404 && sentence == nil { return .unavailable }
+        return .refused(sentence ?? "Squeak could not use that code. Check it and try again.")
+    }
+}
+
+public enum GatewayClaimText {
+    /// "Squeak Voice (add-on 0.9.0) wants to connect."
+    public static func confirm(_ p: GatewayPairing) -> String {
+        let who = (p.name?.isEmpty == false ? p.name! : "Squeak Voice") + (p.version.map { " (add-on \($0))" } ?? "")
+        return "\(who) wants to connect."
+    }
+}

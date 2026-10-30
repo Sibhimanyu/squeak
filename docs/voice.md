@@ -6,12 +6,15 @@ itself, which needs a route to it (home Wi-Fi or a VPN). The gateway wins when b
 
 ## Gateway setup
 
-1. Build and install the add-on (step 2), then in Squeak for Mac: Settings > Phone calls > Add gateway. Copy the code
-   (valid 10 minutes), paste it into the add-on's `pairing_code` option and start it. The add-on logs
-   `Pairing: confirm NNNN on your Mac`; approve in Squeak when the digits match. The Mac makes the channel and key and
-   hands them to the add-on sealed under a key derived from the code (`pair-protocol.ts`); the add-on keeps them in
-   `/data/pairing.json`. The old way, still working: `squeak voice-relay` makes the channel and key (saved to `.env`)
-   and prints `database_url`, `channel` and `key` for the add-on's options.
+1. Build and install the add-on (step 2) and start it. Open the **Squeak Voice** panel in Home Assistant's sidebar: it
+   shows a code like `K7M2-QX9P`. In Squeak for Mac: Settings > Phone calls > Add gateway, type the code, approve.
+   The add-on posts a sealed request on the shared signalling database (`claim-protocol.ts`, `addon-claim.ts`), the
+   Mac seals its channel and key to the add-on's key, and the add-on keeps them in `/data/pairing.json`
+   (design: `.context/claim-flow-contract.md`). The panel (`addon-panel.ts`, ingress port 8099, answers only the
+   Supervisor at 172.30.32.2) also shows SIP registration, PIN state and the recent log, never a key.
+   **Old pairing code:** still works. Make one in Squeak, paste it in the add-on's `pairing_code` option; the add-on
+   logs `Pairing: confirm NNNN on your Mac` (`pair-protocol.ts`). Also old: `squeak voice-relay` makes the channel
+   and key (saved to `.env`) and prints `database_url`, `channel` and `key` for the add-on's options.
 2. `scripts/build-voice-addon.sh` builds `dist-addon/squeak-voice`. Copy that folder to Home Assistant's `/addons`
    share (Samba or SSH add-on), then Settings > Add-ons > Add-on store > menu > Check for updates, and install
    Squeak Voice under Local add-ons. Fill in its SIP options (see its Documentation tab) and start it.

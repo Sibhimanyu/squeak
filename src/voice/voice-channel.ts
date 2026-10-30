@@ -25,6 +25,8 @@ export interface VoiceChannelDependencies {
    */
   canTakeKeys: boolean | (() => boolean);
   policy: CallPolicy;
+  /** True while the person has paused calls (voice/settings.ts); cards still go everywhere else. */
+  paused?: () => boolean;
   graceMs?: number;
   /** A one-off note to Telegram and Cliq: what an answer by phone did, or why a call failed. */
   note: (text: string) => void;
@@ -94,6 +96,10 @@ export class VoiceChannel {
   async ring(item: AttentionItem, episode = this.episode(item)): Promise<void> {
     const current = this.stillWaiting(item);
     if (!current || this.calling) return;
+    if (this.deps.paused?.()) {
+      logger.info("voice call skipped: paused");
+      return;
+    }
     const now = this.now();
     const refusal = this.deps.policy.refusal(episode, now);
     if (refusal) {

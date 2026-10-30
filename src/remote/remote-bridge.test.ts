@@ -4372,6 +4372,20 @@ describe("RemoteBridge phone-call settings from the phone", () => {
     t.bridge.stop();
   });
 
+  it("accepts a pause through voice.apply and refuses an unknown choice", async () => {
+    const t = await voiceT();
+    const paused = await t.bridge.handleCommand(t.config, "p1", t.command({ change: { pause: "1h" } }));
+    expect(paused.result).toEqual({ id: "p1", status: "sent" });
+    expect(t.apply).toHaveBeenLastCalledWith({ pause: "1h" });
+    expect(t.voice.pause()).not.toBeNull();
+    const bad = await t.bridge.handleCommand(t.config, "p2", t.command({ change: { pause: "2h" } }));
+    expect(bad.result).toMatchObject({ id: "p2", status: "refused" });
+    const resumed = await t.bridge.handleCommand(t.config, "p3", t.command({ change: { pause: "resume" } }));
+    expect(resumed.result).toEqual({ id: "p3", status: "sent" });
+    expect(t.voice.pause()).toBeNull();
+    t.bridge.stop();
+  });
+
   it("starts a test call and answers at once, touching no setting", async () => {
     const t = await voiceT();
     const verdict = await t.bridge.handleCommand(t.config, "t1", t.command({ change: { test: true } }));

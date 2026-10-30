@@ -6,6 +6,23 @@
     // (no live thinking, films, voice or Cliq), boxes under 64 KB, and a timestamp, when there is one,
     // within minutes of now. The daemon's own shared-mode limits (src/remote/shared-limits.ts) keep honest
     // installs far below this. Nothing else in the database is readable or writable.
+    // `claims` is the signalling for pairing the Home Assistant add-on by a short code (src/voice/claim-protocol.ts):
+    // one folder per claim, named by a hash of a code only the add-on's screen shows, holding at most a sealed
+    // `req` (the add-on's key) and a sealed `grant` (the Mac's answer). Written once (create or delete, never
+    // rewritten, so the first writer wins), small, and read only by someone who knows the folder name.
+    "claims": {
+      "$claim": {
+        ".read": "$claim.matches(/^[A-Za-z0-9_-]{22}$/)",
+        "$doc": {
+          ".write": "$claim.matches(/^[A-Za-z0-9_-]{22}$/) && ($doc === 'req' || $doc === 'grant') && (!data.exists() || !newData.exists())",
+          ".validate": "newData.hasChildren(['box', 'sig', 'at'])",
+          "box": { ".validate": "newData.isString() && newData.val().length < 2000" },
+          "sig": { ".validate": "newData.isString() && newData.val().length < 512" },
+          "at": { ".validate": "newData.isNumber() && newData.val() > now - 900000 && newData.val() < now + 300000" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
     "channels": {
       "$channel": {
         "$kind": {

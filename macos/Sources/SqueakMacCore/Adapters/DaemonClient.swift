@@ -230,6 +230,20 @@ public struct DaemonClient: Sendable {
         return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
     }
 
+    /// Pauses or resumes calls. nil = a daemon without the route (404).
+    public func setVoicePause(_ choice: VoicePauseChoice) async throws -> VoiceSettings? {
+        let r = try await post("/control/voice", body: choice.requestBody())
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
+    }
+
+    /// Types the add-on's code. `.unavailable` = a daemon without the claim route (404).
+    public func claimGateway(code: String) async throws -> GatewayClaimOutcome {
+        let r = try await post("/control/voice/gateway/claim", body: GatewayClaim.requestBody(code: code), timeout: 20)
+        return GatewayClaim.outcome(status: r.status, body: r.body)
+    }
+
     /// One PIN action (change, turn off, turn on, reset). The PIN is only in the request body, never logged or kept.
     /// `.outdated` = a daemon without the route (404).
     public func pinAction(_ action: PinAction) async throws -> PinOutcome {

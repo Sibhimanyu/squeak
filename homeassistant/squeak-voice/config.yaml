@@ -1,5 +1,5 @@
 name: Squeak Voice
-version: "0.8.0"
+version: "0.9.0"
 slug: squeak_voice
 image: ghcr.io/sibhimanyu/squeak-voice-{arch}
 description: Phones you when a coding agent waits on you, through your 3CX extension; Squeak on your Mac asks for each call through Firebase.
@@ -11,6 +11,11 @@ boot: auto
 init: false
 # SIP and its audio (RTP) must reach the SBC on the LAN without NAT in between.
 host_network: true
+# The Squeak Voice panel in the sidebar: shows the pairing code and the add-on's state.
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:phone-in-talk
+panel_title: Squeak Voice
 options:
   pairing_code: ""
   sip_host: ""

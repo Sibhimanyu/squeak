@@ -82,6 +82,8 @@ import { PinKeeper, type PinPolicy, type PinState } from "../voice/pin-keeper.js
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import { relayLineFor, type RelayLine } from "../voice/relay-line.js";
 import { GatewayPairing } from "../voice/pairing-window.js";
+import { GatewayClaim } from "../voice/gateway-claim.js";
+import { RENDEZVOUS_DATABASE } from "../voice/claim-protocol.js";
 import { CallHistory } from "../voice/call-history.js";
 import { GatewayLogReader } from "../voice/gateway-log.js";
 import { GatewayStatusReader } from "../voice/gateway-status.js";
@@ -625,7 +627,7 @@ export class SqueakApp {
       // Not behind voiceRelay: pairing is how the Mac gets one.
       voiceGateway: {
         read: () => ({
-          pairing: this.gatewayPairing?.view() ?? null,
+          pairing: this.gatewayClaim?.view() ?? this.gatewayPairing?.view() ?? null,
           status: this.gatewayStatusReader().peek(),
         }),
         pair: () => {
@@ -638,12 +640,29 @@ export class SqueakApp {
                 "Pairing needs the phone channel's own Firebase database (not the shared server) to be set up first.",
             };
           }
+          this.gatewayClaim?.stop();
           return { ok: true as const, ...pairing.start() };
         },
+        claim: async (code: string) => {
+          const claim = this.gatewayClaimFor();
+          if (!claim) {
+            return {
+              ok: false as const,
+              status: 503 as const,
+              reason: "Phone calls need your own Firebase (Settings > iPhone)",
+            };
+          }
+          const started = await claim.start(code);
+          if (started.ok) this.gatewayPairing?.stop();
+          return started;
+        },
+        // Whichever flow is open: a code typed on the Mac, or the older code made on the Mac.
         approve: (approve) =>
-          this.gatewayPairing
-            ? this.gatewayPairing.approve(approve)
-            : Promise.resolve({ ok: false as const, reason: "No gateway is waiting to pair." }),
+          this.gatewayClaim?.view()
+            ? this.gatewayClaim.approve(approve)
+            : this.gatewayPairing
+              ? this.gatewayPairing.approve(approve)
+              : Promise.resolve({ ok: false as const, reason: "No gateway is waiting to pair." }),
       },
       voiceCalls: async () => ({
         calls: this.callHistoryStore().list(100),
@@ -1026,6 +1045,7 @@ export class SqueakApp {
   }
 
   private gatewayPairing: GatewayPairing | null = null;
+  private gatewayClaim: GatewayClaim | null = null;
   private gatewayStatus: GatewayStatusReader | null = null;
   private gatewayLog: GatewayLogReader | null = null;
   private callHistory: CallHistory | null = null;
@@ -1069,6 +1089,25 @@ export class SqueakApp {
     return this.gatewayPairing;
   }
 
+  /** The short-code claim's owner; null unless the phone channel's own database is set up (never in shared mode). */
+  private gatewayClaimFor(): GatewayClaim | null {
+    const { remoteDatabaseUrl, remoteShared } = this.config;
+    if (!remoteDatabaseUrl || remoteShared) return null;
+    this.gatewayClaim ??= new GatewayClaim({
+      store: new RtdbRest(RENDEZVOUS_DATABASE),
+      databaseUrl: remoteDatabaseUrl,
+      current: () =>
+        this.config.voiceRelay ? { channel: this.config.voiceRelay.channel, key: this.config.voiceRelay.key } : null,
+      save: (channel, key) =>
+        setEnvValues(resolveSqueakEnvPath(), { SQUEAK_VOICE_RELAY_CHANNEL: channel, SQUEAK_VOICE_RELAY_KEY: key }),
+      restart: () => {
+        logger.info("gateway paired; restarting to use it");
+        process.exit(0);
+      },
+    });
+    return this.gatewayClaim;
+  }
+
   private gatewayStatusReader(): GatewayStatusReader {
     this.gatewayStatus ??= new GatewayStatusReader({
       store: new RtdbRest(this.config.remoteDatabaseUrl ?? "https://unset.firebaseio.com"),
@@ -1090,6 +1129,7 @@ export class SqueakApp {
       defaultCallee: voice?.callee ?? null,
       pin: this.voicePinState(),
       ...this.voicePolicyView(),
+      pause: this.voiceSettings.pause(),
       ...(mode === "gateway" ? { gateway: this.gatewayView() } : {}),
       // Absent until a test has been asked for.
       ...(this.voiceTest ? { lastTest: this.voiceTest } : {}),
@@ -1569,6 +1609,7 @@ export class SqueakApp {
       replier: this.router,
       note: (text: string) => this.announce(text),
       history: this.callHistoryStore(),
+      paused: () => this.voiceSettings.pause() !== null,
     };
     if (voiceRelay && remoteDatabaseUrl) {
       const line = relayLineFor(new RtdbRest(remoteDatabaseUrl), voiceRelay, this.voiceSettings);
