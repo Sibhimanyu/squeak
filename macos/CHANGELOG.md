@@ -6,6 +6,8 @@
 - A blocked update says so plainly and offers Download update, Open App Management settings and Try again. Squeak remembers a Mac that blocks self-updates and leads with Download update next time.
 - A slow or background download is no longer reported as stalled while it is still receiving data.
 - The update log (~/Library/Logs/Squeak Mac/updates.log) now records the installer's own error.
+- Closing the Squeak window right after opening it from the menu-bar popup no longer brings it back.
+- Opening Squeak from Finder, Spotlight or its app icon now puts Squeak's menus in the menu bar instead of leaving Finder's.
 
 ## 2.12.26
 
