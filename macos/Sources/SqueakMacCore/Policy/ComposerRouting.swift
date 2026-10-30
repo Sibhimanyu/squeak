@@ -96,6 +96,13 @@ public enum ReopenPolicy {
     public static func action(hasOrdinaryWindow: Bool) -> Action {
         hasOrdinaryWindow ? .none : .showConversation
     }
+
+    /// The same, but a reopen that is the echo of Squeak opening itself (to take the menu bar) is no click:
+    /// left alone it reopened a window the person had just closed.
+    public static func action(hasOrdinaryWindow: Bool, selfOpenAt: Date?, now: Date) -> Action {
+        if let selfOpenAt, now.timeIntervalSince(selfOpenAt) < ActivationRules.selfOpenEcho { return .none }
+        return action(hasOrdinaryWindow: hasOrdinaryWindow)
+    }
 }
 
 /// Holds notification clicks that arrive before anything can open the composer (a cold launch

@@ -1,4 +1,5 @@
 import AppKit
+import SqueakMacCore
 
 /// Squeak launches as a menu-bar accessory (LSUIElement). While a real window is open (the
 /// conversation, Settings, Welcome) it becomes a regular app: Dock icon, Cmd-Tab and its own menu
@@ -12,8 +13,11 @@ final class ActivationPolicyController {
     /// When code last asked for a window. A window made a moment later is not on screen yet, and must not be
     /// mistaken for "no window" (which would take the Dock icon straight back).
     private var showRequestedAt: Date?
+    /// When an app window last began closing. A close newer than the last request ends the wait for it.
+    private var lastCloseAt: Date?
+    /// When Squeak last opened itself through Launch Services; AppKit hands that back as a reopen to ignore.
+    private(set) var selfOpenAt: Date?
     private var safetyTimer: Timer?
-    private static let windowGrace: TimeInterval = 3
     /// When this process started. After an update Squeak relaunches itself while the Dock is still removing the old
     /// copy's tile; asking for a tile of our own in that moment left a zero-width ghost in the Dock (the app was
     /// running, its icon a speck). So the first seconds of a launch stay a menu-bar accessory.
@@ -42,6 +46,10 @@ final class ActivationPolicyController {
         }
         tokens.append(nc.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { [weak self] note in
             let closing = note.object as? NSWindow
+            // Stamped now, not in the Task: a window asked for straight after this close must still count.
+            MainActor.assumeIsolated {
+                if let closing, Self.isAppWindow(closing) { self?.lastCloseAt = Date() }
+            }
             Task { @MainActor in self?.update(closing: closing) }
         })
     }
@@ -54,9 +62,8 @@ final class ActivationPolicyController {
     /// cannot activate), so no notification would tell us; settle it once the window had time to appear.
     func willShowWindow() {
         showRequestedAt = Date()
-        apply(.regular)
-        takeMenuBar()
-        for delay in [0.3, 1.0, Self.windowGrace + 0.3] {
+        if policy == .regular { takeMenuBar(wasActiveAsAccessory: false) } else { apply(.regular) }
+        for delay in [0.3, 1.0, ActivationRules.windowGrace + 0.3] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.update(closing: nil) }
         }
     }
@@ -68,18 +75,44 @@ final class ActivationPolicyController {
     /// `NSApp.activate` is quietly ignored and the previous app keeps the menu bar. Asking Launch
     /// Services to open Squeak itself is always honoured (it is what a Dock click does), so that is
     /// the fallback when the direct request did not take.
-    private func takeMenuBar() {
-        if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            let owner = NSWorkspace.shared.menuBarOwningApplication
-            AppLog.info("menu bar owner after activate: \(owner == NSRunningApplication.current ? "squeak" : "other")")
-            guard owner != NSRunningApplication.current else { return }
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = true
-            config.addsToRecentItems = false
-            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, error in
-                if let error { AppLog.info("activate via Launch Services failed: \(error.localizedDescription)") }
+    ///
+    /// Opened from Finder, Spotlight or the Dock, Squeak is already frontmost as an accessory when it turns
+    /// regular, and macOS then leaves the previous app's menus up (Finder's, with Squeak's window in front).
+    /// Activating again changes nothing, since it is already active; it has to leave the front and come back.
+    private func takeMenuBar(wasActiveAsAccessory: Bool) {
+        switch ActivationRules.menuBarRoute(wasActiveAsAccessory: wasActiveAsAccessory) {
+        case .deactivateThenReopen:
+            AppLog.info("menu bar: active as accessory, stepping out and back")
+            NSApp.deactivate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.reopenSelf() }
+        case .activate:
+            if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                guard let self else { return }
+                let ours = NSWorkspace.shared.menuBarOwningApplication == NSRunningApplication.current
+                AppLog.info("menu bar owner after activate: \(ours ? "squeak" : "other")")
+                if ActivationRules.shouldReopenSelf(menuBarIsOurs: ours, windowShownOrPending: self.windowShownOrPending) {
+                    self.reopenSelf()
+                }
             }
+        }
+    }
+
+    private var windowShownOrPending: Bool {
+        ActivationRules.wantsRegular(
+            hasWindow: NSApp.windows.contains(where: Self.isAppWindow),
+            showRequestedAt: showRequestedAt, lastCloseAt: lastCloseAt, now: Date())
+    }
+
+    private func reopenSelf() {
+        // The window may have closed in the moment since; opening Squeak now would only reopen it.
+        guard policy == .regular, windowShownOrPending else { return }
+        selfOpenAt = Date()
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        config.addsToRecentItems = false
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, error in
+            if let error { AppLog.info("activate via Launch Services failed: \(error.localizedDescription)") }
         }
     }
 
@@ -96,8 +129,10 @@ final class ActivationPolicyController {
     func update(closing: NSWindow?) {
         for w in NSApp.windows where Self.isAppWindow(w) { Self.makeOrdinary(w) }
         let hasWindow = NSApp.windows.contains { $0 !== closing && Self.isAppWindow($0) }
-        let waitingForWindow = showRequestedAt.map { Date().timeIntervalSince($0) < Self.windowGrace } ?? false
-        apply(hasWindow || (waitingForWindow && closing == nil) ? .regular : .accessory)
+        let wanted = ActivationRules.wantsRegular(
+            hasWindow: hasWindow, showRequestedAt: showRequestedAt,
+            lastCloseAt: lastCloseAt, now: Date())
+        apply(wanted ? .regular : .accessory)
     }
 
     private func apply(_ wanted: NSApplication.ActivationPolicy) {
@@ -107,9 +142,10 @@ final class ActivationPolicyController {
             DispatchQueue.main.asyncAfter(deadline: .now() + settling + 0.05) { [weak self] in self?.update(closing: nil) }
             return
         }
+        let wasActiveAsAccessory = wanted == .regular && NSApp.isActive
         policy = wanted
         NSApp.setActivationPolicy(wanted)
-        if wanted == .regular { takeMenuBar() }
+        if wanted == .regular { takeMenuBar(wasActiveAsAccessory: wasActiveAsAccessory) }
         AppLog.info("activation policy: \(wanted == .regular ? "regular" : "accessory")")
     }
 }
