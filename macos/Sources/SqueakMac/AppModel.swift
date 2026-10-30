@@ -1240,6 +1240,8 @@ final class AppModel {
             // "Restart to update" quit the app and it came back on the same version: the install did not happen.
             updater.restartDidNotApply(target: marker.restartTarget, running: current)
         }
+        // Remembered across launches: an in-place install was refused here, so updates lead with Download update.
+        updater.restoreInPlaceDenial(change: change, marker: marker, current: current)
         guard case .updated = change else { return }
         updateNote = "Updated to \(current)"
         guard let marker = marker?.usable(currentVersion: current), marker.window != .none else { return }

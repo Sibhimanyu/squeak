@@ -226,7 +226,7 @@ or `swift run`). Info.plist carries `SUFeedURL`
   (Sparkle's automatic driver holds one from the download until the app quits) and offers no way to join or cancel
   it. So Install/Check while Sparkle is busy attach to the running progress and queue what was asked for (it runs when
   `canCheckForUpdates` turns true), and a press that cannot start says so. Timeouts: checking 60 s, a download with no
-  progress for 90 s, extracting 120 s, installing 120 s, relaunching 120 s; each moves to `failed`, cancels what
+  progress for 180 s (a background one 15 min), extracting 120 s, installing 120 s, relaunching 120 s; each moves to `failed`, cancels what
   Sparkle lets us cancel and resets the quit flags.
 - **Restart to update must come back.** `QuitIntent.beginUserRestart()` clears stale quit flags, then
   `RelaunchWatchdog` is armed per attempt with its own token file (a new attempt replaces the old; a failed or
@@ -235,6 +235,29 @@ or `swift run`). Info.plist carries `SUFeedURL`
   lets the staged-install block run more than once, so it is kept until the session ends or aborts. If the app comes
   back on the same version within 15 minutes of a "Restart to update", the flow says the install did not happen.
   A quit the person chose never reopens the app (`QuitPolicy.shouldRelaunchAfterUpdate`).
+- **A failed install is reopened in seconds, and said plainly.** Measured on a real Mac (2.12.24 to 2.12.25): Sparkle's
+  installer (`Autoupdate`, launchd job `<bundle id>-sparkle-updater`) was denied by macOS 18 ms after the app quit
+  (`renamex_np` and then the move to `TemporaryItems` failed with EPERM / "you don't have permission": App Management
+  protection or endpoint security), exited 1 and relaunched nothing, so Squeak stayed closed until the 90 s limit.
+  `RelaunchWatchdog` now also treats "old app gone, installer job (`launchctl print gui/<uid>/<job>`) and process
+  (`pgrep -f Sparkle.framework/Versions/B/[A]utoupdate`) absent for 3 s in a row, version unchanged" as a failed install
+  and reopens at once (`watchdog: installer finished without installing; reopening`); the 90 s limit stays as the last
+  resort. After the reopen it copies the installer's last error lines from `log show --last 2m` (best effort, redacted
+  to the bundle name) into `updates.log` as `installer: ...` and into `installer-reason.txt` beside it; the app reads
+  that on return (and polls ~36 s for it) to word the message. On return on the same version the flow says: "macOS
+  wouldn't let Squeak replace itself, so the update to X didn't install. Download the update and drag Squeak to
+  Applications — or allow Squeak in System Settings › Privacy & Security › App Management and try again." with
+  [Download update] [Open App Management settings] (`...com.apple.preference.security?Privacy_AppBundles`, present in
+  macOS 26's Security & Privacy extension; falls back to the Privacy & Security pane) [Try again] [Dismiss]. A reason
+  that is plainly not a denial (signature, disk) is shown instead and not remembered.
+- **A denial is remembered** (`InPlaceInstallDenial`, UserDefaults `inPlaceInstallDenied`): later updates show
+  [Download update] first with "This Mac blocks Squeak from updating itself in place." and [Try restart anyway] (or
+  Install) second. It clears when a launch on a new version follows an update quit (an update marker exists; dragging
+  a new copy in writes none).
+- **Download timeouts follow the bytes.** A download the person started stalls only after 180 s with no data at all
+  (`downloadActivity` on every chunk, throttled to 2 s); a background (automatic) download shows no progress, so it
+  has a 15 min safety net and otherwise ends with Sparkle's session. A download we gave up on that keeps receiving
+  data goes back to Downloading.
 - **`~/Library/Logs/Squeak Mac/updates.log`** (capped at ~200 KB, redacted, only in the real app) records every
   Sparkle callback, state change, tap, timeout, quit decision and watchdog step; "Copy diagnostics" includes its tail.
 - The update archive is the release DMG. Sparkle accepts it only if its EdDSA

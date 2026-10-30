@@ -9,7 +9,12 @@ import Foundation
 /// background (automatic) download shows its progress too.
 public struct UpdateFlow: Equatable, Sendable {
     public enum Stage: String, Equatable, Sendable { case check, download, extract, install, relaunch }
-    public enum Recovery: String, Equatable, Sendable { case tryAgain, downloadManually }
+    public enum Recovery: String, Equatable, Sendable {
+        case tryAgain, downloadManually
+        /// The in-place install was denied: the download is the way forward, so it is the primary button.
+        case downloadUpdate
+        case openAppManagement
+    }
 
     public struct Failure: Equatable, Sendable {
         public var stage: Stage
@@ -71,7 +76,9 @@ public struct UpdateFlow: Equatable, Sendable {
     public struct Timeouts: Equatable, Sendable {
         public var checking: TimeInterval = 60
         /// With no progress for this long a download counts as stalled.
-        public var downloadStall: TimeInterval = 90
+        public var downloadStall: TimeInterval = 180
+        /// A background download we only watch, with no progress to go by.
+        public var downloadBlind: TimeInterval = 900
         public var extracting: TimeInterval = 120
         public var installing: TimeInterval = 120
         public var relaunching: TimeInterval = 120
@@ -92,6 +99,8 @@ public struct UpdateFlow: Equatable, Sendable {
         case noUpdate
         case downloadBegan(version: String?)
         case downloadProgress(Double?)
+        /// Any download callback at all (a chunk of data, the size): the download is alive even if the percentage has not moved.
+        case downloadActivity
         case extractBegan
         case extractProgress(Double)
         case staged(version: String)
@@ -106,7 +115,13 @@ public struct UpdateFlow: Equatable, Sendable {
         case sparkleBecameIdle
         // Launch
         /// The app reopened on the version it had before a "Restart to update".
-        case restartDidNotApply(target: String?, running: String)
+        /// `installerReason` is what the relaunch watchdog captured from the Sparkle installer's log, when it could.
+        case restartDidNotApply(target: String?, running: String, installerReason: String? = nil)
+        /// The remembered "this Mac denied an in-place install" flag, read at launch (true) or cleared because an
+        /// in-place update has since worked (false).
+        case inPlaceDenialRestored(Bool)
+        /// The installer's reason arrived after the app was already back (the watchdog reads it a moment later).
+        case installerReasonArrived(target: String?, running: String, reason: String)
         // Time
         case tick
     }
@@ -131,6 +146,8 @@ public struct UpdateFlow: Equatable, Sendable {
     public private(set) var pendingInstall = false
     /// A check or install is queued behind a Sparkle session we cannot control.
     public private(set) var waitingForSparkle = false
+    /// An in-place install was denied on this Mac before: later updates lead with Download update.
+    public private(set) var inPlaceInstallDenied = false
     private var retriedAfterSessionEnd = false
     public var timeouts: Timeouts
 
@@ -208,6 +225,16 @@ public struct UpdateFlow: Equatable, Sendable {
             }
             return []
 
+        case .downloadActivity:
+            switch phase {
+            case .downloading(let v, let p): enter(.downloading(version: v, progress: p), now)
+            case .failed(let f) where f.stage == .download:
+                // A session we gave up on kept going and is still receiving data: it is alive, so show that.
+                enter(.downloading(version: f.version ?? knownVersion, progress: nil), now)
+            default: break
+            }
+            return []
+
         case .downloadProgress(let value):
             switch phase {
             case .downloading(let v, _): enter(.downloading(version: v, progress: value), now)
@@ -276,13 +303,24 @@ public struct UpdateFlow: Equatable, Sendable {
 
         case .sparkleBecameIdle: return sparkleBecameIdle(now)
 
-        case .restartDidNotApply(let target, let running):
+        case .restartDidNotApply(let target, let running, let reason):
             if let target { knownVersion = target }
-            phase = .failed(Failure(
-                stage: .relaunch,
-                reason: UpdateFlowCopy.restartDidNotApply(target: target, running: running),
-                version: target, recoveries: [.tryAgain, .downloadManually]))
+            phase = restartFailure(target: target, running: running, reason: reason)
+            // Only a denial (or an unknown reason, which on this Mac has always been one) is remembered; a reason
+            // that is plainly something else (a bad signature, a full disk) is not App Management's doing.
+            if reason.map(UpdateFlowCopy.looksDenied) ?? true { inPlaceInstallDenied = true }
             deadline = nil
+            return []
+
+        case .inPlaceDenialRestored(let value):
+            inPlaceInstallDenied = value
+            return []
+
+        case .installerReasonArrived(let target, let running, let reason):
+            // Only refines the message the person is looking at; a person who already moved on is left alone.
+            guard case .failed(let f) = phase, f.stage == .relaunch else { return [] }
+            phase = restartFailure(target: target ?? f.version, running: running, reason: reason)
+            if UpdateFlowCopy.looksDenied(reason) { inPlaceInstallDenied = true }
             return []
 
         case .tick: return tick(now: now)
@@ -417,11 +455,25 @@ public struct UpdateFlow: Equatable, Sendable {
 
     // MARK: Helpers
 
+    private func restartFailure(target: String?, running: String, reason: String?) -> Phase {
+        let denied = reason.map(UpdateFlowCopy.looksDenied) ?? true
+        return .failed(Failure(
+            stage: .relaunch,
+            reason: denied ? UpdateFlowCopy.installDenied(target: target)
+                           : UpdateFlowCopy.restartDidNotApply(target: target, running: running, installerReason: reason),
+            version: target,
+            recoveries: denied ? [.downloadUpdate, .openAppManagement, .tryAgain] : [.tryAgain, .downloadManually]))
+    }
+
     private mutating func enter(_ new: Phase, _ now: Date) {
         phase = new
         switch new {
         case .checking: deadline = now.addingTimeInterval(timeouts.checking)
-        case .downloading: deadline = now.addingTimeInterval(timeouts.downloadStall)
+        case .downloading(_, let p):
+            // A background (automatic) download shows no progress at all, so silence there is not a stall: it ends
+            // when Sparkle's session does. A download the person asked for does report progress.
+            let blind = p == nil && !pendingInstall && !waitingForSparkle
+            deadline = now.addingTimeInterval(blind ? timeouts.downloadBlind : timeouts.downloadStall)
         case .extracting: deadline = now.addingTimeInterval(timeouts.extracting)
         case .installing: deadline = now.addingTimeInterval(timeouts.installing)
         case .relaunching: deadline = now.addingTimeInterval(timeouts.relaunching)
@@ -438,7 +490,10 @@ public struct UpdateFlow: Equatable, Sendable {
 
 /// Every sentence the update surfaces show, and the buttons each phase offers, in one testable place.
 public enum UpdateFlowCopy {
-    public enum Action: String, Equatable, Sendable { case install, restart, cancel, tryAgain, downloadManually, dismiss }
+    public enum Action: String, Equatable, Sendable {
+        case install, restart, cancel, tryAgain, downloadManually, dismiss
+        case downloadUpdate, openAppManagement, tryRestartAnyway
+    }
 
     public static let installerGone = "The update is no longer waiting to install. Try again to fetch it."
     public static let sessionEnded = "The update stopped before it was ready. Try again."
@@ -466,21 +521,41 @@ public enum UpdateFlowCopy {
         }
     }
 
-    public static func restartDidNotApply(target: String?, running: String) -> String {
-        if let target { return "Squeak reopened on \(running), so the update to \(target) didn't install. Try again, or download Squeak by hand." }
-        return "Squeak reopened on \(running), so the update didn't install. Try again, or download Squeak by hand."
+    public static func restartDidNotApply(target: String?, running: String, installerReason: String? = nil) -> String {
+        let said = installerReason.map { " The installer said: \($0)" + ($0.hasSuffix(".") ? "" : ".") } ?? ""
+        if let target { return "Squeak reopened on \(running), so the update to \(target) didn't install.\(said) Try again, or download Squeak by hand." }
+        return "Squeak reopened on \(running), so the update didn't install.\(said) Try again, or download Squeak by hand."
     }
 
+    /// The restart came back on the old version and the installer (or its absence of a reason) says macOS refused.
+    public static func installDenied(target: String?) -> String {
+        let what = target.map { "the update to \($0)" } ?? "the update"
+        return "macOS wouldn't let Squeak replace itself, so \(what) didn't install. Download the update and drag Squeak to Applications — or allow Squeak in System Settings › Privacy & Security › App Management and try again."
+    }
+
+    public static let inPlaceBlockedNote = "This Mac blocks Squeak from updating itself in place."
+
+    /// Whether a Sparkle installer message says macOS refused the write (EPERM / App Management / permission).
+    public static func looksDenied(_ reason: String) -> Bool {
+        let r = reason.lowercased()
+        return ["permission", "not permitted", "code=13", "code=1 ", "eperm", "operation not allowed", "app management"].contains { r.contains($0) }
+    }
+
+    /// System Settings › Privacy & Security › App Management (the pane's `revealElementKeyName`, present in macOS 26's
+    /// Security & Privacy extension and used since 13), and the Privacy & Security pane as a fallback.
+    public static let appManagementSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles")!
+    public static let privacySettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security")!
+
     /// The one-line status in the popup banner and Settings; nil when there is nothing to say.
-    public static func status(_ phase: UpdateFlow.Phase) -> String? {
+    public static func status(_ phase: UpdateFlow.Phase, inPlaceDenied: Bool = false) -> String? {
         func pct(_ p: Double?) -> String { p.map { " \(Int(($0 * 100).rounded()))%" } ?? "" }
         switch phase {
         case .idle: return nil
         case .checking: return "Checking for updates…"
-        case .available(let v): return "Update \(v) available"
+        case .available(let v): return "Update \(v) available" + (inPlaceDenied ? ". \(inPlaceBlockedNote)" : "")
         case .downloading(let v, let p): return "Downloading \(v ?? "the update")…" + pct(p)
         case .extracting(let v, let p): return "Preparing \(v ?? "the update")…" + pct(p)
-        case .readyToInstall(let v): return "Update \(v) is ready"
+        case .readyToInstall(let v): return "Update \(v) is ready" + (inPlaceDenied ? ". \(inPlaceBlockedNote)" : "")
         case .installing(let v): return "Installing \(v ?? "the update")…"
         case .relaunching: return "Restarting Squeak…"
         case .failed(let f): return f.reason
@@ -489,14 +564,33 @@ public enum UpdateFlowCopy {
     }
 
     /// Buttons for a phase, in order. The surface hides `.cancel` when Sparkle gave it nothing to cancel with.
-    public static func actions(_ phase: UpdateFlow.Phase) -> [Action] {
+    /// With `inPlaceDenied` (an in-place install was refused on this Mac before) Download update leads and the old
+    /// way follows as the secondary.
+    public static func actions(_ phase: UpdateFlow.Phase, inPlaceDenied: Bool = false) -> [Action] {
         switch phase {
         case .idle, .installing, .relaunching: []
         case .checking, .downloading, .extracting: [.cancel]
-        case .available: [.install]
-        case .readyToInstall: [.restart]
-        case .failed(let f): f.recoveries.map { $0 == .tryAgain ? .tryAgain : .downloadManually } + [.dismiss]
+        case .available: inPlaceDenied ? [.downloadUpdate, .install] : [.install]
+        case .readyToInstall: inPlaceDenied ? [.downloadUpdate, .tryRestartAnyway] : [.restart]
+        case .failed(let f): f.recoveries.map(action(for:)) + [.dismiss]
         case .upToDate: [.dismiss]
+        }
+    }
+
+    private static func action(for recovery: UpdateFlow.Recovery) -> Action {
+        switch recovery {
+        case .tryAgain: .tryAgain
+        case .downloadManually: .downloadManually
+        case .downloadUpdate: .downloadUpdate
+        case .openAppManagement: .openAppManagement
+        }
+    }
+
+    /// The button drawn as the primary one in a phase.
+    public static func primaryAction(_ phase: UpdateFlow.Phase, inPlaceDenied: Bool = false) -> Action? {
+        switch phase {
+        case .failed(let f): f.recoveries.first == .downloadUpdate ? .downloadUpdate : .tryAgain
+        default: actions(phase, inPlaceDenied: inPlaceDenied).first
         }
     }
 
@@ -507,6 +601,9 @@ public enum UpdateFlowCopy {
         case .cancel: "Cancel"
         case .tryAgain: "Try again"
         case .downloadManually: "Download manually"
+        case .downloadUpdate: "Download update"
+        case .openAppManagement: "Open App Management settings"
+        case .tryRestartAnyway: "Try restart anyway"
         case .dismiss: "Dismiss"
         }
     }
@@ -532,5 +629,47 @@ public enum UpdateFlowCopy {
     public static func manualDownloadURL(version: String?) -> URL {
         guard let version, !version.isEmpty, version.allSatisfy({ $0.isNumber || $0 == "." }), !version.hasPrefix("."), !version.hasSuffix(".") else { return siteURL }
         return URL(string: "https://sibhimanyu.github.io/squeak/download/Squeak-\(version).dmg") ?? siteURL
+    }
+}
+
+/// "This Mac refused to let Squeak replace itself", remembered across launches (UserDefaults, by the adapter) so
+/// later updates lead with Download update instead of a Restart that is known to fail. Pure so it can be tested.
+public struct InPlaceInstallDenial: Codable, Equatable, Sendable {
+    public static let defaultsKey = "inPlaceInstallDenied"
+
+    /// The version that failed to install (nil when the target was not known) and the one that was running.
+    public var failedVersion: String?
+    public var runningVersion: String
+    public var recordedAt: Date
+
+    public init(failedVersion: String?, runningVersion: String, recordedAt: Date = Date()) {
+        self.failedVersion = failedVersion; self.runningVersion = runningVersion; self.recordedAt = recordedAt
+    }
+
+    public func encoded() -> Data? { try? JSONEncoder().encode(self) }
+    public static func decode(_ data: Data?) -> InPlaceInstallDenial? {
+        guard let data else { return nil }
+        return try? JSONDecoder().decode(InPlaceInstallDenial.self, from: data)
+    }
+
+    /// An in-place update has worked: this launch is on a different version than the last run, and the app quit
+    /// for an update (a restart marker exists; a person dragging a new copy in never writes one) from the version
+    /// the denial was recorded on or a later one.
+    public func clears(change: VersionChange, marker: UpdateRestoreMarker?, currentVersion: String, now: Date = Date()) -> Bool {
+        guard case .updated = change, let marker, marker.usable(currentVersion: currentVersion, now: now) != nil else { return false }
+        return currentVersion != runningVersion
+    }
+}
+
+/// Reads what the relaunch watchdog captured from the Sparkle installer's log (`installer-reason.txt`, one
+/// already-redacted line per message) and picks the one worth showing and logging.
+public enum UpdateInstallerReason {
+    public static func pick(from text: String) -> String? {
+        let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return nil }
+        let best = lines.first(where: UpdateFlowCopy.looksDenied) ?? lines.first(where: { $0.hasPrefix("Error") }) ?? lines[0]
+        var out = best
+        if out.hasPrefix("Error: ") { out.removeFirst("Error: ".count) }
+        return out.count > 200 ? String(out.prefix(200)) + "…" : out
     }
 }

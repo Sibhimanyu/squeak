@@ -7,7 +7,8 @@ import SwiftUI
 ///
 /// Update available [Install] > Downloading 2.x… 42% (bar, [Cancel] when Sparkle can) > Preparing 2.x… >
 /// Update 2.x is ready [Restart to update] > Restarting Squeak… (spinner) ; a failure shows one plain sentence with
-/// [Try again] [Download manually] [Dismiss].
+/// [Try again] [Download manually] [Dismiss]; when macOS refused the in-place install it is [Download update]
+/// [Open App Management settings] [Try again] [Dismiss], and later updates on that Mac lead with Download update.
 struct UpdateBanner: View {
     enum Style { case popup, settings }
 
@@ -17,7 +18,7 @@ struct UpdateBanner: View {
     private var phase: UpdateFlow.Phase { updater.flow.phase }
 
     var body: some View {
-        if let text = UpdateFlowCopy.status(phase) {
+        if let text = UpdateFlowCopy.status(phase, inPlaceDenied: updater.flow.inPlaceInstallDenied) {
             VStack(alignment: .leading, spacing: 5) {
                 if case .failed = phase {
                     Text(text).font(font).foregroundStyle(Theme.error)
@@ -46,13 +47,15 @@ struct UpdateBanner: View {
         }
     }
 
+    private var primary: UpdateFlowCopy.Action? { UpdateFlowCopy.primaryAction(phase, inPlaceDenied: updater.flow.inPlaceInstallDenied) }
+
     private var font: Font { style == .popup ? .system(size: 12) : .callout }
 
     @ViewBuilder private var buttons: some View {
         ForEach(updater.actions, id: \.self) { action in
             Button(UpdateFlowCopy.label(action)) { updater.perform(action) }
                 .buttonStyle(.plain)
-                .font(.system(size: style == .popup ? 12 : 13, weight: .medium))
+                .font(.system(size: style == .popup ? 12 : 13, weight: action == primary ? .semibold : .medium))
                 .foregroundStyle(style == .popup ? Theme.ink : Color.accentColor)
         }
     }

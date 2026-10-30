@@ -80,7 +80,7 @@ import Testing
     @Test func installWhileSparkleIsBusyTimesOutInsteadOfWaitingForever() {
         var f = flow(after: [.updateFound(version: "2.12.22")])
         f.handle(.installRequested(sparkle: .busy), now: t0)
-        #expect(f.tick(now: at(90)) == [.cancelSession, .endAttempt])
+        #expect(f.tick(now: at(180)) == [.cancelSession, .endAttempt])
         guard case .failed(let failure) = f.phase else { Issue.record("not failed"); return }
         #expect(failure.stage == .download && failure.version == "2.12.22")
     }
@@ -131,11 +131,43 @@ import Testing
 
     @Test func downloadProgressRefreshesTheStallClock() {
         var f = flow(after: [.downloadBegan(version: "2.12.22")])
-        #expect(f.deadline == t0.addingTimeInterval(90))
+        f.handle(.downloadProgress(0.05), now: t0)
+        #expect(f.deadline == t0.addingTimeInterval(180))
         f.handle(.downloadProgress(0.1), now: at(80))
-        #expect(f.deadline == at(170))
-        #expect(f.tick(now: at(169)).isEmpty)
-        #expect(f.tick(now: at(170)) == [.cancelSession, .endAttempt])
+        #expect(f.deadline == at(260))
+        #expect(f.tick(now: at(259)).isEmpty)
+        #expect(f.tick(now: at(260)) == [.cancelSession, .endAttempt])
+    }
+
+    @Test func anyDownloadActivityKeepsASlowDownloadAlive() {
+        var f = flow(after: [.updateFound(version: "2.12.22")])
+        f.handle(.installRequested(sparkle: .awaitingChoice), now: t0)
+        f.handle(.downloadBegan(version: "2.12.22"), now: t0)
+        f.handle(.downloadProgress(0.01), now: t0)
+        // Bytes keep arriving but the percentage does not move: the stall clock follows the bytes.
+        for s in stride(from: 100.0, through: 400.0, by: 100.0) { f.handle(.downloadActivity, now: at(s)) }
+        #expect(f.tick(now: at(500)).isEmpty)
+        #expect(f.phase == .downloading(version: "2.12.22", progress: 0.01))
+    }
+
+    @Test func aBackgroundDownloadWithNoProgressIsNotCalledStalledAfterNinetySeconds() {
+        // An automatic session reports no progress; it ends with Sparkle's own session, not with our clock.
+        var f = flow(after: [.downloadBegan(version: "2.12.22")])
+        #expect(f.tick(now: at(120)).isEmpty)
+        #expect(f.phase == .downloading(version: "2.12.22", progress: nil))
+        #expect(f.deadline == t0.addingTimeInterval(900))
+    }
+
+    @Test func aDownloadWeGaveUpOnThatKeepsReceivingDataComesBackToDownloading() {
+        var f = flow(after: [.updateFound(version: "2.12.22")])
+        f.handle(.installRequested(sparkle: .awaitingChoice), now: t0)
+        f.handle(.downloadProgress(0.3), now: t0)
+        f.tick(now: at(181))
+        guard case .failed = f.phase else { Issue.record("not failed"); return }
+        f.handle(.downloadActivity, now: at(190))
+        #expect(f.phase == .downloading(version: "2.12.22", progress: nil))
+        f.handle(.staged(version: "2.12.22"), now: at(200))
+        #expect(f.phase == .readyToInstall(version: "2.12.22"))
     }
 
     @Test func aBackgroundDownloadShowsProgressTooAndFinishesReady() {
@@ -260,13 +292,88 @@ import Testing
         #expect(f.phase == .available(version: "2.12.22"))
     }
 
-    @Test func aLaunchOnTheOldVersionAfterRestartIsAFailureNamingBoth() {
+    @Test func aLaunchOnTheOldVersionAfterRestartIsAFailureNamingTheTarget() {
         var f = UpdateFlow()
         f.handle(.restartDidNotApply(target: "2.12.22", running: "2.12.21"), now: t0)
         guard case .failed(let failure) = f.phase else { Issue.record("not failed"); return }
         #expect(failure.stage == .relaunch)
-        #expect(failure.reason.contains("2.12.21") && failure.reason.contains("2.12.22"))
+        #expect(failure.reason.contains("2.12.22") && failure.reason.contains("didn't install"))
         #expect(f.knownVersion == "2.12.22")
+    }
+
+    @Test func aDeniedInstallSaysSoPlainlyAndOffersTheWayOut() {
+        var f = UpdateFlow()
+        f.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24"), now: t0)
+        guard case .failed(let failure) = f.phase else { Issue.record("not failed"); return }
+        #expect(failure.reason == "macOS wouldn't let Squeak replace itself, so the update to 2.12.25 didn't install. Download the update and drag Squeak to Applications — or allow Squeak in System Settings › Privacy & Security › App Management and try again.")
+        #expect(UpdateFlowCopy.actions(f.phase) == [.downloadUpdate, .openAppManagement, .tryAgain, .dismiss])
+        #expect(UpdateFlowCopy.primaryAction(f.phase) == .downloadUpdate)
+        #expect(f.inPlaceInstallDenied)
+    }
+
+    @Test func aCapturedReasonThatIsNotADenialIsShownAndNotRemembered() {
+        var f = UpdateFlow()
+        f.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24", installerReason: "The update is improperly signed"), now: t0)
+        guard case .failed(let failure) = f.phase else { Issue.record("not failed"); return }
+        #expect(failure.reason.contains("The installer said: The update is improperly signed."))
+        #expect(failure.recoveries == [.tryAgain, .downloadManually])
+        #expect(!f.inPlaceInstallDenied)
+    }
+
+    @Test func aReasonThatArrivesLaterRefinesTheMessageOnScreen() {
+        var f = UpdateFlow()
+        f.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24"), now: t0)
+        f.handle(.installerReasonArrived(target: "2.12.25", running: "2.12.24", reason: "Failed: disk full"), now: at(5))
+        guard case .failed(let failure) = f.phase else { Issue.record("not failed"); return }
+        #expect(failure.reason.contains("Failed: disk full"))
+        // Someone who already dismissed it is not pulled back.
+        var g = UpdateFlow()
+        g.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24"), now: t0)
+        g.handle(.dismissRequested, now: at(1))
+        g.handle(.installerReasonArrived(target: "2.12.25", running: "2.12.24", reason: "x"), now: at(5))
+        #expect(g.phase == .available(version: "2.12.25"))
+    }
+
+    @Test func deniedWordingIsRecognised() {
+        #expect(UpdateFlowCopy.looksDenied("“Squeak” couldn’t be moved because you don’t have permission to access it"))
+        #expect(UpdateFlowCopy.looksDenied("NSPOSIXErrorDomain Code=13 \"Permission denied\""))
+        #expect(!UpdateFlowCopy.looksDenied("The update is improperly signed"))
+    }
+
+    @Test func onAMacThatDeniedAnInPlaceInstallTheBannerLeadsWithDownload() {
+        var f = UpdateFlow()
+        f.handle(.inPlaceDenialRestored(true), now: t0)
+        f.handle(.updateFound(version: "2.12.26"), now: t0)
+        #expect(UpdateFlowCopy.actions(f.phase, inPlaceDenied: f.inPlaceInstallDenied) == [.downloadUpdate, .install])
+        #expect(UpdateFlowCopy.status(f.phase, inPlaceDenied: true) == "Update 2.12.26 available. This Mac blocks Squeak from updating itself in place.")
+        f.handle(.staged(version: "2.12.26"), now: at(1))
+        #expect(UpdateFlowCopy.actions(f.phase, inPlaceDenied: true) == [.downloadUpdate, .tryRestartAnyway])
+        #expect(UpdateFlowCopy.label(.tryRestartAnyway) == "Try restart anyway")
+        // Not denied: unchanged.
+        #expect(UpdateFlowCopy.actions(f.phase) == [.restart])
+        #expect(f.handle(.inPlaceDenialRestored(false), now: at(2)).isEmpty)
+        #expect(!f.inPlaceInstallDenied)
+    }
+
+    @Test func theDenialIsClearedOnlyByAnInPlaceUpdateThatWorked() {
+        let now = Date()
+        let denial = InPlaceInstallDenial(failedVersion: "2.12.25", runningVersion: "2.12.24", recordedAt: now)
+        let marker = UpdateRestoreMarker(fromVersion: "2.12.24", window: .none, savedAt: now, restartAttempt: true, restartTarget: "2.12.25")
+        // New version after an update quit wrote a marker: in-place worked.
+        #expect(denial.clears(change: .updated(from: "2.12.24"), marker: marker, currentVersion: "2.12.25", now: now))
+        // A new version with no update marker (dragged in by hand): the Mac still blocks in-place updates.
+        #expect(!denial.clears(change: .updated(from: "2.12.24"), marker: nil, currentVersion: "2.12.25", now: now))
+        // The failed launch itself, or a plain relaunch.
+        #expect(!denial.clears(change: .unchanged, marker: marker, currentVersion: "2.12.24", now: now))
+        #expect(InPlaceInstallDenial.decode(denial.encoded()) == denial)
+    }
+
+    @Test func settingsLinksAndTheDMGAreTheOnesWeMean() {
+        #expect(UpdateFlowCopy.appManagementSettingsURL.absoluteString == "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles")
+        #expect(UpdateFlowCopy.privacySettingsURL.absoluteString == "x-apple.systempreferences:com.apple.preference.security")
+        #expect(UpdateFlowCopy.label(.downloadUpdate) == "Download update")
+        #expect(UpdateFlowCopy.label(.openAppManagement) == "Open App Management settings")
+        #expect(UpdateInstallerReason.pick(from: "Error: a\nError: couldn’t be moved because you don’t have permission\n") == "couldn’t be moved because you don’t have permission")
     }
 
     @Test func installedReturnsToIdle() {

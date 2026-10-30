@@ -31,15 +31,24 @@ import Testing
         }
 
         /// Runs the script for a pid that is already gone; returns whether `open` was called.
-        func run(oldVersion: String, appRunning: Bool, limit: Int = 2, grace: Int = 0, armed: Bool = true, pid: Int32 = 999_999, waitForQuit: Int = 300) throws -> Bool {
+        /// `installerJob`/`installerProcess` say whether Sparkle's installer is still there (launchctl knows the job, or
+        /// `pgrep` finds an `Autoupdate`); by default it is, so the cases that predate the early reopen keep their meaning.
+        /// `logLines` is what the stub `log show` prints.
+        func run(oldVersion: String, appRunning: Bool, limit: Int = 2, grace: Int = 0, armed: Bool = true, pid: Int32 = 999_999, waitForQuit: Int = 300,
+                 installerJob: Bool = true, installerProcess: Bool = false, absent: Int = 3, logLines: String = "") throws -> Bool {
             if armed { FileManager.default.createFile(atPath: token.path, contents: Data()) }
             let open = try stub("open-stub", body: "echo opened >> '\(marker.path)'")
             let pgrep = try stub("pgrep-stub", body: appRunning ? "exit 0" : "exit 1")
+            let installerPgrep = try stub("installer-pgrep-stub", body: installerProcess ? "exit 0" : "exit 1")
+            let launchctl = try stub("launchctl-stub", body: installerJob ? "exit 0" : "exit 113")
+            let logshow = try stub("log-stub", body: "cat <<'EOF'\n\(logLines)\nEOF")
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/sh")
             process.arguments = RelaunchWatchdog.arguments(pid: pid, appPath: app.path, version: oldVersion, limit: limit, grace: grace,
                                                            token: token.path, log: log.path, waitForQuit: waitForQuit)
-            process.environment = ["SQUEAK_OPEN": open, "SQUEAK_PGREP": pgrep, "SQUEAK_RETRY_DELAY": "0", "PATH": "/usr/bin:/bin"]
+            process.environment = ["SQUEAK_OPEN": open, "SQUEAK_PGREP": pgrep, "SQUEAK_RETRY_DELAY": "0", "PATH": "/usr/bin:/bin",
+                                   "SQUEAK_LAUNCHCTL": launchctl, "SQUEAK_LOGSHOW": logshow, "SQUEAK_INSTALLER_PGREP": installerPgrep,
+                                   "SQUEAK_INSTALLER_ABSENT": String(absent)]
             try process.run()
             process.waitUntilExit()
             return FileManager.default.fileExists(atPath: marker.path)
@@ -75,7 +84,7 @@ import Testing
         #expect(args.first == "-c")
         #expect(!args[1].contains("My App"))
         #expect(args.contains("/Applications/My App's \"Squeak\".app"))
-        #expect(args.suffix(8) == ["42", "/Applications/My App's \"Squeak\".app", "2.12.1", "90", "4", "/tmp/t", "", "300"])
+        #expect(args.suffix(9) == ["42", "/Applications/My App's \"Squeak\".app", "2.12.1", "90", "4", "/tmp/t", "", "300", "com.squeak.mac-sparkle-updater"])
     }
 
     @Test func aDisarmedAttemptNeverReopensEvenWhenTheAppIsGone() throws {
@@ -138,6 +147,80 @@ import Testing
         // Arming again after a disarm works: it is per attempt, not once per process.
         #expect(RelaunchWatchdog.arm(pid: ProcessInfo.processInfo.processIdentifier, appPath: "/nonexistent/Squeak.app", version: "9.9.9", log: log))
         #expect(RelaunchWatchdog.isArmed)
+    }
+
+    // MARK: A failed installer is not waited out
+
+    @Test func reopensWithinSecondsWhenTheInstallerEndedWithoutInstalling() throws {
+        // The real failure: the installer was denied and exited; the version on disk is unchanged.
+        let rig = try Rig(version: "2.12.24")
+        let started = Date()
+        #expect(try rig.run(oldVersion: "2.12.24", appRunning: false, limit: 60, installerJob: false, absent: 2))
+        // Alone it takes ~4 s (2 s of absence plus reading the log); the bound only has to beat the 60 s limit on a loaded machine.
+        #expect(Date().timeIntervalSince(started) < 40)
+        #expect(rig.logText.contains("installer finished without installing; reopening"))
+        #expect(!rig.logText.contains("no relaunch within"))
+        #expect(rig.logText.contains("opening Squeak"))
+    }
+
+    @Test func waitsWhileTheInstallerJobIsStillThere() throws {
+        let rig = try Rig(version: "2.12.24")
+        // launchctl knows the job for the whole (short) limit: only the last resort reopens.
+        #expect(try rig.run(oldVersion: "2.12.24", appRunning: false, limit: 4, installerJob: true, absent: 2))
+        #expect(!rig.logText.contains("installer finished without installing"))
+        #expect(rig.logText.contains("no relaunch within 4s"))
+    }
+
+    @Test func waitsWhileTheInstallerProcessIsStillThereEvenIfLaunchctlDoesNotKnowTheJob() throws {
+        let rig = try Rig(version: "2.12.24")
+        #expect(try rig.run(oldVersion: "2.12.24", appRunning: false, limit: 4, installerJob: false, installerProcess: true, absent: 2))
+        #expect(!rig.logText.contains("installer finished without installing"))
+    }
+
+    @Test func aSuccessfulInstallOpensOnceAndIsNotTreatedAsAFailure() throws {
+        // Version changed and the installer is gone, as after a good install: the normal path, one open.
+        let rig = try Rig(version: "2.12.25")
+        FileManager.default.createFile(atPath: rig.token.path, contents: Data())
+        let open = try rig.stub("open-stub", body: "echo opened >> '\(rig.marker.path)'")
+        let pgrep = try rig.stub("pgrep-stub", body: "[ -e '\(rig.marker.path)' ]")
+        let launchctl = try rig.stub("launchctl-stub", body: "exit 113")
+        let installerPgrep = try rig.stub("installer-pgrep-stub", body: "exit 1")
+        let logshow = try rig.stub("log-stub", body: "echo 'Error: should not be asked'")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = RelaunchWatchdog.arguments(pid: 999_999, appPath: rig.app.path, version: "2.12.24", limit: 10, grace: 0, token: rig.token.path, log: rig.log.path)
+        process.environment = ["SQUEAK_OPEN": open, "SQUEAK_PGREP": pgrep, "SQUEAK_RETRY_DELAY": "0", "PATH": "/usr/bin:/bin", "SQUEAK_LAUNCHCTL": launchctl,
+                               "SQUEAK_LOGSHOW": logshow, "SQUEAK_INSTALLER_PGREP": installerPgrep, "SQUEAK_INSTALLER_ABSENT": "1"]
+        try process.run(); process.waitUntilExit()
+        #expect(rig.opens == 1)
+        #expect(!rig.logText.contains("without installing"))
+        #expect(!rig.logText.contains("installer:"))
+    }
+
+    @Test func doesNotReopenAfterAFailedInstallerWhenTheAttemptWasDisarmed() throws {
+        let rig = try Rig(version: "2.12.24")
+        #expect(try !rig.run(oldVersion: "2.12.24", appRunning: false, limit: 10, armed: false, installerJob: false, absent: 1))
+    }
+
+    @Test func copiesTheInstallersErrorLinesToTheLogWithoutPaths() throws {
+        let rig = try Rig(version: "2.12.24")
+        let lines = [
+            "2026-10-30 18:04:01.99 E  Autoupdate[5678:9012] Error: Failed to move the old app at /Applications/Squeak.app to a temporary location at /var/folders/ab/cd/T/TemporaryItems/NSIRD_Sparkle_x1/Squeak.app",
+            "2026-10-30 18:04:01.99 Df Autoupdate[5678:9012] Something harmless",
+        ].joined(separator: "\n")
+        #expect(try rig.run(oldVersion: "2.12.24", appRunning: false, limit: 60, installerJob: false, absent: 1, logLines: lines))
+        let text = rig.logText
+        #expect(text.contains("installer: Error: Failed to move the old app at Squeak.app to a temporary location at Squeak.app"))
+        #expect(!text.contains("/var/folders") && !text.contains("/Applications") && !text.contains("NSIRD"))
+        #expect(!text.contains("harmless"))
+        let reason = try String(contentsOf: rig.dir.appendingPathComponent("installer-reason.txt"), encoding: .utf8)
+        #expect(UpdateInstallerReason.pick(from: reason)?.hasPrefix("Failed to move the old app") == true)
+    }
+
+    @Test func aLogToolThatSaysNothingNeverBreaksTheReopen() throws {
+        let rig = try Rig(version: "2.12.24")
+        #expect(try rig.run(oldVersion: "2.12.24", appRunning: false, limit: 60, installerJob: false, absent: 1, logLines: ""))
+        #expect(rig.logText.contains("no installer error lines found"))
     }
 
     @Test func refusesToArmWithoutAVersion() {

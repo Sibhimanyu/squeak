@@ -168,6 +168,45 @@ final class AppUpdater {
 
     func dismissStatus() { dispatch(.dismissRequested) }
 
+    /// Download update (after an in-place install was denied) is the same DMG as Download manually.
+    func downloadUpdate() { downloadManually() }
+
+    /// System Settings › Privacy & Security › App Management, or the Privacy & Security pane if that anchor fails.
+    func openAppManagementSettings() {
+        log("tap: open App Management settings")
+        NSWorkspace.shared.open(UpdateFlowCopy.appManagementSettingsURL, configuration: NSWorkspace.OpenConfiguration()) { [weak self] _, error in
+            guard error != nil else { return }
+            Task { @MainActor in
+                self?.log("App Management anchor did not open; opening Privacy & Security")
+                NSWorkspace.shared.open(UpdateFlowCopy.privacySettingsURL)
+            }
+        }
+    }
+
+    /// Whether an in-place install has been refused on this Mac (remembered in UserDefaults).
+    var inPlaceInstallDenied: Bool { flow.inPlaceInstallDenied }
+
+    /// Loads the remembered denial at launch, and clears it when an in-place update has worked since.
+    func restoreInPlaceDenial(change: VersionChange, marker: UpdateRestoreMarker?, current: String, defaults: UserDefaults = .standard) {
+        guard let denial = InPlaceInstallDenial.decode(defaults.data(forKey: InPlaceInstallDenial.defaultsKey)) else { return }
+        if denial.clears(change: change, marker: marker, currentVersion: current) {
+            defaults.removeObject(forKey: InPlaceInstallDenial.defaultsKey)
+            log("launch: version \(current), in-place install worked; forgetting the earlier denial (\(denial.failedVersion ?? "?"))")
+            dispatch(.inPlaceDenialRestored(false))
+        } else {
+            dispatch(.inPlaceDenialRestored(true))
+        }
+    }
+
+    /// The text the relaunch watchdog captured from the Sparkle installer's log, if it is recent. Removed once read.
+    static func takeInstallerReason(at url: URL = UpdateLog.defaultURL.deletingLastPathComponent().appendingPathComponent("installer-reason.txt"), now: Date = Date()) -> String? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let modified = attrs[.modificationDate] as? Date, now.timeIntervalSince(modified) < 600,
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        try? FileManager.default.removeItem(at: url)
+        return UpdateInstallerReason.pick(from: text)
+    }
+
     func downloadManually() {
         var version = flow.knownVersion
         if case .failed(let f) = flow.phase, let v = f.version { version = v }
@@ -184,19 +223,45 @@ final class AppUpdater {
         case .cancel: cancel()
         case .tryAgain: retry()
         case .downloadManually: downloadManually()
+        case .downloadUpdate: downloadUpdate()
+        case .openAppManagement: openAppManagementSettings()
+        case .tryRestartAnyway: installNow()
         case .dismiss: dismissStatus()
         }
     }
 
+    var primaryAction: UpdateFlowCopy.Action? { UpdateFlowCopy.primaryAction(flow.phase, inPlaceDenied: flow.inPlaceInstallDenied) }
+
     /// The buttons for what is happening now; "Cancel" only when Sparkle gave us a way to cancel.
     var actions: [UpdateFlowCopy.Action] {
-        UpdateFlowCopy.actions(flow.phase).filter { $0 != .cancel || cancellable }
+        UpdateFlowCopy.actions(flow.phase, inPlaceDenied: flow.inPlaceInstallDenied).filter { $0 != .cancel || cancellable }
     }
 
     /// The app reopened on the version it had before "Restart to update".
-    func restartDidNotApply(target: String?, running: String) {
-        log("launch: restart did not apply (running \(running), target \(target ?? "unknown"))")
-        dispatch(.restartDidNotApply(target: target, running: running))
+    func restartDidNotApply(target: String?, running: String, defaults: UserDefaults = .standard) {
+        let reason = Self.takeInstallerReason()
+        log("launch: restart did not apply (running \(running), target \(target ?? "unknown"), installer reason: \(reason ?? "not captured yet"))")
+        dispatch(.restartDidNotApply(target: target, running: running, installerReason: reason))
+        remember(denialFor: target, running: running, reason: reason, defaults: defaults)
+        guard reason == nil else { return }
+        // The watchdog reads the installer's log a few seconds after it reopens the app: pick the reason up when it lands.
+        Task { @MainActor [weak self] in
+            for _ in 0..<12 {
+                try? await Task.sleep(for: .seconds(3))
+                guard let self else { return }
+                if let late = Self.takeInstallerReason() {
+                    self.log("installer reason arrived: \(late)")
+                    self.dispatch(.installerReasonArrived(target: target, running: running, reason: late))
+                    self.remember(denialFor: target, running: running, reason: late, defaults: defaults)
+                    return
+                }
+            }
+        }
+    }
+
+    private func remember(denialFor target: String?, running: String, reason: String?, defaults: UserDefaults) {
+        guard flow.inPlaceInstallDenied else { return }
+        defaults.set(InPlaceInstallDenial(failedVersion: target, runningVersion: running).encoded(), forKey: InPlaceInstallDenial.defaultsKey)
     }
 
     // MARK: Flow
@@ -354,7 +419,7 @@ final class AppUpdater {
         case .available: return availableNotes.first ?? (informationOnly ? "Read about this version." : "A newer version is available.")
         case .downloading(_, let p): return p.map { "\(Int(($0 * 100).rounded()))% downloaded" } ?? "Downloading a verified update."
         case .extracting: return "Verifying and unpacking Squeak."
-        case .readyToInstall: return "Squeak will restart to finish installing."
+        case .readyToInstall: return flow.inPlaceInstallDenied ? "\(UpdateFlowCopy.inPlaceBlockedNote) Download the update and drag Squeak to Applications, or try restarting anyway." : "Squeak will restart to finish installing."
         case .installing: return retryInstallation == nil ? "Squeak will reopen when the update is complete." : "Squeak needs to close before the update can finish."
         case .relaunching: return "Squeak will reopen when the update is complete."
         case .failed(let f): return f.reason
@@ -570,6 +635,7 @@ final class UpdateUserDriver: NSObject, SPUUserDriver {
     private var expected: UInt64 = 0
     private var received: UInt64 = 0
     private var lastPercent = -1
+    private var lastActivity = Date.distantPast
     private var lastExtractPercent = -1
     init(owner: AppUpdater) { self.owner = owner }
 
@@ -646,7 +712,13 @@ final class UpdateUserDriver: NSObject, SPUUserDriver {
         log("download size \(expectedContentLength) bytes")
         updateDownloadProgress()
     }
-    func showDownloadDidReceiveData(ofLength length: UInt64) { received += length; updateDownloadProgress() }
+    func showDownloadDidReceiveData(ofLength length: UInt64) {
+        received += length
+        // The stall clock follows any data at all, not only a new percent: a slow link can sit on one percent for a while.
+        let now = Date()
+        if now.timeIntervalSince(lastActivity) >= 2 { lastActivity = now; owner?.dispatch(.downloadActivity) }
+        updateDownloadProgress()
+    }
     private func updateDownloadProgress() {
         let value = expected > 0 ? min(1, Double(received) / Double(expected)) : nil
         let percent = value.map { Int($0 * 100) } ?? -1
@@ -909,6 +981,11 @@ private struct UpdateStatusView: View {
             Spacer()
             Button("View Details") { owner.install(); owner.later() }
                 .buttonStyle(UpdatePrimaryButtonStyle()).disabled(owner.informationURL == nil).keyboardShortcut(.defaultAction)
+        case .available where owner.inPlaceInstallDenied:
+            Button("Later") { owner.later() }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Install") { owner.install() }.buttonStyle(SecondaryButtonStyle())
+            Button("Download update") { owner.downloadUpdate() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
         case .available:
             Menu {
                 Button("Skip This Version") { owner.skipVersion() }.disabled(!owner.canSkip)
@@ -920,6 +997,11 @@ private struct UpdateStatusView: View {
             Button("Later") { owner.later() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
             Button("Install") { owner.install() }
                 .buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+        case .ready where owner.inPlaceInstallDenied:
+            Button("Later") { owner.closeUpdateWindowOnly() }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Try restart anyway") { owner.installNow() }.buttonStyle(SecondaryButtonStyle())
+            Button("Download update") { owner.downloadUpdate() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
         case .ready:
             Button("Later") { owner.closeUpdateWindowOnly() }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
             Spacer()
@@ -942,8 +1024,14 @@ private struct UpdateStatusView: View {
         case .error:
             Button("Done") { owner.dismissStatus(); owner.closeUpdateWindowOnly() }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
             Spacer()
-            Button("Download manually") { owner.downloadManually() }.buttonStyle(SecondaryButtonStyle())
-            Button("Try again") { owner.retry() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+            ForEach(owner.actions.filter { $0 != .dismiss }, id: \.self) { action in
+                if action == owner.primaryAction {
+                    Button(UpdateFlowCopy.label(action)) { owner.perform(action) }
+                        .buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                } else {
+                    Button(UpdateFlowCopy.label(action)) { owner.perform(action) }.buttonStyle(SecondaryButtonStyle())
+                }
+            }
         case .current, .idle:
             Text("Squeak for Mac").font(Typo.meta).foregroundStyle(Theme.subtle)
             Spacer()
