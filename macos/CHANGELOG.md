@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.13
+
+- Phone calls: a Test call button in Settings › Phone calls rings you with a made-up question and shows how it went, like on the iPhone.
+- Your iPhone and the web app can now do everything the Mac settings do for calls: play the voice sample, switch the realistic voice and pick it, set quick workspaces and read the call log (the web also got Pause calls and the full PIN controls).
+
 ## 2.12.12
 
 - Calling Squeak: every step now says "Press star to hear this again", and star repeats it, including what it heard from you.
