@@ -427,6 +427,7 @@ export async function runGateway(): Promise<number> {
       } else if (pins.status() === "off") {
         logger.info("the pin is turned off: a call takes a key answer without asking for one");
       }
+      let publishStatus: () => void = () => undefined;
       const gateway = new VoiceGateway({
         store,
         channel: relay.channel,
@@ -439,6 +440,7 @@ export async function runGateway(): Promise<number> {
         canAnswer: () => pins.answerable(),
         pins,
         updater,
+        publishStatus: () => publishStatus(),
         // The Mac's clips for a call follow the request while it rings.
         seed: (clips) => phone.seed?.(clips),
       });
@@ -489,6 +491,8 @@ export async function runGateway(): Promise<number> {
           latestVersion: () => updater.latest(),
         },
       });
+      // A changed latestVersion goes out at once; an unchanged status is already what the Mac last read.
+      publishStatus = () => status.poke();
       const logs = startLogPublisher({ store, channel: relay.channel, key: relay.key, log: events });
       let lastRegistration = "";
       phone.onRegistrationChange(() => {

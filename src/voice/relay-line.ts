@@ -223,18 +223,21 @@ export class RelayLine implements VoiceLine {
    * says it was started, not that it finished: the add-on is gone a moment later. A silent add-on is one from before
    * `gwcmd`.
    */
-  async gatewayCommand(action: "update"): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async gatewayCommand(
+    action: "update" | "check",
+    waitMs = PIN_WAIT_MS,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
     const id = newCallId();
     const at = this.now();
     const doc = sealGatewayCommand(this.options.key, {
       v: 1,
       id,
       at,
-      expiresAt: at + PIN_WAIT_MS,
+      expiresAt: at + waitMs,
       kind: "gwcmd",
       action,
     });
-    const result = await this.roundTrip(id, doc, [], at + PIN_WAIT_MS, OLD_ADDON);
+    const result = await this.roundTrip(id, doc, [], at + waitMs, OLD_ADDON);
     if (result.status === "gwcmd") return result.ok ? { ok: true } : { ok: false, reason: result.reason };
     return {
       ok: false,

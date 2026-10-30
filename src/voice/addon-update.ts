@@ -10,11 +10,14 @@ export const LATEST_CONFIG_URL =
   "https://raw.githubusercontent.com/Sibhimanyu/squeak/master/homeassistant/squeak-voice/config.yaml";
 /** Home Assistant's Supervisor, as an add-on reaches it. Fixed. */
 export const SUPERVISOR_UPDATE_URL = "http://supervisor/addons/self/update";
+/** Makes the Supervisor re-read the add-on repositories, so it learns of a new version. Fixed. */
+export const SUPERVISOR_RELOAD_URL = "http://supervisor/store/reload";
 
 const LOOK_MS = 6 * 60 * 60_000;
 const FETCH_TIMEOUT_MS = 10_000;
 /** The Supervisor answers once the update is installed, which can take a while; the add-on is stopped by it anyway. */
 const SUPERVISOR_TIMEOUT_MS = 90_000;
+const RELOAD_TIMEOUT_MS = 30_000;
 const MAX_CONFIG_BYTES = 64 * 1024;
 
 export const SEMVER = /^(\d{1,4})\.(\d{1,4})\.(\d{1,4})$/;
@@ -73,6 +76,8 @@ const NO_TOKEN = "This add-on can't reach Home Assistant's update service. Updat
 const REFUSED =
   "Home Assistant refused: the add-on needs the 'manager' permission; update it in Home Assistant once, then this button works.";
 
+const NOT_SEEN = "Home Assistant has not seen the new version yet. Try again in a minute.";
+
 export class AddonUpdater {
   private latestSeen: string | null = null;
   private timer: NodeJS.Timeout | null = null;
@@ -129,7 +134,10 @@ export class AddonUpdater {
    * after every check and BEFORE the Supervisor call, since the update stops this process: the reply to the Mac must
    * already be written. A refusal before that is returned and `started` never runs.
    */
-  async update(started: () => Promise<void> | void): Promise<UpdateOutcome> {
+  async update(started: () => Promise<void> | void, note?: (text: string) => void): Promise<UpdateOutcome> {
+    // The Supervisor refuses an update it has not heard of, so make it look first. A failure is not fatal.
+    const reload = await this.reloadStore();
+    if (!reload.ok) note?.(`Could not ask Home Assistant to refresh: ${reload.reason}`);
     // Look again right now so a version the Mac just found is honoured at once; the cache stands if this fails.
     const latest = await this.look();
     if (!isNewer(latest, this.options.version)) return { ok: false, reason: "Already on the newest version." };
@@ -145,10 +153,13 @@ export class AddonUpdater {
     }
   }
 
-  private async callSupervisor(token: string): Promise<UpdateOutcome> {
+  /** Asks the Supervisor to re-read the add-on repositories (fixed address, own token); never throws. */
+  async reloadStore(): Promise<UpdateOutcome> {
+    const token = this.options.token;
+    if (!token) return { ok: false, reason: NO_TOKEN };
     try {
-      const status = await this.withTimeout(SUPERVISOR_TIMEOUT_MS, (signal) =>
-        this.fetchFn(SUPERVISOR_UPDATE_URL, {
+      const status = await this.withTimeout(RELOAD_TIMEOUT_MS, (signal) =>
+        this.fetchFn(SUPERVISOR_RELOAD_URL, {
           method: "POST",
           headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
           signal,
@@ -156,6 +167,28 @@ export class AddonUpdater {
       );
       if (status === 200) return { ok: true };
       if (status === 401 || status === 403) return { ok: false, reason: REFUSED };
+      return { ok: false, reason: "Home Assistant could not refresh its add-on list." };
+    } catch {
+      return { ok: false, reason: "Home Assistant's update service did not answer." };
+    }
+  }
+
+  private async callSupervisor(token: string): Promise<UpdateOutcome> {
+    try {
+      const status = await this.withTimeout(SUPERVISOR_TIMEOUT_MS, (signal) =>
+        this.fetchFn(SUPERVISOR_UPDATE_URL, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          signal,
+        }).then(async (r) => ({
+          status: r.ok ? 200 : r.status,
+          // Only matched, never logged or returned.
+          unseen: !r.ok && /no update/i.test(await r.text().catch(() => "")),
+        })),
+      );
+      if (status.status === 200) return { ok: true };
+      if (status.status === 401 || status.status === 403) return { ok: false, reason: REFUSED };
+      if (status.unseen) return { ok: false, reason: NOT_SEEN };
       return { ok: false, reason: "Home Assistant could not update the add-on. Update it in Home Assistant." };
     } catch {
       return {

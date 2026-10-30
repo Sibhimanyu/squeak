@@ -9,6 +9,7 @@ import {
   isNewer,
   LATEST_CONFIG_URL,
   parseConfigVersion,
+  SUPERVISOR_RELOAD_URL,
   SUPERVISOR_UPDATE_URL,
   type FetchLike,
 } from "./addon-update.js";
@@ -35,7 +36,8 @@ const config = (version: string) => `name: Squeak Voice\nversion: "${version}"\n
 /** A fetch that answers the config look and the Supervisor call as told, and records every call. */
 function fakeFetch(options: {
   latest?: string | Error | { status: number; body?: string };
-  supervisor?: number | Error;
+  supervisor?: number | Error | { status: number; body: string };
+  reload?: number | Error;
 }) {
   const calls: Array<{ url: string; method: string | undefined; headers: Record<string, string> | undefined }> = [];
   const fetchFn: FetchLike = async (url, init) => {
@@ -46,9 +48,16 @@ function fakeFetch(options: {
       if (typeof latest === "object") return { ok: false, status: latest.status, text: async () => latest.body ?? "" };
       return { ok: true, status: 200, text: async () => config(latest ?? "0.10.1") };
     }
+    if (url === SUPERVISOR_RELOAD_URL) {
+      const reload = options.reload ?? 200;
+      if (reload instanceof Error) throw reload;
+      return { ok: reload >= 200 && reload < 300, status: reload, text: async () => `body ${TOKEN}` };
+    }
     if (url === SUPERVISOR_UPDATE_URL) {
       const supervisor = options.supervisor ?? 200;
       if (supervisor instanceof Error) throw supervisor;
+      if (typeof supervisor === "object")
+        return { ok: false, status: supervisor.status, text: async () => supervisor.body };
       return { ok: supervisor >= 200 && supervisor < 300, status: supervisor, text: async () => `body ${TOKEN}` };
     }
     throw new Error(`unexpected fetch ${url}`);
@@ -502,5 +511,136 @@ describe("the Mac asking the add-on to update, through the relay", () => {
       ...(await store.list(`channels/${channel}/voice`)),
     ];
     expect(JSON.stringify(docs)).not.toContain(TOKEN);
+  });
+});
+
+describe("reloading Home Assistant's store", () => {
+  const make = (reload: number | Error, token: string | null = TOKEN) => {
+    const f = fakeFetch({ latest: "0.11.1", reload });
+    return {
+      updater: new AddonUpdater({ version: "0.11.0", fetch: f.fetchFn, token: token ?? undefined }),
+      calls: f.calls,
+    };
+  };
+
+  it("posts to the fixed address with the bearer token and answers ok", async () => {
+    const { updater, calls } = make(200);
+    expect(await updater.reloadStore()).toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ url: "http://supervisor/store/reload", method: "POST" });
+    expect(calls[0]?.headers?.authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it("explains 401, 500, an unreachable Supervisor and a missing token, never with the token", async () => {
+    const answers = [
+      await make(401).updater.reloadStore(),
+      await make(500).updater.reloadStore(),
+      await make(new Error(`down ${TOKEN}`)).updater.reloadStore(),
+      await make(200, null).updater.reloadStore(),
+    ];
+    for (const a of answers) expect(a.ok).toBe(false);
+    expect(JSON.stringify(answers)).not.toContain(TOKEN);
+    expect(answers[0]).toMatchObject({ reason: expect.stringContaining("manager") });
+    const none = make(200, null);
+    await none.updater.reloadStore();
+    expect(none.calls).toHaveLength(0);
+  });
+
+  it("update() reloads before it asks for the update, and still updates when the reload fails", async () => {
+    for (const reload of [200, 500, new Error("down")]) {
+      const f = fakeFetch({ latest: "0.11.1", reload, supervisor: 200 });
+      const updater = new AddonUpdater({ version: "0.11.0", fetch: f.fetchFn, token: TOKEN });
+      const notes: string[] = [];
+      expect(await updater.update(vi.fn(), (t) => notes.push(t))).toEqual({ ok: true });
+      const urls = f.calls.map((c) => c.url);
+      expect(urls.indexOf(SUPERVISOR_RELOAD_URL)).toBeGreaterThanOrEqual(0);
+      expect(urls.indexOf(SUPERVISOR_RELOAD_URL)).toBeLessThan(urls.indexOf(SUPERVISOR_UPDATE_URL));
+      expect(notes.length).toBe(reload === 200 ? 0 : 1);
+      expect(JSON.stringify(notes)).not.toContain(TOKEN);
+    }
+  });
+
+  it("maps the Supervisor's 'no update available' to a plain sentence", async () => {
+    const f = fakeFetch({ latest: "0.11.1", supervisor: { status: 400, body: `No update available ${TOKEN}` } });
+    const updater = new AddonUpdater({ version: "0.11.0", fetch: f.fetchFn, token: TOKEN });
+    const outcome = await updater.update(vi.fn());
+    expect(outcome).toEqual({
+      ok: false,
+      reason: "Home Assistant has not seen the new version yet. Try again in a minute.",
+    });
+  });
+});
+
+describe("the 'check' command", () => {
+  const { key, channelId: channel } = generateChannel();
+  const now = 1_800_000_000_000;
+  let db: FakeRtdb;
+  let store: RtdbRest;
+  let gateway: VoiceGateway | null = null;
+  beforeEach(async () => {
+    db = new FakeRtdb();
+    store = new RtdbRest(await db.start());
+  });
+  afterEach(async () => {
+    gateway?.stop();
+    gateway = null;
+    await db.stop();
+  });
+
+  it("is a valid action; other actions stay refused", () => {
+    const body = { v: 1, id: "a", at: now, expiresAt: now + 1000, kind: "gwcmd" };
+    const doc = (action: string) => sealBody(key, "req", "a", { ...body, action }, now);
+    expect(readGatewayCommand(key, "a", doc("check"), now)).toMatchObject({ ok: true, request: { action: "check" } });
+    expect(readGatewayCommand(key, "a", doc("Check"), now).ok).toBe(false);
+    expect(readGatewayCommand(key, "a", doc("reload"), now).ok).toBe(false);
+    expect(sealGatewayCommand(key, { ...body, action: "check" } as GatewayCommandRequest)).toHaveProperty("box");
+  });
+
+  it("reloads, looks, publishes the status and replies ok, with a note and no token anywhere", async () => {
+    const f = fakeFetch({ latest: "0.11.1", reload: 200 });
+    const updater = new AddonUpdater({ version: "0.11.0", fetch: f.fetchFn, token: TOKEN });
+    const events: string[] = [];
+    const publish = vi.fn(() => {
+      // The look has happened by the time the status goes out.
+      expect(updater.latest()).toBe("0.11.1");
+    });
+    gateway = new VoiceGateway({
+      store,
+      channel,
+      key,
+      callee: "101",
+      pin: () => null,
+      line: { call: async () => ({ status: "unanswered" }) },
+      updater,
+      publishStatus: publish,
+      onEvent: (_l, t) => void events.push(t),
+    });
+    gateway.start();
+    const line = new RelayLine({ store, channel, key });
+    expect(await line.gatewayCommand("check", 5000)).toEqual({ ok: true });
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(f.calls.map((c) => c.url)).toEqual([SUPERVISOR_RELOAD_URL, LATEST_CONFIG_URL]);
+    expect(events).toEqual(["Looked for a newer version at the Mac's request"]);
+    expect(JSON.stringify(events)).not.toContain(TOKEN);
+    const results = await store.list(`channels/${channel}/voiceresult`);
+    expect(JSON.stringify(results)).not.toContain(TOKEN);
+  });
+
+  it("an add-on that is silent reads as too old", async () => {
+    let clock = now;
+    const silent = {
+      set: async () => undefined,
+      get: async () => null,
+      delete: async () => undefined,
+      watch: (_path: string, onChange: () => void) => {
+        const timer = setTimeout(() => {
+          clock += 60_000;
+          onChange();
+        }, 5);
+        return () => clearTimeout(timer);
+      },
+    } as unknown as ConstructorParameters<typeof RelayLine>[0]["store"];
+    const quiet = new RelayLine({ store: silent, channel, key, now: () => clock });
+    expect(await quiet.gatewayCommand("check", 50)).toEqual({ ok: false, reason: OLD_ADDON });
   });
 });

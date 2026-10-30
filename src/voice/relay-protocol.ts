@@ -127,8 +127,8 @@ export type PinControlRequest = {
   kind: "pinctl";
 } & PinControlAction;
 
-/** What the Mac may tell the add-on to do about itself. Exactly this one action; never carries more. */
-export type GatewayCommandAction = "update";
+/** What the Mac may tell the add-on to do about itself. Exactly these actions; never carries more. */
+export type GatewayCommandAction = "update" | "check";
 
 /** A command to the add-on itself (`kind: "gwcmd"`): exactly these keys. */
 export interface GatewayCommandRequest {
@@ -220,7 +220,8 @@ export function readGatewayCommand(
     return { ok: false, reason: "not a gateway command" };
   if (typeof body.at !== "number" || typeof body.expiresAt !== "number")
     return { ok: false, reason: "not a gateway command" };
-  if (body.action !== "update") return { ok: false, reason: "not a gateway command" };
+  if (body.action !== "update" && body.action !== "check") return { ok: false, reason: "not a gateway command" };
+  const action: GatewayCommandAction = body.action;
   if (
     body.expiresAt < now ||
     body.at > now + CLOCK_SKEW_MS ||
@@ -228,7 +229,7 @@ export function readGatewayCommand(
   ) {
     return { ok: false, reason: "expired" };
   }
-  return { ok: true, request: { v: 1, id, at: body.at, expiresAt: body.expiresAt, kind: "gwcmd", action: "update" } };
+  return { ok: true, request: { v: 1, id, at: body.at, expiresAt: body.expiresAt, kind: "gwcmd", action } };
 }
 
 /** A `pinctl` request in a document, or why not. Checks the seal, id, exact keys, digits and age. */

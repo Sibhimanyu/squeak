@@ -35,6 +35,8 @@ Phone calls) shows an **Update add-on** button. It asks Home Assistant to update
 is why the add-on declares the `manager` permission: Home Assistant only lets an add-on update itself with it. The
 request is accepted only from your paired Mac, and the add-on restarts for a minute while it installs. Home Assistant
 may ask you to accept the new permission the first time; if the button is refused, update once in Home Assistant.
+Before updating (and when the Mac checks for updates) the add-on asks Home Assistant to refresh its add-on list, because
+Home Assistant refuses an update it has not yet seen.
 
 ## Options
 
@@ -52,6 +54,7 @@ may ask you to accept the new permission the first time; if the button is refuse
 ## Notes
 
 - When the PIN is asked is set in the Squeak app (Settings > Phone calls > When Squeak asks for the PIN): separately for calls Squeak makes to you and for calls you make to Squeak. Only the one extension set in Squeak's Settings may call in either way. An older `call_in_pin: skip` option, if still in your options, only sets the starting value for calls you make.
+- 0.11.1: **Update add-on** and **Check for updates** now make Home Assistant refresh its add-on list first, so a new version is found and installed at once.
 - 0.11.0: when you ring out, the phone rings at once and the Mac's natural voice follows while it rings (until then the add-on speaks its own voice, so the line is never silent when you pick up). Calling in, you can also ask a question about a chat and hear the answer, or hear where a chat stands (needs Squeak for Mac 2.12.16 or newer; with an older Mac the call-in keys are as before).
 - Create the extension in 3CX, then Add Phone > "I will configure the phone myself" to see its SIP details.
 - The log shows each call as it is placed and why one could not be.

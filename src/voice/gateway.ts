@@ -37,7 +37,9 @@ export interface GatewayDependencies {
   canAnswer?: () => boolean;
   pins?: Pick<PinKeeper, "change" | "disable" | "enable" | "reset" | "status" | "policy" | "setPolicy"> | null;
   /** Updates the add-on on the Mac's word; absent: such a command is refused. */
-  updater?: Pick<AddonUpdater, "update" | "latest"> | null;
+  updater?: (Pick<AddonUpdater, "update" | "latest"> & Partial<Pick<AddonUpdater, "look" | "reloadStore">>) | null;
+  /** Publishes the add-on's status now (`startStatusReporter`'s send); absent: the next 30 s report carries it. */
+  publishStatus?: () => void;
   /**
    * Hands the Mac's clips to the phone as they arrive during a call (a request with `audioFollows`); absent: they are
    * ignored and the add-on speaks everything itself.
@@ -194,7 +196,8 @@ export class VoiceGateway {
         continue;
       }
       if (gwCommand?.ok) {
-        await this.updateFromMac(id);
+        if (gwCommand.request.action === "check") await this.checkFromMac(id);
+        else await this.updateFromMac(id);
         continue;
       }
       if (!read.ok) {
@@ -302,14 +305,28 @@ export class VoiceGateway {
     };
     const target = updater?.latest() ?? null;
     const outcome = updater
-      ? await updater.update(async () => {
-          this.deps.onEvent?.("info", `Update to ${target ?? "the newest version"} requested from the Mac`);
-          await reply({ v: 1, id, at: this.now(), status: "gwcmd", ok: true });
-        })
+      ? await updater.update(
+          async () => {
+            this.deps.onEvent?.("info", `Update to ${target ?? "the newest version"} requested from the Mac`);
+            await reply({ v: 1, id, at: this.now(), status: "gwcmd", ok: true });
+          },
+          (text) => this.deps.onEvent?.("warn", text),
+        )
       : { ok: false as const, reason: "This add-on cannot update itself from an app." };
     logger.info("voice gateway update", { ok: outcome.ok, replied });
     if (outcome.ok) return;
     this.deps.onEvent?.("warn", `Update refused: ${outcome.reason}`);
     if (!replied) await reply({ v: 1, id, at: this.now(), status: "gwcmd", ok: false, reason: outcome.reason });
+  }
+
+  /** The Mac asked this add-on to look for a newer version now: Home Assistant refreshes, then the repo is read. */
+  private async checkFromMac(id: string): Promise<void> {
+    const { store, channel, key, updater } = this.deps;
+    if (updater?.reloadStore) await updater.reloadStore().catch(() => undefined);
+    if (updater?.look) await updater.look().catch(() => undefined);
+    this.deps.publishStatus?.();
+    this.deps.onEvent?.("info", "Looked for a newer version at the Mac's request");
+    logger.info("voice gateway check", { latest: updater?.latest() ?? null });
+    await store.set(resultPath(channel, id), sealResult(key, { v: 1, id, at: this.now(), status: "gwcmd", ok: true }));
   }
 }

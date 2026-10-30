@@ -37,9 +37,9 @@ export class GatewayStatusReader {
     return this.cache?.view ?? { state: "none" };
   }
 
-  async read(): Promise<GatewayStatusView> {
+  async read(force = false): Promise<GatewayStatusView> {
     const now = this.now();
-    if (this.cache && now - this.cache.at <= CACHE_MS) return this.cache.view;
+    if (!force && this.cache && now - this.cache.at <= CACHE_MS) return this.cache.view;
     const relay = this.options.relay();
     let view: GatewayStatusView = { state: "none" };
     if (relay) {

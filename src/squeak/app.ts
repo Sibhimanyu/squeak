@@ -1425,7 +1425,14 @@ export class SqueakApp {
     if (!this.voiceRelayLine) {
       return { ok: false, reason: "Phone calls don't go through a Home Assistant add-on on this Mac.", status: 503 };
     }
+    // Best effort, in parallel with the daemon's own look: the add-on asks Home Assistant to refresh and reads the
+    // repo itself. A silent or old add-on changes nothing here; its answer is never the route's.
+    const asked = this.voiceRelayLine.gatewayCommand("check", 10_000).catch(() => ({ ok: false as const }));
     await this.addonVersions.latest(true);
+    if ((await asked).ok)
+      await this.gatewayStatusReader()
+        .read(true)
+        .catch(() => undefined);
     if (!this.addonVersions.lastOk()) {
       return {
         ok: false,
