@@ -36,14 +36,23 @@ export const HOTSPOT_KEYCHAIN_SERVICE = "Squeak hotspot";
 export const HOTSPOT_CHECK_MS = 10_000;
 /** A phone that looked at the Mac this recently counts as someone who wants it reachable. */
 export const HOTSPOT_PHONE_RECENT_MS = 15 * 60_000;
-/** Consecutive failed looks before switching: 10–20 seconds offline. */
-export const HOTSPOT_FAILURES_TO_SWITCH = 2;
+/**
+ * Consecutive failed looks before switching: a minute offline. Shorter
+ * caught every Wi-Fi roam and every moment the person spent joining a
+ * network, and the hotspot scan then knocked the Mac off the Wi-Fi it was
+ * about to get.
+ */
+export const HOTSPOT_FAILURES_TO_SWITCH = 6;
+/** With no address on Wi-Fi (still joining, or out of range), wait this long before trying the hotspot. */
+export const HOTSPOT_JOINING_GRACE_MS = 2 * 60_000;
+/** A failed try is only told when the outage lasted this long; shorter ones fixed themselves. */
+export const HOTSPOT_NOTICE_MIN_MS = 5 * 60_000;
 /**
  * Waits between automatic tries within one outage, then the last one
- * forever: a phone whose hotspot starts a moment late is caught in seconds,
- * not minutes (Insomnia's 5/10/20/30 s, at Squeak's 10 s look).
+ * forever. Each try scans and associates, which interrupts the Wi-Fi the
+ * Mac may be getting back on its own, so they thin out quickly.
  */
-export const HOTSPOT_RETRY_BACKOFF_MS = [10_000, 20_000, 30_000];
+export const HOTSPOT_RETRY_BACKOFF_MS = [30_000, 120_000, 300_000];
 /** After you switch by hand, no automatic switch for this long. */
 export const HOTSPOT_MANUAL_QUIET_MS = 5 * 60_000;
 const SETTLE_MS = 20_000;
@@ -159,6 +168,8 @@ export class HotspotFailover {
   private settings: HotspotSettings;
   private hasPassword = false;
   private onHotspot = false;
+  /** Whether Wi-Fi has an IPv4 address; false while it is still joining or out of range. */
+  private hasAddress = true;
   private last: HotspotEvent | null = null;
   private failures = 0;
   /** Automatic tries in the current outage; 0 when online. */
@@ -271,7 +282,8 @@ export class HotspotFailover {
       return;
     }
     this.failures += 1;
-    const ready = this.failures >= HOTSPOT_FAILURES_TO_SWITCH;
+    const joining = !this.hasAddress && this.now() - this.outageSince < HOTSPOT_JOINING_GRACE_MS;
+    const ready = this.failures >= HOTSPOT_FAILURES_TO_SWITCH && !joining;
     const wanted = this.options.wanted();
     // An outage that never switches is a silent failure: say once why, so "it didn't switch" can be answered.
     if (ready && (!wanted || this.now() < this.quietUntil)) {
@@ -296,7 +308,7 @@ export class HotspotFailover {
 
   /** Online again: says what the failed tries could not say while offline. */
   private endOutage(): void {
-    if (this.failedTry && this.outageSince !== null) {
+    if (this.failedTry && this.outageSince !== null && this.now() - this.outageSince >= HOTSPOT_NOTICE_MIN_MS) {
       const where = this.onHotspot ? `, on ${this.settings.ssid},` : "";
       const tried = this.tries > 1 ? ` Squeak tried ${this.tries} times.` : "";
       this.options.notify?.(
@@ -393,6 +405,7 @@ export class HotspotFailover {
   private async refreshOnHotspot(): Promise<void> {
     const device = await this.system.wifiDevice().catch(() => null);
     const address = device ? await this.system.address(device).catch(() => null) : null;
+    this.hasAddress = Boolean(address);
     this.onHotspot = Boolean(address?.startsWith(IPHONE_HOTSPOT_PREFIX));
   }
 

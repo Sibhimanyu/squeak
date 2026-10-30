@@ -7,6 +7,8 @@ import {
   describeDuration,
   describeHandsJoin,
   HOTSPOT_FAILURES_TO_SWITCH,
+  HOTSPOT_JOINING_GRACE_MS,
+  HOTSPOT_NOTICE_MIN_MS,
   HOTSPOT_MANUAL_QUIET_MS,
   HOTSPOT_RETRY_BACKOFF_MS,
   HotspotFailover,
@@ -119,7 +121,7 @@ describe("HotspotFailover", () => {
     expect(await hotspot.apply({ action: "join" })).toMatchObject({ ok: false });
   });
 
-  it("joins the hotspot after half a minute without internet, when something needs the Mac", async () => {
+  it("joins the hotspot after a minute without internet, when something needs the Mac", async () => {
     const mac = fakeMac();
     const { hotspot, notify } = failover(mac);
     await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
@@ -157,7 +159,7 @@ describe("HotspotFailover", () => {
     expect(hotspot.state.last).toMatchObject({ ok: false, note: expect.stringContaining("is Personal Hotspot on?") });
     // Telegram and Cliq cannot carry it with no internet.
     expect(notify).not.toHaveBeenCalled();
-    // Not before the wait, then once per wait: 10, 20, 30, 30 s.
+    // Not before the wait, then once per wait: 30, 120, 300, 300 s.
     await hotspot.tick();
     expect(joins()).toBe(1);
     for (const wait of [...HOTSPOT_RETRY_BACKOFF_MS, HOTSPOT_RETRY_BACKOFF_MS.at(-1)!]) {
@@ -168,7 +170,7 @@ describe("HotspotFailover", () => {
     expect(notify).not.toHaveBeenCalled();
     // The phone's hotspot comes up: joined, and only that is said.
     mac.setJoinWorks(true);
-    now += 60_000;
+    now += 300_000;
     await hotspot.tick();
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith("The Mac's Wi-Fi dropped, so it joined Phone.");
@@ -190,8 +192,27 @@ describe("HotspotFailover", () => {
     await hotspot.tick();
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls[0]![0]).toMatch(
-      /^The Mac is back online after 7 min offline\. Couldn't join Phone: is Personal Hotspot on\?.* Squeak tried 2 times\.$/,
+      /^The Mac is back online after 8 min offline\. Couldn't join Phone: is Personal Hotspot on\?.* Squeak tried 2 times\.$/,
     );
+  });
+
+  it("waits longer while Wi-Fi has no address yet (still joining), and for short outages stays quiet", async () => {
+    let now = 1_000_000;
+    const mac = fakeMac({ joinWorks: false, online: false });
+    const noAddress = { ...mac.system, address: async () => null };
+    const { hotspot, notify } = failover({ ...mac, system: noAddress }, true, () => now);
+    await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
+    mac.calls.length = 0;
+    for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH + 2; i += 1) await hotspot.tick();
+    expect(mac.calls).toEqual([]);
+    now += HOTSPOT_JOINING_GRACE_MS;
+    await hotspot.tick();
+    expect(mac.calls).toEqual(["join Phone secret-pass"]);
+    // Back within five minutes: the failed try is not worth a message.
+    now += 60_000;
+    mac.setOnline(true);
+    await hotspot.tick();
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("says nothing when the outage ends because failover was switched off", async () => {
@@ -222,6 +243,7 @@ describe("HotspotFailover", () => {
     const { hotspot, notify } = failover(mac, true, () => now);
     await hotspot.apply({ action: "configure", ssid: "Phone", password: "secret-pass", enabled: true });
     for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
+    now += HOTSPOT_NOTICE_MIN_MS;
     mac.setOnline(true);
     await hotspot.tick();
     mac.setOnline(false);
@@ -240,7 +262,7 @@ describe("HotspotFailover", () => {
     await hotspot.apply({ action: "join" });
     await hotspot.apply({ action: "leave" });
     mac.setOnline(false);
-    for (let i = 0; i < 4; i += 1) await hotspot.tick();
+    for (let i = 0; i < HOTSPOT_FAILURES_TO_SWITCH; i += 1) await hotspot.tick();
     expect(mac.calls.filter((call) => call.startsWith("join"))).toHaveLength(1);
     now += HOTSPOT_MANUAL_QUIET_MS;
     await hotspot.tick();
