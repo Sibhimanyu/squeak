@@ -121,8 +121,11 @@ final class AppUpdater {
         return (updater?.canCheckForUpdates ?? false) ? .idle : .busy
     }
 
-    /// "Check for updates…". Never silent: it starts a check, attaches to the one running, or says why it cannot.
-    func checkForUpdates(presenting: Bool = false) {
+    /// "Check for updates…", from the app menu, the popup's menu or Settings. Never silent: it starts a check, attaches
+    /// to the one running, or says why it cannot, and ALWAYS opens the update window on the live state (checking,
+    /// available, ready to restart, up to date, failed) so every entry point answers in the same place. The popup's
+    /// banner and Settings show the same state and buttons from the same flow.
+    func checkForUpdates(presenting: Bool = true) {
         log("tap: check (sparkle=\(sparkleState), phase=\(flow.phase))")
         guard updater != nil else {
             dispatch(.failed(stage: .check, reason: "Updates aren’t available in this copy of Squeak.", userInitiated: true))

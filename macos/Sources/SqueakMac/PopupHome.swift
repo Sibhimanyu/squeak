@@ -116,7 +116,7 @@ struct PopupMoreMenu: View {
             Divider()
             Button("Settings…", systemImage: "gearshape") { dismiss(); model.openSettings() }
                 .keyboardShortcut(",")
-            // The result shows in the panel's banner, so the panel stays open.
+            // Opens the update window on the live state (the banner shows the same state), so it always answers.
             Button("Check for Updates…", systemImage: "arrow.down.circle") { model.updater.checkForUpdates() }
             Divider()
             Button("Quit Squeak", systemImage: "power") { QuitIntent.shared.quitCompletely() }
