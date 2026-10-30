@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.11
+
+- Quitting Squeak now stays quit: when an update was waiting to install, a quit you chose no longer reopened the app.
+- Phone calls: the add-on's panel links to its updates in Home Assistant.
+
 ## 2.12.10
 
 - Calling Squeak: it now asks which workspace first. Set favourite workspaces with a number each in Settings › Phone calls › Quick workspaces; press the number (even before it finishes reading) to pick the workspace, then the chat.
