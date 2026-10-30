@@ -211,7 +211,7 @@ struct SettingsSidebar: View {
             model.settingsSection = section
         } label: {
             HStack(spacing: 12) {
-                Group { if section == .conductor { AgentMark(.conductor, size: Metrics.sidebarIcon) } else {
+                Group { if section == .conductor { AgentMark(.conductor, size: Metrics.sidebarIcon + 4) } else {
                     Lucide(section.symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted)
                 } }
                     .frame(width: Metrics.sidebarIcon)

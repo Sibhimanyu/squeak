@@ -440,7 +440,8 @@ struct SidebarView: View {
         return Button { NewChatController.shared.hide(); model.navFilter = f; model.projectFilter = nil } label: {
             HStack(spacing: 12) {
                 if let mark {
-                    AgentMark(mark, size: Metrics.sidebarIcon).frame(width: Metrics.sidebarIcon)
+                    AgentMark(mark, size: Metrics.sidebarIcon + (mark == .conductor || mark == .claude ? 4 : 0))
+                        .frame(width: Metrics.sidebarIcon)
                 } else {
                     Lucide(symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted).frame(width: Metrics.sidebarIcon)
                 }
