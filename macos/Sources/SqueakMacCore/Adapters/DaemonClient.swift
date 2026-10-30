@@ -238,9 +238,25 @@ public struct DaemonClient: Sendable {
         return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
     }
 
+    /// A fixed WAV sample made locally using the call voice. Never places a call or changes its settings.
+    public func previewNaturalVoice(_ voice: String) async throws -> Data {
+        let body = try JSONSerialization.data(withJSONObject: ["voice": voice])
+        let r = try await post("/control/voice/preview", body: body, timeout: 65)
+        try Self.check(r.status)
+        return r.body
+    }
+
     /// Pauses or resumes calls. nil = a daemon without the route (404).
     public func setVoicePause(_ choice: VoicePauseChoice) async throws -> VoiceSettings? {
         let r = try await post("/control/voice", body: choice.requestBody())
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
+    }
+
+    /// Replaces the quick-workspace list. nil = a daemon without the route (404).
+    public func setVoiceFavorites(_ list: [FavoriteWorkspace]) async throws -> VoiceSettings? {
+        let r = try await post("/control/voice", body: QuickWorkspaces.requestBody(list))
         if r.status == 404 { return nil }
         try Self.check(r.status)
         return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)

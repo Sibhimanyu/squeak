@@ -635,7 +635,11 @@ export class SqueakApp {
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
-      voice: { read: () => this.voiceView(), apply: (request) => this.applyVoice(request) },
+      voice: {
+        read: () => this.voiceView(),
+        apply: (request) => this.applyVoice(request),
+        preview: (voice) => this.previewVoice(voice),
+      },
       // Not behind voiceRelay: pairing is how the Mac gets one.
       voiceGateway: {
         read: () => ({
@@ -1130,6 +1134,18 @@ export class SqueakApp {
       },
     });
     return this.gatewayStatus;
+  }
+
+  private previewingVoice = false;
+
+  private async previewVoice(voice: string): Promise<Buffer | null> {
+    if (this.previewingVoice) return null;
+    this.previewingVoice = true;
+    try {
+      return await this.naturalVoice.preview(voice);
+    } finally {
+      this.previewingVoice = false;
+    }
   }
 
   /** Whether voice is set up and who it rings: what `GET /control/voice` carries. */

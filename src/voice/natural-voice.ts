@@ -25,6 +25,7 @@ export const NATURAL_VOICE = /^[a-z]{2}_[a-z]+$/;
 const RENDER_TIMEOUT_MS = 30_000;
 /** Most time a call waits for its clips before ringing without the rest. */
 export const CLIPS_BUDGET_MS = 25_000;
+export const VOICE_PREVIEW_TEXT = "Hello, this is Squeak. Your agent needs an answer. Which way should we go?";
 const SOURCE_RATE = 24_000;
 const LINE_RATE = 8_000;
 
@@ -175,16 +176,27 @@ export class NaturalVoice {
   }
 
   /** 24 kHz mono PCM of `text`, or null if the worker could not make it. One at a time. */
-  render(text: string): Promise<Int16Array | null> {
+  render(text: string, voice?: string): Promise<Int16Array | null> {
     const run = async (): Promise<Int16Array | null> => {
-      if (!this.usable) return null;
+      if (voice ? !NATURAL_VOICE.test(voice) || !naturalInstalled(this.paths) : !this.usable) return null;
+      let startupTimer: ReturnType<typeof setTimeout> | undefined;
       try {
-        await this.start();
+        await Promise.race([
+          this.start(),
+          new Promise<never>((_, reject) => {
+            startupTimer = setTimeout(() => {
+              this.child?.kill("SIGKILL");
+              reject(new Error("the voice worker took too long to start"));
+            }, RENDER_TIMEOUT_MS);
+          }),
+        ]);
       } catch (error) {
         logger.warn("voice natural speech could not start", {
           error: error instanceof Error ? error.message : String(error),
         });
         return null;
+      } finally {
+        clearTimeout(startupTimer);
       }
       const child = this.child;
       if (!child?.stdin) return null;
@@ -195,7 +207,7 @@ export class NaturalVoice {
         logger.warn("voice natural speech timed out; restarting the worker");
         child.kill("SIGKILL");
       }, RENDER_TIMEOUT_MS);
-      child.stdin.write(`${JSON.stringify({ id, text, voice: this.settings().voice, speed: 1.0, out })}\n`);
+      child.stdin.write(`${JSON.stringify({ id, text, voice: voice ?? this.settings().voice, speed: 1.0, out })}\n`);
       const ok = await done;
       clearTimeout(timer);
       try {
@@ -209,6 +221,12 @@ export class NaturalVoice {
     const result = this.chain.then(run, run);
     this.chain = result.catch(() => undefined);
     return result;
+  }
+
+  /** A fixed sample through the same engine and telephone filter, without changing call settings. */
+  async preview(voice: string): Promise<Buffer | null> {
+    const pcm = await this.render(VOICE_PREVIEW_TEXT, voice);
+    return pcm?.length ? wavOfLine(downsampleToLine(pcm)) : null;
   }
 
   /** The words as a telephone clip: 8 kHz G.711 mu-law. Null if they could not be made. */

@@ -4,7 +4,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { encodeMulaw, mulawToLinear, mulawToWav, readClips } from "./clips.js";
-import { callPrompts, downsampleToLine, NaturalSettingsStore, readPcm24k, renderCallClips } from "./natural-voice.js";
+import {
+  callPrompts,
+  downsampleToLine,
+  NaturalSettingsStore,
+  NaturalVoice,
+  readPcm24k,
+  renderCallClips,
+} from "./natural-voice.js";
 import { openBody, readRequest, sealRequest } from "./relay-protocol.js";
 import { randomBytes } from "node:crypto";
 
@@ -147,5 +154,50 @@ describe("RelayLine with clips", () => {
     });
     await line.call(script, true);
     expect(writes).toEqual([{ audio: true, timeoutMs: 90_000 }, { audio: false }]);
+  });
+});
+
+describe("voice preview", () => {
+  it("uses an explicit voice and fixed text through the call worker even when calls use plain speech", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-preview-test-"));
+    const worker = path.join(dir, "worker.cjs");
+    const record = path.join(dir, "requests.jsonl");
+    fs.writeFileSync(
+      worker,
+      `
+      const fs = require("node:fs");
+      const readline = require("node:readline");
+      console.log(JSON.stringify({ready:true}));
+      readline.createInterface({input:process.stdin}).on("line", line => {
+        const request = JSON.parse(line);
+        fs.appendFileSync(${JSON.stringify(record)}, line + "\\n");
+        const wav = Buffer.alloc(44 + 4800);
+        wav.write("data", 36);
+        wav.writeUInt32LE(4800, 40);
+        fs.writeFileSync(request.out, wav);
+        console.log(JSON.stringify({id:request.id,ok:true}));
+      });
+    `,
+    );
+    const settings = { enabled: false, voice: "af_heart" };
+    const natural = new NaturalVoice(
+      { dir, python: process.execPath, worker, model: worker, voices: worker },
+      () => settings,
+    );
+    try {
+      const wav = await natural.preview("am_michael");
+      expect(wav?.toString("ascii", 0, 4)).toBe("RIFF");
+      expect(wav?.readUInt32LE(24)).toBe(8000);
+      expect(wav?.length).toBe(1644);
+      const request = JSON.parse(fs.readFileSync(record, "utf8").trim()) as { voice: string; text: string };
+      expect(request.voice).toBe("am_michael");
+      expect(request.text).toContain("Your agent needs an answer");
+      expect(settings).toEqual({ enabled: false, voice: "af_heart" });
+      expect(await natural.preview("../../bad")).toBeNull();
+      expect(fs.readFileSync(record, "utf8").trim().split("\n")).toHaveLength(1);
+    } finally {
+      natural.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -141,6 +141,7 @@ export interface IngressControl {
    */
   voice?: {
     read(): unknown;
+    preview?(voice: string): Promise<Buffer | null>;
     apply(
       request: unknown,
     ):
@@ -942,6 +943,69 @@ export class HookIngressServer {
       });
       request.on("error", () => {
         aborted = true;
+      });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/voice/preview") {
+      if (request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      const preview = control.voice?.preview;
+      if (!preview) {
+        request.resume();
+        respond(response, 404, "voice preview unavailable");
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("error", () => {
+        aborted = true;
+      });
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        if (
+          typeof parsed !== "object" ||
+          parsed === null ||
+          Array.isArray(parsed) ||
+          Object.keys(parsed).length !== 1 ||
+          !("voice" in parsed) ||
+          typeof parsed.voice !== "string" ||
+          !/^[a-z]{2}_[a-z]+$/.test(parsed.voice)
+        ) {
+          respond(response, 400, "invalid voice");
+          return;
+        }
+        void preview(parsed.voice)
+          .then((wav) => {
+            if (response.destroyed) return;
+            if (!wav) {
+              respond(response, 503, "voice preview could not be made");
+              return;
+            }
+            response.writeHead(200, { "Content-Type": "audio/wav", "Cache-Control": "no-store" });
+            response.end(wav);
+          })
+          .catch(() => {
+            if (!response.destroyed) respond(response, 500, "voice preview failed");
+          });
       });
       return;
     }

@@ -15,6 +15,7 @@ struct VoiceSettingsPage: View {
     @State private var ownerChecking = false
     @State private var pairingGateway = false
     @State private var showingCalls = false
+    @State private var preview = VoicePreview()
 
     private var m: ChannelsModel { app.channels }
 
@@ -53,6 +54,8 @@ struct VoiceSettingsPage: View {
             }
         }
         .settingsForm()
+        .onDisappear { preview.stop() }
+        .onChange(of: m.voice?.natural) { _, _ in preview.stop() }
         .sheet(isPresented: $pairingGateway, onDismiss: { m.endGatewayPairing() }) { GatewayPairSheet().environment(app) }
         .sheet(isPresented: $showingCalls) { CallsSheet().environment(app) }
         .task {
@@ -103,17 +106,36 @@ struct VoiceSettingsPage: View {
     private func naturalSection(_ n: NaturalVoice) -> some View {
         Section {
             if n.installed {
-                Toggle(isOn: Binding(get: { n.enabled }, set: { on in Task { await m.setNatural(enabled: on) } })) {
+                Toggle(isOn: Binding(get: { n.enabled }, set: { on in preview.stop(); Task { await m.setNatural(enabled: on) } })) {
                     Text("Speak with this Mac's voice")
                     Text("A realistic voice made on this Mac, played in the call.")
                 }
                 .disabled(m.pauseBusy)
                 if n.enabled {
-                    Picker("Voice", selection: Binding(get: { n.voice }, set: { id in Task { await m.setNatural(voice: id) } })) {
+                    Picker("Voice", selection: Binding(get: { n.voice }, set: { id in preview.stop(); Task { await m.setNatural(voice: id) } })) {
                         ForEach(NaturalVoice.voices, id: \.id) { Text($0.title).tag($0.id) }
                         if !NaturalVoice.voices.contains(where: { $0.id == n.voice }) { Text(n.voice).tag(n.voice) }
                     }
                     .disabled(m.pauseBusy)
+                    HStack(spacing: 8) {
+                        Button {
+                            if preview.active { preview.stop() }
+                            else { preview.play(voice: n.voice, client: m.client) }
+                        } label: {
+                            Label(preview.active ? "Stop sample" : "Play sample",
+                                  systemImage: preview.active ? "stop.fill" : "play.fill")
+                        }
+                        .disabled(m.pauseBusy && !preview.active)
+                        .accessibilityLabel(preview.active ? "Stop voice sample" : "Play sample of selected voice")
+                        .help("Hear this voice on your Mac without placing a call.")
+                        if preview.loading {
+                            ProgressView().controlSize(.small).accessibilityLabel("Making voice sample")
+                            Text("Making sample…").foregroundStyle(.secondary)
+                        } else if preview.playing {
+                            Text("Playing on this Mac").foregroundStyle(.secondary)
+                        }
+                    }
+                    if let error = preview.error { Footnote(error) }
                 }
             } else {
                 LabeledContent {
@@ -124,7 +146,7 @@ struct VoiceSettingsPage: View {
                 }
             }
         } header: { Text("Voice") } footer: {
-            Footnote("Made on this Mac; the words never leave it. If it fails, the plain voice speaks and the call still goes.")
+            Footnote("Samples play on this Mac without placing a call. The words never leave it. If speech fails during a call, the plain voice speaks and the call still goes.")
         }
     }
 

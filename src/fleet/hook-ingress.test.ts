@@ -719,6 +719,42 @@ describe("HookIngressServer control routes", () => {
     expect(body.telegram.finished).toBe("conductor");
   });
 
+  it("gates voice samples, validates the voice, and returns only uncached WAV audio", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/voice/preview`;
+    const headers = { "x-squeak-token": harness.token };
+    const seen: string[] = [];
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voice: {
+        read: () => ({}),
+        apply: () => {
+          throw new Error("must not save settings");
+        },
+        preview: async (voice) => {
+          seen.push(voice);
+          return voice === "af_heart" ? Buffer.from("RIFFsample") : null;
+        },
+      },
+    });
+    expect((await fetch(url, { method: "POST", body: '{"voice":"af_heart"}' })).status).toBe(403);
+    expect((await fetch(url, { headers })).status).toBe(405);
+    for (const body of ["bad", "{}", "[]", '{"voice":"../../private"}', '{"voice":"af_heart","text":"secret"}']) {
+      expect((await fetch(url, { method: "POST", headers, body })).status).toBe(400);
+    }
+    expect(seen).toEqual([]);
+    const sample = await fetch(url, { method: "POST", headers, body: '{"voice":"af_heart"}' });
+    expect(sample.status).toBe(200);
+    expect(sample.headers.get("content-type")).toBe("audio/wav");
+    expect(sample.headers.get("cache-control")).toBe("no-store");
+    expect(sample.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await sample.text()).toBe("RIFFsample");
+    expect((await fetch(url, { method: "POST", headers, body: '{"voice":"af_missing"}' })).status).toBe(503);
+    expect(seen).toEqual(["af_heart", "af_missing"]);
+  });
+
   it("takes pin actions on /control/voice only with the token, awaits them, and never echoes a pin", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;
