@@ -71,6 +71,33 @@ function setup(macApproves: boolean) {
   return { made, store, channel, key, deps, log, dir, clockAt: () => clock };
 }
 
+describe("resolveCredentials with a pairing_code left in the options", () => {
+  it("shows a fresh code instead of waiting forever when that old code was already used", async () => {
+    const t = setup(true);
+    fs.writeFileSync(t.deps.triedFile, "x");
+    const fresh = { databaseUrl: DB, channel: t.channel, key: t.key };
+    let shown = 0;
+    t.deps.claim = async () => {
+      shown += 1;
+      return fresh;
+    };
+    // The tried file holds this code's fingerprint, as after a first (failed) attempt.
+    const { codeFingerprint } = await import("./addon-pairing.js");
+    fs.writeFileSync(t.deps.triedFile, codeFingerprint(t.made.code));
+    const got = await resolveCredentials({ SQUEAK_VOICE_PAIRING_CODE: t.made.code }, t.deps);
+    expect(shown).toBe(1);
+    expect(got).toMatchObject({ ...fresh, source: "paired now" });
+    expect(t.log.join("\n")).toContain("pairing_code option is ignored");
+  });
+
+  it("shows a fresh code when the old one is not a pairing code at all", async () => {
+    const t = setup(true);
+    t.deps.claim = async () => ({ databaseUrl: DB, channel: t.channel, key: t.key });
+    const got = await resolveCredentials({ SQUEAK_VOICE_PAIRING_CODE: "garbage" }, t.deps);
+    expect(got).toMatchObject({ source: "paired now" });
+  });
+});
+
 describe("resolveCredentials", () => {
   it("pairs, saves 0600, and cleans up the rendezvous", async () => {
     const t = setup(true);

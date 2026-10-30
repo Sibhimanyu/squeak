@@ -13,6 +13,8 @@ export interface PanelSources {
   version: string;
   paired(): boolean;
   code(): { code: string; expiresAt: number } | null;
+  /** One plain sentence about something the person should know (never a secret), or null. */
+  notice?(): string | null;
   registration(): { registered: boolean; error?: string };
   pin(): "set" | "off" | "none";
   log(): GatewayLogLine[];
@@ -23,6 +25,7 @@ export interface PanelState {
   paired: boolean;
   code?: string;
   codeExpiresAt?: number;
+  notice?: string;
   sipRegistered: boolean;
   sipError?: string;
   pin: "set" | "off" | "none";
@@ -39,6 +42,7 @@ export function panelState(sources: PanelSources): PanelState {
     version: sources.version,
     paired,
     ...(code ? { code: code.code, codeExpiresAt: code.expiresAt } : {}),
+    ...(!paired && sources.notice?.() ? { notice: (sources.notice() as string).slice(0, 300) } : {}),
     sipRegistered: registration.registered,
     ...(registration.error ? { sipError: registration.error.slice(0, 200) } : {}),
     pin: sources.pin(),
@@ -110,39 +114,52 @@ main{max-width:640px;margin:0 auto}
 h1{font-size:22px;margin:0 0 16px}
 section{background:var(--card);border-radius:14px;padding:16px;margin:0 0 14px}
 .code{font:600 40px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.08em;margin:8px 0}
-.mute{color:var(--mute)}.ok{color:var(--ok)}.bad{color:var(--bad)}
+.small{font-size:13px;margin:6px 0 12px}ol{margin:8px 0 12px;padding-left:22px}.note{background:rgba(255,160,0,.15);border-radius:10px;padding:10px 12px;margin:8px 0}.mute{color:var(--mute)}.ok{color:var(--ok)}.bad{color:var(--bad)}
 button{min-height:44px;padding:0 20px;border:0;border-radius:10px;background:var(--btn);color:var(--btnfg);font:600 16px system-ui;cursor:pointer}
 pre{font:14px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto;margin:8px 0 12px}
 </style></head><body><main>
 <h1>Squeak Voice</h1>
 <section><strong id="status">Loading</strong><div id="version" class="mute"></div></section>
-<section id="codebox" hidden>
-<div>Type this in Squeak for Mac: Settings &gt; Phone calls &gt; Add gateway.</div>
+<section id="pairbox" hidden>
+<strong>Pair with your Mac</strong>
+<ol>
+<li>Open <b>Squeak for Mac</b>, then Settings, then Phone calls, then <b>Add gateway</b>.</li>
+<li>Type this code there and click Connect.</li>
+<li>Click Approve. This page changes to "Paired".</li>
+</ol>
+<div id="notice" class="note" hidden></div>
 <div class="code" id="code"></div>
-<button id="copycode" type="button">Copy</button>
+<div class="mute" id="expiry"></div>
+<div class="mute small">Codes use letters and the digits 2 to 9. They never contain 0, 1, O, I or L.</div>
+<button id="copycode" type="button">Copy code</button>
+<div id="waiting" class="mute" hidden>Getting a code…</div>
 </section>
 <section><div id="sip"></div><div id="pin"></div></section>
-<section><strong>Recent</strong><pre id="log"></pre><button id="copylog" type="button">Copy</button></section>
+<section><strong>Recent activity</strong><pre id="log"></pre><button id="copylog" type="button">Copy</button></section>
 </main>
 <script>
 var $=function(i){return document.getElementById(i)};
-function copy(text,btn){var done=function(){btn.textContent="Copied";setTimeout(function(){btn.textContent="Copy"},1500)};
+function copy(text,btn,label){var done=function(){btn.textContent="Copied";setTimeout(function(){btn.textContent=label},1500)};
 if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done,fallback)}else fallback();
 function fallback(){var t=document.createElement("textarea");t.value=text;document.body.appendChild(t);t.select();try{document.execCommand("copy")}catch(e){}document.body.removeChild(t);done()}}
 var PIN={set:"A PIN is set.",off:"The PIN is turned off.",none:"No PIN is set yet. Set one in Squeak for Mac, Settings > Phone calls."};
+function minutes(ms){var m=Math.max(0,Math.round(ms/60000));return m<=1?"about a minute":m+" minutes"}
 function render(s){
 $("status").textContent=s.paired?"Paired with your Mac":"Not paired yet";
 $("status").className=s.paired?"ok":"";
 $("version").textContent="Add-on "+s.version;
-$("codebox").hidden=s.paired||!s.code;
-if(s.code)$("code").textContent=s.code;
-$("sip").textContent=s.sipRegistered?"Registered with your PBX":"Can't register: "+(s.sipError||"no answer yet");
+$("pairbox").hidden=s.paired;
+$("codebox")&&($("codebox").hidden=true);
+$("code").hidden=!s.code;$("copycode").hidden=!s.code;$("expiry").hidden=!s.code;$("waiting").hidden=!!s.code;
+if(s.code){$("code").textContent=s.code;$("expiry").textContent="A new code appears in "+minutes((s.codeExpiresAt||0)-Date.now())+"."}
+$("notice").hidden=!s.notice;if(s.notice)$("notice").textContent=s.notice;
+$("sip").textContent=s.sipRegistered?"Registered with your PBX":"Can't register with your PBX: "+(s.sipError||"no answer yet");
 $("sip").className=s.sipRegistered?"ok":"bad";
 $("pin").textContent=PIN[s.pin]||"";
 $("log").textContent=s.log.map(function(l){return new Date(l.at).toLocaleTimeString()+"  "+(l.level==="warn"?"! ":"")+l.text}).join("\\n")||"Nothing yet.";}
 var last=null;
 function tick(){fetch("api/state",{cache:"no-store"}).then(function(r){return r.json()}).then(function(s){last=s;render(s)}).catch(function(){})}
-$("copycode").onclick=function(){if(last&&last.code)copy(last.code,$("copycode"))};
-$("copylog").onclick=function(){copy($("log").textContent,$("copylog"))};
+$("copycode").onclick=function(){if(last&&last.code)copy(last.code,$("copycode"),"Copy code")};
+$("copylog").onclick=function(){copy($("log").textContent,$("copylog"),"Copy")};
 tick();setInterval(tick,3000);
 </script></body></html>`;

@@ -137,9 +137,9 @@ export async function resolveCredentials(
 
   const notPaired =
     "Not paired: open the Squeak Voice panel in Home Assistant's sidebar and type the code it shows in Squeak for Mac (Settings > Phone calls > Add gateway)";
-  const raw = env.SQUEAK_VOICE_PAIRING_CODE;
-  if (!raw?.trim()) {
-    deps.log(notPaired);
+  // The code shown in the panel: used whenever nothing else pairs, and after any old pairing_code option has failed
+  // (a used-up code left in the options must not stop a fresh one from being shown).
+  const showCode = async (): Promise<GatewayCredentials | null> => {
     if (!deps.claim) return null;
     let claimed: SavedPairing | null;
     try {
@@ -151,11 +151,17 @@ export async function resolveCredentials(
     writeSavedPairing(deps.pairingFile, claimed);
     deps.log("Paired with your Mac");
     return { ...claimed, source: "paired now" };
+  };
+  const raw = env.SQUEAK_VOICE_PAIRING_CODE;
+  if (!raw?.trim()) {
+    deps.log(notPaired);
+    return showCode();
   }
+  const ignored = "The pairing_code option is ignored: you can empty it.";
   const code = readPairingCode(raw);
   if (!code) {
-    deps.log(`The pairing_code is not a Squeak pairing code. ${notPaired}`);
-    return null;
+    deps.log(`The pairing_code is not a Squeak pairing code. ${ignored} ${notPaired}`);
+    return showCode();
   }
   const fingerprint = codeFingerprint(raw);
   let tried = "";
@@ -165,8 +171,8 @@ export async function resolveCredentials(
     // Never tried.
   }
   if (tried === fingerprint) {
-    deps.log(`That pairing code was already used or has run out. ${notPaired}`);
-    return null;
+    deps.log(`That pairing code was already used or has run out. ${ignored} ${notPaired}`);
+    return showCode();
   }
   // Recorded before asking, so a crash mid-way cannot lead to a second request on the same code.
   fs.mkdirSync(path.dirname(deps.triedFile), { recursive: true });
@@ -182,12 +188,12 @@ export async function resolveCredentials(
       log: deps.log,
     });
   } catch (error) {
-    deps.log(`Pairing failed: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    deps.log(`Pairing failed: ${error instanceof Error ? error.message : String(error)}. ${notPaired}`);
+    return showCode();
   }
   if (!outcome.ok) {
     deps.log(`${outcome.reason} ${notPaired}`);
-    return null;
+    return showCode();
   }
   const paired = { databaseUrl: code.databaseUrl, channel: outcome.channel, key: outcome.key };
   writeSavedPairing(deps.pairingFile, paired);
@@ -287,12 +293,14 @@ export async function runGateway(): Promise<number> {
   // What the sidebar panel shows. It is up before pairing finishes so the code is visible while unpaired.
   let panelCode: { code: string; expiresAt: number } | null = null;
   let panelPaired = false;
+  let panelNotice: string | null = null;
   let phoneLive: SipPhone | null = null;
   let pinLive: PinKeeper | null = null;
   const panel = await startPanel({
     version,
     paired: () => panelPaired,
     code: () => panelCode,
+    notice: () => panelNotice,
     registration: () => phoneLive?.registration() ?? { registered: false, error: "Not set up yet" },
     pin: () => pinLive?.status() ?? "none",
     log: () => events.doc(Date.now()).lines,
@@ -336,6 +344,10 @@ export async function runGateway(): Promise<number> {
         if (line === "Paired with your Mac") note("info", "Paired with your Mac");
         else if (/ran out/.test(line)) note("warn", "The pairing code ran out before it was approved");
         else if (/already used/.test(line)) note("warn", "The pairing code was already used or has run out");
+        if (/pairing_code option is ignored/.test(line)) {
+          panelNotice =
+            "An old pairing code is still set in this add-on's options. It has been used or has run out, so it is ignored; you can empty that option. Use the new code below.";
+        }
       },
       storeFor: (url) => new RtdbRest(url),
     });

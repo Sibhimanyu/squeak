@@ -15,6 +15,7 @@ function sources(paired: boolean): PanelSources & { canary: string } {
     code: () => ({ code: "K7M2-QX9P", expiresAt: 123 }),
     registration: () => ({ registered: false, error: "401" }),
     pin: () => "set",
+    notice: () => (paired ? "never shown once paired" : "An old pairing code is still set."),
     log: () => [{ at: 1, level: "info", text: "Waiting for the Mac: code K7M2-QX9P" }],
   };
 }
@@ -35,6 +36,20 @@ function get(
   });
 }
 
+describe("addon panel notice", () => {
+  it("carries the notice while unpaired, and never once paired", async () => {
+    for (const [paired, want] of [
+      [false, "An old pairing code is still set."],
+      [true, undefined],
+    ] as const) {
+      const panel = await startPanel(sources(paired), { port: 0, host: "127.0.0.1" });
+      stops.push(panel.stop);
+      const state = JSON.parse((await get(panel.port, "/api/state")).body) as { notice?: string };
+      expect(state.notice).toBe(want);
+    }
+  });
+});
+
 describe("addon panel", () => {
   it("serves state to a local/supervisor address", async () => {
     const p = await startPanel(sources(false), { port: 0, host: "127.0.0.1" });
@@ -47,6 +62,7 @@ describe("addon panel", () => {
       paired: false,
       code: "K7M2-QX9P",
       codeExpiresAt: 123,
+      notice: "An old pairing code is still set.",
       sipRegistered: false,
       sipError: "401",
       pin: "set",
