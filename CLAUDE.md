@@ -104,6 +104,16 @@ Rules:
 - Only ship when the user asks. Editing and testing freely in the worktree is
   fine and expected; putting code live is their call.
 - Commit before shipping — `ship.sh` refuses a dirty worktree.
+- **A Mac release is one command, run by the `mac-release` agent (Haiku, `.claude/agents/mac-release.md`), never by hand
+  or by a bigger model:** `macos/scripts/release-mac.sh <version>` (`--dry-run` builds and publishes nothing). It builds
+  `origin/master` in its own warm checkout (`~/.squeak-release`), so other chats' uncommitted edits cannot ride along
+  and a release does not wait for a clean tree; the version needs a `## <version>` section in `macos/CHANGELOG.md`
+  *on master*. It makes the GitHub release (notes and checksum only), publishes the appcast and the DMG to
+  sibhimanyu.github.io through the Git Data API (`publish-pages.sh`: no clone of that 1.6 GB repo, the commit may touch
+  only the paths it names, the newest 3 DMGs are kept), waits until the live appcast and DMG answer, updates
+  `website/release.json` and pushes the version commit. One at a time (`/tmp/squeak-mac-release.lock`). The uplink is
+  the floor (~1 MB/s: a 50 MB DMG is ~1.5 min), so the DMG is uploaded once. The iPhone app has its own
+  `ios/scripts/release.sh`; the daemon ships with `scripts/ship.sh`.
 
 ## Working on it
 

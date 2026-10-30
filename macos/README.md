@@ -284,6 +284,8 @@ swift run SqueakMac            # needs the daemon running for real data
 `macos/assets/squeak.icns`), `Squeak-<version>.zip` and its `.sha256`.
 It installs nothing and makes no DMG.
 
+**Day to day, use `scripts/release-mac.sh <version>`** (see CLAUDE.md, "A Mac release is one command"): it runs this script in a clean checkout of `origin/master` and then publishes with `scripts/publish-pages.sh`, so the two manual steps below are done for you. What follows is what `release.sh` does inside it.
+
 `scripts/release.sh <version>` (add the `## <version>` CHANGELOG section first) bumps
 the version, runs the tests, builds the app, builds the DMG (`make-dmg.sh`), signs
 it with Sparkle's `sign_update`, fetches the published appcast and adds the new
