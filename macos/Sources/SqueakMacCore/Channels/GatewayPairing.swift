@@ -61,18 +61,26 @@ public struct GatewayStatus: Sendable, Equatable, Decodable {
 public struct GatewayView: Sendable, Equatable, Decodable {
     public var pairing: GatewayPairing?
     public var status: GatewayStatus
+    /// The newest add-on version the add-on knows of, and whether it is newer than the running one (computed by the daemon).
+    public var latestVersion: String?
+    public var updateAvailable: Bool
 
-    public init(pairing: GatewayPairing? = nil, status: GatewayStatus = GatewayStatus()) {
-        self.pairing = pairing; self.status = status
+    public init(pairing: GatewayPairing? = nil, status: GatewayStatus = GatewayStatus(), latestVersion: String? = nil, updateAvailable: Bool = false) {
+        self.pairing = pairing; self.status = status; self.latestVersion = latestVersion; self.updateAvailable = updateAvailable
     }
 
-    private enum Keys: String, CodingKey { case pairing, status }
+    private enum Keys: String, CodingKey { case pairing, status, latestVersion, updateAvailable }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         pairing = try? c.decode(GatewayPairing.self, forKey: .pairing)
         status = (try? c.decode(GatewayStatus.self, forKey: .status)) ?? GatewayStatus()
+        latestVersion = try? c.decode(String.self, forKey: .latestVersion)
+        updateAvailable = (try? c.decode(Bool.self, forKey: .updateAvailable)) ?? false
     }
+
+    /// "Add-on 0.9.2 · 0.10.0 is available", or nil when there is nothing to update to.
+    public var updateLine: String? { GatewayText.updateLine(self) }
 
     /// True once a gateway has ever reported in, so the button reads "Pair again".
     public var isPaired: Bool { status.state != .none }
@@ -111,6 +119,14 @@ public enum GatewayText {
             return "Add-on can't reach your PBX"
         }
     }
+
+    public static func updateLine(_ g: GatewayView) -> String? {
+        guard g.updateAvailable, let latest = g.latestVersion, !latest.isEmpty else { return nil }
+        let now = g.status.version.map { "Add-on \($0) · " } ?? ""
+        return "\(now)\(latest) is available"
+    }
+
+    public static let updateSlow = "Home Assistant is taking long: check the add-on in Home Assistant."
 
     static func duration(minutes: Int) -> String {
         if minutes < 60 { return "\(minutes) min" }
@@ -182,5 +198,26 @@ public enum GatewayClaimText {
     public static func confirm(_ p: GatewayPairing) -> String {
         let who = (p.name?.isEmpty == false ? p.name! : "Squeak Voice") + (p.version.map { " (add-on \($0))" } ?? "")
         return "\(who) wants to connect."
+    }
+}
+
+/// What `POST /control/voice/gateway/update` came to.
+public enum GatewayUpdateOutcome: Sendable, Equatable {
+    case done
+    /// The daemon's own plain sentence.
+    case refused(String)
+    /// A daemon without the route.
+    case unavailable
+}
+
+public enum GatewayUpdate {
+    public static let requestBody = Data("{}".utf8)
+
+    public static func outcome(status: Int, body: Data) -> GatewayUpdateOutcome {
+        let o = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        let sentence = (o?["error"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        if (200..<300).contains(status), o?["ok"] as? Bool != false { return .done }
+        if status == 404 && sentence == nil { return .unavailable }
+        return .refused(sentence ?? "Squeak could not update the add-on. Try again, or update it in Home Assistant.")
     }
 }

@@ -251,6 +251,45 @@ final class ChannelsModel {
     private(set) var gatewayConnecting = false
     private var gatewayConnectWatch: Task<Void, Never>?
 
+    /// True from the press of "Update add-on" until the add-on reports the new version (or 3 min).
+    private(set) var gatewayUpdating = false
+    private var gatewayUpdateWatch: Task<Void, Never>?
+
+    func updateGatewayAddon() async {
+        guard !gatewayUpdating, !gatewayBusy, let target = gateway?.latestVersion, gateway?.updateAvailable == true else { return }
+        gatewayError = nil
+        if demo { return }
+        gatewayBusy = true
+        defer { gatewayBusy = false }
+        do {
+            switch try await client.updateGatewayAddon() {
+            case .done: watchGatewayUpdate(to: target)
+            case .refused(let sentence): gatewayError = sentence
+            case .unavailable: gatewayError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            gatewayError = "Squeak on this Mac did not answer."
+        }
+    }
+
+    private func watchGatewayUpdate(to target: String) {
+        gatewayUpdateWatch?.cancel()
+        gatewayUpdating = true
+        gatewayUpdateWatch = Task { [weak self] in
+            let deadline = Date().addingTimeInterval(180)
+            var arrived = false
+            while !Task.isCancelled, Date() < deadline {
+                try? await Task.sleep(for: .seconds(3))
+                guard let self else { return }
+                await self.refreshGateway()
+                if self.gateway?.status.version == target { arrived = true; break }
+            }
+            guard let self, !Task.isCancelled else { return }
+            if !arrived { self.gatewayError = GatewayText.updateSlow }
+            self.gatewayUpdating = false
+        }
+    }
+
     func refreshGateway() async {
         if demo { return }
         do {

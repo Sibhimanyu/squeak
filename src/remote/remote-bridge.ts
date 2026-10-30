@@ -714,12 +714,21 @@ export interface RemoteBridgeDependencies {
    */
   voice?: {
     state(): unknown;
+    /** The recent calls with their steps (voice/phone-voice.ts); sent only to a phone whose `caps` name `calls`. */
+    calls?(): unknown;
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
     test(): { ok: true } | { ok: false; reason: string };
     /** Change the pin the gateway asks for: it needs the current one. Answers when the gateway has. */
     changePin(current: string, next: string): Promise<{ ok: true } | { ok: false; reason: string }>;
     /** Change, turn off, turn on or reset the pin (voice/pin-keeper.ts); a reset needs no current pin. */
     pinAction(action: PinAction): Promise<{ ok: true } | { ok: false; reason: string }>;
+    /** Update the Home Assistant add-on (voice/addon-update.ts): `{ gatewayUpdate: true }`. Absent: refused. */
+    gatewayUpdate?(): Promise<{ ok: true } | { ok: false; reason: string }>;
+    /**
+     * The sample the Mac app's "Play sample" plays (an 8 kHz mono WAV made with the call voice); null when it could
+     * not be made or one is being made. Absent: the phone is not offered a sample.
+     */
+    preview?(voice: string): Promise<Buffer | null>;
   } | null;
   hotspot?: {
     state(): HotspotState;
@@ -3128,6 +3137,22 @@ export class RemoteBridge {
       if (!outcome.ok) return refuse(outcome.reason, `pin ${action.action} refused: ${outcome.reason}`);
       this.nudgePublish(0);
       this.log(device.name, "sent", `voice pin ${action.action}`);
+      return { write: true, result: { id, status: "sent" } };
+    }
+    // Update the add-on: `{ gatewayUpdate: true }`, exactly that key and the boolean true. Nothing else travels.
+    if (
+      typeof change === "object" &&
+      change !== null &&
+      !Array.isArray(change) &&
+      Object.keys(change).join(",") === "gatewayUpdate"
+    ) {
+      if ((change as Record<string, unknown>).gatewayUpdate !== true || !voice.gatewayUpdate) {
+        return refuse("This Mac can't update the add-on from a phone.", "bad gateway update");
+      }
+      const outcome = await voice.gatewayUpdate();
+      if (!outcome.ok) return refuse(outcome.reason, `gateway update refused: ${outcome.reason}`);
+      this.nudgePublish(0);
+      this.log(device.name, "sent", "voice add-on update");
       return { write: true, result: { id, status: "sent" } };
     }
     // A pin change: `{ pin: { current, next } }`, digits only. Its values are never logged.

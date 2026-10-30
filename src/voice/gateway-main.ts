@@ -31,6 +31,7 @@ import { EspeakSpeaker, PiperSpeaker, setSpeechSlowHook, type Speaker } from "./
 import { GatewayEventLog, startLogPublisher } from "./addon-event-log.js";
 import { claimWithMac } from "./addon-claim.js";
 import { startPanel } from "./addon-panel.js";
+import { AddonUpdater } from "./addon-update.js";
 import { RENDEZVOUS_DATABASE } from "./claim-protocol.js";
 import type { Clip } from "./clips.js";
 
@@ -301,8 +302,11 @@ export async function runGateway(): Promise<number> {
   let panelNotice: string | null = null;
   let phoneLive: SipPhone | null = null;
   let pinLive: PinKeeper | null = null;
+  // Asks Home Assistant's Supervisor for an update only on the paired Mac's word; the token stays in this call's env read.
+  const updater = new AddonUpdater({ version, token: process.env.SUPERVISOR_TOKEN });
   const panel = await startPanel({
     version,
+    latestVersion: () => updater.latest(),
     paired: () => panelPaired,
     code: () => panelCode,
     notice: () => panelNotice,
@@ -433,6 +437,7 @@ export async function runGateway(): Promise<number> {
         pinRequired: () => pins.requiresPin(),
         canAnswer: () => pins.answerable(),
         pins,
+        updater,
       });
       // Incoming "skip": a call from the one allowed extension is proof enough (the keeper's policy, set from the app).
       const gate = incomingGate(pins);
@@ -474,7 +479,12 @@ export async function runGateway(): Promise<number> {
         store,
         channel: relay.channel,
         key: relay.key,
-        sources: { version, registration: () => phone.registration(), pin: () => pins.status() },
+        sources: {
+          version,
+          registration: () => phone.registration(),
+          pin: () => pins.status(),
+          latestVersion: () => updater.latest(),
+        },
       });
       const logs = startLogPublisher({ store, channel: relay.channel, key: relay.key, log: events });
       let lastRegistration = "";
@@ -488,12 +498,14 @@ export async function runGateway(): Promise<number> {
         lastRegistration = text;
         note(r.registered ? "info" : "warn", text);
       });
+      updater.start();
       phone.start();
       gateway.start();
       started = {
         stop: () => {
           status.stop();
           logs.stop();
+          updater.stop();
           setSpeechSlowHook(null);
           gateway.stop();
           directory.stop();

@@ -4307,13 +4307,27 @@ describe("RemoteBridge notification settings from the phone", () => {
 
 describe("RemoteBridge phone-call settings from the phone", () => {
   async function voiceT(
-    options: { offered?: boolean; testOutcome?: { ok: true } | { ok: false; reason: string } } = {},
+    options: {
+      offered?: boolean;
+      testOutcome?: { ok: true } | { ok: false; reason: string };
+      calls?: () => unknown;
+      gatewayUpdate?: () => Promise<{ ok: true } | { ok: false; reason: string }>;
+      preview?: (voice: string) => Promise<Buffer | null>;
+      natural?: Record<string, unknown>;
+      streaming?: boolean;
+    } = {},
   ) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-voice-"));
     dirs.push(dir);
-    const store = new MemoryStore();
+    const store = options.streaming ? new WatchingStore() : new MemoryStore();
+    const clock = { t: NOW };
     const voice = new VoiceSettingsStore(path.join(dir, "voice-settings.json"));
-    const view = () => ({ mode: "gateway", callee: voice.settings.callee, defaultCallee: null });
+    const view = () => ({
+      mode: "gateway",
+      callee: voice.settings.callee,
+      defaultCallee: null,
+      ...(options.natural ? { natural: options.natural } : {}),
+    });
     const apply = vi.fn((request: unknown) => {
       const outcome = voice.apply(request);
       return outcome.ok ? { ok: true as const, state: view() } : outcome;
@@ -4336,8 +4350,21 @@ describe("RemoteBridge phone-call settings from the phone", () => {
       store,
       replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
       snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
-      ...(options.offered === false ? {} : { voice: { state: view, apply, test, changePin, pinAction } }),
-      now: () => NOW,
+      ...(options.offered === false
+        ? {}
+        : {
+            voice: {
+              state: view,
+              apply,
+              test,
+              changePin,
+              pinAction,
+              ...(options.gatewayUpdate ? { gatewayUpdate: options.gatewayUpdate } : {}),
+              ...(options.calls ? { calls: options.calls } : {}),
+              ...(options.preview ? { preview: options.preview } : {}),
+            },
+          }),
+      now: () => clock.t,
     });
     const pairing = bridge.startPairing();
     const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
@@ -4447,6 +4474,44 @@ describe("RemoteBridge phone-call settings from the phone", () => {
     const log = JSON.stringify((t.bridge.status() as { activity: unknown }).activity);
     expect(log).not.toMatch(/987654|1234|0000/);
     t.bridge.stop();
+  });
+
+  it("updates the add-on only for exactly { gatewayUpdate: true }", async () => {
+    const gatewayUpdate = vi.fn(async () => ({ ok: true as const }));
+    const t = await voiceT({ gatewayUpdate });
+    const sent = await t.bridge.handleCommand(t.config, "g1", t.command({ change: { gatewayUpdate: true } }));
+    expect(sent.result).toEqual({ id: "g1", status: "sent" });
+    expect(gatewayUpdate).toHaveBeenCalledTimes(1);
+    for (const change of [
+      { gatewayUpdate: false },
+      { gatewayUpdate: "true" },
+      { gatewayUpdate: 1 },
+      { gatewayUpdate: null },
+      { gatewayUpdate: true, callee: "101" },
+      { gatewayUpdate: true, pinAction: { action: "reset", next: null } },
+    ]) {
+      const verdict = await t.bridge.handleCommand(t.config, "g2", t.command({ change }));
+      expect(verdict.result).toMatchObject({ status: "refused" });
+    }
+    expect(gatewayUpdate).toHaveBeenCalledTimes(1);
+    t.bridge.stop();
+  });
+
+  it("passes the add-on's refusal sentence back, and refuses on a Mac without the hook", async () => {
+    const t = await voiceT({
+      gatewayUpdate: async () => ({ ok: false, reason: "The add-on is already on the newest version." }),
+    });
+    const verdict = await t.bridge.handleCommand(t.config, "g3", t.command({ change: { gatewayUpdate: true } }));
+    expect(verdict.result).toEqual({
+      id: "g3",
+      status: "refused",
+      reason: "The add-on is already on the newest version.",
+    });
+    t.bridge.stop();
+    const bare = await voiceT();
+    const none = await bare.bridge.handleCommand(bare.config, "g4", bare.command({ change: { gatewayUpdate: true } }));
+    expect(none.result).toMatchObject({ status: "refused" });
+    bare.bridge.stop();
   });
 
   it("refuses malformed pin actions, extra keys and bad digits without asking", async () => {

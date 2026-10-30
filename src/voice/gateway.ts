@@ -4,6 +4,7 @@ import type { CallResult } from "./baresip-line.js";
 import type { Clip } from "./clips.js";
 import { CallDialog } from "./dialog.js";
 import {
+  readGatewayCommand,
   readPinChange,
   readPinControl,
   readRequest,
@@ -14,6 +15,7 @@ import {
   type CallResultDoc,
 } from "./relay-protocol.js";
 import type { PinKeeper } from "./pin-keeper.js";
+import type { AddonUpdater } from "./addon-update.js";
 
 export type GatewayStore = Pick<RtdbRest, "list" | "set" | "delete" | "watch">;
 
@@ -33,6 +35,8 @@ export interface GatewayDependencies {
   /** Read at each call: whether a call can take a key answer at all (the keeper's rule); default true. */
   canAnswer?: () => boolean;
   pins?: Pick<PinKeeper, "change" | "disable" | "enable" | "reset" | "status" | "policy" | "setPolicy"> | null;
+  /** Updates the add-on on the Mac's word; absent: such a command is refused. */
+  updater?: Pick<AddonUpdater, "update" | "latest"> | null;
   now?: () => number;
   /** A plain sentence for the apps' gateway log; never a pin, a question or a key. */
   onEvent?: (level: "info" | "warn", text: string) => void;
@@ -122,6 +126,8 @@ export class VoiceGateway {
       // Not a call: it may be a pin change, which is also sealed with the key and needs the current pin.
       const pinChange = read.ok ? null : readPinChange(key, id, doc, this.now());
       const pinControl = read.ok || pinChange?.ok ? null : readPinControl(key, id, doc, this.now());
+      const gwCommand =
+        read.ok || pinChange?.ok || pinControl?.ok ? null : readGatewayCommand(key, id, doc, this.now());
       // Remember it first, synchronously: a second pass (the stream wakes one while another runs) must see
       // it as taken. Then claim: an undeletable document is left for the next pass, never run twice.
       this.handled.push(id);
@@ -181,6 +187,10 @@ export class VoiceGateway {
         await store.set(resultPath(channel, id), sealResult(key, answer));
         continue;
       }
+      if (gwCommand?.ok) {
+        await this.updateFromMac(id);
+        continue;
+      }
       if (!read.ok) {
         logger.info("voice gateway dropped a request", { reason: read.reason });
         continue;
@@ -209,5 +219,29 @@ export class VoiceGateway {
             : { v: 1, id, at: this.now(), status: "failed", reason: result.reason };
       await store.set(resultPath(channel, id), sealResult(key, body));
     }
+  }
+
+  /**
+   * The Mac asked this add-on to update itself. The updater checks that the newest version it found on its own is newer,
+   * and tells us just before it asks Home Assistant, because that stops this process: the answer is written first.
+   */
+  private async updateFromMac(id: string): Promise<void> {
+    const { store, channel, key, updater } = this.deps;
+    let replied = false;
+    const reply = async (answer: CallResultDoc): Promise<void> => {
+      replied = true;
+      await store.set(resultPath(channel, id), sealResult(key, answer));
+    };
+    const target = updater?.latest() ?? null;
+    const outcome = updater
+      ? await updater.update(async () => {
+          this.deps.onEvent?.("info", `Update to ${target ?? "the newest version"} requested from the Mac`);
+          await reply({ v: 1, id, at: this.now(), status: "gwcmd", ok: true });
+        })
+      : { ok: false as const, reason: "This add-on cannot update itself from an app." };
+    logger.info("voice gateway update", { ok: outcome.ok, replied });
+    if (outcome.ok) return;
+    this.deps.onEvent?.("warn", `Update refused: ${outcome.reason}`);
+    if (!replied) await reply({ v: 1, id, at: this.now(), status: "gwcmd", ok: false, reason: outcome.reason });
   }
 }

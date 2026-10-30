@@ -23,12 +23,13 @@ function setup(relay: { channel: string; key: string } | null = { channel: CHANN
     relay: () => relay,
     now: () => now,
   });
-  const put = (over: { at?: number; sipRegistered?: boolean; sipError?: string } = {}) => {
+  const put = (over: { at?: number; sipRegistered?: boolean; sipError?: string; latestVersion?: string } = {}) => {
     doc = sealGatewayStatus(KEY, {
       v: 1,
       id: "gwstatus",
       at: over.at ?? now,
       version: "0.7.0",
+      ...(over.latestVersion ? { latestVersion: over.latestVersion } : {}),
       sipRegistered: over.sipRegistered ?? true,
       ...(over.sipError ? { sipError: over.sipError } : {}),
       paired: true,
@@ -48,6 +49,15 @@ describe("GatewayStatusReader", () => {
     const { reader, put } = setup();
     put();
     expect(await reader.read()).toMatchObject({ state: "ok", version: "0.7.0", sipRegistered: true });
+  });
+
+  it("carries the newest version the add-on found, only when it reported one", async () => {
+    const a = setup();
+    a.put();
+    expect(await a.reader.read()).not.toHaveProperty("latestVersion");
+    const b = setup();
+    b.put({ latestVersion: "0.10.1" });
+    expect(await b.reader.read()).toMatchObject({ version: "0.7.0", latestVersion: "0.10.1" });
   });
 
   it("is sipDown with the PBX's reason", async () => {

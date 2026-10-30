@@ -220,8 +220,22 @@ struct VoiceSettingsPage: View {
                     Text(g.statusLine(now: ctx.date)).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            if m.gatewayUpdating {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Updating the add-on… it restarts in a minute").frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else if let line = g.updateLine {
+                Text(line).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let e = m.gatewayError, !pairingGateway { Footnote(e) }
             HStack {
-                Button(g.isPaired ? "Pair again" : "Add gateway") { pairingGateway = true }.disabled(m.gatewayConnecting)
+                Button(g.isPaired ? "Pair again" : "Add gateway") { pairingGateway = true }.disabled(m.gatewayConnecting || m.gatewayUpdating)
+                if g.updateAvailable {
+                    Button("Update add-on") { Task { await m.updateGatewayAddon() } }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(m.gatewayBusy || m.gatewayUpdating || m.gatewayConnecting)
+                }
                 Spacer()
             }
         } header: { Text("Phone-call gateway") } footer: {

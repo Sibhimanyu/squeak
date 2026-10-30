@@ -15,6 +15,7 @@ import {
 } from "./pair-protocol.js";
 import { GATEWAY_STATUS_ID, sealGatewayStatus, type GatewayStatusDoc } from "./gateway-status-protocol.js";
 import { resultPath } from "./relay-protocol.js";
+import { cleanVersion } from "./addon-update.js";
 
 /** What pairing leaves behind in the add-on's own storage: the three things the old options used to hold. */
 export interface SavedPairing {
@@ -101,15 +102,19 @@ export interface StatusSources {
   version: string;
   registration(): { registered: boolean; error?: string };
   pin(): "set" | "off" | "none";
+  /** The newest add-on version found (x.y.z), or null/absent. */
+  latestVersion?(): string | null;
 }
 
 export function gatewayStatusNow(sources: StatusSources, now: number): GatewayStatusDoc {
   const registration = sources.registration();
+  const latestVersion = cleanVersion(sources.latestVersion?.());
   return {
     v: 1,
     id: GATEWAY_STATUS_ID,
     at: now,
     version: sources.version,
+    ...(latestVersion ? { latestVersion } : {}),
     sipRegistered: registration.registered,
     ...(registration.error ? { sipError: registration.error.slice(0, 200) } : {}),
     paired: true,

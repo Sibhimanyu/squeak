@@ -9,6 +9,7 @@ import {
   REQUEST_TTL_MS,
   requestPath,
   resultPath,
+  sealGatewayCommand,
   sealPinChange,
   sealPinControl,
   type PinAction,
@@ -141,6 +142,30 @@ export class RelayLine implements VoiceLine {
       return result.ok
         ? { ok: true, state: result.state, ...(result.policy ? { policy: result.policy } : {}) }
         : { ok: false, reason: result.reason };
+    return {
+      ok: false,
+      reason: result.status === "failed" ? result.reason : "The gateway answered with something else.",
+    };
+  }
+
+  /**
+   * Tells the add-on to update itself (it checks it is behind, then asks Home Assistant, which restarts it). The answer
+   * says it was started, not that it finished: the add-on is gone a moment later. A silent add-on is one from before
+   * `gwcmd`.
+   */
+  async gatewayCommand(action: "update"): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const id = newCallId();
+    const at = this.now();
+    const doc = sealGatewayCommand(this.options.key, {
+      v: 1,
+      id,
+      at,
+      expiresAt: at + PIN_WAIT_MS,
+      kind: "gwcmd",
+      action,
+    });
+    const result = await this.roundTrip(id, doc, [], at + PIN_WAIT_MS, OLD_ADDON);
+    if (result.status === "gwcmd") return result.ok ? { ok: true } : { ok: false, reason: result.reason };
     return {
       ok: false,
       reason: result.status === "failed" ? result.reason : "The gateway answered with something else.",

@@ -2,6 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 
 import type { GatewayLogLine } from "./gateway-log-protocol.js";
+import { cleanVersion, isNewer } from "./addon-update.js";
 
 /**
  * The add-on's page in Home Assistant's sidebar (ingress; docs: .context/claim-flow-contract.md). It answers only the
@@ -11,6 +12,8 @@ import type { GatewayLogLine } from "./gateway-log-protocol.js";
 
 export interface PanelSources {
   version: string;
+  /** The newest version found, or null. */
+  latestVersion?(): string | null;
   paired(): boolean;
   code(): { code: string; expiresAt: number } | null;
   /** One plain sentence about something the person should know (never a secret), or null. */
@@ -22,6 +25,8 @@ export interface PanelSources {
 
 export interface PanelState {
   version: string;
+  /** Only present when newer than `version`. */
+  updateAvailable?: string;
   paired: boolean;
   code?: string;
   codeExpiresAt?: number;
@@ -38,8 +43,10 @@ export function panelState(sources: PanelSources): PanelState {
   const paired = sources.paired();
   const code = paired ? null : sources.code();
   const registration = sources.registration();
+  const latest = cleanVersion(sources.latestVersion?.());
   return {
     version: sources.version,
+    ...(latest && isNewer(latest, sources.version) ? { updateAvailable: latest } : {}),
     paired,
     ...(code ? { code: code.code, codeExpiresAt: code.expiresAt } : {}),
     ...(!paired && sources.notice?.() ? { notice: (sources.notice() as string).slice(0, 300) } : {}),
@@ -146,7 +153,7 @@ function render(s){
 $("status").textContent=s.paired?"Paired with your Mac":"Ready to pair";
 $("statusdot").className="dot"+(s.paired?" ok":"");
 $("statusdetail").textContent=s.paired?"Your Mac and this gateway are connected.":"Connect Squeak for Mac to get started.";
-$("version").textContent="Add-on "+s.version;
+$("version").textContent="Add-on "+s.version+(s.updateAvailable?" · Update available: "+s.updateAvailable:"");
 $("pairbox").hidden=s.paired;$("pairednote").hidden=!s.paired;
 var codeReady=!!s.code&&s.codeExpiresAt>Date.now();
 $("code").hidden=!codeReady;$("copycode").hidden=!codeReady;$("expiry").hidden=!codeReady;$("waiting").hidden=codeReady;

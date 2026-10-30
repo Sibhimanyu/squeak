@@ -47,7 +47,10 @@ export type CallResultBody =
       /** When the pin is asked; an older add-on omits it. */
       policy?: { outgoing: "ask" | "skip"; incoming: "ask" | "skip" };
     }
-  | { status: "pinctl"; ok: false; reason: string };
+  | { status: "pinctl"; ok: false; reason: string }
+  /** The answer to a gateway command (update the add-on): it was started (the add-on restarts), or why not. */
+  | { status: "gwcmd"; ok: true }
+  | { status: "gwcmd"; ok: false; reason: string };
 
 /**
  * Change the pin the gateway asks for. It needs the current pin: whoever only holds the channel key cannot set
@@ -118,6 +121,19 @@ export type PinControlRequest = {
   kind: "pinctl";
 } & PinControlAction;
 
+/** What the Mac may tell the add-on to do about itself. Exactly this one action; never carries more. */
+export type GatewayCommandAction = "update";
+
+/** A command to the add-on itself (`kind: "gwcmd"`): exactly these keys. */
+export interface GatewayCommandRequest {
+  v: 1;
+  id: string;
+  at: number;
+  expiresAt: number;
+  kind: "gwcmd";
+  action: GatewayCommandAction;
+}
+
 /** A call result, as the gateway seals it. `id` is the request's. */
 export type CallResultDoc = CallResultBody & { v: 1; id: string; at: number };
 
@@ -178,6 +194,35 @@ export function sealPinChange(keyBase64: string, request: PinChangeRequest): Cha
 
 export function sealPinControl(keyBase64: string, request: PinControlRequest): ChannelDoc {
   return sealBody(keyBase64, "req", request.id, request, request.at);
+}
+
+export function sealGatewayCommand(keyBase64: string, request: GatewayCommandRequest): ChannelDoc {
+  return sealBody(keyBase64, "req", request.id, request, request.at);
+}
+
+/** A `gwcmd` request in a document, or why not. Checks the seal, id, exact keys, the action enum and age. */
+export function readGatewayCommand(
+  keyBase64: string,
+  id: string,
+  doc: ChannelDoc,
+  now: number,
+): { ok: true; request: GatewayCommandRequest } | { ok: false; reason: string } {
+  const body = openBody(keyBase64, "req", id, doc);
+  if (!isRecord(body)) return { ok: false, reason: "not sealed with this key" };
+  if (body.v !== 1 || body.kind !== "gwcmd" || body.id !== id) return { ok: false, reason: "not a gateway command" };
+  if (Object.keys(body).sort().join(",") !== "action,at,expiresAt,id,kind,v")
+    return { ok: false, reason: "not a gateway command" };
+  if (typeof body.at !== "number" || typeof body.expiresAt !== "number")
+    return { ok: false, reason: "not a gateway command" };
+  if (body.action !== "update") return { ok: false, reason: "not a gateway command" };
+  if (
+    body.expiresAt < now ||
+    body.at > now + CLOCK_SKEW_MS ||
+    body.expiresAt - body.at > REQUEST_TTL_MS + CLOCK_SKEW_MS
+  ) {
+    return { ok: false, reason: "expired" };
+  }
+  return { ok: true, request: { v: 1, id, at: body.at, expiresAt: body.expiresAt, kind: "gwcmd", action: "update" } };
 }
 
 /** A `pinctl` request in a document, or why not. Checks the seal, id, exact keys, digits and age. */
@@ -339,6 +384,11 @@ export function readResult(
       }
       return body.ok === false && typeof body.reason === "string"
         ? { status: "pinctl", ok: false, reason: body.reason.slice(0, 200) }
+        : null;
+    case "gwcmd":
+      if (body.ok === true) return { status: "gwcmd", ok: true };
+      return body.ok === false && typeof body.reason === "string"
+        ? { status: "gwcmd", ok: false, reason: body.reason.slice(0, 200) }
         : null;
     default:
       return null;

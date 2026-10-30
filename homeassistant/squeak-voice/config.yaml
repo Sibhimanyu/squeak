@@ -1,5 +1,5 @@
 name: Squeak Voice
-version: "0.9.5"
+version: "0.10.0"
 slug: squeak_voice
 image: ghcr.io/sibhimanyu/squeak-voice-{arch}
 description: Phones you when a coding agent waits on you, through your 3CX extension; Squeak on your Mac asks for each call through Firebase.
@@ -9,6 +9,9 @@ arch:
 startup: services
 boot: auto
 init: false
+# Lets the Mac app's Update button ask Home Assistant to update this add-on (Supervisor API, its own add-on only).
+hassio_api: true
+hassio_role: manager
 # SIP and its audio (RTP) must reach the SBC on the LAN without NAT in between.
 host_network: true
 # The Squeak Voice panel in the sidebar: shows the pairing code and the add-on's state.

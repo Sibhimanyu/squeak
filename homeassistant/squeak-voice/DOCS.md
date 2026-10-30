@@ -27,8 +27,14 @@ pairing code instead), paste it in the option and start the add-on, then confirm
 
 Choose **Open Home Assistant updates** in the Squeak Voice panel to open **Settings > Updates**.
 Use Home Assistant’s **Check for updates** action to refresh available versions, then choose Squeak Voice to review
-and install its update. Home Assistant manages installation and any backup options; the add-on cannot update itself.
+and install its update. Home Assistant manages installation and any backup options.
 If you do not have permission to manage updates, ask your Home Assistant administrator.
+
+**Update from your Mac.** The add-on checks for a newer version itself, and when one exists Squeak for Mac (Settings >
+Phone calls) shows an **Update add-on** button. It asks Home Assistant to update this add-on and nothing else, which
+is why the add-on declares the `manager` permission: Home Assistant only lets an add-on update itself with it. The
+request is accepted only from your paired Mac, and the add-on restarts for a minute while it installs. Home Assistant
+may ask you to accept the new permission the first time; if the button is refused, update once in Home Assistant.
 
 ## Options
 

@@ -1,5 +1,6 @@
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import { openBody, sealBody } from "./relay-protocol.js";
+import { cleanVersion } from "./addon-update.js";
 
 /**
  * What the Home Assistant add-on tells the Mac about itself (docs: .context/gateway-pairing-contract.md): a sealed doc
@@ -14,6 +15,8 @@ export interface GatewayStatusDoc {
   id: "gwstatus";
   at: number;
   version: string;
+  /** The newest add-on version the add-on itself found (x.y.z); absent from an older add-on or before its first look. */
+  latestVersion?: string;
   sipRegistered: boolean;
   sipError?: string;
   paired: true;
@@ -34,11 +37,13 @@ export function readGatewayStatus(key: string, doc: ChannelDoc, now: number): Ga
   if (typeof r.version !== "string" || typeof r.sipRegistered !== "boolean") return null;
   if (r.pin !== "set" && r.pin !== "off" && r.pin !== "none") return null;
   if (r.sipError !== undefined && typeof r.sipError !== "string") return null;
+  const latestVersion = cleanVersion(r.latestVersion);
   return {
     v: 1,
     id: GATEWAY_STATUS_ID,
     at: r.at,
     version: r.version.slice(0, 20),
+    ...(latestVersion ? { latestVersion } : {}),
     sipRegistered: r.sipRegistered,
     ...(r.sipError ? { sipError: r.sipError.slice(0, 200) } : {}),
     paired: true,

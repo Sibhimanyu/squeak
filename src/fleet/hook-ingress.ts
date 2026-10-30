@@ -170,6 +170,12 @@ export interface IngressControl {
     claim?(
       code: string,
     ): Promise<{ ok: true; name: string; version: string } | { ok: false; reason: string; status: 400 | 503 }>;
+    /**
+     * `POST /control/voice/gateway/update` (body `{}`, no other key) asks the add-on to update itself through Home
+     * Assistant: `{ ok: true }` once it has started (the add-on restarts); 400 `{ error }` when no newer version is
+     * known or the add-on refused (its sentence passes through), 503 without a relay. Absent on an older daemon (404).
+     */
+    update?(): Promise<{ ok: true } | { ok: false; reason: string; status: 400 | 503 }>;
   };
   /**
    * `GET /control/voice/calls` (token-gated, no CORS header, 405 for other methods, 503 when voice is unavailable):
@@ -1033,7 +1039,8 @@ export class HookIngressServer {
       gatewayUrl === "/control/voice/gateway" ||
       gatewayUrl === "/control/voice/gateway/pair" ||
       gatewayUrl === "/control/voice/gateway/approve" ||
-      gatewayUrl === "/control/voice/gateway/claim"
+      gatewayUrl === "/control/voice/gateway/claim" ||
+      gatewayUrl === "/control/voice/gateway/update"
     ) {
       const gateway = control.voiceGateway;
       const wanted = gatewayUrl === "/control/voice/gateway" ? "GET" : "POST";
@@ -1083,6 +1090,28 @@ export class HookIngressServer {
           return;
         }
         const keys = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.keys(parsed) : [];
+        if (gatewayUrl === "/control/voice/gateway/update") {
+          const update = gateway.update;
+          if (!update) {
+            respond(response, 404, "not found");
+            return;
+          }
+          if (keys.length !== 0) {
+            respondJson(response, 400, { error: "Nothing to send: the body is {}." });
+            return;
+          }
+          void Promise.resolve()
+            .then(() => update())
+            .then((outcome) => {
+              if (!outcome.ok) {
+                respondJson(response, outcome.status, { error: outcome.reason });
+                return;
+              }
+              respondJson(response, 200, { ok: true });
+            })
+            .catch(() => respond(response, 500, "gateway update failed"));
+          return;
+        }
         if (gatewayUrl === "/control/voice/gateway/claim") {
           const claim = gateway.claim;
           if (!claim) {

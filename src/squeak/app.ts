@@ -88,6 +88,7 @@ import { CallHistory } from "../voice/call-history.js";
 import { CallTrace } from "../voice/call-trace.js";
 import { GatewayLogReader } from "../voice/gateway-log.js";
 import { GatewayStatusReader } from "../voice/gateway-status.js";
+import { isNewer } from "../voice/addon-update.js";
 import { setEnvValues } from "../cliq/setup.js";
 import { resolveSqueakEnvPath } from "./paths.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
@@ -522,7 +523,13 @@ export class SqueakApp {
               state: () => this.voiceView(),
               apply: (request) => this.applyVoiceSettings(request),
               test: () => this.testVoiceCall(),
+              // The same function the Mac app's `POST /control/voice/preview` ends in.
+              preview: (voice) => this.previewVoice(voice),
               changePin: (current, next) => this.changeVoicePin(current, next),
+              gatewayUpdate: async () => {
+                const outcome = await this.updateGatewayAddon();
+                return outcome.ok ? { ok: true as const } : { ok: false as const, reason: outcome.reason };
+              },
               pinAction: async (action) => {
                 const outcome = await this.runPinAction(action);
                 return outcome.ok ? { ok: true as const } : outcome;
@@ -685,6 +692,8 @@ export class SqueakApp {
           if (started.ok) this.gatewayPairing?.stop();
           return started;
         },
+        // The same function the phone's signed `gatewayUpdate` ends in.
+        update: () => this.updateGatewayAddon(),
         // Whichever flow is open: a code typed on the Mac, or the older code made on the Mac.
         approve: (approve) =>
           this.gatewayClaim?.view()
@@ -1280,13 +1289,32 @@ export class SqueakApp {
   }
 
   private gatewayView() {
-    const { state, version, sipRegistered, sipError } = this.gatewayStatusReader().peek();
+    const { state, version, latestVersion, sipRegistered, sipError } = this.gatewayStatusReader().peek();
     return {
       state,
       ...(version !== undefined ? { version } : {}),
+      ...(latestVersion !== undefined ? { latestVersion } : {}),
+      // Computed here so every surface agrees: strictly newer than the running version, false when either is unknown.
+      updateAvailable: isNewer(latestVersion, version),
       ...(sipRegistered !== undefined ? { sipRegistered } : {}),
       ...(sipError ? { sipError } : {}),
     };
+  }
+
+  /**
+   * Tells the add-on to update itself (Home Assistant restarts it): the Mac app's route and the phone's signed
+   * command end here. Only when the add-on reported a newer version; the add-on checks again itself.
+   */
+  private async updateGatewayAddon(): Promise<{ ok: true } | { ok: false; reason: string; status: 400 | 503 }> {
+    const line = this.voiceRelayLine;
+    if (!line) {
+      return { ok: false, reason: "Phone calls don't go through a Home Assistant add-on on this Mac.", status: 503 };
+    }
+    if (!this.gatewayView().updateAvailable) {
+      return { ok: false, reason: "The add-on is already on the newest version.", status: 400 };
+    }
+    const outcome = await line.gatewayCommand("update");
+    return outcome.ok ? outcome : { ok: false, reason: outcome.reason, status: 400 };
   }
 
   /** Where the pin stands, never the pin. Gateway: the add-on's last answer, refreshed when older than a minute. */

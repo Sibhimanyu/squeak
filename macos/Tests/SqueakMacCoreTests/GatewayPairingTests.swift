@@ -116,3 +116,27 @@ import Testing
         #expect(PauseText.isPaused(VoicePause(until: nil)) && !PauseText.isPaused(nil))
     }
 }
+
+@Suite struct GatewayUpdateTests {
+    private func view(_ json: String) throws -> GatewayView {
+        try JSONDecoder().decode(GatewayView.self, from: Data(json.utf8))
+    }
+
+    @Test func decodesUpdateFieldsAndToleratesAbsence() throws {
+        let v = try view(#"{"status":{"state":"ok","version":"0.9.2"},"latestVersion":"0.10.0","updateAvailable":true}"#)
+        #expect(v.updateAvailable && v.latestVersion == "0.10.0")
+        #expect(v.updateLine == "Add-on 0.9.2 · 0.10.0 is available")
+        let old = try view(#"{"status":{"state":"ok"}}"#)
+        #expect(!old.updateAvailable && old.latestVersion == nil && old.updateLine == nil)
+        #expect(try view(#"{"updateAvailable":"yes","latestVersion":5}"#).updateAvailable == false)
+    }
+
+    @Test func requestBodyAndOutcomes() {
+        #expect(String(decoding: GatewayUpdate.requestBody, as: UTF8.self) == "{}")
+        #expect(GatewayUpdate.outcome(status: 200, body: Data(#"{"ok":true}"#.utf8)) == .done)
+        #expect(GatewayUpdate.outcome(status: 400, body: Data(#"{"error":"The add-on is already on the newest version."}"#.utf8))
+            == .refused("The add-on is already on the newest version."))
+        #expect(GatewayUpdate.outcome(status: 404, body: Data()) == .unavailable)
+        if case .refused(let s) = GatewayUpdate.outcome(status: 500, body: Data("x".utf8)) { #expect(!s.isEmpty) } else { Issue.record("expected refused") }
+    }
+}

@@ -1153,6 +1153,57 @@ describe("HookIngressServer gateway claim route", () => {
   });
 });
 
+describe("HookIngressServer gateway update route", () => {
+  it("gates and shapes POST /control/voice/gateway/update", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/voice/gateway/update`;
+    const auth = { "x-squeak-token": harness.token };
+    const post = (body: string, headers: Record<string, string> = auth) =>
+      fetch(url, { method: "POST", headers, body });
+    let outcome: { ok: true } | { ok: false; reason: string; status: 400 | 503 } = { ok: true };
+    let calls = 0;
+    const base = {
+      read: () => null,
+      pair: () => ({ ok: false as const, reason: "x" }),
+      approve: async () => ({ ok: true as const }),
+    };
+    server.setControl({ sessionMessage: () => null, reply: async () => null, voiceGateway: base });
+    expect((await post("{}")).status).toBe(404);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voiceGateway: {
+        ...base,
+        update: async () => {
+          calls += 1;
+          return outcome;
+        },
+      },
+    });
+    expect((await post("{}", {})).status).toBe(403);
+    expect((await fetch(url, { headers: auth })).status).toBe(405);
+    for (const bad of ["{nope", JSON.stringify({ action: "update" }), JSON.stringify({ x: 1 })]) {
+      expect((await post(bad)).status).toBe(400);
+    }
+    expect(calls).toBe(0);
+    const ok = await post("{}");
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ ok: true });
+    expect((await post("")).status).toBe(200);
+    outcome = { ok: false, status: 400, reason: "The add-on is already on the newest version." };
+    const refused = await post("{}");
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "The add-on is already on the newest version." });
+    outcome = { ok: false, status: 503, reason: "Phone calls don't go through a Home Assistant add-on on this Mac." };
+    expect((await post("{}")).status).toBe(503);
+    // Without a voiceGateway control at all, 503 like the other gateway routes.
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await post("{}")).status).toBe(503);
+  });
+});
+
 describe("HookIngressServer call history route", () => {
   it("gates, shapes and answers /control/voice/calls", async () => {
     const harness = await startServer();

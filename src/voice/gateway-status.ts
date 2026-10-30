@@ -9,6 +9,7 @@ const CACHE_MS = 5_000;
 export interface GatewayStatusView {
   state: "none" | "stale" | "ok" | "sipDown";
   version?: string;
+  latestVersion?: string;
   sipRegistered?: boolean;
   sipError?: string;
   at?: number;
@@ -50,6 +51,7 @@ export class GatewayStatusReader {
           view = {
             state: !fresh ? "stale" : status.sipRegistered ? "ok" : "sipDown",
             version: status.version,
+            ...(status.latestVersion ? { latestVersion: status.latestVersion } : {}),
             sipRegistered: status.sipRegistered,
             ...(status.sipError ? { sipError: status.sipError } : {}),
             at: status.at,
