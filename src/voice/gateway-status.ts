@@ -65,3 +65,22 @@ export class GatewayStatusReader {
     return view;
   }
 }
+
+/**
+ * What `GET /control/voice/gateway` answers: the pairing window, the add-on's status, and the update fields at the top
+ * level beside them (that is where the Mac app reads them). A missing top-level field here once left the app showing
+ * "Add-on 0.10.0" for good while 0.11.0 was out, so the shape is pinned by a test.
+ */
+export function gatewayRouteView(
+  pairing: unknown,
+  status: unknown,
+  update: { latestVersion?: string; updateAvailable: boolean; checkedAt?: number },
+): Record<string, unknown> {
+  return {
+    pairing,
+    status,
+    ...(update.latestVersion !== undefined ? { latestVersion: update.latestVersion } : {}),
+    updateAvailable: update.updateAvailable,
+    ...(update.checkedAt !== undefined ? { checkedAt: update.checkedAt } : {}),
+  };
+}

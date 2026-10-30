@@ -91,7 +91,7 @@ import { RENDEZVOUS_DATABASE } from "../voice/claim-protocol.js";
 import { CallHistory } from "../voice/call-history.js";
 import { CallTrace } from "../voice/call-trace.js";
 import { GatewayLogReader } from "../voice/gateway-log.js";
-import { GatewayStatusReader } from "../voice/gateway-status.js";
+import { GatewayStatusReader, gatewayRouteView } from "../voice/gateway-status.js";
 import { isNewer } from "../voice/addon-update.js";
 import { claimPath, OrphanWatch, realOrphanWatchDeps } from "./orphan-watch.js";
 import { AddonVersionCheck } from "../voice/addon-version-check.js";
@@ -719,10 +719,12 @@ export class SqueakApp {
       },
       // Not behind voiceRelay: pairing is how the Mac gets one.
       voiceGateway: {
-        read: () => ({
-          pairing: this.gatewayClaim?.view() ?? this.gatewayPairing?.view() ?? null,
-          status: this.gatewayStatusReader().peek(),
-        }),
+        read: () =>
+          gatewayRouteView(
+            this.gatewayClaim?.view() ?? this.gatewayPairing?.view() ?? null,
+            this.gatewayStatusReader().peek(),
+            this.gatewayView(),
+          ),
         check: () => this.checkGatewayAddon(),
         pair: () => {
           const pairing = this.gatewayPairingFor();

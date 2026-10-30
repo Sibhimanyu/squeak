@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ChannelDoc } from "../remote/firestore-rest.js";
-import { GatewayStatusReader } from "./gateway-status.js";
+import { GatewayStatusReader, gatewayRouteView } from "./gateway-status.js";
 import { sealGatewayStatus } from "./gateway-status-protocol.js";
 import { resultPath } from "./relay-protocol.js";
 
@@ -77,5 +77,31 @@ describe("GatewayStatusReader", () => {
     const view = await reader.read();
     expect(view.state).toBe("stale");
     expect(reads()).toBe(2);
+  });
+});
+
+describe("gatewayRouteView", () => {
+  it("carries the update fields at the top level beside status, as the Mac app reads them", () => {
+    const view = gatewayRouteView(
+      null,
+      { state: "ok", version: "0.10.0", latestVersion: "0.10.0" },
+      {
+        latestVersion: "0.11.0",
+        updateAvailable: true,
+        checkedAt: 5,
+      },
+    );
+    expect(view).toEqual({
+      pairing: null,
+      status: { state: "ok", version: "0.10.0", latestVersion: "0.10.0" },
+      latestVersion: "0.11.0",
+      updateAvailable: true,
+      checkedAt: 5,
+    });
+    expect(gatewayRouteView(null, { state: "none" }, { updateAvailable: false })).toEqual({
+      pairing: null,
+      status: { state: "none" },
+      updateAvailable: false,
+    });
   });
 });
