@@ -523,6 +523,7 @@ struct QuickComposerView: View {
                 Text("To").font(.system(size: 13)).foregroundStyle(Theme.muted)
                 if let target {
                     Circle().fill(Theme.color(for: target.state)).frame(width: 7, height: 7).accessibilityHidden(true)
+                    AgentAvatar(session: target, size: 18)
                 }
                 // Capped so a long title shortens with "…" instead of pushing Send off the row.
                 Text(verbatim: destinationTitle).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)

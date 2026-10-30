@@ -61,19 +61,36 @@ public enum ChatPreset: String, Codable, CaseIterable, Sendable {
 
 /// Editable preset labels and per-agent setup overrides. Missing or stale choices fall back to the
 /// built-in preset after being checked against the daemon's current model list.
+///
+/// The daemon owns the settings (`GET/POST /control/presets`, shared with the phone and the web). What is in
+/// `UserDefaults` here is the Mac's copy of the daemon's document, so the sheets read synchronously and the
+/// app still works, with the built-in defaults, while the daemon is down. A change is applied to the copy at
+/// once and queued as a request for the daemon; `ChatPresetSync` sends the queue and refreshes the copy.
 public struct ChatPresetPreferences: Equatable, @unchecked Sendable {
     private let defaults: UserDefaults
-    private let key = "squeak.mac.newchat.presets"
-    private struct Saved: Codable { var names: [String: String] = [:]; var setups: [String: ChatSetup] = [:] }
+    static let key = "squeak.mac.newchat.presets"
+    static let pendingKey = "squeak.mac.newchat.presets.pending"
+    static let migratedKey = "squeak.mac.newchat.presets.migrated"
+    /// Called after a change is queued, so the app can send it now.
+    nonisolated(unsafe) public static var onChange: (@Sendable () -> Void)?
+    struct Saved: Codable { var names: [String: String] = [:]; var setups: [String: ChatSetup] = [:] }
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
-    private func value() -> Saved { defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) } ?? Saved() }
-    private func store(_ value: Saved) { defaults.set(try? JSONEncoder().encode(value), forKey: key) }
+    func value() -> Saved { defaults.data(forKey: Self.key).flatMap { try? JSONDecoder().decode(Saved.self, from: $0) } ?? Saved() }
+    func store(_ value: Saved) { defaults.set(try? JSONEncoder().encode(value), forKey: Self.key) }
+    func pending() -> [Data] { (defaults.array(forKey: Self.pendingKey) as? [Data]) ?? [] }
+    func setPending(_ list: [Data]) { defaults.set(list, forKey: Self.pendingKey) }
+    func enqueue(_ request: Data?) {
+        guard let request else { return }
+        setPending(pending() + [request])
+        Self.onChange?()
+    }
     public func title(for preset: ChatPreset) -> String { value().names[preset.rawValue]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? preset.title }
     public func setTitle(_ title: String, for preset: ChatPreset) {
         guard preset != .custom else { return }; var saved = value()
         let clean = String(title.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32))
         if clean.isEmpty || clean == preset.title { saved.names.removeValue(forKey: preset.rawValue) } else { saved.names[preset.rawValue] = clean }
         store(saved)
+        enqueue(ChatPresetRequest.name(preset, clean.isEmpty || clean == preset.title ? nil : clean))
     }
     public func setup(for preset: ChatPreset, agent: NewChatAgent, models: [DaemonChatModel]) -> ChatSetup? {
         guard preset != .custom else { return nil }
@@ -85,14 +102,18 @@ public struct ChatPresetPreferences: Equatable, @unchecked Sendable {
     }
     public func setSetup(_ setup: ChatSetup, for preset: ChatPreset, agent: NewChatAgent, models: [DaemonChatModel]) {
         guard preset != .custom else { return }; var saved = value()
-        saved.setups["\(agent.rawValue).\(preset.rawValue)"] = ChatPresets.sanitised(setup, agent: agent, models: models)
+        let safe = ChatPresets.sanitised(setup, agent: agent, models: models)
+        saved.setups["\(agent.rawValue).\(preset.rawValue)"] = safe
         store(saved)
+        // A setup with no model cannot be stored on the daemon, which needs one.
+        if safe.modelId != nil { enqueue(ChatPresetRequest.setup(preset, agent, safe)) }
     }
     public func restoreDefaults(for preset: ChatPreset, agent: NewChatAgent) {
         guard preset != .custom else { return }; var saved = value()
         saved.names.removeValue(forKey: preset.rawValue)
         saved.setups.removeValue(forKey: "\(agent.rawValue).\(preset.rawValue)")
         store(saved)
+        enqueue(ChatPresetRequest.reset(preset, agent))
     }
 }
 

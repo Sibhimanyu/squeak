@@ -96,6 +96,7 @@ final class NewChatState {
         loadTask?.cancel()
         loadTask = Task { [weak self] in
             // Models come with the sheet; an older daemon lists none and the chat starts as it always did.
+            await model.syncChatPresets()
             let listed = await model.newChatModels()
             if let self, !Task.isCancelled, !listed.isEmpty { form.setModels(listed) }
             let result = await model.newChatWorkspaces()
@@ -308,7 +309,7 @@ struct NewChatSheet: View {
                     HStack(alignment: .top, spacing: 12) {
                         column("Agent") {
                             NCPopup(label: "Agent", selection: Binding(get: { state.form.agent }, set: { state.form.choose(agent: $0) }),
-                                    options: NewChatAgent.allCases.map { ($0, $0.displayName) })
+                                    options: NewChatAgent.allCases.map { ($0, $0.displayName) }, mark: { $0.mark })
                         }
                         if !f.agentModels.isEmpty {
                             column("Model") {
@@ -453,9 +454,36 @@ private struct NCFooterButtonStyle: ButtonStyle {
 
 // MARK: - AppModel
 
+@MainActor enum PresetSyncGate {
+    static var pending: Task<Void, Never>?
+    static var running = false
+}
+
 enum NewChatWorkspaces { case success([NewChatWorkspace]), outdated, offline }
 
 extension AppModel {
+    /// Brings the Mac's copy of the new chat presets level with the daemon's (queued edits first, a one-time
+    /// hand-over of presets customised before the daemon held them). With the daemon down the copy stands.
+    @discardableResult
+    func syncChatPresets() async -> Bool {
+        if demoMode { return false }
+        // A name is saved on every keystroke: send the burst once, after it settles.
+        ChatPresetPreferences.onChange = { [weak self] in
+            Task { @MainActor in
+                PresetSyncGate.pending?.cancel()
+                PresetSyncGate.pending = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(600))
+                    guard !Task.isCancelled else { return }
+                    await self?.syncChatPresets()
+                }
+            }
+        }
+        while PresetSyncGate.running { try? await Task.sleep(for: .milliseconds(100)) }
+        PresetSyncGate.running = true
+        defer { PresetSyncGate.running = false }
+        return await ChatPresetSync.sync(client: client) == .synced
+    }
+
     func newChatWorkspaces() async -> NewChatWorkspaces {
         if demoMode { return .success(NewChatDemo.workspaces()) }
         do {

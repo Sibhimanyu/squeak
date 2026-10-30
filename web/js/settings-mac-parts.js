@@ -693,7 +693,7 @@ function channelBlock(ctx, channel, settings) {
   );
 }
 
-async function pressAvatar(ctx) {
+export async function pressAvatar(ctx) {
   S.avatar.sending = true;
   S.avatar.line = null;
   S.avatar.lockedUntil = Date.now() + AVATAR_COOLDOWN_MS;

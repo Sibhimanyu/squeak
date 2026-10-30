@@ -213,6 +213,24 @@ public struct DaemonClient: Sendable {
         return .saved(try? JSONDecoder().decode(NotifySettings.self, from: r.body))
     }
 
+    // MARK: New chat presets (nil: the daemon predates the route or has none: 404/503)
+
+    public func chatPresets() async throws -> DaemonChatPresets? {
+        let r = try await get("/control/presets", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(DaemonChatPresets.self, r.body)
+    }
+
+    /// One change, already a request body (`ChatPresetRequest`). A 400 is the daemon refusing it: `.refused`.
+    public func changeChatPreset(_ body: Data) async throws -> ChatPresetOutcome {
+        let r = try await post("/control/presets", body: body)
+        if r.status == 404 || r.status == 503 { return .outdated }
+        if r.status == 400 { return .refused }
+        try Self.check(r.status)
+        return .saved(try? JSONDecoder().decode(DaemonChatPresets.self, from: r.body))
+    }
+
     // MARK: Voice (nil means the daemon predates the route: 404)
 
     public func voiceSettings() async throws -> VoiceSettings? {

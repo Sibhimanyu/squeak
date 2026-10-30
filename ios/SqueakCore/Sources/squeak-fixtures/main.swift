@@ -28,6 +28,27 @@ let (voiceResetId, voiceResetDocument) = try channel.voiceDocument(.pinAction(.r
 let (voiceResetOffId, voiceResetOffDocument) = try channel.voiceDocument(.pinAction(.reset(next: nil)), signer: signer, now: madeAt)
 let (voiceEnableId, voiceEnableDocument) = try channel.voiceDocument(.pinAction(.enable(next: "135790")), signer: signer, now: madeAt)
 let (voicePolicyId, voicePolicyDocument) = try channel.voiceDocument(.pinAction(.policy(outgoing: .skip, incoming: .ask)), signer: signer, now: madeAt)
+let channelSetupVariants: [(name: String, kind: String, telegram: TelegramChange?, cliq: CliqChange?)] = [
+    ("telegramToken", "telegram", .token("123456789:FAKE_fixture-token_NotARealBotTokenAbcdef"), nil),
+    ("telegramOff", "telegram", .off, nil),
+    ("telegramStartLink", "telegram", .startLink, nil),
+    ("telegramStopLink", "telegram", .stopLink, nil),
+    ("telegramLink", "telegram", .link(-1001234567890), nil),
+    ("telegramUnlink", "telegram", .unlink(987654321), nil),
+    ("telegramTest", "telegram", .test, nil),
+    ("cliqWebhook", "cliq", nil, .webhook("https://cliq.zoho.in/api/v2/bots/fixture/incoming?zapikey=FAKE-fixture-key")),
+    ("cliqRemoveWebhook", "cliq", nil, .removeWebhook),
+    ("cliqOwner", "cliq", nil, .owner(email: "fixture@example.com", id: "12345")),
+    ("cliqOwnerCleared", "cliq", nil, .owner(email: nil, id: nil)),
+]
+var channelSetupEntries: [String: Any] = [:]
+for v in channelSetupVariants {
+    let (cid, cdoc) = v.telegram != nil
+        ? try channel.telegramDocument(change: v.telegram!, signer: signer, now: madeAt)
+        : try channel.cliqDocument(change: v.cliq!, signer: signer, now: madeAt)
+    channelSetupEntries["\(v.name)CommandId"] = cid
+    channelSetupEntries["\(v.name)Command"] = ["box": cdoc.box, "sig": cdoc.sig!, "device": cdoc.device!]
+}
 let (voiceNaturalId, voiceNaturalDocument) = try channel.voiceDocument(.natural(enabled: true, voice: "bf_emma"), signer: signer, now: madeAt)
 let (voiceFavoritesId, voiceFavoritesDocument) = try channel.voiceDocument(
     .favorites([FavoriteWorkspace(n: 1, workspace: "ws-1", label: "squeak"), FavoriteWorkspace(n: 3, workspace: "/Users/me/proj")]),
@@ -35,6 +56,11 @@ let (voiceFavoritesId, voiceFavoritesDocument) = try channel.voiceDocument(
 let (voiceSampleId, voiceSampleDocument) = try channel.voiceSampleDocument(voice: "am_adam", signer: signer, now: madeAt)
 let (voicePauseId, voicePauseDocument) = try channel.voiceDocument(.pause(.fourHours), signer: signer, now: madeAt)
 let (voiceChangeId, voiceChangeDocument) = try channel.voiceDocument(.pinAction(.change(current: "4821", next: "135790")), signer: signer, now: madeAt)
+let (presetsSetupId, presetsSetupDocument) = try channel.presetsDocument(
+    .setup(agent: .claude, preset: .save, ChatSetup(modelId: "opus-5-5-1m", level: "low", code: "sonnet", run: "haiku", planFirst: true)),
+    signer: signer, now: madeAt)
+let (presetsNameId, presetsNameDocument) = try channel.presetsDocument(.name(preset: .save, "Cheap"), signer: signer, now: madeAt)
+let (presetsResetId, presetsResetDocument) = try channel.presetsDocument(.reset(agent: .codex, preset: .best), signer: signer, now: madeAt)
 let (controlsId, controlsDocument) = try channel.controlsDocument(.fans("60"), signer: signer, now: madeAt)
 let (tabId, tabDocument) = try channel.controlsDocument(.selectTab(1, title: "Heresay"), signer: signer, now: madeAt)
 let (statsId, statsDocument) = try channel.statsDocument(range: "30d", agent: "codex", signer: signer, now: madeAt)
@@ -106,7 +132,7 @@ let (filmImageId, filmImageDocument) = try channel.imageDocument(
     sessionId: "", filmId: filmId, source: ".rasanai/run-1/design/Wild/specimen.png", signer: signer, now: madeAt)
 let (filmMediaId, filmMediaDocument) = try channel.mediaDocument(
     filmId: filmId, source: ".rasanai/run-1/animatic-mix.wav", signer: signer, now: madeAt)
-let fixture: [String: Any] = [
+var fixture: [String: Any] = [
     "madeAt": Int64(madeAt.timeIntervalSince1970 * 1000),
     "key": key,
     "channelId": pairing.c,
@@ -124,6 +150,13 @@ let fixture: [String: Any] = [
     // Hotspot failover set up from the phone.
     "hotspotCommandId": hotspotId,
     "hotspotCommand": ["box": hotspotDocument.box, "sig": hotspotDocument.sig!, "device": hotspotDocument.device!],
+    // New chat presets (presets command): a whole setup, a name, a reset.
+    "presetsSetupCommandId": presetsSetupId,
+    "presetsSetupCommand": ["box": presetsSetupDocument.box, "sig": presetsSetupDocument.sig!, "device": presetsSetupDocument.device!],
+    "presetsNameCommandId": presetsNameId,
+    "presetsNameCommand": ["box": presetsNameDocument.box, "sig": presetsNameDocument.sig!, "device": presetsNameDocument.device!],
+    "presetsResetCommandId": presetsResetId,
+    "presetsResetCommand": ["box": presetsResetDocument.box, "sig": presetsResetDocument.sig!, "device": presetsResetDocument.device!],
     // What a closed lid does: mute off, pause chat apps on.
     "lidActionsCommandId": lidId,
     "lidActionsCommand": ["box": lidDocument.box, "sig": lidDocument.sig!, "device": lidDocument.device!],
@@ -225,6 +258,7 @@ let fixture: [String: Any] = [
     "workflowImageCommandId": posterId,
     "workflowImageCommand": ["box": posterDocument.box, "sig": posterDocument.sig!, "device": posterDocument.device!],
 ]
+for (k, v) in channelSetupEntries { fixture[k] = v }
 let data = try JSONSerialization.data(withJSONObject: fixture, options: [.prettyPrinted, .sortedKeys])
 FileManager.default.createFile(atPath: CommandLine.arguments[1], contents: data)
 print("wrote \(CommandLine.arguments[1])")

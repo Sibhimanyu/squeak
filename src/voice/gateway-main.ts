@@ -395,7 +395,8 @@ export async function runGateway(): Promise<number> {
         onQuality: (stats) => note("info", `Line quality: ${stats}`),
         // A line the add-on made itself means the Mac's clip was missing (or late): the signal to check when a call breaks up.
         onSpoke: (info) => {
-          if (info.source === "add-on")
+          if (info.source === "mac") note("info", `Spoke with the Mac's voice: ${info.text.slice(0, 60)}`);
+          else
             note(
               "warn",
               `Spoke with the add-on's own voice (made in ${(info.makeMs / 1000).toFixed(1)} s): ${info.text.slice(0, 60)}`,
@@ -438,6 +439,8 @@ export async function runGateway(): Promise<number> {
         canAnswer: () => pins.answerable(),
         pins,
         updater,
+        // The Mac's clips for a call follow the request while it rings.
+        seed: (clips) => phone.seed?.(clips),
       });
       // Incoming "skip": a call from the one allowed extension is proof enough (the keeper's policy, set from the app).
       const gate = incomingGate(pins);

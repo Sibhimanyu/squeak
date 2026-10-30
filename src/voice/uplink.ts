@@ -15,6 +15,10 @@ export interface Uplink {
   /** Null when the Mac did not answer in time. */
   memo(memoId: string, choice: number, dirVersion: string, audio: Buffer): Promise<DownMessage | null>;
   send(memoId: string): Promise<DownMessage | null>;
+  /** Treat the recording as a question about its chat: the answer to read aloud. Sends nothing to the chat. */
+  ask(memoId: string): Promise<DownMessage | null>;
+  /** Where a chat stands, to read aloud. */
+  status(choice: number, dirVersion: string): Promise<DownMessage | null>;
 }
 
 export type UplinkStore = Pick<RtdbRest, "get" | "set" | "delete" | "watch">;
@@ -27,6 +31,8 @@ export interface RelayUplinkOptions {
   /** How long to wait for the Mac: transcribing takes a few seconds, and the phone line is waiting. */
   memoWaitMs?: number;
   sendWaitMs?: number;
+  /** A model answers a question: longer than a transcript, and the Mac gives up on its own sooner. */
+  askWaitMs?: number;
 }
 
 const POLL_MS = 5000;
@@ -59,6 +65,22 @@ export class RelayUplink implements Uplink {
     const at = this.now();
     return this.exchange(
       { v: 1, id: newMessageId(), at, expiresAt: at + UP_TTL_MS, kind: "send", memoId },
+      this.options.sendWaitMs ?? 30_000,
+    );
+  }
+
+  ask(memoId: string): Promise<DownMessage | null> {
+    const at = this.now();
+    return this.exchange(
+      { v: 1, id: newMessageId(), at, expiresAt: at + UP_TTL_MS, kind: "ask", memoId },
+      this.options.askWaitMs ?? 60_000,
+    );
+  }
+
+  status(choice: number, dirVersion: string): Promise<DownMessage | null> {
+    const at = this.now();
+    return this.exchange(
+      { v: 1, id: newMessageId(), at, expiresAt: at + UP_TTL_MS, kind: "status", dirVersion, choice },
       this.options.sendWaitMs ?? 30_000,
     );
   }

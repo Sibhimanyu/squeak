@@ -80,6 +80,8 @@ function setup(call: FakeCall, overrides: Partial<InboundDependencies> = {}, pee
         sends.push(memoId);
         return { v: 1, id: "x", at: 0, status: "sent" };
       },
+      ask: async () => null,
+      status: async () => null,
     },
     ...overrides,
   };
@@ -197,7 +199,9 @@ describe("call-in flow", () => {
 
   it("says so when the Mac does not answer, and when there is no chat", async () => {
     const quiet = new FakeCall([...keys("4821#"), "1"]);
-    const a = setup(quiet, { uplink: { memo: async () => null, send: async () => null } });
+    const a = setup(quiet, {
+      uplink: { memo: async () => null, send: async () => null, ask: async () => null, status: async () => null },
+    });
     await handleIncoming(a.incoming, a.deps);
     expect(quiet.said.at(-1)).toBe("I could not reach your Mac. Goodbye.");
 

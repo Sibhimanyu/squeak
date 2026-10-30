@@ -14,10 +14,11 @@ import {
   sealResult,
   type CallResultDoc,
 } from "./relay-protocol.js";
+import { audioPath, callAudioId, readAudio } from "./memo-protocol.js";
 import type { PinKeeper } from "./pin-keeper.js";
 import type { AddonUpdater } from "./addon-update.js";
 
-export type GatewayStore = Pick<RtdbRest, "list" | "set" | "delete" | "watch">;
+export type GatewayStore = Pick<RtdbRest, "get" | "list" | "set" | "delete" | "watch">;
 
 export interface GatewayDependencies {
   store: GatewayStore;
@@ -37,6 +38,11 @@ export interface GatewayDependencies {
   pins?: Pick<PinKeeper, "change" | "disable" | "enable" | "reset" | "status" | "policy" | "setPolicy"> | null;
   /** Updates the add-on on the Mac's word; absent: such a command is refused. */
   updater?: Pick<AddonUpdater, "update" | "latest"> | null;
+  /**
+   * Hands the Mac's clips to the phone as they arrive during a call (a request with `audioFollows`); absent: they are
+   * ignored and the add-on speaks everything itself.
+   */
+  seed?: (clips: Clip[]) => void;
   now?: () => number;
   /** A plain sentence for the apps' gateway log; never a pin, a question or a key. */
   onEvent?: (level: "info" | "warn", text: string) => void;
@@ -198,19 +204,25 @@ export class VoiceGateway {
       const { request } = read;
       const callee = request.callee ?? this.deps.callee;
       const answerable = request.answerable && (this.deps.canAnswer?.() ?? true);
-      const result: CallResult = callee
-        ? await this.deps.line.call(
-            callee,
-            // An unanswerable request (the Mac's word, or the keeper's: no pin and outgoing "ask") is tell-only;
-            // "pin off" or outgoing "skip" only matters when keys are allowed.
-            new CallDialog(
-              request.script,
-              answerable ? this.deps.pin() : null,
-              answerable ? (this.deps.pinRequired?.() ?? true) : true,
-            ),
-            request.audio,
-          )
-        : { status: "failed", reason: "No phone extension is set. Set it in Squeak's settings on your Mac." };
+      const stopFollowing = request.audioFollows ? this.followClips(id) : null;
+      let result: CallResult;
+      try {
+        result = callee
+          ? await this.deps.line.call(
+              callee,
+              // An unanswerable request (the Mac's word, or the keeper's: no pin and outgoing "ask") is tell-only;
+              // "pin off" or outgoing "skip" only matters when keys are allowed.
+              new CallDialog(
+                request.script,
+                answerable ? this.deps.pin() : null,
+                answerable ? (this.deps.pinRequired?.() ?? true) : true,
+              ),
+              request.audio,
+            )
+          : { status: "failed", reason: "No phone extension is set. Set it in Squeak's settings on your Mac." };
+      } finally {
+        stopFollowing?.();
+      }
       const body: CallResultDoc =
         result.status === "answered"
           ? { v: 1, id, at: this.now(), status: "answered", letter: result.letter }
@@ -219,6 +231,62 @@ export class VoiceGateway {
             : { v: 1, id, at: this.now(), status: "failed", reason: result.reason };
       await store.set(resultPath(channel, id), sealResult(key, body));
     }
+  }
+
+  /**
+   * While one call runs: picks up the Mac's clips as it writes them (`callaudio-<id>-<n>`, in order) and seeds each,
+   * so the line uses the Mac's voice for every line spoken after it arrives. Stops with the call.
+   */
+  private followClips(id: string): (() => void) | null {
+    const { store, channel, key, seed } = this.deps;
+    if (!seed) return null;
+    let next = 0;
+    let stopped = false;
+    let busy = false;
+    let again = false;
+    const began = this.now();
+    const pull = async (): Promise<void> => {
+      if (stopped) return;
+      if (busy) {
+        again = true;
+        return;
+      }
+      busy = true;
+      try {
+        for (;;) {
+          if (stopped) break;
+          const docId = callAudioId(id, next);
+          const doc = await store.get(audioPath(channel, docId));
+          if (!doc) break;
+          next += 1;
+          const read = readAudio(key, docId, doc);
+          if (read && read.version === id && !stopped) {
+            seed(read.clips);
+            this.deps.onEvent?.(
+              "info",
+              `Mac voice clip ${next} arrived ${((this.now() - began) / 1000).toFixed(1)} s into the call`,
+            );
+          }
+        }
+      } catch {
+        // The next event or poll tries again.
+      } finally {
+        busy = false;
+        if (again) {
+          again = false;
+          void pull();
+        }
+      }
+    };
+    const unwatch = store.watch(`channels/${channel}/voicedir`, () => void pull());
+    const poll = setInterval(() => void pull(), 2000);
+    poll.unref?.();
+    void pull();
+    return () => {
+      stopped = true;
+      unwatch();
+      clearInterval(poll);
+    };
   }
 
   /**

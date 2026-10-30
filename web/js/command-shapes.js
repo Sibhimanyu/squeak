@@ -57,8 +57,12 @@ export const FINISHED_MODES = ["conductor", "all", "off"];
 export const PAUSE_CHOICES = ["1h", "4h", "tomorrow", "forever", "resume"];
 export const PIN_POLICIES = ["ask", "skip"];
 export const FAVORITES_MAX = 9;
+export const PRESET_IDS = ["best", "balanced", "save"];
+export const PRESET_NAME_MAX = 32;
+export const WORKER_IDS = ["sonnet", "haiku", "opus", "fable"];
 export const FILM_OPS = ["answer", "chat", "resume", "stop", "installTool"];
 
+const PRESET_LEVEL = /^[a-z][a-z0-9_-]{0,19}$/;
 const KOKORO_VOICE = /^[a-z]{2}_[a-z]+$/;
 const SESSION_ID = /^[A-Za-z0-9_-]{1,120}$/;
 const UPLOAD_ID = /^[A-Za-z0-9_-]{8,40}$/;
@@ -194,6 +198,85 @@ function notifyChange(change) {
     }
     default:
       return bad(`"${key}" is not a notification setting.`);
+  }
+}
+
+/* ---------- Telegram and Cliq setup (the Mac's channels-setup.ts). No message below ever repeats a value. ---------- */
+
+export const BOT_TOKEN = /^\d{3,20}:[A-Za-z0-9_-]{20,80}$/;
+export const OWNER_EMAIL = /^[^\s@"'#\\]{1,64}@[^\s@"'#\\]{1,200}$/;
+export const OWNER_ID = /^[A-Za-z0-9_.-]{1,64}$/;
+const CLIQ_HOSTS = /^cliq\.(zoho\.(com|eu|in|com\.au|jp|sa|uk|com\.cn)|zohocloud\.ca)$/;
+const WEBHOOK_HELP = "That should be an https link on zoho.com, like the one in the bot's webhook settings.";
+
+/** The Mac's `parseCliqWebhookUrl`: https, a Cliq host, a `zapikey`, nothing the daemon would trim or refuse. */
+export function isCliqWebhook(value) {
+  if (!isString(value) || value !== value.trim() || value.length > 2_000) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\u0000-\u001f]/.test(value)) return false;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && CLIQ_HOSTS.test(url.hostname) && Boolean(url.searchParams.get("zapikey"));
+}
+
+const chatIdOf = (value) => {
+  if (!(typeof value === "number" && Number.isSafeInteger(value) && value !== 0))
+    bad("Not a chat this Mac understands.");
+  return value;
+};
+
+function telegramChange(change) {
+  if (!isObject(change) || Object.keys(change).length !== 1) bad("A Telegram change is one thing at a time.");
+  const [key] = Object.keys(change);
+  const v = change[key];
+  switch (key) {
+    case "token":
+      if (!(isString(v) && BOT_TOKEN.test(v))) {
+        bad("That doesn't look like a bot token. It is a number, a colon, then letters and digits.");
+      }
+      return { token: v };
+    case "off":
+    case "startLink":
+    case "stopLink":
+    case "test":
+      if (v !== true) bad(`"${key}" is true or nothing.`);
+      return { [key]: true };
+    case "link":
+      return { link: chatIdOf(v) };
+    case "unlink":
+      return { unlink: chatIdOf(v) };
+    default:
+      return bad("Not a Telegram setting this Mac understands.");
+  }
+}
+
+function cliqChange(change) {
+  if (!isObject(change) || Object.keys(change).length !== 1) bad("A Cliq change is one thing at a time.");
+  const [key] = Object.keys(change);
+  const v = change[key];
+  switch (key) {
+    case "webhook":
+      if (!isCliqWebhook(v)) bad(WEBHOOK_HELP);
+      return { webhook: v };
+    case "removeWebhook":
+      if (v !== true) bad('"removeWebhook" is true or nothing.');
+      return { removeWebhook: true };
+    case "owner": {
+      if (!isObject(v) || Object.keys(v).sort().join(",") !== "email,id") bad("The owner is an email and an ID.");
+      const { email, id } = v;
+      if (email !== null && !(isString(email) && OWNER_EMAIL.test(email)))
+        bad("That doesn't look like an email address.");
+      if (id !== null && !(isString(id) && OWNER_ID.test(id))) {
+        bad("A Cliq user ID is letters, digits, dots, dashes and underscores.");
+      }
+      return { owner: { email, id } };
+    }
+    default:
+      return bad("Not a Cliq setting this Mac understands.");
   }
 }
 
@@ -469,9 +552,64 @@ const SHAPES = {
     return { channel: input.channel, change: notifyChange(input.change) };
   },
 
+  telegram(input) {
+    only(input, ["change"], "A Telegram setting");
+    return { change: telegramChange(input.change) };
+  },
+
+  cliq(input) {
+    only(input, ["change"], "A Cliq setting");
+    return { change: cliqChange(input.change) };
+  },
+
   voice(input) {
     only(input, ["change"], "A phone-call setting");
     return { change: voiceChange(input.change) };
+  },
+
+  /** The Mac's `readPresetRequest` (fleet/chat-presets.ts): one name, one whole setup or one reset. */
+  presets(input) {
+    only(input, ["agent", "preset", "change"], "A preset change");
+    if (!PRESET_IDS.includes(input.preset)) bad("Not a preset this Mac knows.");
+    if (!isObject(input.change)) bad("Not a preset change this Mac understands.");
+    const keys = Object.keys(input.change);
+    if (keys.length !== 1) bad("Not a preset change this Mac understands.");
+    if (keys[0] === "name") {
+      if ("agent" in input) bad("A preset's name is shared by both agents.");
+      const name = input.change.name;
+      if (name !== null && !isString(name)) bad("A preset's name is text.");
+      // eslint-disable-next-line no-control-regex
+      const flat = name === null ? "" : name.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+      const clean = flat.length > PRESET_NAME_MAX ? flat.slice(0, PRESET_NAME_MAX).trim() : flat;
+      return { preset: input.preset, change: { name: clean === "" ? null : clean } };
+    }
+    if (!AGENTS.includes(input.agent)) bad("Not a preset change this Mac understands.");
+    if (keys[0] === "reset") {
+      if (input.change.reset !== true) bad("Not a preset change this Mac understands.");
+      return { agent: input.agent, preset: input.preset, change: { reset: true } };
+    }
+    if (keys[0] !== "setup") bad("Not a preset change this Mac understands.");
+    const setup = only(input.change.setup, ["modelId", "level", "code", "run", "planFirst"], "A setup");
+    if (!isString(setup.modelId) || setup.modelId.length < 1 || setup.modelId.length > 80)
+      bad("A setup needs a model.");
+    const level = setup.level ?? null;
+    if (level !== null && !(isString(level) && PRESET_LEVEL.test(level))) bad("That is not a thinking level.");
+    const worker = (value, name) => {
+      if (value === undefined || value === null) return null;
+      if (!WORKER_IDS.includes(value)) bad(`${name} is not a worker this Mac knows.`);
+      return value;
+    };
+    const code = worker(setup.code, "The code worker");
+    const run = worker(setup.run, "The run worker");
+    if (setup.planFirst !== undefined && typeof setup.planFirst !== "boolean") bad("Ask before changes is on or off.");
+    if (input.agent === "codex" && (code !== null || run !== null || setup.planFirst === true))
+      bad("Codex chats do their own work.");
+    const planFirst = (code !== null || run !== null) && setup.planFirst === true;
+    return {
+      agent: input.agent,
+      preset: input.preset,
+      change: { setup: { modelId: setup.modelId, level, code, run, planFirst } },
+    };
   },
 
   voiceSample(input) {

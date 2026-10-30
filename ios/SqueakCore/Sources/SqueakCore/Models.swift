@@ -385,12 +385,18 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// What Telegram and Cliq may push (src/fleet/notify-settings.ts; `notify` command). Optional: an older Mac
     /// omits it, and the phone hides the page.
     public var notify: NotifySettings? = nil
+    /// The shared new chat presets (src/fleet/chat-presets.ts; `presets` command). Optional: an older Mac omits it,
+    /// and the phone then uses the built-in presets and hides the editor.
+    public var presets: ChatPresetsDocument? = nil
     /// Phone calls: who Squeak rings, and how the last test call went (src/voice/; `voice` command). Optional: an
     /// older Mac omits it, and the phone hides the page.
     public var voice: VoiceView? = nil
     /// This Mac can set the Telegram bot's photo to Squeak's logo (`telegramAvatar` command). Optional: an older
     /// Mac omits it, and the phone hides the button.
     public var telegramAvatar: Bool? = nil
+    /// Telegram and Zoho Cliq setup (`telegram` / `cliq` commands; .context/channels-setup-protocol.md). Optional: an
+    /// older Mac omits it, and the phone hides the page. Never carries a token or a webhook.
+    public var channelsSetup: ChannelsSetup? = nil
     /// Where this Mac listens on the local network, for the direct same-Wi-Fi path (docs/remote-channel.md).
     /// Optional: older Macs, and a Mac with the path off, omit it. A phone off that network just fails to
     /// connect and stays on the cloud.

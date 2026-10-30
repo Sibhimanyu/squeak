@@ -66,6 +66,7 @@ struct PopupUsageBand: View {
 
     @ViewBuilder private func provider(_ name: String, _ reading: ProviderUsage?, long: String, notSeen: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if let m = AgentMarkAsset(agent: name) { AgentMark(m, size: 18).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 } }
             Text(name).font(.popup(14, .bold)).foregroundStyle(Theme.ink)
             if let age = UsageFormat.asOf(reading?.observedAt) { Text(age).font(.popup(12)).foregroundStyle(Theme.muted) }
             Spacer(minLength: 0)

@@ -136,7 +136,7 @@ struct PopupNewChatBand: View {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top, spacing: 12) {
                         column("Agent", width: 134) {
-                            PopupSegmented(items: NewChatAgent.allCases.map { ($0, $0.displayName) }, selection: f.agent, height: 26, size: 12.5) {
+                            PopupSegmented(items: NewChatAgent.allCases.map { ($0, $0.displayName) }, selection: f.agent, height: 26, size: 12.5, mark: { $0.mark }) {
                                 state.form.choose(agent: $0)
                             }
                         }

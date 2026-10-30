@@ -28,6 +28,12 @@ export interface CallRequest {
    * for exactly these words. Absent: the add-on speaks everything itself (an older add-on ignores the field).
    */
   audio?: Clip[];
+  /**
+   * The Mac's clips are not in this request: they follow as `voicedir` documents (`callaudio-<id>-<n>`, memo-protocol.ts)
+   * while the phone rings, so the call starts at once. The add-on seeds each as it arrives and speaks its own voice for
+   * anything not there yet. Absent: an older Mac, whose request carries its clips (or none).
+   */
+  audioFollows?: boolean;
   /** The extension to ring, from the Mac's settings; absent: the gateway's own default. Internal extensions only. */
   callee?: string;
 }
@@ -344,6 +350,7 @@ export function readRequest(
       answerable: body.answerable,
       script: body.script,
       ...(readClips(body.audio) ? { audio: readClips(body.audio)! } : {}),
+      ...(body.audioFollows === true ? { audioFollows: true } : {}),
       ...(typeof body.callee === "string" ? { callee: body.callee } : {}),
     },
   };

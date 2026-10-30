@@ -58,10 +58,12 @@ struct NewChatView: View {
     private var allModels: [PhoneSnapshot.ChatModel] { model.snapshot?.chatModels ?? [] }
     /// The models a Claude chat can hand work to; empty from a Mac older than the split, which hides it.
     private var workers: [PhoneSnapshot.SplitWorker] { model.snapshot?.chatWorkers ?? [] }
+    /// The Mac's shared presets; absent from an older Mac, which keeps the built-in ones.
+    private var shared: ChatPresetsDocument? { model.presetsDocument }
     private var models: [PhoneSnapshot.ChatModel] { allModels.filter { $0.agent == agent.rawValue } }
     private var chosen: PhoneSnapshot.ChatModel? { models.first { $0.id == setup.modelId } ?? models.first }
-    private var presets: [ChatPreset] { ChatPresets.available(agent: agent, models: allModels, workers: workers) }
-    private var kind: ChatPreset { ChatPresets.preset(of: setup, agent: agent, models: allModels, workers: workers) }
+    private var presets: [ChatPreset] { ChatPresets.available(agent: agent, models: allModels, workers: workers, shared: shared) }
+    private var kind: ChatPreset { ChatPresets.preset(of: setup, agent: agent, models: allModels, workers: workers, shared: shared) }
     private var summary: String { ChatPresets.summary(of: setup, agent: agent, models: allModels, workers: workers) }
 
     var body: some View {
@@ -93,7 +95,7 @@ struct NewChatView: View {
             // the keyboard), not with a draft or photos, not while sending. Cancel always closes it.
             .interactiveDismissDisabled(sending || focused || !trimmed.isEmpty || !photos.isEmpty)
             .sheet(isPresented: $customizing) {
-                CustomizeSheet(setup: $setup, agent: $agent, allModels: allModels, workers: workers)
+                CustomizeSheet(setup: $setup, agent: $agent, allModels: allModels, workers: workers, shared: shared)
             }
             .onAppear { settle() }
             .task {
@@ -104,7 +106,7 @@ struct NewChatView: View {
             }
             .onChange(of: agent) { _, new in
                 // Each agent has its own models: start from what was last used with it.
-                setup = store.restore(agent: new, models: allModels, workers: workers)
+                setup = store.restore(agent: new, models: allModels, workers: workers, shared: shared)
             }
             .onChange(of: setup) { _, new in
                 if settled { store.save(new, preset: kind, agent: agent) }
@@ -211,7 +213,7 @@ struct NewChatView: View {
                 HStack(spacing: 8) { ForEach(presets, id: \.self) { presetChip($0) } }
             }
             if !focused {
-                (presets.isEmpty || kind != .custom ? Text(summary) : Text(kind.title + "  ").fontWeight(.semibold).foregroundColor(Theme.ink) + Text(summary))
+                (presets.isEmpty || kind != .custom ? Text(summary) : Text(ChatPresets.name(of: kind, shared: shared) + "  ").fontWeight(.semibold).foregroundColor(Theme.ink) + Text(summary))
                     .font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -225,10 +227,10 @@ struct NewChatView: View {
     private func presetChip(_ option: ChatPreset) -> some View {
         let selected = option == kind
         return Button {
-            if let next = ChatPresets.setup(for: option, agent: agent, models: allModels, workers: workers) { setup = next }
+            if let next = ChatPresets.setup(for: option, agent: agent, models: allModels, workers: workers, shared: shared) { setup = next }
             UISelectionFeedbackGenerator().selectionChanged()
         } label: {
-            Text(option.title).font(.subheadline.weight(selected ? .semibold : .regular))
+            Text(ChatPresets.name(of: option, shared: shared)).font(.subheadline.weight(selected ? .semibold : .regular))
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .foregroundStyle(selected ? Theme.ink : Theme.muted)
                 .padding(.horizontal, 4).frame(maxWidth: .infinity, minHeight: 48)
@@ -237,7 +239,7 @@ struct NewChatView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(option.title)
+        .accessibilityLabel(ChatPresets.name(of: option, shared: shared))
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
@@ -259,9 +261,9 @@ struct NewChatView: View {
     /// Starts from what was last used, kept on what the Mac offers; `-squeak-newchat-save` is a demo flag.
     private func settle() {
         guard !allModels.isEmpty || !settled else { return }
-        setup = store.restore(agent: agent, models: allModels, workers: workers)
+        setup = store.restore(agent: agent, models: allModels, workers: workers, shared: shared)
         if ProcessInfo.processInfo.arguments.contains("-squeak-newchat-save"),
-           let save = ChatPresets.setup(for: .save, agent: agent, models: allModels, workers: workers) { setup = save }
+           let save = ChatPresets.setup(for: .save, agent: agent, models: allModels, workers: workers, shared: shared) { setup = save }
         settled = true
     }
 
@@ -313,11 +315,12 @@ private struct CustomizeSheet: View {
     @Binding var agent: NewChatAgent
     let allModels: [PhoneSnapshot.ChatModel]
     let workers: [PhoneSnapshot.SplitWorker]
+    let shared: ChatPresetsDocument?
     @Environment(\.dismiss) private var dismiss
 
     private var models: [PhoneSnapshot.ChatModel] { allModels.filter { $0.agent == agent.rawValue } }
     private var chosen: PhoneSnapshot.ChatModel? { models.first { $0.id == setup.modelId } ?? models.first }
-    private var kind: ChatPreset { ChatPresets.preset(of: setup, agent: agent, models: allModels, workers: workers) }
+    private var kind: ChatPreset { ChatPresets.preset(of: setup, agent: agent, models: allModels, workers: workers, shared: shared) }
 
     var body: some View {
         NavigationStack {
@@ -368,7 +371,7 @@ private struct CustomizeSheet: View {
             .listSectionSpacing(14)
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle(kind.title)
+            .navigationTitle(ChatPresets.name(of: kind, shared: shared))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.fontWeight(.semibold) } }
         }

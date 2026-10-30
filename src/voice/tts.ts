@@ -269,6 +269,12 @@ export class CachedSpeaker implements Speaker {
     const began = Date.now();
     const result = await this.inner.speak(text);
     const makeMs = Date.now() - began;
+    // The Mac's clip may have arrived while this was being made (it follows a call that is already ringing): keep it.
+    const seeded = this.made.get(text);
+    if (seeded?.seeded && fs.existsSync(seeded.file)) {
+      if (seeded.file !== result.file) fs.rmSync(result.file, { force: true });
+      return { file: seeded.file, durationMs: seeded.durationMs, source: "mac", makeMs };
+    }
     this.made.set(text, result);
     while (this.made.size > this.limit) {
       const oldest = this.made.keys().next().value as string;
@@ -281,10 +287,9 @@ export class CachedSpeaker implements Speaker {
 
   /** Files someone else made for these words (the Mac's voice, sent with a call) count as already said. */
   seed(text: string, made: { file: string; durationMs: number }): void {
-    const old = this.made.get(text);
+    // The old file is left: a clip that arrives mid-call may replace a line that is about to play.
     this.made.delete(text);
     this.made.set(text, { ...made, seeded: true });
-    if (old && old.file !== made.file) fs.rmSync(old.file, { force: true });
   }
 
   /** Makes each prompt now (one at a time, so a small machine is not swamped); a failure is left for the call to meet. */

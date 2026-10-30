@@ -16,6 +16,7 @@ const READERS = [
   "macHeat",
   "voice",
   "telegramAvatar",
+  "channelsSetup",
   "awakeLidActions",
   "awakeOpenActions",
   "awakeRules",

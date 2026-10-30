@@ -681,6 +681,25 @@ returns `{ taskId, agentId, label, status, available, steps, total, startedAt, e
 as the main feed's are); 404 for a task the session does not have. The existing `/activity` route's
 `background` items carry `agentId` and `hasSteps` too.
 
+## New chat presets (2026-10-30)
+
+Best / Balanced / Save usage are one setting on the daemon, edited from the Mac app (Settings, General), the phone
+and the web; the surfaces only draw. Code: `src/fleet/chat-presets.ts` (`ChatPresetsStore`), saved in
+`<support dir>/chat-presets.json` (0600, atomic write). It stores only what a person changed: a name per preset
+(shared by both agents) and, per agent and preset, a whole setup (`modelId`, `level`, `code`, `run`, `planFirst`)
+that replaces the built-in one. Absent means the built-in rule, so a Mac nobody edited behaves as before.
+
+- `GET /control/presets` and `POST /control/presets` (token-gated, no CORS header): one change per POST, strictly
+  `{ agent, preset, change: { setup } | { reset: true } }` or `{ preset, change: { name } }`; the answer is the document.
+- The phone view carries `presets` (`{ names, setups }`; absent on an older Mac). The signed `presets` command is the
+  same request with the usual envelope, ends in the same `applyPresets`, and needs no Face ID: it touches no chat.
+- A setup naming a model the Mac does not list (or a level it does not take) is refused when the Mac can check; a
+  worker must be one of `SPLIT_WORKERS`; Codex setups cannot delegate.
+- Mac app: keeps a local copy and a queue of unsent edits (`ChatPresetSync`), migrates presets customised before
+  this once (the daemon's entries win), and uses the built-in defaults when the daemon is down.
+- Exact wire format for phone and web clients: view JSON, command JSON and refusals are in the code's tests
+  (`chat-presets.test.ts`, `remote-bridge.test.ts`).
+
 ## Notification settings (2026-10-25)
 
 What Telegram and Cliq may push, edited from the Mac app and the phone. It only filters pushes, per channel:
@@ -764,6 +783,40 @@ folders above `dist/telegram`, which is the same place in the checkout and in th
   `{"which":"logo"}`. `200 {"message":"Done"}`, `400 {"error": <sentence above>}`, `429` for the rate limit, `405`
   for other methods, `503` from a daemon without it (an older one: hide the button).
 - Both end in `TelegramAvatar.apply` (`src/telegram/avatar.ts`). Never show or log the token or Telegram's own words.
+
+## Channel setup from a phone (2026-10-30)
+
+Telegram and Zoho Cliq setup, which was only in the Mac app's Settings › Channels, is also on the iPhone and the web.
+Protocol: `.context/channels-setup-protocol.md`; writer: `src/squeak/channels-setup.ts`.
+
+- **Two signed command kinds**, `telegram` and `cliq`: `{ v: 1, kind, change: { <exactly one key> }, nonce, expiresAt }`,
+  checked like every command (device key, <= 10 min, new nonce), then `RemoteBridge.handleChannelSetup` refuses any other
+  key set and the writer reads the change again strictly. Telegram: `token`, `off`, `startLink`, `stopLink`, `link`,
+  `unlink`, `test`; Cliq: `webhook`, `removeWebhook`, `owner { email, id }`. The bot picture is the existing
+  `telegramAvatar` command.
+- **The Mac app writes `.env` itself** (`EnvFile`, then restarts the service), so there was no daemon function to share.
+  `ChannelsSetup` is the daemon's own writer for the same keys (`SQUEAK_BOT_TOKEN`, `SQUEAK_ALLOWED_CHAT_IDS`,
+  `SQUEAK_CLIQ_WEBHOOK_URL`, `SQUEAK_CLIQ_OWNER_EMAIL`, `SQUEAK_CLIQ_OWNER_ID`): other lines kept, file 0600. A save
+  restarts the daemon 4 s after the answer is written (launchd KeepAlive brings it back), because `.env` is read at start.
+- **Secrets**: a bot token or webhook URL exists only inside the sealed, signed command, then in `.env`. It is never
+  logged (the audit line names the key, not the value), never put in a result (a refusal is a fixed sentence), never in
+  `/state`, and never in the phone view, which carries only `channelsSetup`: `tokenSet`/`webhookSet` booleans (no last
+  four), the bot's username, linked chats with names, the owner email and ID, the last test, link candidates, and
+  whether the service is restarting. Tests pin this (`channels-setup.test.ts`, `remote-bridge.test.ts`,
+  `phone-interop.test.ts`). Absent on an older Mac: phones hide the page.
+- **Owner check**: everything that sends data to a third party or grants an account access (set a token or webhook, turn
+  off or remove, link or unlink a chat, change the Cliq owner) needs Face ID or the passcode on the iPhone, always,
+  whatever "Ask for Face ID to send" says (as the PIN reset), and an explicit confirm on the web that says the browser
+  can't check it's you. The Mac can check only the device key's signature, as for the voice PIN reset: Face ID is the
+  phone's job. Test message, start/stop linking and reads need none. Turn off and Remove webhook ask a confirm first.
+- **Linking** mirrors the Mac's sheet: `startLink` opens a 10-minute window (the phone shows "send any message to
+  @bot"), the view lists chats that messaged the bot (`linking.candidates`, only while the window is open), `link` takes
+  one of them (the Mac refuses an id nobody saw, so a phone cannot allow an arbitrary chat), Done sends `stopLink`. With
+  no allow list the bot was open to anyone and never listed them; strangers are now remembered then too, so the first
+  chat can be linked.
+- **Differences from the Mac app, on purpose**: `unlink` refuses the last chat (the Mac's save would leave the bot open to
+  anyone; a phone must turn Telegram off instead); the Cliq webhook must be one of Cliq's own data-centre hosts (the
+  Mac app's check is looser).
 
 ## Phone calls (2026-10-28)
 

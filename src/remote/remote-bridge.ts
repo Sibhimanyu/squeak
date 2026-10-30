@@ -707,8 +707,23 @@ export interface RemoteBridgeDependencies {
   telegramAvatar?: {
     apply(request: unknown): Promise<{ ok: true; message: string } | { ok: false; reason: string; retry?: boolean }>;
   };
+  /**
+   * Telegram and Cliq setup (squeak/channels-setup.ts). Absent: phones hide the setup, and a change is refused.
+   * `state()` is non-secret by construction; a bot token and a webhook URL travel only inside a signed command and
+   * end in `.env`, never in a log, a result or the view. The phone asks Face ID before it sends any change but a test.
+   */
+  channelsSetup?: {
+    state(): unknown;
+    telegram(change: unknown): Promise<{ ok: true; message: string } | { ok: false; reason: string }>;
+    cliq(change: unknown): { ok: true; message: string } | { ok: false; reason: string };
+  } | null;
   /** Notification settings (fleet/notify-settings.ts). Absent: phones hide the page, and a change is refused. */
   notify?: {
+    state(): unknown;
+    apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
+  } | null;
+  /** New chat presets (fleet/chat-presets.ts). Absent: phones use their built-in defaults and cannot edit. */
+  presets?: {
     state(): unknown;
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
   } | null;
@@ -1750,6 +1765,12 @@ export class RemoteBridge {
     }
     if (kind === "notify") {
       return this.handleNotify(device, id, command as unknown as Record<string, unknown>);
+    }
+    if (kind === "telegram" || kind === "cliq") {
+      return this.handleChannelSetup(device, id, kind, command as unknown as Record<string, unknown>);
+    }
+    if (kind === "presets") {
+      return this.handlePresets(device, id, command as unknown as Record<string, unknown>);
     }
     if (kind === "voice") {
       return this.handleVoice(device, id, command as unknown as Record<string, unknown>);
@@ -3186,6 +3207,82 @@ export class RemoteBridge {
   }
 
   /**
+   * Telegram or Cliq setup: `{ v: 1, kind: "telegram" | "cliq", change: { <one key>: value }, nonce, expiresAt }`,
+   * exactly these keys. Signature, freshness and nonce have already held; the change is read again strictly in
+   * squeak/channels-setup.ts and ends in the daemon's own writer. A token or webhook in `change` is never logged,
+   * echoed or put in the result: the log names the key only, and a refusal is one of the writer's fixed sentences.
+   * The phone asks Face ID before sending anything but a test (the key's signature is all this Mac can check).
+   */
+  private async handleChannelSetup(
+    device: PairedDevice,
+    id: string,
+    kind: "telegram" | "cliq",
+    command: Record<string, unknown>,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `${kind}: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const setup = this.deps.channelsSetup;
+    if (!setup || command.v !== 1) {
+      return refuse(`This Mac can't set up ${kind === "cliq" ? "Cliq" : "Telegram"} from a phone.`, "not available");
+    }
+    if (Object.keys(command).sort().join(",") !== "change,expiresAt,kind,nonce,v") {
+      return refuse("Not a setting this Mac understands.", "bad keys");
+    }
+    const change = command.change;
+    // Only the key's name is ever logged, never its value.
+    const name =
+      typeof change === "object" && change !== null && !Array.isArray(change) && Object.keys(change).length === 1
+        ? Object.keys(change)[0]!.slice(0, 24)
+        : "?";
+    let outcome: { ok: true; message: string } | { ok: false; reason: string };
+    try {
+      outcome = kind === "telegram" ? await setup.telegram(change) : setup.cliq(change);
+    } catch {
+      return refuse("This Mac couldn't make that change.", `${name} failed`);
+    }
+    if (!outcome.ok) {
+      return refuse(outcome.reason, `${name} refused`);
+    }
+    this.nudgePublish(0);
+    this.log(device.name, "sent", `${kind} ${name}`);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
+   * A change to the new chat presets: `{ v: 1, kind: "presets", agent?, preset, change, nonce, expiresAt }`, with
+   * `change` one of `{ setup }`, `{ reset: true }` (both with `agent`) or `{ name: string | null }` (no `agent`).
+   * Signature, freshness and nonce have already held; the keys and values are read again strictly in
+   * fleet/chat-presets.ts, which ends in the same function as the Mac app's route. It touches no chat, so no Face ID.
+   */
+  private handlePresets(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): { write: boolean; result: Record<string, unknown> } {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `presets: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const presets = this.deps.presets;
+    if (!presets || command.v !== 1) {
+      return refuse("This Mac can't change presets from a phone.", "not available");
+    }
+    // The envelope's own keys come off; whatever is left must be exactly one request, read strictly by the store.
+    const request = Object.fromEntries(
+      Object.entries(command).filter(([key]) => !["v", "kind", "nonce", "expiresAt"].includes(key)),
+    );
+    const outcome = presets.apply(request);
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.nudgePublish(0);
+    this.log(device.name, "sent", "presets");
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
    * Phone-call settings: `{ v: 1, kind: "voice", change: { callee: "101" | null } | { test: true }, nonce, expiresAt }`,
    * exactly these keys. Signature, freshness and nonce have already held. A callee is read again strictly in
    * voice/settings.ts (an internal extension or null) and ends in the same function as the Mac app's route; a test
@@ -3472,8 +3569,10 @@ export class RemoteBridge {
       JSON.stringify(view.awakeSleepProblem) +
       JSON.stringify(view.hotspot) +
       JSON.stringify(view.notify) +
+      JSON.stringify(view.presets) +
       JSON.stringify(view.voice) +
       JSON.stringify(view.telegramAvatar) +
+      JSON.stringify(view.channelsSetup) +
       JSON.stringify(view.macControls) +
       JSON.stringify(view.local) +
       JSON.stringify(view.usage, (key, value: unknown) => (key === "observedAt" ? undefined : value));
@@ -3625,10 +3724,14 @@ export class RemoteBridge {
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
       // What Telegram and Cliq may push, and which of them this Mac has. Absent: the page is hidden.
       ...(this.deps.notify ? { notify: this.deps.notify.state() } : {}),
+      // The shared new chat presets (what a person changed; absent keys mean the built-in rule). Absent on an older Mac.
+      ...(this.deps.presets ? { presets: this.deps.presets.state() } : {}),
       // Who phone calls ring, whether they are set up, and how the last test went. Absent: the page is hidden.
       ...(this.deps.voice ? { voice: this.phoneVoice(this.deps.voice) } : {}),
       // The Mac can set the Telegram bot's photo to Squeak's logo. Absent on an older Mac: the button is hidden.
       ...(this.deps.telegramAvatar ? { telegramAvatar: true as const } : {}),
+      // Telegram and Cliq setup, non-secret only (set or not, linked chats, owner). Absent on an older Mac: hidden.
+      ...(this.deps.channelsSetup ? { channelsSetup: this.deps.channelsSetup.state() } : {}),
       // Usage › Details is offered: the numbers themselves come only in a `stats` command's answer.
       ...(this.deps.stats ? { usageStats: true } : {}),
       // Volume, brightness, fans: what the phone's Mac controls page draws. Absent: the page is hidden.

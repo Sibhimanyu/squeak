@@ -4,7 +4,7 @@ import type { RtdbRest } from "../remote/rtdb-rest.js";
 import type { ReplyFailureHandler, ReplyOutcome } from "../fleet/session-reply.js";
 import { logger } from "../utils/logger.js";
 import { chunkClips, type Clip } from "./clips.js";
-import { inboundPrompts } from "./inbound-flow.js";
+import { ASK_FAILED, inboundPrompts } from "./inbound-flow.js";
 import {
   audioDocId,
   audioPath,
@@ -13,6 +13,7 @@ import {
   sealAudio,
   dirPath,
   downPath,
+  MAX_ANSWER_CHARS,
   MAX_CHOICES,
   MAX_WORKSPACES,
   MENU_CHOICES,
@@ -62,9 +63,18 @@ export interface MemoInboxDependencies {
   /** The Mac's own recordings of these call-in prompts (voice/natural-voice.ts); absent or empty: the add-on speaks. */
   audioClips?: (texts: string[]) => Promise<Clip[]>;
   /** The Mac's recording of the read-back sentence; undefined (or a failure) leaves it to the add-on. */
-  readBack?: (text: string, label: string) => Promise<Clip | undefined>;
+  readBack?: (text: string, label: string, ask?: boolean) => Promise<Clip | undefined>;
   /** Makes the fixed part of the read-back for these chats ahead of any call (after the prompts are published). */
-  prepareReadBack?: (labels: string[]) => Promise<void>;
+  prepareReadBack?: (labels: string[], ask?: boolean) => Promise<void>;
+  /**
+   * Read-only answers for a call: where a chat stands (`describe`, from what Squeak knows, null when the chat is gone)
+   * and an answer to a spoken question (`answer`, a headless model with no tools; throws a sentence fit to say when it
+   * cannot). Both must write nothing, send nothing and touch no chat. With both, the directory says it can ask.
+   */
+  describe?: (target: string, label: string) => string | null;
+  answer?: (target: string, label: string, question: string) => Promise<string>;
+  /** The Mac's recording of an answer's words; undefined (or a failure) leaves it to the add-on. */
+  speech?: (text: string) => Promise<Clip | undefined>;
   /** A line for the call trace. */
   trace?: (kind: TraceKind, text: string, extra?: { ms?: number; label?: string }) => void;
   now?: () => number;
@@ -86,6 +96,10 @@ const READ_BACK_BUDGET_MS = 8_000;
 /** A phone is not a keyboard: this many sends an hour is a stuck loop, not a person. */
 const MAX_SENDS_PER_HOUR = 20;
 const MAX_SPOKEN_LABEL = 60;
+/** A model answer is worth a minute of a person's time, not more; the add-on waits a little longer than this. */
+const ANSWER_BUDGET_MS = 45_000;
+/** Questions and status read-outs an hour: a model call each, so a stuck loop is stopped here too. */
+const MAX_ANSWERS_PER_HOUR = 40;
 
 /** A workspace name read aloud: no longer than 60 characters, cut at a word. */
 function spokenLabel(label: string): string {
@@ -117,6 +131,7 @@ export class MemoInbox {
   private readonly audioDocs = new Map<string, string[]>();
   private swept = false;
   private readonly sends: number[] = [];
+  private readonly answers: number[] = [];
 
   constructor(private readonly deps: MemoInboxDependencies) {
     this.now = deps.now ?? Date.now;
@@ -206,7 +221,15 @@ export class MemoInbox {
       targets.map((t) => t.target),
     );
     while (this.versions.size > KEEP_VERSIONS) this.versions.delete(this.versions.keys().next().value as string);
-    const doc: DirectoryDoc = { v: 1, at, version, caller, items, ...(workspaces ? { workspaces } : {}) };
+    const doc: DirectoryDoc = {
+      v: 1,
+      at,
+      version,
+      caller,
+      items,
+      ...(workspaces ? { workspaces } : {}),
+      ...(this.canAsk ? { ask: true as const } : {}),
+    };
     const audio = this.audioDocs.get(version);
     await this.deps.store.set(
       dirPath(this.deps.channel),
@@ -239,7 +262,7 @@ export class MemoInbox {
     await this.dropStaleAudio();
     if (this.deps.prepareReadBack && !this.stopped) {
       const labels = [...doc.items, ...(doc.workspaces ?? []).flatMap((w) => w.chats)].map((i) => i.label);
-      await this.deps.prepareReadBack(labels).catch(() => undefined);
+      await this.deps.prepareReadBack(labels, this.canAsk).catch(() => undefined);
     }
   }
 
@@ -312,11 +335,15 @@ export class MemoInbox {
   }
 
   /** The read-back in the Mac's voice, within a short budget: a slow render must not hold up the phone line. */
+  private get canAsk(): boolean {
+    return Boolean(this.deps.describe && this.deps.answer);
+  }
+
   private async readBackAudio(text: string, label: string): Promise<Clip | undefined> {
     if (!this.deps.readBack) return undefined;
     try {
       return await Promise.race([
-        this.deps.readBack(text, label),
+        this.deps.readBack(text, label, this.canAsk),
         new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), READ_BACK_BUDGET_MS).unref()),
       ]);
     } catch {
@@ -326,6 +353,80 @@ export class MemoInbox {
 
   private refuse(id: string, reason: string): DownMessage {
     return { v: 1, id, at: this.now(), status: "refused", reason };
+  }
+
+  /** The recording's words in the Mac's voice, within a short budget; undefined leaves it to the add-on. */
+  private async answerAudio(text: string): Promise<Clip | undefined> {
+    if (!this.deps.speech) return undefined;
+    try {
+      return await Promise.race([
+        this.deps.speech(text),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), READ_BACK_BUDGET_MS).unref()),
+      ]);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * A question about a chat, or where it stands, answered aloud. Read-only by construction: nothing here reaches
+   * `send`, `canSend` or any writer, so a question can never become a message to an agent or change a chat.
+   */
+  private async handleAnswer(message: Extract<UpMessage, { kind: "ask" | "status" }>): Promise<DownMessage> {
+    const { describe, answer, trace } = this.deps;
+    if (!describe || !answer) return this.refuse(message.id, "Your Mac cannot answer questions yet.");
+    const now = this.now();
+    while (this.answers.length > 0 && now - this.answers[0]! > 60 * 60_000) this.answers.shift();
+    if (this.answers.length >= MAX_ANSWERS_PER_HOUR)
+      return this.refuse(message.id, "Too many questions by phone this hour.");
+    let target: string;
+    let label: string;
+    let question = "";
+    if (message.kind === "status") {
+      const found = this.versions.get(message.dirVersion)?.[message.choice - 1];
+      if (!found) return this.refuse(message.id, "That list is out of date. Call again.");
+      target = found;
+      label = this.deps.targets().find((t) => t.target === found)?.label ?? `chat ${message.choice}`;
+    } else {
+      // Not deleted: the same recording may be sent after it was asked about, or asked again.
+      const pending = this.pending.get(message.memoId);
+      if (!pending) return this.refuse(message.id, "That recording is no longer waiting. Record it again.");
+      target = pending.target;
+      label = pending.label;
+      question = pending.text;
+    }
+    this.answers.push(now);
+    let text: string;
+    const began = Date.now();
+    try {
+      if (message.kind === "status") {
+        const read = describe(target, label);
+        if (!read) return this.refuse(message.id, `I could not find ${label} any more.`);
+        text = read;
+      } else {
+        text = await Promise.race([
+          answer(target, label, question),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("took too long")), ANSWER_BUDGET_MS).unref(),
+          ),
+        ]);
+      }
+    } catch (error) {
+      logger.warn("voice answer failed", { error: error instanceof Error ? error.message : String(error) });
+      trace?.("warn", message.kind === "ask" ? "Could not answer the question" : "Could not read the status", {
+        label,
+      });
+      return this.refuse(message.id, ASK_FAILED);
+    }
+    text = text.slice(0, MAX_ANSWER_CHARS);
+    trace?.(
+      "step",
+      message.kind === "ask" ? `Question answered in ${((Date.now() - began) / 1000).toFixed(1)} s` : "Status read out",
+      { label, ms: Date.now() - began },
+    );
+    trace?.("said", text, { label });
+    const spoken = await this.answerAudio(text);
+    return { v: 1, id: message.id, at: this.now(), status: "answer", text, ...(spoken ? { audio: spoken } : {}) };
   }
 
   private async handle(message: UpMessage): Promise<DownMessage> {
@@ -383,6 +484,8 @@ export class MemoInbox {
         ...(spoken ? { audio: spoken } : {}),
       };
     }
+
+    if (message.kind === "status" || message.kind === "ask") return this.handleAnswer(message);
 
     const pending = this.pending.get(message.memoId);
     if (!pending) return this.refuse(message.id, "That message is no longer waiting.");

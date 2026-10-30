@@ -782,6 +782,54 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed document for one Telegram setup change. The secret (a token) exists only inside the sealed box.
+    public func telegramDocument(
+        change: TelegramChange, signer: CommandSigner, now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = TelegramSetupCommand(
+            v: 1, kind: "telegram", change: change,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// The signed document for one Zoho Cliq setup change. The secret (a webhook) exists only inside the sealed box.
+    public func cliqDocument(
+        change: CliqChange, signer: CommandSigner, now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = CliqSetupCommand(
+            v: 1, kind: "cliq", change: change,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// The signed document changing the shared new chat presets (name, a whole setup, or a reset).
+    public func presetsDocument(
+        _ change: PresetsChange, signer: CommandSigner, now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = PresetsCommand(
+            v: 1, kind: "presets", request: change,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
     /// The signed document changing phone calls: the extension to ring, or a test call.
     public func voiceDocument(
         _ change: VoiceChange, signer: CommandSigner, now: Date = Date()

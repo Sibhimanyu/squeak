@@ -35,6 +35,8 @@ import { open, pairingCode, seal } from "./remote-crypto.js";
 import { historyPageDoc, liveHandle } from "./live-turn.js";
 import { subagentFeedDoc } from "./subagent-feed.js";
 import type { SubagentActivity } from "../fleet/subagent-activity.js";
+import { ChatPresetsStore } from "../fleet/chat-presets.js";
+import { logger } from "../utils/logger.js";
 import { defaultNotifySettings, NotifySettingsStore } from "../fleet/notify-settings.js";
 import { VoiceSettingsStore } from "../voice/settings.js";
 
@@ -4197,6 +4199,119 @@ describe("RemoteBridge subagent feed", () => {
   });
 });
 
+describe("RemoteBridge chat presets from the phone", () => {
+  async function presetsT(options: { offered?: boolean } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-presets-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    const presets = new ChatPresetsStore(path.join(dir, "chat-presets.json"));
+    const apply = vi.fn((request: unknown) => {
+      const outcome = presets.apply(request);
+      return outcome.ok ? { ok: true as const, state: outcome.doc } : outcome;
+    });
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      ...(options.offered === false ? {} : { presets: { state: () => presets.snapshot(), apply } }),
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const phone = device();
+    await store.set(`channels/${payload.c}/pairing/iphone-1`, {
+      box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }),
+    });
+    await bridge.tick();
+    await bridge.approve("iphone-1");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    const command = (
+      fields: Record<string, unknown>,
+      signer = phone,
+      nonce = crypto.randomBytes(16).toString("hex"),
+    ) => {
+      const box = seal(payload.k, { v: 1, kind: "presets", nonce, expiresAt: NOW + 60_000, ...fields });
+      return { box, sig: signer.sign(box), device: "iphone-1" };
+    };
+    return { bridge, config, command, presets };
+  }
+  const setup = { modelId: "opus-5-5", level: "high", code: "sonnet", run: null, planFirst: true };
+
+  it("shows the document and applies a signed setup, a name and a reset", async () => {
+    const t = await presetsT();
+    expect(t.bridge.phoneView().presets).toEqual({ names: {}, setups: {} });
+    const sent = await t.bridge.handleCommand(
+      t.config,
+      "p1",
+      t.command({ agent: "claude", preset: "balanced", change: { setup } }),
+    );
+    expect(sent.result).toEqual({ id: "p1", status: "sent" });
+    expect(
+      (await t.bridge.handleCommand(t.config, "p2", t.command({ preset: "balanced", change: { name: "Mine" } })))
+        .result,
+    ).toEqual({
+      id: "p2",
+      status: "sent",
+    });
+    expect(t.bridge.phoneView().presets).toEqual({
+      names: { balanced: "Mine" },
+      setups: { claude: { balanced: { ...setup } } },
+    });
+    await t.bridge.handleCommand(
+      t.config,
+      "p3",
+      t.command({ agent: "claude", preset: "balanced", change: { reset: true } }),
+    );
+    expect(t.bridge.phoneView().presets).toEqual({ names: {}, setups: {} });
+    t.bridge.stop();
+  });
+
+  it("refuses malformed changes and extra envelope keys, changing nothing", async () => {
+    const t = await presetsT();
+    const bad: Record<string, unknown>[] = [
+      { preset: "balanced", change: { name: 7 } },
+      { agent: "claude", preset: "custom", change: { reset: true } },
+      { agent: "claude", preset: "balanced", change: { setup: { ...setup, code: "gpt" } } },
+      { agent: "claude", preset: "balanced", change: { setup }, extra: 1 },
+      { agent: "claude", preset: "balanced", change: { setup }, v: 2 },
+      {},
+    ];
+    for (const fields of bad) {
+      const verdict = await t.bridge.handleCommand(t.config, "x", t.command(fields));
+      expect(verdict.result).toMatchObject({ status: "refused" });
+    }
+    expect(t.presets.snapshot()).toEqual({ names: {}, setups: {} });
+    t.bridge.stop();
+  });
+
+  it("refuses a replay, a stranger's signature, and a Mac without presets", async () => {
+    const t = await presetsT();
+    const fields = { preset: "best", change: { name: "Top" } };
+    const nonce = "p".repeat(32);
+    expect((await t.bridge.handleCommand(t.config, "a", t.command(fields, undefined, nonce))).result).toMatchObject({
+      status: "sent",
+    });
+    expect((await t.bridge.handleCommand(t.config, "b", t.command(fields, undefined, nonce))).result).toMatchObject({
+      status: "refused",
+    });
+    expect(
+      (await t.bridge.handleCommand(t.config, "c", t.command({ preset: "best", change: { name: "X" } }, device())))
+        .write,
+    ).toBe(false);
+    expect(t.presets.snapshot().names).toEqual({ best: "Top" });
+    t.bridge.stop();
+
+    const off = await presetsT({ offered: false });
+    expect(off.bridge.phoneView().presets).toBeUndefined();
+    expect((await off.bridge.handleCommand(off.config, "d", off.command(fields))).result).toMatchObject({
+      status: "refused",
+    });
+    off.bridge.stop();
+  });
+});
+
 describe("RemoteBridge notification settings from the phone", () => {
   async function notifyT(options: { offered?: boolean } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-notify-"));
@@ -4859,5 +4974,145 @@ describe("RemoteBridge Telegram avatar from the phone", () => {
       status: "refused",
     });
     off.bridge.stop();
+  });
+});
+
+describe("RemoteBridge Telegram and Cliq setup from the phone", () => {
+  const SECRET_TOKEN = "123456789:SECRETtokenABCDEFGHIJKLMNOP";
+  const SECRET_HOOK = "https://cliq.zoho.in/api/v2/bots/b/incoming?zapikey=SECRETZAPIKEY";
+
+  async function setupT(options: { offered?: boolean; fail?: boolean } = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-channels-"));
+    dirs.push(dir);
+    const store = new MemoryStore();
+    const telegram = vi.fn(async (change: unknown) => {
+      if (options.fail) throw new Error(`boom ${JSON.stringify(change)}`);
+      return (change as { token?: string }).token === "bad"
+        ? { ok: false as const, reason: "That doesn't look like a bot token." }
+        : { ok: true as const, message: "Saved." };
+    });
+    const cliq = vi.fn((change: unknown) => {
+      if (options.fail) throw new Error(`boom ${JSON.stringify(change)}`);
+      return { ok: true as const, message: "Saved." };
+    });
+    const state = () => ({ telegram: { tokenSet: true, chats: [], linking: null }, cliq: { webhookSet: false } });
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store,
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      ...(options.offered === false ? {} : { channelsSetup: { state, telegram, cliq } }),
+      now: () => NOW,
+    });
+    const pairing = bridge.startPairing();
+    const payload = JSON.parse(Buffer.from(new URL(pairing.url).searchParams.get("d")!, "base64url").toString());
+    const phone = device();
+    await store.set(`channels/${payload.c}/pairing/iphone-1`, {
+      box: seal(payload.k, { name: "iPhone", publicKey: phone.x963 }),
+    });
+    await bridge.tick();
+    await bridge.approve("iphone-1");
+    const config = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    const command = (
+      kind: string,
+      fields: Record<string, unknown>,
+      signer = phone,
+      nonce = crypto.randomBytes(16).toString("hex"),
+    ) => {
+      const box = seal(payload.k, { v: 1, kind, nonce, expiresAt: NOW + 60_000, ...fields });
+      return { box, sig: signer.sign(box), device: "iphone-1" };
+    };
+    return { bridge, config, command, telegram, cliq };
+  }
+
+  it("shows only non-secret state, and hides it on a Mac without the setup", async () => {
+    const t = await setupT();
+    expect(t.bridge.phoneView().channelsSetup).toEqual({
+      telegram: { tokenSet: true, chats: [], linking: null },
+      cliq: { webhookSet: false },
+    });
+    t.bridge.stop();
+    const off = await setupT({ offered: false });
+    expect(off.bridge.phoneView()).not.toHaveProperty("channelsSetup");
+    off.bridge.stop();
+  });
+
+  it("applies one signed change per command and answers only sent or a fixed reason", async () => {
+    const t = await setupT();
+    const sent = await t.bridge.handleCommand(
+      t.config,
+      "a",
+      t.command("telegram", { change: { token: SECRET_TOKEN } }),
+    );
+    expect(sent.result).toEqual({ id: "a", status: "sent" });
+    expect(t.telegram).toHaveBeenCalledWith({ token: SECRET_TOKEN });
+    const hook = await t.bridge.handleCommand(t.config, "b", t.command("cliq", { change: { webhook: SECRET_HOOK } }));
+    expect(hook.result).toEqual({ id: "b", status: "sent" });
+    expect(t.cliq).toHaveBeenCalledWith({ webhook: SECRET_HOOK });
+    const refused = await t.bridge.handleCommand(t.config, "c", t.command("telegram", { change: { token: "bad" } }));
+    expect(refused.result).toEqual({
+      id: "c",
+      status: "refused",
+      reason: "That doesn't look like a bot token.",
+    });
+    t.bridge.stop();
+  });
+
+  it("refuses extra or missing keys, a wrong version, a replay, a stranger, and a Mac without the setup", async () => {
+    const t = await setupT();
+    const verdict = async (id: string, kind: string, fields: Record<string, unknown>) =>
+      (await t.bridge.handleCommand(t.config, id, t.command(kind, fields))).result;
+    expect(await verdict("1", "telegram", { change: { off: true }, extra: 1 })).toMatchObject({ status: "refused" });
+    expect(await verdict("2", "telegram", {})).toMatchObject({ status: "refused" });
+    expect(await verdict("3", "cliq", { change: { removeWebhook: true }, channel: "x" })).toMatchObject({
+      status: "refused",
+    });
+    expect(await verdict("4", "telegram", { v: 2, change: { off: true } })).toMatchObject({ status: "refused" });
+    // The change itself is read strictly by the writer: an array or a string reaches it and is its to refuse.
+    expect(t.telegram).not.toHaveBeenCalled();
+    expect(t.cliq).not.toHaveBeenCalled();
+
+    const fields = { change: { test: true } };
+    const nonce = "t".repeat(32);
+    expect(
+      (await t.bridge.handleCommand(t.config, "5", t.command("telegram", fields, undefined, nonce))).result,
+    ).toEqual({ id: "5", status: "sent" });
+    expect(
+      (await t.bridge.handleCommand(t.config, "6", t.command("telegram", fields, undefined, nonce))).result,
+    ).toMatchObject({ status: "refused" });
+    const stranger = await t.bridge.handleCommand(
+      t.config,
+      "7",
+      t.command("telegram", { change: { off: true } }, device()),
+    );
+    expect(stranger.write).toBe(false);
+    expect(t.telegram).toHaveBeenCalledTimes(1);
+    t.bridge.stop();
+
+    const off = await setupT({ offered: false });
+    expect((await off.bridge.handleCommand(off.config, "8", off.command("telegram", fields))).result).toMatchObject({
+      status: "refused",
+    });
+    expect(
+      (await off.bridge.handleCommand(off.config, "9", off.command("cliq", { change: { removeWebhook: true } })))
+        .result,
+    ).toMatchObject({ status: "refused" });
+    off.bridge.stop();
+  });
+
+  it("never logs, answers or shows a secret, even when the writer fails with it in its message", async () => {
+    const logs = [vi.spyOn(logger, "info"), vi.spyOn(logger, "warn"), vi.spyOn(logger, "error")];
+    const t = await setupT({ fail: true });
+    const results = [
+      (await t.bridge.handleCommand(t.config, "a", t.command("telegram", { change: { token: SECRET_TOKEN } }))).result,
+      (await t.bridge.handleCommand(t.config, "b", t.command("cliq", { change: { webhook: SECRET_HOOK } }))).result,
+    ];
+    for (const result of results) expect(result).toMatchObject({ status: "refused" });
+    const everything = JSON.stringify([results, logs.flatMap((spy) => spy.mock.calls), t.bridge.phoneView()]);
+    expect(everything).not.toContain("SECRET");
+    expect(everything).not.toContain("zapikey");
+    t.bridge.stop();
+    vi.restoreAllMocks();
   });
 });

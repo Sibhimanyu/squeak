@@ -124,3 +124,116 @@ struct ChatPresetsTests {
         #expect(await t.requests.count == 1)
     }
 }
+
+private final class PresetsStub: HTTPTransport, @unchecked Sendable {
+    var requests: [HTTPRequest] = []
+    var doc: String
+    var refuse = false
+    var down = false
+    init(_ doc: String = #"{"names":{},"setups":{}}"#) { self.doc = doc }
+    func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+        requests.append(request)
+        if down { throw TransportError.connectionRefused }
+        if request.method == "POST", refuse { return HTTPResponse(status: 400, body: Data(#"{"error":"no"}"#.utf8)) }
+        return HTTPResponse(status: 200, body: Data(doc.utf8))
+    }
+}
+
+@Suite struct ChatPresetSyncTests {
+    private func client(_ t: PresetsStub) -> DaemonClient {
+        DaemonClient(baseURL: URL(string: "http://127.0.0.1:1")!, transport: t, tokenProvider: { "tok" })
+    }
+    private func defaults() -> UserDefaults { UserDefaults(suiteName: "squeak.presets.sync.\(UUID().uuidString)")! }
+
+    private func bodies(_ t: PresetsStub) -> [[String: Any]] {
+        t.requests.filter { $0.method == "POST" }.compactMap { try? JSONSerialization.jsonObject(with: $0.body ?? Data()) as? [String: Any] }
+    }
+
+    @Test func requestBodiesHaveExactlyTheDaemonsKeys() throws {
+        let setup = ChatSetup(modelId: "opus-5-5-1m", level: "high", code: "sonnet", run: nil, planFirst: true)
+        let raw = try #require(ChatPresetRequest.setup(.save, .claude, setup))
+        let body = try #require(try JSONSerialization.jsonObject(with: raw) as? [String: Any])
+        #expect(Set(body.keys) == ["agent", "preset", "change"])
+        let change = try #require(body["change"] as? [String: Any])
+        #expect(Set(change.keys) == ["setup"])
+        let wire = try #require(change["setup"] as? [String: Any])
+        #expect(Set(wire.keys) == ["modelId", "level", "code", "run", "planFirst"])
+        #expect(wire["run"] is NSNull)
+        #expect(ChatPresetRequest.setup(.save, .claude, ChatSetup()) == nil)
+        let rawName = try #require(ChatPresetRequest.name(.best, nil))
+        let name = try #require(try JSONSerialization.jsonObject(with: rawName) as? [String: Any])
+        #expect(Set(name.keys) == ["preset", "change"])
+    }
+
+    @Test func daemonDocumentReplacesTheLocalCopy() async {
+        let d = defaults()
+        let stub = PresetsStub(#"{"names":{"save":"Cheap"},"setups":{"claude":{"save":{"modelId":"opus-5-5-1m","level":"low","code":"sonnet","run":null,"planFirst":false}}}}"#)
+        #expect(await ChatPresetSync.sync(client: client(stub), defaults: d) == .synced)
+        let prefs = ChatPresetPreferences(defaults: d)
+        #expect(prefs.title(for: .save) == "Cheap")
+        #expect(prefs.setup(for: .save, agent: .claude, models: models)?.level == "low")
+    }
+
+    @Test func localCustomPresetsMigrateOnceAndNeverOverwriteTheDaemons() async {
+        let d = defaults()
+        // Edited on this Mac before the daemon held presets (no hook set, so nothing is queued then).
+        var saved = ChatPresetPreferences.Saved()
+        saved.names = ["save": "Budget", "best": "Top"]
+        saved.setups["claude.save"] = ChatSetup(modelId: "opus-5-5-1m", level: "low", code: "sonnet", run: "haiku", planFirst: true)
+        saved.setups["claude.best"] = ChatSetup(modelId: "opus-5-5-1m", level: "high")
+        ChatPresetPreferences(defaults: d).store(saved)
+        // The daemon already has a name for "best" (a phone set it): that one wins.
+        let stub = PresetsStub(#"{"names":{"best":"Phone"},"setups":{}}"#)
+        _ = await ChatPresetSync.sync(client: client(stub), defaults: d)
+        let sent = bodies(stub)
+        #expect(sent.count == 3) // save's name, claude.best, claude.save
+        #expect(!sent.contains { ($0["preset"] as? String) == "best" && ($0["change"] as? [String: Any])?["name"] != nil })
+        #expect(d.bool(forKey: ChatPresetPreferences.migratedKey))
+        // Marked migrated: a second sync sends nothing.
+        stub.requests.removeAll()
+        _ = await ChatPresetSync.sync(client: client(stub), defaults: d)
+        #expect(bodies(stub).isEmpty)
+    }
+
+    @Test func daemonDownKeepsTheCopyAndTheQueueAndDoesNotMarkMigrated() async {
+        let d = defaults()
+        let prefs = ChatPresetPreferences(defaults: d)
+        prefs.setTitle("Mine", for: .balanced)
+        let stub = PresetsStub()
+        stub.down = true
+        #expect(await ChatPresetSync.sync(client: client(stub), defaults: d) == .unavailable)
+        #expect(prefs.title(for: .balanced) == "Mine")
+        #expect(prefs.pending().count == 1)
+        #expect(!d.bool(forKey: ChatPresetPreferences.migratedKey))
+        // Back up: the queued edit goes out, and the daemon's answer is the copy.
+        stub.down = false
+        stub.doc = #"{"names":{"balanced":"Mine"},"setups":{}}"#
+        #expect(await ChatPresetSync.sync(client: client(stub), defaults: d) == .synced)
+        #expect(prefs.pending().isEmpty)
+        #expect(bodies(stub).contains { ($0["change"] as? [String: Any])?["name"] as? String == "Mine" })
+    }
+
+    @Test func aRefusedChangeIsDroppedAndTheDaemonsDocumentWins() async {
+        let d = defaults()
+        let prefs = ChatPresetPreferences(defaults: d)
+        prefs.setTitle("Mine", for: .best)
+        let stub = PresetsStub()
+        stub.refuse = true
+        #expect(await ChatPresetSync.sync(client: client(stub), defaults: d) == .synced)
+        #expect(prefs.pending().isEmpty)
+        #expect(prefs.title(for: .best) == ChatPreset.best.title)
+    }
+
+    @Test func anOlderDaemonLeavesEverythingAlone() async {
+        let d = defaults()
+        let prefs = ChatPresetPreferences(defaults: d)
+        prefs.setTitle("Mine", for: .best)
+        final class Old: HTTPTransport, @unchecked Sendable {
+            func send(_ request: HTTPRequest) async throws -> HTTPResponse { HTTPResponse(status: 404, body: Data()) }
+        }
+        let old = DaemonClient(baseURL: URL(string: "http://127.0.0.1:1")!, transport: Old(), tokenProvider: { "tok" })
+        #expect(await ChatPresetSync.sync(client: old, defaults: d) == .unavailable)
+        #expect(prefs.title(for: .best) == "Mine")
+        #expect(prefs.pending().count == 1)
+    }
+}

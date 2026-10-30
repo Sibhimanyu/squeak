@@ -93,6 +93,7 @@ struct SessionListRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: Space.m) {
             StateDot(state: session.state).frame(height: 19)
+            AgentAvatar(session: session, size: 20).padding(.top, -1)
             SessionRowLines(session: session, isPinned: isPinned, subtitleOverride: subtitleOverride)
         }
         .padding(.vertical, 3)

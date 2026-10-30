@@ -144,7 +144,7 @@ struct QuickNewChatView: View {
                     HStack(alignment: .top, spacing: 12) {
                         column("Agent") {
                             NCPopup(label: "Agent", selection: Binding(get: { f.agent }, set: { state.form.choose(agent: $0) }),
-                                    options: NewChatAgent.allCases.map { ($0, $0.displayName) })
+                                    options: NewChatAgent.allCases.map { ($0, $0.displayName) }, mark: { $0.mark })
                         }
                         if !f.agentModels.isEmpty {
                             column("Model") {

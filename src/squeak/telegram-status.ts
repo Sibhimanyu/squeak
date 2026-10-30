@@ -82,9 +82,12 @@ export class TelegramStatus {
     return !allowed || allowed.has(chatId);
   }
 
-  /** Remember a chat that is not allowed. Allowed chats are ignored. */
+  /**
+   * Remember a chat that is not on the allow list, for the link flow. Linked chats are ignored. With no allow list
+   * every chat is open to the bot, and is remembered too, so the first chat can still be linked.
+   */
   noteChat(chat: CandidateChat): void {
-    if (this.isAllowed(chat.id)) {
+    if (this.options.allowedChatIds?.has(chat.id)) {
       return;
     }
     const type: CandidateType =

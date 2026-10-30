@@ -203,6 +203,7 @@ struct HomeSessionRow: View {
         Button { model.select(session.key) } label: {
             HStack(alignment: .top, spacing: 10) {
                 StateDot(state: session.state).frame(width: 10, height: 18)
+                AgentAvatar(session: session, size: 20)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(verbatim: SessionText.headline(session)).font(.system(size: Metrics.rowTitle, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)

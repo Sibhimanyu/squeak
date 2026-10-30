@@ -3,6 +3,7 @@ import type { CallResult } from "./baresip-line.js";
 import type { Clip } from "./clips.js";
 import type { CallScript } from "./dialog.js";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
+import { audioPath, callAudioId, sealAudio } from "./memo-protocol.js";
 import {
   newCallId,
   readResult,
@@ -48,7 +49,14 @@ export interface RelayLineOptions {
    * The call's words in the Mac's own voice (voice/natural-voice.ts), made before the request goes out; absent or
    * failing, the add-on speaks everything itself.
    */
-  clips?: (script: CallScript, answerable: boolean) => Promise<Clip[] | undefined>;
+  clips?: (script: CallScript, answerable: boolean, onClip?: (clip: Clip) => void) => Promise<Clip[] | undefined>;
+  /**
+   * True when the add-on can take clips after the call is placed (0.11.0 and newer): the request then goes out at once
+   * and `clips` is given an `onClip` to hand over each clip as it is made. False or absent: the old way, clips first.
+   */
+  lateClips?: () => boolean;
+  /** A line for the call trace: when dialling started, and when each clip was made and sent. */
+  trace?: (text: string) => void;
   now?: () => number;
 }
 
@@ -67,6 +75,7 @@ export class RelayLine implements VoiceLine {
   async call(script: CallScript, answerable: boolean): Promise<CallResult> {
     const { key } = this.options;
     const id = newCallId();
+    if (this.options.clips && this.options.lateClips?.()) return this.callWithLateClips(id, script, answerable);
     // Made first: the request's clock starts when it is written, not while the voice is being recorded.
     const audio = await this.options.clips?.(script, answerable).catch(() => undefined);
     const at = this.now();
@@ -86,6 +95,67 @@ export class RelayLine implements VoiceLine {
     );
     if (result.status === "answered" || result.status === "unanswered" || result.status === "failed") return result;
     return { status: "failed", reason: "The gateway answered with something else." };
+  }
+
+  /**
+   * The call goes out at once, so the phone rings now; the Mac's voice is made while it rings and each clip is written
+   * as its own document the add-on picks up (`audioFollows`). Whatever is not there when a line is spoken is spoken
+   * by the add-on's own voice, so a slow render never leaves the line silent.
+   */
+  private async callWithLateClips(id: string, script: CallScript, answerable: boolean): Promise<CallResult> {
+    const { key, store, channel, trace } = this.options;
+    const at = this.now();
+    const callee = this.options.callee?.() ?? null;
+    const doc = sealRequest(key, {
+      v: 1,
+      id,
+      at,
+      expiresAt: at + REQUEST_TTL_MS,
+      answerable,
+      script,
+      audioFollows: true,
+      ...(callee ? { callee } : {}),
+    });
+    const written: string[] = [];
+    let finished = false;
+    let chain: Promise<void> = Promise.resolve();
+    const onClip = (clip: Clip): void => {
+      chain = chain.then(async () => {
+        if (finished) return;
+        const docId = callAudioId(id, written.length);
+        try {
+          await store.set(audioPath(channel, docId), sealAudio(key, docId, id, [clip], this.now()), {
+            timeoutMs: AUDIO_WRITE_MS,
+          });
+          written.push(docId);
+          trace?.(
+            `Voice clip ${written.length} sent to the add-on ${((this.now() - at) / 1000).toFixed(1)} s after dialling`,
+          );
+        } catch {
+          trace?.("A voice clip could not be sent; the add-on speaks that line itself");
+        }
+      });
+    };
+    trace?.("Dialling started: the voice clips follow while it rings");
+    // Rendering starts after the request is written (it must not delay the ring), and never throws.
+    const rendering = this.options.clips!(script, answerable, onClip).catch(() => undefined);
+    void rendering.then(() =>
+      trace?.(`Voice clips finished ${((this.now() - at) / 1000).toFixed(1)} s after dialling`),
+    );
+    try {
+      const result = await this.roundTrip(
+        id,
+        doc,
+        script.options.map((option) => option.letter),
+        at + REQUEST_TTL_MS + MAX_CALL_MS,
+      );
+      if (result.status === "answered" || result.status === "unanswered" || result.status === "failed") return result;
+      return { status: "failed", reason: "The gateway answered with something else." };
+    } finally {
+      finished = true;
+      await chain.catch(() => undefined);
+      await Promise.allSettled(written.map((docId) => store.delete(audioPath(channel, docId))));
+    }
   }
 
   /**
@@ -252,6 +322,7 @@ export function relayLineFor(
   relay: { channel: string; key: string },
   settings: { settings: { callee: string | null } },
   clips?: RelayLineOptions["clips"],
+  extra: Pick<RelayLineOptions, "lateClips" | "trace"> = {},
 ): RelayLine {
   return new RelayLine({
     store,
@@ -259,5 +330,6 @@ export function relayLineFor(
     key: relay.key,
     callee: () => settings.settings.callee,
     ...(clips ? { clips } : {}),
+    ...extra,
   });
 }

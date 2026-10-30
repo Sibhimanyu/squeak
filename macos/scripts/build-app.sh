@@ -58,6 +58,9 @@ mkdir -p "$BRAND/mood-sprites"
 cp "$REPO"/brand/mood-sprites/duck*.png "$BRAND/mood-sprites/"
 # The bot's profile picture (Telegram's "Use Squeak logo", Cliq's "Save logo"): the same JPG the daemon uploads.
 cp "$REPO/brand/logo/png/squeak-bot-avatar-640.jpg" "$BRAND/"
+# The Claude, Codex and Conductor marks (the same PNGs the iPhone ships); AgentMark reads them from brand/agents.
+mkdir -p "$BRAND/agents"
+cp "$REPO"/macos/assets/agents/agent-*.png "$BRAND/agents/"
 
 ICON=""
 for c in "$REPO/macos/assets/squeak.icns"; do [ -f "$c" ] && ICON="$c"; done

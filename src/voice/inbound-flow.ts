@@ -4,6 +4,7 @@ import { logger } from "../utils/logger.js";
 import type { Clip } from "./clips.js";
 import { readDigits, type IncomingCall, type PhoneCall } from "./phone.js";
 import {
+  MAX_ANSWERS_PER_CALL,
   MAX_MEMO_MS,
   MENU_CHOICES,
   newMessageId,
@@ -40,20 +41,27 @@ export interface InboundDependencies {
   seed?: (clips: Clip[]) => void;
 }
 
-/** The read-back of what was heard: said by the add-on, and made ahead by the Mac in its own voice. */
-export function readBackSentence(text: string, label: string): string {
-  const { head, tail } = readBackParts(text, label);
+/**
+ * The read-back of what was heard: said by the add-on, and made ahead by the Mac in its own voice. With `ask` (a Mac
+ * that can answer questions) the keys are 1 send and hang up, 2 ask it as a question, 3 record again.
+ */
+export function readBackSentence(text: string, label: string, ask = false): string {
+  const { head, tail } = readBackParts(text, label, ask);
   return `${head} ${tail}`;
 }
 
 /** The read-back in two parts: what was heard (per call), and the fixed suffix (per chat, made ahead). */
-export function readBackParts(text: string, label: string): { head: string; tail: string } {
+export function readBackParts(text: string, label: string, ask = false): { head: string; tail: string } {
   return {
     head: `I heard: ${text.replace(/[.!?\s]+$/, "")}.`,
-    tail: `Press 1 to send it to ${label}, 2 to record again, star to hear it again, or hash to cancel.`,
+    tail: ask
+      ? `Press 1 to send it to ${label} and hang up, 2 to ask it as a question, 3 to record again, star to hear it again, or hash to cancel.`
+      : `Press 1 to send it to ${label}, 2 to record again, star to hear it again, or hash to cancel.`,
   };
 }
 
+/** What the Mac says when it cannot answer a question (also what the add-on says when the Mac is silent). */
+export const ASK_FAILED = "I could not get an answer. You can try again.";
 const GREETING = "Hello, this is Squeak.";
 const AGAIN = "Press star to hear this again";
 
@@ -71,11 +79,19 @@ const SAYS = {
   noMac: "I could not reach your Mac. Goodbye.",
   notSure: "I could not reach your Mac, so I am not sure it was sent. Check the app. Goodbye.",
   wrong: "Something went wrong.",
+  // Only with a Mac that answers questions (`DirectoryDoc.ask`).
+  recordAsk: "Speak your message or question after the beep, and press hash when you are done.",
+  askFail: ASK_FAILED,
+  followUp: `${AGAIN}, 1 for something else about this chat, or hash to hang up.`,
+  limit: "That is as many answers as I can give on one call. Goodbye.",
 };
 
 /** Said once a chat is chosen, before the beep. */
 const recordPrompt = (label: string): string =>
   `${label}. Speak your message after the beep, and press hash when you are done.`;
+/** The first question once a chat is chosen, with a Mac that answers: say or ask something, or hear its status. */
+const actionPrompt = (label: string): string =>
+  `${label}. Press 1 to say a message or ask a question, or 3 to hear where it stands. ${AGAIN}, or hash to hang up.`;
 const sentLine = (label: string): string => `Done. Your message was sent to ${label}. Goodbye.`;
 
 const MENU_END = `${AGAIN}, or hash to hang up.`;
@@ -142,7 +158,13 @@ export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean):
     SAYS.noChat,
   ];
   const pin = askPin ? [`${GREETING} ${SAYS.pin}`, SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
-  const perChat = directory ? allLabels(directory).flatMap((label) => [recordPrompt(label), sentLine(label)]) : [];
+  const ask = directory?.ask === true;
+  const perChat = directory
+    ? allLabels(directory).flatMap((label) =>
+        ask ? [actionPrompt(label), sentLine(label)] : [recordPrompt(label), sentLine(label)],
+      )
+    : [];
+  if (ask) fixed.push(SAYS.recordAsk, SAYS.askFail, SAYS.followUp, SAYS.limit);
   return [...new Set([...pin, ...(directory ? menuPrompts(directory, !askPin) : []), ...perChat, ...fixed])];
 }
 
@@ -234,13 +256,111 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
   }
   const target = await pickTarget(call, deps, directory, pin === null);
   if (target === null) return bye(call, deps, SAYS.bye);
-  const choice = chosen(target);
 
-  // 3. Record, hear it back, send.
+  // 3. With a Mac that answers questions: say or ask something, or hear the chat's status; each answer may be followed
+  // by something else about the same chat (at most MAX_ANSWERS_PER_CALL in all). Without one: record, hear it, send.
+  if (directory.ask !== true) {
+    await messageFlow(call, deps, directory, target, false, { answers: 0 });
+    return;
+  }
+  const counter = { answers: 0 };
+  for (let round = 0; call.open; round++) {
+    const mode = await actionKey(call, deps, target.label);
+    if (mode === null) return bye(call, deps, SAYS.bye);
+    const outcome =
+      mode === "status"
+        ? await statusFlow(call, deps, directory, target, counter)
+        : await messageFlow(call, deps, directory, target, true, counter);
+    if (outcome === "done") return;
+    // An answer was read out: offer something else about this chat, or hang up.
+    if (counter.answers >= MAX_ANSWERS_PER_CALL) return bye(call, deps, SAYS.limit);
+    let next: string | null = null;
+    for (let repeats = 0; call.open; repeats++) {
+      await speak(call, deps, SAYS.followUp);
+      next = await call.key(CONFIRM_WAIT_MS);
+      if (next !== "*") break;
+      deps.trace?.("key: * (hear the answer again)");
+      if (repeats >= MAX_REPEATS || !outcome.text) {
+        next = null;
+        break;
+      }
+      await speak(call, deps, outcome.text);
+    }
+    deps.trace?.(`key: ${next === "1" ? "1 (something else about this chat)" : "hang up"}`);
+    if (next !== "1") return bye(call, deps, SAYS.bye);
+  }
+}
+
+type Done = "done" | { text: string };
+
+/** One of the two things to do with a chat: 1 say or ask, 3 its status. Null: hash, silence or two wrong keys. */
+async function actionKey(
+  call: PhoneCall,
+  deps: InboundDependencies,
+  label: string,
+): Promise<"message" | "status" | null> {
+  for (let attempt = 0; attempt < 2 && call.open; attempt++) {
+    const key = await menuKey(call, deps, actionPrompt(label));
+    if (key === null || key === "#") return null;
+    if (key === "1") return "message";
+    if (key === "3") {
+      deps.trace?.("key: 3 (status)");
+      return "status";
+    }
+  }
+  return null;
+}
+
+/** Reads out where the chat stands. Asks the Mac, which answers from what it knows and changes nothing. */
+async function statusFlow(
+  call: PhoneCall,
+  deps: InboundDependencies,
+  directory: DirectoryDoc,
+  target: DirectoryItem,
+  counter: { answers: number },
+): Promise<Done> {
+  counter.answers += 1;
+  await speak(call, deps, SAYS.wait);
+  const waiting = setTimeout(() => void speak(call, deps, SAYS.still).catch(() => undefined), STILL_WORKING_MS);
+  let heard: DownMessage | null;
+  try {
+    heard = await deps.uplink.status(chosen(target), directory.version);
+  } finally {
+    clearTimeout(waiting);
+  }
+  if (!heard) return bye(call, deps, SAYS.noMac).then(() => "done" as const);
+  if (heard.status !== "answer") {
+    await speak(call, deps, heard.status === "refused" ? heard.reason : SAYS.wrong);
+    // Not a status: back to the question of what to do, unless the cap is spent.
+    return counter.answers >= MAX_ANSWERS_PER_CALL
+      ? bye(call, deps, SAYS.limit).then(() => "done" as const)
+      : { text: "" };
+  }
+  deps.trace?.("step: Status read out");
+  if (heard.audio) deps.seed?.([heard.audio]);
+  await speak(call, deps, heard.text);
+  return { text: heard.text };
+}
+
+/**
+ * Record a message, hear it back, and with 1 send it (the call then ends). With a Mac that answers questions, 2 treats
+ * the recording as a question instead: the answer is read out and nothing is sent or typed anywhere.
+ */
+async function messageFlow(
+  call: PhoneCall,
+  deps: InboundDependencies,
+  directory: DirectoryDoc,
+  target: DirectoryItem,
+  ask: boolean,
+  counter: { answers: number },
+): Promise<Done> {
+  const choice = chosen(target);
+  const done = (text: string): Promise<Done> => bye(call, deps, text).then(() => "done" as const);
+  let askFails = 0;
   for (let take = 0; take < MAX_TAKES && call.open; take++) {
-    await speak(call, deps, recordPrompt(target.label));
+    await speak(call, deps, ask ? SAYS.recordAsk : recordPrompt(target.label));
     const recording = await call.record({ maxMs: MAX_MEMO_MS, beep: true });
-    if (!recording) return;
+    if (!recording) return "done";
     deps.trace?.(`step: Recorded ${(recording.durationMs / 1000).toFixed(1)} s`);
     if (recording.durationMs < MIN_MEMO_MS) {
       await speak(call, deps, SAYS.nothing);
@@ -255,33 +375,62 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
     } finally {
       clearTimeout(waiting);
     }
-    if (!heard) return bye(call, deps, SAYS.noMac);
+    if (!heard) return done(SAYS.noMac);
     if (heard.status !== "transcript") {
       await speak(call, deps, heard.status === "refused" ? heard.reason : SAYS.wrong);
       continue;
     }
     if (heard.audio) deps.seed?.([heard.audio]);
-    const readBack = readBackSentence(heard.text, heard.label);
+    const readBack = readBackSentence(heard.text, heard.label, ask);
+    const recordAgain = ask ? "3" : "2";
     let answer: string | null = null;
-    for (let repeats = 0; call.open; repeats++) {
+    // Said until a key that means something: star hears it again, 2 (with a Mac that answers) asks it as a question,
+    // and a question that fails is offered again here, never by recording again.
+    for (let repeats = 0; call.open; ) {
       await speak(call, deps, readBack);
       answer = await call.key(CONFIRM_WAIT_MS);
-      if (answer !== "*") break;
-      deps.trace?.("key: * (hear it again)");
-      if (repeats >= MAX_REPEATS) {
-        answer = null;
-        break;
+      if (answer === "*") {
+        deps.trace?.("key: * (hear it again)");
+        if (repeats++ >= MAX_REPEATS) {
+          answer = null;
+          break;
+        }
+        continue;
       }
+      if (!(ask && answer === "2")) break;
+      deps.trace?.("key: 2 (ask it as a question)");
+      if (counter.answers >= MAX_ANSWERS_PER_CALL) return done(SAYS.limit);
+      counter.answers += 1;
+      await speak(call, deps, SAYS.wait);
+      const stillWorking = setTimeout(
+        () => void speak(call, deps, SAYS.still).catch(() => undefined),
+        STILL_WORKING_MS,
+      );
+      let reply: DownMessage | null;
+      try {
+        reply = await deps.uplink.ask(memoId);
+      } finally {
+        clearTimeout(stillWorking);
+      }
+      if (reply?.status === "answer") {
+        deps.trace?.("step: Question answered");
+        if (reply.audio) deps.seed?.([reply.audio]);
+        await speak(call, deps, reply.text);
+        return { text: reply.text };
+      }
+      askFails += 1;
+      await speak(call, deps, reply?.status === "refused" ? reply.reason : SAYS.askFail);
+      if (askFails >= 2 || counter.answers >= MAX_ANSWERS_PER_CALL) return done(SAYS.bye);
     }
-    deps.trace?.(`key: ${answer === "1" ? "1 (send)" : answer === "2" ? "2 (record again)" : "cancel"}`);
-    if (answer === "2") continue;
-    if (answer !== "1") return bye(call, deps, SAYS.cancelled);
+    deps.trace?.(
+      `key: ${answer === "1" ? "1 (send)" : answer === recordAgain ? `${recordAgain} (record again)` : "cancel"}`,
+    );
+    if (answer === recordAgain) continue;
+    if (answer !== "1") return done(SAYS.cancelled);
     const outcome = await deps.uplink.send(memoId);
-    if (!outcome) return bye(call, deps, SAYS.notSure);
+    if (!outcome) return done(SAYS.notSure);
     deps.trace?.(outcome.status === "sent" ? "step: Message sent" : "step: Message not sent");
-    return bye(
-      call,
-      deps,
+    return done(
       outcome.status === "sent"
         ? sentLine(target.label)
         : outcome.status === "refused"
@@ -289,7 +438,7 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
           : SAYS.bye,
     );
   }
-  return bye(call, deps, SAYS.bye);
+  return done(SAYS.bye);
 }
 
 const digitOf = (key: string | null): number | null => (key !== null && /^\d$/.test(key) ? Number(key) : null);

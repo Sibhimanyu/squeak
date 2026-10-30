@@ -20,7 +20,7 @@ struct ConductorRelayCard: View {
     private var relay: RelayModel { model.relay }
 
     var body: some View {
-        SettingsCard(title: "Your Conductor connection", subtitle: "Bring agent sessions and replies into Squeak.", symbol: "terminal") {
+        SettingsCard(title: "Your Conductor connection", subtitle: "Bring agent sessions and replies into Squeak.", symbol: "terminal", mark: .conductor) {
             VStack(alignment: .leading, spacing: Space.m) {
                 if relay.needsServiceUpdate {
                     row(dot: Theme.offline, text: "Update the background service")

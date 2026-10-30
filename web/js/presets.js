@@ -69,8 +69,8 @@ const worker = (name, workers) =>
 
 const firstLevel = (model) => model.defaultLevel ?? model.levels[0] ?? null;
 
-/** The setup a preset stands for, or null when the Mac's lists cannot back it (custom is never derived). */
-export function presetSetup(preset, agent, models, workers) {
+/** The built-in rule: the setup a preset stands for, or null when the Mac's lists cannot back it. */
+export function builtInSetup(preset, agent, models, workers) {
   const list = modelsFor(models, agent);
   const delegates = agent === "claude";
   if (preset === "best") {
@@ -94,16 +94,50 @@ export function presetSetup(preset, agent, models, workers) {
   return null;
 }
 
+/**
+ * A stored setup (the Mac's shared presets) checked against what the Mac lists now, as the Mac app does:
+ * an unlisted model falls back to `fallback`, a level it does not take to the model's default, Codex never
+ * delegates, an unknown worker is dropped and "ask first" needs delegated work.
+ */
+export function sanitiseSetup(setup, agent, models, workers, fallback) {
+  const chat = modelsFor(models, agent).find((m) => m.id === setup?.modelId);
+  if (!chat) return fallback;
+  const out = normal(setup);
+  if (chat.levels.length === 0) out.level = null;
+  else if (out.level === null || !chat.levels.includes(out.level)) out.level = firstLevel(chat);
+  if (agent !== "claude") return { ...out, code: null, run: null, planFirst: false };
+  const known = (id) => (workers ?? []).some((w) => w.id === id);
+  if (out.code && !known(out.code)) out.code = null;
+  if (out.run && !known(out.run)) out.run = null;
+  if (out.code === null && out.run === null) out.planFirst = false;
+  return out;
+}
+
+/** The setup a preset stands for: the Mac's stored one when it has one, else the built-in rule; null: not offered. */
+export function presetSetup(preset, agent, models, workers, shared = null) {
+  const built = builtInSetup(preset, agent, models, workers);
+  const stored = shared?.setups?.[agent]?.[preset];
+  if (!stored) return built;
+  const safe = sanitiseSetup(stored, agent, models, workers, null);
+  return safe ?? built;
+}
+
+/** The name on a preset's chip: the shared name when there is one, else the built-in title. */
+export const presetTitle = (preset, shared = null) => {
+  const name = shared?.names?.[preset];
+  return typeof name === "string" && name.trim() !== "" ? name.trim() : PRESET_TITLES[preset];
+};
+
 /** The presets worth showing: only those the Mac can back, and only when there is a choice. */
-export function availablePresets(agent, models, workers) {
-  const shown = ["best", "balanced", "save"].filter((p) => presetSetup(p, agent, models, workers) !== null);
+export function availablePresets(agent, models, workers, shared = null) {
+  const shown = ["best", "balanced", "save"].filter((p) => presetSetup(p, agent, models, workers, shared) !== null);
   return shown.length > 1 ? shown : [];
 }
 
 /** Which preset a setup is, or "custom": editing a detail turns the label into Custom by itself. */
-export function presetOf(setup, agent, models, workers) {
+export function presetOf(setup, agent, models, workers, shared = null) {
   for (const candidate of ["best", "balanced", "save"]) {
-    const made = presetSetup(candidate, agent, models, workers);
+    const made = presetSetup(candidate, agent, models, workers, shared);
     if (made && sameSetup(made, setup)) return candidate;
   }
   return "custom";
@@ -139,15 +173,16 @@ export function summary(setup, agent, models, workers) {
 }
 
 /** What a setup starts from for an agent: the remembered choice kept on what the Mac offers now, else Best. */
-export function restoreSetup(saved, agent, models, workers) {
+export function restoreSetup(saved, agent, models, workers, shared = null) {
   const list = modelsFor(models, agent);
   const first = list[0];
   const fallback =
-    presetSetup("best", agent, models, workers) ??
+    presetSetup("best", agent, models, workers, shared) ??
     (first ? { ...emptySetup(), modelId: first.id, level: firstLevel(first) } : emptySetup());
   const entry = saved && typeof saved === "object" ? saved[agent] : null;
   if (!entry || typeof entry !== "object") return fallback;
-  if (entry.preset && entry.preset !== "custom") return presetSetup(entry.preset, agent, models, workers) ?? fallback;
+  if (entry.preset && entry.preset !== "custom")
+    return presetSetup(entry.preset, agent, models, workers, shared) ?? fallback;
   const setup = normal(entry.setup);
   const chat = list.find((m) => m.id === setup.modelId);
   if (!entry.setup || !chat) return fallback;

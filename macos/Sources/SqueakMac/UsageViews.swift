@@ -59,6 +59,7 @@ private struct ProviderHeader<Trailing: View>: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if let m = AgentMarkAsset(agent: name) { AgentMark(m, size: bigger ? 20 : 16).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 } }
             Text(name).font(bigger ? Typo.heading : Typo.label).foregroundStyle(Theme.ink)
             if let age = UsageFormat.asOf(reading?.observedAt) {
                 Text(age).font(Typo.meta).foregroundStyle(Theme.muted)

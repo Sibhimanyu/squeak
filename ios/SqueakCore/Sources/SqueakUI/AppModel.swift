@@ -1487,6 +1487,70 @@ final class AppModel {
         }
     }
 
+    /* ---------- new chat presets ---------- */
+
+    /// Preset edits this phone made that the Mac's own view has not shown back yet, oldest first. Each is laid
+    /// over the Mac's document for 20 seconds, or until the Mac refuses it.
+    private var presetTaps: [(id: UUID, change: PresetsChange, at: Date)] = []
+    private var presetTick = 0
+    /// Sends go one after another, so the Mac applies edits in the order they were made.
+    @ObservationIgnored private var presetSends: Task<Void, Never>?
+
+    /// Whether this Mac sends the shared presets (an older one does not: built-in presets, no editor).
+    var presetsOffered: Bool { snapshot?.presets != nil }
+
+    /// The shared presets as shown: the Mac's, with this phone's unconfirmed edits laid over them. Nil from an older Mac.
+    var presetsDocument: ChatPresetsDocument? {
+        _ = presetTick
+        guard var document = snapshot?.presets else { return nil }
+        for tap in presetTaps where Date().timeIntervalSince(tap.at) < 20 { tap.change.apply(to: &document) }
+        return document
+    }
+
+    /// Changes one thing in the shared presets. No Face ID: it is a Mac setting, reaches no chat and carries no
+    /// message. Shows the change at once; returns the Mac's reason on a refusal, after putting the old value back.
+    func changePresets(_ change: PresetsChange) async -> String? {
+        let tap = (id: UUID(), change: change, at: Date())
+        presetTaps.append(tap)
+        presetTick += 1
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(21))
+            self?.presetTaps.removeAll { $0.id == tap.id }
+            self?.presetTick += 1
+        }
+        func fail(_ reason: String) -> String {
+            presetTaps.removeAll { $0.id == tap.id }
+            presetTick += 1
+            return reason
+        }
+        if demo {
+            if var document = snapshot?.presets {
+                change.apply(to: &document)
+                snapshot?.presets = document
+            }
+            presetTaps.removeAll { $0.id == tap.id }
+            return nil
+        }
+        let before = presetSends
+        let send = Task { @MainActor [weak self] () -> String? in
+            await before?.value
+            guard let self else { return nil }
+            guard let channelStore = self.channel else { return fail("Not connected to your Mac.") }
+            do {
+                let (id, document) = try channelStore.presetsDocument(change, signer: self.signer)
+                try await channelStore.send(document, id: id)
+                guard let result = try await self.awaitResult(id, on: channelStore) else { return fail("Your Mac didn't answer. Is Squeak running?") }
+                guard result.sent else { return fail(result.reason ?? "Your Mac couldn't change that.") }
+                await self.refresh()
+                return nil
+            } catch {
+                return fail("Couldn't reach your Mac.")
+            }
+        }
+        presetSends = Task { _ = await send.value }
+        return await send.value
+    }
+
     /* ---------- phone calls ---------- */
 
     /// Whether this Mac sends phone-call settings (an older one does not, and the page is hidden).
@@ -1570,6 +1634,68 @@ final class AppModel {
         } catch {
             return TelegramAvatarFormat.unreachable
         }
+    }
+
+    /// Whether this Mac sends channel setup (an older one does not, and the page is hidden).
+    var channelsSetupOffered: Bool { snapshot?.channelsSetup != nil }
+
+    /// One Telegram setup change. Owner check (Face ID or passcode, always) first unless it is a test or the link
+    /// window. A token is only a parameter: it is sealed into the command and kept nowhere else. Nil when the Mac
+    /// took it, else a line to show (its own reason; nothing for the quiet while it restarts is an error).
+    func changeTelegram(_ change: TelegramChange) async -> String? {
+        if change.requiresOwnerCheck, !(await confirmOwner(reason: change.ownerReason)) { return ChannelsSetupFormat.cancelled }
+        if demo { applyDemo(change); return nil }
+        return await sendSetup { channelStore, signer in try channelStore.telegramDocument(change: change, signer: signer) }
+    }
+
+    /// One Cliq setup change; always owner-checked. A webhook is only a parameter, like the token.
+    func changeCliq(_ change: CliqChange) async -> String? {
+        if !(await confirmOwner(reason: change.ownerReason)) { return ChannelsSetupFormat.cancelled }
+        if demo { applyDemo(change); return nil }
+        return await sendSetup { channelStore, signer in try channelStore.cliqDocument(change: change, signer: signer) }
+    }
+
+    private func sendSetup(
+        _ make: (Channel, CommandSigner) throws -> (id: String, document: ChannelDocument)
+    ) async -> String? {
+        guard let channelStore = channel else { return ChannelsSetupFormat.notConnected }
+        do {
+            let (id, document) = try make(channelStore, signer)
+            try await channelStore.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channelStore) else { return ChannelsSetupFormat.noAnswer }
+            if let refusal = ChannelsSetupFormat.refusal(for: result) { return refusal }
+            await refresh()
+            return nil
+        } catch {
+            return ChannelsSetupFormat.unreachable
+        }
+    }
+
+    private func applyDemo(_ change: TelegramChange) {
+        guard var t = snapshot?.channelsSetup?.telegram else { return }
+        switch change {
+        case .token: t.tokenSet = true; t.polling = "ok"; t.bot = t.bot ?? "squeak_demo_bot"
+        case .off: t.tokenSet = false; t.polling = "off"; t.linking = nil
+        case .startLink: t.linking = .init(until: nil, candidates: [.init(id: 4242, name: "Sibhi", type: "private")])
+        case .stopLink: t.linking = nil
+        case .link(let id):
+            let name = t.linking?.candidates.first { $0.id == id }?.name
+            t.chats = (t.chats ?? []).filter { $0.id != id } + [.init(id: id, name: name)]
+            t.open = false
+        case .unlink(let id): t.chats = (t.chats ?? []).filter { $0.id != id }
+        case .test: t.lastTest = .init(at: nil, ok: true, sentTo: t.chats?.count ?? 0)
+        }
+        snapshot?.channelsSetup?.telegram = t
+    }
+
+    private func applyDemo(_ change: CliqChange) {
+        guard var c = snapshot?.channelsSetup?.cliq else { return }
+        switch change {
+        case .webhook: c.webhookSet = true; c.oneWay = true
+        case .removeWebhook: c.webhookSet = false; c.oneWay = false; c.twoWay = false
+        case .owner(let email, let id): c.ownerEmail = email; c.ownerId = id
+        }
+        snapshot?.channelsSetup?.cliq = c
     }
 
     /// One live control of the Mac (volume, mute, brightness, fans, screen off). No Face ID: it reaches no agent

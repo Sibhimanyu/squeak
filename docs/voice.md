@@ -146,7 +146,35 @@ Dial Squeak's extension (the one in the add-on's options) from your 3CX app, fro
    it with Whisper (local, about a third of a second for a sentence) and the gateway reads back what was heard.
 5. Press 1 to send, 2 to record again, hash to cancel. "Send" names the recording, never text: the Mac sends the
    words it transcribed itself, through the same replier as every other surface, only if the chat can still take a
-   message, and Telegram/Cliq get a note of what was sent. At most 20 messages an hour by phone.
+   message, and Telegram/Cliq get a note of what was sent. At most 20 messages an hour by phone. After a send the
+   call ends ("Done. Your message was sent to ... Goodbye.").
+
+**Asking, with a Mac that answers (add-on 0.11.0 and Squeak for Mac 2.12.15 or newer).** The Mac says it can in the
+directory it publishes (`ask: true`); without that flag the steps above are exactly as before.
+
+- Once a chat is chosen: **1** to say a message or ask a question, **3** to hear where it stands (no recording), star
+  repeats, hash hangs up. A key that means nothing is ignored; two in a row end the call.
+- After the recording is read back: **1** sends it to the chat and hangs up, **2** treats it as a _question_ about the
+  chat and reads the answer aloud, **3** records again, star hears it again, hash cancels.
+- After an answer: star hears it again, **1** asks or hears something else about the same chat, hash hangs up. At most 3
+  answers (questions and status read-outs together) per call, then "That is as many answers as I can give on one call."
+  A question that fails or times out is said ("I could not get an answer. You can try again.") and the read-back's keys
+  are offered again; two failures end the call.
+- Status (`voice/chat-brief.ts`, `statusReadout`, no model): state (working, finished, waiting for an approval or an
+  answer, stopped on an error, idle, looks stuck), what it is doing now (the newest step) or its last message, files and
+  lines changed and whether they are pushed, helpers and background commands still running, time since its last
+  activity. Two to five short sentences, no paths or links.
+- A question (`ChatQuestioner`) is answered by the Cliq assistant's own headless runner (`claudeCliRunner`: `claude -p`
+  with no tools, no MCP, no settings or hooks, no saved session; 40 s limit) from the chat's facts and recent steps and
+  last message only. The reply is made fit to be heard (`spokenAnswer`: no markdown, paths, links or emoji, anything that
+  looks like a secret replaced, whole sentences within 600 characters).
+- **Read-only.** Two new `voiceup` kinds, `ask` (names the recording) and `status` (names the chat), answered by a new
+  `voicedown` status `answer`. `MemoInbox.handleAnswer` never calls `send`, `canSend` or any writer, so a question cannot
+  become a message to an agent, type anywhere or change a chat; the recording stays so it can still be sent after being
+  asked about. At most 40 answers an hour; the call trace says `key: 2 (ask it as a question)`, `step: Question answered`,
+  `step: Status read out`.
+- Old with new: an older Mac never sets `ask`, so a new add-on behaves as before; an older add-on never sends `ask` or
+  `status`. A new add-on with an older Mac speaks the read-back in its own voice rather than the Mac's.
 
 Needs on the Mac: `whisper-cli` and `ffmpeg` (`brew install whisper-cpp ffmpeg`) and a speech model at
 `~/Library/Application Support/squeak/whisper/ggml-base.en.bin` (or `SQUEAK_VOICE_WHISPER_MODEL`). Without them
@@ -159,10 +187,22 @@ types the PIN and speaks a message, and Whisper transcribes it.
 Trust: whoever holds the channel key and passes the PIN can message a chat, as with the phone app's pairing but
 without a device key. The key lives only on the Mac and in the add-on's options.
 
+## Ringing out: the phone rings first, the voice follows
+
+From add-on 0.11.0 the Mac writes the call request at once (`audioFollows: true`, no clips in it) and makes its natural
+voice while the phone rings, writing each clip as its own `voicedir` document (`callaudio-<callId>-<n>`, sealed and
+signed like the call-in prompts). The gateway claims the request, starts ringing, and follows those documents for the
+length of the call, seeding each into the phone's speech cache as it arrives. Whatever line is spoken before its clip
+arrives is spoken by the add-on's own voice (prepared while the phone rang), so the line is never silent on answer, and
+a clip that lands in the middle of the plain version is used from the next line. For an add-on before 0.11.0 (the Mac
+reads its version from the add-on's status) the clips go in the request as before, but the render is capped at 6 s
+instead of waiting up to 25 s before dialling. The ring itself is 40 s (`RING_TIMEOUT_MS`); a "Call not answered" after
+about 12 s is the phone or the PBX ending the call, not Squeak giving up. The call trace says when dialling started,
+when each clip was sent, and what played first.
+
 ## Later
 
-Asking questions out loud ("what needs me?") on the same call, through the Cliq assistant; ending a message on
-silence instead of hash.
+Ending a message on silence instead of hash.
 
 ## Pairing a gateway (daemon side)
 

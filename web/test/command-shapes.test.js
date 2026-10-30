@@ -1,6 +1,10 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { parseAnswerInput } from "../../src/fleet/answer.js";
+import { ChatPresetsStore } from "../../src/fleet/chat-presets.js";
 import { readHotspotRequest } from "../../src/fleet/hotspot.js";
 import { readControlChange } from "../../src/fleet/mac-controls.js";
 import { readNotifyRequest } from "../../src/fleet/notify-settings.js";
@@ -25,6 +29,7 @@ describe("every command kind a browser sends", () => {
         "answer",
         "attach",
         "awake",
+        "cliq",
         "close",
         "controls",
         "diff",
@@ -35,10 +40,12 @@ describe("every command kind a browser sends", () => {
         "lidActions",
         "media",
         "notify",
+        "presets",
         "setup",
         "start",
         "stats",
         "subagent",
+        "telegram",
         "telegramAvatar",
         "usage",
         "voice",
@@ -480,5 +487,179 @@ describe("a signed command", () => {
       channel.startDocument({ workspaceId: "w", agent: "claude", text: "" }, device.privateKey),
     ).rejects.toThrow(CommandInputError);
     for (const kind of COMMAND_KINDS) expect(typeof channel[`${kind}Document`], kind).toBe("function");
+  });
+});
+
+describe("presets", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "web-presets-"));
+  const store = () => new ChatPresetsStore(path.join(dir, `${Math.random()}.json`));
+  const setup = { modelId: "opus-5-5", level: "low", code: "sonnet", run: "haiku", planFirst: true };
+
+  it("every request the page builds is one the Mac's store accepts, with the same result", () => {
+    const requests = [
+      { agent: "claude", preset: "save", change: { setup } },
+      {
+        agent: "claude",
+        preset: "best",
+        change: { setup: { modelId: "m", level: null, code: null, run: null, planFirst: false } },
+      },
+      {
+        agent: "codex",
+        preset: "best",
+        change: { setup: { modelId: "gpt-5.5", level: "high", code: null, run: null, planFirst: false } },
+      },
+      { preset: "save", change: { name: "Cheap" } },
+      { preset: "save", change: { name: null } },
+      { preset: "save", change: { name: "  Save usage  " } },
+      { agent: "claude", preset: "balanced", change: { reset: true } },
+    ];
+    for (const request of requests) {
+      const built = shape("presets", request);
+      const a = store().apply(request);
+      const b = store().apply(built);
+      expect(b, JSON.stringify(request)).toEqual(a);
+      expect(a.ok).toBe(true);
+    }
+  });
+
+  it("sends a name as the Mac would keep it: trimmed, flattened, cut at 32, empty is removal", () => {
+    expect(shape("presets", { preset: "best", change: { name: "  Top\n" } }).change).toEqual({ name: "Top" });
+    expect(shape("presets", { preset: "best", change: { name: "" } }).change).toEqual({ name: null });
+    expect(shape("presets", { preset: "best", change: { name: "x".repeat(40) } }).change.name).toHaveLength(32);
+  });
+
+  it("refuses what the Mac's store refuses", () => {
+    const refused = [
+      { preset: "custom", change: { name: "x" } },
+      { preset: "best", change: { name: 5 } },
+      { agent: "claude", preset: "best", change: { name: "x" } },
+      { preset: "best", change: { reset: true } },
+      { agent: "claude", preset: "best", change: { reset: false } },
+      { agent: "claude", preset: "best", change: { reset: true, name: "x" } },
+      { agent: "claude", preset: "best", change: {} },
+      { agent: "gemini", preset: "best", change: { reset: true } },
+      { agent: "claude", preset: "best", change: { setup: { ...setup, extra: 1 } } },
+      { agent: "claude", preset: "best", change: { setup: { ...setup, modelId: "" } } },
+      { agent: "claude", preset: "best", change: { setup: { ...setup, level: "HIGH" } } },
+      { agent: "claude", preset: "best", change: { setup: { ...setup, code: "gpt" } } },
+      { agent: "claude", preset: "best", change: { setup: { ...setup, planFirst: "yes" } } },
+      { agent: "codex", preset: "best", change: { setup: { ...setup } } },
+      { agent: "claude", preset: "best", change: { setup: { level: "low" } } },
+    ];
+    for (const request of refused) {
+      expect(store().apply(request).ok, JSON.stringify(request)).toBe(false);
+      bad("presets", request);
+    }
+  });
+});
+
+describe("telegram and cliq setup", () => {
+  const TOKEN = "123456789:ABCdefGHIjklMNOpqrSTUvwxYZ_-0123456";
+  const HOOK = "https://cliq.zoho.in/api/v2/bots/squeak/incoming?zapikey=abc123";
+
+  it("builds every valid Telegram change", () => {
+    for (const change of [
+      { token: TOKEN },
+      { off: true },
+      { startLink: true },
+      { stopLink: true },
+      { link: 123456789 },
+      { link: -1001234567890 },
+      { unlink: 42 },
+      { test: true },
+    ]) {
+      expect(shape("telegram", { change })).toEqual({ change });
+    }
+  });
+
+  it("refuses every bad Telegram change, without echoing the value", () => {
+    const secret = "999:short";
+    expect(() => shape("telegram", { change: { token: secret } })).toThrow(/bot token/);
+    try {
+      shape("telegram", { change: { token: secret } });
+    } catch (e) {
+      expect(e.message).not.toContain(secret);
+    }
+    for (const input of [
+      { change: { token: ` ${TOKEN}` } },
+      { change: { token: 12345 } },
+      { change: { token: `${TOKEN}\n` } },
+      { change: { token: TOKEN, off: true } },
+      { change: {} },
+      { change: null },
+      { change: { off: false } },
+      { change: { off: "yes" } },
+      { change: { test: 1 } },
+      { change: { startLink: false } },
+      { change: { link: 1.5 } },
+      { change: { link: "5" } },
+      { change: { link: 0 } },
+      { change: { link: Number.MAX_SAFE_INTEGER + 2 } },
+      { change: { unlink: null } },
+      { change: { unlink: NaN } },
+      { change: { frob: true } },
+      { change: { token: TOKEN }, extra: 1 },
+      {},
+      null,
+    ]) {
+      bad("telegram", input);
+    }
+  });
+
+  it("builds every valid Cliq change", () => {
+    for (const change of [
+      { webhook: HOOK },
+      { removeWebhook: true },
+      { owner: { email: "me@zohocorp.com", id: null } },
+      { owner: { email: null, id: "12345.ab-c_d" } },
+      { owner: { email: null, id: null } },
+    ]) {
+      expect(shape("cliq", { change })).toEqual({ change });
+    }
+    expect(shape("cliq", { change: { webhook: "https://cliq.zohocloud.ca/x?zapikey=k" } })).toBeTruthy();
+  });
+
+  it("refuses every bad Cliq change", () => {
+    for (const input of [
+      { change: { webhook: "http://cliq.zoho.in/x?zapikey=k" } },
+      { change: { webhook: "https://evil.example.com/x?zapikey=k" } },
+      { change: { webhook: "https://cliq.zoho.in.evil.com/x?zapikey=k" } },
+      { change: { webhook: "https://cliq.zoho.in/x" } },
+      { change: { webhook: `${HOOK} ` } },
+      { change: { webhook: "not a url" } },
+      { change: { webhook: 5 } },
+      { change: { removeWebhook: false } },
+      { change: { owner: { email: "me@x.com" } } },
+      { change: { owner: { email: "me@x.com", id: null, more: 1 } } },
+      { change: { owner: { email: "nope", id: null } } },
+      { change: { owner: { email: "", id: null } } },
+      { change: { owner: { email: null, id: "bad id" } } },
+      { change: { owner: { email: 5, id: null } } },
+      { change: { owner: "me" } },
+      { change: { webhook: HOOK, removeWebhook: true } },
+      { change: {} },
+      { change: { x: 1 } },
+      { change: { webhook: HOOK }, nope: 1 },
+    ]) {
+      bad("cliq", input);
+    }
+    try {
+      shape("cliq", { change: { webhook: "https://evil.example.com/x?zapikey=SECRETKEY" } });
+    } catch (e) {
+      expect(e.message).not.toContain("SECRETKEY");
+    }
+  });
+
+  it("agrees with the Mac's channel-setup reader on the token and owner shapes", async () => {
+    const { isBotToken } = await import("../../src/squeak/channels-setup.js");
+    for (const t of [TOKEN, "1:abc", "12:ABCdefGHIjklMNOpqrSTUvwxYZ", "123:ABCdefGHIjklMNOpqrSTUvwxYZ", `${TOKEN}x`]) {
+      let ok = true;
+      try {
+        shape("telegram", { change: { token: t } });
+      } catch {
+        ok = false;
+      }
+      expect(ok, t).toBe(isBotToken(t));
+    }
   });
 });

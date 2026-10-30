@@ -9,6 +9,8 @@ import SwiftUI
 struct MessageView: View {
     let message: ChatMessage
     var agentName: String
+    /// The agent's own mark beside its messages.
+    var mark: AgentMarkAsset? = nil
     var canOpenHost: Bool
     /// Whether the agent is still mid-turn, which decides if a queued message still reads "Queued".
     var agentWorking = true
@@ -52,7 +54,7 @@ struct MessageView: View {
 
     private var agentBody: some View {
         HStack(alignment: .top, spacing: 10) {
-            AgentAvatar().padding(.top, 1)
+            MessageAgentAvatar(mark: mark).padding(.top, 1)
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 9) {
                     Text(agentName).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.ink)
@@ -233,11 +235,13 @@ struct EarlierRow: View {
 /// Motion) and the live step ("Running tests…", "Starting…" before the first).
 struct WorkingRow: View {
     let agentName: String
+    var mark: AgentMarkAsset? = nil
     let label: String
 
     var body: some View {
         HStack(spacing: 8) {
             StateDot(state: .working)
+            if let mark { AgentMark(mark, size: 18) }
             Text(agentName).font(Typo.label).foregroundStyle(Theme.ink)
             Text("·").foregroundStyle(Theme.subtle)
             Text(verbatim: label).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
@@ -249,9 +253,15 @@ struct WorkingRow: View {
     }
 }
 
-/// The agent's mark beside its messages: a light disc with a spark, as in the mockup.
-struct AgentAvatar: View {
+/// The agent's mark beside its messages. An agent with no mark keeps the neutral light disc with a spark.
+struct MessageAgentAvatar: View {
+    var mark: AgentMarkAsset?
+
     var body: some View {
+        if let mark { AgentMark(mark, size: 26) } else { fallback }
+    }
+
+    private var fallback: some View {
         Circle().fill(Color(nsColor: NSColor(hex: 0xE9DDD3))).frame(width: 26, height: 26)
             .overlay(Lucide(.sparkles, size: 14, color: Color(nsColor: NSColor(hex: 0x6B4A3A))))
             .accessibilityHidden(true)

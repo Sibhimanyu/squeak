@@ -23,12 +23,19 @@ import {
   PRESET_TITLES,
   presetOf,
   presetSetup,
+  presetTitle,
   restoreSetup,
   shortName,
   summary,
   workspaceGroups,
 } from "./presets.js";
-import { chatModels, chatWorkers, repos as repoList, workspaces as workspaceList } from "./view-model.js";
+import {
+  chatModels,
+  chatWorkers,
+  presets as sharedPresets,
+  repos as repoList,
+  workspaces as workspaceList,
+} from "./view-model.js";
 
 export const title = () => "New chat";
 
@@ -59,6 +66,7 @@ let live = { count: null, send: null };
 
 const models = () => chatModels(cur.view) ?? [];
 const workers = () => chatWorkers(cur.view) ?? [];
+const shared = () => sharedPresets(cur.view);
 const workspaces = () => workspaceList(cur.view) ?? [];
 const known = () => workspaces().find((w) => w.id === st.workspaceId) ?? null;
 /** A workspace just made may not be in the Mac's list yet; it is still the one chosen. */
@@ -69,7 +77,7 @@ const saved = () => cur.prefs.get("newChat") ?? {};
 function persist() {
   if (!st.settled) return;
   const prefs = saved();
-  const preset = presetOf(st.setup, st.agent, models(), workers());
+  const preset = presetOf(st.setup, st.agent, models(), workers(), shared());
   cur.prefs.save({
     newChat: { ...prefs, workspace: st.workspaceId, choices: choiceToSave(prefs.choices, st.agent, st.setup, preset) },
   });
@@ -86,16 +94,16 @@ function settle() {
     }
   }
   if (!st.settled && models().length > 0) {
-    st.setup = restoreSetup(saved().choices, st.agent, models(), workers());
+    st.setup = restoreSetup(saved().choices, st.agent, models(), workers(), shared());
     st.settled = true;
   }
-  st.setup ??= restoreSetup(saved().choices, st.agent, models(), workers());
+  st.setup ??= restoreSetup(saved().choices, st.agent, models(), workers(), shared());
 }
 
 function setAgent(agent) {
   if (agent === st.agent) return;
   st.agent = agent;
-  st.setup = restoreSetup(saved().choices, agent, models(), workers());
+  st.setup = restoreSetup(saved().choices, agent, models(), workers(), shared());
   persist();
   draw();
 }
@@ -377,7 +385,7 @@ function chip(preset, selected) {
       "aria-pressed": selected ? "true" : "false",
       disabled: st.sending,
       onclick: () => {
-        const next = presetSetup(preset, st.agent, models(), workers());
+        const next = presetSetup(preset, st.agent, models(), workers(), shared());
         if (next) {
           st.setup = next;
           persist();
@@ -385,7 +393,7 @@ function chip(preset, selected) {
         }
       },
     },
-    PRESET_TITLES[preset],
+    presetTitle(preset, shared()),
   );
 }
 
@@ -509,8 +517,8 @@ function customize() {
 }
 
 function howItWorks() {
-  const presets = availablePresets(st.agent, models(), workers());
-  const kind = presetOf(st.setup, st.agent, models(), workers());
+  const presets = availablePresets(st.agent, models(), workers(), shared());
+  const kind = presetOf(st.setup, st.agent, models(), workers(), shared());
   const words = summary(st.setup, st.agent, models(), workers());
   return h(
     "div",

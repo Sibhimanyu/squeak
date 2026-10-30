@@ -42,6 +42,39 @@ export function chatWorkers(view) {
   );
 }
 
+const PRESET_IDS = ["best", "balanced", "save"];
+
+/**
+ * The Mac's shared new chat presets (`presets`: names and whole setups per agent, see docs/remote-channel.md);
+ * null on an older Mac: the built-in rule, and no editor. Each setup is read the way the Mac writes it.
+ */
+export function presets(view) {
+  const p = field(view, "presets");
+  if (!isObject(p)) return null;
+  const names = {};
+  const setups = {};
+  if (isObject(p.names)) for (const id of PRESET_IDS) if (nonEmpty(p.names[id])) names[id] = p.names[id];
+  if (isObject(p.setups)) {
+    for (const agent of ["claude", "codex"]) {
+      const byPreset = p.setups[agent];
+      if (!isObject(byPreset)) continue;
+      for (const id of PRESET_IDS) {
+        const s = byPreset[id];
+        if (!isObject(s) || !nonEmpty(s.modelId)) continue;
+        setups[agent] ??= {};
+        setups[agent][id] = {
+          modelId: s.modelId,
+          level: nonEmpty(s.level),
+          code: nonEmpty(s.code),
+          run: nonEmpty(s.run),
+          planFirst: s.planFirst === true,
+        };
+      }
+    }
+  }
+  return { names, setups };
+}
+
 /** Repositories a workspace can be made in (`repos`); its presence says the Mac archives and makes workspaces. */
 export function repos(view) {
   return list(field(view, "repos"), (r) =>
@@ -435,6 +468,57 @@ export function tasks(session) {
       canOpenSteps: t.kind !== "shell" && t.hasSteps === true,
     }));
   return out.length > 0 ? out : null;
+}
+
+const LINK_TYPES = ["private", "group", "supergroup", "channel"];
+const chatInt = (v) => (Number.isSafeInteger(v) && v !== 0 ? v : null);
+
+/**
+ * Channel setup (`channelsSetup`, the Mac's Settings > Channels): `{ telegram, cliq, restarting }`, or null when the
+ * Mac does not send it (older Mac: the whole UI is hidden). Holds no secret: the Mac never sends one.
+ */
+export function channelsSetup(view) {
+  const c = field(view, "channelsSetup");
+  if (!isObject(c) || !isObject(c.telegram) || !isObject(c.cliq)) return null;
+  const t = c.telegram;
+  const linking = isObject(t.linking)
+    ? {
+        until: nonEmpty(t.linking.until),
+        candidates:
+          list(t.linking.candidates, (x) =>
+            isObject(x) && chatInt(x.id) !== null
+              ? { id: x.id, name: str(x.name) ?? "", type: LINK_TYPES.includes(x.type) ? x.type : "private" }
+              : null,
+          ) ?? [],
+      }
+    : null;
+  const lt = t.lastTest;
+  return {
+    telegram: {
+      tokenSet: t.tokenSet === true,
+      bot: nonEmpty(t.bot),
+      polling: t.polling === "ok" || t.polling === "error" ? t.polling : "off",
+      lastError: nonEmpty(t.lastError),
+      chats:
+        list(t.chats, (x) => (isObject(x) && chatInt(x.id) !== null ? { id: x.id, name: nonEmpty(x.name) } : null)) ??
+        [],
+      open: t.open === true,
+      linking,
+      testing: t.testing === true,
+      lastTest:
+        isObject(lt) && typeof lt.ok === "boolean"
+          ? { at: nonEmpty(lt.at), ok: lt.ok, sentTo: int(lt.sentTo) ?? 0, reason: nonEmpty(lt.reason) }
+          : null,
+    },
+    cliq: {
+      webhookSet: c.cliq.webhookSet === true,
+      ownerEmail: nonEmpty(c.cliq.ownerEmail),
+      ownerId: nonEmpty(c.cliq.ownerId),
+      oneWay: c.cliq.oneWay === true,
+      twoWay: c.cliq.twoWay === true,
+    },
+    restarting: c.restarting === true,
+  };
 }
 
 export { tasks as background };

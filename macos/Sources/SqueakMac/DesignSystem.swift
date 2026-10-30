@@ -261,6 +261,7 @@ struct SessionRowView: View {
         HStack(alignment: .top, spacing: Space.m) {
             StateDot(state: session.state)
                 .frame(height: 19)  // aligned to the first text line
+            AgentAvatar(session: session, size: 20).padding(.top, -1)
             SessionRowLines(session: session, isPinned: isPinned && (hovering || isSelected), subtitleOverride: subtitleOverride)
             Spacer(minLength: Space.s)
         }
@@ -424,6 +425,7 @@ struct NeedsYouCard: View {
                 VStack(alignment: .leading, spacing: Space.s) {
                     HStack(alignment: .top, spacing: Space.m) {
                         StateDot(state: .blocked).frame(height: 19)
+                        AgentAvatar(session: session, size: 20).padding(.top, -1)
                         SessionRowLines(session: session)
                     }
                     if let question, !question.isEmpty {
@@ -431,7 +433,7 @@ struct NeedsYouCard: View {
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, 21)  // under the title, past the dot
+                            .padding(.leading, 21 + 20 + Space.m)  // under the title, past the dot and the agent mark
                     }
                 }
                 .contentShape(Rectangle())

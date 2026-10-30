@@ -36,6 +36,10 @@ export const MAX_CHOICES = 40;
 /** The chats read out in one menu without workspaces: a keypad's digits, and a menu a person can hold in mind. */
 export const MENU_CHOICES = 6;
 export const MAX_WORKSPACES = 9;
+/** The most a call reads out for one answer: a phone line is a poor place for a document. */
+export const MAX_ANSWER_CHARS = 600;
+/** Answers (questions and status read-outs together) one call may ask for. */
+export const MAX_ANSWERS_PER_CALL = 3;
 
 export const newMessageId = (): string => crypto.randomBytes(16).toString("base64url");
 
@@ -65,6 +69,11 @@ export interface DirectoryDoc {
   items: DirectoryItem[];
   /** The favourite workspaces, in the order they are read; absent from an older Mac. */
   workspaces?: DirectoryWorkspace[];
+  /**
+   * The Mac can answer a question about a chat and read out a chat's status (`ask` and `status` messages): the
+   * keypad then offers them. Absent from an older Mac, and the call goes as it always has.
+   */
+  ask?: true;
   /** Ids of the audio documents (`voicedir/audio-<version>-<i>`) holding the Mac's recordings of this list's prompts. */
   audio?: string[];
 }
@@ -73,6 +82,8 @@ export const MAX_AUDIO_DOCS = 8;
 const AUDIO_ID = /^[A-Za-z0-9_-]{1,80}$/;
 
 export const audioDocId = (version: string, index: number): string => `audio-${version}-${index}`;
+/** The Mac's clips for one outbound call, one document each, written while the phone rings (`audioFollows`). */
+export const callAudioId = (callId: string, index: number): string => `callaudio-${callId}-${index}`;
 export const audioPath = (channel: string, id: string): string => `channels/${channel}/${DIR_KIND}/${id}`;
 
 /** One audio document: the Mac's clips for call-in prompts, sealed apart from the list so the list stays small. */
@@ -90,11 +101,17 @@ export function readAudio(key: string, id: string, doc: ChannelDoc): { version: 
 
 export type UpMessage =
   | { v: 1; id: string; at: number; expiresAt: number; kind: "memo"; dirVersion: string; choice: number; audio: string }
-  | { v: 1; id: string; at: number; expiresAt: number; kind: "send"; memoId: string };
+  | { v: 1; id: string; at: number; expiresAt: number; kind: "send"; memoId: string }
+  /** The recording is a question about its chat: answer it aloud; send nothing to the chat. */
+  | { v: 1; id: string; at: number; expiresAt: number; kind: "ask"; memoId: string }
+  /** Read out where a chat stands: no recording. Names the chat as a memo does. */
+  | { v: 1; id: string; at: number; expiresAt: number; kind: "status"; dirVersion: string; choice: number };
 
 export type DownMessage =
   | { v: 1; id: string; at: number; status: "transcript"; text: string; label: string; audio?: Clip }
   | { v: 1; id: string; at: number; status: "sent" }
+  /** What to read aloud for an `ask` or `status`: plain sentences, at most `MAX_ANSWER_CHARS`. */
+  | { v: 1; id: string; at: number; status: "answer"; text: string; audio?: Clip }
   | { v: 1; id: string; at: number; status: "refused"; reason: string };
 
 export function sealDirectory(key: string, doc: DirectoryDoc): ChannelDoc {
@@ -141,6 +158,7 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
     audio = body.audio as string[];
   }
   return {
+    ...(body.ask === true ? { ask: true as const } : {}),
     v: 1,
     at: body.at,
     version: body.version,
@@ -184,6 +202,17 @@ export function readUp(
   if (body.kind === "send" && typeof body.memoId === "string" && body.memoId.length <= 64) {
     return { ok: true, message: { ...base, kind: "send", memoId: body.memoId } };
   }
+  if (body.kind === "ask" && typeof body.memoId === "string" && body.memoId.length <= 64) {
+    return { ok: true, message: { ...base, kind: "ask", memoId: body.memoId } };
+  }
+  if (body.kind === "status") {
+    const { dirVersion, choice } = body;
+    if (typeof dirVersion !== "string" || dirVersion.length > 64) return { ok: false, reason: "not a voice message" };
+    if (typeof choice !== "number" || !Number.isInteger(choice) || choice < 1 || choice > MAX_CHOICES) {
+      return { ok: false, reason: "not a voice message" };
+    }
+    return { ok: true, message: { ...base, kind: "status", dirVersion, choice } };
+  }
   return { ok: false, reason: "not a voice message" };
 }
 
@@ -210,6 +239,16 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
     }
     case "sent":
       return { ...base, status: "sent" };
+    case "answer": {
+      if (typeof body.text !== "string" || body.text.trim() === "") return null;
+      const spoken = readClip(body.audio);
+      return {
+        ...base,
+        status: "answer",
+        text: body.text.slice(0, MAX_ANSWER_CHARS),
+        ...(spoken ? { audio: spoken } : {}),
+      };
+    }
     case "refused":
       return typeof body.reason === "string" ? { ...base, status: "refused", reason: body.reason.slice(0, 200) } : null;
     default:

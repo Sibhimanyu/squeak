@@ -53,6 +53,7 @@ struct PopupSessionTop: View {
             HStack(alignment: .center, spacing: 12) {
                 PopupBackButton { PopupNav.shared.back() } .accessibilityLabel("Back")
                 if let s = model.session(key) {
+                    AgentAvatar(session: s, size: 24)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(verbatim: SessionText.headline(s)).font(.popup(14, .semibold)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.8)
                         Text(verbatim: agentLine(s)).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1)

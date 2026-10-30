@@ -134,6 +134,15 @@ export interface IngressControl {
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
   };
   /**
+   * New chat presets (fleet/chat-presets.ts): `GET /control/presets` answers `{ names, setups }`; `POST` takes one change,
+   * `{ agent, preset, change: { setup } | { reset: true } }` or `{ preset, change: { name } }` (strict) and answers the
+   * same document. Token-gated, no CORS header.
+   */
+  presets?: {
+    read(): unknown;
+    apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
+  };
+  /**
    * Who a phone call rings (voice/settings.ts): `GET /control/voice` answers `{ mode, callee, defaultCallee }`;
    * `POST` takes `{ callee }` (an internal extension, or null to clear it) or `{ pin: PinAction }` (change, disable,
    * enable, reset: exactly its keys; a reset is the Mac app's own path, after its Touch ID check) and answers the
@@ -920,6 +929,57 @@ export class HookIngressServer {
       if (!notify) {
         request.resume();
         respond(response, 503, "notification settings unavailable");
+        return;
+      }
+      if (request.method === "GET") {
+        request.resume();
+        respondJson(response, 200, notify.read());
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        const outcome = notify.apply(parsed);
+        if (!outcome.ok) {
+          respondJson(response, 400, { error: outcome.reason });
+          return;
+        }
+        respondJson(response, 200, outcome.state);
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/presets") {
+      const notify = control.presets;
+      if (request.method !== "GET" && request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!notify) {
+        request.resume();
+        respond(response, 503, "presets unavailable");
         return;
       }
       if (request.method === "GET") {

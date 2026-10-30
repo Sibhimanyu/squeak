@@ -23,6 +23,7 @@ import { LidActions, readOpenSettings, readSettings as readLidActionSettings } f
 import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
 import { preparePhoneMedia } from "../remote/phone-media.js";
+import { ChatPresetsStore } from "../fleet/chat-presets.js";
 import { channelFilter, NotifySettingsStore, PushCounter, wantsAllFinishes } from "../fleet/notify-settings.js";
 import { HOTSPOT_PHONE_RECENT_MS, HotspotFailover, macHotspotSystem, readHotspotRequest } from "../fleet/hotspot.js";
 import {
@@ -83,6 +84,7 @@ import { DirectLine } from "../voice/direct-line.js";
 import { PinKeeper, type PinPolicy, type PinState } from "../voice/pin-keeper.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import { relayLineFor, type RelayLine } from "../voice/relay-line.js";
+import { addonSupports, LATE_CLIPS_ADDON } from "../voice/addon-update.js";
 import { GatewayPairing } from "../voice/pairing-window.js";
 import { GatewayClaim } from "../voice/gateway-claim.js";
 import { RENDEZVOUS_DATABASE } from "../voice/claim-protocol.js";
@@ -94,6 +96,7 @@ import { isNewer } from "../voice/addon-update.js";
 import { claimPath, OrphanWatch, realOrphanWatchDeps } from "./orphan-watch.js";
 import { AddonVersionCheck } from "../voice/addon-version-check.js";
 import { setEnvValues } from "../cliq/setup.js";
+import { ChannelsSetup } from "./channels-setup.js";
 import { resolveSqueakEnvPath } from "./paths.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker, type Speaker } from "../voice/tts.js";
@@ -107,10 +110,13 @@ import {
   PromptClipCache,
   ReadBackClips,
   renderCallClips,
+  CLIPS_BUDGET_MS,
+  OLD_ADDON_CLIPS_BUDGET_MS,
 } from "../voice/natural-voice.js";
 import type { VoiceLine } from "../voice/relay-line.js";
 import { TEST_SCRIPT } from "../voice/test-script.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
+import { ChatQuestioner, statusReadout, type ChatBriefInputs } from "../voice/chat-brief.js";
 import { VoiceFavoritesStore, workspaceKeyOf } from "../voice/favorites.js";
 import { cutAtWord, speakable, spokenChat, spokenChats, spokenWorkspace } from "../voice/spoken-labels.js";
 import { applyPhoneVoiceChange, phoneCalls } from "../voice/phone-voice.js";
@@ -176,8 +182,12 @@ export class SqueakApp {
   /** Sets the bot's profile photo to Squeak's logo; the Mac app's route and the phone's `telegramAvatar` end in it. */
   private readonly telegramAvatar: TelegramAvatar;
   private readonly telegramStatus: TelegramStatus;
+  /** Telegram and Cliq setup (channels-setup.ts); the phone's signed `telegram` and `cliq` commands end in it. */
+  private readonly channelsSetup: ChannelsSetup;
   /** What Telegram and Cliq may push (notify-settings.json), edited from the Mac app and the phone. */
   private readonly notifySettings: NotifySettingsStore;
+  /** New chat presets (chat-presets.json): one setting for the Mac app, the phone and the web. */
+  private readonly chatPresets: ChatPresetsStore;
   /** Cards each channel pushed today, for the Mac app's "Fewer?" tip. */
   private readonly pushCounter = new PushCounter();
   private readonly runtime: FleetRuntime;
@@ -241,6 +251,8 @@ export class SqueakApp {
   /** Claude's plan limits, as the assistant's own `claude` runs last reported them. */
   private readonly claudeLimits: ClaudeLimitsStore;
   private readonly backgroundWork = new BackgroundWorkReader();
+  /** Answers a spoken question about one chat: `claude` with no tools, a short leash (voice/chat-brief.ts). */
+  private readonly chatQuestioner: ChatQuestioner;
   private readonly subagents = new SubagentActivityReader(this.backgroundWork);
   private readonly claudeRefresher: ClaudeLimitsRefresher;
   /** What Squeak Hands holds, for the Mac app's permission explainer (GET /control/hands/grants). */
@@ -384,6 +396,13 @@ export class SqueakApp {
     const telegram = this.telegram;
     this.telegramAvatar = new TelegramAvatar({ telegram });
     this.notifySettings = new NotifySettingsStore(path.join(config.supportDir, "notify-settings.json"));
+    this.chatPresets = new ChatPresetsStore(path.join(config.supportDir, "chat-presets.json"), () => {
+      try {
+        return listChatModels(config.conductorDbPath);
+      } catch {
+        return [];
+      }
+    });
     this.voiceSettings = new VoiceSettingsStore(path.join(config.supportDir, "voice-settings.json"));
     this.voiceFavorites = new VoiceFavoritesStore(path.join(config.supportDir, "voice-favorites.json"), (key) =>
       this.workspaceLabel(key),
@@ -396,6 +415,17 @@ export class SqueakApp {
       sender: telegram ? { sendMessage: (chatId, text) => telegram.sendMessage(chatId, text) } : null,
       allowedChatIds: config.allowedChatIds,
       redact: config.botToken ? [config.botToken] : [],
+    });
+    this.channelsSetup = new ChannelsSetup({
+      envPath: resolveSqueakEnvPath(),
+      namesPath: path.join(config.supportDir, "telegram-chats.json"),
+      status: this.telegramStatus,
+      live: () => ({ cliqOneWay: Boolean(config.cliqWebhookUrl), cliqTwoWay: Boolean(config.cliqTwoWay) }),
+      // launchd's KeepAlive starts the daemon again, now with the saved settings.
+      restart: () => {
+        logger.info("channel settings changed; restarting to use them");
+        process.exit(0);
+      },
     });
     this.runtime = createFleetRuntime({
       workflows: this.films,
@@ -529,6 +559,11 @@ export class SqueakApp {
               apply: (request) => this.applyHotspot(request),
             },
             telegramAvatar: { apply: (request) => this.telegramAvatar.apply(request) },
+            channelsSetup: {
+              state: () => this.channelsSetup.state(),
+              telegram: (change) => this.channelsSetup.telegram(change),
+              cliq: (change) => this.channelsSetup.cliq(change),
+            },
             voice: {
               state: () => this.voiceView(),
               apply: (request) => this.applyVoiceSettings(request),
@@ -555,6 +590,10 @@ export class SqueakApp {
             notify: {
               state: () => this.notifyView(),
               apply: (request) => this.applyNotify(request),
+            },
+            presets: {
+              state: () => this.chatPresets.snapshot(),
+              apply: (request) => this.applyPresets(request),
             },
             awake: {
               state: () => this.awake.state,
@@ -672,6 +711,7 @@ export class SqueakApp {
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
+      presets: { read: () => this.chatPresets.snapshot(), apply: (request) => this.applyPresets(request) },
       voice: {
         read: () => this.voiceView(),
         apply: (request) => this.applyVoice(request),
@@ -799,6 +839,9 @@ export class SqueakApp {
       this.claudeLimits.record(limits),
     );
     this.assistant = new FleetAssistant(claudeRunner);
+    this.chatQuestioner = new ChatQuestioner(
+      claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), null, 40_000),
+    );
     // Only a Refresh press reaches this: no timer, no model call, and the
     // Keychain is read only then.
     this.claudeRefresher = new ClaudeLimitsRefresher(this.claudeLimits, () => fetchClaudeUsage());
@@ -1075,11 +1118,48 @@ export class SqueakApp {
       // The call-in dialog in the Mac's own voice: every prompt, and the read-back of each message.
       audioClips: (texts) => this.promptClips.clips(texts),
       // Only what was heard is rendered per call; the fixed suffix per chat is kept, and the two are joined.
-      readBack: (text, label) => this.readBackClips.clip(text, label),
-      prepareReadBack: (labels) => this.readBackClips.prepare(labels),
+      readBack: (text, label, ask) => this.readBackClips.clip(text, label, ask),
+      prepareReadBack: (labels, ask) => this.readBackClips.prepare(labels, ask),
+      // Questions and status by phone: read-only, from the chat's own transcript; nothing reaches the replier.
+      describe: (target, label) => {
+        const input = this.chatBriefInputs(target, label);
+        return input ? statusReadout(input) : null;
+      },
+      answer: async (target, label, question) => {
+        const input = this.chatBriefInputs(target, label);
+        if (!input) throw new Error("chat not found");
+        return this.chatQuestioner.ask(question, input);
+      },
+      speech: async (text) => (await this.promptClips.clips([text]))[0],
       note: (text) => this.announce(text),
       trace: (kind, text, extra) => this.traceMac(kind, text, extra),
     });
+  }
+
+  /** What a call may read about one chat: its state, steps, last message, changes and background work. */
+  private chatBriefInputs(target: string, label: string): ChatBriefInputs | null {
+    const session = this.runtime.monitor.snapshot.sessions.find((s) => replyTargetFor(s) === target);
+    if (!session) return null;
+    const nowMs = Date.now();
+    const safely = <T>(read: () => T, fallback: T): T => {
+      try {
+        return read();
+      } catch {
+        return fallback;
+      }
+    };
+    return {
+      session,
+      label,
+      nowMs,
+      lastTurnText: safely(() => this.router.lastTurnText(target), null),
+      activity: session.transcriptPath
+        ? safely(() => readActivity(session.agent, session.transcriptPath!), null)
+        : null,
+      background: session.transcriptPath
+        ? safely(() => this.backgroundWork.read(session.transcriptPath!, nowMs), [])
+        : [],
+    };
   }
 
   /** The chats that can take a message right now, those waiting on you first, then the newest. */
@@ -1556,6 +1636,12 @@ export class SqueakApp {
     return outcome.ok ? { ok: true as const, state: this.notifyView() } : outcome;
   }
 
+  /** The one place a preset changes: the Mac app's route and the phone's signed `presets` command both end here. */
+  private applyPresets(request: unknown) {
+    const outcome = this.chatPresets.apply(request);
+    return outcome.ok ? { ok: true as const, state: outcome.doc } : outcome;
+  }
+
   private async applyHotspot(request: unknown) {
     const parsed = readHotspotRequest(request);
     return parsed
@@ -1716,11 +1802,8 @@ export class SqueakApp {
 
   /** A chat that is not allowed is remembered for the app to offer, never acted on. */
   private authorized(chat: TelegramChat): boolean {
-    if (this.telegramStatus.isAllowed(chat.id)) {
-      return true;
-    }
     this.telegramStatus.noteChat(chat);
-    return false;
+    return this.telegramStatus.isAllowed(chat.id);
   }
 
   private async handleUpdate(update: TelegramUpdate): Promise<void> {
@@ -1882,21 +1965,33 @@ export class SqueakApp {
       paused: () => this.voiceSettings.pause() !== null,
     };
     if (voiceRelay && remoteDatabaseUrl) {
-      const line = relayLineFor(new RtdbRest(remoteDatabaseUrl), voiceRelay, this.voiceSettings, async (script) => {
-        // Whether the add-on asks for a pin decides which of the dialog's words are worth recording.
-        const pin = this.voicePinState();
-        const began = Date.now();
-        const clips = await renderCallClips(
-          this.naturalVoice,
-          script,
-          pin === "set" ? "ask" : pin === "unknown" ? "both" : "none",
-        );
-        const took = Date.now() - began;
-        this.traceMac("step", `Rendered ${clips?.length ?? 0} voice clips in ${(took / 1000).toFixed(1)} s`, {
-          ms: took,
-        });
-        return clips;
-      });
+      // An add-on from 0.11.0 takes the Mac's voice while the phone rings; an older one needs it in the request, so
+      // that render is kept short (the ring is silent for as long as it takes).
+      const lateClips = (): boolean => addonSupports(this.gatewayStatusReader().peek().version, LATE_CLIPS_ADDON);
+      const line = relayLineFor(
+        new RtdbRest(remoteDatabaseUrl),
+        voiceRelay,
+        this.voiceSettings,
+        async (script, _answerable, onClip) => {
+          // Whether the add-on asks for a pin decides which of the dialog's words are worth recording.
+          const pin = this.voicePinState();
+          const began = Date.now();
+          const clips = await renderCallClips(
+            this.naturalVoice,
+            script,
+            pin === "set" ? "ask" : pin === "unknown" ? "both" : "none",
+            onClip ? CLIPS_BUDGET_MS : OLD_ADDON_CLIPS_BUDGET_MS,
+            Date.now,
+            onClip,
+          );
+          const took = Date.now() - began;
+          this.traceMac("step", `Rendered ${clips?.length ?? 0} voice clips in ${(took / 1000).toFixed(1)} s`, {
+            ms: took,
+          });
+          return clips;
+        },
+        { lateClips, trace: (text) => this.traceMac("step", text) },
+      );
       this.voiceLine = line;
       this.voiceRelayLine = line;
       // Ask the add-on where the pin stands; the view says "unknown" until it answers.

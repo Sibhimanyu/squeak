@@ -7,6 +7,9 @@ import { describe, expect, it } from "vitest";
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import type { QueueAction, ReplyOptions } from "../fleet/session-reply.js";
 import type { FleetSession } from "../fleet/types.js";
+import { ChatPresetsStore } from "../fleet/chat-presets.js";
+import { ChannelsSetup } from "../squeak/channels-setup.js";
+import { TelegramStatus } from "../squeak/telegram-status.js";
 import { RemoteBridge, type RemoteConfig } from "./remote-bridge.js";
 
 /**
@@ -78,6 +81,34 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   mediaCommand: { box: string; sig: string; device: string };
   workflowImageCommandId: string;
   workflowImageCommand: { box: string; sig: string; device: string };
+  presetsSetupCommandId: string;
+  presetsSetupCommand: { box: string; sig: string; device: string };
+  presetsNameCommandId: string;
+  presetsNameCommand: { box: string; sig: string; device: string };
+  presetsResetCommandId: string;
+  presetsResetCommand: { box: string; sig: string; device: string };
+  telegramTokenCommandId: string;
+  telegramTokenCommand: { box: string; sig: string; device: string };
+  telegramOffCommandId: string;
+  telegramOffCommand: { box: string; sig: string; device: string };
+  telegramStartLinkCommandId: string;
+  telegramStartLinkCommand: { box: string; sig: string; device: string };
+  telegramStopLinkCommandId: string;
+  telegramStopLinkCommand: { box: string; sig: string; device: string };
+  telegramLinkCommandId: string;
+  telegramLinkCommand: { box: string; sig: string; device: string };
+  telegramUnlinkCommandId: string;
+  telegramUnlinkCommand: { box: string; sig: string; device: string };
+  telegramTestCommandId: string;
+  telegramTestCommand: { box: string; sig: string; device: string };
+  cliqWebhookCommandId: string;
+  cliqWebhookCommand: { box: string; sig: string; device: string };
+  cliqRemoveWebhookCommandId: string;
+  cliqRemoveWebhookCommand: { box: string; sig: string; device: string };
+  cliqOwnerCommandId: string;
+  cliqOwnerCommand: { box: string; sig: string; device: string };
+  cliqOwnerClearedCommandId: string;
+  cliqOwnerClearedCommand: { box: string; sig: string; device: string };
 };
 
 const QUEUED_ID = "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31";
@@ -111,7 +142,40 @@ function bridge(turn: string) {
   const mediaFile = path.join(dir, "copy.m4a");
   fs.writeFileSync(mediaFile, Buffer.alloc(1000, 7));
   const pictures: Array<[string, string]> = [];
+  const presets = new ChatPresetsStore(path.join(dir, "chat-presets.json"));
+  // The real Telegram/Cliq writer, over a temp .env: a token or webhook the phone signed lands there and nowhere else.
+  const envPath = path.join(dir, ".env");
+  fs.writeFileSync(envPath, "OTHER=1\n");
+  const telegramSent: string[] = [];
+  const telegramStatus = new TelegramStatus({
+    sender: {
+      sendMessage: async (chatId) => {
+        telegramSent.push(String(chatId));
+      },
+    },
+    allowedChatIds: new Set([987654321, 5]),
+  });
+  const channels = new ChannelsSetup({
+    envPath,
+    namesPath: path.join(dir, "telegram-chats.json"),
+    status: telegramStatus,
+    live: () => ({ cliqOneWay: false, cliqTwoWay: false }),
+    restart: () => {},
+    restartDelayMs: 60_000,
+  });
   const remote = new RemoteBridge({
+    presets: {
+      state: () => presets.snapshot(),
+      apply: (request) => {
+        const outcome = presets.apply(request);
+        return outcome.ok ? { ok: true as const, state: outcome.doc } : outcome;
+      },
+    },
+    channelsSetup: {
+      state: () => channels.state(),
+      telegram: (change) => channels.telegram(change),
+      cliq: (change) => channels.cliq(change),
+    },
     configPath,
     projectId: "squeak-test",
     // A streaming store, as the Realtime Database is: films go only that way.
@@ -310,6 +374,11 @@ function bridge(turn: string) {
     acts,
     pictures,
     written,
+    presets,
+    channels,
+    envPath,
+    telegramStatus,
+    telegramSent,
   };
 }
 
@@ -477,6 +546,61 @@ describe("a reply made on the iPhone", () => {
       media: { chunks: 1, bytes: 7, mime: "audio/wav" },
     });
     expect(voicePreviews).toEqual(["am_adam"]);
+  });
+
+  it("applies the presets the phone signs: a whole setup, a name, a reset", async () => {
+    const { remote, config, presets } = bridge("turn-1");
+    const setup = await remote.handleCommand(config, fixture.presetsSetupCommandId, fixture.presetsSetupCommand);
+    expect(setup.result).toEqual({ id: fixture.presetsSetupCommandId, status: "sent" });
+    expect(presets.snapshot().setups).toMatchObject({
+      claude: { save: { modelId: "opus-5-5-1m", level: "low", code: "sonnet", run: "haiku", planFirst: true } },
+    });
+    const name = await remote.handleCommand(config, fixture.presetsNameCommandId, fixture.presetsNameCommand);
+    expect(name.result).toEqual({ id: fixture.presetsNameCommandId, status: "sent" });
+    expect(presets.snapshot().names).toEqual({ save: "Cheap" });
+    // Codex's "best" was never changed: a reset of it is a valid no-op, accepted.
+    const reset = await remote.handleCommand(config, fixture.presetsResetCommandId, fixture.presetsResetCommand);
+    expect(reset.result).toEqual({ id: fixture.presetsResetCommandId, status: "sent" });
+    expect(presets.snapshot().setups).toMatchObject({ claude: { save: expect.anything() } });
+  });
+
+  it("sets up Telegram and Cliq when the phone signs those requests, and no secret leaves .env", async () => {
+    const { remote, config, channels, envPath, telegramStatus, telegramSent } = bridge("turn-1");
+    const run = async (name: keyof typeof fixture) => {
+      const id = fixture[`${String(name)}Id` as keyof typeof fixture] as string;
+      const command = fixture[name] as { box: string; sig: string; device: string };
+      return (await remote.handleCommand(config, id, command)).result;
+    };
+    const tokenId = fixture.telegramTokenCommandId;
+    expect(await run("telegramTokenCommand")).toEqual({ id: tokenId, status: "sent" });
+    expect(fs.readFileSync(envPath, "utf8")).toContain(
+      "SQUEAK_BOT_TOKEN=123456789:FAKE_fixture-token_NotARealBotTokenAbcdef",
+    );
+    // (A chat nobody saw cannot be linked: channels-setup.test.ts. A signed command's nonce works once.)
+    expect(await run("telegramStartLinkCommand")).toMatchObject({ status: "sent" });
+    telegramStatus.noteChat({ id: -1001234567890, type: "supergroup", title: "Build watch" });
+    expect(await run("telegramLinkCommand")).toMatchObject({ status: "sent" });
+    expect(fs.readFileSync(envPath, "utf8")).toContain("SQUEAK_ALLOWED_CHAT_IDS=-1001234567890");
+    expect(await run("telegramStopLinkCommand")).toMatchObject({ status: "sent" });
+    // The env holds only the new chat; 987654321 was never linked there.
+    expect(await run("telegramUnlinkCommand")).toMatchObject({ status: "refused" });
+    expect(await run("telegramTestCommand")).toMatchObject({ status: "sent" });
+    expect(telegramSent).toEqual(["987654321", "5"]);
+    expect(await run("telegramOffCommand")).toMatchObject({ status: "sent" });
+    expect(fs.readFileSync(envPath, "utf8")).not.toContain("SQUEAK_BOT_TOKEN");
+
+    expect(await run("cliqWebhookCommand")).toMatchObject({ status: "sent" });
+    expect(fs.readFileSync(envPath, "utf8")).toContain("zapikey=FAKE-fixture-key");
+    expect(await run("cliqOwnerCommand")).toMatchObject({ status: "sent" });
+    expect(channels.state()).toMatchObject({
+      cliq: { webhookSet: true, ownerEmail: "fixture@example.com", ownerId: "12345" },
+    });
+    expect(await run("cliqOwnerClearedCommand")).toMatchObject({ status: "sent" });
+    expect(await run("cliqRemoveWebhookCommand")).toMatchObject({ status: "sent" });
+    expect(channels.state()).toMatchObject({ cliq: { webhookSet: false, ownerEmail: null, ownerId: null } });
+    const view = JSON.stringify(remote.phoneView());
+    expect(view).not.toContain("FAKE");
+    expect(view).not.toContain("zapikey");
   });
 
   it("sets the fans when the phone signs a controls request", async () => {

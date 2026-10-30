@@ -260,6 +260,7 @@ struct MenuSessionRow: View {
                 // The state is said in words for VoiceOver (below); the dot is colour only.
                 Circle().fill(Theme.color(for: session.state)).frame(width: 8, height: 8).padding(.top, 6)
                     .accessibilityHidden(true)
+                AgentAvatar(session: session, size: 18)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(verbatim: SessionText.headline(session))
@@ -352,6 +353,7 @@ struct MenuAskRow: View {
         let choices = Array(model.choices(for: session.key).prefix(4))
         HStack(alignment: .top, spacing: Space.s) {
             Capsule().fill(Theme.needsYou).frame(width: 3).accessibilityHidden(true)
+            AgentAvatar(session: session, size: 18).padding(.top, 1)
             VStack(alignment: .leading, spacing: 4) {
                 Button(action: open) {
                     VStack(alignment: .leading, spacing: 2) {

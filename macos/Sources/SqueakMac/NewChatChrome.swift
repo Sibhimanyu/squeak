@@ -1,3 +1,4 @@
+import SqueakMacCore
 import SqueakIcons
 import SwiftUI
 
@@ -8,14 +9,23 @@ struct NCPopup<Tag: Hashable>: View {
     var selection: Binding<Tag>
     var options: [(tag: Tag, title: String)]
     var height: CGFloat = Metrics.field
+    /// The mark that goes before an option's name (the agent picker), in the menu and on the closed field.
+    var mark: ((Tag) -> AgentMarkAsset?)? = nil
 
     var body: some View {
         Menu {
             Picker(label, selection: selection) {
-                ForEach(options.indices, id: \.self) { Text(options[$0].title).tag(options[$0].tag) }
+                ForEach(options.indices, id: \.self) { i in
+                    if let m = mark?(options[i].tag), let img = AgentMarkImages.sized(m, 16) {
+                        Label { Text(options[i].title) } icon: { Image(nsImage: img) }.tag(options[i].tag)
+                    } else {
+                        Text(options[i].title).tag(options[i].tag)
+                    }
+                }
             }.pickerStyle(.inline).labelsHidden()
         } label: {
             HStack(spacing: 6) {
+                if let m = mark?(selection.wrappedValue) { AgentMark(m, size: 16) }
                 Text(options.first { $0.tag == selection.wrappedValue }?.title ?? "").font(.system(size: 13)).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 4)
                 Lucide(.chevronDown, size: 13, color: Theme.muted)
@@ -34,6 +44,7 @@ struct NCPopup<Tag: Hashable>: View {
 struct NCSegmented: View {
     var options: [(id: String, title: String)]
     var selection: String
+    var mark: ((String) -> AgentMarkAsset?)? = nil
     var onPick: (String) -> Void
 
     var body: some View {
@@ -41,7 +52,11 @@ struct NCSegmented: View {
             ForEach(options.indices, id: \.self) { i in
                 let o = options[i], on = o.id == selection
                 Button { onPick(o.id) } label: {
-                    Text(o.title).font(.system(size: 12, weight: on ? .semibold : .regular)).lineLimit(1).minimumScaleFactor(0.55)
+                    HStack(spacing: 6) {
+                        if let m = mark?(o.id) { AgentMark(m, size: 16) }
+                        Text(o.title).lineLimit(1).minimumScaleFactor(0.55)
+                    }
+                        .font(.system(size: 12, weight: on ? .semibold : .regular))
                         .foregroundStyle(on ? Theme.ink : Theme.muted)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(on ? Theme.lineStrong : .clear, in: RoundedRectangle(cornerRadius: Radius.control))

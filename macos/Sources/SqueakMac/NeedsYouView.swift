@@ -61,6 +61,7 @@ struct NeedsYouDecision: View {
                     VStack(alignment: .leading, spacing: 3) {
                         TimelineView(.periodic(from: .now, by: 30)) { ctx in
                             HStack(spacing: 6) {
+                                AgentAvatar(session: session, size: 18)
                                 Text(verbatim: SessionText.secondLine(session).replacingOccurrences(of: " \u{00B7} ", with: " \u{2022} "))
                                     .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
                                 Spacer(minLength: Space.s)

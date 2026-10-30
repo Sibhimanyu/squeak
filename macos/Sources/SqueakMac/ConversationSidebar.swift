@@ -402,10 +402,10 @@ struct SidebarView: View {
                             .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 0)
                             .accessibilityAddTraits(.isHeader)
                     }
-                    row(.source(.conductor), SessionSource.conductor.title, .gitBranch)
+                    row(.source(.conductor), SessionSource.conductor.title, .gitBranch, mark: .conductor)
                     row(.source(.terminal), SessionSource.terminal.title, .squareTerminal)
-                    row(.source(.claudeDesktop), SessionSource.claudeDesktop.title, .monitor)
-                    if model.hasCodexApp { row(.source(.codexApp), SessionSource.codexApp.title, .code) }
+                    row(.source(.claudeDesktop), SessionSource.claudeDesktop.title, .monitor, mark: .claude)
+                    if model.hasCodexApp { row(.source(.codexApp), SessionSource.codexApp.title, .code, mark: .codex) }
                 }
                 .padding(.horizontal, isCollapsed ? 8 : Metrics.sidebarInset).padding(.top, 14)
             }
@@ -434,12 +434,16 @@ struct SidebarView: View {
         }
     }
 
-    private func row(_ f: NavFilter, _ title: String, _ symbol: LucideName) -> some View {
+    private func row(_ f: NavFilter, _ title: String, _ symbol: LucideName, mark: AgentMarkAsset? = nil) -> some View {
         let selected = NewChatController.shared.page == nil && current == f
         let n = count(for: f) ?? 0
         return Button { NewChatController.shared.hide(); model.navFilter = f; model.projectFilter = nil } label: {
             HStack(spacing: 12) {
-                Lucide(symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted).frame(width: 20)
+                if let mark {
+                    AgentMark(mark, size: Metrics.sidebarIcon).frame(width: 20)
+                } else {
+                    Lucide(symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted).frame(width: 20)
+                }
                 if !isCollapsed {
                     Text(verbatim: title).font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular)).foregroundStyle(Theme.ink)
                     Spacer(minLength: 4)

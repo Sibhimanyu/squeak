@@ -37,6 +37,14 @@ export function isNewer(latest: string | null | undefined, current: string | nul
   return false;
 }
 
+/** The add-on that takes the Mac's call clips after the call is placed, and speaks the question flow (docs/voice.md). */
+export const LATE_CLIPS_ADDON = "0.11.0";
+
+/** Whether an add-on reporting `version` is at least `minimum`; false when its version is unknown. */
+export function addonSupports(version: string | null | undefined, minimum: string): boolean {
+  return cleanVersion(version) !== null && !isNewer(minimum, version);
+}
+
 /** The `version: "x.y.z"` line of a config.yaml, strictly; null for anything else. */
 export function parseConfigVersion(text: string): string | null {
   return cleanVersion(/^version:[ \t]*"([^"\r\n]*)"[ \t]*\r?$/m.exec(text)?.[1]);

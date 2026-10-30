@@ -206,6 +206,7 @@ export function claudeCliRunner(
   claudeBin: string,
   cwd: string,
   onLimits: ((limits: ClaudeLimits) => void) | null = null,
+  timeoutMs: number = TIMEOUT_MS,
 ): AssistantRunner {
   return ({ system, user, schema }) =>
     new Promise((resolve, reject) => {
@@ -264,7 +265,7 @@ export function claudeCliRunner(
       const timer = setTimeout(() => {
         child.kill("SIGTERM");
         reject(new Error("the assistant took too long"));
-      }, TIMEOUT_MS);
+      }, timeoutMs);
       child.on("error", (error) => {
         clearTimeout(timer);
         reject(error);

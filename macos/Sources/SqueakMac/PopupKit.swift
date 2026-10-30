@@ -104,6 +104,8 @@ struct PopupSegmented<ID: Hashable>: View {
     var height: CGFloat = Metrics.segmented
     var size: CGFloat = 12.5
     var enabled = true
+    /// The mark before an item's title (the agent switch).
+    var mark: ((ID) -> AgentMarkAsset?)? = nil
     var onPick: (ID) -> Void
 
     var body: some View {
@@ -112,7 +114,10 @@ struct PopupSegmented<ID: Hashable>: View {
                 let on = item.id == selection
                 let nextOn = i + 1 < items.count && items[i + 1].id == selection
                 Button { onPick(item.id) } label: {
-                    Text(item.title)
+                    HStack(spacing: 6) {
+                        if let m = mark?(item.id) { AgentMark(m, size: size + 3.5) }
+                        Text(item.title)
+                    }
                         .font(.popup(size, on ? .semibold : .regular))
                         .foregroundStyle(on ? Theme.ink : Theme.muted)
                         .lineLimit(1).minimumScaleFactor(0.8)
@@ -146,14 +151,23 @@ struct PopupMenuField<Tag: Hashable>: View {
     var selection: Binding<Tag>
     var options: [(tag: Tag, title: String)]
     var height: CGFloat = Metrics.field
+    /// The mark that goes before an option's name (the agent picker), in the menu and on the closed field.
+    var mark: ((Tag) -> AgentMarkAsset?)? = nil
 
     var body: some View {
         Menu {
             Picker(label, selection: selection) {
-                ForEach(options.indices, id: \.self) { Text(options[$0].title).tag(options[$0].tag) }
+                ForEach(options.indices, id: \.self) { i in
+                    if let m = mark?(options[i].tag), let img = AgentMarkImages.sized(m, 16) {
+                        Label { Text(options[i].title) } icon: { Image(nsImage: img) }.tag(options[i].tag)
+                    } else {
+                        Text(options[i].title).tag(options[i].tag)
+                    }
+                }
             }.pickerStyle(.inline).labelsHidden()
         } label: {
             HStack(spacing: 6) {
+                if let m = mark?(selection.wrappedValue) { AgentMark(m, size: 16) }
                 Text(options.first { $0.tag == selection.wrappedValue }?.title ?? "").font(.popup(13)).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 4)
                 Lucide(.chevronDown, size: 14, color: Theme.ink)

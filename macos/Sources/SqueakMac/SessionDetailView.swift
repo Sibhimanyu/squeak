@@ -146,6 +146,7 @@ struct SessionDetail: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 12) {
+                AgentAvatar(session: session, size: 26)
                 Text(verbatim: SessionText.headline(session))
                     .font(.system(size: 18, weight: .bold)).lineLimit(1).truncationMode(.tail)
                     .frame(minWidth: 0, alignment: .leading)
@@ -236,14 +237,14 @@ struct SessionDetail: View {
                             switch row {
                             case .message(let m, let muted):
                                 MessageView(
-                                    message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
+                                    message: m, agentName: agent, mark: session.agentMark, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
                                     layout: !muted && m.id == needsYouMessageID && model.askDisplay(for: session.key) == nil ? ChoiceLayout.make(m.text) : nil,
                                     canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
                                     receipt: receipt?.id == m.id ? receipt?.receipt : nil
                                 )
                                 .id(m.id)
                             case .working(let label):
-                                WorkingRow(agentName: agent, label: label)
+                                WorkingRow(agentName: agent, mark: session.agentMark, label: label)
                                     .id("working")
                                     .transition(.opacity)
                             case .empty:

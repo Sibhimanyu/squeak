@@ -6,14 +6,17 @@ struct SettingsCard<Content: View>: View {
     let title: String
     let subtitle: String
     let symbol: String
+    var mark: AgentMarkAsset? = nil
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: symbol)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Theme.ink)
+                Group {
+                    if let mark { AgentMark(mark, size: 20) } else {
+                        Image(systemName: symbol).font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.ink)
+                    }
+                }
                     .frame(width: 34, height: 34)
                     .background(Theme.duck.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
                     .accessibilityHidden(true)

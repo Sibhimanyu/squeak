@@ -223,6 +223,21 @@ struct SettingsView: View {
                             Text("New notification settings need a newer Squeak on your Mac.")
                                 .font(.footnote).foregroundStyle(Theme.muted)
                         }
+                        if snapshot.channelsSetup != nil {
+                            NavigationLink { ChannelsSetupView() } label: { Label("Telegram and Cliq", systemImage: "paperplane") }
+                                .frame(minHeight: 44)
+                                .accessibilityIdentifier("channels-setup")
+                        }
+                        if snapshot.presets != nil, !(snapshot.chatModels ?? []).isEmpty {
+                            NavigationLink { ChatPresetsSettingsView() } label: { Label("New chat presets", systemImage: "sparkles") }
+                                .frame(minHeight: 44)
+                                .accessibilityIdentifier("new-chat-presets")
+                        }
+                        if snapshot.presets != nil, !(snapshot.chatModels ?? []).isEmpty {
+                            NavigationLink { ChatPresetsSettingsView() } label: { Label("New chat presets", systemImage: "sparkles") }
+                                .frame(minHeight: 44)
+                                .accessibilityIdentifier("new-chat-presets")
+                        }
                         if snapshot.voice != nil {
                             NavigationLink { VoiceSettingsView() } label: { Label("Phone calls", systemImage: "phone") }
                                 .frame(minHeight: 44)

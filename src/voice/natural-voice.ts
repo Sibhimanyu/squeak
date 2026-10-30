@@ -36,6 +36,8 @@ export const NATURAL_VOICES: ReadonlyArray<{ id: string; label: string }> = [
 const RENDER_TIMEOUT_MS = 30_000;
 /** Most time a call waits for its clips before ringing without the rest. */
 export const CLIPS_BUDGET_MS = 25_000;
+/** An add-on that cannot take clips after dialling gets them in the request, so the ring waits: keep that short. */
+export const OLD_ADDON_CLIPS_BUDGET_MS = 6_000;
 export const VOICE_PREVIEW_TEXT = "Hello, this is Squeak. Your agent needs an answer. Which way should we go?";
 const SOURCE_RATE = 24_000;
 const LINE_RATE = 8_000;
@@ -369,15 +371,15 @@ export class ReadBackClips {
   }
 
   /** Renders the suffix for each of these chats ahead of any call. */
-  async prepare(labels: readonly string[]): Promise<void> {
+  async prepare(labels: readonly string[], ask = false): Promise<void> {
     if (!this.natural.usable) return;
-    for (const label of new Set(labels)) await this.tailClip(readBackParts("", label).tail);
+    for (const label of new Set(labels)) await this.tailClip(readBackParts("", label, ask).tail);
   }
 
   /** One clip saying exactly `readBackSentence(text, label)`; undefined when it should be left to the add-on. */
-  async clip(text: string, label: string): Promise<Clip | undefined> {
+  async clip(text: string, label: string, ask = false): Promise<Clip | undefined> {
     if (!this.natural.usable) return undefined;
-    const { head, tail } = readBackParts(text, label);
+    const { head, tail } = readBackParts(text, label, ask);
     if (head.length > READ_BACK_HEAD_MAX_CHARS) return undefined;
     const [first, second] = await Promise.all([this.natural.clip(head), this.tailClip(tail)]);
     if (!first || !second) return undefined;
@@ -413,6 +415,8 @@ export async function renderCallClips(
   pin: "ask" | "none" | "both",
   budgetMs = CLIPS_BUDGET_MS,
   now: () => number = Date.now,
+  /** Told each clip the moment it is made, so a call already ringing can have it. */
+  onClip?: (clip: Clip) => void,
 ): Promise<Clip[] | undefined> {
   if (!natural.usable) return undefined;
   const deadline = now() + budgetMs;
@@ -429,6 +433,7 @@ export async function renderCallClips(
     if (bytes + size > MAX_CLIP_BYTES) continue;
     bytes += size;
     clips.push(clip);
+    onClip?.(clip);
   }
   return clips.length > 0 ? clips : undefined;
 }

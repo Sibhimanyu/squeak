@@ -442,6 +442,7 @@ struct PopupSessionCard: View {
         Button { PopupNav.shared.openSession(session.key) } label: {
             HStack(alignment: .top, spacing: 12) {
                 Circle().fill(Theme.color(for: session.state)).frame(width: 8, height: 8).padding(.top, 4).accessibilityHidden(true)
+                AgentAvatar(session: session, size: 18)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(verbatim: SessionText.headline(session)).font(.popup(13, .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
@@ -480,6 +481,7 @@ struct PopupAskCard: View {
         let choices = Array(model.choices(for: session.key).prefix(4))
         HStack(alignment: .top, spacing: 11) {
             Capsule().fill(Theme.needsYou).frame(width: 4.5).padding(.vertical, 1).accessibilityHidden(true)
+            AgentAvatar(session: session, size: 18).padding(.top, 1)
             VStack(alignment: .leading, spacing: 6) {
                 Button { PopupNav.shared.openSession(session.key) } label: {
                     VStack(alignment: .leading, spacing: 2) {

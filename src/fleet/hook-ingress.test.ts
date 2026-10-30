@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { HookIngressServer } from "./hook-ingress.js";
+import { ChatPresetsStore } from "./chat-presets.js";
 import { defaultNotifySettings, NotifySettingsStore } from "./notify-settings.js";
 import { renderHookScript } from "./hook-install.js";
 import type { HookEvent } from "./types.js";
@@ -717,6 +718,47 @@ describe("HookIngressServer control routes", () => {
     const body = (await ok.json()) as { cliq: { finished: string }; telegram: { finished: string } };
     expect(body.cliq.finished).toBe("off");
     expect(body.telegram.finished).toBe("conductor");
+  });
+
+  it("reads and changes the chat presets only with the token, strictly", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const store = new ChatPresetsStore(path.join(makeDir(), "chat-presets.json"));
+    const url = `http://127.0.0.1:${harness.port}/control/presets`;
+    const auth = { "x-squeak-token": harness.token };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(url, { headers: auth })).status).toBe(503);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      presets: {
+        read: () => store.snapshot(),
+        apply: (request) => {
+          const outcome = store.apply(request);
+          return outcome.ok ? { ok: true, state: outcome.doc } : outcome;
+        },
+      },
+    });
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(url, { method: "DELETE", headers: auth })).status).toBe(405);
+    const read = await fetch(url, { headers: auth });
+    expect(read.status).toBe(200);
+    expect(read.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await read.json()).toEqual({ names: {}, setups: {} });
+    expect((await fetch(url, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
+    const post = (body: unknown) => fetch(url, { method: "POST", headers: auth, body: JSON.stringify(body) });
+    expect((await post({ preset: "best", change: { name: 3 } })).status).toBe(400);
+    expect((await post({ agent: "claude", preset: "best", change: { setup: { modelId: "m" }, x: 1 } })).status).toBe(
+      400,
+    );
+    expect(store.snapshot()).toEqual({ names: {}, setups: {} });
+    const ok = await post({ agent: "claude", preset: "best", change: { setup: { modelId: "m", level: "high" } } });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({
+      names: {},
+      setups: { claude: { best: { modelId: "m", level: "high", code: null, run: null, planFirst: false } } },
+    });
   });
 
   it("gates voice samples, validates the voice, and returns only uncached WAV audio", async () => {

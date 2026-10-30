@@ -211,7 +211,9 @@ struct SettingsSidebar: View {
             model.settingsSection = section
         } label: {
             HStack(spacing: 12) {
-                Lucide(section.symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted)
+                Group { if section == .conductor { AgentMark(.conductor, size: Metrics.sidebarIcon) } else {
+                    Lucide(section.symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted)
+                } }
                     .frame(width: 20)
                 if !isCollapsed {
                     Text(verbatim: section.title)
@@ -276,7 +278,9 @@ private struct SettingsPage: View {
     var body: some View {
         VStack(alignment: .center, spacing: 0) {
             HStack(alignment: .center, spacing: Space.m) {
-                Lucide(section.symbol, size: 18, color: section.headerColor)
+                Group { if section == .conductor { AgentMark(.conductor, size: 18) } else {
+                    Lucide(section.symbol, size: 18, color: section.headerColor)
+                } }
                     .frame(width: 38, height: 38)
                     .background(section.headerColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.control))
                     .accessibilityHidden(true)
@@ -480,9 +484,9 @@ struct GeneralSettings: View {
 
     private var chatPresetSettings: some View {
         SettingsCard(title: "New chat presets", subtitle: "Give each kind of work a familiar starting point.", symbol: "sparkles") {
-            Picker("Agent", selection: $presetAgent) {
-                ForEach(NewChatAgent.allCases) { agent in Text(agent.displayName).tag(agent) }
-            }.pickerStyle(.segmented)
+            NCSegmented(options: NewChatAgent.allCases.map { ($0.rawValue, $0.displayName) }, selection: presetAgent.rawValue,
+                        mark: { NewChatAgent(rawValue: $0)?.mark }) { presetAgent = NewChatAgent(rawValue: $0) ?? .claude }
+                .accessibilityLabel("Agent")
             if chatModels.isEmpty {
                 SectionFootnote("Connect Conductor to load the models this Mac can use.")
             } else {
@@ -490,9 +494,12 @@ struct GeneralSettings: View {
                     presetEditor(preset)
                 }
             }
-            SectionFootnote("Saved on this Mac. Each agent has its own model choices.")
+            SectionFootnote("Shared with your iPhone and the web through Squeak. Each agent has its own model choices.")
         }
         .task {
+            await model.syncChatPresets()
+            draftPresetNames = [:]
+            presetRefresh += 1
             chatModels = await model.newChatModels()
             for preset in [ChatPreset.best, .balanced, .save] where draftPresetNames[preset.rawValue] == nil {
                 draftPresetNames[preset.rawValue] = presetPreferences.title(for: preset)
