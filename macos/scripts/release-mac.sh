@@ -43,6 +43,7 @@ if [ -n "$LIVE" ]; then
 fi
 
 step "Build, test, DMG, appcast"
+mkdir -p "$REL/macos/build"
 (cd "$REL/macos" && ./scripts/release.sh "$VERSION") > "$REL/macos/build/release-$VERSION.log" 2>&1 \
   || { tail -30 "$REL/macos/build/release-$VERSION.log" >&2; echo "release.sh failed; full log: $REL/macos/build/release-$VERSION.log" >&2; exit 1; }
 BUILD="$REL/macos/build"
