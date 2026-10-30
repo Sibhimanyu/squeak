@@ -1,5 +1,6 @@
 import type { RtdbRest } from "../remote/rtdb-rest.js";
 import type { CallResult } from "./baresip-line.js";
+import type { Clip } from "./clips.js";
 import type { CallScript } from "./dialog.js";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import {
@@ -40,6 +41,11 @@ export interface RelayLineOptions {
   key: string;
   /** The extension to ring now (the Mac's voice settings); null leaves it to the gateway's default. */
   callee?: () => string | null;
+  /**
+   * The call's words in the Mac's own voice (voice/natural-voice.ts), made before the request goes out; absent or
+   * failing, the add-on speaks everything itself.
+   */
+  clips?: (script: CallScript, answerable: boolean) => Promise<Clip[] | undefined>;
   now?: () => number;
 }
 
@@ -58,6 +64,8 @@ export class RelayLine implements VoiceLine {
   async call(script: CallScript, answerable: boolean): Promise<CallResult> {
     const { key } = this.options;
     const id = newCallId();
+    // Made first: the request's clock starts when it is written, not while the voice is being recorded.
+    const audio = await this.options.clips?.(script, answerable).catch(() => undefined);
     const at = this.now();
     const callee = this.options.callee?.() ?? null;
     const doc = sealRequest(key, {
@@ -67,6 +75,7 @@ export class RelayLine implements VoiceLine {
       expiresAt: at + REQUEST_TTL_MS,
       answerable,
       script,
+      ...(audio ? { audio } : {}),
       ...(callee ? { callee } : {}),
     });
     const result = await this.roundTrip(
@@ -212,6 +221,13 @@ export function relayLineFor(
   store: RelayStore,
   relay: { channel: string; key: string },
   settings: { settings: { callee: string | null } },
+  clips?: RelayLineOptions["clips"],
 ): RelayLine {
-  return new RelayLine({ store, channel: relay.channel, key: relay.key, callee: () => settings.settings.callee });
+  return new RelayLine({
+    store,
+    channel: relay.channel,
+    key: relay.key,
+    callee: () => settings.settings.callee,
+    ...(clips ? { clips } : {}),
+  });
 }

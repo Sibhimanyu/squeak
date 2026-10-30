@@ -34,7 +34,7 @@ FLEET_CODEX_QUOTA_WARN_PERCENT=85
 `;
 
 function printUsage(): void {
-  console.log(`Usage: squeak [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|cliq-relay|voice-test|voice-relay|voice-gateway|help]
+  console.log(`Usage: squeak [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|cliq-relay|voice-test|voice-tts-setup|voice-relay|voice-gateway|help]
 
 Commands:
   start            Start squeaking (default)
@@ -48,6 +48,7 @@ Commands:
   cliq-relay       Set up two-way Zoho Cliq; writes the handlers to paste (--rotate: new secret)
   voice-relay      Make the key Squeak and the Home Assistant voice gateway share; prints the add-on options
   voice-gateway    Run the voice gateway (the Home Assistant add-on runs this)
+  voice-tts-setup  Install the realistic voice for phone calls on this Mac (Kokoro, about 350 MB once)
   voice-test       Ring your phone with a made-up question, to check the PBX setup (docs/voice.md)
   help             Show this message`);
 }
@@ -229,6 +230,11 @@ export async function main(argv: string[]): Promise<void> {
     case "voice-gateway": {
       const { runGateway } = await import("../voice/gateway-main.js");
       process.exitCode = await runGateway();
+      return;
+    }
+    case "voice-tts-setup": {
+      const { runNaturalSetup } = await import("../voice/natural-setup.js");
+      process.exitCode = await runNaturalSetup(path.dirname(resolveSqueakEnvPath()));
       return;
     }
     case "voice-test": {

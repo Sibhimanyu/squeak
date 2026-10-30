@@ -38,6 +38,7 @@ struct VoiceSettingsPage: View {
                     Footnote(footnote(v))
                 }
                 if v.pauseKnown { pauseSection(v) }
+                if let natural = v.natural { naturalSection(natural) }
                 callsSection
                 if m.gatewayAvailable { gatewaySection }
                 if let state = v.pinState { pinSection(state) }
@@ -94,6 +95,36 @@ struct VoiceSettingsPage: View {
             }
         } footer: {
             Footnote("Cards still reach Telegram and the apps. A test call still rings.")
+        }
+    }
+
+    // MARK: Natural voice
+
+    private func naturalSection(_ n: NaturalVoice) -> some View {
+        Section {
+            if n.installed {
+                Toggle(isOn: Binding(get: { n.enabled }, set: { on in Task { await m.setNatural(enabled: on) } })) {
+                    Text("Speak with this Mac's voice")
+                    Text("A realistic voice made on this Mac, played in the call.")
+                }
+                .disabled(m.pauseBusy)
+                if n.enabled {
+                    Picker("Voice", selection: Binding(get: { n.voice }, set: { id in Task { await m.setNatural(voice: id) } })) {
+                        ForEach(NaturalVoice.voices, id: \.id) { Text($0.title).tag($0.id) }
+                        if !NaturalVoice.voices.contains(where: { $0.id == n.voice }) { Text(n.voice).tag(n.voice) }
+                    }
+                    .disabled(m.pauseBusy)
+                }
+            } else {
+                LabeledContent {
+                    Text("squeak voice-tts-setup").font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                } label: {
+                    Text("Realistic voice")
+                    Text("Not installed. Run this in Terminal once (about 350 MB); calls use it afterwards.")
+                }
+            }
+        } header: { Text("Voice") } footer: {
+            Footnote("Made on this Mac; the words never leave it. If it fails, the plain voice speaks and the call still goes.")
         }
     }
 

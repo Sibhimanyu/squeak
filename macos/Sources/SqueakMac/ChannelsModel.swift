@@ -178,6 +178,24 @@ final class ChannelsModel {
 
     private(set) var pauseBusy = false
 
+    /// Turns the realistic call voice on or off, or picks its voice; takes the daemon's answer as the truth.
+    func setNatural(enabled: Bool? = nil, voice: String? = nil) async {
+        voiceError = nil
+        if demo { return }
+        pauseBusy = true
+        defer { pauseBusy = false }
+        do {
+            if let answered = try await client.setNaturalVoice(enabled: enabled, voice: voice) {
+                self.voice = answered
+            } else {
+                voiceError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            voiceError = "Could not save: Squeak on this Mac did not answer."
+        }
+        await refreshVoice()
+    }
+
     /// Pauses or resumes calls and takes the daemon's answer as the truth.
     func setPause(_ choice: VoicePauseChoice) async {
         voiceError = nil

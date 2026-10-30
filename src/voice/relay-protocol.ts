@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { open, seal } from "../remote/remote-crypto.js";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import type { CallScript } from "./dialog.js";
+import { readClips, type Clip } from "./clips.js";
 import { EXTENSION } from "./settings.js";
 
 /**
@@ -22,6 +23,11 @@ export interface CallRequest {
   /** Whether a reply could go back right now; the gateway only takes keys when it also holds a PIN. */
   answerable: boolean;
   script: CallScript;
+  /**
+   * The words of this call as the Mac's own voice says them, played in place of the add-on's when the dialog asks
+   * for exactly these words. Absent: the add-on speaks everything itself (an older add-on ignores the field).
+   */
+  audio?: Clip[];
   /** The extension to ring, from the Mac's settings; absent: the gateway's own default. Internal extensions only. */
   callee?: string;
 }
@@ -292,6 +298,7 @@ export function readRequest(
       expiresAt: body.expiresAt,
       answerable: body.answerable,
       script: body.script,
+      ...(readClips(body.audio) ? { audio: readClips(body.audio)! } : {}),
       ...(typeof body.callee === "string" ? { callee: body.callee } : {}),
     },
   };

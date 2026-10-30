@@ -90,7 +90,15 @@ import { GatewayStatusReader } from "../voice/gateway-status.js";
 import { setEnvValues } from "../cliq/setup.js";
 import { resolveSqueakEnvPath } from "./paths.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
-import { MacSpeaker } from "../voice/tts.js";
+import { MacSpeaker, type Speaker } from "../voice/tts.js";
+import {
+  naturalInstalled,
+  naturalPaths,
+  NaturalSettingsStore,
+  NaturalSpeaker,
+  NaturalVoice,
+  renderCallClips,
+} from "../voice/natural-voice.js";
 import type { VoiceLine } from "../voice/relay-line.js";
 import { TEST_SCRIPT } from "../voice/test-script.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
@@ -184,7 +192,9 @@ export class SqueakApp {
   private readonly cliq: CliqChannel | null;
   /** Rings the owner through a SIP extension when an agent waits on them (src/voice/); null unless set up. */
   private voice: VoiceChannel | null = null;
-  private voiceSpeaker: MacSpeaker | null = null;
+  private voiceSpeaker: Speaker | null = null;
+  private readonly naturalSettings: NaturalSettingsStore;
+  private readonly naturalVoice: NaturalVoice;
   /** The line voice calls go out on (the gateway through the relay, or this Mac), also for a test call from an app. */
   private voiceLine: VoiceLine | null = null;
   /** The relay line when the gateway places the calls: also how a pin change reaches it. */
@@ -356,6 +366,8 @@ export class SqueakApp {
     this.telegramAvatar = new TelegramAvatar({ telegram });
     this.notifySettings = new NotifySettingsStore(path.join(config.supportDir, "notify-settings.json"));
     this.voiceSettings = new VoiceSettingsStore(path.join(config.supportDir, "voice-settings.json"));
+    this.naturalSettings = new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json"));
+    this.naturalVoice = new NaturalVoice(naturalPaths(config.supportDir), () => this.naturalSettings.settings);
     this.telegramStatus = new TelegramStatus({
       sender: telegram ? { sendMessage: (chatId, text) => telegram.sendMessage(chatId, text) } : null,
       allowedChatIds: config.allowedChatIds,
@@ -884,6 +896,7 @@ export class SqueakApp {
     this.voice?.stop();
     this.stopMemoInbox();
     this.voiceSpeaker?.dispose();
+    this.naturalVoice.stop();
     await this.conductorRelay.stop().catch(() => undefined);
     await this.replier.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);
@@ -1130,6 +1143,11 @@ export class SqueakApp {
       pin: this.voicePinState(),
       ...this.voicePolicyView(),
       pause: this.voiceSettings.pause(),
+      // The realistic voice this Mac makes for calls (`squeak voice-tts-setup` installs it).
+      natural: {
+        installed: naturalInstalled(naturalPaths(this.config.supportDir)),
+        ...this.naturalSettings.settings,
+      },
       ...(mode === "gateway" ? { gateway: this.gatewayView() } : {}),
       // Absent until a test has been asked for.
       ...(this.voiceTest ? { lastTest: this.voiceTest } : {}),
@@ -1275,6 +1293,12 @@ export class SqueakApp {
       return this.runPinAction(action).then((outcome) =>
         outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome,
       );
+    }
+    if (typeof request === "object" && request !== null && !Array.isArray(request) && "natural" in request) {
+      const keys = Object.keys(request);
+      const natural = keys.length === 1 ? (request as { natural: unknown }).natural : null;
+      const outcome = this.naturalSettings.apply(natural);
+      return Promise.resolve(outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome);
     }
     const outcome = this.voiceSettings.apply(request);
     // Who may call in is the same setting: tell the gateway now.
@@ -1612,7 +1636,11 @@ export class SqueakApp {
       paused: () => this.voiceSettings.pause() !== null,
     };
     if (voiceRelay && remoteDatabaseUrl) {
-      const line = relayLineFor(new RtdbRest(remoteDatabaseUrl), voiceRelay, this.voiceSettings);
+      const line = relayLineFor(new RtdbRest(remoteDatabaseUrl), voiceRelay, this.voiceSettings, (script) => {
+        // Whether the add-on asks for a pin decides which of the dialog's words are worth recording.
+        const pin = this.voicePinState();
+        return renderCallClips(this.naturalVoice, script, pin === "set" ? "ask" : pin === "unknown" ? "both" : "none");
+      });
       this.voiceLine = line;
       this.voiceRelayLine = line;
       // Ask the add-on where the pin stands; the view says "unknown" until it answers.
@@ -1634,7 +1662,7 @@ export class SqueakApp {
       logger.warn("voice needs SQUEAK_VOICE_CALLEE or an extension in Settings; voice is off");
       return null;
     }
-    this.voiceSpeaker = new MacSpeaker(voice.speechVoice);
+    this.voiceSpeaker = new NaturalSpeaker(this.naturalVoice, new MacSpeaker(voice.speechVoice));
     const pins = new PinKeeper(voice.pin, path.join(this.config.supportDir, "voice-pin.json"));
     this.voicePins = pins;
     const direct = new DirectLine(

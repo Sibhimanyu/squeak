@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger.js";
 import type { RtdbRest } from "../remote/rtdb-rest.js";
 import type { CallResult } from "./baresip-line.js";
+import type { Clip } from "./clips.js";
 import { CallDialog } from "./dialog.js";
 import {
   readPinChange,
@@ -21,7 +22,7 @@ export interface GatewayDependencies {
   channel: string;
   key: string;
   /** Places the call to the owner's phone and runs the dialog (`BaresipLine.call`). */
-  line: { call(callee: string, dialog: CallDialog): Promise<CallResult> };
+  line: { call(callee: string, dialog: CallDialog, audio?: Clip[]): Promise<CallResult> };
   /** The extension to ring when a request names none. A request may name one, but only an internal extension (checked on reading it). */
   callee: string | null;
   /** Read at each call, so a pin changed from an app applies at once. Null: calls tell, never take an answer. */
@@ -197,6 +198,7 @@ export class VoiceGateway {
               answerable ? this.deps.pin() : null,
               answerable ? (this.deps.pinRequired?.() ?? true) : true,
             ),
+            request.audio,
           )
         : { status: "failed", reason: "No phone extension is set. Set it in Squeak's settings on your Mac." };
       const body: CallResultDoc =

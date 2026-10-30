@@ -16,6 +16,7 @@ import {
 } from "./baresip-line.js";
 import type { DialOutcome, IncomingCall, Phone, PhoneCall } from "./phone.js";
 import { CachedSpeaker, wavDurationMs, type Speaker } from "./tts.js";
+import { mulawToWav, type Clip } from "./clips.js";
 
 /**
  * The Home Assistant gateway's phone: one `baresip`, registered with the PBX for as long as the gateway runs, so
@@ -278,6 +279,21 @@ export class SipPhone implements Phone {
     };
     fs.writeFileSync(this.files.silence, wavOf(new Int16Array(SAMPLE_RATE)));
     fs.writeFileSync(this.files.beep, wavOf(tone(880, 0.3)));
+  }
+
+  private seeded = 0;
+
+  /**
+   * The Mac's own recordings of this call's words: written as WAVs and entered in the speech cache, so the dialog
+   * plays them when it asks for exactly these words. Anything without a clip is still made here.
+   */
+  seed(clips: readonly Clip[]): void {
+    for (const clip of clips) {
+      const mulaw = Buffer.from(clip.mulaw, "base64");
+      const file = path.join(this.dir, `mac-${this.seeded++}.wav`);
+      fs.writeFileSync(file, mulawToWav(mulaw), { mode: 0o600 });
+      this.speaker.seed(clip.text, { file, durationMs: Math.round((mulaw.length / SAMPLE_RATE) * 1000) });
+    }
   }
 
   /** Queued behind any earlier warm-up, one prompt at a time. */

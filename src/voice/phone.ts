@@ -1,5 +1,6 @@
 import type { CallResult } from "./baresip-line.js";
 import type { CallDialog, DialogAction } from "./dialog.js";
+import type { Clip } from "./clips.js";
 
 /**
  * A phone call as a program sees it: say something, wait for a key, record the other side. The SIP details
@@ -46,6 +47,8 @@ export interface Phone {
   onIncoming(handler: (incoming: IncomingCall) => void): void;
   /** Makes these prompts ahead of time so they are ready the moment a call connects. */
   prewarm?(texts: readonly string[]): void;
+  /** The Mac's own recordings of a call's words, played in place of making them here. */
+  seed?(clips: readonly Clip[]): void;
 }
 
 /** After a prompt ends, how long to wait for a key. */

@@ -230,6 +230,14 @@ public struct DaemonClient: Sendable {
         return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
     }
 
+    /// Turns the Mac's realistic call voice on or off, or picks its voice. nil = a daemon without the route (404).
+    public func setNaturalVoice(enabled: Bool? = nil, voice: String? = nil) async throws -> VoiceSettings? {
+        let r = try await post("/control/voice", body: NaturalVoice.requestBody(enabled: enabled, voice: voice))
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
+    }
+
     /// Pauses or resumes calls. nil = a daemon without the route (404).
     public func setVoicePause(_ choice: VoicePauseChoice) async throws -> VoiceSettings? {
         let r = try await post("/control/voice", body: choice.requestBody())

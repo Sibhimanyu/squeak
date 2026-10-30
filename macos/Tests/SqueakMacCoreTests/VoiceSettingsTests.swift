@@ -68,6 +68,35 @@ import Testing
         #expect(old.pin == nil && old.pinState == nil)
     }
 
+    @Test func effectivePolicyFollowsPinStateWithoutChangingSavedChoices() throws {
+        for mode in ["direct", "gateway"] {
+            for choice in PinPolicyChoice.allCases {
+                for incoming in [false, true] {
+                    let policy = PinPolicy(outgoing: choice, incoming: choice)
+                    var view = VoiceSettings(mode: mode, pin: "set", policy: policy)
+                    #expect(PinPolicyText.effective(state: view.pinState, choice: choice, incoming: incoming)
+                            == (choice == .ask ? "Ask for the PIN" : "Don't ask"))
+                    view.pin = "off"
+                    #expect(PinPolicyText.effective(state: view.pinState, choice: choice, incoming: incoming)
+                            == "No PIN required (PIN is off)")
+                    view.pin = "none"
+                    let withoutPin = choice == .skip ? "No PIN required"
+                        : (incoming ? "Unavailable until a PIN is set" : "Read-only until a PIN is set")
+                    #expect(PinPolicyText.effective(state: view.pinState, choice: choice, incoming: incoming) == withoutPin)
+                    for unknown in ["unknown", "future-status", nil] {
+                        view.pin = unknown
+                        #expect(PinPolicyText.effective(state: view.pinState, choice: choice, incoming: incoming)
+                                == "PIN status unavailable")
+                    }
+                    view.pin = "set"
+                    #expect(view.policy == policy)
+                    #expect(PinPolicyText.effective(state: view.pinState, choice: choice, incoming: incoming)
+                            == (choice == .ask ? "Ask for the PIN" : "Don't ask"))
+                }
+            }
+        }
+    }
+
     @Test func refusalReasonComesFromTheError() {
         #expect(PinOutcome.reason(from: Data(#"{"error":"That is not your PIN."}"#.utf8)) == "That is not your PIN.")
         #expect(PinOutcome.reason(from: Data("nope".utf8)) == "Squeak could not do that.")
@@ -86,5 +115,26 @@ import Testing
         #expect(odd.policy == PinPolicy(outgoing: .ask, incoming: .ask))
         let none = try d.decode(VoiceSettings.self, from: Data(#"{"mode":"direct"}"#.utf8))
         #expect(none.policy == nil)
+    }
+}
+
+@Suite struct NaturalVoiceTests {
+    @Test func decodesTheDaemonsNaturalVoiceAndHidesWhenAbsent() throws {
+        let d = JSONDecoder()
+        let on = try d.decode(VoiceSettings.self, from: Data(#"{"mode":"gateway","natural":{"installed":true,"enabled":true,"voice":"af_heart"}}"#.utf8))
+        #expect(on.natural == NaturalVoice(installed: true, enabled: true, voice: "af_heart"))
+        let old = try d.decode(VoiceSettings.self, from: Data(#"{"mode":"gateway"}"#.utf8))
+        #expect(old.natural == nil)
+    }
+
+    @Test func requestsCarryOnlyWhatChanged() throws {
+        func keys(_ data: Data) throws -> [String: Any] {
+            let outer = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return try #require(outer?["natural"] as? [String: Any])
+        }
+        let toggled = try keys(NaturalVoice.requestBody(enabled: false))
+        #expect(toggled.count == 1 && toggled["enabled"] as? Bool == false)
+        let picked = try keys(NaturalVoice.requestBody(voice: "am_michael"))
+        #expect(picked.count == 1 && picked["voice"] as? String == "am_michael")
     }
 }

@@ -269,6 +269,14 @@ export class CachedSpeaker implements Speaker {
     return result;
   }
 
+  /** Files someone else made for these words (the Mac's voice, sent with a call) count as already said. */
+  seed(text: string, made: { file: string; durationMs: number }): void {
+    const old = this.made.get(text);
+    this.made.delete(text);
+    this.made.set(text, made);
+    if (old && old.file !== made.file) fs.rmSync(old.file, { force: true });
+  }
+
   /** Makes each prompt now (one at a time, so a small machine is not swamped); a failure is left for the call to meet. */
   async prewarm(texts: readonly string[]): Promise<void> {
     for (const text of texts) {

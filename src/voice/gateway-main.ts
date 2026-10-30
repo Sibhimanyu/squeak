@@ -32,6 +32,7 @@ import { GatewayEventLog, startLogPublisher } from "./addon-event-log.js";
 import { claimWithMac } from "./addon-claim.js";
 import { startPanel } from "./addon-panel.js";
 import { RENDEZVOUS_DATABASE } from "./claim-protocol.js";
+import type { Clip } from "./clips.js";
 
 /** Where Home Assistant puts an add-on's options. */
 const ADDON_OPTIONS = "/data/options.json";
@@ -207,9 +208,11 @@ export function phoneLine(
   onEvent?: (level: "info" | "warn", text: string) => void,
   now: () => number = Date.now,
 ): {
-  call(callee: string, dialog: CallDialog): Promise<CallResult>;
+  call(callee: string, dialog: CallDialog, audio?: Clip[]): Promise<CallResult>;
 } {
-  const place = async (callee: string, dialog: CallDialog): Promise<CallResult> => {
+  const place = async (callee: string, dialog: CallDialog, audio?: Clip[]): Promise<CallResult> => {
+    // The Mac's own recordings first: prewarm then finds them made and speaks only what is missing.
+    if (audio) phone.seed?.(audio);
     // Make what it will say while the phone rings, so the first word is there the moment you pick up.
     phone.prewarm?.(dialog.prompts());
     const dialled = await phone.dial(callee);
@@ -218,14 +221,14 @@ export function phoneLine(
     return runDialog(dialled.call, dialog);
   };
   return {
-    async call(callee, dialog) {
-      if (!onEvent) return place(callee, dialog);
+    async call(callee, dialog, audio) {
+      if (!onEvent) return place(callee, dialog, audio);
       const began = now();
       // The extension is a number on the PBX, not a secret; the script (the question) never goes in.
       onEvent("info", `Call placed to extension ${callee}`);
       let result: CallResult;
       try {
-        result = await place(callee, dialog);
+        result = await place(callee, dialog, audio);
       } catch (error) {
         onEvent(
           "warn",

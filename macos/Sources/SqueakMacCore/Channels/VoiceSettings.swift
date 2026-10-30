@@ -18,6 +18,8 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public var pause: VoicePause?
     /// True when the daemon sent a `pause` key at all (even null); false from an older daemon (hide the row).
     public var pauseKnown = false
+    /// The realistic voice this Mac makes for calls; nil from a daemon that predates it (hide the row).
+    public var natural: NaturalVoice?
 
     public init(mode: String = "off", callee: String? = nil, defaultCallee: String? = nil, pin: String? = nil, policy: PinPolicy? = nil,
                 pause: VoicePause? = nil, pauseKnown: Bool? = nil) {
@@ -25,7 +27,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         self.pause = pause; self.pauseKnown = pauseKnown ?? (pause != nil)
     }
 
-    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause }
+    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -36,6 +38,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         policy = try? c.decode(PinPolicy.self, forKey: .policy)
         pauseKnown = c.contains(.pause)
         pause = try? c.decode(VoicePause.self, forKey: .pause)
+        natural = try? c.decode(NaturalVoice.self, forKey: .natural)
     }
 
     public var isOn: Bool { mode != "off" }
@@ -113,5 +116,30 @@ public enum PauseText {
         guard let pause else { return false }
         guard let until = pause.until else { return true }
         return Date(timeIntervalSince1970: until / 1000) > now
+    }
+}
+
+/// `natural`: Kokoro on this Mac (`squeak voice-tts-setup` installs it); the daemon owns the rules.
+public struct NaturalVoice: Sendable, Equatable, Decodable {
+    public var installed: Bool
+    public var enabled: Bool
+    public var voice: String
+
+    public init(installed: Bool, enabled: Bool, voice: String) {
+        self.installed = installed; self.enabled = enabled; self.voice = voice
+    }
+
+    /// A few of Kokoro's English voices; the daemon accepts any Kokoro name.
+    public static let voices: [(id: String, title: String)] = [
+        ("af_heart", "Heart (female)"), ("af_bella", "Bella (female)"), ("af_nicole", "Nicole (female)"),
+        ("bf_emma", "Emma (British female)"), ("am_michael", "Michael (male)"), ("am_adam", "Adam (male)"),
+        ("bm_george", "George (British male)"),
+    ]
+
+    public static func requestBody(enabled: Bool? = nil, voice: String? = nil) -> Data {
+        var inner: [String: Any] = [:]
+        if let enabled { inner["enabled"] = enabled }
+        if let voice { inner["voice"] = voice }
+        return (try? JSONSerialization.data(withJSONObject: ["natural": inner], options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 }
