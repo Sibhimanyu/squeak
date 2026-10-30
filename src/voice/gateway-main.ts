@@ -385,12 +385,16 @@ export async function runGateway(): Promise<number> {
         speaker,
         onQuality: (stats) => note("info", `Line quality: ${stats}`),
       });
-      setSpeechSlowHook((ms) =>
+      // At most one note every ten minutes: the first start makes a handful of prompts and each is slow on a small machine.
+      let lastSlowNote = Number.NEGATIVE_INFINITY;
+      setSpeechSlowHook((ms) => {
+        if (Date.now() - lastSlowNote < 10 * 60_000) return;
+        lastSlowNote = Date.now();
         note(
           "warn",
-          `Making a spoken prompt took ${(ms / 1000).toFixed(1)} s: the add-on's machine is slow, so the call may break up`,
-        ),
-      );
+          `Making a spoken prompt took ${(ms / 1000).toFixed(1)} s: this machine is slow at the natural voice. If calls break up, set the add-on's speech option to plain.`,
+        );
+      });
       // The pin lives in one place: set from the Squeak app, kept in the add-on's own storage. There is no option for
       // it (two places to set it was how a pin ended up in force that the settings did not show).
       // The legacy `call_in_pin: skip` option only seeds the incoming setting until the app saves a policy.

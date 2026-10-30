@@ -169,9 +169,14 @@ export class PiperSpeaker implements Speaker {
     try {
       await new Promise<void>((resolve, reject) => {
         // A little slower and with a pause between sentences: easier to follow over a phone line.
+        // At the lowest priority: Piper uses every core it can get, and a call's audio is paced by a thread that must
+        // never wait behind it (a slow machine broke the line up while a prompt was being made).
         const child = spawn(
-          this.paths.binary,
+          "nice",
           [
+            "-n",
+            "15",
+            this.paths.binary,
             "--model",
             this.paths.model,
             "--output_file",
