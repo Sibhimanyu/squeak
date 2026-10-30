@@ -48,7 +48,7 @@ describe("condenseHistory", () => {
     turnId: null,
   });
 
-  it("keeps every user message and only the last agent message of each run", () => {
+  it("keeps every message, including the agent's notes between steps", () => {
     const history = condenseHistory([
       m("user", "Fix the splitter", 0),
       m("assistant", "Looking at it", 1),
@@ -58,13 +58,14 @@ describe("condenseHistory", () => {
     ]);
     expect(history.map((h) => [h.role, h.text])).toEqual([
       ["user", "Fix the splitter"],
+      ["assistant", "Looking at it"],
       ["assistant", "Fixed: the splitter keeps tags balanced."],
       ["user", "Add tests"],
       ["assistant", "Added three."],
     ]);
   });
 
-  it("adds up the work behind a run of agent messages, and carries the work before a user message", () => {
+  it("keeps the work behind each agent message, and carries the work before a user message", () => {
     const withWork = (role: "user" | "assistant", text: string, i: number, workBefore?: number) => ({
       ...m(role, text, i),
       ...(workBefore ? { workBefore } : {}),
@@ -78,7 +79,8 @@ describe("condenseHistory", () => {
     ]);
     expect(history.map((h) => [h.role, h.workBefore])).toEqual([
       ["user", undefined],
-      ["assistant", 5],
+      ["assistant", 2],
+      ["assistant", 3],
       ["user", 4],
       ["assistant", undefined],
     ]);

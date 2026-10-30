@@ -139,18 +139,9 @@ function condenseRuns(
     if (work > 0) {
       entry.workBefore = work;
     }
-    const previous = kept[kept.length - 1];
-    if (entry.role === "assistant" && previous?.role === "assistant") {
-      // A run of agent messages is one answer; the work behind every message of it is the answer's work.
-      const total = (previous.workBefore ?? 0) + work;
-      if (total > 0) {
-        entry.workBefore = total;
-      }
-      kept[kept.length - 1] = entry;
-    } else {
-      kept.push(entry);
-      firsts.push(message.cursor ?? null);
-    }
+    // Every agent message stays its own entry: the notes between steps are part of the conversation.
+    kept.push(entry);
+    firsts.push(message.cursor ?? null);
   }
   return { entries: kept, firsts };
 }

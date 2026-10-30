@@ -2154,6 +2154,7 @@ describe("RemoteBridge verbose view (live turn)", () => {
     expect(transcript).toHaveBeenCalledWith("s1", 40);
     expect(turn.history).toEqual([
       { role: "user", text: "Fix it", at: null },
+      { role: "assistant", text: "On it", at: null },
       { role: "assistant", text: "Fixed.", at: "2026-10-19T09:00:00.000Z" },
     ]);
     t.bridge.stop();
