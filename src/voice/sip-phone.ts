@@ -17,6 +17,7 @@ import {
 import type { DialOutcome, IncomingCall, Phone, PhoneCall, RecordEnd } from "./phone.js";
 import { CachedSpeaker, wavDurationMs, type Speaker } from "./tts.js";
 import { mulawToWav, type Clip } from "./clips.js";
+import { ClipStore } from "./clip-store.js";
 import { qualityOf, type CallQuality } from "./line-quality.js";
 
 /**
@@ -402,6 +403,8 @@ export interface SipPhoneOptions {
   listen?: string;
   /** A quick voice for a line that is missing mid-call (the plain one), so the natural voice never runs during a call. */
   inlineSpeaker?: Speaker | null;
+  /** Where the Mac's recordings are kept between runs (`/data/clips` in the add-on); absent: they live in memory only. */
+  clipDir?: string;
   /** Told each call's line-quality summary when the call ends (the same text the log line carries). */
   onQuality?: (stats: string, quality: CallQuality | null) => void;
   /** Told each line the call speaks: where its audio came from, how long it took to make here, and how long it plays. */
@@ -429,6 +432,7 @@ export class SipPhone implements Phone {
   private awaiting: { peer: string; settle: (call: LiveCall | null) => void } | null = null;
 
   private readonly speaker: CachedSpeaker;
+  private readonly clipStore: ClipStore | null;
   private warming: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: SipPhoneOptions) {
@@ -437,6 +441,9 @@ export class SipPhone implements Phone {
       plain: options.inlineSpeaker ?? null,
     });
     this.dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-phone-"));
+    // What the Mac recorded before the last restart is ready before the first call, not after Firebase catches up.
+    this.clipStore = options.clipDir ? new ClipStore(options.clipDir) : null;
+    if (this.clipStore) this.seed(this.clipStore.load(), false);
     this.files = {
       silence: path.join(this.dir, "silence.wav"),
       discard: path.join(this.dir, "discard.wav"),
@@ -452,7 +459,8 @@ export class SipPhone implements Phone {
    * The Mac's own recordings of this call's words: written as WAVs and entered in the speech cache, so the dialog
    * plays them when it asks for exactly these words. Anything without a clip is still made here.
    */
-  seed(clips: readonly Clip[]): void {
+  seed(clips: readonly Clip[], keep = true): void {
+    if (keep) this.clipStore?.save(clips);
     for (const clip of clips) {
       const mulaw = Buffer.from(clip.mulaw, "base64");
       const file = path.join(this.dir, `mac-${this.seeded++}.wav`);

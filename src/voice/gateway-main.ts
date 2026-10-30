@@ -404,6 +404,7 @@ export async function runGateway(): Promise<number> {
         line: voice.line,
         speaker,
         inlineSpeaker: inlineSpeaker,
+        clipDir: "/data/clips",
         onQuality: (stats, quality) => {
           lastQuality = quality;
           note("info", `Line quality: ${quality ? `${quality.verdict} (${stats})` : stats}`);

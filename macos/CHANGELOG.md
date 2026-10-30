@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.25
+
+- Phone calls: the add-on now remembers the Mac's recordings of the call prompts across restarts, so the first call after an update starts talking at once (needs Squeak Voice add-on 0.11.4: update it once in Home Assistant).
+
 ## 2.12.24
 
 - Updates are rebuilt to be reliable. The menu-bar popup and Settings show the update live: downloading with a percentage, preparing, ready, restarting.
