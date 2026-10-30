@@ -40,7 +40,7 @@ describe("CallDialog with the pin turned off", () => {
 describe("CallDialog with a pin required (unchanged)", () => {
   it("asks for the pin before answering, and refuses without one set", () => {
     const asks = new CallDialog(script, "4821");
-    expect(asks.start()[0]).toMatchObject({ text: expect.stringContaining("enter your pin") });
+    expect(asks.start()[0]).toMatchObject({ text: expect.stringContaining("enter your PIN") });
     for (const d of "4821#") asks.key(d);
     expect(asks.key("1")[0]).toEqual({ type: "answer", letter: "A" });
     const none = new CallDialog(script, null);

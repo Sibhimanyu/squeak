@@ -47,7 +47,7 @@ import { BackgroundWorkReader } from "../fleet/background-work.js";
 import { SubagentActivityReader } from "../fleet/subagent-activity.js";
 import { resolveSetup } from "../fleet/chat-setup.js";
 import { parseChoices } from "../fleet/choices.js";
-import { cardLabel, distinctTitles, renderUsage } from "../fleet/radar.js";
+import { cardLabel, renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
 import { listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
@@ -99,13 +99,14 @@ import {
   NaturalSpeaker,
   NaturalVoice,
   PromptClipCache,
+  ReadBackClips,
   renderCallClips,
 } from "../voice/natural-voice.js";
-import { readBackSentence } from "../voice/inbound-flow.js";
 import type { VoiceLine } from "../voice/relay-line.js";
 import { TEST_SCRIPT } from "../voice/test-script.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
 import { VoiceFavoritesStore, workspaceKeyOf } from "../voice/favorites.js";
+import { cutAtWord, speakable, spokenChat, spokenChats, spokenWorkspace } from "../voice/spoken-labels.js";
 import { VoiceSettingsStore } from "../voice/settings.js";
 import { findWhisper, WhisperTranscriber } from "../voice/transcribe.js";
 import { VoiceChannel } from "../voice/voice-channel.js";
@@ -200,6 +201,7 @@ export class SqueakApp {
   private readonly naturalSettings: NaturalSettingsStore;
   private readonly naturalVoice: NaturalVoice;
   private readonly promptClips: PromptClipCache;
+  private readonly readBackClips: ReadBackClips;
   /** The line voice calls go out on (the gateway through the relay, or this Mac), also for a test call from an app. */
   private voiceLine: VoiceLine | null = null;
   /** The relay line when the gateway places the calls: also how a pin change reaches it. */
@@ -378,6 +380,7 @@ export class SqueakApp {
     this.naturalSettings = new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json"));
     this.naturalVoice = new NaturalVoice(naturalPaths(config.supportDir), () => this.naturalSettings.settings);
     this.promptClips = new PromptClipCache(this.naturalVoice, () => this.naturalSettings.settings.voice);
+    this.readBackClips = new ReadBackClips(this.naturalVoice, () => this.naturalSettings.settings.voice);
     this.telegramStatus = new TelegramStatus({
       sender: telegram ? { sendMessage: (chatId, text) => telegram.sendMessage(chatId, text) } : null,
       allowedChatIds: config.allowedChatIds,
@@ -1032,13 +1035,12 @@ export class SqueakApp {
       },
       send: (target, text, onFailed) => this.router.send(target, text, onFailed),
       caller: () => this.voiceSettings.settings.callee,
-      favorites: () => this.voiceFavorites.list(),
+      favorites: () => this.voiceFavorites.list().map((fav) => ({ ...fav, label: this.spokenFavoriteLabel(fav) })),
       // The call-in dialog in the Mac's own voice: every prompt, and the read-back of each message.
       audioClips: (texts) => this.promptClips.clips(texts),
-      readBack: async (text, label) =>
-        this.naturalVoice.usable
-          ? ((await this.naturalVoice.clip(readBackSentence(text, label))) ?? undefined)
-          : undefined,
+      // Only what was heard is rendered per call; the fixed suffix per chat is kept, and the two are joined.
+      readBack: (text, label) => this.readBackClips.clip(text, label),
+      prepareReadBack: (labels) => this.readBackClips.prepare(labels),
       note: (text) => this.announce(text),
       trace: (kind, text, extra) => this.traceMac(kind, text, extra),
     });
@@ -1048,22 +1050,28 @@ export class SqueakApp {
   private memoTargets(): MemoTarget[] {
     const snapshot = this.runtime.monitor.snapshot;
     const needing = new Set(snapshot.attention.map((item) => item.session.key));
-    const titles = distinctTitles(snapshot.active);
-    return snapshot.active
+    const ordered = snapshot.active
       .filter((session) => !session.retired && canTakeMessageNow(session, this.router))
       .sort(
         (a, b) =>
           Number(needing.has(b.key)) - Number(needing.has(a.key)) ||
           Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
-      )
-      .map((session) => {
-        const own = titles.get(session.key);
-        return {
-          target: replyTargetFor(session),
-          label: own ? `${cardLabel(session)} · ${own}` : cardLabel(session),
-          workspace: workspaceKeyOf(session),
-        };
-      });
+      );
+    const spoken = spokenChats(ordered, workspaceKeyOf);
+    return ordered.map((session) => ({
+      target: replyTargetFor(session),
+      label: spoken.get(session.key) ?? spokenChat(session),
+      workspace: workspaceKeyOf(session),
+      workspaceLabel: spokenWorkspace(session),
+    }));
+  }
+
+  /** A favourite's spoken name: its live workspace, else the stored label made speakable (no "…"). */
+  private spokenFavoriteLabel(fav: { workspace: string; label: string }): string {
+    const session = this.runtime.monitor.snapshot.sessions
+      .filter((s) => workspaceKeyOf(s) === fav.workspace)
+      .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))[0];
+    return session ? spokenWorkspace(session) : cutAtWord(speakable(fav.label), 50) || "a workspace";
   }
 
   /** A workspace's current spoken name, from its newest live session; null when none is known. */
@@ -1402,6 +1410,17 @@ export class SqueakApp {
   }
 
   private applyVoice(request: unknown) {
+    // `{ test: true }`: a test call, the same function as the phone's signed `test` command.
+    if (
+      typeof request === "object" &&
+      request !== null &&
+      !Array.isArray(request) &&
+      Object.keys(request).join(",") === "test" &&
+      (request as { test: unknown }).test === true
+    ) {
+      const outcome = this.testVoiceCall();
+      return Promise.resolve(outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome);
+    }
     // `{ pin: PinAction }`: the pin controls (the Mac app does Touch ID before a reset). Nothing else rides along.
     if (typeof request === "object" && request !== null && !Array.isArray(request) && "pin" in request) {
       const keys = Object.keys(request);

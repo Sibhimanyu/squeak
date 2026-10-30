@@ -65,7 +65,7 @@ describe("Mac and gateway through the relay", () => {
     expect(callees).toEqual(["101"]);
     // The PIN is the gateway's: the dialog starts by asking for it, and the request never carried one.
     expect(dialogs[0]!.start()[0]).toMatchObject({ type: "play" });
-    expect((dialogs[0]!.start()[0] as { text: string }).text).toContain("enter your pin");
+    expect((dialogs[0]!.start()[0] as { text: string }).text).toContain("enter your PIN");
   });
 
   it("rings the extension the Mac names, not the gateway's default", async () => {
@@ -282,7 +282,7 @@ describe("Mac and gateway through the relay", () => {
       await line.pinControl({ action: "policy", outgoing: "skip", incoming: "ask" });
       await line.call(script, true);
       const skip = dialogs.pop()!;
-      expect((skip.start()[0] as { text: string }).text).not.toContain("enter your pin");
+      expect((skip.start()[0] as { text: string }).text).not.toContain("enter your PIN");
       expect(skip.key("1")[0]).toEqual({ type: "answer", letter: "A" });
       // A set pin with outgoing skip also answers without asking.
       fresh.enable("4821");

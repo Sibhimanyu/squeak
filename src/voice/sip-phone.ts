@@ -31,6 +31,11 @@ const ANSWER_WAIT_MS = 15_000;
 const SETTLE_MS = 150;
 const FINALIZE_MS = 400;
 const SAMPLE_RATE = 8000;
+const BEEP_MS = 300;
+/** How long after a clip's end the line goes back to silence (it plays its own last frames out first). */
+const IDLE_AFTER_MS = 100;
+/** The silence the line rests on between clips: long enough to outlast any wait for a key. */
+export const SILENCE_SECONDS = 180;
 
 /** The user part of a SIP URI, however the PBX dresses it: `sip:35210@host`, `"Name" <sip:35210@host;x>`. */
 export function userOf(uri: string): string {
@@ -106,16 +111,17 @@ export function persistentConfigFile(
   );
 }
 
-interface CallContext {
+export interface CallContext {
   send(command: string, params?: string): void;
-  speaker: Speaker;
+  speaker: CachedSpeaker;
+  onSpoke?: SipPhoneOptions["onSpoke"];
   dir: string;
   silence: string;
   discard: string;
   beepFile: string;
 }
 
-class LiveCall implements PhoneCall {
+export class LiveCall implements PhoneCall {
   open = true;
   readonly closed: Promise<void>;
   private markClosed!: () => void;
@@ -146,6 +152,8 @@ class LiveCall implements PhoneCall {
   end(): void {
     if (!this.open) return;
     this.open = false;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
     this.waiter?.(null);
     this.waiter = null;
     for (const listener of [...this.listeners]) listener();
@@ -172,12 +180,33 @@ class LiveCall implements PhoneCall {
 
   async say(text: string): Promise<void> {
     if (!this.open || this.keys.length > 0) return;
-    const { file, durationMs } = await this.ctx.speaker.speak(text);
+    const { file, durationMs, source, makeMs } = await this.ctx.speaker.speakDetailed(text);
     if (!this.open || this.keys.length > 0) return;
-    this.ctx.send("ausrc", `aufile,${file}`);
+    this.play(file, durationMs);
+    this.ctx.onSpoke?.({ text, source, makeMs, playMs: durationMs });
     const why = await this.pause(durationMs + 250, { key: true });
     // Stop talking over someone who has already pressed their key.
-    if (why === "key") this.ctx.send("ausrc", `aufile,${this.ctx.silence}`);
+    if (why === "key") this.idle();
+  }
+
+  private idleTimer: NodeJS.Timeout | null = null;
+
+  /**
+   * Plays a file into the call. A file source stops sending RTP at its end, and the old one second of silence did
+   * too, so a long wait or a recording left the far side's jitter buffer starved: the line is put back on the (long)
+   * silence file just after each clip would have ended, so packets never stop.
+   */
+  private play(file: string, durationMs: number): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.ctx.send("ausrc", `aufile,${file}`);
+    this.idleTimer = setTimeout(() => this.idle(), durationMs + IDLE_AFTER_MS);
+    this.idleTimer.unref();
+  }
+
+  private idle(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    if (this.open) this.ctx.send("ausrc", `aufile,${this.ctx.silence}`);
   }
 
   async key(timeoutMs: number): Promise<string | null> {
@@ -198,7 +227,7 @@ class LiveCall implements PhoneCall {
 
   async beep(): Promise<void> {
     if (!this.open) return;
-    this.ctx.send("ausrc", `aufile,${this.ctx.beepFile}`);
+    this.play(this.ctx.beepFile, BEEP_MS);
     await this.pause(450);
   }
 
@@ -213,7 +242,7 @@ class LiveCall implements PhoneCall {
     // The beep plays while the recording is already running: starting after it lost the first syllable of what
     // people said right on the beep ("Telegram" came out "egram").
     if (options.beep) {
-      this.ctx.send("ausrc", `aufile,${this.ctx.beepFile}`);
+      this.play(this.ctx.beepFile, BEEP_MS);
       await this.pause(150);
     }
     let ended: "key" | "limit" | "closed" = "limit";
@@ -254,6 +283,8 @@ export interface SipPhoneOptions {
   listen?: string;
   /** Told each call's line-quality summary when the call ends (the same text the log line carries). */
   onQuality?: (stats: string) => void;
+  /** Told each line the call speaks: where its audio came from, how long it took to make here, and how long it plays. */
+  onSpoke?: (info: { text: string; source: "mac" | "add-on"; makeMs: number; playMs: number }) => void;
 }
 
 export class SipPhone implements Phone {
@@ -270,6 +301,7 @@ export class SipPhone implements Phone {
   private current: LiveCall | null = null;
   private statsTimer: NodeJS.Timeout | null = null;
   private lastStats: string | null = null;
+  private inCall = false;
   /** A call that is ringing or being answered: the next CALL_ESTABLISHED is its. */
   private awaiting: { peer: string; settle: (call: LiveCall | null) => void } | null = null;
 
@@ -284,7 +316,7 @@ export class SipPhone implements Phone {
       discard: path.join(this.dir, "discard.wav"),
       beep: path.join(this.dir, "beep.wav"),
     };
-    fs.writeFileSync(this.files.silence, wavOf(new Int16Array(SAMPLE_RATE)));
+    fs.writeFileSync(this.files.silence, wavOf(new Int16Array(SAMPLE_RATE * SILENCE_SECONDS)));
     fs.writeFileSync(this.files.beep, wavOf(tone(880, 0.3)));
   }
 
@@ -415,6 +447,7 @@ export class SipPhone implements Phone {
     return {
       send: this.send,
       speaker: this.speaker,
+      onSpoke: this.options.onSpoke,
       dir: this.dir,
       silence: this.files.silence,
       discard: this.files.discard,
@@ -448,6 +481,7 @@ export class SipPhone implements Phone {
         this.awaiting = null;
         const call = new LiveCall(waiting.peer, this.context());
         this.current = call;
+        this.inCall = true;
         this.startStats();
         waiting.settle(call);
         return;
@@ -456,7 +490,8 @@ export class SipPhone implements Phone {
         if (param) this.current?.pushKey(param.trim().slice(0, 1));
         return;
       case "CALL_CLOSED":
-        this.stopStats();
+        this.stopStats(this.inCall);
+        this.inCall = false;
         this.current?.end();
         this.current = null;
         this.awaiting?.settle(null);
@@ -474,12 +509,13 @@ export class SipPhone implements Phone {
     this.statsTimer.unref();
   }
 
-  private stopStats(): void {
+  /** Stops asking; at a call's end (`report`) the last answer is logged, or "no data" so its absence says something. */
+  private stopStats(report = false): void {
     if (this.statsTimer) clearInterval(this.statsTimer);
     this.statsTimer = null;
-    if (this.lastStats) {
-      logger.info("voice call line quality", { stats: this.lastStats });
-      this.options.onQuality?.(this.lastStats);
+    if (report) {
+      logger.info("voice call line quality", { stats: this.lastStats ?? "no data" });
+      this.options.onQuality?.(this.lastStats ?? "no data");
     }
     this.lastStats = null;
   }

@@ -243,7 +243,7 @@ export class PiperSpeaker implements Speaker {
  * the oldest are dropped, with their files, past `limit`.
  */
 export class CachedSpeaker implements Speaker {
-  private readonly made = new Map<string, { file: string; durationMs: number }>();
+  private readonly made = new Map<string, { file: string; durationMs: number; seeded?: boolean }>();
 
   constructor(
     private readonly inner: Speaker,
@@ -251,14 +251,24 @@ export class CachedSpeaker implements Speaker {
   ) {}
 
   async speak(text: string): Promise<{ file: string; durationMs: number }> {
+    const { file, durationMs } = await this.speakDetailed(text);
+    return { file, durationMs };
+  }
+
+  /** `speak`, and where it came from: the Mac's seeded clip or one made here (and how long that took; 0 for a hit). */
+  async speakDetailed(
+    text: string,
+  ): Promise<{ file: string; durationMs: number; source: "mac" | "add-on"; makeMs: number }> {
     const hit = this.made.get(text);
     if (hit && fs.existsSync(hit.file)) {
       // Most recently used last, so the dropped one is the stalest.
       this.made.delete(text);
       this.made.set(text, hit);
-      return hit;
+      return { file: hit.file, durationMs: hit.durationMs, source: hit.seeded ? "mac" : "add-on", makeMs: 0 };
     }
+    const began = Date.now();
     const result = await this.inner.speak(text);
+    const makeMs = Date.now() - began;
     this.made.set(text, result);
     while (this.made.size > this.limit) {
       const oldest = this.made.keys().next().value as string;
@@ -266,14 +276,14 @@ export class CachedSpeaker implements Speaker {
       this.made.delete(oldest);
       if (gone) fs.rmSync(gone.file, { force: true });
     }
-    return result;
+    return { ...result, source: "add-on", makeMs };
   }
 
   /** Files someone else made for these words (the Mac's voice, sent with a call) count as already said. */
   seed(text: string, made: { file: string; durationMs: number }): void {
     const old = this.made.get(text);
     this.made.delete(text);
-    this.made.set(text, made);
+    this.made.set(text, { ...made, seeded: true });
     if (old && old.file !== made.file) fs.rmSync(old.file, { force: true });
   }
 

@@ -57,10 +57,10 @@ export class CallDialog {
   prompts(): string[] {
     const out = this.asksPin
       ? [
-          `${this.script.greeting} To answer, enter your pin, then hash.`,
+          `${this.script.greeting} Please enter your PIN, then press hash.`,
           this.script.question,
-          "That pin is not right. Try again, then hash.",
-          "That pin is not right. Goodbye.",
+          "That PIN is not right. Try again, then press hash.",
+          "That PIN is not right. Goodbye.",
         ]
       : [`${this.script.greeting} ${this.script.question}`];
     for (const option of this.script.options) out.push(`Sent ${option.letter}. Goodbye.`);
@@ -70,7 +70,7 @@ export class CallDialog {
   start(): DialogAction[] {
     if (this.asksPin) {
       this.stage = "pin";
-      return [{ type: "play", text: `${this.script.greeting} To answer, enter your pin, then hash.` }];
+      return [{ type: "play", text: `${this.script.greeting} Please enter your PIN, then press hash.` }];
     }
     this.stage = "question";
     return [{ type: "play", text: `${this.script.greeting} ${this.script.question}` }];
@@ -105,9 +105,9 @@ export class CallDialog {
     this.tries += 1;
     if (this.tries >= MAX_PIN_TRIES) {
       this.stage = "done";
-      return [{ type: "hangup", text: "That pin is not right. Goodbye." }];
+      return [{ type: "hangup", text: "That PIN is not right. Goodbye." }];
     }
-    return [{ type: "play", text: "That pin is not right. Try again, then hash." }];
+    return [{ type: "play", text: "That PIN is not right. Try again, then press hash." }];
   }
 
   private questionKey(digit: string): DialogAction[] {

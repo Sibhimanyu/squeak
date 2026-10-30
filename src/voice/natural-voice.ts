@@ -6,6 +6,7 @@ import readline from "node:readline";
 
 import { logger } from "../utils/logger.js";
 import { encodeMulaw, MAX_CLIP_BYTES, type Clip } from "./clips.js";
+import { readBackParts } from "./inbound-flow.js";
 import { CallDialog, type CallScript } from "./dialog.js";
 import type { Speaker } from "./tts.js";
 
@@ -313,6 +314,64 @@ export class PromptClipCache {
     }
     for (const id of [...this.made.keys()]) if (!wanted.has(id)) this.made.delete(id);
     return out;
+  }
+}
+
+/** Silence kept between the two halves of a joined clip. */
+export const JOIN_GAP_MS = 120;
+/** A read-back whose heard part is longer than this is left to the add-on's voice: it would take too long to make. */
+export const READ_BACK_HEAD_MAX_CHARS = 300;
+
+/** Two line clips as one saying `text`: the first's tail pad and the second's lead pad go, a short gap stays. */
+export function joinClips(first: Clip, second: Clip, text: string, gapMs = JOIN_GAP_MS): Clip {
+  const a = Buffer.from(first.mulaw, "base64");
+  const b = Buffer.from(second.mulaw, "base64");
+  const cutA = Math.min(a.length, Math.round((TAIL_SILENCE_MS / 1000) * LINE_RATE));
+  const cutB = Math.min(b.length, Math.round((LEAD_SILENCE_MS / 1000) * LINE_RATE));
+  const gap = Buffer.alloc(Math.round((gapMs / 1000) * LINE_RATE), 0xff); // mu-law zero
+  return { text, mulaw: Buffer.concat([a.subarray(0, a.length - cutA), gap, b.subarray(cutB)]).toString("base64") };
+}
+
+/**
+ * The read-back in the Mac's voice, made fast: the suffix ("Press 1 to send it to ...") is fixed per chat, so it is
+ * rendered once per voice and kept; a call renders only what was heard and joins the two into one clip.
+ */
+export class ReadBackClips {
+  private readonly tails = new Map<string, Promise<Clip | null>>();
+
+  constructor(
+    private readonly natural: Pick<NaturalVoice, "clip" | "usable">,
+    private readonly voice: () => string,
+  ) {}
+
+  private tailClip(tail: string): Promise<Clip | null> {
+    const id = `${this.voice()}\n${tail}`;
+    let made = this.tails.get(id);
+    if (!made) {
+      made = this.natural.clip(tail).catch(() => null);
+      this.tails.set(id, made);
+      void made.then((clip) => {
+        if (!clip && this.tails.get(id) === made) this.tails.delete(id);
+      });
+      while (this.tails.size > 60) this.tails.delete(this.tails.keys().next().value as string);
+    }
+    return made;
+  }
+
+  /** Renders the suffix for each of these chats ahead of any call. */
+  async prepare(labels: readonly string[]): Promise<void> {
+    if (!this.natural.usable) return;
+    for (const label of new Set(labels)) await this.tailClip(readBackParts("", label).tail);
+  }
+
+  /** One clip saying exactly `readBackSentence(text, label)`; undefined when it should be left to the add-on. */
+  async clip(text: string, label: string): Promise<Clip | undefined> {
+    if (!this.natural.usable) return undefined;
+    const { head, tail } = readBackParts(text, label);
+    if (head.length > READ_BACK_HEAD_MAX_CHARS) return undefined;
+    const [first, second] = await Promise.all([this.natural.clip(head), this.tailClip(tail)]);
+    if (!first || !second) return undefined;
+    return joinClips(first, second, `${head} ${tail}`);
   }
 }
 

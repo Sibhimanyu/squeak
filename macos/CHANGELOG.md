@@ -2,6 +2,14 @@
 
 ## 2.12.11
 
+- Calling Squeak: every step now says "Press star to hear this again", and star repeats it, including what it heard from you.
+- Calling Squeak: it asks which workspace first even before you set favourites (workspaces are numbered by recent activity); favourites in Settings › Phone calls › Quick workspaces keep their own numbers.
+- Calling Squeak: names are spoken short and whole ("squeak, ushuaia") instead of a cut-off branch name; the wording is more like a phone line ("Hello, this is Squeak", "Done. Your message was sent to …").
+- Calling Squeak: the pause after you finish speaking is much shorter, and the line no longer goes silent between prompts, which was a cause of the voice breaking up (add-on 0.9.5).
+- The Calls log marks any line the add-on had to speak in its own voice, and always shows the line quality.
+
+## 2.12.11
+
 - Quitting Squeak now stays quit: when an update was waiting to install, a quit you chose no longer reopened the app.
 - Phone calls: the add-on's panel links to its updates in Home Assistant.
 

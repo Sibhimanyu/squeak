@@ -258,7 +258,7 @@ describe("MemoInbox", () => {
       });
       await upload({ v: 1, kind: "send", memoId });
       expect(sent).toEqual([{ target: "t12", text: "tell it to go with option B" }]);
-      expect(traces.map(([k]) => k)).toEqual(["step", "heard", "said", "step"]);
+      expect(traces.map(([k]) => k)).toEqual(["step", "heard", "step", "said", "step"]);
     });
 
     it("still resolves a stale version, and truncates long workspace names at a word", async () => {
@@ -272,6 +272,74 @@ describe("MemoInbox", () => {
       await inbox.publish();
       expect((await directory())!.version).not.toBe(old.version);
       expect(await upload(memo(1, old.version))).toMatchObject({ status: "transcript", label: "chat 1" });
+    });
+
+    describe("automatic workspaces", () => {
+      const wchat = (n: number, workspace: string | null, workspaceLabel?: string): MemoTarget => ({
+        target: `t${n}`,
+        label: `chat ${n}`,
+        workspace,
+        ...(workspaceLabel ? { workspaceLabel } : {}),
+      });
+
+      it("groups chats by workspace, newest first, when there are no favourites", async () => {
+        targets = [wchat(1, "wb", "blume, hub"), wchat(2, "wa", "squeak, main"), wchat(3, "wb", "blume, hub")];
+        await inbox.publish();
+        const dir = (await directory())!;
+        expect(dir.workspaces).toEqual([
+          {
+            n: 1,
+            label: "blume, hub",
+            chats: [
+              { n: 1, label: "chat 1", choice: 1 },
+              { n: 2, label: "chat 3", choice: 2 },
+            ],
+          },
+          { n: 2, label: "squeak, main", chats: [{ n: 1, label: "chat 2", choice: 3 }] },
+        ]);
+        expect(dir.items).toEqual([]);
+      });
+
+      it("keeps the flat menu for one workspace and no favourites", async () => {
+        targets = [wchat(1, "wa"), wchat(2, "wa")];
+        await inbox.publish();
+        const dir = (await directory())!;
+        expect(dir.workspaces).toBeUndefined();
+        expect(dir.items).toHaveLength(2);
+      });
+
+      it("puts automatic workspaces after favourites on the lowest free digits", async () => {
+        targets = [wchat(1, "wx"), wchat(2, "wa"), wchat(3, "wy"), wchat(4, null)];
+        favs = [
+          { n: 1, workspace: "wa", label: "squeak main" },
+          { n: 3, workspace: "wz", label: "quiet" },
+        ];
+        await inbox.publish();
+        const dir = (await directory())!;
+        expect(dir.workspaces!.map((w) => w.n)).toEqual([1, 3, 2, 4]);
+        expect(dir.workspaces![2]!.chats).toEqual([{ n: 1, label: "chat 1", choice: 2 }]);
+        expect(dir.items).toEqual([{ n: 1, label: "chat 4", choice: 4 }]);
+      });
+
+      it("leaves workspaces past nine in the flat menu, and its version is stable", async () => {
+        targets = Array.from({ length: 11 }, (_, i) => wchat(i + 1, `w${i}`));
+        await inbox.publish();
+        const dir = (await directory())!;
+        expect(dir.workspaces).toHaveLength(9);
+        expect(dir.workspaces!.map((w) => w.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        expect(dir.items.map((i) => i.label)).toEqual(["chat 10", "chat 11"]);
+        const memoId = newMessageId();
+        expect(await upload({ ...memo(dir.items[1]!.choice!, dir.version), id: memoId })).toMatchObject({
+          label: "chat 11",
+        });
+        await store.delete(dirPath(channel));
+        clock += 1000;
+        await inbox.publish();
+        expect(await directory()).toBeNull();
+        clock += 40 * 60_000;
+        await inbox.publish();
+        expect((await directory())!.version).toBe(dir.version);
+      });
     });
   });
 });

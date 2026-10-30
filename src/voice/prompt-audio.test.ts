@@ -102,7 +102,7 @@ describe("transcript audio", () => {
 
   it("shares the read-back wording", () => {
     expect(readBackSentence("go with B.", "blume")).toBe(
-      "I heard: go with B. Press 1 to send it to blume, 2 to record again, or hash to cancel.",
+      "I heard: go with B. Press 1 to send it to blume, 2 to record again, star to hear it again, or hash to cancel.",
     );
   });
 });

@@ -50,7 +50,7 @@ export function composeScript(item: AttentionItem, lastText: string | null, canA
   const choices = item.kind === "asked_question" || item.kind === "blocked_question" ? parseChoices(lastText) : null;
   const options = (choices?.options ?? []).slice(0, MAX_KEYPAD_OPTIONS);
   const asked = choices?.question ? say(choices.question) : summarizeOutcome(lastText, 240);
-  const greeting = `Squeak. ${label} ${describe(item.kind)}.`;
+  const greeting = `Hello, this is Squeak. ${label} ${describe(item.kind)}.`;
 
   const parts: string[] = [];
   if (asked) parts.push(asked);

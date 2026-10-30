@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { incomingGate, PinKeeper } from "./pin-keeper.js";
-import { handleIncoming, inboundPrompts, type InboundDependencies } from "./inbound-flow.js";
+import { handleIncoming, inboundPrompts, readBackSentence, type InboundDependencies } from "./inbound-flow.js";
 import type { DirectoryDoc, DownMessage } from "./memo-protocol.js";
 import type { IncomingCall, PhoneCall } from "./phone.js";
 
@@ -132,8 +132,8 @@ describe("call-in flow", () => {
   });
 
   it("makes no pin prompts ahead of time when the pin is off", () => {
-    expect(inboundPrompts(directory, false).join(" ")).not.toMatch(/enter your pin/i);
-    expect(inboundPrompts(directory, true).join(" ")).toMatch(/enter your pin/i);
+    expect(inboundPrompts(directory, false).join(" ")).not.toMatch(/enter your PIN/i);
+    expect(inboundPrompts(directory, true).join(" ")).toMatch(/enter your PIN/i);
   });
 
   it("still refuses another caller when the PIN is skipped", async () => {
@@ -166,7 +166,7 @@ describe("call-in flow", () => {
     expect(t.sends).toEqual([t.memos[0]!.memoId]);
     expect(call.said.join(" | ")).toContain("Press 1 for squeak · voice. Press 2 for blume · hub.");
     expect(call.said.join(" | ")).toContain("I heard: go with option B. Press 1 to send it to blume · hub");
-    expect(call.said.at(-1)).toBe("Sent. Goodbye.");
+    expect(call.said.at(-1)).toBe("Done. Your message was sent to blume · hub. Goodbye.");
     expect(call.hungUp).toBe(true);
   });
 
@@ -174,7 +174,7 @@ describe("call-in flow", () => {
     const call = new FakeCall([...keys("1111#"), ...keys("2222#")]);
     const t = setup(call);
     await handleIncoming(t.incoming, t.deps);
-    expect(call.said.at(-1)).toBe("That pin is not right. Goodbye.");
+    expect(call.said.at(-1)).toBe("That PIN is not right. Goodbye.");
     expect(t.memos).toEqual([]);
   });
 
@@ -192,7 +192,7 @@ describe("call-in flow", () => {
     const t = setup(call);
     await handleIncoming(t.incoming, t.deps);
     expect(t.memos).toEqual([]);
-    expect(call.said.filter((s) => s === "I did not hear anything.")).toHaveLength(3);
+    expect(call.said.filter((s) => s === "I did not hear anything. Let's try again.")).toHaveLength(3);
   });
 
   it("says so when the Mac does not answer, and when there is no chat", async () => {
@@ -237,7 +237,7 @@ describe("call-in flow", () => {
       const ready = new Set(inboundPrompts(directory, askPin));
       const late = call.said.filter((text) => text !== "<beep>" && !ready.has(text));
       expect(late).toHaveLength(1);
-      expect(late[0]).toMatch(/^I heard: /);
+      expect(late[0]).toBe(readBackSentence("go with option B", "blume · hub"));
     }
   });
 
@@ -246,5 +246,84 @@ describe("call-in flow", () => {
     const t = setup(call);
     await handleIncoming(t.incoming, t.deps);
     expect(call.said.every((text) => inboundPrompts(directory, true).includes(text))).toBe(true);
+  });
+
+  it("star repeats every menu and the read-back without counting as an attempt", async () => {
+    const call = new FakeCall([...keys("4821#"), "*", "*", "2", "*", "1"]);
+    const t = setup(call);
+    await handleIncoming(t.incoming, t.deps);
+    const menus = call.said.filter((s) => s.includes("Which chat?"));
+    expect(menus).toHaveLength(3);
+    expect(menus[0]).toContain("Press star to hear this again, or hash to hang up.");
+    expect(call.said.filter((s) => s.startsWith("I heard:"))).toHaveLength(2);
+    expect(t.memos).toHaveLength(1);
+    expect(t.sends).toHaveLength(1);
+  });
+
+  it("gives up on a menu after five repeats", async () => {
+    const call = new FakeCall([...keys("4821#"), ...Array(8).fill("*")]);
+    const t = setup(call);
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.filter((s) => s.includes("Which chat?"))).toHaveLength(6);
+    expect(call.said.at(-1)).toBe("Goodbye.");
+  });
+
+  it("walks workspaces, chats and the 0 menu with star, saying only listed texts", async () => {
+    const dir: DirectoryDoc = {
+      ...directory,
+      workspaces: [
+        {
+          n: 1,
+          label: "Blume",
+          chats: [
+            { n: 1, label: "hub" },
+            { n: 2, label: "api" },
+          ],
+        },
+        { n: 2, label: "Empty", chats: [] },
+      ],
+    } as DirectoryDoc;
+    const call = new FakeCall([...keys("4821#"), "*", "2", "1", "*", "2", "1"]);
+    const t = setup(call, { directory: async () => dir });
+    await handleIncoming(t.incoming, t.deps);
+    const ready = new Set(inboundPrompts(dir, true));
+    const late = call.said.filter((s) => s !== "<beep>" && !ready.has(s));
+    expect(late).toEqual([readBackSentence("go with option B", "blume · hub")]);
+    expect(call.said).toContain("Nothing in Empty can take a message right now.");
+    expect(call.said).toContain(
+      "Blume. Which chat? Press 1 for hub. Press 2 for api. Press star to hear this again, or hash to go back.",
+    );
+    expect(call.said[0]).toBe(
+      "Hello, this is Squeak. Please enter your PIN, then press hash. Press star to start over.",
+    );
+    expect(call.said.some((s) => s.startsWith("api. Speak your message after the beep"))).toBe(true);
+    const other = new FakeCall([...keys("4821#"), "0", "*", "1", "1"]);
+    const u = setup(other, { directory: async () => dir });
+    await handleIncoming(u.incoming, u.deps);
+    const late2 = other.said.filter((s) => s !== "<beep>" && !ready.has(s));
+    expect(late2).toEqual([readBackSentence("go with option B", "blume · hub")]);
+    expect(other.said.filter((s) => s.startsWith("Which chat?"))).toHaveLength(2);
+  });
+
+  it("says Still working on it once when the Mac is slow", async () => {
+    vi.useFakeTimers();
+    try {
+      const call = new FakeCall([...keys("4821#"), "1", "#"]);
+      const t = setup(call);
+      t.deps.uplink.memo = () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () => resolve({ v: 1, id: "x", at: 0, status: "transcript", text: "hi", label: "squeak · voice" }),
+            15_000,
+          ),
+        );
+      const done = handleIncoming(t.incoming, t.deps);
+      await vi.advanceTimersByTimeAsync(20_000);
+      await done;
+      expect(call.said.filter((s) => s === "Still working on it.")).toHaveLength(1);
+      expect(call.said).toContain("One moment.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

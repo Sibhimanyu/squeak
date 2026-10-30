@@ -389,6 +389,14 @@ export async function runGateway(): Promise<number> {
         line: voice.line,
         speaker,
         onQuality: (stats) => note("info", `Line quality: ${stats}`),
+        // A line the add-on made itself means the Mac's clip was missing (or late): the signal to check when a call breaks up.
+        onSpoke: (info) => {
+          if (info.source === "add-on")
+            note(
+              "warn",
+              `Spoke with the add-on's own voice (made in ${(info.makeMs / 1000).toFixed(1)} s): ${info.text.slice(0, 60)}`,
+            );
+        },
       });
       // At most one note every ten minutes: the first start makes a handful of prompts and each is slow on a small machine.
       let lastSlowNote = Number.NEGATIVE_INFINITY;

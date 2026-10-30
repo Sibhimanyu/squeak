@@ -37,6 +37,8 @@ export interface MemoTarget {
   label: string;
   /** The workspace it belongs to (`workspaceKeyOf`), for favourites. */
   workspace: string | null;
+  /** The workspace as spoken ("squeak, ushuaia", `spokenWorkspace`); absent: the label stands in. */
+  workspaceLabel?: string;
 }
 
 export type TraceKind = "step" | "said" | "heard" | "key" | "warn";
@@ -61,6 +63,8 @@ export interface MemoInboxDependencies {
   audioClips?: (texts: string[]) => Promise<Clip[]>;
   /** The Mac's recording of the read-back sentence; undefined (or a failure) leaves it to the add-on. */
   readBack?: (text: string, label: string) => Promise<Clip | undefined>;
+  /** Makes the fixed part of the read-back for these chats ahead of any call (after the prompts are published). */
+  prepareReadBack?: (labels: string[]) => Promise<void>;
   /** A line for the call trace. */
   trace?: (kind: TraceKind, text: string, extra?: { ms?: number; label?: string }) => void;
   now?: () => number;
@@ -147,24 +151,44 @@ export class MemoInbox {
     let targets: MemoTarget[];
     let items: DirectoryItem[];
     let workspaces: DirectoryWorkspace[] | undefined;
-    if (favorites.length === 0) {
+    // Automatic workspaces: the distinct workspaces of the chats no favourite holds, newest chat first.
+    const favoriteKeys = new Set(favorites.map((f) => f.workspace));
+    const rest = all.filter((x) => !x.workspace || !favoriteKeys.has(x.workspace));
+    const autoKeys: string[] = [];
+    for (const t of rest) if (t.workspace && !autoKeys.includes(t.workspace)) autoKeys.push(t.workspace);
+    if (favorites.length === 0 && autoKeys.length < 2) {
       targets = all.slice(0, MENU_CHOICES);
       items = targets.map((t, index) => ({ n: index + 1, label: t.label }));
     } else {
       targets = [];
       const room = () => targets.length < MAX_CHOICES;
-      const favoriteKeys = new Set(favorites.map((f) => f.workspace));
-      workspaces = favorites.map((fav) => {
+      const chatsOf = (key: string, from: MemoTarget[]): DirectoryItem[] => {
         const chats: DirectoryItem[] = [];
-        for (const t of all.filter((x) => x.workspace === fav.workspace).slice(0, MAX_WORKSPACES)) {
+        for (const t of from.filter((x) => x.workspace === key).slice(0, MAX_WORKSPACES)) {
           if (!room()) break;
           targets.push(t);
           chats.push({ n: chats.length + 1, label: t.label, choice: targets.length });
         }
-        return { n: fav.n, label: spokenLabel(fav.label), chats };
-      });
+        return chats;
+      };
+      workspaces = favorites.map((fav) => ({
+        n: fav.n,
+        label: spokenLabel(fav.label),
+        chats: chatsOf(fav.workspace, all),
+      }));
+      const used = new Set(favorites.map((f) => f.n));
+      const grouped = new Set<string>();
+      for (const key of autoKeys) {
+        let n = 1;
+        while (used.has(n)) n++;
+        if (n > MAX_WORKSPACES || workspaces.length >= MAX_WORKSPACES) break;
+        used.add(n);
+        grouped.add(key);
+        const first = rest.find((x) => x.workspace === key)!;
+        workspaces.push({ n, label: spokenLabel(first.workspaceLabel ?? first.label), chats: chatsOf(key, rest) });
+      }
       items = [];
-      for (const t of all.filter((x) => !x.workspace || !favoriteKeys.has(x.workspace)).slice(0, MENU_CHOICES)) {
+      for (const t of rest.filter((x) => !x.workspace || !grouped.has(x.workspace)).slice(0, MENU_CHOICES)) {
         if (!room()) break;
         targets.push(t);
         items.push({ n: items.length + 1, label: t.label, choice: targets.length });
@@ -213,6 +237,10 @@ export class MemoInbox {
       await store.set(dirPath(channel), sealDirectory(key, { ...doc, audio: ids }));
     }
     await this.dropStaleAudio();
+    if (this.deps.prepareReadBack && !this.stopped) {
+      const labels = [...doc.items, ...(doc.workspaces ?? []).flatMap((w) => w.chats)].map((i) => i.label);
+      await this.deps.prepareReadBack(labels).catch(() => undefined);
+    }
   }
 
   /** Deletes audio documents of directory versions no longer kept (and, once, ones a restart left behind). */
@@ -327,11 +355,24 @@ export class MemoInbox {
         trace?.("warn", "Nothing was heard in the recording", { label });
         return this.refuse(message.id, "I did not hear anything.");
       }
-      trace?.("heard", text, { ms: Date.now() - began, label });
+      const transcribedMs = Date.now() - began;
+      // The Mac's voice starts on the words as soon as they are known; the trace lines are written meanwhile.
+      const spokenPromise = this.readBackAudio(text, label);
+      trace?.("heard", text, { ms: transcribedMs, label });
+      trace?.("step", `Transcribed in ${(transcribedMs / 1000).toFixed(1)} s`, { ms: transcribedMs, label });
       trace?.("said", text, { label });
       this.pending.set(message.id, { target, label, text, at: this.now() });
       while (this.pending.size > MAX_PENDING) this.pending.delete(this.pending.keys().next().value as string);
-      const spoken = await this.readBackAudio(text, label);
+      const spoken = await spokenPromise;
+      const renderMs = Date.now() - began - transcribedMs;
+      if (this.deps.readBack)
+        trace?.(
+          spoken ? "step" : "warn",
+          spoken
+            ? `Read-back voice rendered in ${(renderMs / 1000).toFixed(1)} s`
+            : `Read-back voice not ready after ${(renderMs / 1000).toFixed(1)} s; the add-on will speak it`,
+          { ms: renderMs, label },
+        );
       return {
         v: 1,
         id: message.id,

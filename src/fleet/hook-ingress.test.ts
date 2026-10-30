@@ -791,6 +791,38 @@ describe("HookIngressServer control routes", () => {
     expect(seen).toHaveLength(2);
   });
 
+  it("passes a test call on /control/voice to apply and shows lastTest on GET", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/voice`;
+    const auth = { "x-squeak-token": harness.token };
+    const seen: unknown[] = [];
+    let lastTest: unknown;
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voice: {
+        read: () => ({ mode: "direct", ...(lastTest ? { lastTest } : {}) }),
+        apply: async (request) => {
+          seen.push(request);
+          if (lastTest) return { ok: false, reason: "A test call is already ringing." };
+          lastTest = { at: 1, status: "ringing" };
+          return { ok: true, state: { mode: "direct", lastTest } };
+        },
+      },
+    });
+    const post = () => fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ test: true }) });
+    expect(await (await fetch(url, { headers: auth })).json()).toEqual({ mode: "direct" });
+    const first = await post();
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ mode: "direct", lastTest: { at: 1, status: "ringing" } });
+    const second = await post();
+    expect(second.status).toBe(400);
+    expect(await second.json()).toEqual({ error: "A test call is already ringing." });
+    expect(seen).toEqual([{ test: true }, { test: true }]);
+    expect(((await (await fetch(url, { headers: auth })).json()) as { lastTest: unknown }).lastTest).toEqual(lastTest);
+  });
+
   it("answers 500 without detail when a voice change throws", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;

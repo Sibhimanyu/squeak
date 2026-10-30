@@ -84,7 +84,7 @@ describe("downsample and wav reading", () => {
 
 describe("callPrompts", () => {
   it("covers the pin dialog, the pinless one, or only a tell", () => {
-    expect(callPrompts(script, "ask")[0]).toContain("enter your pin");
+    expect(callPrompts(script, "ask")[0]).toContain("enter your PIN");
     expect(callPrompts(script, "none")[0]).toBe(`${script.greeting} ${script.question}`);
     expect(callPrompts({ ...script, options: [] }, "ask")).toEqual([`${script.greeting} ${script.question}`]);
     expect(callPrompts(script, "both").length).toBeGreaterThan(callPrompts(script, "ask").length);
@@ -93,7 +93,7 @@ describe("callPrompts", () => {
 
 describe("renderCallClips", () => {
   it("skips prompts that fail and returns undefined when none work or the voice is off", async () => {
-    const clip = async (text: string) => (text.includes("pin is not right") ? null : { text, mulaw: "AAAA" });
+    const clip = async (text: string) => (text.includes("PIN is not right") ? null : { text, mulaw: "AAAA" });
     const got = await renderCallClips({ usable: true, clip }, script, "ask");
     expect(got?.length).toBeGreaterThan(0);
     expect(got?.every((c) => !c.text.includes("not right"))).toBe(true);
@@ -199,5 +199,43 @@ describe("voice preview", () => {
       natural.stop();
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("read-back clips", () => {
+  const mulaw = (bytes: number, fill: number): string => Buffer.alloc(bytes, fill).toString("base64");
+
+  it("joins two clips into one, dropping the join's pads and keeping a short gap", async () => {
+    const {
+      joinClips,
+      TAIL_SILENCE_MS: tailMs,
+      LEAD_SILENCE_MS: leadMs,
+      JOIN_GAP_MS,
+    } = await import("./natural-voice.js");
+    const a = { text: "a", mulaw: mulaw(8000, 0x10) };
+    const b = { text: "b", mulaw: mulaw(8000, 0x20) };
+    const joined = joinClips(a, b, "a b");
+    const bytes = Buffer.from(joined.mulaw, "base64").length;
+    expect(joined.text).toBe("a b");
+    expect(bytes).toBe(8000 - tailMs * 8 + JOIN_GAP_MS * 8 + 8000 - leadMs * 8);
+  });
+
+  it("renders only what was heard per call and keeps the suffix", async () => {
+    const { ReadBackClips } = await import("./natural-voice.js");
+    const { readBackSentence } = await import("./inbound-flow.js");
+    const said: string[] = [];
+    const natural = {
+      usable: true,
+      clip: async (text: string) => (said.push(text), { text, mulaw: mulaw(8000, 0x30) }),
+    };
+    const clips = new ReadBackClips(natural, () => "af_heart");
+    await clips.prepare(["Chat A"]);
+    const one = await clips.clip("go ahead.", "Chat A");
+    const two = await clips.clip("something else", "Chat A");
+    expect(one?.text).toBe(readBackSentence("go ahead.", "Chat A"));
+    expect(two?.text).toBe(readBackSentence("something else", "Chat A"));
+    expect(said.filter((t) => t.startsWith("Press 1"))).toHaveLength(1);
+    expect(said.filter((t) => t.startsWith("I heard"))).toHaveLength(2);
+    expect(await clips.clip("x".repeat(400), "Chat A")).toBeUndefined();
   });
 });

@@ -9,6 +9,7 @@ import {
   newMessageId,
   type DirectoryDoc,
   type DirectoryItem,
+  type DownMessage,
   type DirectoryWorkspace,
 } from "./memo-protocol.js";
 import type { Uplink } from "./uplink.js";
@@ -41,25 +42,43 @@ export interface InboundDependencies {
 
 /** The read-back of what was heard: said by the add-on, and made ahead by the Mac in its own voice. */
 export function readBackSentence(text: string, label: string): string {
-  return `I heard: ${text.replace(/[.!?\s]+$/, "")}. Press 1 to send it to ${label}, 2 to record again, or hash to cancel.`;
+  const { head, tail } = readBackParts(text, label);
+  return `${head} ${tail}`;
 }
+
+/** The read-back in two parts: what was heard (per call), and the fixed suffix (per chat, made ahead). */
+export function readBackParts(text: string, label: string): { head: string; tail: string } {
+  return {
+    head: `I heard: ${text.replace(/[.!?\s]+$/, "")}.`,
+    tail: `Press 1 to send it to ${label}, 2 to record again, star to hear it again, or hash to cancel.`,
+  };
+}
+
+const GREETING = "Hello, this is Squeak.";
+const AGAIN = "Press star to hear this again";
 
 /** Every fixed sentence the flow says: also what is made ahead of time, so it is ready the moment a call connects. */
 const SAYS = {
-  pin: "Squeak. Enter your pin, then hash.",
-  pinAgain: "That pin is not right. Try again, then hash.",
-  pinFail: "That pin is not right. Goodbye.",
+  pin: "Please enter your PIN, then press hash. Press star to start over.",
+  pinAgain: "That PIN is not right. Try again, then press hash.",
+  pinFail: "That PIN is not right. Goodbye.",
   noChat: "No chat can take a message right now. Goodbye.",
   wait: "One moment.",
-  nothing: "I did not hear anything.",
+  still: "Still working on it.",
+  nothing: "I did not hear anything. Let's try again.",
   cancelled: "Cancelled. Goodbye.",
-  sent: "Sent. Goodbye.",
   bye: "Goodbye.",
   noMac: "I could not reach your Mac. Goodbye.",
-  record: "Speak after the beep, then press hash.",
+  notSure: "I could not reach your Mac, so I am not sure it was sent. Check the app. Goodbye.",
+  wrong: "Something went wrong.",
 };
 
-const MENU_END = "Or press hash to hang up.";
+/** Said once a chat is chosen, before the beep. */
+const recordPrompt = (label: string): string =>
+  `${label}. Speak your message after the beep, and press hash when you are done.`;
+const sentLine = (label: string): string => `Done. Your message was sent to ${label}. Goodbye.`;
+
+const MENU_END = `${AGAIN}, or hash to hang up.`;
 
 /** The menu of chats outside the favourites (or all of them, with no workspaces). */
 function menuPrompt(directory: DirectoryDoc, greet: boolean): string {
@@ -67,24 +86,24 @@ function menuPrompt(directory: DirectoryDoc, greet: boolean): string {
     .slice(0, MENU_CHOICES)
     .map((item) => `Press ${item.n} for ${item.label}.`)
     .join(" ");
-  return `${greet ? "Squeak. " : ""}Which chat? ${menu} ${MENU_END}`;
+  return `${greet ? `${GREETING} ` : ""}Which chat? ${menu} ${MENU_END}`;
 }
 
 /** The first thing said after the PIN when favourites are set: one key picks the workspace. */
 function workspaceMenuPrompt(directory: DirectoryDoc, greet: boolean): string {
   const menu = (directory.workspaces ?? []).map((w) => `Press ${w.n} for ${w.label}.`).join(" ");
   const other = directory.items.length > 0 ? " Press 0 for other chats." : "";
-  return `${greet ? "Squeak. " : ""}Which workspace? ${menu}${other} ${MENU_END}`;
+  return `${greet ? `${GREETING} ` : ""}Which workspace? ${menu}${other} ${MENU_END}`;
 }
 
 function chatMenuPrompt(workspace: DirectoryWorkspace): string {
   const menu = workspace.chats.map((chat) => `Press ${chat.n} for ${chat.label}.`).join(" ");
-  return `${workspace.label}. Which chat? ${menu} Or press hash to go back.`;
+  return `${workspace.label}. Which chat? ${menu} ${AGAIN}, or hash to go back.`;
 }
 
 const noneIn = (workspace: DirectoryWorkspace): string => `Nothing in ${workspace.label} can take a message right now.`;
 
-/** The words the menus will say for this list; the first menu carries "Squeak." only when no PIN prompt came first. */
+/** The words the menus will say for this list; the first menu carries the greeting only when no PIN prompt came first. */
 function menuPrompts(directory: DirectoryDoc, greet: boolean): string[] {
   const out: string[] = [];
   if (directory.workspaces?.length) {
@@ -99,14 +118,32 @@ function menuPrompts(directory: DirectoryDoc, greet: boolean): string[] {
   return out;
 }
 
+/** Every chat a message can go to, whichever menu names it. */
+function allLabels(directory: DirectoryDoc): string[] {
+  const labels = [...directory.items.map((item) => item.label)];
+  for (const workspace of directory.workspaces ?? []) for (const chat of workspace.chats) labels.push(chat.label);
+  return [...new Set(labels)];
+}
+
 /**
  * What to have ready for this chat list (the read-back of a message is the one thing made on the spot). Also what
  * the Mac records in its own voice and sends along (voice/natural-voice.ts), so the whole call sounds the same.
  */
 export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean): string[] {
-  const fixed = [SAYS.record, SAYS.wait, SAYS.nothing, SAYS.cancelled, SAYS.sent, SAYS.bye, SAYS.noMac, SAYS.noChat];
-  const pin = askPin ? [SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
-  return [...new Set([...pin, ...(directory ? menuPrompts(directory, !askPin) : []), ...fixed])];
+  const fixed = [
+    SAYS.wait,
+    SAYS.still,
+    SAYS.nothing,
+    SAYS.cancelled,
+    SAYS.bye,
+    SAYS.noMac,
+    SAYS.notSure,
+    SAYS.wrong,
+    SAYS.noChat,
+  ];
+  const pin = askPin ? [`${GREETING} ${SAYS.pin}`, SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
+  const perChat = directory ? allLabels(directory).flatMap((label) => [recordPrompt(label), sentLine(label)]) : [];
+  return [...new Set([...pin, ...(directory ? menuPrompts(directory, !askPin) : []), ...perChat, ...fixed])];
 }
 
 /** The shortest recording that is a message, not a hiss. */
@@ -116,6 +153,8 @@ const PIN_WAIT_MS = 20_000;
 const MENU_WAIT_MS = 15_000;
 const CONFIRM_WAIT_MS = 30_000;
 const MAX_TAKES = 3;
+const MAX_REPEATS = 5;
+const STILL_WORKING_MS = 6_000;
 
 function samePin(typed: string, pin: string): boolean {
   const a = Buffer.from(typed);
@@ -180,7 +219,7 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
   let known = pin === null;
   for (let attempt = 0; attempt < PIN_TRIES && call.open && !known; attempt++) {
     // The PIN prompt is said but its digits are never written down.
-    await speak(call, deps, attempt === 0 ? SAYS.pin : SAYS.pinAgain);
+    await speak(call, deps, attempt === 0 ? `${GREETING} ${SAYS.pin}` : SAYS.pinAgain);
     const typed = await readDigits(call, { maxLength: 12, timeoutMs: PIN_WAIT_MS });
     if (typed === null) return;
     known = samePin(typed, pin ?? "");
@@ -193,12 +232,13 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
   if (!directory || (directory.items.length === 0 && !directory.workspaces?.some((w) => w.chats.length > 0))) {
     return bye(call, deps, SAYS.noChat);
   }
-  const choice = await pickTarget(call, deps, directory, pin === null);
-  if (choice === null) return bye(call, deps, SAYS.bye);
+  const target = await pickTarget(call, deps, directory, pin === null);
+  if (target === null) return bye(call, deps, SAYS.bye);
+  const choice = chosen(target);
 
   // 3. Record, hear it back, send.
   for (let take = 0; take < MAX_TAKES && call.open; take++) {
-    await speak(call, deps, SAYS.record);
+    await speak(call, deps, recordPrompt(target.label));
     const recording = await call.record({ maxMs: MAX_MEMO_MS, beep: true });
     if (!recording) return;
     deps.trace?.(`step: Recorded ${(recording.durationMs / 1000).toFixed(1)} s`);
@@ -208,31 +248,45 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
     }
     await speak(call, deps, SAYS.wait);
     const memoId = newMessageId();
-    const heard = await deps.uplink.memo(memoId, choice, directory.version, await deps.encode(recording.file));
+    const waiting = setTimeout(() => void speak(call, deps, SAYS.still).catch(() => undefined), STILL_WORKING_MS);
+    let heard: DownMessage | null;
+    try {
+      heard = await deps.uplink.memo(memoId, choice, directory.version, await deps.encode(recording.file));
+    } finally {
+      clearTimeout(waiting);
+    }
     if (!heard) return bye(call, deps, SAYS.noMac);
     if (heard.status !== "transcript") {
-      await speak(call, deps, heard.status === "refused" ? heard.reason : "Something went wrong.");
+      await speak(call, deps, heard.status === "refused" ? heard.reason : SAYS.wrong);
       continue;
     }
     if (heard.audio) deps.seed?.([heard.audio]);
-    await speak(call, deps, readBackSentence(heard.text, heard.label));
-    const answer = await call.key(CONFIRM_WAIT_MS);
+    const readBack = readBackSentence(heard.text, heard.label);
+    let answer: string | null = null;
+    for (let repeats = 0; call.open; repeats++) {
+      await speak(call, deps, readBack);
+      answer = await call.key(CONFIRM_WAIT_MS);
+      if (answer !== "*") break;
+      deps.trace?.("key: * (hear it again)");
+      if (repeats >= MAX_REPEATS) {
+        answer = null;
+        break;
+      }
+    }
     deps.trace?.(`key: ${answer === "1" ? "1 (send)" : answer === "2" ? "2 (record again)" : "cancel"}`);
     if (answer === "2") continue;
     if (answer !== "1") return bye(call, deps, SAYS.cancelled);
     const outcome = await deps.uplink.send(memoId);
-    if (!outcome) {
-      return bye(call, deps, "I could not reach your Mac, so I am not sure it was sent. Check the app. Goodbye.");
-    }
+    if (!outcome) return bye(call, deps, SAYS.notSure);
     deps.trace?.(outcome.status === "sent" ? "step: Message sent" : "step: Message not sent");
     return bye(
       call,
       deps,
       outcome.status === "sent"
-        ? "Sent. Goodbye."
+        ? sentLine(target.label)
         : outcome.status === "refused"
           ? `${outcome.reason} Goodbye.`
-          : "Goodbye.",
+          : SAYS.bye,
     );
   }
   return bye(call, deps, SAYS.bye);
@@ -241,8 +295,20 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
 const digitOf = (key: string | null): number | null => (key !== null && /^\d$/.test(key) ? Number(key) : null);
 const chosen = (item: DirectoryItem): number => item.choice ?? item.n;
 
+/** Says a menu and reads one key; `*` says it again (not an attempt), up to MAX_REPEATS times, then counts as no answer. */
+async function menuKey(call: PhoneCall, deps: InboundDependencies, prompt: string): Promise<string | null> {
+  for (let repeats = 0; call.open; repeats++) {
+    await speak(call, deps, prompt);
+    const key = await call.key(MENU_WAIT_MS);
+    if (key !== "*") return key;
+    deps.trace?.("key: * (hear it again)");
+    if (repeats >= MAX_REPEATS) return null;
+  }
+  return null;
+}
+
 /**
- * The chat to send to (its number in the directory), or null. With favourite workspaces the first question is the
+ * The chat to send to, or null. With favourite workspaces the first question is the
  * workspace; pressing a number before it has been read out is enough (a key interrupts speech).
  */
 async function pickTarget(
@@ -250,12 +316,11 @@ async function pickTarget(
   deps: InboundDependencies,
   directory: DirectoryDoc,
   greet: boolean,
-): Promise<number | null> {
+): Promise<DirectoryItem | null> {
   const workspaces = directory.workspaces ?? [];
   if (workspaces.length === 0) return pickChat(call, deps, directory.items, menuPrompt(directory, greet));
   for (let attempt = 0; attempt < 3 && call.open; attempt++) {
-    await speak(call, deps, workspaceMenuPrompt(directory, greet && attempt === 0));
-    const key = await call.key(MENU_WAIT_MS);
+    const key = await menuKey(call, deps, workspaceMenuPrompt(directory, greet && attempt === 0));
     if (key === null || key === "#") return null;
     const digit = digitOf(key);
     if (digit === 0 && directory.items.length > 0) {
@@ -271,30 +336,29 @@ async function pickTarget(
       await speak(call, deps, noneIn(workspace));
       continue;
     }
-    // One chat in it: nothing to choose, and the read-back names it.
-    if (workspace.chats.length === 1) return chosen(workspace.chats[0]!);
+    // One chat in it: nothing to choose, and the line before the beep names it.
+    if (workspace.chats.length === 1) return workspace.chats[0]!;
     const picked = await pickChat(call, deps, workspace.chats, chatMenuPrompt(workspace));
     if (picked !== null) return picked;
   }
   return null;
 }
 
-/** A chat from a menu: its number, or null when none was chosen (or `#` was pressed). */
+/** A chat from a menu, or null when none was chosen (or `#` was pressed). */
 async function pickChat(
   call: PhoneCall,
   deps: InboundDependencies,
   items: DirectoryItem[],
   prompt: string,
-): Promise<number | null> {
+): Promise<DirectoryItem | null> {
   for (let attempt = 0; attempt < 2 && call.open; attempt++) {
-    await speak(call, deps, prompt);
-    const key = await call.key(MENU_WAIT_MS);
+    const key = await menuKey(call, deps, prompt);
     if (key === null || key === "#") return null;
     const digit = digitOf(key);
     const item = items.find((candidate) => candidate.n === digit);
     if (item) {
       deps.trace?.(`key: ${digit} (${item.label})`);
-      return chosen(item);
+      return item;
     }
   }
   return null;

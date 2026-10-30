@@ -48,7 +48,7 @@ describe("CallDialog", () => {
     expect((first as { text: string }).text).not.toContain("Press 1");
     // A key before the PIN is just PIN input, never an answer.
     expect(dialog.key("1")).toEqual([]);
-    expect(dialog.key("#")).toEqual([{ type: "play", text: "That pin is not right. Try again, then hash." }]);
+    expect(dialog.key("#")).toEqual([{ type: "play", text: "That PIN is not right. Try again, then press hash." }]);
     for (const digit of "1234") dialog.key(digit);
     expect(dialog.key("#")).toEqual([{ type: "play", text: script.question }]);
   });
@@ -72,7 +72,7 @@ describe("CallDialog", () => {
     dialog.key("9");
     dialog.key("#");
     dialog.key("9");
-    expect(dialog.key("#")).toEqual([{ type: "hangup", text: "That pin is not right. Goodbye." }]);
+    expect(dialog.key("#")).toEqual([{ type: "hangup", text: "That PIN is not right. Goodbye." }]);
     expect(dialog.key("1")).toEqual([]);
   });
 
