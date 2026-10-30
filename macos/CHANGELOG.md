@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.20
+
+- Larger session rows, project titles and sidebar icons make sessions easier to read and select.
+
 ## 2.12.19
 
 - Settings › Voice: "Set up realistic voice" installs the realistic call voice from the app, with live progress, a clear failure reason and Retry. It keeps going if you close Settings.

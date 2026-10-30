@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.20.9] - 2026-10-30 (iOS)
+
+- Settings shows the New chat presets link once.
+
 ## [1.20.6] - 2026-10-30 (iOS)
 
 - Phone calls: pause calls for an hour, four hours, until tomorrow morning, or until you turn them back on.
