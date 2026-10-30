@@ -49,6 +49,16 @@ interface Claim {
   timer: NodeJS.Timeout | null;
 }
 
+/** Why a typed code cannot be one: the add-on never shows 0, 1, O, I or L, so a typo of those is named, not "not found". */
+export function badCodeReason(input: unknown): string {
+  const flat = typeof input === "string" ? input.toUpperCase().replace(/[\s-]/g, "") : "";
+  if (/[01OIL]/.test(flat)) {
+    return "A code never has the characters 0, 1, O, I or L. Look again at the add-on's panel: it is letters and the digits 2 to 9.";
+  }
+  if (flat.length !== 8) return "A code is 8 characters, like K7M2-QX9P.";
+  return UNKNOWN_CODE;
+}
+
 const UNKNOWN_CODE = "That code isn't showing on an add-on. Check it, or open the add-on's panel for a new one.";
 
 /**
@@ -66,7 +76,7 @@ export class GatewayClaim {
 
   async start(input: unknown): Promise<ClaimStartResult> {
     const code = normalizeClaimCode(input);
-    if (!code) return { ok: false, status: 400, reason: UNKNOWN_CODE };
+    if (!code) return { ok: false, status: 400, reason: badCodeReason(input) };
     const claimId = claimIdOf(code);
     let request: ClaimRequest | null;
     try {

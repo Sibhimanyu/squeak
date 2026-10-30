@@ -97,8 +97,11 @@ describe("GatewayClaim", () => {
     for (const bad of ["", "nope", 12, null, "K7M2-QX9O"]) {
       const out = await t.claim.start(bad);
       expect(out).toMatchObject({ ok: false, status: 400 });
-      expect(out.ok ? "" : out.reason).toContain("isn't showing on an add-on");
+      expect(out.ok ? "x" : out.reason).not.toBe("");
     }
+    // Well formed but not on any add-on: the plain "not showing" sentence.
+    const unknown = await t.claim.start("K7M2-QX9P");
+    expect(unknown.ok ? "" : unknown.reason).toContain("isn't showing on an add-on");
     expect(await t.claim.start(makeClaimCode())).toMatchObject({ ok: false, status: 400 });
     expect(t.claim.view()).toBeNull();
   });
@@ -140,5 +143,19 @@ describe("GatewayClaim", () => {
     const text = JSON.stringify(t.claim.view());
     expect(text).not.toContain(flat);
     expect(text).not.toContain(t.saved[0]!.key);
+  });
+
+  it("names a typo of the look-alike characters and a wrong length instead of saying the code is not showing", async () => {
+    const claim = new GatewayClaim({
+      store: { get: async () => null, set: async () => undefined, delete: async () => undefined },
+      databaseUrl: "https://squeak-x-default-rtdb.asia-southeast1.firebasedatabase.app",
+      current: () => null,
+      save: () => undefined,
+      restart: () => undefined,
+    });
+    const lookAlike = await claim.start("9001-4AMA");
+    expect(lookAlike.ok ? "" : lookAlike.reason).toContain("never has the characters 0, 1, O, I or L");
+    const short = await claim.start("K7M2");
+    expect(short.ok ? "" : short.reason).toContain("8 characters");
   });
 });
