@@ -275,7 +275,7 @@ const content = {
     heading: "Keep Conductor close.",
     pondDescription:
       "Decoration: a small pile of Squeak's rubber duck mascot pours into a box and settles. Moving a pointer over it nudges the ducks.",
-    lede: `Squeak ${version} for Mac, as a disk image. It is free and ad-hoc signed rather than notarized, so macOS asks once before the first launch. After that, Squeak updates itself.`,
+    lede: `Squeak ${version} for Mac, as a disk image. It is free and signed with an Apple Development certificate, but not notarized; macOS may ask you to allow it on first launch. After that, Squeak updates itself.`,
     cta: "Download for Mac",
     ctaHref: download,
     ctaFile: dmg,
