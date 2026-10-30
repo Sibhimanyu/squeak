@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.12.19
+
+- Settings › Voice: "Set up realistic voice" installs the realistic call voice from the app, with live progress, a clear failure reason and Retry. It keeps going if you close Settings.
+- A new "Phone calls setup" list at the top of Voice shows each step (Home Assistant add-on, add-on up to date, extension, PIN, realistic voice, test call) with its own button and a "Phone calls are ready" / "N steps left" summary.
+- If Python 3.10 or newer is missing, the app says to run `brew install python`; a lost connection or low disk space gets its own plain message, and a download resumes on retry.
+
 ## 2.12.18
 
 - Phone calls: Check for updates now also makes Home Assistant refresh its own add-on list, and Update add-on refreshes it first, so a newly published add-on version is seen straight away (needs Squeak Voice 0.11.1).
