@@ -159,6 +159,17 @@ export interface IngressControl {
       | Promise<{ ok: true; state: unknown } | { ok: false; reason: string }>;
   };
   /**
+   * Installing the realistic call voice from an app (voice/natural-setup.ts), token-gated, no CORS header, 405 for
+   * other methods: `GET /control/voice/natural/setup` answers `{ state: "idle" | "running" | "ready" | "failed",
+   * step?, text?, percent?, bytes?, totalBytes?, code?, error? }` (`error` is one fixed sentence, never a path or
+   * command output); `POST` (body `{}`) starts the install in the background and answers the same status, joining one
+   * that already runs. 400 `{ error }` when it is already installed; 503 when unavailable.
+   */
+  voiceNatural?: {
+    status(): unknown;
+    start(): { ok: true } | { ok: false; reason: string };
+  };
+  /**
    * Pairing the Home Assistant gateway (voice/pairing-window.ts), all token-gated, no CORS header:
    * `GET /control/voice/gateway` answers `{ pairing: null | { state: "waiting" | "request" | "done" | "expired",
    * expiresAt, name?, version?, verify? }, status: { state: "none" | "stale" | "ok" | "sipDown", version?,
@@ -1081,6 +1092,28 @@ export class HookIngressServer {
             if (!response.destroyed) respond(response, 500, "voice preview failed");
           });
       });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/voice/natural/setup") {
+      request.resume();
+      if (request.method !== "GET" && request.method !== "POST") {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      const natural = control.voiceNatural;
+      if (!natural) {
+        respond(response, 503, "voice setup unavailable");
+        return;
+      }
+      if (request.method === "POST") {
+        const started = natural.start();
+        if (!started.ok) {
+          respondJson(response, 400, { error: started.reason });
+          return;
+        }
+      }
+      respondJson(response, 200, natural.status());
       return;
     }
 

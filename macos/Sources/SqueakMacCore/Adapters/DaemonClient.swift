@@ -264,6 +264,23 @@ public struct DaemonClient: Sendable {
         return r.body
     }
 
+    /// How the realistic voice install is doing. nil = a daemon without the route (404 or 503).
+    public func naturalSetupStatus() async throws -> NaturalSetupStatus? {
+        let r = try await get("/control/voice/natural/setup", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(NaturalSetupStatus.self, r.body)
+    }
+
+    /// Starts the install in the daemon (or joins the one that runs). Never downloads anything in this process.
+    public func startNaturalSetup() async throws -> NaturalSetupOutcome {
+        let r = try await post("/control/voice/natural/setup", body: NaturalSetup.requestBody, timeout: 15)
+        if r.status == 404 || r.status == 503 { return .outdated }
+        if r.status == 400 { return .refused(PinOutcome.reason(from: r.body)) }
+        try Self.check(r.status)
+        return .started(try decode(NaturalSetupStatus.self, r.body))
+    }
+
     /// Places a test call. `.done` carries the view with `lastTest` ringing; `.refused` the daemon's sentence.
     public func testVoiceCall() async throws -> PinOutcome {
         let r = try await post("/control/voice", body: VoiceSettings.testRequestBody())

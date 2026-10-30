@@ -797,6 +797,43 @@ describe("HookIngressServer control routes", () => {
     expect(seen).toEqual(["af_heart", "af_missing"]);
   });
 
+  it("gates the realistic voice install, starts it once, and carries no CORS header", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/voice/natural/setup`;
+    const headers = { "x-squeak-token": harness.token };
+    let installed = false;
+    let starts = 0;
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voiceNatural: {
+        status: () => (installed ? { state: "ready" } : { state: "running", step: "model", text: "x", percent: 40 }),
+        start: () => {
+          if (installed) return { ok: false, reason: "The realistic voice is already installed." };
+          starts += 1;
+          return { ok: true };
+        },
+      },
+    });
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(url, { method: "DELETE", headers })).status).toBe(405);
+    expect(starts).toBe(0);
+    const read = await fetch(url, { headers });
+    expect(read.status).toBe(200);
+    expect(read.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await read.json()).toMatchObject({ state: "running", percent: 40 });
+    expect(starts).toBe(0);
+    const started = await fetch(url, { method: "POST", headers, body: "{}" });
+    expect(started.status).toBe(200);
+    expect(starts).toBe(1);
+    installed = true;
+    const refused = await fetch(url, { method: "POST", headers, body: "{}" });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "The realistic voice is already installed." });
+  });
+
   it("takes pin actions on /control/voice only with the token, awaits them, and never echoes a pin", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;

@@ -43,6 +43,23 @@ and the SIP password live only in the add-on's options.
 The add-on image builds baresip 4.12 from source (the version tested here) and uses `espeak-ng` for speech, so its
 voice is plainer than the Mac's.
 
+## Phone calls setup in Squeak for Mac
+
+Settings > Voice opens on a **Phone calls setup** list: the gateway paired, the add-on up to date, the extension to
+ring, a PIN (or consciously off), the realistic voice and a test call that was answered, each with its own button and a
+summary line ("Phone calls are ready" / "2 steps left"). It reads only what the daemon already says
+(`GET /control/voice`, the gateway view, the install status); the rules live in `PhoneCallsChecklist` (SqueakMacCore).
+The realistic voice is optional (the plain voice speaks without it) and never keeps calls from being "ready".
+
+**Realistic voice from the app.** "Set up realistic voice" runs the same installer as `squeak voice-tts-setup`
+(`natural-setup.ts`: a Python 3.10+ venv with kokoro-onnx, then the ~310 MB model and voice list, resumable) inside the
+daemon, never the app. Token-gated, no CORS: `POST /control/voice/natural/setup` starts it (one at a time; asking again
+joins the run; 400 "already installed" when it is), `GET` answers `{ state: idle | running | ready | failed, step, text,
+percent, bytes, totalBytes, code, error }`. A failure is one fixed sentence by `code`: `no-python` (says to
+`brew install python`), `no-network` (a retry resumes the download), `no-space` (about 1 GB free is wanted) or `failed`;
+paths and command output go only to the daemon's log. The app polls while it runs, so closing Settings does not stop it,
+and the toggle and Voice picker appear when the daemon reports `installed`.
+
 ## Direct setup
 
 When an agent is waiting on you (blocked on an approval, blocked on a question, or finished on a question), Squeak can

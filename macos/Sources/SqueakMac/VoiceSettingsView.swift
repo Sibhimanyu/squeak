@@ -16,17 +16,21 @@ struct VoiceSettingsPage: View {
     @State private var pairingGateway = false
     @State private var showingCalls = false
     @State private var preview = VoicePreview()
+    @FocusState private var extensionFocused: Bool
 
     private var m: ChannelsModel { app.channels }
 
     var body: some View {
+        ScrollViewReader { proxy in
         Form {
+            if !m.voiceOutdated || m.voice != nil { checklistSection(proxy) }
             if let v = m.voice, v.isOn {
                 Section {
                     LabeledContent {
                         HStack {
                             TextField("", text: $typed, prompt: Text(v.defaultCallee ?? "101"))
                                 .textFieldStyle(.roundedBorder).frame(width: 110)
+                                .focused($extensionFocused)
                                 .onSubmit(save)
                             Button("Save", action: save).disabled(!changed(v) || m.voiceSaving)
                         }
@@ -34,6 +38,7 @@ struct VoiceSettingsPage: View {
                         Text("Extension to ring")
                         Text("Your phone's extension in 3CX, like 101.")
                     }
+                    .id("extension")
                     if let e = m.voiceError { Footnote(e) }
                 } header: { Text("Phone calls") } footer: {
                     Footnote(footnote(v))
@@ -44,7 +49,7 @@ struct VoiceSettingsPage: View {
                 if let favorites = v.favorites { quickSection(favorites, candidates: v.workspaces ?? []) }
                 callsSection
                 if m.gatewayAvailable { gatewaySection }
-                if let state = v.pinState { pinSection(state) }
+                if let state = v.pinState { pinSection(state).id("pin") }
                 if let policy = v.policy { policySection(policy, state: v.pinState) }
             } else if m.voiceOutdated {
                 Section { Footnote("Squeak on this Mac is older than phone calls. Update it, then come back.") } header: { Text("Phone calls") }
@@ -56,12 +61,14 @@ struct VoiceSettingsPage: View {
             }
         }
         .settingsForm()
-        .onDisappear { preview.stop() }
+        }
+        .onDisappear { preview.stop(); m.stopWatchingNaturalSetup() }
         .onChange(of: m.voice?.natural) { _, _ in preview.stop() }
         .sheet(isPresented: $pairingGateway, onDismiss: { m.endGatewayPairing() }) { GatewayPairSheet().environment(app) }
         .sheet(isPresented: $showingCalls) { CallsSheet().environment(app) }
         .task {
             await m.refreshVoice()
+            await m.refreshNaturalSetup()
             if !loaded { typed = m.voice?.callee ?? ""; loaded = true }
         }
     }
@@ -203,15 +210,104 @@ struct VoiceSettingsPage: View {
                     if let error = preview.error { Footnote(error) }
                 }
             } else {
-                LabeledContent {
-                    Text("squeak voice-tts-setup").font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                } label: {
-                    Text("Realistic voice")
-                    Text("Not installed. Run this in Terminal once (about 350 MB); calls use it afterwards.")
-                }
+                naturalInstall(m.naturalSetup)
             }
         } header: { Text("Voice") } footer: {
             Footnote("Samples play on this Mac without placing a call. The words never leave it. If speech fails during a call, the plain voice speaks and the call still goes.")
+        }
+    }
+
+    /// The install, run by the daemon: a button, then visible progress, then a clear end (the toggle appears by itself).
+    @ViewBuilder private func naturalInstall(_ setup: NaturalSetupStatus?) -> some View {
+        if let setup, setup.isRunning {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Setting up the realistic voice")
+                if let fraction = setup.fraction { ProgressView(value: fraction) } else { ProgressView().controlSize(.small) }
+                Text(setup.progressLine).font(.callout).foregroundStyle(.secondary)
+                Text("You can close Settings: it keeps going. Calls use the plain voice until it is ready.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            LabeledContent {
+                Button(setup?.state == .failed ? "Retry" : "Set up realistic voice") { Task { await m.startNaturalSetup() } }
+                    .buttonStyle(PrimaryButtonStyle())
+            } label: {
+                Text("Realistic voice")
+                Text("Not installed. Squeak downloads it once (about 350 MB) and makes the speech on this Mac; calls use the plain voice until then.")
+            }
+            if let setup, setup.state == .failed {
+                Label(setup.failureLine, systemImage: "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(Theme.error)
+                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            }
+            if let note = m.naturalSetupNote { Footnote(note) }
+        }
+    }
+
+    // MARK: Setup checklist
+
+    private func checklistSection(_ proxy: ScrollViewProxy) -> some View {
+        let list = PhoneCallsChecklist(m.phoneFacts)
+        return Section {
+            ForEach(list.steps) { step in checklistRow(step, proxy) }
+        } header: { Text("Phone calls setup") } footer: {
+            Text(list.summaryLine)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(list.isReady ? Theme.done : Color.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func checklistRow(_ step: PhoneCallsStep, _ proxy: ScrollViewProxy) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            checklistMark(step.state).frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.title + (step.isOptional ? " (optional)" : "")).font(.system(size: 13, weight: .medium))
+                Text(step.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if let action = step.action {
+                Button(action.label) { run(action, proxy) }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(actionDisabled(action))
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(step.title): \(step.state == .done ? "done" : "needs attention"). \(step.detail)")
+    }
+
+    @ViewBuilder private func checklistMark(_ state: PhoneCallsStep.State) -> some View {
+        switch state {
+        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.done)
+        case .todo: Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.needsYou)
+        case .blocked, .unknown: Image(systemName: "circle").foregroundStyle(Theme.muted)
+        case .working: ProgressView().controlSize(.small)
+        }
+    }
+
+    private func actionDisabled(_ action: PhoneCallsAction) -> Bool {
+        switch action {
+        case .pairGateway: m.gatewayConnecting || m.gatewayUpdating
+        case .updateAddon: m.gatewayBusy || m.gatewayUpdating || m.gatewayConnecting
+        case .testCall: m.testPlacing
+        case .installVoice, .retryVoice: m.naturalSetup?.isRunning == true
+        case .setExtension, .setPin: false
+        }
+    }
+
+    private func run(_ action: PhoneCallsAction, _ proxy: ScrollViewProxy) {
+        switch action {
+        case .pairGateway: pairingGateway = true
+        case .updateAddon: Task { await m.updateGatewayAddon() }
+        case .testCall: Task { await m.testCall() }
+        case .installVoice, .retryVoice: Task { await m.startNaturalSetup() }
+        case .setExtension:
+            withAnimation { proxy.scrollTo("extension", anchor: .center) }
+            extensionFocused = true
+        case .setPin:
+            withAnimation { proxy.scrollTo("pin", anchor: .center) }
+            open(.turnOn)
         }
     }
 

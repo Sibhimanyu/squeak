@@ -114,6 +114,7 @@ import {
   OLD_ADDON_CLIPS_BUDGET_MS,
 } from "../voice/natural-voice.js";
 import type { VoiceLine } from "../voice/relay-line.js";
+import { NaturalInstaller } from "../voice/natural-setup.js";
 import { TEST_SCRIPT } from "../voice/test-script.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
 import { ChatQuestioner, statusReadout, type ChatBriefInputs } from "../voice/chat-brief.js";
@@ -217,6 +218,7 @@ export class SqueakApp {
   private voiceSpeaker: Speaker | null = null;
   private readonly naturalSettings: NaturalSettingsStore;
   private readonly naturalVoice: NaturalVoice;
+  private readonly naturalInstaller: NaturalInstaller;
   private readonly promptClips: PromptClipCache;
   private readonly readBackClips: ReadBackClips;
   /** The line voice calls go out on (the gateway through the relay, or this Mac), also for a test call from an app. */
@@ -409,6 +411,9 @@ export class SqueakApp {
     );
     this.naturalSettings = new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json"));
     this.naturalVoice = new NaturalVoice(naturalPaths(config.supportDir), () => this.naturalSettings.settings);
+    this.naturalInstaller = new NaturalInstaller(config.supportDir, {
+      log: (detail) => logger.warn("realistic voice setup failed", { detail }),
+    });
     this.promptClips = new PromptClipCache(this.naturalVoice, () => this.naturalSettings.settings.voice);
     this.readBackClips = new ReadBackClips(this.naturalVoice, () => this.naturalSettings.settings.voice);
     this.telegramStatus = new TelegramStatus({
@@ -717,6 +722,8 @@ export class SqueakApp {
         apply: (request) => this.applyVoice(request),
         preview: (voice) => this.previewVoice(voice),
       },
+      // The Mac app's "Set up realistic voice": the install runs here, in the background, one at a time.
+      voiceNatural: { status: () => this.naturalInstaller.status(), start: () => this.naturalInstaller.start() },
       // Not behind voiceRelay: pairing is how the Mac gets one.
       voiceGateway: {
         read: () =>
@@ -1000,6 +1007,7 @@ export class SqueakApp {
     this.stopTraceWatch();
     this.voiceSpeaker?.dispose();
     this.naturalVoice.stop();
+    this.naturalInstaller.stop();
     await this.conductorRelay.stop().catch(() => undefined);
     await this.replier.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);

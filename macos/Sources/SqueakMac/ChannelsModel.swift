@@ -153,8 +153,10 @@ final class ChannelsModel {
             guard generation == voiceRefreshGeneration else { return }
             voiceOutdated = v == nil
             if let v { voice = v }
+            daemonReachable = true
         } catch {
-            // The service is off or busy: keep what is shown.
+            // The service is off or busy: keep what is shown, but the setup list must not claim what it cannot see.
+            daemonReachable = false
         }
     }
 
@@ -221,6 +223,69 @@ final class ChannelsModel {
     }
 
     // Test call ("Call me now"): the daemon's `lastTest` carries the result; this is only the press in flight.
+    // The realistic voice install, run by the daemon: this only starts it and watches its status.
+    private(set) var naturalSetup: NaturalSetupStatus?
+    /// Set when the app, not the daemon, has the reason: an old daemon, or one that stopped answering.
+    private(set) var naturalSetupNote: String?
+    @ObservationIgnored private var naturalSetupPoll: Task<Void, Never>?
+
+    /// Reads the install's state (opening Settings mid-install picks it up again).
+    func refreshNaturalSetup() async {
+        if demo { return }
+        guard let status = try? await client.naturalSetupStatus() else { return }
+        naturalSetup = status
+        if status.isRunning { watchNaturalSetup() }
+    }
+
+    func startNaturalSetup() async {
+        if demo || naturalSetup?.isRunning == true { return }
+        naturalSetupNote = nil
+        do {
+            switch try await client.startNaturalSetup() {
+            case let .started(status): naturalSetup = status; watchNaturalSetup()
+            case let .refused(sentence):
+                naturalSetupNote = sentence
+                await refreshVoice()
+            case .outdated: naturalSetupNote = NaturalSetup.outdatedSentence
+            }
+        } catch {
+            naturalSetupNote = NaturalSetup.unreachableSentence
+        }
+    }
+
+    private func watchNaturalSetup() {
+        guard naturalSetupPoll == nil else { return }
+        naturalSetupPoll = Task { [weak self] in
+            var misses = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1.2))
+                guard let self, !Task.isCancelled else { return }
+                if let status = try? await self.client.naturalSetupStatus() {
+                    misses = 0
+                    self.naturalSetup = status
+                    if !status.isRunning { break }
+                } else {
+                    misses += 1
+                    if misses >= 5 {
+                        self.naturalSetup = NaturalSetupStatus(state: .failed, error: NaturalSetup.unreachableSentence)
+                        break
+                    }
+                }
+            }
+            guard let self else { return }
+            self.naturalSetupPoll = nil
+            await self.refreshVoice()
+        }
+    }
+
+    func stopWatchingNaturalSetup() { naturalSetupPoll?.cancel(); naturalSetupPoll = nil }
+
+    /// What the "Phone calls setup" list reads: only what the daemon already said.
+    var phoneFacts: PhoneCallsFacts {
+        PhoneCallsFacts(daemonReachable: daemonReachable, voice: voice, voiceOutdated: voiceOutdated, gateway: gateway,
+                        gatewayAvailable: gatewayAvailable, naturalSetup: naturalSetup, testPlacing: testPlacing)
+    }
+
     private(set) var testPlacing = false
     private(set) var testError: String?
 
