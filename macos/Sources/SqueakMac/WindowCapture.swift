@@ -41,13 +41,20 @@ extension CaptureRunner {
         )
         win.titlebarAppearsTransparent = true
         win.titleVisibility = .hidden
-        win.contentView = NSHostingView(rootView: ConversationView(initiallySidebarCollapsed: true).environment(model))
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        win.contentView = NSHostingView(rootView: ConversationView(initiallySidebarCollapsed: true)
+            .environment(model))
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
         model.select(SessionKey(provider: "conductor", hostSessionId: "demo-1"))
         try? await Task.sleep(for: .milliseconds(1800))
         if let content = win.contentView { logSidebarWidth(in: content, state: "collapsed") }
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-sidebar-main.png")
+
+        var motion: [[String: Any]] = []
+        motion.append(await sampleSidebarMotion("main-expand", in: win, prefix: prefix))
+        motion.append(await sampleSidebarMotion("main-collapse", in: win, prefix: prefix))
+        motion.append(await sampleSidebarMotion("main-interrupted-expand", in: win, prefix: prefix, reverseAt: 5))
 
         // Reproduce Home ↔ project navigation while the sidebar is collapsed. The demo
         // project data contains "squeak" and this exercises the same NavigationSplitView.
@@ -104,8 +111,43 @@ extension CaptureRunner {
         await sendCommandB(to: win)
         await waitForSidebarWidth(64, in: win)
         if let content = win.contentView { logSidebarWidth(in: content, state: "Settings collapsed with Cmd+B") }
+        motion.append(await sampleSidebarMotion("settings-expand", in: win, prefix: prefix))
+        motion.append(await sampleSidebarMotion("settings-collapse", in: win, prefix: prefix))
+        let report: [String: Any] = ["reduceMotion": reduceMotion, "sequences": motion]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: URL(fileURLWithPath: "\(prefix)-sidebar-motion.json"))
+        }
         win.orderOut(nil)
         NSApp.terminate(nil)
+    }
+
+    /// Samples the actual NSSplitView sidebar on the main run loop, including interrupted motion.
+    private static func sampleSidebarMotion(_ name: String, in window: NSWindow, prefix: String, reverseAt: Int? = nil) async -> [String: Any] {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(100))
+        var samples: [[String: Double]] = []
+        let start = ProcessInfo.processInfo.systemUptime
+        NotificationCenter.default.post(name: .squeakToggleSidebar, object: nil)
+        for frame in 0..<30 {
+            if frame == reverseAt { NotificationCenter.default.post(name: .squeakToggleSidebar, object: nil) }
+            if let content = window.contentView, let width = sidebarWidth(in: content) {
+                func sizers(in view: NSView) -> [SidebarColumnSizerView] {
+                    (view as? SidebarColumnSizerView).map { [$0] } ?? view.subviews.flatMap { sizers(in: $0) }
+                }
+                let sizing = sizers(in: content)
+                samples.append(["milliseconds": (ProcessInfo.processInfo.systemUptime - start) * 1000, "width": width,
+                                "target": sizing.first?.configuration.ideal ?? -1, "sizers": Double(sizing.count)])
+            }
+            // Optional stills are visual references; caching the view blocks the main
+            // thread, so use the default width-only run for timing measurements.
+            if ProcessInfo.processInfo.environment["SQUEAK_MAC_CAPTURE_MOTION_FRAMES"] == "1", [0, 3, 6, 12, 20].contains(frame) {
+                snapshot(window.contentView?.superview ?? window.contentView, to: "\(prefix)-\(name)-frame-\(frame).png")
+            }
+            try? await Task.sleep(for: .milliseconds(16))
+        }
+        print("CaptureRunner motion \(name): \(samples.map { Int($0["width"] ?? 0) })")
+        return ["name": name, "samples": samples]
     }
 
     private static func sendCommandBackslash(to window: NSWindow) async {
@@ -145,6 +187,9 @@ extension CaptureRunner {
     }
 
     private static func waitForSidebarWidth(_ expected: CGFloat, in window: NSWindow) async {
+        // A native layout pass can briefly use the destination width before the
+        // transition clock's next tick. Wait for its duration before checking rest.
+        try? await Task.sleep(for: .seconds(SidebarColumnSizerView.duration + 0.05))
         for _ in 0..<30 {
             if let content = window.contentView,
                abs((sidebarWidth(in: content) ?? -1) - expected) < 1 { return }

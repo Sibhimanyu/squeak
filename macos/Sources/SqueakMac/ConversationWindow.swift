@@ -31,11 +31,9 @@ struct ConversationView: View {
         NavigationSplitView(columnVisibility: $visibility) {
             if showingSettings {
                 SettingsSidebar(isCollapsed: $sidebarCollapsed)
-                    .navigationSplitViewColumnWidth(min: sidebarCollapsed ? 64 : 200, ideal: sidebarCollapsed ? 64 : 216, max: sidebarCollapsed ? 64 : 280)
                     .toolbar(removing: .sidebarToggle)
             } else {
                 SidebarView(isCollapsed: $sidebarCollapsed)
-                    .navigationSplitViewColumnWidth(min: sidebarCollapsed ? 64 : Metrics.sidebarWidth, ideal: sidebarCollapsed ? 64 : Metrics.sidebarWidth, max: sidebarCollapsed ? 64 : Metrics.sidebarWidth)
                     .toolbar(removing: .sidebarToggle)
             }
         } content: {

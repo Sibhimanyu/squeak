@@ -21,54 +21,78 @@ private struct SidebarGlass: NSViewRepresentable {
     func updateNSView(_ v: NSVisualEffectView, context: Context) {}
 }
 
-/// NavigationSplitView assigns its AppKit sidebar item a 140pt minimum even when the
-/// SwiftUI column-width preference is lower. Update that native constraint alongside
-/// the sidebar content so the entire column, including its material, becomes an icon rail.
+extension View {
+    /// Content and the native divider share a short, non-bouncing ease curve. The native
+    /// sizer owns its clock: SwiftUI can coalesce representable updates during animation.
+    func sidebarColumn(
+        isCollapsed: Bool,
+        expandedMinimum: CGFloat,
+        expandedIdeal: CGFloat,
+        expandedMaximum: CGFloat,
+        reduceMotion: Bool
+    ) -> some View {
+        let width = isCollapsed ? 64 : expandedIdeal
+        return self
+            .lineLimit(1)
+            .frame(width: width, alignment: .topLeading)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .clipped()
+            .background(SidebarBackground())
+            .animation(reduceMotion ? nil : .timingCurve(1.0 / 3, 0, 2.0 / 3, 1, duration: SidebarColumnSizerView.duration), value: isCollapsed)
+            // Keep SwiftUI's native preference permissive while the sizer interpolates
+            // the actual constraints. A target-only minimum would snap the divider.
+            .navigationSplitViewColumnWidth(min: 64, ideal: width, max: expandedMaximum)
+            .background {
+                SidebarColumnSizer(
+                    configuration: .init(
+                        minimum: isCollapsed ? 64 : expandedMinimum,
+                        ideal: width,
+                        maximum: isCollapsed ? 64 : expandedMaximum
+                    ),
+                    animated: !reduceMotion
+                )
+                .frame(width: 0, height: 0)
+            }
+    }
+}
+
+/// NavigationSplitView assigns its native sidebar a 140pt minimum. Enforce the
+/// current animated constraints synchronously so that minimum never flashes onscreen.
 struct SidebarColumnSizer: NSViewRepresentable {
-    let isCollapsed: Bool
-    let expandedMinimum: CGFloat
-    let expandedIdeal: CGFloat
-    let expandedMaximum: CGFloat
+    let configuration: SidebarColumnSizerView.Configuration
+    let animated: Bool
 
     func makeNSView(context: Context) -> SidebarColumnSizerView {
         SidebarColumnSizerView(configuration: configuration)
     }
 
     func updateNSView(_ view: SidebarColumnSizerView, context: Context) {
-        view.configuration = configuration
-        view.applyWhenAttached()
-    }
-
-    private var configuration: SidebarColumnSizerView.Configuration {
-        .init(
-            isCollapsed: isCollapsed,
-            expandedMinimum: expandedMinimum,
-            expandedIdeal: expandedIdeal,
-            expandedMaximum: expandedMaximum
-        )
+        view.setConfiguration(configuration, animated: animated)
     }
 }
 
 @MainActor
 final class SidebarColumnSizerView: NSView {
     struct Configuration: Equatable {
-        let isCollapsed: Bool
-        let expandedMinimum: CGFloat
-        let expandedIdeal: CGFloat
-        let expandedMaximum: CGFloat
-
-        var minimum: CGFloat { isCollapsed ? 64 : expandedMinimum }
-        var ideal: CGFloat { isCollapsed ? 64 : expandedIdeal }
-        var maximum: CGFloat { isCollapsed ? 64 : expandedMaximum }
+        let minimum: CGFloat
+        let ideal: CGFloat
+        let maximum: CGFloat
     }
 
-    var configuration: Configuration
+    static let duration: TimeInterval = 0.24
+    private(set) var configuration: Configuration
+    private var destination: Configuration
+    private var animationTimer: Timer?
+    private var animationStart: TimeInterval = 0
+    private var animationOrigin: Configuration
     private var applyScheduled = false
     private var isApplying = false
     private weak var observedSplitView: NSSplitView?
 
     init(configuration: Configuration) {
         self.configuration = configuration
+        self.destination = configuration
+        self.animationOrigin = configuration
         super.init(frame: .zero)
     }
 
@@ -76,7 +100,59 @@ final class SidebarColumnSizerView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window == nil {
+            animationTimer?.invalidate()
+            animationTimer = nil
+            configuration = destination
+        }
         applyWhenAttached()
+    }
+
+    func setConfiguration(_ target: Configuration, animated: Bool) {
+        guard target != destination else {
+            if !animated, animationTimer != nil {
+                animationTimer?.invalidate()
+                animationTimer = nil
+                configuration = target
+            }
+            applyWhenAttached()
+            return
+        }
+        destination = target
+        animationTimer?.invalidate()
+        animationTimer = nil
+        guard animated, window != nil, splitViewController != nil else {
+            configuration = target
+            applyWhenAttached()
+            return
+        }
+        animationOrigin = configuration
+        animationStart = ProcessInfo.processInfo.systemUptime
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.advanceAnimation() }
+        }
+        animationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        advanceAnimation()
+    }
+
+    private func advanceAnimation() {
+        let elapsed = ProcessInfo.processInfo.systemUptime - animationStart
+        let progress = min(max(elapsed / Self.duration, 0), 1)
+        // With x control points at 1/3 and 2/3, the matching SwiftUI cubic
+        // has x(t) = t and y(t) = 3t² - 2t³.
+        let fraction = progress * progress * (3 - 2 * progress)
+        func interpolate(_ from: CGFloat, _ to: CGFloat) -> CGFloat { from + (to - from) * fraction }
+        configuration = .init(
+            minimum: interpolate(animationOrigin.minimum, destination.minimum),
+            ideal: interpolate(animationOrigin.ideal, destination.ideal),
+            maximum: interpolate(animationOrigin.maximum, destination.maximum)
+        )
+        apply()
+        if progress >= 1 {
+            animationTimer?.invalidate()
+            animationTimer = nil
+        }
     }
 
     override func layout() {
@@ -85,6 +161,11 @@ final class SidebarColumnSizerView: NSView {
     }
 
     func applyWhenAttached() {
+        // Correct attached layout changes before the next frame.
+        if splitViewController != nil {
+            apply()
+            return
+        }
         guard !applyScheduled else { return }
         applyScheduled = true
         Task { @MainActor [weak self] in
@@ -114,7 +195,9 @@ final class SidebarColumnSizerView: NSView {
         }
         let currentWidth = sidebar.viewController.view.frame.width
         if constraintsChanged || abs(currentWidth - configuration.ideal) > 0.5 {
-            controller.view.layoutSubtreeIfNeeded()
+            // The divider already lays out its children on each animation tick.
+            // An extra full controller layout here would measure the transcript twice.
+            if animationTimer == nil { controller.view.layoutSubtreeIfNeeded() }
             controller.splitView.setPosition(configuration.ideal, ofDividerAt: 0)
             controller.splitView.adjustSubviews()
         }
@@ -141,10 +224,9 @@ final class SidebarColumnSizerView: NSView {
     @objc private func splitViewDidResize(_ notification: Notification) {
         // SwiftUI can restore its native 140pt sidebar minimum during layout. Deferring
         // the correction to another task lets that wider rail render for a frame.
-        // Correct a collapsed rail in the same resize pass; our own resize reenters
-        // this observer, so `apply` guards against recursive corrections.
-        if configuration.isCollapsed { apply() }
-        else { applyWhenAttached() }
+        // Correct it in the same resize pass, including during animation. Our own
+        // resize reenters this observer, so `apply` guards against recursion.
+        apply()
     }
 
     private var splitViewController: NSSplitViewController? {
@@ -282,6 +364,7 @@ struct SidebarSearchField: View {
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @Binding var isCollapsed: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @State private var showConnection = false
 
@@ -329,23 +412,16 @@ struct SidebarView: View {
             .scrollContentBackground(.hidden)
             footer
         }
-        // Give the split view an actual narrow fitting view when collapsed. A minimum width
-        // alone still lets NavigationSplitView keep the last expanded sidebar width.
-        .frame(width: isCollapsed ? 64 : Metrics.sidebarWidth, alignment: .topLeading)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(SidebarBackground())
-        .background {
-            SidebarColumnSizer(
-                isCollapsed: isCollapsed,
-                expandedMinimum: Metrics.sidebarWidth,
-                expandedIdeal: Metrics.sidebarWidth,
-                expandedMaximum: Metrics.sidebarWidth
-            )
-            .frame(width: 0, height: 0)
-        }
+        .sidebarColumn(
+            isCollapsed: isCollapsed,
+            expandedMinimum: Metrics.sidebarWidth,
+            expandedIdeal: Metrics.sidebarWidth,
+            expandedMaximum: Metrics.sidebarWidth,
+            reduceMotion: reduceMotion
+        )
         .background {
             // ⌘K focuses the search field, wherever focus is.
-            Button("Search") { searchFocused = true }
+            Button("Search") { isCollapsed = false; searchFocused = true }
                 .keyboardShortcut("k", modifiers: .command)
                 .opacity(0).accessibilityHidden(true)
         }
@@ -425,6 +501,8 @@ struct SidebarView: View {
                 .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
+            .help("Settings")
         }
         .padding(.horizontal, isCollapsed ? 8 : Metrics.sidebarInset).padding(.vertical, 12)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, Metrics.sidebarInset) }

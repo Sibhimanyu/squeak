@@ -121,6 +121,7 @@ struct SettingSubsectionHeader: View {
 struct SettingsSidebar: View {
     @Environment(AppModel.self) private var model
     @Binding var isCollapsed: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @FocusState private var focusedSection: SettingsSection?
     @State private var query = ""
@@ -168,22 +169,15 @@ struct SettingsSidebar: View {
             .onMoveCommand(perform: moveFocus)
             footer
         }
-        // A fixed fitting width lets NavigationSplitView honor the icon rail after the
-        // collapsed state changes, instead of retaining the expanded sidebar's width.
-        .frame(width: isCollapsed ? 64 : Metrics.sidebarWidth, alignment: .topLeading)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(SidebarBackground())
+        .sidebarColumn(
+            isCollapsed: isCollapsed,
+            expandedMinimum: 200,
+            expandedIdeal: 216,
+            expandedMaximum: 280,
+            reduceMotion: reduceMotion
+        )
         .background {
-            SidebarColumnSizer(
-                isCollapsed: isCollapsed,
-                expandedMinimum: 200,
-                expandedIdeal: 216,
-                expandedMaximum: 280
-            )
-            .frame(width: 0, height: 0)
-        }
-        .background {
-            Button("Search Settings") { searchFocused = true }
+            Button("Search Settings") { isCollapsed = false; searchFocused = true }
                 .keyboardShortcut("k", modifiers: .command)
                 .opacity(0)
                 .accessibilityHidden(true)
