@@ -93,3 +93,16 @@ describe("sip-phone helpers", () => {
     expect(wavDurationMs(wavOf(new Int16Array(4000)))).toBe(500);
   });
 });
+
+describe("runDialog trace", () => {
+  it("traces what is said and the key chosen, never a PIN digit", async () => {
+    const lines: string[] = [];
+    const call = fakeCall([..."4821#".split(""), "2"]);
+    const result = await runDialog(call, new CallDialog(script, "4821"), (line) => lines.push(line));
+    expect(result).toEqual({ status: "answered", letter: "B" });
+    expect(lines).toContain("key: B chosen");
+    expect(lines.filter((l) => l.startsWith("said: ")).length).toBeGreaterThan(1);
+    expect(lines.some((l) => l.includes("4821"))).toBe(false);
+    expect(lines.filter((l) => l.startsWith("key: ")).every((l) => !/\d/.test(l))).toBe(true);
+  });
+});

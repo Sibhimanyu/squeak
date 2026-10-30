@@ -26,6 +26,8 @@ describe("MemoInbox", () => {
   let targets: MemoTarget[];
   let transcript: string | Error;
   let busy: Set<string>;
+  let favs: Array<{ n: number; workspace: string; label: string }>;
+  const traces: Array<[string, string]> = [];
   const sent: Array<{ target: string; text: string }> = [];
   const notes: string[] = [];
   let clock = 1_800_000_000_000;
@@ -34,11 +36,13 @@ describe("MemoInbox", () => {
     db = new FakeRtdb();
     store = new RtdbRest(await db.start());
     targets = [
-      { target: "c1", label: "squeak · voice" },
-      { target: "c2", label: "blume · hub" },
+      { target: "c1", label: "squeak · voice", workspace: null },
+      { target: "c2", label: "blume · hub", workspace: null },
     ];
     transcript = "tell it to go with option B";
     busy = new Set();
+    favs = [];
+    traces.length = 0;
     sent.length = 0;
     notes.length = 0;
     clock = 1_800_000_000_000;
@@ -59,6 +63,8 @@ describe("MemoInbox", () => {
         return { status: "started", via: "conductor", delivery: "sent" } as never;
       },
       caller: () => "35210",
+      favorites: () => favs,
+      trace: (kind, text) => traces.push([kind, text]),
       note: (text) => notes.push(text),
       now: () => clock,
     });
@@ -114,7 +120,7 @@ describe("MemoInbox", () => {
     await store.delete(dirPath(channel));
     await inbox.publish();
     expect(await directory()).toBeNull();
-    targets = [{ target: "c9", label: "other" }];
+    targets = [{ target: "c9", label: "other", workspace: null }];
     await inbox.publish();
     expect((await directory())!.version).not.toBe(first);
   });
@@ -202,5 +208,70 @@ describe("MemoInbox", () => {
     }
     expect(last).toMatchObject({ status: "refused", reason: expect.stringContaining("Too many") });
     expect(sent).toHaveLength(20);
+  });
+
+  describe("favourite workspaces", () => {
+    const chat = (n: number, workspace: string | null): MemoTarget => ({
+      target: `t${n}`,
+      label: `chat ${n}`,
+      workspace,
+    });
+
+    it("lists workspaces first, with chat choices counted across the whole directory", async () => {
+      targets = [chat(1, "wa"), chat(2, "wb"), chat(3, "wa"), chat(4, null)];
+      favs = [
+        { n: 2, workspace: "wb", label: "blume · hub" },
+        { n: 1, workspace: "wa", label: "squeak · main" },
+        { n: 5, workspace: "wz", label: "quiet" },
+      ];
+      await inbox.publish();
+      const dir = (await directory())!;
+      expect(dir.workspaces).toEqual([
+        {
+          n: 1,
+          label: "squeak · main",
+          chats: [
+            { n: 1, label: "chat 1", choice: 1 },
+            { n: 2, label: "chat 3", choice: 2 },
+          ],
+        },
+        { n: 2, label: "blume · hub", chats: [{ n: 1, label: "chat 2", choice: 3 }] },
+        { n: 5, label: "quiet", chats: [] },
+      ]);
+      expect(dir.items).toEqual([{ n: 1, label: "chat 4", choice: 4 }]);
+    });
+
+    it("sends a memo naming a favourite chat's choice to that chat, even past nine", async () => {
+      targets = Array.from({ length: 12 }, (_, i) => chat(i + 1, i < 9 ? "wa" : "wb"));
+      favs = [
+        { n: 1, workspace: "wa", label: "a" },
+        { n: 2, workspace: "wb", label: "b" },
+      ];
+      await inbox.publish();
+      const dir = (await directory())!;
+      const choice = dir.workspaces![1]!.chats[2]!.choice!;
+      expect(choice).toBe(12);
+      const memoId = newMessageId();
+      expect(await upload({ ...memo(choice, dir.version), id: memoId })).toMatchObject({
+        status: "transcript",
+        label: "chat 12",
+      });
+      await upload({ v: 1, kind: "send", memoId });
+      expect(sent).toEqual([{ target: "t12", text: "tell it to go with option B" }]);
+      expect(traces.map(([k]) => k)).toEqual(["step", "heard", "said", "step"]);
+    });
+
+    it("still resolves a stale version, and truncates long workspace names at a word", async () => {
+      targets = [chat(1, "wa")];
+      favs = [{ n: 1, workspace: "wa", label: "word ".repeat(30).trim() }];
+      await inbox.publish();
+      const old = (await directory())!;
+      expect(old.workspaces![0]!.label.length).toBeLessThanOrEqual(60);
+      expect(old.workspaces![0]!.label.endsWith("word")).toBe(true);
+      targets = [chat(1, "wa"), chat(2, "wa")];
+      await inbox.publish();
+      expect((await directory())!.version).not.toBe(old.version);
+      expect(await upload(memo(1, old.version))).toMatchObject({ status: "transcript", label: "chat 1" });
+    });
   });
 });

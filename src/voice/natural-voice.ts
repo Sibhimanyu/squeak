@@ -28,6 +28,9 @@ export const CLIPS_BUDGET_MS = 25_000;
 export const VOICE_PREVIEW_TEXT = "Hello, this is Squeak. Your agent needs an answer. Which way should we go?";
 const SOURCE_RATE = 24_000;
 const LINE_RATE = 8_000;
+/** Silence around every line clip: media takes a moment to start, and the first syllable was eaten ("egram"). */
+export const LEAD_SILENCE_MS = 300;
+export const TAIL_SILENCE_MS = 250;
 
 export interface NaturalPaths {
   dir: string;
@@ -226,21 +229,21 @@ export class NaturalVoice {
   /** A fixed sample through the same engine and telephone filter, without changing call settings. */
   async preview(voice: string): Promise<Buffer | null> {
     const pcm = await this.render(VOICE_PREVIEW_TEXT, voice);
-    return pcm?.length ? wavOfLine(downsampleToLine(pcm)) : null;
+    return pcm?.length ? wavOfLine(padLine(downsampleToLine(pcm))) : null;
   }
 
   /** The words as a telephone clip: 8 kHz G.711 mu-law. Null if they could not be made. */
   async clip(text: string): Promise<Clip | null> {
     const pcm = await this.render(text);
     if (!pcm) return null;
-    return { text, mulaw: encodeMulaw(downsampleToLine(pcm)).toString("base64") };
+    return { text, mulaw: encodeMulaw(padLine(downsampleToLine(pcm))).toString("base64") };
   }
 
   /** The words as an 8 kHz WAV file, for a call this Mac places itself. Null if they could not be made. */
   async wav(text: string): Promise<{ file: string; durationMs: number } | null> {
     const pcm = await this.render(text);
     if (!pcm) return null;
-    const line = downsampleToLine(pcm);
+    const line = padLine(downsampleToLine(pcm));
     const file = path.join(this.tmp, `s${this.nextId++}.wav`);
     fs.writeFileSync(file, wavOfLine(line), { mode: 0o600 });
     return { file, durationMs: Math.round((line.length / LINE_RATE) * 1000) };
@@ -272,6 +275,44 @@ export class NaturalSpeaker implements Speaker {
   dispose(): void {
     this.natural.stop();
     this.fallback.dispose();
+  }
+}
+
+/** Most seconds of speech one rebuild of the call-in prompts renders anew (cached ones cost nothing). */
+export const PROMPT_RENDER_SECONDS = 60;
+
+/**
+ * The Mac's recordings of call-in prompts, remembered by voice and words so a rebuild renders only what is missing.
+ * What a rebuild no longer asks for is forgotten, so the cache cannot grow past the current prompts.
+ */
+export class PromptClipCache {
+  private readonly made = new Map<string, Clip>();
+
+  constructor(
+    private readonly natural: Pick<NaturalVoice, "clip" | "usable">,
+    private readonly voice: () => string,
+    private readonly maxSeconds = PROMPT_RENDER_SECONDS,
+  ) {}
+
+  async clips(texts: readonly string[]): Promise<Clip[]> {
+    if (!this.natural.usable) return [];
+    const voice = this.voice();
+    const wanted = new Map<string, string>(texts.map((text) => [`${voice}\n${text}`, text]));
+    const out: Clip[] = [];
+    let renderedBytes = 0;
+    for (const [id, text] of wanted) {
+      let clip = this.made.get(id);
+      if (!clip && renderedBytes < this.maxSeconds * LINE_RATE) {
+        clip = (await this.natural.clip(text)) ?? undefined;
+        if (clip) {
+          this.made.set(id, clip);
+          renderedBytes += Math.floor((clip.mulaw.length * 3) / 4);
+        }
+      }
+      if (clip) out.push(clip);
+    }
+    for (const id of [...this.made.keys()]) if (!wanted.has(id)) this.made.delete(id);
+    return out;
   }
 }
 
@@ -354,6 +395,15 @@ export function downsampleToLine(pcm: Int16Array): Int16Array {
     }
     out[n] = Math.max(-32768, Math.min(32767, Math.round(acc)));
   }
+  return out;
+}
+
+/** Line audio with a little silence before and after, so a clip starts and ends cleanly. */
+export function padLine(line: Int16Array): Int16Array {
+  const lead = Math.round((LEAD_SILENCE_MS / 1000) * LINE_RATE);
+  const tail = Math.round((TAIL_SILENCE_MS / 1000) * LINE_RATE);
+  const out = new Int16Array(lead + line.length + tail);
+  out.set(line, lead);
   return out;
 }
 

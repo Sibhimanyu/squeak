@@ -278,8 +278,11 @@ export class CachedSpeaker implements Speaker {
   }
 
   /** Makes each prompt now (one at a time, so a small machine is not swamped); a failure is left for the call to meet. */
-  async prewarm(texts: readonly string[]): Promise<void> {
+  async prewarm(texts: readonly string[], pause?: () => boolean): Promise<void> {
     for (const text of texts) {
+      // Making speech uses the cores the call's audio thread needs: wait until the line is free.
+      while (pause?.()) await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (this.made.has(text) && fs.existsSync(this.made.get(text)!.file)) continue;
       await this.speak(text).catch(() => undefined);
     }
   }

@@ -30,16 +30,16 @@ afterEach(() => {
 });
 
 describe("GatewayEventLog", () => {
-  it("keeps the newest 50 lines and clips text to 200", () => {
+  it("keeps the newest 200 lines and clips text to 320", () => {
     let t = 0;
     const log = new GatewayEventLog(() => ++t);
-    for (let i = 0; i < 60; i++) log.note("info", `line ${i}`);
+    for (let i = 0; i < 260; i++) log.note("info", `line ${i}`);
     log.note("warn", "x".repeat(500));
     const doc = log.doc(99);
-    expect(doc.lines).toHaveLength(50);
+    expect(doc.lines).toHaveLength(200);
     expect(doc.lines.at(-1)).toMatchObject({ level: "warn" });
-    expect(doc.lines.at(-1)!.text).toHaveLength(200);
-    expect(doc.lines[0]!.text).toBe("line 11");
+    expect(doc.lines.at(-1)!.text).toHaveLength(320);
+    expect(doc.lines[0]!.text).toBe("line 61");
     expect(doc).toMatchObject({ v: 1, id: "gwlog", at: 99 });
   });
 });

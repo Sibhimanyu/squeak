@@ -8,8 +8,8 @@ import { openBody, sealBody } from "./relay-protocol.js";
  */
 
 export const GATEWAY_LOG_ID = "gwlog";
-export const MAX_LOG_LINES = 50;
-export const MAX_LOG_TEXT = 200;
+export const MAX_LOG_LINES = 200;
+export const MAX_LOG_TEXT = 320;
 
 export interface GatewayLogLine {
   at: number;

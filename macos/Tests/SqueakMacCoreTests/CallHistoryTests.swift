@@ -66,3 +66,30 @@ import Testing
         #expect(CallText.logExport(log, calendar: cal) == "14:02:00 WARN slow speech")
     }
 }
+
+@Suite struct CallEventsTests {
+    private func view(_ json: String) throws -> CallsView { try JSONDecoder().decode(CallsView.self, from: Data(json.utf8)) }
+
+    @Test func decodesEventsAndIncoming() throws {
+        let v = try view(#"{"calls":[{"id":"a","at":1,"kind":"incoming","label":"w · c","outcome":"answered","sent":true,"events":[{"at":1000,"source":"add-on","kind":"heard","text":"hi","ms":812},{"at":2000,"source":"x","kind":"zzz","text":"t"},{}]}]}"#)
+        let c = v.calls[0]
+        #expect(c.kind == .incoming && c.events.count == 3)
+        #expect(c.events[0].source == .addOn && c.events[0].kind == .heard && c.events[0].ms == 812)
+        #expect(c.events[1].source == .mac && c.events[1].kind == .step && c.events[1].ms == nil)
+        #expect(CallText.what(c) == "You called Squeak \u{00B7} w \u{00B7} c")
+        #expect(CallText.outcomeSentence(c) == "Message taken \u{00B7} sent to the chat")
+        #expect(try view(#"{"calls":[{"id":"a"}]}"#).calls[0].events.isEmpty)
+    }
+
+    @Test func timelineCopyIsPlainText() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let e = CallEntry(id: "a", at: 0, kind: .agent, label: "Repo", outcome: .answered, durationMs: 42000, events: [
+            CallEvent(at: 3_723_004, source: .mac, kind: .step, text: "Rendered 7 voice clips", ms: 10200),
+            CallEvent(at: 3_724_000, source: .addOn, kind: .said, text: "Press 1"),
+        ])
+        let lines = CallText.timelineExport(e, calendar: cal).split(separator: "\n").map(String.init)
+        #expect(lines.count == 3)
+        #expect(lines[1] == "01:02:03.004 [Mac] Step: Rendered 7 voice clips (10.2 s)")
+        #expect(lines[2] == "01:02:04.000 [Add-on] Squeak said: \u{201C}Press 1\u{201D}")
+    }
+}

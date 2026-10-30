@@ -20,6 +20,10 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public var pauseKnown = false
     /// The realistic voice this Mac makes for calls; nil from a daemon that predates it (hide the row).
     public var natural: NaturalVoice?
+    /// Quick workspaces (keypad number to workspace); nil from a daemon that predates them (hide the section).
+    public var favorites: [FavoriteWorkspace]?
+    /// Workspaces a favourite can be picked from; nil from an older daemon.
+    public var workspaces: [WorkspaceChoice]?
 
     public init(mode: String = "off", callee: String? = nil, defaultCallee: String? = nil, pin: String? = nil, policy: PinPolicy? = nil,
                 pause: VoicePause? = nil, pauseKnown: Bool? = nil) {
@@ -27,7 +31,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         self.pause = pause; self.pauseKnown = pauseKnown ?? (pause != nil)
     }
 
-    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural }
+    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -39,6 +43,8 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         pauseKnown = c.contains(.pause)
         pause = try? c.decode(VoicePause.self, forKey: .pause)
         natural = try? c.decode(NaturalVoice.self, forKey: .natural)
+        favorites = try? c.decode([FavoriteWorkspace].self, forKey: .favorites)
+        workspaces = try? c.decode([WorkspaceChoice].self, forKey: .workspaces)
     }
 
     public var isOn: Bool { mode != "off" }
@@ -141,5 +147,74 @@ public struct NaturalVoice: Sendable, Equatable, Decodable {
         if let enabled { inner["enabled"] = enabled }
         if let voice { inner["voice"] = voice }
         return (try? JSONSerialization.data(withJSONObject: ["natural": inner], options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+}
+
+/// A workspace a call can pick with one key: `n` is the keypad number 1-9.
+public struct FavoriteWorkspace: Sendable, Equatable, Decodable, Identifiable {
+    public var n: Int
+    public var workspace: String
+    public var label: String
+    public var id: Int { n }
+
+    public init(n: Int, workspace: String, label: String = "") { self.n = n; self.workspace = workspace; self.label = label }
+
+    private enum Keys: String, CodingKey { case n, workspace, label }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        n = (try? c.decode(Int.self, forKey: .n)) ?? 0
+        workspace = (try? c.decode(String.self, forKey: .workspace)) ?? ""
+        label = (try? c.decode(String.self, forKey: .label)) ?? workspace
+    }
+}
+
+public struct WorkspaceChoice: Sendable, Equatable, Decodable, Identifiable, Hashable {
+    public var key: String
+    public var label: String
+    public var id: String { key }
+
+    public init(key: String, label: String) { self.key = key; self.label = label }
+
+    private enum Keys: String, CodingKey { case key, label }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        key = (try? c.decode(String.self, forKey: .key)) ?? ""
+        label = (try? c.decode(String.self, forKey: .label)) ?? key
+    }
+}
+
+public enum QuickWorkspaces {
+    public static let numbers = Array(1...9)
+
+    /// Body of the POST that replaces the whole list: exactly `{"favorites":[{"n":1,"workspace":"<key>"}]}`.
+    public static func requestBody(_ list: [FavoriteWorkspace]) -> Data {
+        let items: [[String: Any]] = list.map { ["n": $0.n, "workspace": $0.workspace] }
+        return (try? JSONSerialization.data(withJSONObject: ["favorites": items], options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+
+    /// Numbers a row may take: its own plus every number no other row holds.
+    public static func availableNumbers(for row: Int, in list: [FavoriteWorkspace]) -> [Int] {
+        let others = Set(list.filter { $0.n != row }.map(\.n))
+        return numbers.filter { $0 == row || !others.contains($0) }
+    }
+
+    public static func nextFreeNumber(in list: [FavoriteWorkspace]) -> Int? {
+        let used = Set(list.map(\.n))
+        return numbers.first { !used.contains($0) }
+    }
+
+    /// Moves a row to another number; refused (nil) when another row already holds it or it is outside 1-9.
+    public static func renumbered(_ list: [FavoriteWorkspace], from n: Int, to new: Int) -> [FavoriteWorkspace]? {
+        guard numbers.contains(new), n == new || !list.contains(where: { $0.n == new }) else { return nil }
+        return list.map { $0.n == n ? FavoriteWorkspace(n: new, workspace: $0.workspace, label: $0.label) : $0 }.sorted { $0.n < $1.n }
+    }
+
+    /// Adds the first candidate not already used at the lowest free number; nil when none is left or 9 are used.
+    public static func added(_ list: [FavoriteWorkspace], candidates: [WorkspaceChoice]) -> [FavoriteWorkspace]? {
+        guard let n = nextFreeNumber(in: list),
+              let w = candidates.first(where: { c in !list.contains { $0.workspace == c.key } }) else { return nil }
+        return (list + [FavoriteWorkspace(n: n, workspace: w.key, label: w.label)]).sorted { $0.n < $1.n }
     }
 }

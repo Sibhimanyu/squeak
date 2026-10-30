@@ -3,7 +3,35 @@ import Foundation
 /// Phone-call history and the gateway's own log: `GET /control/voice/calls`. The daemon owns the data;
 /// this decodes tolerantly (an unknown word never fails the page) and words everything in plain sentences.
 /// Times are milliseconds since 1970.
-public enum CallKind: String, Sendable, Equatable { case agent, test }
+public enum CallKind: String, Sendable, Equatable { case agent, test, incoming }
+
+public enum CallEventKind: String, Sendable, Equatable { case step, said, heard, key, warn }
+public enum CallEventSource: String, Sendable, Equatable { case mac, addOn = "add-on" }
+
+/// One line of a call's timeline (`events` on a call, oldest first). `at` is ms since 1970, `ms` an optional duration.
+public struct CallEvent: Sendable, Equatable, Decodable, Identifiable {
+    public var at: Double
+    public var source: CallEventSource
+    public var kind: CallEventKind
+    public var text: String
+    public var ms: Double?
+    public var id: String { "\(at)-\(kind.rawValue)-\(text)" }
+
+    public init(at: Double, source: CallEventSource = .mac, kind: CallEventKind = .step, text: String, ms: Double? = nil) {
+        self.at = at; self.source = source; self.kind = kind; self.text = text; self.ms = ms
+    }
+
+    private enum Keys: String, CodingKey { case at, source, kind, text, ms }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        at = (try? c.decode(Double.self, forKey: .at)) ?? 0
+        source = (try? c.decode(String.self, forKey: .source)).flatMap(CallEventSource.init(rawValue:)) ?? .mac
+        kind = (try? c.decode(String.self, forKey: .kind)).flatMap(CallEventKind.init(rawValue:)) ?? .step
+        text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        ms = try? c.decode(Double.self, forKey: .ms)
+    }
+}
 
 public enum CallOutcome: String, Sendable, Equatable {
     case answered, unanswered, failed
@@ -23,16 +51,20 @@ public struct CallEntry: Sendable, Equatable, Decodable, Identifiable {
     public var sent: Bool?
     public var durationMs: Double
     public var failure: String?
+    /// The call's timeline, oldest first; empty from a daemon that predates it.
+    public var events: [CallEvent]
 
     public init(
         id: String, at: Double, kind: CallKind = .agent, reason: String? = nil, label: String? = nil,
-        outcome: CallOutcome = .unanswered, letter: String? = nil, sent: Bool? = nil, durationMs: Double = 0, failure: String? = nil
+        outcome: CallOutcome = .unanswered, letter: String? = nil, sent: Bool? = nil, durationMs: Double = 0, failure: String? = nil,
+        events: [CallEvent] = []
     ) {
+        self.events = events
         self.id = id; self.at = at; self.kind = kind; self.reason = reason; self.label = label; self.outcome = outcome
         self.letter = letter; self.sent = sent; self.durationMs = durationMs; self.failure = failure
     }
 
-    private enum Keys: String, CodingKey { case id, at, kind, reason, label, outcome, letter, sent, durationMs, failure }
+    private enum Keys: String, CodingKey { case id, at, kind, reason, label, outcome, letter, sent, durationMs, failure, events }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -47,6 +79,7 @@ public struct CallEntry: Sendable, Equatable, Decodable, Identifiable {
         sent = try? c.decode(Bool.self, forKey: .sent)
         durationMs = (try? c.decode(Double.self, forKey: .durationMs)) ?? 0
         failure = try? c.decode(String.self, forKey: .failure)
+        events = (try? c.decode([CallEvent].self, forKey: .events)) ?? []
     }
 }
 
@@ -104,6 +137,10 @@ public enum CallText {
 
     public static func what(_ e: CallEntry) -> String {
         if e.kind == .test { return "Test call" }
+        if e.kind == .incoming {
+            if let l = e.label, !l.isEmpty { return "You called Squeak · \(l)" }
+            return "You called Squeak"
+        }
         if let l = e.label, !l.isEmpty { return l }
         switch e.reason {
         case "blocked_approval": return "An approval was waiting"
@@ -114,6 +151,8 @@ public enum CallText {
 
     public static func outcomeSentence(_ e: CallEntry) -> String {
         switch e.outcome {
+        case .answered where e.kind == .incoming:
+            return e.sent == true ? "Message taken · sent to the chat" : "Message taken"
         case .answered:
             var s = "Answered"
             if let l = e.letter, !l.isEmpty { s += ", pressed \(l)" }
@@ -166,5 +205,60 @@ public enum CallText {
 
     public static func logExport(_ log: GatewayLog, calendar: Calendar = .current) -> String {
         log.lines.map { logLine($0, calendar: calendar) }.joined(separator: "\n")
+    }
+}
+
+extension CallText {
+    public static func eventTime(_ ms: Double, calendar: Calendar = .current) -> String {
+        let f = DateFormatter()
+        f.calendar = calendar; f.timeZone = calendar.timeZone; f.locale = Locale(identifier: "en_GB")
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f.string(from: Date(timeIntervalSince1970: ms / 1000))
+    }
+
+    /// "812 ms", "10.2 s", else minutes.
+    public static func eventDuration(ms: Double) -> String {
+        if ms < 1000 { return "\(Int(ms.rounded())) ms" }
+        if ms < 60_000 { return String(format: "%.1f s", ms / 1000) }
+        return duration(ms: ms)
+    }
+
+    public static func sourceTag(_ s: CallEventSource) -> String { s == .mac ? "Mac" : "Add-on" }
+
+    public static func kindLabel(_ k: CallEventKind) -> String {
+        switch k {
+        case .step: "Step"
+        case .said: "Squeak said"
+        case .heard: "Heard"
+        case .key: "Key"
+        case .warn: "Warning"
+        }
+    }
+
+    /// The text of one timeline line: said and heard are quoted.
+    public static func eventBody(_ e: CallEvent) -> String {
+        switch e.kind {
+        case .said, .heard: "\u{201C}\(e.text)\u{201D}"
+        default: e.text
+        }
+    }
+
+    public static func eventLine(_ e: CallEvent, calendar: Calendar = .current) -> String {
+        var s = "\(eventTime(e.at, calendar: calendar)) [\(sourceTag(e.source))] \(kindLabel(e.kind)): \(eventBody(e))"
+        if let ms = e.ms { s += " (\(eventDuration(ms: ms)))" }
+        return s
+    }
+
+    /// One-line summary at the top of an expanded call: direction, who, total time, outcome.
+    public static func summary(_ e: CallEntry) -> String {
+        let direction = e.kind == .incoming ? "Incoming" : "Outgoing"
+        var parts = [direction, what(e), duration(ms: e.durationMs), outcomeSentence(e)]
+        if e.kind == .incoming { parts.remove(at: 1) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The whole timeline as plain text, one line per event.
+    public static func timelineExport(_ e: CallEntry, calendar: Calendar = .current) -> String {
+        ([summary(e)] + e.events.map { eventLine($0, calendar: calendar) }).joined(separator: "\n")
     }
 }

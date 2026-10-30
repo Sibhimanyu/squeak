@@ -35,6 +35,8 @@ import { RENDEZVOUS_DATABASE } from "./claim-protocol.js";
 import type { Clip } from "./clips.js";
 
 /** Where Home Assistant puts an add-on's options. */
+/** How long the add-on waits for the Mac's recordings of the call-in prompts before making them itself. */
+const PREWARM_WAIT_MS = 20_000;
 const ADDON_OPTIONS = "/data/options.json";
 /** Channel, key and database address once paired (0600): what the removed database_url/channel/key options held. */
 const PAIRING_FILE = "/data/pairing.json";
@@ -218,7 +220,7 @@ export function phoneLine(
     const dialled = await phone.dial(callee);
     if (dialled.status === "unanswered") return { status: "unanswered" };
     if (dialled.status === "failed") return { status: "failed", reason: dialled.reason };
-    return runDialog(dialled.call, dialog);
+    return runDialog(dialled.call, dialog, onEvent ? (line) => onEvent("info", line) : undefined);
   };
   return {
     async call(callee, dialog, audio) {
@@ -429,7 +431,9 @@ export async function runGateway(): Promise<number> {
       const callInPin = gate.pin;
       // Answered at once from memory, and the prompts made before anyone calls: a network read or a voice made after
       // pick-up is a silence on the line.
-      const directory = new DirectoryCache(store, relay.channel, relay.key);
+      // The Mac's recordings of every prompt are seeded before anything is made here, so the add-on synthesizes only
+      // what is still missing.
+      const directory = new DirectoryCache(store, relay.channel, relay.key, Date.now, (clips) => phone.seed?.(clips));
       const uplink = new RelayUplink({ store, channel: relay.channel, key: relay.key });
       phone.onIncoming((incoming) => {
         void handleIncoming(incoming, {
@@ -439,13 +443,25 @@ export async function runGateway(): Promise<number> {
           directory: async () => directory.current() ?? (await directory.refresh()),
           uplink,
           encode: encodeOpus,
+          trace: (line) => note("info", line),
+          seed: (clips) => phone.seed?.(clips),
         }).catch((error: unknown) =>
           logger.warn("voice call-in failed", { error: error instanceof Error ? error.message : String(error) }),
         );
       });
-      phone.prewarm?.(inboundPrompts(null, callInPin() !== null));
-      void directory.refresh().then((first) => phone.prewarm?.(inboundPrompts(first, callInPin() !== null)));
-      directory.start((changed) => phone.prewarm?.(inboundPrompts(changed, callInPin() !== null)));
+      // Without the Mac's recordings the add-on makes them, but not at once: the Mac publishes them just after the list,
+      // and a prompt made here first is a prompt the Mac's voice then replaces.
+      let warmTimer: NodeJS.Timeout | null = null;
+      const warm = (doc: Awaited<ReturnType<typeof directory.refresh>>): void => {
+        if (warmTimer) clearTimeout(warmTimer);
+        const run = (): void => phone.prewarm?.(inboundPrompts(doc, callInPin() !== null));
+        if (doc?.audio?.length) return run();
+        warmTimer = setTimeout(run, PREWARM_WAIT_MS);
+        warmTimer.unref?.();
+      };
+      warm(null);
+      void directory.refresh().then(warm);
+      directory.start(warm);
       const status = startStatusReporter({
         store,
         channel: relay.channel,
@@ -473,6 +489,7 @@ export async function runGateway(): Promise<number> {
           setSpeechSlowHook(null);
           gateway.stop();
           directory.stop();
+          if (warmTimer) clearTimeout(warmTimer);
           phone.stop();
           speaker.dispose();
         },

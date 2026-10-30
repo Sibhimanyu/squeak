@@ -73,18 +73,64 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Clips from an untrusted (but sealed and signed) request: well-formed ones only, within the size cap; else none. */
-export function readClips(value: unknown): Clip[] | undefined {
-  if (!Array.isArray(value) || value.length > MAX_CLIPS) return undefined;
+/** Most mu-law bytes one audio document carries (about 41 s): sealed it stays under the database's 900000-character box. */
+export const MAX_AUDIO_DOC_BYTES = 330_000;
+const MAX_AUDIO_DOC_CLIPS = 40;
+
+/** One clip from an untrusted (but sealed and signed) document, or undefined; `bytes` is its mu-law size. */
+export function readClip(value: unknown, maxBytes = MAX_CLIP_BYTES): Clip | undefined {
+  if (!isRecord(value) || typeof value.text !== "string" || typeof value.mulaw !== "string") return undefined;
+  if (value.text.length === 0 || value.text.length > MAX_TEXT) return undefined;
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value.mulaw)) return undefined;
+  if (Math.floor((value.mulaw.length * 3) / 4) > maxBytes) return undefined;
+  return { text: value.text, mulaw: value.mulaw };
+}
+
+function readClipList(value: unknown, maxClips: number, maxBytes: number): Clip[] | undefined {
+  if (!Array.isArray(value) || value.length > maxClips) return undefined;
   const clips: Clip[] = [];
   let bytes = 0;
   for (const item of value) {
-    if (!isRecord(item) || typeof item.text !== "string" || typeof item.mulaw !== "string") return undefined;
-    if (item.text.length === 0 || item.text.length > MAX_TEXT) return undefined;
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(item.mulaw)) return undefined;
-    bytes += Math.floor((item.mulaw.length * 3) / 4);
-    if (bytes > MAX_CLIP_BYTES) return undefined;
-    clips.push({ text: item.text, mulaw: item.mulaw });
+    const clip = readClip(item, maxBytes);
+    if (!clip) return undefined;
+    bytes += clipBytes(clip);
+    if (bytes > maxBytes) return undefined;
+    clips.push(clip);
   }
   return clips.length > 0 ? clips : undefined;
+}
+
+/** Clips from an untrusted (but sealed and signed) request: well-formed ones only, within the size cap; else none. */
+export function readClips(value: unknown): Clip[] | undefined {
+  return readClipList(value, MAX_CLIPS, MAX_CLIP_BYTES);
+}
+
+/** Clips of one audio document (call-in prompts): the same checks, a larger count, the document's own size cap. */
+export function readAudioClips(value: unknown): Clip[] | undefined {
+  return readClipList(value, MAX_AUDIO_DOC_CLIPS, MAX_AUDIO_DOC_BYTES);
+}
+
+/** The mu-law size of a clip. */
+export function clipBytes(clip: Clip): number {
+  return Math.floor((clip.mulaw.length * 3) / 4);
+}
+
+/** Clips split into groups that each stay within `maxBytes` (a clip bigger than that alone is dropped), in order. */
+export function chunkClips(clips: readonly Clip[], maxBytes = MAX_AUDIO_DOC_BYTES): Clip[][] {
+  const groups: Clip[][] = [];
+  let current: Clip[] = [];
+  let bytes = 0;
+  for (const clip of clips) {
+    const size = clipBytes(clip);
+    if (size > maxBytes) continue;
+    if (bytes + size > maxBytes || current.length >= MAX_AUDIO_DOC_CLIPS) {
+      groups.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(clip);
+    bytes += size;
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
 }

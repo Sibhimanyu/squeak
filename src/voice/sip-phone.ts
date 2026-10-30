@@ -204,11 +204,18 @@ class LiveCall implements PhoneCall {
 
   async record(options: {
     maxMs: number;
+    beep?: boolean;
   }): Promise<{ file: string; durationMs: number; ended: "key" | "limit" } | null> {
     if (!this.open) return null;
     const file = path.join(this.ctx.dir, `memo-${this.recordings++}.wav`);
     this.keys.length = 0;
     this.ctx.send("auplay", `aufile,${file}`);
+    // The beep plays while the recording is already running: starting after it lost the first syllable of what
+    // people said right on the beep ("Telegram" came out "egram").
+    if (options.beep) {
+      this.ctx.send("ausrc", `aufile,${this.ctx.beepFile}`);
+      await this.pause(150);
+    }
     let ended: "key" | "limit" | "closed" = "limit";
     const deadline = Date.now() + options.maxMs;
     for (;;) {
@@ -298,7 +305,9 @@ export class SipPhone implements Phone {
 
   /** Queued behind any earlier warm-up, one prompt at a time. */
   prewarm(texts: readonly string[]): void {
-    this.warming = this.warming.then(() => this.speaker.prewarm(texts)).catch(() => undefined);
+    this.warming = this.warming
+      .then(() => this.speaker.prewarm(texts, () => this.current?.open === true))
+      .catch(() => undefined);
   }
 
   /** Whether the PBX has accepted the registration, and why not when it has not (a fixed-length reason from baresip). */

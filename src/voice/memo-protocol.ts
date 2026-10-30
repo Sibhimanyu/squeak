@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import type { ChannelDoc } from "../remote/firestore-rest.js";
+import { readAudioClips, readClip, type Clip } from "./clips.js";
 import { CLOCK_SKEW_MS, isRecord, openBody, sealBody } from "./relay-protocol.js";
 
 /**
@@ -30,13 +31,27 @@ export const UP_TTL_MS = 5 * 60_000;
 /** Longest recording, and the most characters of base64 audio a memo may carry (~120 s of Opus at 16 kbit/s). */
 export const MAX_MEMO_MS = 120_000;
 export const MAX_AUDIO_CHARS = 450_000;
-export const MAX_CHOICES = 6;
+/** Most chats a directory can name (a memo's `choice` indexes them); a keypad shows at most nine at a time. */
+export const MAX_CHOICES = 40;
+/** The chats read out in one menu without workspaces: a keypad's digits, and a menu a person can hold in mind. */
+export const MENU_CHOICES = 6;
+export const MAX_WORKSPACES = 9;
 
 export const newMessageId = (): string => crypto.randomBytes(16).toString("base64url");
 
 export interface DirectoryItem {
+  /** The digit that picks it in its menu. */
   n: number;
   label: string;
+  /** Which chat it is (what a memo names); absent: `n`, as before workspaces existed. */
+  choice?: number;
+}
+
+/** A favourite workspace: its own digit, and the chats in it that can take a message now. */
+export interface DirectoryWorkspace {
+  n: number;
+  label: string;
+  chats: DirectoryItem[];
 }
 
 export interface DirectoryDoc {
@@ -46,7 +61,31 @@ export interface DirectoryDoc {
   version: string;
   /** The one extension allowed to call in (the Mac's "who to ring" setting); null: nobody. */
   caller: string | null;
+  /** Chats outside the favourites (or all of them, with none); the menu behind "0" when workspaces exist. */
   items: DirectoryItem[];
+  /** The favourite workspaces, in the order they are read; absent from an older Mac. */
+  workspaces?: DirectoryWorkspace[];
+  /** Ids of the audio documents (`voicedir/audio-<version>-<i>`) holding the Mac's recordings of this list's prompts. */
+  audio?: string[];
+}
+
+export const MAX_AUDIO_DOCS = 8;
+const AUDIO_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+export const audioDocId = (version: string, index: number): string => `audio-${version}-${index}`;
+export const audioPath = (channel: string, id: string): string => `channels/${channel}/${DIR_KIND}/${id}`;
+
+/** One audio document: the Mac's clips for call-in prompts, sealed apart from the list so the list stays small. */
+export function sealAudio(key: string, id: string, version: string, clips: Clip[], at: number): ChannelDoc {
+  return sealBody(key, "dir", id, { v: 1, version, clips }, at);
+}
+
+export function readAudio(key: string, id: string, doc: ChannelDoc): { version: string; clips: Clip[] } | null {
+  if (!AUDIO_ID.test(id)) return null;
+  const body = openBody(key, "dir", id, doc);
+  if (!isRecord(body) || body.v !== 1 || typeof body.version !== "string") return null;
+  const clips = readAudioClips(body.clips);
+  return clips ? { version: body.version, clips } : null;
 }
 
 export type UpMessage =
@@ -54,7 +93,7 @@ export type UpMessage =
   | { v: 1; id: string; at: number; expiresAt: number; kind: "send"; memoId: string };
 
 export type DownMessage =
-  | { v: 1; id: string; at: number; status: "transcript"; text: string; label: string }
+  | { v: 1; id: string; at: number; status: "transcript"; text: string; label: string; audio?: Clip }
   | { v: 1; id: string; at: number; status: "sent" }
   | { v: 1; id: string; at: number; status: "refused"; reason: string };
 
@@ -68,13 +107,48 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
   // A list from last week is not a list of who can take a message now.
   if (Math.abs(now - body.at) > 24 * 60 * 60_000) return null;
   if (body.caller !== null && typeof body.caller !== "string") return null;
-  if (!Array.isArray(body.items) || body.items.length > MAX_CHOICES) return null;
-  const items: DirectoryItem[] = [];
-  for (const item of body.items) {
-    if (!isRecord(item) || typeof item.n !== "number" || typeof item.label !== "string") return null;
-    items.push({ n: item.n, label: item.label.slice(0, 80) });
+  const readItems = (raw: unknown, max: number): DirectoryItem[] | null => {
+    if (!Array.isArray(raw) || raw.length > max) return null;
+    const out: DirectoryItem[] = [];
+    for (const item of raw) {
+      if (!isRecord(item) || typeof item.n !== "number" || typeof item.label !== "string") return null;
+      if (item.choice !== undefined && !(typeof item.choice === "number" && Number.isInteger(item.choice))) return null;
+      out.push({
+        n: item.n,
+        label: item.label.slice(0, 80),
+        ...(typeof item.choice === "number" ? { choice: item.choice } : {}),
+      });
+    }
+    return out;
+  };
+  const items = readItems(body.items, MAX_CHOICES);
+  if (!items) return null;
+  let workspaces: DirectoryWorkspace[] | undefined;
+  if (body.workspaces !== undefined) {
+    if (!Array.isArray(body.workspaces) || body.workspaces.length > MAX_WORKSPACES) return null;
+    workspaces = [];
+    for (const raw of body.workspaces) {
+      if (!isRecord(raw) || typeof raw.n !== "number" || typeof raw.label !== "string") return null;
+      const chats = readItems(raw.chats, MAX_WORKSPACES);
+      if (!chats) return null;
+      workspaces.push({ n: raw.n, label: raw.label.slice(0, 80), chats });
+    }
   }
-  return { v: 1, at: body.at, version: body.version, caller: body.caller, items };
+  let audio: string[] | undefined;
+  if (body.audio !== undefined) {
+    if (!Array.isArray(body.audio) || body.audio.length > MAX_AUDIO_DOCS) return null;
+    if (!body.audio.every((id) => typeof id === "string" && AUDIO_ID.test(id))) return null;
+    audio = body.audio as string[];
+  }
+  return {
+    v: 1,
+    at: body.at,
+    version: body.version,
+    caller: body.caller,
+    items,
+    ...(workspaces ? { workspaces } : {}),
+    ...(audio ? { audio } : {}),
+  };
 }
 
 export function sealUp(key: string, message: UpMessage): ChannelDoc {
@@ -122,10 +196,18 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
   if (!isRecord(body) || body.v !== 1 || body.id !== id || typeof body.at !== "number") return null;
   const base = { v: 1 as const, id, at: body.at };
   switch (body.status) {
-    case "transcript":
-      return typeof body.text === "string" && typeof body.label === "string"
-        ? { ...base, status: "transcript", text: body.text.slice(0, 1500), label: body.label.slice(0, 80) }
-        : null;
+    case "transcript": {
+      if (typeof body.text !== "string" || typeof body.label !== "string") return null;
+      const spoken = readClip(body.audio);
+      return {
+        ...base,
+        status: "transcript",
+        text: body.text.slice(0, 1500),
+        label: body.label.slice(0, 80),
+        // Speech that does not check out is dropped, never a reason to lose the transcript.
+        ...(spoken ? { audio: spoken } : {}),
+      };
+    }
     case "sent":
       return { ...base, status: "sent" };
     case "refused":

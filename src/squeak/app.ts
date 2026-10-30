@@ -85,6 +85,7 @@ import { GatewayPairing } from "../voice/pairing-window.js";
 import { GatewayClaim } from "../voice/gateway-claim.js";
 import { RENDEZVOUS_DATABASE } from "../voice/claim-protocol.js";
 import { CallHistory } from "../voice/call-history.js";
+import { CallTrace } from "../voice/call-trace.js";
 import { GatewayLogReader } from "../voice/gateway-log.js";
 import { GatewayStatusReader } from "../voice/gateway-status.js";
 import { setEnvValues } from "../cliq/setup.js";
@@ -97,11 +98,14 @@ import {
   NaturalSettingsStore,
   NaturalSpeaker,
   NaturalVoice,
+  PromptClipCache,
   renderCallClips,
 } from "../voice/natural-voice.js";
+import { readBackSentence } from "../voice/inbound-flow.js";
 import type { VoiceLine } from "../voice/relay-line.js";
 import { TEST_SCRIPT } from "../voice/test-script.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
+import { VoiceFavoritesStore, workspaceKeyOf } from "../voice/favorites.js";
 import { VoiceSettingsStore } from "../voice/settings.js";
 import { findWhisper, WhisperTranscriber } from "../voice/transcribe.js";
 import { VoiceChannel } from "../voice/voice-channel.js";
@@ -195,6 +199,7 @@ export class SqueakApp {
   private voiceSpeaker: Speaker | null = null;
   private readonly naturalSettings: NaturalSettingsStore;
   private readonly naturalVoice: NaturalVoice;
+  private readonly promptClips: PromptClipCache;
   /** The line voice calls go out on (the gateway through the relay, or this Mac), also for a test call from an app. */
   private voiceLine: VoiceLine | null = null;
   /** The relay line when the gateway places the calls: also how a pin change reaches it. */
@@ -219,6 +224,7 @@ export class SqueakApp {
   private memoTimer: NodeJS.Timeout | null = null;
   /** The extension to ring, edited from the Mac app (voice-settings.json). */
   private readonly voiceSettings: VoiceSettingsStore;
+  private readonly voiceFavorites: VoiceFavoritesStore;
   /** The Cliq webhook the channel posts through, for one-off notes (an awake session's end). */
   private cliqWebhook: CliqWebhook | null = null;
   /** Plain-language questions from Cliq, answered through the Mac's own `claude`. */
@@ -366,8 +372,12 @@ export class SqueakApp {
     this.telegramAvatar = new TelegramAvatar({ telegram });
     this.notifySettings = new NotifySettingsStore(path.join(config.supportDir, "notify-settings.json"));
     this.voiceSettings = new VoiceSettingsStore(path.join(config.supportDir, "voice-settings.json"));
+    this.voiceFavorites = new VoiceFavoritesStore(path.join(config.supportDir, "voice-favorites.json"), (key) =>
+      this.workspaceLabel(key),
+    );
     this.naturalSettings = new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json"));
     this.naturalVoice = new NaturalVoice(naturalPaths(config.supportDir), () => this.naturalSettings.settings);
+    this.promptClips = new PromptClipCache(this.naturalVoice, () => this.naturalSettings.settings.voice);
     this.telegramStatus = new TelegramStatus({
       sender: telegram ? { sendMessage: (chatId, text) => telegram.sendMessage(chatId, text) } : null,
       allowedChatIds: config.allowedChatIds,
@@ -680,13 +690,16 @@ export class SqueakApp {
               ? this.gatewayPairing.approve(approve)
               : Promise.resolve({ ok: false as const, reason: "No gateway is waiting to pair." }),
       },
-      voiceCalls: async () => ({
-        calls: this.callHistoryStore().list(100),
-        gatewayLog:
-          (await this.gatewayLogReader()
-            ?.read()
-            .catch(() => null)) ?? null,
-      }),
+      voiceCalls: async () => {
+        const gatewayLog = await this.ingestGatewayLog();
+        const trace = this.callTraceStore();
+        const history = this.callHistoryStore();
+        trace.deriveIncoming(history);
+        return {
+          calls: history.list(100).map((entry) => ({ ...entry, events: trace.eventsFor(entry) })),
+          gatewayLog,
+        };
+      },
       telegramAvatar: (request) => this.telegramAvatar.apply(request),
       fanRule: () => {
         const rule = fansSudoersRule(os.userInfo().username);
@@ -789,6 +802,7 @@ export class SqueakApp {
     this.cliq?.start();
     this.voice?.start();
     this.startMemoInbox();
+    this.startTraceWatch();
     if (this.config.caffeinate) {
       this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
     }
@@ -899,6 +913,7 @@ export class SqueakApp {
     this.cliq?.stop();
     this.voice?.stop();
     this.stopMemoInbox();
+    this.stopTraceWatch();
     this.voiceSpeaker?.dispose();
     this.naturalVoice.stop();
     await this.conductorRelay.stop().catch(() => undefined);
@@ -1017,7 +1032,15 @@ export class SqueakApp {
       },
       send: (target, text, onFailed) => this.router.send(target, text, onFailed),
       caller: () => this.voiceSettings.settings.callee,
+      favorites: () => this.voiceFavorites.list(),
+      // The call-in dialog in the Mac's own voice: every prompt, and the read-back of each message.
+      audioClips: (texts) => this.promptClips.clips(texts),
+      readBack: async (text, label) =>
+        this.naturalVoice.usable
+          ? ((await this.naturalVoice.clip(readBackSentence(text, label))) ?? undefined)
+          : undefined,
       note: (text) => this.announce(text),
+      trace: (kind, text, extra) => this.traceMac(kind, text, extra),
     });
   }
 
@@ -1035,8 +1058,37 @@ export class SqueakApp {
       )
       .map((session) => {
         const own = titles.get(session.key);
-        return { target: replyTargetFor(session), label: own ? `${cardLabel(session)} · ${own}` : cardLabel(session) };
+        return {
+          target: replyTargetFor(session),
+          label: own ? `${cardLabel(session)} · ${own}` : cardLabel(session),
+          workspace: workspaceKeyOf(session),
+        };
       });
+  }
+
+  /** A workspace's current spoken name, from its newest live session; null when none is known. */
+  private workspaceLabel(key: string): string | null {
+    const session = this.runtime.monitor.snapshot.sessions
+      .filter((s) => workspaceKeyOf(s) === key)
+      .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))[0];
+    return session ? cardLabel(session) : null;
+  }
+
+  /** Workspaces a favourite can be set on: distinct, live, newest first. */
+  private voiceWorkspaces(): Array<{ key: string; label: string }> {
+    const seen = new Set<string>();
+    const out: Array<{ key: string; label: string }> = [];
+    const sessions = [...this.runtime.monitor.snapshot.sessions].sort(
+      (a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
+    );
+    for (const session of sessions) {
+      const key = workspaceKeyOf(session);
+      if (!key || seen.has(key) || session.retired || session.workspaceRetired) continue;
+      seen.add(key);
+      out.push({ key, label: cardLabel(session) });
+      if (out.length >= 40) break;
+    }
+    return out;
   }
 
   private startMemoInbox(): void {
@@ -1066,6 +1118,53 @@ export class SqueakApp {
   private gatewayStatus: GatewayStatusReader | null = null;
   private gatewayLog: GatewayLogReader | null = null;
   private callHistory: CallHistory | null = null;
+
+  private callTrace: CallTrace | null = null;
+  private traceTimer: NodeJS.Timeout | null = null;
+  private traceInterval: NodeJS.Timeout | null = null;
+
+  private callTraceStore(): CallTrace {
+    this.callTrace ??= new CallTrace(this.config.supportDir);
+    return this.callTrace;
+  }
+
+  /** One line in the Calls page's log from this Mac; the add-on's side is read 6 s later, once it has published. */
+  private traceMac(
+    kind: "step" | "said" | "heard" | "key" | "warn",
+    text: string,
+    extra?: { ms?: number; label?: string },
+  ): void {
+    this.callTraceStore().mac(kind, text, extra);
+    if (this.traceTimer) return;
+    this.traceTimer = setTimeout(() => {
+      this.traceTimer = null;
+      void this.ingestGatewayLog();
+    }, 6_000);
+    this.traceTimer.unref();
+  }
+
+  /** Reads the add-on's log into the trace (and returns it, for the app); never throws. */
+  private async ingestGatewayLog(): Promise<Awaited<ReturnType<GatewayLogReader["read"]>>> {
+    const log = await (this.gatewayLogReader()?.read() ?? Promise.resolve(null)).catch(() => null);
+    if (log) this.callTraceStore().ingestGateway(log.lines);
+    return log;
+  }
+
+  /** At start, and every 90 s while a call was logged in the last 15 min. */
+  private startTraceWatch(): void {
+    void this.ingestGatewayLog();
+    this.traceInterval = setInterval(() => {
+      if (this.callTraceStore().activeSince(Date.now() - 15 * 60_000)) void this.ingestGatewayLog();
+    }, 90_000);
+    this.traceInterval.unref();
+  }
+
+  private stopTraceWatch(): void {
+    if (this.traceTimer) clearTimeout(this.traceTimer);
+    if (this.traceInterval) clearInterval(this.traceInterval);
+    this.traceTimer = null;
+    this.traceInterval = null;
+  }
 
   private callHistoryStore(): CallHistory {
     this.callHistory ??= new CallHistory(path.join(this.config.supportDir, "voice-calls.json"));
@@ -1159,6 +1258,8 @@ export class SqueakApp {
       pin: this.voicePinState(),
       ...this.voicePolicyView(),
       pause: this.voiceSettings.pause(),
+      favorites: this.voiceFavorites.list(),
+      workspaces: this.voiceWorkspaces(),
       // The realistic voice this Mac makes for calls (`squeak voice-tts-setup` installs it).
       natural: {
         installed: naturalInstalled(naturalPaths(this.config.supportDir)),
@@ -1314,6 +1415,11 @@ export class SqueakApp {
       const keys = Object.keys(request);
       const natural = keys.length === 1 ? (request as { natural: unknown }).natural : null;
       const outcome = this.naturalSettings.apply(natural);
+      return Promise.resolve(outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome);
+    }
+    if (typeof request === "object" && request !== null && !Array.isArray(request) && "favorites" in request) {
+      const outcome = this.voiceFavorites.apply(request);
+      if (outcome.ok) void this.memoInbox?.publish().catch(() => undefined);
       return Promise.resolve(outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome);
     }
     const outcome = this.voiceSettings.apply(request);
@@ -1649,13 +1755,25 @@ export class SqueakApp {
       replier: this.router,
       note: (text: string) => this.announce(text),
       history: this.callHistoryStore(),
+      trace: (kind: "step" | "said" | "warn" | "key", text: string, extra?: { ms?: number; label?: string }) =>
+        this.traceMac(kind, text, extra),
       paused: () => this.voiceSettings.pause() !== null,
     };
     if (voiceRelay && remoteDatabaseUrl) {
-      const line = relayLineFor(new RtdbRest(remoteDatabaseUrl), voiceRelay, this.voiceSettings, (script) => {
+      const line = relayLineFor(new RtdbRest(remoteDatabaseUrl), voiceRelay, this.voiceSettings, async (script) => {
         // Whether the add-on asks for a pin decides which of the dialog's words are worth recording.
         const pin = this.voicePinState();
-        return renderCallClips(this.naturalVoice, script, pin === "set" ? "ask" : pin === "unknown" ? "both" : "none");
+        const began = Date.now();
+        const clips = await renderCallClips(
+          this.naturalVoice,
+          script,
+          pin === "set" ? "ask" : pin === "unknown" ? "both" : "none",
+        );
+        const took = Date.now() - began;
+        this.traceMac("step", `Rendered ${clips?.length ?? 0} voice clips in ${(took / 1000).toFixed(1)} s`, {
+          ms: took,
+        });
+        return clips;
       });
       this.voiceLine = line;
       this.voiceRelayLine = line;

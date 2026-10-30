@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.12.10
+
+- Calling Squeak: it now asks which workspace first. Set favourite workspaces with a number each in Settings › Phone calls › Quick workspaces; press the number (even before it finishes reading) to pick the workspace, then the chat.
+- Calling Squeak: the first word of your message is no longer cut off ("Telegram" was heard as "egram"), and names like Telegram and Conductor are recognised more reliably.
+- Calling Squeak: every prompt and the read-back are now played in the realistic voice made on this Mac, so the line no longer breaks up (add-on 0.9.4).
+- Phone calls: the Calls page shows a detailed, expandable log for each call, with timestamps: what Squeak said, what it heard, the keys pressed and each step. Calls you make to Squeak are listed too.
+
 ## 2.12.9
 
 - Phone calls: a realistic voice made on this Mac. Run `squeak voice-tts-setup` once, then Settings › Phone calls › Voice turns it on and picks the voice; the Home Assistant add-on (0.9.3) plays it in the call instead of its plainer one. If it fails, the plain voice speaks and the call still goes.

@@ -73,4 +73,19 @@ describe("CallHistory", () => {
     expect(entry?.letter).toBeUndefined();
     expect(fs.readFileSync(f, "utf8")).not.toContain("1234");
   });
+
+  it("keeps incoming calls with a label, and ignores a repeated id", () => {
+    const f = file();
+    const history = new CallHistory(f);
+    const first = history.record(
+      { at: 5, kind: "incoming", label: "squeak · chat", outcome: "answered", sent: true, durationMs: 9000 },
+      "in-5",
+    );
+    expect(first).toMatchObject({ id: "in-5", kind: "incoming", label: "squeak · chat", sent: true });
+    expect(history.record({ at: 5, kind: "incoming", outcome: "unanswered", durationMs: 0 }, "in-5")).toBeNull();
+    expect(history.has("in-5")).toBe(true);
+    expect(history.has("in-6")).toBe(false);
+    expect(history.list()).toHaveLength(1);
+    expect(new CallHistory(f).list()[0]).toMatchObject({ id: "in-5", kind: "incoming" });
+  });
 });

@@ -220,6 +220,25 @@ final class ChannelsModel {
         await refreshVoice()
     }
 
+    /// Replaces the quick workspaces and takes the daemon's answer as the truth.
+    func setFavorites(_ list: [FavoriteWorkspace]) async {
+        voiceError = nil
+        if demo { voice?.favorites = list; return }
+        pauseBusy = true
+        defer { pauseBusy = false }
+        do {
+            if let answered = try await client.setVoiceFavorites(list) {
+                voice = answered
+            } else {
+                voiceOutdated = true
+                voiceError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            voiceError = "Could not save: Squeak on this Mac did not answer."
+        }
+        await refreshVoice()
+    }
+
     // The phone-call gateway (nil until the daemon answers; unavailable hides the section).
     private(set) var gateway: GatewayView?
     private(set) var gatewayAvailable = true

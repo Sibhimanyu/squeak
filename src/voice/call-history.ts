@@ -13,7 +13,7 @@ import { logger } from "../utils/logger.js";
 export const MAX_CALLS = 200;
 export const DEFAULT_LIST = 100;
 
-export type CallKind = "agent" | "test";
+export type CallKind = "agent" | "test" | "incoming";
 export type CallReason = "blocked_approval" | "blocked_question" | "asked_question";
 export type CallOutcome = "answered" | "unanswered" | "failed" | "moved_on";
 
@@ -45,12 +45,12 @@ function clean(raw: unknown, id: string): CallEntry | null {
   const entry: CallEntry = {
     id,
     at: r.at,
-    kind: r.kind === "test" ? "test" : "agent",
+    kind: r.kind === "test" ? "test" : r.kind === "incoming" ? "incoming" : "agent",
     outcome: r.outcome as CallOutcome,
     durationMs: typeof r.durationMs === "number" && Number.isFinite(r.durationMs) ? Math.max(0, r.durationMs) : 0,
   };
   if (typeof r.reason === "string" && REASONS.has(r.reason)) entry.reason = r.reason as CallReason;
-  if (entry.kind === "agent" && typeof r.label === "string" && r.label) entry.label = r.label.slice(0, 80);
+  if (entry.kind !== "test" && typeof r.label === "string" && r.label) entry.label = r.label.slice(0, 80);
   if (typeof r.letter === "string" && /^[A-Za-z]$/.test(r.letter)) entry.letter = r.letter;
   if (typeof r.sent === "boolean") entry.sent = r.sent;
   if (typeof r.failure === "string" && r.failure) entry.failure = r.failure.slice(0, 200);
@@ -78,15 +78,20 @@ export class CallHistory {
     }
   }
 
-  /** Adds a call; returns it, or null when it is not a valid record. */
-  record(call: CallRecord): CallEntry | null {
-    const entry = clean(call, crypto.randomBytes(8).toString("base64url"));
+  /** Adds a call; returns it, or null when it is not a valid record or its given id is already recorded. */
+  record(call: CallRecord, id?: string): CallEntry | null {
+    if (id !== undefined && this.has(id)) return null;
+    const entry = clean(call, id ? id.slice(0, 32) : crypto.randomBytes(8).toString("base64url"));
     if (!entry) return null;
     this.entries.push(entry);
     this.entries.sort((a, b) => b.at - a.at);
     this.entries = this.entries.slice(0, MAX_CALLS);
     this.save();
     return entry;
+  }
+
+  has(id: string): boolean {
+    return this.entries.some((entry) => entry.id === id.slice(0, 32));
   }
 
   /** Newest first. */

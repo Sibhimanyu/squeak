@@ -138,3 +138,29 @@ import Testing
         #expect(picked.count == 1 && picked["voice"] as? String == "am_michael")
     }
 }
+
+@Suite struct QuickWorkspacesTests {
+    @Test func decodesPresentAndAbsent() throws {
+        let v = try JSONDecoder().decode(VoiceSettings.self, from: Data(#"{"mode":"direct","favorites":[{"n":1,"workspace":"k","label":"L"}],"workspaces":[{"key":"k","label":"L"}]}"#.utf8))
+        #expect(v.favorites == [FavoriteWorkspace(n: 1, workspace: "k", label: "L")])
+        #expect(v.workspaces == [WorkspaceChoice(key: "k", label: "L")])
+        let old = try JSONDecoder().decode(VoiceSettings.self, from: Data(#"{"mode":"direct"}"#.utf8))
+        #expect(old.favorites == nil && old.workspaces == nil)
+    }
+
+    @Test func requestBodyBytes() {
+        let body = QuickWorkspaces.requestBody([FavoriteWorkspace(n: 1, workspace: "a", label: "A"), FavoriteWorkspace(n: 2, workspace: "b")])
+        #expect(String(decoding: body, as: UTF8.self) == #"{"favorites":[{"n":1,"workspace":"a"},{"n":2,"workspace":"b"}]}"#)
+    }
+
+    @Test func duplicateNumberGuard() {
+        let list = [FavoriteWorkspace(n: 1, workspace: "a"), FavoriteWorkspace(n: 2, workspace: "b")]
+        #expect(QuickWorkspaces.renumbered(list, from: 1, to: 2) == nil)
+        #expect(QuickWorkspaces.renumbered(list, from: 1, to: 3)?.map(\.n) == [2, 3])
+        #expect(QuickWorkspaces.availableNumbers(for: 1, in: list) == [1, 3, 4, 5, 6, 7, 8, 9])
+        let full = (1...9).map { FavoriteWorkspace(n: $0, workspace: "w\($0)") }
+        #expect(QuickWorkspaces.added(full, candidates: [WorkspaceChoice(key: "z", label: "Z")]) == nil)
+        #expect(QuickWorkspaces.added(list, candidates: [WorkspaceChoice(key: "a", label: "A")]) == nil)
+        #expect(QuickWorkspaces.added(list, candidates: [WorkspaceChoice(key: "c", label: "C")])?.last?.n == 3)
+    }
+}

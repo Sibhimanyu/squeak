@@ -40,6 +40,7 @@ struct VoiceSettingsPage: View {
                 }
                 if v.pauseKnown { pauseSection(v) }
                 if let natural = v.natural { naturalSection(natural) }
+                if let favorites = v.favorites { quickSection(favorites, candidates: v.workspaces ?? []) }
                 callsSection
                 if m.gatewayAvailable { gatewaySection }
                 if let state = v.pinState { pinSection(state) }
@@ -98,6 +99,47 @@ struct VoiceSettingsPage: View {
             }
         } footer: {
             Footnote("Cards still reach Telegram and the apps. A test call still rings.")
+        }
+    }
+
+    // MARK: Quick workspaces
+
+    private func quickSection(_ list: [FavoriteWorkspace], candidates: [WorkspaceChoice]) -> some View {
+        Section {
+            ForEach(list) { f in
+                HStack(spacing: 10) {
+                    Picker("Number", selection: Binding(get: { f.n }, set: { new in
+                        if let next = QuickWorkspaces.renumbered(list, from: f.n, to: new) { Task { await m.setFavorites(next) } }
+                    })) {
+                        ForEach(QuickWorkspaces.availableNumbers(for: f.n, in: list), id: \.self) { Text("\($0)").tag($0) }
+                    }
+                    .labelsHidden().fixedSize().accessibilityLabel("Keypad number")
+                    Picker("Workspace", selection: Binding(get: { f.workspace }, set: { key in
+                        let label = candidates.first { $0.key == key }?.label ?? key
+                        let next = list.map { $0.n == f.n ? FavoriteWorkspace(n: f.n, workspace: key, label: label) : $0 }
+                        Task { await m.setFavorites(next) }
+                    })) {
+                        ForEach(candidates) { Text($0.label).tag($0.key) }
+                        if !candidates.contains(where: { $0.key == f.workspace }) { Text(f.label).tag(f.workspace) }
+                    }
+                    .labelsHidden().accessibilityLabel("Workspace")
+                    Button { Task { await m.setFavorites(list.filter { $0.n != f.n }) } } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless).accessibilityLabel("Remove \(f.label)")
+                }
+                .disabled(m.pauseBusy)
+            }
+            if candidates.isEmpty {
+                Footnote("No workspaces yet \u{2014} open a chat in Conductor.")
+            }
+            Button("Add workspace") {
+                if let next = QuickWorkspaces.added(list, candidates: candidates) { Task { await m.setFavorites(next) } }
+            }
+            .disabled(m.pauseBusy || QuickWorkspaces.added(list, candidates: candidates) == nil)
+            if let e = m.voiceError { Footnote(e) }
+        } header: { Text("Quick workspaces") } footer: {
+            Footnote("On a call, Squeak reads these first. Press the number to pick the workspace, then the chat.")
         }
     }
 
@@ -585,18 +627,7 @@ struct CallsSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(calls) { e in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack {
-                                Text(CallText.what(e)).font(Typo.body).lineLimit(1)
-                                Spacer()
-                                Text(CallText.when(ms: e.at)).font(.caption.monospacedDigit()).foregroundStyle(Theme.muted)
-                            }
-                            Text("\(CallText.outcomeSentence(e)) · \(CallText.duration(ms: e.durationMs))")
-                                .font(Typo.meta).foregroundStyle(e.outcome == .failed ? Theme.error : Theme.muted)
-                                .fontWeight(e.outcome == .failed ? .semibold : .regular)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.vertical, 8)
+                        CallRow(entry: e)
                         Divider().overlay(Theme.line)
                     }
                 }
@@ -614,12 +645,99 @@ struct CallsSheet: View {
                             .fontWeight(l.level == .warn ? .bold : .regular)
                             .foregroundStyle(l.level == .warn ? Theme.error : Theme.ink)
                             .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
         } else {
             Footnote("Nothing from the gateway yet. Once the Home Assistant add-on is paired and running, what it does shows here.")
+        }
+    }
+}
+
+
+/// One call: its summary row, and when opened the timeline of what happened, with a Copy of it as plain text.
+struct CallRow: View {
+    let entry: CallEntry
+    @State private var open = false
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { withAnimation(.snappy(duration: 0.15)) { open.toggle() } } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
+                        .rotationEffect(.degrees(open ? 90 : 0)).frame(width: 10).padding(.top, 4)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(CallText.what(entry)).font(Typo.body).lineLimit(1)
+                            Spacer()
+                            Text(CallText.when(ms: entry.at)).font(.caption.monospacedDigit()).foregroundStyle(Theme.muted)
+                        }
+                        Text("\(CallText.outcomeSentence(entry)) \u{00B7} \(CallText.duration(ms: entry.durationMs))")
+                            .font(Typo.meta).foregroundStyle(entry.outcome == .failed ? Theme.error : Theme.muted)
+                            .fontWeight(entry.outcome == .failed ? .semibold : .regular)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(CallText.callRow(entry))
+            .accessibilityValue(open ? "Expanded" : "Collapsed")
+            if open { detail.padding(.leading, 18) }
+        }
+        .padding(.vertical, 8)
+    }
+
+    private var detail: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(CallText.summary(entry)).font(Typo.meta).foregroundStyle(Theme.muted).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if entry.events.isEmpty {
+                Text("No detail was recorded for this call.").font(Typo.meta).foregroundStyle(Theme.muted)
+            } else {
+                ForEach(entry.events) { ev in eventLine(ev) }
+            }
+            Button(copied ? "Copied" : "Copy") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(CallText.timelineExport(entry), forType: .string)
+                copied = true
+                Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+            }
+            .buttonStyle(SecondaryButtonStyle())
+        }
+    }
+
+    private func eventLine(_ ev: CallEvent) -> some View {
+        let warn = ev.kind == .warn
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(CallText.eventTime(ev.at)).font(.system(.caption, design: .monospaced)).foregroundStyle(Theme.muted)
+            Text(CallText.sourceTag(ev.source)).font(.caption2.weight(.semibold)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 5).padding(.vertical, 1).background(Theme.surface, in: Capsule())
+            Image(systemName: icon(ev.kind)).font(.caption).foregroundStyle(warn ? Theme.error : Theme.muted)
+                .help(CallText.kindLabel(ev.kind)).accessibilityLabel(CallText.kindLabel(ev.kind))
+            Text(CallText.eventBody(ev))
+                .font(ev.kind == .step ? .system(.caption, design: .monospaced) : .caption)
+                .fontWeight(warn ? .semibold : .regular)
+                .foregroundStyle(warn ? Theme.error : Theme.ink)
+                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            if let ms = ev.ms {
+                Text(CallText.eventDuration(ms: ms)).font(.system(.caption2, design: .monospaced)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 5).padding(.vertical, 1).background(Theme.surface, in: Capsule())
+            }
+        }
+    }
+
+    private func icon(_ k: CallEventKind) -> String {
+        switch k {
+        case .step: "gearshape"
+        case .said: "speaker.wave.2"
+        case .heard: "mic"
+        case .key: "number.square"
+        case .warn: "exclamationmark.triangle"
         }
     }
 }

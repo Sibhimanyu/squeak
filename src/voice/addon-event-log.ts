@@ -10,7 +10,7 @@ import {
 import { resultPath } from "./relay-protocol.js";
 
 /**
- * What the add-on has been doing, for the apps' Calls page: the last 50 notable events as plain sentences. Callers
+ * What the add-on has been doing, for the apps' Calls page: the last 200 notable events as plain sentences. Callers
  * pass only words they wrote themselves, never a secret, a PIN, a question or a key; the Home Assistant log stays
  * the full record.
  */

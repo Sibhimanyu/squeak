@@ -33,6 +33,8 @@ export interface VoiceChannelDependencies {
   now?: () => number;
   /** Where each call is written down (voice/call-history.ts); absent in tests that do not look. */
   history?: Pick<CallHistory, "record">;
+  /** The call's step-by-step log (voice/call-trace.ts), for the apps' Calls page; absent in tests that do not look. */
+  trace?: (kind: "step" | "said" | "warn" | "key", text: string, extra?: { ms?: number; label?: string }) => void;
 }
 
 /**
@@ -117,10 +119,14 @@ export class VoiceChannel {
     this.calling = true;
     this.deps.policy.record(episode, now);
     const placedAt = this.now();
+    const label = cardLabel(current.session);
+    this.trace("step", `Call placed: ${label}`);
+    this.trace("said", `${script.greeting} ${script.question}`);
     let result: CallResult;
     try {
       result = await this.deps.line.call(script, canAnswer);
     } catch (error) {
+      this.trace("warn", `Failed: ${error instanceof Error ? error.message : String(error)}`);
       this.writeDown(current, placedAt, {
         outcome: "failed",
         failure: error instanceof Error ? error.message : String(error),
@@ -130,6 +136,7 @@ export class VoiceChannel {
       this.calling = false;
     }
     if (result.status === "failed") {
+      this.trace("warn", `Failed: ${result.reason}`);
       this.writeDown(current, placedAt, { outcome: "failed", failure: result.reason });
       logger.warn("voice call could not be placed", { reason: result.reason });
       if (this.now() - this.lastFailureNote > FAILURE_NOTE_GAP_MS) {
@@ -139,6 +146,7 @@ export class VoiceChannel {
       return;
     }
     if (result.status === "answered" && result.letter) {
+      this.trace("key", `Answered ${result.letter}`);
       const what = await this.answer(current, target, stamp, result.letter);
       this.writeDown(current, placedAt, {
         outcome: what === "moved_on" ? "moved_on" : "answered",
@@ -147,7 +155,16 @@ export class VoiceChannel {
       });
       return;
     }
+    this.trace("step", "Not answered");
     this.writeDown(current, placedAt, { outcome: result.status === "answered" ? "answered" : "unanswered" });
+  }
+
+  private trace(kind: "step" | "said" | "warn" | "key", text: string, extra?: { ms?: number; label?: string }): void {
+    try {
+      this.deps.trace?.(kind, text, extra);
+    } catch {
+      // A log line never matters more than the call.
+    }
   }
 
   /** One line in the call history: never the question, a PIN or any key but the answer letter. */
@@ -185,6 +202,7 @@ export class VoiceChannel {
     // The call can last a minute: only answer the turn that was read out.
     if (turnStamp(safely(() => this.deps.replier.lastTurnText(target))) !== stamp) {
       this.deps.note(`You pressed ${letter} for ${label}, but it has moved on since the call, so I sent nothing.`);
+      this.trace("warn", `Moved on: ${label} changed since the call, nothing sent`);
       return "moved_on";
     }
     const outcome = await this.deps.replier.send(target, letter, (message) => {
@@ -192,11 +210,13 @@ export class VoiceChannel {
     });
     if (outcome.status === "refused" || outcome.status === "unconfirmed") {
       this.deps.note(`The ${letter} you pressed for ${label} was not sent: ${outcome.reason}`);
+      this.trace("warn", `${letter} not sent to ${label}: ${outcome.reason}`);
       return "not_sent";
     }
     // Look again now, so the turn this starts registers and its finish pushes a card.
     void this.deps.monitor.refresh().catch(() => undefined);
     this.deps.note(`Answered by phone: sent ${letter} to ${label}.`);
+    this.trace("step", `Sent ${letter} to ${label}`);
     return "sent";
   }
 }

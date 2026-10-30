@@ -22,7 +22,10 @@ export interface PhoneCall {
    * Records what the other side says until `#`, the limit, or hang-up. Null if they hung up (nothing worth
    * keeping: they cannot confirm it).
    */
-  record(options: { maxMs: number }): Promise<{ file: string; durationMs: number; ended: "key" | "limit" } | null>;
+  record(options: {
+    maxMs: number;
+    beep?: boolean;
+  }): Promise<{ file: string; durationMs: number; ended: "key" | "limit" } | null>;
   hangup(): Promise<void>;
 }
 
@@ -73,17 +76,26 @@ export async function readDigits(
 }
 
 /** The outbound dialog (script.ts / dialog.ts) on a connected call: what `BaresipLine` does, on the shared phone. */
-export async function runDialog(call: PhoneCall, dialog: CallDialog): Promise<CallResult> {
+export async function runDialog(
+  call: PhoneCall,
+  dialog: CallDialog,
+  trace?: (line: string) => void,
+): Promise<CallResult> {
   let letter: string | null = null;
   let actions: DialogAction[] = dialog.start();
   while (call.open) {
     for (const action of actions) {
       if (action.type === "answer") {
         letter = action.letter;
+        trace?.(`key: ${action.letter} chosen`);
       } else if (action.type === "play") {
+        trace?.(`said: ${action.text}`);
         await call.say(action.text);
       } else {
-        if (action.text) await call.say(action.text);
+        if (action.text) {
+          trace?.(`said: ${action.text}`);
+          await call.say(action.text);
+        }
         await call.hangup();
         return { status: "answered", letter };
       }

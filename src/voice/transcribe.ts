@@ -52,16 +52,36 @@ export class WhisperTranscriber implements Transcriber {
           timeout: 30_000,
         },
       );
-      const { stdout } = await run(this.paths.whisper, ["-m", this.paths.model, "-f", wav, "-nt", "-np", "-l", "en"], {
-        timeout: 90_000,
-        maxBuffer: 1_000_000,
-      });
+      const { stdout } = await run(
+        this.paths.whisper,
+        [
+          "-m",
+          this.paths.model,
+          "-f",
+          wav,
+          "-nt",
+          "-np",
+          "-l",
+          "en",
+          // Words people say to their agents that a general model mishears.
+          "--prompt",
+          WHISPER_VOCABULARY,
+        ],
+        {
+          timeout: 90_000,
+          maxBuffer: 1_000_000,
+        },
+      );
       return cleanTranscript(stdout);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
 }
+
+/** Spelling hints for whisper's decoder: product and tool names that come up in messages to coding agents. */
+export const WHISPER_VOCABULARY =
+  "Telegram, Squeak, Conductor, Claude, Codex, GitHub, pull request, Xcode, TypeScript, Firebase, Home Assistant.";
 
 /** One line of plain words: no control characters, no bracketed sound notes like "[BLANK_AUDIO]". */
 export function cleanTranscript(raw: string): string {

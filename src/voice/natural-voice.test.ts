@@ -188,7 +188,7 @@ describe("voice preview", () => {
       const wav = await natural.preview("am_michael");
       expect(wav?.toString("ascii", 0, 4)).toBe("RIFF");
       expect(wav?.readUInt32LE(24)).toBe(8000);
-      expect(wav?.length).toBe(1644);
+      expect(wav?.length).toBe(1644 + 2 * 4400); // plus 300 ms lead and 250 ms tail of silence
       const request = JSON.parse(fs.readFileSync(record, "utf8").trim()) as { voice: string; text: string };
       expect(request.voice).toBe("am_michael");
       expect(request.text).toContain("Your agent needs an answer");
