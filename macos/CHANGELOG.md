@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.23
+
+- The Conductor and Claude marks in the sidebars are drawn a little larger.
+
 ## 2.12.22
 
 - Phone calls: "Update add-on" now really updates the Home Assistant add-on (Home Assistant does not let an add-on update itself, so Squeak now asks Home Assistant to do it), never spins forever, and says plainly when Home Assistant has not seen the new version yet, with a Check again button. Needs add-on 0.11.3: update it once in Home Assistant (Settings › Add-ons › Squeak Voice) to get the new permission.
