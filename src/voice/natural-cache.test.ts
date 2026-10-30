@@ -296,11 +296,16 @@ describe("priority and warm-up", () => {
 
   it("does not make an urgent call wait behind background renders", async () => {
     const { natural } = fakeVoice({ delayMs: 80 });
-    const background = natural.prewarm(["Background one is long enough.", "Background two is long enough."]);
+    let backgroundDone = false;
+    const background = natural
+      .prewarm(["Background one is long enough.", "Background two is long enough."])
+      .then(() => {
+        backgroundDone = true;
+      });
     await new Promise((r) => setTimeout(r, 20));
-    const t0 = performance.now();
     await natural.clip("An urgent sentence goes here.");
-    expect(performance.now() - t0).toBeLessThan(300);
+    // The urgent line ran beside the background renders, not after them (a wall-clock limit is flaky under load).
+    expect(backgroundDone).toBe(false);
     await background;
   });
 
