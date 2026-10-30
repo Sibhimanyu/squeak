@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.8
+
+- Phone calls: after you approve a gateway, Squeak shows "Connecting to the add-on…" with a progress indicator until the add-on reports in, instead of looking unchanged for a while.
+
 ## 2.12.7
 
 - After Squeak updates itself, its Dock icon shows up properly instead of sometimes appearing as a speck.

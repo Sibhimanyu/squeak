@@ -115,11 +115,18 @@ struct VoiceSettingsPage: View {
     private var gatewaySection: some View {
         Section {
             let g = m.gateway ?? GatewayView()
-            TimelineView(.periodic(from: .now, by: 30)) { ctx in
-                Text(g.statusLine(now: ctx.date)).frame(maxWidth: .infinity, alignment: .leading)
+            if m.gatewayConnecting {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Paired. Connecting to the add-on…").frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                    Text(g.statusLine(now: ctx.date)).frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             HStack {
-                Button(g.isPaired ? "Pair again" : "Add gateway") { pairingGateway = true }
+                Button(g.isPaired ? "Pair again" : "Add gateway") { pairingGateway = true }.disabled(m.gatewayConnecting)
                 Spacer()
             }
         } header: { Text("Phone-call gateway") } footer: {
@@ -310,12 +317,24 @@ struct GatewayPairSheet: View {
 
     @ViewBuilder private var claimContent: some View {
         let p = m.gateway?.pairing
+        // Squeak restarts a moment after the approval, which clears its pairing view: this must not fall back to the code screen.
+        if m.gatewayConnecting, p?.state != .request {
+            connectingContent
+        } else {
         switch p?.state {
         case .request:
             Text(GatewayClaimText.confirm(p!)).font(Typo.body).fixedSize(horizontal: false, vertical: true)
             approveButtons
         case .done:
-            Text("Paired").font(Typo.body)
+            if m.gatewayConnecting {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Paired. Connecting to the add-on…").font(Typo.body)
+                }
+                Text("Squeak restarts for a few seconds to use it. You can close this.").font(Typo.body).foregroundStyle(Theme.muted)
+            } else {
+                Text("Paired and connected").font(Typo.body)
+            }
             Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle())
         default:
             Text("In Home Assistant, open the Squeak Voice panel in the sidebar. It shows a code. Type it here.")
@@ -336,11 +355,23 @@ struct GatewayPairSheet: View {
                 Button("Use a pairing code instead") { legacy = true }.buttonStyle(.link).font(.caption)
             }
         }
+        }
     }
 
     private func connect() {
         guard GatewayClaim.isComplete(typed) else { return }
         Task { await m.claimGateway(code: typed) }
+    }
+
+    private var connectingContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Paired. Connecting to the add-on…").font(Typo.body)
+            }
+            Text("Squeak restarts for a few seconds to use it. You can close this.").font(Typo.body).foregroundStyle(Theme.muted)
+            Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle())
+        }
     }
 
     private var approveButtons: some View {
@@ -354,12 +385,24 @@ struct GatewayPairSheet: View {
 
     @ViewBuilder private var legacyContent: some View {
         let p = m.gateway?.pairing
+        // Squeak restarts a moment after the approval, which clears its pairing view: this must not fall back to the code screen.
+        if m.gatewayConnecting, p?.state != .request {
+            connectingContent
+        } else {
         switch p?.state {
         case .request:
             Text(GatewayText.requestSentence(p!)).font(Typo.body).fixedSize(horizontal: false, vertical: true)
             approveButtons
         case .done:
-            Text("Paired").font(Typo.body)
+            if m.gatewayConnecting {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Paired. Connecting to the add-on…").font(Typo.body)
+                }
+                Text("Squeak restarts for a few seconds to use it. You can close this.").font(Typo.body).foregroundStyle(Theme.muted)
+            } else {
+                Text("Paired and connected").font(Typo.body)
+            }
             Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle())
         case .expired:
             Text("The code expired").font(Typo.body)
@@ -399,6 +442,7 @@ struct GatewayPairSheet: View {
                     Button("Type the add-on's code instead") { legacy = false }.buttonStyle(.link).font(.caption)
                 }
             }
+        }
         }
     }
 }

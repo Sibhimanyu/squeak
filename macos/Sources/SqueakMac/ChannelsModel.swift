@@ -204,6 +204,10 @@ final class ChannelsModel {
     private(set) var gatewayError: String?
     private(set) var gatewayBusy = false
     private var gatewayPoll: Task<Void, Never>?
+    /// True from the moment you approve until the add-on reports in again (Squeak restarts to use the new pairing and
+    /// the add-on takes a few seconds to say hello), so the page shows "Connecting…" instead of its old state.
+    private(set) var gatewayConnecting = false
+    private var gatewayConnectWatch: Task<Void, Never>?
 
     func refreshGateway() async {
         if demo { return }
@@ -278,6 +282,7 @@ final class ChannelsModel {
         defer { gatewayBusy = false }
         do {
             if try await client.approveGateway(approve) {
+                if approve { watchGatewayConnecting() }
                 await refreshGateway()
             } else {
                 gatewayError = "Squeak on this Mac is older than this setting. Update it and try again."
@@ -312,6 +317,24 @@ final class ChannelsModel {
             }
         } catch {
             gatewayError = "Squeak on this Mac did not answer."
+        }
+    }
+
+    /// Polls until the add-on's first report after this approval (or 90 s). The daemon restarts in between, so a
+    /// failed look is not an answer: the last view stays and the watch goes on.
+    private func watchGatewayConnecting() {
+        gatewayConnectWatch?.cancel()
+        gatewayConnecting = true
+        let approvedAt = Date().timeIntervalSince1970 * 1000
+        gatewayConnectWatch = Task { [weak self] in
+            let deadline = Date().addingTimeInterval(90)
+            while !Task.isCancelled, Date() < deadline {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                await self.refreshGateway()
+                if let s = self.gateway?.status, let at = s.at, at > approvedAt, s.state == .ok || s.state == .sipDown { break }
+            }
+            self?.gatewayConnecting = false
         }
     }
 
