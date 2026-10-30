@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.12.24
+
+- Updates are rebuilt to be reliable. The menu-bar popup and Settings show the update live: downloading with a percentage, preparing, ready, restarting.
+- Pressing Install or Check while an update is already downloading now joins it and shows its progress instead of doing nothing.
+- A stuck check, download or install now ends after a short time with a clear message, Try again and Download manually.
+- Restart to update is more reliable: Squeak reopens itself, and tells you if the update didn't install.
+- Updates keep a log at ~/Library/Logs/Squeak Mac/updates.log, included in Copy diagnostics.
+
 ## 2.12.23
 
 - The Conductor and Claude marks in the sidebars are drawn a little larger.
