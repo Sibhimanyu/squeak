@@ -88,4 +88,27 @@ describe("CallHistory", () => {
     expect(history.list()).toHaveLength(1);
     expect(new CallHistory(f).list()[0]).toMatchObject({ id: "in-5", kind: "incoming" });
   });
+
+  it("keeps a summary, one clipped line, and reads a file written before it existed", () => {
+    const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "calls-")), "voice-calls.json");
+    const history = new CallHistory(f);
+    history.record({
+      at: 1,
+      kind: "agent",
+      outcome: "answered",
+      durationMs: 1,
+      summary: `Answered:\n option 1 ${"x".repeat(300)}`,
+    });
+    history.record({ at: 2, kind: "agent", outcome: "answered", durationMs: 1, summary: "  " });
+    const [second, first] = new CallHistory(f).list();
+    expect(first?.summary?.length).toBe(160);
+    expect(first?.summary).not.toContain("\n");
+    expect(second).not.toHaveProperty("summary");
+    fs.writeFileSync(
+      f,
+      JSON.stringify({ v: 1, calls: [{ id: "old", at: 5, kind: "agent", outcome: "failed", durationMs: 0 }] }),
+    );
+    expect(new CallHistory(f).list()).toHaveLength(1);
+    expect(new CallHistory(f).list()[0]).not.toHaveProperty("summary");
+  });
 });

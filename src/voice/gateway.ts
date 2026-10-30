@@ -228,7 +228,14 @@ export class VoiceGateway {
       }
       const body: CallResultDoc =
         result.status === "answered"
-          ? { v: 1, id, at: this.now(), status: "answered", letter: result.letter }
+          ? {
+              v: 1,
+              id,
+              at: this.now(),
+              status: "answered",
+              letter: result.letter,
+              ...(result.quality ? { quality: result.quality } : {}),
+            }
           : result.status === "unanswered"
             ? { v: 1, id, at: this.now(), status: "unanswered" }
             : { v: 1, id, at: this.now(), status: "failed", reason: result.reason };

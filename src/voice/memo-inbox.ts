@@ -40,6 +40,8 @@ export interface MemoTarget {
   workspace: string | null;
   /** The workspace as spoken ("squeak, ushuaia", `spokenWorkspace`); absent: the label stands in. */
   workspaceLabel?: string;
+  /** It waits on the person (an approval or a question): the fallback "last chat" when none was used by phone. */
+  waiting?: boolean;
 }
 
 export type TraceKind = "step" | "said" | "heard" | "key" | "warn";
@@ -58,6 +60,12 @@ export interface MemoInboxDependencies {
   caller: () => string | null;
   /** A one-off note to Telegram and Cliq: what was sent by phone. */
   note: (text: string) => void;
+  /**
+   * The chat last used by phone (a message sent, a question or status asked), saved across restarts. With it the
+   * directory names that chat first (`last`); without it, or when it cannot take a message now, the newest chat waiting
+   * on the person stands in.
+   */
+  lastChat?: { get: () => string | null; set: (target: string) => void };
   /** Favourite workspaces for calling in, in any order. None: a flat list of chats, as before. */
   favorites?: () => Array<{ n: number; workspace: string; label: string }>;
   /** The Mac's own recordings of these call-in prompts (voice/natural-voice.ts); absent or empty: the add-on speaks. */
@@ -209,9 +217,22 @@ export class MemoInbox {
         items.push({ n: items.length + 1, label: t.label, choice: targets.length });
       }
     }
+    // The chat offered first: the last one used by phone, else the newest waiting on the person. It is always one of
+    // `targets` (put at the end, off every menu, when no menu lists it), so a memo or a status can name it.
+    const lastTarget = this.deps.lastChat?.get();
+    const lastPick = all.find((t) => t.target === lastTarget) ?? all.find((t) => t.waiting);
+    let last: DirectoryDoc["last"];
+    if (lastPick) {
+      let index = targets.findIndex((t) => t.target === lastPick.target);
+      if (index < 0 && targets.length < MAX_CHOICES) {
+        targets.push(lastPick);
+        index = targets.length - 1;
+      }
+      if (index >= 0) last = { choice: index + 1, label: lastPick.label };
+    }
     const version = crypto
       .createHash("sha256")
-      .update(JSON.stringify({ items, workspaces, caller, targets: targets.map((t) => t.target) }))
+      .update(JSON.stringify({ items, workspaces, caller, last, targets: targets.map((t) => t.target) }))
       .digest("hex")
       .slice(0, 12);
     const at = this.now();
@@ -228,6 +249,7 @@ export class MemoInbox {
       caller,
       items,
       ...(workspaces ? { workspaces } : {}),
+      ...(last ? { last } : {}),
       ...(this.canAsk ? { ask: true as const } : {}),
     };
     const audio = this.audioDocs.get(version);
@@ -351,6 +373,14 @@ export class MemoInbox {
     }
   }
 
+  /** Notes the chat used by phone and republishes, so the next call offers it first. */
+  private rememberLast(target: string): void {
+    const { lastChat } = this.deps;
+    if (!lastChat || lastChat.get() === target) return;
+    lastChat.set(target);
+    void this.publish().catch(() => undefined);
+  }
+
   private refuse(id: string, reason: string): DownMessage {
     return { v: 1, id, at: this.now(), status: "refused", reason };
   }
@@ -396,6 +426,7 @@ export class MemoInbox {
       question = pending.text;
     }
     this.answers.push(now);
+    this.rememberLast(target);
     let text: string;
     const began = Date.now();
     try {
@@ -498,6 +529,7 @@ export class MemoInbox {
       return this.refuse(message.id, `${pending.label} is busy right now. Send it from the app.`);
     }
     this.sends.push(now);
+    this.rememberLast(pending.target);
     const outcome = await this.deps.send(pending.target, pending.text, (reason) => {
       this.deps.note(`The message you phoned in for ${pending.label} did not go through: ${reason}`);
     });

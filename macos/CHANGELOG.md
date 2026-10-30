@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.12.21
+
+- Calling Squeak: a recording now ends when you stop talking (or press hash), is capped at one minute, and if nothing is heard it says so instead of recording two minutes of silence. A message that is unclear or silent is never sent without a key press.
+- Calling Squeak: the call starts with the chat you used last ("Press 1 for ..., the last one you used"), then the usual menus on 2.
+- Calls break up less: nothing is made mid-call any more, every clip is padded so the line never runs dry, and the realistic voice is cached sentence by sentence and kept warm, so calls start talking sooner (needs Squeak Voice add-on 0.11.2).
+- Test call shows "Line quality: good / fair / poor" and the call log records jitter, loss and delay.
+- When an agent's question call hits a busy line (you are already on a call), Squeak rings when it ends instead of dropping it. A missed call is retried once after two minutes, and the question goes to Telegram if it hasn't already.
+- Calls speak a shorter question and terse options ("The full text is on your phone"), and each call leaves a one-line summary in the call log; a message you send by phone gets a short text confirmation.
+
 ## 2.12.20
 
 - Larger session rows, project titles and sidebar icons make sessions easier to read and select.

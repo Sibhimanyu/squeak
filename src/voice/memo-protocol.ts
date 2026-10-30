@@ -28,8 +28,8 @@ export const downPath = (channel: string, id: string): string => `channels/${cha
 
 /** A memo or a send stays valid this long: recording, uploading and transcribing take a while. */
 export const UP_TTL_MS = 5 * 60_000;
-/** Longest recording, and the most characters of base64 audio a memo may carry (~120 s of Opus at 16 kbit/s). */
-export const MAX_MEMO_MS = 120_000;
+/** Longest recording (60 s; it was 120 s), and the most characters of base64 audio a memo may carry (kept for older peers). */
+export const MAX_MEMO_MS = 60_000;
 export const MAX_AUDIO_CHARS = 450_000;
 /** Most chats a directory can name (a memo's `choice` indexes them); a keypad shows at most nine at a time. */
 export const MAX_CHOICES = 40;
@@ -74,6 +74,12 @@ export interface DirectoryDoc {
    * keypad then offers them. Absent from an older Mac, and the call goes as it always has.
    */
   ask?: true;
+  /**
+   * The chat the person used last (a message sent or a question asked by phone), else the newest one waiting on them:
+   * offered first, before any menu. `choice` indexes the version's chats as a memo's does, whether or not a menu lists
+   * it. Absent from an older Mac, and the call goes straight to the menus as it always has.
+   */
+  last?: { choice: number; label: string };
   /** Ids of the audio documents (`voicedir/audio-<version>-<i>`) holding the Mac's recordings of this list's prompts. */
   audio?: string[];
 }
@@ -151,6 +157,13 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
       workspaces.push({ n: raw.n, label: raw.label.slice(0, 80), chats });
     }
   }
+  let last: DirectoryDoc["last"];
+  if (body.last !== undefined) {
+    const raw = body.last;
+    if (!isRecord(raw) || typeof raw.label !== "string" || typeof raw.choice !== "number") return null;
+    if (!Number.isInteger(raw.choice) || raw.choice < 1 || raw.choice > MAX_CHOICES) return null;
+    last = { choice: raw.choice, label: raw.label.slice(0, 80) };
+  }
   let audio: string[] | undefined;
   if (body.audio !== undefined) {
     if (!Array.isArray(body.audio) || body.audio.length > MAX_AUDIO_DOCS) return null;
@@ -165,6 +178,7 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
     caller: body.caller,
     items,
     ...(workspaces ? { workspaces } : {}),
+    ...(last ? { last } : {}),
     ...(audio ? { audio } : {}),
   };
 }

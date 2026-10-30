@@ -7,7 +7,8 @@ import { logger } from "../utils/logger.js";
 /**
  * Every phone call Squeak made, for the apps' Calls page (docs: .context/calls-page-contract.md). Kept on this Mac
  * only, `voice-calls.json` (0600, atomic write), newest 200. It never holds a question's text, a PIN or any key
- * but the answer letter.
+ * but the answer letter; `summary` is one clipped line naming the option chosen, or the start of a message the person
+ * dictated by phone.
  */
 
 export const MAX_CALLS = 200;
@@ -29,7 +30,11 @@ export interface CallEntry {
   sent?: boolean;
   durationMs: number;
   failure?: string;
+  /** One line of what the call did ("Answered: option 1 (Yes, both)"), at most 160 characters. Optional: old files have none. */
+  summary?: string;
 }
+
+export const MAX_SUMMARY = 160;
 
 export type CallRecord = Omit<CallEntry, "id">;
 
@@ -54,6 +59,8 @@ function clean(raw: unknown, id: string): CallEntry | null {
   if (typeof r.letter === "string" && /^[A-Za-z]$/.test(r.letter)) entry.letter = r.letter;
   if (typeof r.sent === "boolean") entry.sent = r.sent;
   if (typeof r.failure === "string" && r.failure) entry.failure = r.failure.slice(0, 200);
+  if (typeof r.summary === "string" && r.summary.trim())
+    entry.summary = r.summary.replace(/\s+/g, " ").trim().slice(0, MAX_SUMMARY);
   return entry;
 }
 

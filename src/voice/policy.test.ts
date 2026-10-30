@@ -26,4 +26,23 @@ describe("CallPolicy", () => {
     expect(policy.refusal("a", at("03:00"))).toBe("quiet hours");
     expect(policy.refusal("a", at("12:00"))).toBeNull();
   });
+
+  it("allows one retry of an episode after its own call, once", () => {
+    const policy = new CallPolicy({ minGapMs: 5 * 60_000, quiet: null });
+    expect(policy.refusal("a", at("12:00"), true)).toBe("not called yet");
+    policy.record("a", at("12:00"));
+    expect(policy.refusal("a", at("12:02"))).toBe("already called for this");
+    expect(policy.refusal("a", at("12:02"), true)).toBeNull();
+    policy.record("a", at("12:02"), true);
+    expect(policy.refusal("a", at("12:10"), true)).toBe("already retried");
+  });
+
+  it("holds a retry for another episode's call and for quiet hours", () => {
+    const policy = new CallPolicy({ minGapMs: 5 * 60_000, quiet: { from: "22:00", to: "07:00" } });
+    policy.record("a", at("12:00"));
+    policy.record("b", at("12:01"));
+    expect(policy.refusal("a", at("12:03"), true)).toBe("called a moment ago");
+    policy.record("c", at("21:59"));
+    expect(policy.refusal("c", at("22:01"), true)).toBe("quiet hours");
+  });
 });

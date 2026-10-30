@@ -6,7 +6,16 @@ import readline from "node:readline";
 
 import { logger } from "../utils/logger.js";
 import { encodeMulaw, MAX_CLIP_BYTES, type Clip } from "./clips.js";
-import { readBackParts } from "./inbound-flow.js";
+import { inboundPrompts, readBackParts } from "./inbound-flow.js";
+import {
+  assembleLine,
+  LINE_RATE,
+  pcmOfWav,
+  SentenceCache,
+  splitSentences,
+  wavOfPcm,
+  type LineStats,
+} from "./natural-cache.js";
 import { CallDialog, type CallScript } from "./dialog.js";
 import type { Speaker } from "./tts.js";
 
@@ -40,7 +49,6 @@ export const CLIPS_BUDGET_MS = 25_000;
 export const OLD_ADDON_CLIPS_BUDGET_MS = 6_000;
 export const VOICE_PREVIEW_TEXT = "Hello, this is Squeak. Your agent needs an answer. Which way should we go?";
 const SOURCE_RATE = 24_000;
-const LINE_RATE = 8_000;
 /** Silence around every line clip: media takes a moment to start, and the first syllable was eaten ("egram"). */
 export const LEAD_SILENCE_MS = 300;
 export const TAIL_SILENCE_MS = 250;
@@ -128,30 +136,47 @@ interface Pending {
   out: string;
 }
 
-/** The worker process, started on first use and kept for the next call; replaced if it dies or hangs. */
-export class NaturalVoice {
+/** `urgent`: a ringing call waits for it (normal CPU priority). `background`: made ahead at idle (niced). */
+export type RenderPriority = "background" | "urgent";
+/** Nice value of the background worker: it gives way to builds, agents and the urgent worker. */
+export const BACKGROUND_NICE = 10;
+
+/** One Python worker process, started on first use and kept for the next render; replaced if it dies or hangs. */
+class WorkerProc {
   private child: ChildProcess | null = null;
   private ready: Promise<void> | null = null;
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private chain: Promise<unknown> = Promise.resolve();
-  private readonly tmp = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-natural-"));
+  /** Whether a start was ever requested (a death before that is not an unexpected one). */
+  starts = 0;
 
   constructor(
     private readonly paths: NaturalPaths,
-    private readonly settings: () => NaturalSettings,
+    private readonly tmp: string,
+    private readonly tag: string,
+    private readonly nice: number | null,
+    /** Called when the process dies by itself (not by `stop`). */
+    private readonly onDied?: () => void,
   ) {}
 
-  /** Installed and switched on. */
-  get usable(): boolean {
-    return this.settings().enabled && naturalInstalled(this.paths);
+  get running(): boolean {
+    return this.child !== null;
   }
 
-  private start(): Promise<void> {
+  start(): Promise<void> {
     if (this.ready) return this.ready;
+    this.starts += 1;
     const child = spawn(this.paths.python, [this.paths.worker, this.paths.model, this.paths.voices], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    if (this.nice !== null && child.pid) {
+      try {
+        os.setPriority(child.pid, this.nice);
+      } catch {
+        // Normal priority is only slower for others.
+      }
+    }
     this.child = child;
     let stderr = "";
     child.stderr?.on("data", (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-500)));
@@ -175,13 +200,17 @@ export class NaturalVoice {
       child.on("error", reject);
       child.on("exit", (code) => {
         reject(new Error(`the voice worker exited ${code}: ${stderr.trim()}`));
+        const mine = this.child === child;
         this.drop(child);
+        if (mine && !this.stopping) this.onDied?.();
       });
     });
     this.ready = ready;
     ready.catch(() => this.drop(child));
     return ready;
   }
+
+  private stopping = false;
 
   private drop(child: ChildProcess): void {
     if (this.child !== child) return;
@@ -191,10 +220,10 @@ export class NaturalVoice {
     this.pending.clear();
   }
 
-  /** 24 kHz mono PCM of `text`, or null if the worker could not make it. One at a time. */
-  render(text: string, voice?: string): Promise<Int16Array | null> {
+  /** 24 kHz mono PCM of `text`, or null if the worker could not make it. One at a time per worker. */
+  render(text: string, voice: string, speed: number): Promise<Int16Array | null> {
     const run = async (): Promise<Int16Array | null> => {
-      if (voice ? !NATURAL_VOICE.test(voice) || !naturalInstalled(this.paths) : !this.usable) return null;
+      this.stopping = false;
       let startupTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
@@ -217,13 +246,13 @@ export class NaturalVoice {
       const child = this.child;
       if (!child?.stdin) return null;
       const id = this.nextId++;
-      const out = path.join(this.tmp, `r${id}.wav`);
+      const out = path.join(this.tmp, `${this.tag}${id}.wav`);
       const done = new Promise<boolean>((resolve) => this.pending.set(id, { resolve, out }));
       const timer = setTimeout(() => {
         logger.warn("voice natural speech timed out; restarting the worker");
         child.kill("SIGKILL");
       }, RENDER_TIMEOUT_MS);
-      child.stdin.write(`${JSON.stringify({ id, text, voice: voice ?? this.settings().voice, speed: 1.0, out })}\n`);
+      child.stdin.write(`${JSON.stringify({ id, text, voice, speed, out })}\n`);
       const ok = await done;
       clearTimeout(timer);
       try {
@@ -239,35 +268,310 @@ export class NaturalVoice {
     return result;
   }
 
+  stop(signal: NodeJS.Signals = "SIGTERM"): void {
+    this.stopping = true;
+    this.child?.kill(signal);
+    this.child = null;
+    this.ready = null;
+  }
+}
+
+export interface NaturalVoiceOptions {
+  /** Where rendered sentences are kept (default `<natural dir>/cache`). */
+  cacheDir?: string;
+  cacheMaxBytes?: number;
+  /** Wait before restarting a kept-warm worker that died (doubles per failure, five tries). */
+  restartDelayMs?: number;
+  /** The background worker is stopped this long after its last render. */
+  backgroundIdleMs?: number;
+  now?: () => number;
+}
+
+/** One sentence of a line, told the moment it is ready. */
+export interface SentenceReady {
+  index: number;
+  total: number;
+  /** 8 kHz mono PCM16 of just this sentence (no padding). */
+  pcm: Int16Array;
+  cached: boolean;
+}
+
+export interface LineOptions {
+  voice?: string;
+  priority?: RenderPriority;
+  /** Called in order as each sentence is ready, so a line can start before the rest is made. */
+  onSentence?: (sentence: SentenceReady) => void;
+}
+
+const SPEED = 1.0;
+const WARM_TEXT = "Hello.";
+
+/**
+ * The natural voice: a sentence cache over up to two Python workers (urgent at normal priority, background niced).
+ * Renders for one worker are serial, so the CPU is never hammered by two at once on the same priority.
+ */
+export class NaturalVoice {
+  private readonly urgent: WorkerProc;
+  private readonly background: WorkerProc;
+  private readonly cache: SentenceCache;
+  private readonly tmp = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-natural-"));
+  private readonly inflight = new Map<string, Promise<Int16Array | null>>();
+  private keepWarm = false;
+  private restartFailures = 0;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private backgroundTimer: ReturnType<typeof setTimeout> | null = null;
+  private backgroundBusy = 0;
+  private prewarmChain: Promise<unknown> = Promise.resolve();
+  private readonly restartDelayMs: number;
+  private readonly backgroundIdleMs: number;
+  private readonly now: () => number;
+
+  constructor(
+    private readonly paths: NaturalPaths,
+    private readonly settings: () => NaturalSettings,
+    options: NaturalVoiceOptions = {},
+  ) {
+    this.restartDelayMs = options.restartDelayMs ?? 2_000;
+    this.backgroundIdleMs = options.backgroundIdleMs ?? 30_000;
+    this.now = options.now ?? Date.now;
+    this.urgent = new WorkerProc(paths, this.tmp, "u", null, () => this.urgentDied());
+    this.background = new WorkerProc(paths, this.tmp, "b", BACKGROUND_NICE);
+    this.cache = new SentenceCache(
+      options.cacheDir ?? path.join(paths.dir, "cache"),
+      engineTag(paths),
+      options.cacheMaxBytes,
+    );
+  }
+
+  /** Installed and switched on. */
+  get usable(): boolean {
+    return this.settings().enabled && naturalInstalled(this.paths);
+  }
+
+  /** Cache hit rate since this daemon started (0..1; null before any look). */
+  get cacheHitRate(): number | null {
+    const total = this.cache.totalHits + this.cache.totalMisses;
+    return total === 0 ? null : this.cache.totalHits / total;
+  }
+
+  /**
+   * Starts the worker now and renders a tiny sentence, so the first real call does not pay for loading the model;
+   * and keeps it alive (a worker that dies is started again). Call after the daemon starts and after setup.
+   */
+  async warm(): Promise<boolean> {
+    if (!this.usable) return false;
+    this.keepWarm = true;
+    const pcm = await this.urgent.render(WARM_TEXT, this.settings().voice, SPEED);
+    if (pcm) this.restartFailures = 0;
+    return pcm !== null;
+  }
+
+  private urgentDied(): void {
+    if (!this.keepWarm || !this.usable || this.restartTimer) return;
+    if (this.restartFailures >= 5) return;
+    const delay = this.restartDelayMs * 2 ** this.restartFailures;
+    this.restartFailures += 1;
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      void this.warm();
+    }, delay);
+    this.restartTimer.unref?.();
+  }
+
+  /** 24 kHz mono PCM of `text` (one piece, no cache), or null if the worker could not make it. */
+  render(text: string, voice?: string, priority: RenderPriority = "urgent"): Promise<Int16Array | null> {
+    if (voice ? !NATURAL_VOICE.test(voice) || !naturalInstalled(this.paths) : !this.usable)
+      return Promise.resolve(null);
+    const proc = this.procFor(priority);
+    return proc.render(text, voice ?? this.settings().voice, SPEED);
+  }
+
+  private procFor(priority: RenderPriority): WorkerProc {
+    if (priority === "urgent") return this.urgent;
+    this.backgroundBusy += 1;
+    if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
+    this.backgroundTimer = null;
+    return this.background;
+  }
+
+  private backgroundDone(): void {
+    this.backgroundBusy = Math.max(0, this.backgroundBusy - 1);
+    if (this.backgroundBusy > 0) return;
+    if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
+    this.backgroundTimer = setTimeout(() => {
+      this.backgroundTimer = null;
+      if (this.backgroundBusy === 0) this.background.stop();
+    }, this.backgroundIdleMs);
+    this.backgroundTimer.unref?.();
+  }
+
+  /** One sentence as 8 kHz PCM: from the cache, else rendered (and kept). */
+  private async sentence(
+    text: string,
+    voice: string,
+    priority: RenderPriority,
+  ): Promise<{ pcm: Int16Array; cached: boolean; ms: number } | null> {
+    const key = this.cache.key(voice, SPEED, text);
+    const hit = this.cache.get(key);
+    if (hit) return { pcm: hit, cached: true, ms: 0 };
+    const began = this.now();
+    const flight = `${priority}:${key}`;
+    let made = this.inflight.get(flight);
+    if (!made) {
+      made = (async () => {
+        try {
+          const pcm = await this.render(text, voice, priority);
+          if (!pcm || pcm.length === 0) return null;
+          const line = downsampleToLine(pcm);
+          this.cache.put(key, line);
+          return line;
+        } finally {
+          this.inflight.delete(flight);
+          if (priority === "background") this.backgroundDone();
+        }
+      })();
+      this.inflight.set(flight, made);
+    }
+    const pcm = await made;
+    return pcm ? { pcm, cached: false, ms: this.now() - began } : null;
+  }
+
+  /**
+   * The words as one padded 8 kHz line, made of cached sentences plus whatever is missing, which is rendered in
+   * order (all queued at once on the worker) so the first sentence is ready first. Null if any sentence failed.
+   */
+  async line(text: string, options: LineOptions = {}): Promise<Int16Array | null> {
+    const voice = options.voice ?? this.settings().voice;
+    const priority = options.priority ?? "urgent";
+    const parts = splitSentences(text);
+    if (parts.length === 0) return null;
+    const began = this.now();
+    const renders = parts.map((part) => this.sentence(part, voice, priority));
+    const pieces: Int16Array[] = [];
+    const stats: LineStats = { sentences: parts.length, hits: 0, renderMs: [] };
+    let failed = false;
+    for (let index = 0; index < renders.length; index += 1) {
+      const made = await renders[index]!;
+      if (!made) {
+        failed = true;
+        continue;
+      }
+      if (made.cached) stats.hits += 1;
+      else stats.renderMs.push(made.ms);
+      pieces.push(made.pcm);
+      options.onSentence?.({ index, total: parts.length, pcm: made.pcm, cached: made.cached });
+    }
+    const info = {
+      priority,
+      sentences: stats.sentences,
+      cacheHits: stats.hits,
+      renderMs: stats.renderMs,
+      totalMs: this.now() - began,
+      hitRate: this.cacheHitRate === null ? null : Math.round(this.cacheHitRate * 100) / 100,
+    };
+    if (stats.renderMs.length > 0 || failed) logger.info("voice natural line", info);
+    else logger.debug("voice natural line", info);
+    if (failed) return null;
+    return assembleLine(pieces, LEAD_SILENCE_MS, TAIL_SILENCE_MS);
+  }
+
+  /**
+   * Renders (niced, in the background) whatever of these phrases is not cached yet, one at a time; resolves when
+   * done. Cheap to call again: cached sentences cost a file look.
+   */
+  prewarm(texts: readonly string[], voice?: string): Promise<{ rendered: number; cached: number }> {
+    const run = async (): Promise<{ rendered: number; cached: number }> => {
+      let rendered = 0;
+      let cached = 0;
+      if (!this.usable) return { rendered, cached };
+      const useVoice = voice ?? this.settings().voice;
+      const seen = new Set<string>();
+      for (const text of texts) {
+        for (const part of splitSentences(text)) {
+          const key = this.cache.key(useVoice, SPEED, part);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (this.cache.has(key)) {
+            cached += 1;
+            continue;
+          }
+          if (!this.usable) return { rendered, cached };
+          const made = await this.sentence(part, useVoice, "background");
+          if (made && !made.cached) rendered += 1;
+        }
+      }
+      logger.debug("voice natural prewarm", { rendered, cached });
+      return { rendered, cached };
+    };
+    const result = this.prewarmChain.then(run, run);
+    this.prewarmChain = result.catch(() => undefined);
+    return result;
+  }
+
   /** A fixed sample through the same engine and telephone filter, without changing call settings. */
   async preview(voice: string): Promise<Buffer | null> {
     const pcm = await this.render(VOICE_PREVIEW_TEXT, voice);
-    return pcm?.length ? wavOfLine(padLine(downsampleToLine(pcm))) : null;
+    return pcm?.length ? wavOfPcm(padLine(downsampleToLine(pcm))) : null;
   }
 
   /** The words as a telephone clip: 8 kHz G.711 mu-law. Null if they could not be made. */
-  async clip(text: string): Promise<Clip | null> {
-    const pcm = await this.render(text);
-    if (!pcm) return null;
-    return { text, mulaw: encodeMulaw(padLine(downsampleToLine(pcm))).toString("base64") };
+  async clip(text: string, options: LineOptions = {}): Promise<Clip | null> {
+    const line = await this.line(text, options);
+    if (!line) return null;
+    return { text, mulaw: encodeMulaw(line).toString("base64") };
   }
 
   /** The words as an 8 kHz WAV file, for a call this Mac places itself. Null if they could not be made. */
-  async wav(text: string): Promise<{ file: string; durationMs: number } | null> {
-    const pcm = await this.render(text);
-    if (!pcm) return null;
-    const line = padLine(downsampleToLine(pcm));
-    const file = path.join(this.tmp, `s${this.nextId++}.wav`);
-    fs.writeFileSync(file, wavOfLine(line), { mode: 0o600 });
+  async wav(text: string, options: LineOptions = {}): Promise<{ file: string; durationMs: number } | null> {
+    const line = await this.line(text, options);
+    if (!line) return null;
+    const file = path.join(this.tmp, `s${this.fileCounter++}.wav`);
+    fs.writeFileSync(file, wavOfPcm(line), { mode: 0o600 });
     return { file, durationMs: Math.round((line.length / LINE_RATE) * 1000) };
   }
 
+  private fileCounter = 1;
+
   stop(): void {
-    this.child?.kill("SIGTERM");
-    this.child = null;
-    this.ready = null;
+    this.keepWarm = false;
+    if (this.restartTimer) clearTimeout(this.restartTimer);
+    if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
+    this.restartTimer = null;
+    this.backgroundTimer = null;
+    this.urgent.stop();
+    this.background.stop();
     fs.rmSync(this.tmp, { recursive: true, force: true });
   }
+}
+
+/** The engine's identity for the cache: a replaced model file changes every key. */
+function engineTag(paths: NaturalPaths): string {
+  try {
+    const stat = fs.statSync(paths.model);
+    return `${stat.size}-${Math.round(stat.mtimeMs)}`;
+  } catch {
+    return "none";
+  }
+}
+
+/**
+ * Every sentence the call flows say whatever the chat: the dialog's PIN lines, the call-in prompts and the greeting.
+ * Pre-rendered at idle (`NaturalVoice.prewarm`) so they are instant when a call needs them.
+ */
+export function fixedPhrases(): string[] {
+  const dialog = new CallDialog({ greeting: "Hello, this is Squeak.", question: "", options: [] }, "0000", true);
+  return [
+    ...new Set([
+      "Hello, this is Squeak.",
+      "Goodbye.",
+      "Press star to hear this again",
+      ...dialog.prompts().slice(0, 1),
+      "That PIN is not right. Try again, then press hash.",
+      "That PIN is not right. Goodbye.",
+      ...inboundPrompts(null, true),
+      ...inboundPrompts(null, false),
+    ]),
+  ].filter((text) => text.trim().length > 0);
 }
 
 /** Plays the natural voice where it works, the plain one where it does not. */
@@ -483,36 +787,5 @@ export function padLine(line: Int16Array): Int16Array {
 
 /** The samples of a 16-bit mono WAV written by the worker. */
 export function readPcm24k(wav: Buffer): Int16Array {
-  let at = 12;
-  while (at + 8 <= wav.length) {
-    const id = wav.toString("ascii", at, at + 4);
-    const size = wav.readUInt32LE(at + 4);
-    if (id === "data") {
-      const bytes = Math.min(size, wav.length - at - 8) & ~1;
-      const out = new Int16Array(bytes / 2);
-      for (let i = 0; i < out.length; i += 1) out[i] = wav.readInt16LE(at + 8 + i * 2);
-      return out;
-    }
-    at += 8 + size + (size % 2);
-  }
-  return new Int16Array(0);
-}
-
-function wavOfLine(pcm: Int16Array): Buffer {
-  const data = Buffer.alloc(pcm.length * 2);
-  for (let i = 0; i < pcm.length; i += 1) data.writeInt16LE(pcm[i]!, i * 2);
-  const header = Buffer.alloc(44);
-  header.write("RIFF", 0, "ascii");
-  header.writeUInt32LE(36 + data.length, 4);
-  header.write("WAVEfmt ", 8, "ascii");
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(1, 22);
-  header.writeUInt32LE(LINE_RATE, 24);
-  header.writeUInt32LE(LINE_RATE * 2, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write("data", 36, "ascii");
-  header.writeUInt32LE(data.length, 40);
-  return Buffer.concat([header, data]);
+  return pcmOfWav(wav);
 }

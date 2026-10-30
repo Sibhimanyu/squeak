@@ -13,6 +13,7 @@ import {
   type DownMessage,
   type DirectoryWorkspace,
 } from "./memo-protocol.js";
+import { judgeTranscript } from "./transcript-quality.js";
 import type { Uplink } from "./uplink.js";
 
 export interface InboundDependencies {
@@ -84,6 +85,8 @@ const SAYS = {
   askFail: ASK_FAILED,
   followUp: `${AGAIN}, 1 for something else about this chat, or hash to hang up.`,
   limit: "That is as many answers as I can give on one call. Goodbye.",
+  noSpeech: "I didn't hear anything. Press 1 to try again, or hash to hang up.",
+  cap: "I have to stop there.",
 };
 
 /** Said once a chat is chosen, before the beep. */
@@ -92,6 +95,15 @@ const recordPrompt = (label: string): string =>
 /** The first question once a chat is chosen, with a Mac that answers: say or ask something, or hear its status. */
 const actionPrompt = (label: string): string =>
   `${label}. Press 1 to say a message or ask a question, or 3 to hear where it stands. ${AGAIN}, or hash to hang up.`;
+/** Offered first when the Mac names the chat used last: 1 takes it, 2 goes to the menus. */
+export const lastChatPrompt = (label: string, greet: boolean): string =>
+  `${greet ? `${GREETING} ` : ""}Press 1 for ${label}, the last one you used. Press 2 for another chat. ${AGAIN}, or hash to hang up.`;
+/** Said when the recording came back as silence or a stock hallucination; the key is "record again" for the flow. */
+export const heardNothingPrompt = (recordAgain: string): string =>
+  `I didn't hear anything. Press ${recordAgain} to record again, or hash to cancel.`;
+/** Said when the words are too few or too brief to trust; nothing is sent without a key. */
+export const unclearPrompt = (text: string, recordAgain: string): string =>
+  `I only heard: ${text.replace(/[.!?\s]+$/, "")}. Press ${recordAgain} to record again, 1 to send it anyway, star to hear it again, or hash to cancel.`;
 const sentLine = (label: string): string => `Done. Your message was sent to ${label}. Goodbye.`;
 
 const MENU_END = `${AGAIN}, or hash to hang up.`;
@@ -156,6 +168,8 @@ export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean):
     SAYS.notSure,
     SAYS.wrong,
     SAYS.noChat,
+    SAYS.noSpeech,
+    SAYS.cap,
   ];
   const pin = askPin ? [`${GREETING} ${SAYS.pin}`, SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
   const ask = directory?.ask === true;
@@ -165,7 +179,13 @@ export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean):
       )
     : [];
   if (ask) fixed.push(SAYS.recordAsk, SAYS.askFail, SAYS.followUp, SAYS.limit);
-  return [...new Set([...pin, ...(directory ? menuPrompts(directory, !askPin) : []), ...perChat, ...fixed])];
+  fixed.push(heardNothingPrompt(ask ? "3" : "2"));
+  const last = directory?.last ? [lastChatPrompt(directory.last.label, !askPin)] : [];
+  // With a last chat the offer carries the greeting, so the menus behind "another chat" do not.
+  const greetMenus = !askPin && last.length === 0;
+  return [
+    ...new Set([...pin, ...last, ...(directory ? menuPrompts(directory, greetMenus) : []), ...perChat, ...fixed]),
+  ];
 }
 
 /** The shortest recording that is a message, not a hiss. */
@@ -177,6 +197,38 @@ const CONFIRM_WAIT_MS = 30_000;
 const MAX_TAKES = 3;
 const MAX_REPEATS = 5;
 const STILL_WORKING_MS = 6_000;
+/** "Still working on it" is never said twice within this: a long wait is not a stream of reassurance. */
+const STILL_WORKING_GAP_MS = 10_000;
+
+/**
+ * While the Mac works on an answer: says "Still working on it." after the first wait, and again only after the gap, as
+ * long as the work goes on and the last one has been said. Returns what stops it.
+ */
+function reassure(call: PhoneCall, deps: InboundDependencies): () => void {
+  let stopped = false;
+  let saying = false;
+  let lastAt = 0;
+  const tick = (): void => {
+    if (stopped || saying || !call.open || Date.now() - lastAt < STILL_WORKING_GAP_MS) return;
+    saying = true;
+    lastAt = Date.now();
+    void speak(call, deps, SAYS.still)
+      .catch(() => undefined)
+      .finally(() => {
+        saying = false;
+      });
+  };
+  const begun = Date.now();
+  const first = setTimeout(tick, STILL_WORKING_MS);
+  const again = setInterval(() => {
+    if (Date.now() - begun >= STILL_WORKING_MS) tick();
+  }, 1_000);
+  return () => {
+    stopped = true;
+    clearTimeout(first);
+    clearInterval(again);
+  };
+}
 
 function samePin(typed: string, pin: string): boolean {
   const a = Buffer.from(typed);
@@ -212,6 +264,7 @@ export async function handleIncoming(incoming: IncomingCall, deps: InboundDepend
     return;
   }
   const began = Date.now();
+  call.trace = deps.trace ?? null;
   deps.trace?.(`step: Call in answered from extension ${incoming.peer || "unknown"}`);
   try {
     await conversation(call, deps);
@@ -242,7 +295,10 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
   for (let attempt = 0; attempt < PIN_TRIES && call.open && !known; attempt++) {
     // The PIN prompt is said but its digits are never written down.
     await speak(call, deps, attempt === 0 ? `${GREETING} ${SAYS.pin}` : SAYS.pinAgain);
-    const typed = await readDigits(call, { maxLength: 12, timeoutMs: PIN_WAIT_MS });
+    call.redactKeys = true;
+    const typed = await readDigits(call, { maxLength: 12, timeoutMs: PIN_WAIT_MS }).finally(() => {
+      call.redactKeys = false;
+    });
     if (typed === null) return;
     known = samePin(typed, pin ?? "");
     deps.trace?.(known ? "step: PIN accepted" : "step: PIN wrong");
@@ -254,7 +310,28 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
   if (!directory || (directory.items.length === 0 && !directory.workspaces?.some((w) => w.chats.length > 0))) {
     return bye(call, deps, SAYS.noChat);
   }
-  const target = await pickTarget(call, deps, directory, pin === null);
+  // The chat used last is offered before any menu: 1 takes it, 2 goes on to the workspaces and chats.
+  let target: DirectoryItem | null = null;
+  let greet = pin === null;
+  if (directory.last) {
+    const offered = directory.last;
+    let another = false;
+    for (let attempt = 0; attempt < 2 && call.open && target === null && !another; attempt++) {
+      const key = await menuKey(call, deps, lastChatPrompt(offered.label, greet && attempt === 0));
+      if (key === null || key === "#") return bye(call, deps, SAYS.bye);
+      if (key === "1") {
+        deps.trace?.(`key: 1 (${offered.label}, the last one used)`);
+        target = { n: 1, label: offered.label, choice: offered.choice };
+      } else if (key === "2") {
+        deps.trace?.("key: 2 (another chat)");
+        another = true;
+      }
+    }
+    // Two wrong keys end the call, as in every menu; 2 goes on, with the greeting already said.
+    if (target === null && !another) return bye(call, deps, SAYS.bye);
+    greet = false;
+  }
+  target ??= await pickTarget(call, deps, directory, greet);
   if (target === null) return bye(call, deps, SAYS.bye);
 
   // 3. With a Mac that answers questions: say or ask something, or hear the chat's status; each answer may be followed
@@ -321,12 +398,12 @@ async function statusFlow(
 ): Promise<Done> {
   counter.answers += 1;
   await speak(call, deps, SAYS.wait);
-  const waiting = setTimeout(() => void speak(call, deps, SAYS.still).catch(() => undefined), STILL_WORKING_MS);
+  const stopReassuring = reassure(call, deps);
   let heard: DownMessage | null;
   try {
     heard = await deps.uplink.status(chosen(target), directory.version);
   } finally {
-    clearTimeout(waiting);
+    stopReassuring();
   }
   if (!heard) return bye(call, deps, SAYS.noMac).then(() => "done" as const);
   if (heard.status !== "answer") {
@@ -359,30 +436,50 @@ async function messageFlow(
   let askFails = 0;
   for (let take = 0; take < MAX_TAKES && call.open; take++) {
     await speak(call, deps, ask ? SAYS.recordAsk : recordPrompt(target.label));
-    const recording = await call.record({ maxMs: MAX_MEMO_MS, beep: true });
+    const recording = await call.record({ maxMs: MAX_MEMO_MS, beep: true, endOnSilence: true });
     if (!recording) return "done";
     deps.trace?.(`step: Recorded ${(recording.durationMs / 1000).toFixed(1)} s`);
+    if (recording.ended === "no-speech") {
+      // Nothing was said: do not process two minutes of silence. One key tries again; anything else hangs up.
+      await speak(call, deps, SAYS.noSpeech);
+      const again = await call.key(MENU_WAIT_MS);
+      deps.trace?.(`key: ${again === "1" ? "1 (try again)" : "hang up"}`);
+      if (again === "1") continue;
+      return done(SAYS.bye);
+    }
+    if (recording.ended === "limit") await speak(call, deps, SAYS.cap);
     if (recording.durationMs < MIN_MEMO_MS) {
       await speak(call, deps, SAYS.nothing);
       continue;
     }
     await speak(call, deps, SAYS.wait);
     const memoId = newMessageId();
-    const waiting = setTimeout(() => void speak(call, deps, SAYS.still).catch(() => undefined), STILL_WORKING_MS);
+    const stopReassuring = reassure(call, deps);
     let heard: DownMessage | null;
     try {
       heard = await deps.uplink.memo(memoId, choice, directory.version, await deps.encode(recording.file));
     } finally {
-      clearTimeout(waiting);
+      stopReassuring();
     }
     if (!heard) return done(SAYS.noMac);
     if (heard.status !== "transcript") {
       await speak(call, deps, heard.status === "refused" ? heard.reason : SAYS.wrong);
       continue;
     }
-    if (heard.audio) deps.seed?.([heard.audio]);
-    const readBack = readBackSentence(heard.text, heard.label, ask);
     const recordAgain = ask ? "3" : "2";
+    // Silence and stock hallucinations are nothing heard; a few brief words are offered back, never sent on their own.
+    const quality = judgeTranscript(heard.text, recording.durationMs);
+    deps.trace?.(`step: Transcript judged ${quality}`);
+    if (quality === "silence") {
+      await speak(call, deps, heardNothingPrompt(recordAgain));
+      const retry = await call.key(MENU_WAIT_MS);
+      deps.trace?.(`key: ${retry === recordAgain ? `${recordAgain} (record again)` : "cancel"}`);
+      if (retry === recordAgain) continue;
+      return done(SAYS.cancelled);
+    }
+    const unclear = quality === "unclear";
+    if (!unclear && heard.audio) deps.seed?.([heard.audio]);
+    const readBack = unclear ? unclearPrompt(heard.text, recordAgain) : readBackSentence(heard.text, heard.label, ask);
     let answer: string | null = null;
     // Said until a key that means something: star hears it again, 2 (with a Mac that answers) asks it as a question,
     // and a question that fails is offered again here, never by recording again.
@@ -397,20 +494,17 @@ async function messageFlow(
         }
         continue;
       }
-      if (!(ask && answer === "2")) break;
+      if (!(ask && !unclear && answer === "2")) break;
       deps.trace?.("key: 2 (ask it as a question)");
       if (counter.answers >= MAX_ANSWERS_PER_CALL) return done(SAYS.limit);
       counter.answers += 1;
       await speak(call, deps, SAYS.wait);
-      const stillWorking = setTimeout(
-        () => void speak(call, deps, SAYS.still).catch(() => undefined),
-        STILL_WORKING_MS,
-      );
+      const stopReassuring = reassure(call, deps);
       let reply: DownMessage | null;
       try {
         reply = await deps.uplink.ask(memoId);
       } finally {
-        clearTimeout(stillWorking);
+        stopReassuring();
       }
       if (reply?.status === "answer") {
         deps.trace?.("step: Question answered");

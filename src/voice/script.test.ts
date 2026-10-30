@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { item, QUESTION } from "./fixtures.js";
-import { CallDialog, composeScript, shouldCall } from "./script.js";
+import { CallDialog, clipOption, clipQuestion, composeScript, FULL_TEXT_NOTE, shouldCall } from "./script.js";
 
 describe("shouldCall", () => {
   it("rings only for what waits on you", () => {
@@ -19,8 +19,8 @@ describe("composeScript", () => {
     const script = composeScript(item(), QUESTION, true);
     expect(script.greeting).toContain("squeak · voice");
     expect(script.question).toContain("Which one?");
-    expect(script.question).toContain("Press 1 for Merge now, recommended.");
-    expect(script.question).toContain("Press 2 for Open a PR first.");
+    expect(script.question).toContain("Options. 1, Merge now, recommended. 2, Open a PR first.");
+    expect(script.question).not.toContain(FULL_TEXT_NOTE);
     expect(script.options.map((o) => o.letter)).toEqual(["A", "B"]);
   });
 
@@ -37,6 +37,72 @@ describe("composeScript", () => {
     expect(script.question).toContain("Approve it from the Mac or the phone app.");
   });
 });
+
+describe("a shorter call", () => {
+  const LONG = [
+    "Okay, so I'm not releasing without your word, because it would go out together with whatever the other chat has committed by the time the build finishes and that may include unrelated work. The daemon and the uninstaller both changed. Let me know what you think.",
+    "Release both?",
+    "",
+    "A) Yes, both: ship the daemon and the uninstaller together (recommended)",
+    "B) Only the daemon",
+    "C) Only the uninstaller — leave the rest",
+  ].join("\n");
+
+  it("speaks the question and the options tersely", () => {
+    const script = composeScript(item(), LONG, true);
+    expect(script.question).toContain("Release both?");
+    expect(script.question).toContain(
+      "Options. 1, Yes, both, recommended. 2, Only the daemon. 3, Only the uninstaller.",
+    );
+    expect(script.question).toContain("Press star to hear this again, or hash to hang up.");
+    expect(script.question.split(/\s+/).length).toBeLessThan(60);
+  });
+
+  it("with no options, keeps the closing question of a long message and says the full text is on the phone", () => {
+    const script = composeScript(item(), LONG.split("\n")[0] + " Release both?", false);
+    expect(script.question).toContain("Release both?");
+    expect(script.question).toContain(FULL_TEXT_NOTE);
+    expect(script.question).not.toContain("Let me know");
+    expect(script.question).toContain("Open Squeak to answer.");
+    expect(script.question.split(/\s+/).length).toBeLessThan(70);
+  });
+
+  it("cuts a long question at a sentence boundary, never mid-word", () => {
+    const text = "First point here. Second point goes on for a while with several more words in it. ".repeat(6);
+    const { text: out, cut } = clipQuestion(text);
+    expect(cut).toBe(true);
+    expect(out.split(/\s+/).length).toBeLessThanOrEqual(35);
+    expect(out).toMatch(/[.!?]$/);
+    expect(text.startsWith(out)).toBe(true);
+  });
+
+  it("cuts one endless sentence at a clause or a word", () => {
+    const sentence = `${"alpha bravo charlie delta, ".repeat(5)}${"echo ".repeat(40)}`;
+    const { text, cut } = clipQuestion(sentence);
+    expect(cut).toBe(true);
+    expect(words(text)).toBeLessThanOrEqual(35);
+    expect(text).toMatch(/\w\.$/);
+    expect(words(clipQuestion("x".repeat(500)).text)).toBe(1);
+  });
+
+  it("leaves a short question whole, minus filler and links", () => {
+    expect(clipQuestion("Sure, should I merge https://example.com/pr/1 now?")).toEqual({
+      text: "should I merge a link now?",
+      cut: false,
+    });
+    expect(clipQuestion("").text).toBe("");
+  });
+
+  it("clips options to a few words and drops the explanation", () => {
+    expect(clipOption("Only the uninstaller — leave the rest of it")).toBe("Only the uninstaller");
+    expect(clipOption("Rebuild everything from scratch with a clean cache and retry later")).toBe(
+      "Rebuild everything from scratch with a",
+    );
+    expect(clipOption("Yes!")).toBe("Yes");
+  });
+});
+
+const words = (text: string): number => text.split(/\s+/).filter(Boolean).length;
 
 describe("CallDialog", () => {
   const script = composeScript(item(), QUESTION, true);

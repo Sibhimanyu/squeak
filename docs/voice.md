@@ -217,9 +217,72 @@ instead of waiting up to 25 s before dialling. The ring itself is 40 s (`RING_TI
 about 12 s is the phone or the PBX ending the call, not Squeak giving up. The call trace says when dialling started,
 when each clip was sent, and what played first.
 
-## Later
+### The chat you used last, and recordings it will not send blind
 
-Ending a message on silence instead of hash.
+- **Jump straight in** (`DirectoryDoc.last`, optional: `{ choice, label }`). The Mac names the chat you last used by
+  phone (a message sent, or a question or status asked; saved in `voice-last-chat.json`, `last-chat.ts`), else the newest
+  chat that waits on you, provided it can take a message now. After the PIN (or first, when it is skipped) the call says
+  "Hello, this is Squeak. Press 1 for <chat>, the last one you used. Press 2 for another chat." Key 1 goes on as if
+  the chat had been picked from a menu (with a Mac that answers: the say/ask/status step), key 2 goes to the workspace
+  and chat menus, star repeats, hash hangs up, two wrong keys end the call. `choice` indexes the list version's chats as
+  a memo's does; a last chat no menu lists is appended after the menus' chats, never read out in one. An older Mac
+  publishes no `last`, and the call starts at the menus as before. The sentence is among the fixed prompts the Mac
+  records ahead (`inboundPrompts`), in both the greeting and no-greeting forms.
+- **Unclear recordings** (`transcript-quality.ts`, pure). After transcription: nothing, punctuation only, or one of
+  Whisper's stock silence strings ("you", "Thank you.", "Thanks for watching", "[BLANK_AUDIO]", ...) is "nothing heard":
+  "I didn't hear anything. Press 3 to record again, or hash to cancel." (2 without a Mac that answers: the key is
+  whichever one records again). Two words or fewer under eight characters ("uh", "okay"), or a recording under
+  1.5 s, is unclear: "I only heard: <text>. Press 3 to record again, 1 to send it anyway, star to hear it again, or hash
+  to cancel." Neither is ever sent without a key, and an unclear one offers no "ask it as a question".
+
+## What an outgoing call says, missed calls, and what a call leaves behind
+
+- **A short script** (`script.ts`). The question is capped at about 15 seconds (35 words), cut at a sentence boundary and
+  never mid-word (one endless sentence is cut at a clause, else at a word); a filler opener ("Okay, so") and a trailing
+  "let me know" are dropped, and when the start does not fit the closing question is kept, since that is what you answer.
+  When anything was left out it says "The full text is on your phone." Options are read tersely, "Options. 1, yes both.
+  2, only the daemon. 3, only the uninstaller.": the part before a dash or colon, at most six words, "recommended"
+  after the agent's pick. "Press star to hear this again, or hash to hang up." stays. The cards on Telegram, Cliq and
+  the apps always carry the whole text, unchanged.
+- **A missed call is tried once more** (`missed-call.ts`, `policy.ts`). A call that ends unanswered or fails (a busy
+  line is not this: it is waited out as before) is dialled again about 2 minutes later, once, and only if the session
+  is still waiting on that same question; then it gives up quietly. The retry keeps every rule of a call: paused,
+  quiet hours (`voice.quiet`), and the 5 minute gap after any _other_ episode's call (a retry is not held by the gap
+  after its own call, since the gap would always outlast the 2 minutes).
+- **The question also goes out as a text** after the first miss, to each of Telegram and Cliq whose notify settings
+  allow that kind now (`shouldPushTo`: not muted, the `question` / `approval` switch, quiet hours as notify treats
+  them) and that did not already get this episode's card. The monitor's own card, pushed when the call was queued, is
+  the normal case, so usually nothing more is sent; the text only makes up for a card held back (quiet hours that
+  ended, a setting changed since). Never a duplicate.
+- **A one-line summary** is saved with each call in `voice-calls.json` (`summary`, at most 160 characters, optional so
+  older files read as before) and appears in `GET /control/voice/calls` and the phone's `voice.calls`:
+  "Answered: option 1 (Yes, both)" for a key that answered a question, "Sent “xyz…” to App quitting loop" for a call in
+  that sent a message (the transcript's start, from the call trace). It never holds a PIN or a key but the option name.
+- **After a call in that sent a message, one text** goes to Telegram and Cliq: "Call: sent your message to <chat>:
+  “<first 80 characters>”". It is on by default, replaces the earlier longer "Sent by phone" note, and is held for a
+  channel that is muted or in its quiet hours. Failures of a call in are still announced as before.
+
+## How a recording ends, keys, busy lines, and the line itself (add-on 0.11.2)
+
+- A message recording ends on the first of: `#` (hash), 2.5 s of quiet after speech was heard (energy-based, read from
+  the WAV as baresip writes it, `SpeechWatcher` in `sip-phone.ts`), the 60 s cap (the line says "I have to stop there"
+  and carries on with what it has), or no speech 8 s after the beep ("I didn't hear anything. Press 1 to try again, or
+  hash to hang up."). The call log says: `Recording started`, `Speech detected X s in`, and `Recording ended because:
+hash | silence | cap | no speech`.
+- Every key is logged as `dtmf: <key> (prompt|menu|recording)`. Digits are shown as `digit` while a PIN is typed and in
+  an outbound call's dialog; `#` and `*` are always named.
+- An outbound "agent has a question" call that finds the line busy (a call in is up) is not failed: the Mac traces
+  `Line busy, will ring when the call ends`, tries again every 10 s for up to 3 minutes, then gives up with a trace and
+  leaves the question in the app. The existing minimum gap between calls still applies.
+- No speech is made during a call. The natural voice runs only in advance (add-on start, a changed directory, ringing),
+  and a pre-render waits for a call to end. A line that is missing mid-call comes from the plain voice and logs
+  `voice line made during a call`. The line rests on a long silence file between clips, so RTP never stops. Every clip is
+  padded with 300 ms of silence, and a clip that is not 8 kHz mono PCM16 is logged (`voice clip is not 8 kHz mono PCM16`).
+- At the end of a call the log carries `Line quality: good|fair|poor (<callstat lines>)`; when baresip's reply is not a
+  stats block the add-on logs its first 200 characters once (`voice call stats reply not recognised`) so "no data" can
+  be diagnosed. See docs/remote-channel.md for `lastTest.quality`.
+
+## Later
 
 ## Pairing a gateway (daemon side)
 

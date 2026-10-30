@@ -20,14 +20,29 @@ export interface PhoneCall {
   beep(): Promise<void>;
   /**
    * Records what the other side says until `#`, the limit, or hang-up. Null if they hung up (nothing worth
-   * keeping: they cannot confirm it).
+   * keeping: they cannot confirm it). With `endOnSilence` it also ends on end-of-speech (`silence`: speech was heard,
+   * then a quiet spell) or when nothing at all was heard after the beep (`no-speech`).
    */
   record(options: {
     maxMs: number;
     beep?: boolean;
-  }): Promise<{ file: string; durationMs: number; ended: "key" | "limit" } | null>;
+    endOnSilence?: boolean;
+  }): Promise<{ file: string; durationMs: number; ended: RecordEnd } | null>;
+  /** Where the call writes a line for the call log (set by the flow that owns the call); absent: nothing is logged. */
+  trace?: ((line: string) => void) | null;
+  /**
+   * True while the other side is typing something secret (a PIN): a digit is then logged as "digit" rather than
+   * itself. `#` and `*` are always named.
+   */
+  redactKeys?: boolean;
   hangup(): Promise<void>;
 }
+
+/** Why a recording stopped: a hash, a quiet spell after speech, the cap, or nothing was said at all. */
+export type RecordEnd = "key" | "limit" | "silence" | "no-speech";
+
+/** What the add-on and the Mac both say when the line is busy, so the Mac knows to wait rather than give up. */
+export const LINE_BUSY_REASON = "The line is busy with another call.";
 
 export interface IncomingCall {
   /** The caller's user part (an extension), as the PBX names it. */
@@ -82,6 +97,9 @@ export async function runDialog(
   trace?: (line: string) => void,
 ): Promise<CallResult> {
   let letter: string | null = null;
+  call.trace = trace ?? null;
+  // The outbound dialog may be taking a PIN: digits are not written down, only that keys arrived and where.
+  call.redactKeys = true;
   let actions: DialogAction[] = dialog.start();
   while (call.open) {
     for (const action of actions) {

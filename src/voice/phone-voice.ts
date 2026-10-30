@@ -11,6 +11,7 @@ import type { VoiceFavorite } from "./favorites.js";
 export const PHONE_CALLS_MAX = 20;
 export const PHONE_CALL_EVENTS_MAX = 40;
 export const PHONE_EVENT_TEXT_MAX = 200;
+export const PHONE_SUMMARY_MAX = 160;
 
 /** The phone's capability name (its presence `caps`) for the calls log. */
 export const PHONE_CALLS_CAP = "calls";
@@ -31,6 +32,8 @@ export function phoneCalls(
 ): PhoneCall[] {
   return history.list(PHONE_CALLS_MAX).map((entry) => ({
     ...entry,
+    // One optional line of what the call did, clipped again here so no store can widen what leaves the Mac.
+    ...(entry.summary ? { summary: entry.summary.slice(0, PHONE_SUMMARY_MAX) } : {}),
     events: trace
       .eventsFor(entry)
       .slice(0, PHONE_CALL_EVENTS_MAX)

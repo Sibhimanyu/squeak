@@ -98,6 +98,12 @@ final class VoiceCommandTests: XCTestCase {
         XCTAssertEqual(line("ringing"), "Ringing your phone…")
         XCTAssertEqual(line("answered", letter: "B"), "You answered and pressed B. Nothing was sent anywhere.")
         XCTAssertEqual(line("answered"), "You answered. No key was pressed.")
+        XCTAssertEqual(
+            VoiceFormat.testLine(.init(at: 0, status: "answered", letter: "B", quality: .init(verdict: "fair", jitterMs: 40))),
+            "You answered and pressed B. Nothing was sent anywhere. Line quality: fair.")
+        let decoded = try? JSONDecoder().decode(VoiceView.LastTest.self, from: Data(#"{"at":1,"status":"answered","quality":{"verdict":"poor","lossPct":7.5}}"#.utf8))
+        XCTAssertEqual(decoded?.quality?.verdict, "poor")
+        XCTAssertNil(try? JSONDecoder().decode(VoiceView.LastTest.self, from: Data(#"{"at":1,"status":"answered"}"#.utf8)).quality)
         XCTAssertEqual(line("unanswered"), "Nobody picked up.")
         XCTAssertEqual(line("failed", reason: "PBX refused"), "The call failed: PBX refused")
     }

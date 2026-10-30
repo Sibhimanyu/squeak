@@ -335,7 +335,16 @@ export function voice(view) {
     defaultCallee: nonEmpty(v.defaultCallee),
     lastTest:
       isObject(t) && num(t.at) !== null && nonEmpty(t.status)
-        ? { at: t.at, status: t.status, letter: nonEmpty(t.letter), reason: nonEmpty(t.reason) }
+        ? {
+            at: t.at,
+            status: t.status,
+            letter: nonEmpty(t.letter),
+            reason: nonEmpty(t.reason),
+            quality:
+              isObject(t.quality) && ["good", "fair", "poor"].includes(t.quality.verdict)
+                ? { verdict: t.quality.verdict }
+                : null,
+          }
         : null,
     pin: nonEmpty(v.pin),
     policy: isObject(p) ? { outgoing: choice(p.outgoing), incoming: choice(p.incoming) } : null,

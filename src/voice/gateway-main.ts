@@ -27,6 +27,7 @@ import { incomingGate, PinKeeper } from "./pin-keeper.js";
 import { runDialog, type Phone } from "./phone.js";
 import { SipPhone } from "./sip-phone.js";
 import { RelayUplink } from "./uplink.js";
+import type { CallQuality } from "./line-quality.js";
 import { EspeakSpeaker, PiperSpeaker, setSpeechSlowHook, type Speaker } from "./tts.js";
 import { GatewayEventLog, startLogPublisher } from "./addon-event-log.js";
 import { claimWithMac } from "./addon-claim.js";
@@ -210,10 +211,17 @@ export function phoneLine(
   phone: Phone,
   onEvent?: (level: "info" | "warn", text: string) => void,
   now: () => number = Date.now,
+  /** The line quality of the call that just ended (set by the phone's `onQuality`); attached to an answered result. */
+  quality: () => CallQuality | null = () => null,
 ): {
   call(callee: string, dialog: CallDialog, audio?: Clip[]): Promise<CallResult>;
 } {
   const place = async (callee: string, dialog: CallDialog, audio?: Clip[]): Promise<CallResult> => {
+    const result = await placeCall(callee, dialog, audio);
+    const measured = result.status === "answered" ? quality() : null;
+    return result.status === "answered" && measured ? { ...result, quality: measured } : result;
+  };
+  const placeCall = async (callee: string, dialog: CallDialog, audio?: Clip[]): Promise<CallResult> => {
     // The Mac's own recordings first: prewarm then finds them made and speaks only what is missing.
     if (audio) phone.seed?.(audio);
     // Make what it will say while the phone rings, so the first word is there the moment you pick up.
@@ -387,12 +395,19 @@ export async function runGateway(): Promise<number> {
     }
     if (credentials && relay && voice) {
       const speaker = chooseSpeaker(env);
+      let lastQuality: CallQuality | null = null;
+      // Quick and plain: what speaks a line that is missing during a call, so the natural voice never runs then.
+      const inlineSpeaker = new EspeakSpeaker();
       const store = new RtdbRest(databaseUrl(env.SQUEAK_REMOTE_DATABASE_URL));
       // One phone, registered for as long as the gateway runs: it rings you for questions and answers when you call in.
       const phone = new SipPhone({
         line: voice.line,
         speaker,
-        onQuality: (stats) => note("info", `Line quality: ${stats}`),
+        inlineSpeaker: inlineSpeaker,
+        onQuality: (stats, quality) => {
+          lastQuality = quality;
+          note("info", `Line quality: ${quality ? `${quality.verdict} (${stats})` : stats}`);
+        },
         // A line the add-on made itself means the Mac's clip was missing (or late): the signal to check when a call breaks up.
         onSpoke: (info) => {
           if (info.source === "mac") note("info", `Spoke with the Mac's voice: ${info.text.slice(0, 60)}`);
@@ -432,7 +447,7 @@ export async function runGateway(): Promise<number> {
         store,
         channel: relay.channel,
         key: relay.key,
-        line: phoneLine(phone, note),
+        line: phoneLine(phone, note, Date.now, () => lastQuality),
         onEvent: note,
         callee: voice.callee,
         pin: () => pins.current(),
@@ -519,6 +534,7 @@ export async function runGateway(): Promise<number> {
           if (warmTimer) clearTimeout(warmTimer);
           phone.stop();
           speaker.dispose();
+          inlineSpeaker.dispose();
         },
       };
     }

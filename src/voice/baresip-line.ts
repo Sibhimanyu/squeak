@@ -35,8 +35,10 @@ export interface LineConfig {
   dir: string;
 }
 
+import type { CallQuality } from "./line-quality.js";
+
 export type CallResult =
-  | { status: "answered"; letter: string | null }
+  | { status: "answered"; letter: string | null; quality?: CallQuality }
   | { status: "unanswered" }
   | { status: "failed"; reason: string };
 

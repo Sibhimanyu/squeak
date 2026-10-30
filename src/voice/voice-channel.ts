@@ -4,9 +4,13 @@ import { cardLabel } from "../fleet/radar.js";
 import { replyTargetFor } from "../fleet/reply-router.js";
 import type { AttentionItem } from "../fleet/types.js";
 import { turnStamp } from "../cliq/channel.js";
+import type { NotifyChannel, NotifySettings } from "../fleet/notify-settings.js";
 import { logger } from "../utils/logger.js";
 import type { CallResult } from "./baresip-line.js";
 import type { CallHistory, CallReason } from "./call-history.js";
+import { answeredSummary } from "./call-summary.js";
+import { MissedCallFollowUp } from "./missed-call.js";
+import { LINE_BUSY_REASON } from "./phone.js";
 import type { CallPolicy } from "./policy.js";
 import type { VoiceLine } from "./relay-line.js";
 import { composeScript, shouldCall } from "./script.js";
@@ -14,6 +18,9 @@ import { composeScript, shouldCall } from "./script.js";
 /** How long a card waits before Squeak rings: long enough that you may have answered it already. */
 export const DEFAULT_GRACE_MS = 45_000;
 const FAILURE_NOTE_GAP_MS = 60 * 60_000;
+/** A call that finds the line busy (a call in, usually) waits this long in all for it to end, looking this often. */
+export const BUSY_WAIT_MS = 3 * 60_000;
+export const BUSY_POLL_MS = 10_000;
 
 export interface VoiceChannelDependencies {
   monitor: Pick<FleetMonitor, "onPush" | "snapshot" | "refresh">;
@@ -35,6 +42,18 @@ export interface VoiceChannelDependencies {
   history?: Pick<CallHistory, "record">;
   /** The call's step-by-step log (voice/call-trace.ts), for the apps' Calls page; absent in tests that do not look. */
   trace?: (kind: "step" | "said" | "warn" | "key", text: string, extra?: { ms?: number; label?: string }) => void;
+  /** Waits between looks at a busy line; tests pass a fast one. */
+  sleep?: (ms: number) => Promise<void>;
+  busyWaitMs?: number;
+  /**
+   * After a missed call (voice/missed-call.ts): the notify settings and a per-channel text sender, so a question the
+   * channel's rules allow and that was not pushed yet goes out once. `retryDelayMs` 0 turns the one retry off.
+   */
+  notify?: {
+    settings: () => NotifySettings;
+    push: (channel: NotifyChannel, text: string) => void;
+    retryDelayMs?: number;
+  };
 }
 
 /**
@@ -50,13 +69,26 @@ export class VoiceChannel {
   private calling = false;
   private lastFailureNote = Number.NEGATIVE_INFINITY;
 
+  private readonly followUp: MissedCallFollowUp;
+
   constructor(private readonly deps: VoiceChannelDependencies) {
     this.now = deps.now ?? Date.now;
+    this.followUp = new MissedCallFollowUp({
+      settings: deps.notify?.settings,
+      push: deps.notify?.push,
+      retryDelayMs: deps.notify?.retryDelayMs,
+      stillWaiting: (item) => this.stillWaiting(item),
+      retry: (item, episode) => this.ring(item, episode, true),
+      now: this.now,
+    });
   }
 
   start(): void {
     this.unsubscribe = this.deps.monitor.onPush((items) => {
-      for (const item of items) this.consider(item);
+      for (const item of items) {
+        this.followUp.observe(item, this.episode(item));
+        this.consider(item);
+      }
     });
   }
 
@@ -65,6 +97,7 @@ export class VoiceChannel {
     this.unsubscribe = null;
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+    this.followUp.stop();
   }
 
   private episode(item: AttentionItem): string {
@@ -95,7 +128,7 @@ export class VoiceChannel {
   }
 
   /** Runs one call if everything still holds; exposed for tests. */
-  async ring(item: AttentionItem, episode = this.episode(item)): Promise<void> {
+  async ring(item: AttentionItem, episode = this.episode(item), retry = false): Promise<void> {
     const current = this.stillWaiting(item);
     if (!current || this.calling) return;
     if (this.deps.paused?.()) {
@@ -103,7 +136,7 @@ export class VoiceChannel {
       return;
     }
     const now = this.now();
-    const refusal = this.deps.policy.refusal(episode, now);
+    const refusal = this.deps.policy.refusal(episode, now, retry);
     if (refusal) {
       logger.info("voice call skipped", { reason: refusal });
       return;
@@ -117,7 +150,7 @@ export class VoiceChannel {
     const script = composeScript(current, text, canAnswer);
 
     this.calling = true;
-    this.deps.policy.record(episode, now);
+    this.deps.policy.record(episode, now, retry);
     const placedAt = this.now();
     const label = cardLabel(current.session);
     this.trace("step", `Call placed: ${label}`);
@@ -125,6 +158,32 @@ export class VoiceChannel {
     let result: CallResult;
     try {
       result = await this.deps.line.call(script, canAnswer);
+      // The line is in use (a call in, or another call out): the request is not lost, it rings once the line is free.
+      if (result.status === "failed" && result.reason === LINE_BUSY_REASON) {
+        const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+        const cap = this.deps.busyWaitMs ?? BUSY_WAIT_MS;
+        const waitFrom = this.now();
+        this.trace("warn", "Line busy, will ring when the call ends");
+        let waited = 0;
+        while (result.status === "failed" && result.reason === LINE_BUSY_REASON) {
+          if (waited >= cap) {
+            this.trace(
+              "warn",
+              `Line still busy after ${Math.round(cap / 1000)} s, gave up; the question stays in the app`,
+            );
+            break;
+          }
+          await sleep(BUSY_POLL_MS);
+          waited = Math.max(waited + BUSY_POLL_MS, this.now() - waitFrom);
+          if (!this.stillWaiting(item) || this.deps.paused?.()) {
+            this.trace("warn", "No longer waiting, so the call was not placed after the line freed up");
+            break;
+          }
+          result = await this.deps.line.call(script, canAnswer);
+          if (result.status !== "failed" || result.reason !== LINE_BUSY_REASON)
+            this.trace("step", `Line free after ${Math.round(waited / 1000)} s, ringing now`);
+        }
+      }
     } catch (error) {
       this.trace("warn", `Failed: ${error instanceof Error ? error.message : String(error)}`);
       this.writeDown(current, placedAt, {
@@ -143,8 +202,11 @@ export class VoiceChannel {
         this.lastFailureNote = this.now();
         this.deps.note(`Squeak could not call you: ${result.reason}`);
       }
+      // A busy line is waited out above; any other failure gets the one retry and the question as a text.
+      if (result.reason !== LINE_BUSY_REASON) this.followUp.missed(current, episode, retry, text);
       return;
     }
+    if (result.status === "answered" && result.quality) this.trace("step", `Line quality: ${result.quality.verdict}`);
     if (result.status === "answered" && result.letter) {
       this.trace("key", `Answered ${result.letter}`);
       const what = await this.answer(current, target, stamp, result.letter);
@@ -152,11 +214,13 @@ export class VoiceChannel {
         outcome: what === "moved_on" ? "moved_on" : "answered",
         letter: result.letter,
         sent: what === "sent",
+        ...(what === "sent" ? summaryOf(answeredSummary(script.options, result.letter)) : {}),
       });
       return;
     }
     this.trace("step", "Not answered");
     this.writeDown(current, placedAt, { outcome: result.status === "answered" ? "answered" : "unanswered" });
+    if (result.status !== "answered") this.followUp.missed(current, episode, retry, text);
   }
 
   private trace(kind: "step" | "said" | "warn" | "key", text: string, extra?: { ms?: number; label?: string }): void {
@@ -176,6 +240,7 @@ export class VoiceChannel {
       letter?: string;
       sent?: boolean;
       failure?: string;
+      summary?: string;
     },
   ): void {
     try {
@@ -220,6 +285,8 @@ export class VoiceChannel {
     return "sent";
   }
 }
+
+const summaryOf = (summary: string | null): { summary?: string } => (summary ? { summary } : {});
 
 function safely<T>(read: () => T): T | null {
   try {

@@ -24,7 +24,14 @@ import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
 import { preparePhoneMedia } from "../remote/phone-media.js";
 import { ChatPresetsStore } from "../fleet/chat-presets.js";
-import { channelFilter, NotifySettingsStore, PushCounter, wantsAllFinishes } from "../fleet/notify-settings.js";
+import {
+  channelFilter,
+  NOTIFY_CHANNELS,
+  NotifySettingsStore,
+  PushCounter,
+  wantsAllFinishes,
+  type NotifyChannel,
+} from "../fleet/notify-settings.js";
 import { HOTSPOT_PHONE_RECENT_MS, HotspotFailover, macHotspotSystem, readHotspotRequest } from "../fleet/hotspot.js";
 import {
   FANS_HELPER_PRIVILEGED,
@@ -107,6 +114,7 @@ import {
   NaturalSettingsStore,
   NaturalSpeaker,
   NaturalVoice,
+  fixedPhrases,
   PromptClipCache,
   ReadBackClips,
   renderCallClips,
@@ -119,10 +127,12 @@ import { TEST_SCRIPT } from "../voice/test-script.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
 import { ChatQuestioner, statusReadout, type ChatBriefInputs } from "../voice/chat-brief.js";
 import { VoiceFavoritesStore, workspaceKeyOf } from "../voice/favorites.js";
+import { LastChatStore } from "../voice/last-chat.js";
 import { cutAtWord, speakable, spokenChat, spokenChats, spokenWorkspace } from "../voice/spoken-labels.js";
 import { applyPhoneVoiceChange, phoneCalls } from "../voice/phone-voice.js";
 import { VoiceSettingsStore } from "../voice/settings.js";
 import { findWhisper, WhisperTranscriber } from "../voice/transcribe.js";
+import { callNoteAllowed, callSentText, parseSentNote } from "../voice/call-summary.js";
 import { VoiceChannel } from "../voice/voice-channel.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
 import type { TelegramChat, TelegramConversationTarget, TelegramUpdate } from "../types.js";
@@ -238,6 +248,8 @@ export class SqueakApp {
     status: "ringing" | "answered" | "unanswered" | "failed";
     letter?: string;
     reason?: string;
+    /** How the line was on an answered test call (voice/line-quality.ts); absent from an older add-on. */
+    quality?: { verdict: "good" | "fair" | "poor"; jitterMs?: number; lossPct?: number; rttMs?: number };
   } | null = null;
   /** Calling in: transcribes a phoned-in message and sends it (src/voice/memo-inbox.ts); null without the relay or Whisper. */
   private memoInbox: MemoInbox | null = null;
@@ -246,6 +258,7 @@ export class SqueakApp {
   /** The extension to ring, edited from the Mac app (voice-settings.json). */
   private readonly voiceSettings: VoiceSettingsStore;
   private readonly voiceFavorites: VoiceFavoritesStore;
+  private readonly lastVoiceChat: LastChatStore;
   /** The Cliq webhook the channel posts through, for one-off notes (an awake session's end). */
   private cliqWebhook: CliqWebhook | null = null;
   /** Plain-language questions from Cliq, answered through the Mac's own `claude`. */
@@ -409,8 +422,16 @@ export class SqueakApp {
     this.voiceFavorites = new VoiceFavoritesStore(path.join(config.supportDir, "voice-favorites.json"), (key) =>
       this.workspaceLabel(key),
     );
+    this.lastVoiceChat = new LastChatStore(path.join(config.supportDir, "voice-last-chat.json"));
     this.naturalSettings = new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json"));
     this.naturalVoice = new NaturalVoice(naturalPaths(config.supportDir), () => this.naturalSettings.settings);
+    // Start the realistic voice's worker now and render the fixed call phrases while no call waits on them.
+    if (this.naturalVoice.usable) {
+      void this.naturalVoice
+        .warm()
+        .then(() => this.naturalVoice.prewarm(fixedPhrases()))
+        .catch(() => undefined);
+    }
     this.naturalInstaller = new NaturalInstaller(config.supportDir, {
       log: (detail) => logger.warn("realistic voice setup failed", { detail }),
     });
@@ -1125,6 +1146,7 @@ export class SqueakApp {
       send: (target, text, onFailed) => this.router.send(target, text, onFailed),
       caller: () => this.voiceSettings.settings.callee,
       favorites: () => this.voiceFavorites.list().map((fav) => ({ ...fav, label: this.spokenFavoriteLabel(fav) })),
+      lastChat: this.lastVoiceChat,
       // The call-in dialog in the Mac's own voice: every prompt, and the read-back of each message.
       audioClips: (texts) => this.promptClips.clips(texts),
       // Only what was heard is rendered per call; the fixed suffix per chat is kept, and the two are joined.
@@ -1141,7 +1163,7 @@ export class SqueakApp {
         return this.chatQuestioner.ask(question, input);
       },
       speech: async (text) => (await this.promptClips.clips([text]))[0],
-      note: (text) => this.announce(text),
+      note: (text) => this.announceCallNote(text),
       trace: (kind, text, extra) => this.traceMac(kind, text, extra),
     });
   }
@@ -1189,6 +1211,7 @@ export class SqueakApp {
       label: spoken.get(session.key) ?? spokenChat(session),
       workspace: workspaceKeyOf(session),
       workspaceLabel: spokenWorkspace(session),
+      waiting: needing.has(session.key),
     }));
   }
 
@@ -1575,7 +1598,12 @@ export class SqueakApp {
             ? { at: Date.now(), status: "failed", reason: result.reason }
             : result.status === "unanswered"
               ? { at: Date.now(), status: "unanswered" }
-              : { at: Date.now(), status: "answered", ...(result.letter ? { letter: result.letter } : {}) };
+              : {
+                  at: Date.now(),
+                  status: "answered",
+                  ...(result.letter ? { letter: result.letter } : {}),
+                  ...(result.quality ? { quality: result.quality } : {}),
+                };
       })
       .catch((error: unknown) => {
         const reason = error instanceof Error ? error.message : String(error);
@@ -1787,6 +1815,35 @@ export class SqueakApp {
     void this.cliqWebhook?.post(text).catch(() => null);
   }
 
+  /** One short text to one channel only (Telegram's allowed chats, or Cliq), counted like a card. */
+  private pushToChannel(channel: NotifyChannel, text: string): void {
+    this.pushCounter.record(channel);
+    if (channel === "cliq") {
+      void this.cliqWebhook?.post(text).catch(() => null);
+      return;
+    }
+    for (const chatId of this.config.allowedChatIds ?? []) {
+      void this.telegram?.sendMessage(chatId, text).catch(() => undefined);
+    }
+  }
+
+  /**
+   * What a call in did: the one text after it sent a message ("Call: sent your message to <chat>: ...") goes only to
+   * a channel that is not muted and not in its quiet hours; any other note is announced as before.
+   */
+  private announceCallNote(text: string): void {
+    const sent = parseSentNote(text);
+    if (!sent) {
+      this.announce(text);
+      return;
+    }
+    const line = callSentText(sent.label, sent.message);
+    const now = Date.now();
+    for (const channel of NOTIFY_CHANNELS) {
+      if (callNoteAllowed(this.notifySettings.settings[channel], now)) this.pushToChannel(channel, line);
+    }
+  }
+
   private announceAwakeEnd(end: AwakeEnd): void {
     if (end.reason !== "battery" && end.reason !== "heat") {
       return;
@@ -1980,6 +2037,11 @@ export class SqueakApp {
       trace: (kind: "step" | "said" | "warn" | "key", text: string, extra?: { ms?: number; label?: string }) =>
         this.traceMac(kind, text, extra),
       paused: () => this.voiceSettings.pause() !== null,
+      // A missed call: the one retry, and the question as a text where the notify rules allow it and it has not gone.
+      notify: {
+        settings: () => this.notifySettings.settings,
+        push: (channel: NotifyChannel, text: string) => this.pushToChannel(channel, text),
+      },
     };
     if (voiceRelay && remoteDatabaseUrl) {
       // An add-on from 0.11.0 takes the Mac's voice while the phone rings; an older one needs it in the request, so

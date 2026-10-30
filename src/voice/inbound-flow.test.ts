@@ -14,10 +14,13 @@ class FakeCall implements PhoneCall {
   readonly closed = new Promise<void>(() => undefined);
   said: string[] = [];
   hungUp = false;
-  records: Array<{ durationMs: number } | null>;
+  redactKeys = false;
+  records: Array<{ durationMs: number; ended?: "key" | "limit" | "silence" | "no-speech" } | null>;
   constructor(
     private keys: Array<string | null>,
-    records: Array<{ durationMs: number } | null> = [{ durationMs: 3000 }],
+    records: Array<{ durationMs: number; ended?: "key" | "limit" | "silence" | "no-speech" } | null> = [
+      { durationMs: 3000 },
+    ],
   ) {
     this.records = records;
   }
@@ -31,9 +34,15 @@ class FakeCall implements PhoneCall {
   async beep(): Promise<void> {
     this.said.push("<beep>");
   }
-  async record(): Promise<{ file: string; durationMs: number; ended: "key" } | null> {
+  recordOptions: unknown[] = [];
+  async record(options: unknown): Promise<{
+    file: string;
+    durationMs: number;
+    ended: "key" | "limit" | "silence" | "no-speech";
+  } | null> {
+    this.recordOptions.push(options);
     const next = this.records.shift();
-    return next ? { file: "/tmp/memo.wav", durationMs: next.durationMs, ended: "key" } : null;
+    return next ? { file: "/tmp/memo.wav", durationMs: next.durationMs, ended: next.ended ?? "key" } : null;
   }
   async hangup(): Promise<void> {
     this.hungUp = true;
@@ -329,5 +338,247 @@ describe("call-in flow", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("recording ends", () => {
+  it("asks to end on silence, and caps a memo at 60 s", async () => {
+    const call = new FakeCall(["2", "1"]);
+    const t = setup(call, { pin: () => null });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.recordOptions[0]).toMatchObject({ maxMs: 60_000, endOnSilence: true });
+  });
+
+  it("offers another try when nothing was heard, instead of processing silence", async () => {
+    const call = new FakeCall(["2", "1", "1"], [{ durationMs: 8000, ended: "no-speech" }, { durationMs: 3000 }]);
+    const t = setup(call, { pin: () => null });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said).toContain("I didn't hear anything. Press 1 to try again, or hash to hang up.");
+    expect(t.memos).toHaveLength(1);
+    expect(t.sends).toHaveLength(1);
+  });
+
+  it("hangs up on hash after nothing was heard, sending nothing", async () => {
+    const call = new FakeCall(["2", "#"], [{ durationMs: 8000, ended: "no-speech" }]);
+    const t = setup(call, { pin: () => null });
+    await handleIncoming(t.incoming, t.deps);
+    expect(t.memos).toHaveLength(0);
+    expect(t.sends).toHaveLength(0);
+    expect(call.said.at(-1)).toBe("Goodbye.");
+  });
+
+  it("says it has to stop at the cap, then carries on with what was recorded", async () => {
+    const call = new FakeCall(["2", "1"], [{ durationMs: 60_000, ended: "limit" }]);
+    const t = setup(call, { pin: () => null });
+    await handleIncoming(t.incoming, t.deps);
+    const stop = call.said.indexOf("I have to stop there.");
+    expect(stop).toBeGreaterThan(-1);
+    expect(call.said.indexOf("One moment.")).toBeGreaterThan(stop);
+    expect(t.memos).toHaveLength(1);
+  });
+
+  it("logs the digits the flow reads for a PIN as hidden: redaction is on only while the PIN is typed", async () => {
+    const seen: boolean[] = [];
+    const call = new FakeCall(["4", "8", "2", "1", "#"]);
+    const original = call.key.bind(call);
+    call.key = async () => {
+      seen.push(call.redactKeys === true);
+      return original();
+    };
+    const t = setup(call, { pin: () => "4821" });
+    await handleIncoming(t.incoming, t.deps);
+    expect(seen.slice(0, 5)).toEqual([true, true, true, true, true]);
+    expect(call.redactKeys).toBe(false);
+  });
+
+  it("says 'Still working on it' at most once every 10 s while the Mac takes a long time", async () => {
+    vi.useFakeTimers();
+    try {
+      const call = new FakeCall(["2", "1"]);
+      const t = setup(call, {
+        pin: () => null,
+        uplink: {
+          memo: () =>
+            new Promise((resolve) =>
+              setTimeout(
+                () => resolve({ v: 1, id: "x", at: 0, status: "transcript", text: "go on", label: "blume · hub" }),
+                36_000,
+              ),
+            ),
+          send: async () => ({ v: 1, id: "x", at: 0, status: "sent" }),
+          ask: async () => null,
+          status: async () => null,
+        },
+      });
+      const done = handleIncoming(t.incoming, t.deps);
+      await vi.advanceTimersByTimeAsync(40_000);
+      await done;
+      const stills = call.said.filter((l) => l === "Still working on it.").length;
+      // first at 6 s, then no more often than every 10 s: 6, 16, 26, 36 at most.
+      expect(stills).toBeGreaterThanOrEqual(2);
+      expect(stills).toBeLessThanOrEqual(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("the chat used last", () => {
+  const withLast: DirectoryDoc = { ...directory, last: { choice: 2, label: "blume · hub" } };
+  const lastLine = "Press 1 for blume · hub, the last one you used. Press 2 for another chat.";
+
+  it("offers it first, with the greeting when there is no PIN, and key 1 goes straight to the message", async () => {
+    const call = new FakeCall(["1", "1"]);
+    const t = setup(call, { pin: () => null, directory: async () => withLast });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said[0]).toContain("Hello, this is Squeak. Press 1 for blume · hub, the last one you used.");
+    expect(call.said.join(" ")).not.toContain("Which chat?");
+    expect(t.memos).toEqual([{ memoId: expect.any(String), choice: 2, dirVersion: "v1", bytes: 4 }]);
+    expect(t.sends).toHaveLength(1);
+  });
+
+  it("says the offer after the PIN prompt, without a second greeting", async () => {
+    const call = new FakeCall([...keys("4821#"), "1", "1"]);
+    const t = setup(call, { directory: async () => withLast });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said[0]).toContain("Please enter your PIN");
+    const offer = call.said.find((s) => s.includes(lastLine));
+    expect(offer).toBeDefined();
+    expect(offer).not.toContain("Hello");
+  });
+
+  it("goes to the existing menus on 2", async () => {
+    const call = new FakeCall(["2", "1", "1"]);
+    const t = setup(call, { pin: () => null, directory: async () => withLast });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.some((s) => s.startsWith("Which chat?"))).toBe(true);
+    expect(t.memos[0]?.choice).toBe(1);
+  });
+
+  it("hangs up on hash, and after two wrong keys, sending nothing", async () => {
+    for (const pressed of [["#"], ["5", "7"], [null]]) {
+      const call = new FakeCall(pressed);
+      const t = setup(call, { pin: () => null, directory: async () => withLast });
+      await handleIncoming(t.incoming, t.deps);
+      expect(t.memos).toHaveLength(0);
+      expect(call.said.at(-1)).toBe("Goodbye.");
+    }
+  });
+
+  it("repeats the offer on star without counting it", async () => {
+    const call = new FakeCall(["*", "*", "1", "1"]);
+    const t = setup(call, { pin: () => null, directory: async () => withLast });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.filter((s) => s.includes(lastLine))).toHaveLength(3);
+    expect(t.sends).toHaveLength(1);
+  });
+
+  it("goes with key 1 to the action step with a Mac that answers", async () => {
+    const call = new FakeCall(["1", "1", "3"]);
+    const t = setup(call, { pin: () => null, directory: async () => ({ ...withLast, ask: true }) });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.some((s) => s.startsWith("blume · hub. Press 1 to say a message or ask a question"))).toBe(true);
+  });
+
+  it("leaves a directory without it unchanged", async () => {
+    const call = new FakeCall(["2", "1"]);
+    const t = setup(call, { pin: () => null });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said[0]).toBe(
+      inboundPrompts(directory, false).find((s) => s.startsWith("Hello, this is Squeak. Which")),
+    );
+    expect(call.said.join(" ")).not.toContain("last one you used");
+  });
+
+  it("has its sentences made ahead of time, for both greetings, and says nothing else unlisted", async () => {
+    for (const askPin of [true, false]) {
+      const ready = inboundPrompts({ ...withLast, ask: true }, askPin);
+      expect(ready.some((s) => s.includes(lastLine))).toBe(true);
+      expect(ready).toContain("I didn't hear anything. Press 3 to record again, or hash to cancel.");
+      const call = new FakeCall([...(askPin ? keys("4821#") : []), "2", "2", "1", "1"]);
+      const t = setup(call, { pin: () => (askPin ? "4821" : null), directory: async () => withLast });
+      await handleIncoming(t.incoming, t.deps);
+      const late = call.said.filter((s) => s !== "<beep>" && !inboundPrompts(withLast, askPin).includes(s));
+      expect(late).toEqual([readBackSentence("go with option B", "blume · hub")]);
+    }
+    expect(inboundPrompts(directory, false)).toContain(
+      "I didn't hear anything. Press 2 to record again, or hash to cancel.",
+    );
+  });
+});
+
+describe("an unclear recording", () => {
+  const heardAs =
+    (text: string, count = { n: 0 }) =>
+    async (memoId: string): Promise<DownMessage> => {
+      count.n++;
+      return { v: 1, id: memoId, at: 0, status: "transcript", text, label: "blume · hub" };
+    };
+  const uplinkFor = (memo: ReturnType<typeof heardAs>, sends: string[]) => ({
+    memo,
+    send: async (memoId: string): Promise<DownMessage | null> => {
+      sends.push(memoId);
+      return { v: 1, id: "x", at: 0, status: "sent" } as DownMessage;
+    },
+    ask: async () => null,
+    status: async () => null,
+  });
+
+  it("never auto-sends a very short transcript: offers 3 first with a Mac that answers, and sends only on 1", async () => {
+    const sends: string[] = [];
+    const call = new FakeCall(["1", "1", "1"]);
+    const t = setup(call, {
+      pin: () => null,
+      directory: async () => ({ ...directory, ask: true }),
+      uplink: uplinkFor(heardAs("uh"), sends),
+    });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said).toContain(
+      "I only heard: uh. Press 3 to record again, 1 to send it anyway, star to hear it again, or hash to cancel.",
+    );
+    expect(call.said.join(" ")).not.toContain("I heard:");
+    expect(sends).toHaveLength(1);
+  });
+
+  it("records again on the record-again key, and sends nothing on hash", async () => {
+    const sends: string[] = [];
+    const count = { n: 0 };
+    const call = new FakeCall(["1", "2", "#"], [{ durationMs: 3000 }, { durationMs: 3000 }]);
+    const t = setup(call, { pin: () => null, uplink: uplinkFor(heardAs("um", count), sends) });
+    await handleIncoming(t.incoming, t.deps);
+    expect(count.n).toBe(2);
+    expect(sends).toHaveLength(0);
+    expect(call.said.at(-1)).toBe("Cancelled. Goodbye.");
+  });
+
+  it("treats a recording under 1.5 s as unclear even with real words", async () => {
+    const sends: string[] = [];
+    const call = new FakeCall(["1", "#"], [{ durationMs: 1200 }]);
+    const t = setup(call, { pin: () => null, uplink: uplinkFor(heardAs("go with option B"), sends) });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.some((s) => s.startsWith("I only heard: go with option B."))).toBe(true);
+    expect(sends).toHaveLength(0);
+  });
+
+  it("says nothing was heard for Whisper's silence strings, and offers to record again", async () => {
+    for (const text of ["you", "Thank you.", "."]) {
+      const sends: string[] = [];
+      const call = new FakeCall(["1", "1", "#"]);
+      const t = setup(call, {
+        pin: () => null,
+        directory: async () => ({ ...directory, ask: true }),
+        uplink: uplinkFor(heardAs(text), sends),
+      });
+      await handleIncoming(t.incoming, t.deps);
+      expect(call.said).toContain("I didn't hear anything. Press 3 to record again, or hash to cancel.");
+      expect(sends).toHaveLength(0);
+    }
+  });
+
+  it("repeats the unclear offer on star", async () => {
+    const call = new FakeCall(["1", "*", "#"]);
+    const t = setup(call, { pin: () => null, uplink: uplinkFor(heardAs("uh"), []) });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.filter((s) => s.startsWith("I only heard: uh.")).length).toBe(2);
   });
 });

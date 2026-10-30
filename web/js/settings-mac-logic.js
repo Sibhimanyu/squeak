@@ -403,10 +403,15 @@ export function testLine(test) {
   switch (test.status) {
     case "ringing":
       return "Ringing your phone…";
-    case "answered":
-      return test.letter
+    case "answered": {
+      const base = test.letter
         ? `You answered and pressed ${test.letter}. Nothing was sent anywhere.`
         : "You answered. No key was pressed.";
+      const verdict = test.quality?.verdict;
+      return verdict === "good" || verdict === "fair" || verdict === "poor"
+        ? `${base} Line quality: ${verdict}.`
+        : base;
+    }
     case "unanswered":
       return "Nobody picked up.";
     case "failed":

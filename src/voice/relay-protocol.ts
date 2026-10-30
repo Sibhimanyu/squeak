@@ -4,6 +4,7 @@ import { open, seal } from "../remote/remote-crypto.js";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import type { CallScript } from "./dialog.js";
 import { readClips, type Clip } from "./clips.js";
+import { readQuality, type CallQuality } from "./line-quality.js";
 import { EXTENSION } from "./settings.js";
 
 /**
@@ -39,7 +40,7 @@ export interface CallRequest {
 }
 
 export type CallResultBody =
-  | { status: "answered"; letter: string | null }
+  | { status: "answered"; letter: string | null; quality?: CallQuality }
   | { status: "unanswered" }
   | { status: "failed"; reason: string }
   /** The answer to a pin change: it took, or why not. */
@@ -368,10 +369,15 @@ export function readResult(
   if (!isRecord(body) || body.v !== 1 || body.id !== id) return null;
   switch (body.status) {
     case "answered":
-      if (body.letter === null || body.letter === undefined) return { status: "answered", letter: null };
-      return typeof body.letter === "string" && offered.includes(body.letter)
-        ? { status: "answered", letter: body.letter }
-        : null;
+      if (body.letter === null || body.letter === undefined) {
+        const quality = readQuality(body.quality);
+        return { status: "answered", letter: null, ...(quality ? { quality } : {}) };
+      }
+      if (typeof body.letter === "string" && offered.includes(body.letter)) {
+        const quality = readQuality(body.quality);
+        return { status: "answered", letter: body.letter, ...(quality ? { quality } : {}) };
+      }
+      return null;
     case "unanswered":
       return { status: "unanswered" };
     case "failed":

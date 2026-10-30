@@ -198,6 +198,9 @@ describe("notify and voice inputs", () => {
     expect(L.testLine({ status: "answered", letter: "B" })).toBe(
       "You answered and pressed B. Nothing was sent anywhere.",
     );
+    expect(L.testLine({ status: "answered", letter: "B", quality: { verdict: "poor" } })).toBe(
+      "You answered and pressed B. Nothing was sent anywhere. Line quality: poor.",
+    );
     expect(L.testLine({ status: "failed" })).toBe("The call failed: no reason given");
     expect(L.testLine(null)).toBeNull();
     expect(L.modeLine({ mode: "gateway" })).toBe("Your Home Assistant add-on places the calls.");

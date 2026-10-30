@@ -1787,8 +1787,21 @@ public struct VoiceView: Codable, Equatable, Sendable {
         public var status: String
         public var letter: String?
         public var reason: String?
-        public init(at: Double, status: String, letter: String? = nil, reason: String? = nil) {
-            self.at = at; self.status = status; self.letter = letter; self.reason = reason
+        /// How the line was on an answered call; absent from an older Mac.
+        public var quality: LineQuality?
+        public init(at: Double, status: String, letter: String? = nil, reason: String? = nil, quality: LineQuality? = nil) {
+            self.at = at; self.status = status; self.letter = letter; self.reason = reason; self.quality = quality
+        }
+    }
+
+    /// A call's line: "good", "fair" or "poor", and the numbers behind it.
+    public struct LineQuality: Codable, Equatable, Sendable {
+        public var verdict: String
+        public var jitterMs: Double?
+        public var lossPct: Double?
+        public var rttMs: Double?
+        public init(verdict: String, jitterMs: Double? = nil, lossPct: Double? = nil, rttMs: Double? = nil) {
+            self.verdict = verdict; self.jitterMs = jitterMs; self.lossPct = lossPct; self.rttMs = rttMs
         }
     }
 
@@ -1962,7 +1975,9 @@ public enum VoiceFormat {
         switch test.status {
         case "ringing": return "Ringing your phone…"
         case "answered":
-            return test.letter.map { "You answered and pressed \($0). Nothing was sent anywhere." } ?? "You answered. No key was pressed."
+            let base = test.letter.map { "You answered and pressed \($0). Nothing was sent anywhere." } ?? "You answered. No key was pressed."
+            guard let q = test.quality, ["good", "fair", "poor"].contains(q.verdict) else { return base }
+            return "\(base) Line quality: \(q.verdict)."
         case "unanswered": return "Nobody picked up."
         case "failed": return "The call failed: \(test.reason ?? "no reason given")"
         default: return nil

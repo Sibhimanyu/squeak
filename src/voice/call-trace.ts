@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { logger } from "../utils/logger.js";
 import type { CallEntry, CallHistory } from "./call-history.js";
+import { sentSummary } from "./call-summary.js";
 import type { GatewayLogLine } from "./gateway-log-protocol.js";
 
 /**
@@ -205,6 +206,8 @@ export class CallTrace {
         (e) => e.label && e.at >= line.at - BEFORE_MS && e.at <= line.at + durationMs + AFTER_MS,
       )?.label;
       const outcome = failed && !heard ? "failed" : heard ? "answered" : "unanswered";
+      // The words that were sent: the last thing heard in the call's window (a re-recording replaces the first).
+      const said = sent ? inWindow.filter((e) => e.kind === "heard").pop()?.text : undefined;
       const recorded = history.record(
         {
           at: line.at,
@@ -213,6 +216,7 @@ export class CallTrace {
           durationMs,
           ...(label ? { label } : {}),
           ...(outcome === "answered" ? { sent } : {}),
+          ...(sent && said ? { summary: sentSummary(label, said) } : {}),
           ...(outcome === "failed" && failed ? { failure: failed.text } : {}),
         },
         id,

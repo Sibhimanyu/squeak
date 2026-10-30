@@ -27,7 +27,73 @@ export function shouldCall(item: Pick<AttentionItem, "kind" | "session">): boole
 export const MAX_KEYPAD_OPTIONS = 8;
 
 function say(text: string): string {
-  return stripMarkdown(text).replace(/\s+/g, " ").trim();
+  return stripMarkdown(text)
+    .replace(/https?:\/\/\S+/gi, "a link")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** About 15 seconds of speech. */
+export const MAX_QUESTION_WORDS = 35;
+/** An option is a handful of words, not a sentence. */
+export const MAX_OPTION_WORDS = 6;
+export const FULL_TEXT_NOTE = "The full text is on your phone.";
+
+const words = (text: string): string[] => text.split(/\s+/).filter(Boolean);
+const LEADING_FILLER =
+  /^(?:(?:so|okay|ok|sure|great|alright|all right|well|hey|hi|quick question|one thing)\b[,:!.]?\s+)+/i;
+const TRAILING_FILLER = /^(?:please\s+)?(?:let me know|thanks|thank you|hope (?:this|that) helps)\b/i;
+
+function tidy(text: string): string {
+  return text.replace(/[\s,;:\u2014\u2013-]+$/, "").trim();
+}
+
+/** A sentence too long to keep: cut at a clause break in its back half, else at a word. Never mid-word. */
+function cutSentence(sentence: string, max: number): string {
+  const head = words(sentence).slice(0, max).join(" ");
+  const breaks = [...head.matchAll(/[,;:]\s|\s[\u2014\u2013-]\s/g)];
+  const late = breaks.filter((m) => (m.index ?? 0) > head.length / 2).pop();
+  const cut = late ? head.slice(0, late.index) : head;
+  return `${tidy(cut)}.`;
+}
+
+/**
+ * The question as it is read aloud: filler dropped, at most `max` words, cut at a sentence boundary (a sentence
+ * too long to keep alone is cut at a clause or a word, never in the middle of one). When the start does not fit
+ * the closing question is kept, since that is what the person has to answer. `cut` says words were left out.
+ */
+export function clipQuestion(raw: string, max = MAX_QUESTION_WORDS): { text: string; cut: boolean } {
+  const flat = say(raw).replace(LEADING_FILLER, "");
+  if (words(flat).length <= max) return { text: flat, cut: false };
+  let sentences = flat.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/).filter(Boolean);
+  const kept = sentences.filter((s) => !TRAILING_FILLER.test(s));
+  if (kept.length > 0) sentences = kept;
+  const fill = (budget: number): string[] => {
+    const out: string[] = [];
+    let used = 0;
+    for (const sentence of sentences) {
+      const n = words(sentence).length;
+      if (used + n > budget) break;
+      out.push(sentence);
+      used += n;
+    }
+    return out;
+  };
+  const question = [...sentences].reverse().find((s) => s.endsWith("?"));
+  const qWords = question ? words(question).length : 0;
+  let lead = fill(max);
+  if (question && !lead.includes(question) && qWords <= max - 8) {
+    lead = [...fill(max - qWords), question];
+  }
+  if (lead.length === 0) lead = [cutSentence(sentences[0] ?? flat, max)];
+  return { text: lead.join(" "), cut: true };
+}
+
+/** One option as spoken: the part before a dash, colon or bracket, at most six words, no trailing punctuation. */
+export function clipOption(title: string): string {
+  const flat = say(title);
+  const head = flat.split(/\s[\u2014\u2013-]\s|:\s|\s\(/)[0]?.trim() || flat;
+  return tidy(words(head).slice(0, MAX_OPTION_WORDS).join(" ")).replace(/[.!?]+$/, "");
 }
 
 function describe(kind: AttentionKind): string {
@@ -49,16 +115,18 @@ export function composeScript(item: AttentionItem, lastText: string | null, canA
   const label = say(cardLabel(item.session));
   const choices = item.kind === "asked_question" || item.kind === "blocked_question" ? parseChoices(lastText) : null;
   const options = (choices?.options ?? []).slice(0, MAX_KEYPAD_OPTIONS);
-  const asked = choices?.question ? say(choices.question) : summarizeOutcome(lastText, 240);
+  const askedRaw = choices?.question ?? summarizeOutcome(lastText, 600);
+  const asked = askedRaw ? clipQuestion(askedRaw) : null;
   const greeting = `Hello, this is Squeak. ${label} ${describe(item.kind)}.`;
 
   const parts: string[] = [];
-  if (asked) parts.push(asked);
+  if (asked) parts.push(asked.cut ? `${asked.text} ${FULL_TEXT_NOTE}` : asked.text);
   if (canAnswer && options.length > 0) {
-    options.forEach((option, index) => {
+    const spoken = options.map((option, index) => {
       const recommended = choices?.recommended === option.letter ? ", recommended" : "";
-      parts.push(`Press ${index + 1} for ${say(option.title)}${recommended}.`);
+      return `${index + 1}, ${clipOption(option.title)}${recommended}.`;
     });
+    parts.push(`Options. ${spoken.join(" ")}`);
   } else if (item.kind === "blocked_approval") {
     parts.push("Approve it from the Mac or the phone app.");
   } else {

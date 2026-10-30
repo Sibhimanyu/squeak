@@ -14,9 +14,10 @@ import {
   parseEvent,
   type LineConfig,
 } from "./baresip-line.js";
-import type { DialOutcome, IncomingCall, Phone, PhoneCall } from "./phone.js";
+import type { DialOutcome, IncomingCall, Phone, PhoneCall, RecordEnd } from "./phone.js";
 import { CachedSpeaker, wavDurationMs, type Speaker } from "./tts.js";
 import { mulawToWav, type Clip } from "./clips.js";
+import { qualityOf, type CallQuality } from "./line-quality.js";
 
 /**
  * The Home Assistant gateway's phone: one `baresip`, registered with the PBX for as long as the gateway runs, so
@@ -57,6 +58,63 @@ export function summarizeCallStats(data: string): string | null {
 
 /** How often a live call is asked for its stats; the last answer is logged when the call ends. */
 const STATS_EVERY_MS = 8_000;
+
+/** End-of-speech rules for a recording: how long a quiet spell after speech ends it, and how long to wait for any. */
+export const END_SILENCE_MS = 2_500;
+export const NO_SPEECH_MS = 8_000;
+const FRAME_SAMPLES = 160; // 20 ms at 8 kHz
+const MIN_SPEECH_RMS = 300;
+/** Consecutive loud frames that count as speech (100 ms), so a click or a pop is not a person. */
+const SPEECH_FRAMES = 5;
+/** How often the growing recording is looked at. */
+const WATCH_EVERY_MS = 100;
+
+/**
+ * Energy-based end-of-speech detection on 16-bit mono PCM, fed as the recording grows. Times are wall-clock (`now`):
+ * a PBX that stops sending packets in silence leaves the file still, so audio time would stand still with it. The
+ * speech threshold follows the line's noise floor (a hissy line is not speech), never below MIN_SPEECH_RMS.
+ */
+export class SpeechWatcher {
+  private floor = Number.POSITIVE_INFINITY;
+  private run = 0;
+  private carry = Buffer.alloc(0);
+  /** When speech was first confirmed, and when it was last loud; null before. */
+  speechAt: number | null = null;
+  private lastLoudAt = 0;
+
+  constructor(private readonly startedAt: number) {}
+
+  feed(pcm: Buffer, now: number): void {
+    const data = this.carry.length ? Buffer.concat([this.carry, pcm]) : pcm;
+    const frameBytes = FRAME_SAMPLES * 2;
+    let at = 0;
+    for (; at + frameBytes <= data.length; at += frameBytes) {
+      let sum = 0;
+      for (let i = at; i < at + frameBytes; i += 2) {
+        const sample = data.readInt16LE(i);
+        sum += sample * sample;
+      }
+      const rms = Math.sqrt(sum / FRAME_SAMPLES);
+      const loud = rms > Math.max(MIN_SPEECH_RMS, Number.isFinite(this.floor) ? this.floor * 3 : 0);
+      if (!loud) this.floor = Math.min(this.floor, rms === 0 ? this.floor : rms);
+      if (loud) {
+        this.run += 1;
+        if (this.speechAt !== null) this.lastLoudAt = now;
+        else if (this.run >= SPEECH_FRAMES) {
+          this.speechAt = now;
+          this.lastLoudAt = now;
+        }
+      } else this.run = 0;
+    }
+    this.carry = Buffer.from(data.subarray(at));
+  }
+
+  /** Whether the recording should stop now, and why: speech then quiet, or never any speech. */
+  verdict(now: number, noSpeechAfterMs = NO_SPEECH_MS): "silence" | "no-speech" | null {
+    if (this.speechAt !== null) return now - this.lastLoudAt >= END_SILENCE_MS ? "silence" : null;
+    return now - this.startedAt >= noSpeechAfterMs ? "no-speech" : null;
+  }
+}
 
 /** A 16-bit mono 8 kHz PCM WAV of `samples`. */
 export function wavOf(samples: Int16Array): Buffer {
@@ -111,6 +169,24 @@ export function persistentConfigFile(
   );
 }
 
+/** The bytes a recording gained since `from`, and where the next look starts. Nothing yet (or no file yet) is empty. */
+function readNewAudio(file: string, from: number): { data: Buffer; next: number } {
+  try {
+    const size = fs.statSync(file).size;
+    if (size <= from) return { data: Buffer.alloc(0), next: from };
+    const fd = fs.openSync(file, "r");
+    try {
+      const data = Buffer.alloc(size - from);
+      const got = fs.readSync(fd, data, 0, data.length, from);
+      return { data: data.subarray(0, got), next: from + got };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return { data: Buffer.alloc(0), next: from };
+  }
+}
+
 export interface CallContext {
   send(command: string, params?: string): void;
   speaker: CachedSpeaker;
@@ -129,6 +205,9 @@ export class LiveCall implements PhoneCall {
   private waiter: ((key: string | null) => void) | null = null;
   private readonly listeners = new Set<() => void>();
   private recordings = 0;
+  private recording = false;
+  trace: ((line: string) => void) | null = null;
+  redactKeys = false;
 
   constructor(
     readonly peer: string,
@@ -139,6 +218,14 @@ export class LiveCall implements PhoneCall {
 
   pushKey(key: string): void {
     if (!this.open) return;
+    // Every digit is written down with where it landed, so a hash that never arrived is visible next time.
+    const phase = this.recording ? "recording" : this.waiter ? "menu" : "prompt";
+    const shown = this.redactKeys && /^\d$/.test(key) ? "digit" : key;
+    try {
+      this.trace?.(`dtmf: ${shown} (${phase})`);
+    } catch {
+      // A log line never matters more than the call.
+    }
     if (this.waiter) {
       const waiting = this.waiter;
       this.waiter = null;
@@ -234,33 +321,65 @@ export class LiveCall implements PhoneCall {
   async record(options: {
     maxMs: number;
     beep?: boolean;
-  }): Promise<{ file: string; durationMs: number; ended: "key" | "limit" } | null> {
+    endOnSilence?: boolean;
+  }): Promise<{ file: string; durationMs: number; ended: RecordEnd } | null> {
     if (!this.open) return null;
     const file = path.join(this.ctx.dir, `memo-${this.recordings++}.wav`);
     this.keys.length = 0;
-    this.ctx.send("auplay", `aufile,${file}`);
-    // The beep plays while the recording is already running: starting after it lost the first syllable of what
-    // people said right on the beep ("Telegram" came out "egram").
-    if (options.beep) {
-      this.play(this.ctx.beepFile, BEEP_MS);
-      await this.pause(150);
-    }
-    let ended: "key" | "limit" | "closed" = "limit";
-    const deadline = Date.now() + options.maxMs;
-    for (;;) {
-      const why = await this.pause(Math.max(0, deadline - Date.now()), { key: true });
-      if (why === "closed") {
-        ended = "closed";
-        break;
+    this.recording = true;
+    const began = Date.now();
+    this.trace?.("step: Recording started");
+    let ended: RecordEnd | "closed";
+    try {
+      this.ctx.send("auplay", `aufile,${file}`);
+      // The beep plays while the recording is already running: starting after it lost the first syllable of what
+      // people said right on the beep ("Telegram" came out "egram").
+      if (options.beep) {
+        this.play(this.ctx.beepFile, BEEP_MS);
+        await this.pause(150);
       }
-      if (why === "time") break;
-      // Only `#` ends it; any other key is not part of the message.
-      if (this.keys.shift() === "#") {
-        ended = "key";
-        break;
+      const watcher = options.endOnSilence ? new SpeechWatcher(began + BEEP_MS) : null;
+      let readAt = 44; // the WAV header is written first; what follows is the call's audio
+      const deadline = began + options.maxMs;
+      let announced = false;
+      for (;;) {
+        const why = await this.pause(Math.min(WATCH_EVERY_MS, Math.max(0, deadline - Date.now())), { key: true });
+        if (why === "closed") {
+          ended = "closed";
+          break;
+        }
+        if (why === "key") {
+          // Only `#` ends it; any other key is not part of the message.
+          if (this.keys.shift() === "#") {
+            ended = "key";
+            break;
+          }
+        }
+        if (Date.now() >= deadline) {
+          ended = "limit";
+          break;
+        }
+        if (!watcher) continue;
+        const grown = readNewAudio(file, readAt);
+        readAt = grown.next;
+        if (grown.data.length) watcher.feed(grown.data, Date.now());
+        if (!announced && watcher.speechAt !== null) {
+          announced = true;
+          this.trace?.(`step: Speech detected ${((watcher.speechAt - began) / 1000).toFixed(1)} s in`);
+        }
+        const verdict = watcher.verdict(Date.now());
+        if (verdict) {
+          ended = verdict;
+          break;
+        }
       }
+    } finally {
+      this.recording = false;
     }
     if (ended === "closed") return null;
+    this.trace?.(
+      `step: Recording ended because: ${{ key: "hash", silence: "silence", limit: "cap", "no-speech": "no speech" }[ended]}`,
+    );
     // Moving the player to another file is what finishes this one's header.
     this.ctx.send("auplay", `aufile,${this.ctx.discard}`);
     await delay(FINALIZE_MS);
@@ -281,8 +400,10 @@ export interface SipPhoneOptions {
   speaker: Speaker;
   /** `ip:port` to listen on instead of a random port: for a test where the caller has no PBX to find us. */
   listen?: string;
+  /** A quick voice for a line that is missing mid-call (the plain one), so the natural voice never runs during a call. */
+  inlineSpeaker?: Speaker | null;
   /** Told each call's line-quality summary when the call ends (the same text the log line carries). */
-  onQuality?: (stats: string) => void;
+  onQuality?: (stats: string, quality: CallQuality | null) => void;
   /** Told each line the call speaks: where its audio came from, how long it took to make here, and how long it plays. */
   onSpoke?: (info: { text: string; source: "mac" | "add-on"; makeMs: number; playMs: number }) => void;
 }
@@ -301,6 +422,8 @@ export class SipPhone implements Phone {
   private current: LiveCall | null = null;
   private statsTimer: NodeJS.Timeout | null = null;
   private lastStats: string | null = null;
+  private statsNoted = false;
+  private lastQuality: CallQuality | null = null;
   private inCall = false;
   /** A call that is ringing or being answered: the next CALL_ESTABLISHED is its. */
   private awaiting: { peer: string; settle: (call: LiveCall | null) => void } | null = null;
@@ -309,7 +432,10 @@ export class SipPhone implements Phone {
   private warming: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: SipPhoneOptions) {
-    this.speaker = new CachedSpeaker(options.speaker);
+    this.speaker = new CachedSpeaker(options.speaker, 120, {
+      callActive: () => this.current?.open === true,
+      plain: options.inlineSpeaker ?? null,
+    });
     this.dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-phone-"));
     this.files = {
       silence: path.join(this.dir, "silence.wav"),
@@ -507,6 +633,9 @@ export class SipPhone implements Phone {
     this.lastStats = null;
     this.statsTimer = setInterval(() => this.send("callstat"), STATS_EVERY_MS);
     this.statsTimer.unref();
+    this.statsNoted = false;
+    const first = setTimeout(() => this.send("callstat"), 3_000);
+    first.unref();
   }
 
   /** Stops asking; at a call's end (`report`) the last answer is logged, or "no data" so its absence says something. */
@@ -515,9 +644,10 @@ export class SipPhone implements Phone {
     this.statsTimer = null;
     if (report) {
       logger.info("voice call line quality", { stats: this.lastStats ?? "no data" });
-      this.options.onQuality?.(this.lastStats ?? "no data");
+      this.options.onQuality?.(this.lastStats ?? "no data", this.lastQuality);
     }
     this.lastStats = null;
+    this.lastQuality = null;
   }
 
   /** A command's answer (events are handled elsewhere): only the stats block is kept. */
@@ -526,7 +656,14 @@ export class SipPhone implements Phone {
       const value = JSON.parse(payload) as { response?: unknown; data?: unknown };
       if (value.response === true && typeof value.data === "string") {
         const summary = summarizeCallStats(value.data);
-        if (summary) this.lastStats = summary;
+        if (summary) {
+          this.lastStats = summary;
+          this.lastQuality = qualityOf(value.data) ?? this.lastQuality;
+        } else if (this.inCall && !this.statsNoted && value.data.trim()) {
+          // Once per call: what baresip's reply looked like when it was not a stats block, so "no data" can be diagnosed.
+          this.statsNoted = true;
+          logger.info("voice call stats reply not recognised", { head: value.data.replace(/\s+/g, " ").slice(0, 200) });
+        }
       }
     } catch {
       // Not JSON: nothing to keep.

@@ -46,6 +46,20 @@ describe("phoneCalls", () => {
     }
   });
 
+  it("carries a call's one-line summary, clipped, and none for an old entry", () => {
+    const calls = phoneCalls(
+      {
+        list: () => [
+          { id: "a", at: 1, kind: "agent", outcome: "answered", durationMs: 0, summary: "s".repeat(400) },
+          { id: "b", at: 0, kind: "agent", outcome: "failed", durationMs: 0 },
+        ],
+      },
+      { eventsFor: () => [] },
+    );
+    expect(calls[0]!.summary).toHaveLength(160);
+    expect(calls[1]).not.toHaveProperty("summary");
+  });
+
   it("clips events directly even when the trace is long", () => {
     const long = Array.from({ length: 90 }, (_, i) => ({
       at: i,

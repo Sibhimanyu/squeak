@@ -10,6 +10,86 @@ const run = promisify(execFile);
 /** 8 kHz mono 16-bit: what a phone line carries, and what baresip's `aufile` plays without resampling. */
 const SAMPLE_RATE = 8000;
 
+/** Silence added after every clip played into a call, so a late switch to the next file never starves the far jitter buffer. */
+export const CLIP_PAD_MS = 300;
+
+/** The format of a WAV's `fmt ` chunk, or null when it is not a WAV at all. */
+export function wavFormat(wav: Buffer): { format: number; channels: number; rate: number; bits: number } | null {
+  if (wav.length < 12 || wav.toString("ascii", 0, 4) !== "RIFF") return null;
+  let at = 12;
+  while (at + 8 <= wav.length) {
+    const id = wav.toString("ascii", at, at + 4);
+    const size = wav.readUInt32LE(at + 4);
+    if (id === "fmt " && at + 8 + 16 <= wav.length) {
+      return {
+        format: wav.readUInt16LE(at + 8),
+        channels: wav.readUInt16LE(at + 10),
+        rate: wav.readUInt32LE(at + 12),
+        bits: wav.readUInt16LE(at + 22),
+      };
+    }
+    at += 8 + size + (size % 2);
+  }
+  return null;
+}
+
+/** True for what a G.711 line carries without resampling: PCM, mono, 8 kHz, 16-bit. */
+export function isLineFormat(wav: Buffer): boolean {
+  const f = wavFormat(wav);
+  return f !== null && f.format === 1 && f.channels === 1 && f.rate === SAMPLE_RATE && f.bits === 16;
+}
+
+/**
+ * The clip with CLIP_PAD_MS of silence after it, as a new file beside it (the original stays: a speaker may cache it).
+ * A file that is not 8 kHz mono PCM16 is logged and returned as it is: playing it makes baresip resample during the
+ * call, which is the thing to find, not to hide.
+ */
+export function padClip(made: { file: string; durationMs: number }): { file: string; durationMs: number } {
+  try {
+    const wav = fs.readFileSync(made.file);
+    if (!isLineFormat(wav)) {
+      logger.warn("voice clip is not 8 kHz mono PCM16: the line would resample it during a call", {
+        file: path.basename(made.file),
+        format: wavFormat(wav),
+      });
+      return made;
+    }
+    let at = 12;
+    let dataAt = -1;
+    let dataSize = 0;
+    while (at + 8 <= wav.length) {
+      const size = wav.readUInt32LE(at + 4);
+      if (wav.toString("ascii", at, at + 4) === "data") {
+        dataAt = at + 8;
+        dataSize = Math.min(size, wav.length - dataAt);
+        break;
+      }
+      at += 8 + size + (size % 2);
+    }
+    if (dataAt < 0) return made;
+    const pad = Buffer.alloc(Math.round((SAMPLE_RATE * 2 * CLIP_PAD_MS) / 1000));
+    const data = Buffer.concat([wav.subarray(dataAt, dataAt + dataSize), pad]);
+    const head = Buffer.alloc(44);
+    head.write("RIFF", 0);
+    head.writeUInt32LE(36 + data.length, 4);
+    head.write("WAVEfmt ", 8);
+    head.writeUInt32LE(16, 16);
+    head.writeUInt16LE(1, 20);
+    head.writeUInt16LE(1, 22);
+    head.writeUInt32LE(SAMPLE_RATE, 24);
+    head.writeUInt32LE(SAMPLE_RATE * 2, 28);
+    head.writeUInt16LE(2, 32);
+    head.writeUInt16LE(16, 34);
+    head.write("data", 36);
+    head.writeUInt32LE(data.length, 40);
+    const file = `${made.file}.pad.wav`;
+    fs.writeFileSync(file, Buffer.concat([head, data]), { mode: 0o600 });
+    return { file, durationMs: made.durationMs + CLIP_PAD_MS };
+  } catch {
+    return made;
+  }
+}
+
 /** Speech as a WAV file the line can play. Injected in tests. */
 export interface Speaker {
   /** Writes `text` to a new WAV file and returns its path and length. */
@@ -248,6 +328,12 @@ export class CachedSpeaker implements Speaker {
   constructor(
     private readonly inner: Speaker,
     private readonly limit = 120,
+    private readonly live: {
+      /** True while a call is up: nothing slow may be made then. */
+      callActive: () => boolean;
+      /** A quick voice for a line that is missing mid-call (the plain one); absent: the main voice, logged. */
+      plain?: Speaker | null;
+    } = { callActive: () => false },
   ) {}
 
   async speak(text: string): Promise<{ file: string; durationMs: number }> {
@@ -267,7 +353,7 @@ export class CachedSpeaker implements Speaker {
       return { file: hit.file, durationMs: hit.durationMs, source: hit.seeded ? "mac" : "add-on", makeMs: 0 };
     }
     const began = Date.now();
-    const result = await this.inner.speak(text);
+    const result = padClip(await this.make(text));
     const makeMs = Date.now() - began;
     // The Mac's clip may have arrived while this was being made (it follows a call that is already ringing): keep it.
     const seeded = this.made.get(text);
@@ -285,18 +371,31 @@ export class CachedSpeaker implements Speaker {
     return { ...result, source: "add-on", makeMs };
   }
 
+  /**
+   * Makes a line the cache lacks. Never the slow natural voice while a call is up: a missing line then comes from the
+   * plain voice (quick), and is logged, since that means a clip should have been ready.
+   */
+  private make(text: string): Promise<{ file: string; durationMs: number }> {
+    if (!this.live.callActive()) return this.inner.speak(text);
+    logger.warn("voice line made during a call: it was not ready in advance", {
+      chars: text.length,
+      voice: this.live.plain ? "plain" : "main",
+    });
+    return (this.live.plain ?? this.inner).speak(text);
+  }
+
   /** Files someone else made for these words (the Mac's voice, sent with a call) count as already said. */
   seed(text: string, made: { file: string; durationMs: number }): void {
     // The old file is left: a clip that arrives mid-call may replace a line that is about to play.
     this.made.delete(text);
-    this.made.set(text, { ...made, seeded: true });
+    this.made.set(text, { ...padClip(made), seeded: true });
   }
 
   /** Makes each prompt now (one at a time, so a small machine is not swamped); a failure is left for the call to meet. */
   async prewarm(texts: readonly string[], pause?: () => boolean): Promise<void> {
     for (const text of texts) {
       // Making speech uses the cores the call's audio thread needs: wait until the line is free.
-      while (pause?.()) await new Promise((resolve) => setTimeout(resolve, 1000));
+      while (pause?.() || this.live.callActive()) await new Promise((resolve) => setTimeout(resolve, 1000));
       if (this.made.has(text) && fs.existsSync(this.made.get(text)!.file)) continue;
       await this.speak(text).catch(() => undefined);
     }

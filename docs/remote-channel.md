@@ -836,7 +836,12 @@ The phone view carries `voice` when the Mac offers it (absent on an older Mac: t
 
 `mode` is `gateway` (the Home Assistant add-on places the call), `direct` (the Mac does) or `off`; `callee` is the
 extension set from an app (null until one is); `lastTest` appears once a test was asked for, with `status`
-`ringing`, `answered` (and the key pressed), `unanswered` or `failed` (and why).
+`ringing`, `answered` (and the key pressed), `unanswered` or `failed` (and why). An answered test may carry an optional
+`quality: { verdict: "good"|"fair"|"poor", jitterMs?, lossPct?, rttMs? }` (add-on 0.11.2 and newer, from baresip's
+`callstat` at the call's end; absent when baresip gave no usable numbers). Fair is jitter over 30 ms, loss over 1% or a
+round trip over 300 ms; poor is over 60 ms, 5% or 400 ms (what G.711 without loss concealment and a typical jitter
+buffer tolerate; ITU-T G.114 for the round trip). The apps add "Line quality: poor." to the test line when it is there;
+older ones ignore the key.
 
 The command is one signed envelope, exactly these keys:
 

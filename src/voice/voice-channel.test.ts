@@ -21,6 +21,8 @@ function setup(
     history?: Pick<CallHistory, "record">;
     send?: () => Promise<unknown>;
     paused?: () => boolean;
+    results?: CallResult[];
+    busyWaitMs?: number;
   } = {},
 ) {
   const waiting = item("asked_question");
@@ -28,6 +30,8 @@ function setup(
   const sent: string[] = [];
   let pushed: ((items: AttentionItem[]) => void) | null = null;
   const dialogs: boolean[] = [];
+  const traces: string[] = [];
+  const sleeps: number[] = [];
   const text = options.text ?? (() => QUESTION);
   const channel = new VoiceChannel({
     monitor: {
@@ -49,7 +53,7 @@ function setup(
     line: {
       call: async (_script, answerable) => {
         dialogs.push(answerable);
-        return options.result ?? { status: "answered", letter: "B" };
+        return options.results?.shift() ?? options.result ?? { status: "answered", letter: "B" };
       },
     },
     canTakeKeys: options.keys ?? (options.pin === undefined ? true : options.pin !== null),
@@ -58,8 +62,13 @@ function setup(
     ...(options.paused ? { paused: options.paused } : {}),
     ...(options.history ? { history: options.history } : {}),
     note: (message) => notes.push(message),
+    trace: (_kind, text) => traces.push(text),
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    },
+    ...(options.busyWaitMs !== undefined ? { busyWaitMs: options.busyWaitMs } : {}),
   });
-  return { channel, waiting, notes, sent, dialogs, push: (items: AttentionItem[]) => pushed?.(items) };
+  return { channel, waiting, notes, sent, dialogs, traces, sleeps, push: (items: AttentionItem[]) => pushed?.(items) };
 }
 
 describe("VoiceChannel.ring", () => {
@@ -198,12 +207,51 @@ describe("VoiceChannel call history", () => {
       expect(raw).not.toContain("424242");
       expect(raw).not.toContain(QUESTION.slice(0, 30));
       expect(Object.keys(history.list()[0]!).sort()).toEqual(
-        ["at", "durationMs", "id", "kind", "label", "letter", "outcome", "reason", "sent"].sort(),
+        ["at", "durationMs", "id", "kind", "label", "letter", "outcome", "reason", "sent", "summary"].sort(),
       );
       expect(history.list()[0]!.letter).toBe("B");
       expect(history.list()).toHaveLength(1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("VoiceChannel when the line is busy (a call in, usually)", () => {
+  const busy: CallResult = { status: "failed", reason: "The line is busy with another call." };
+
+  it("waits, then rings once the line is free, and carries on as a normal call", async () => {
+    const { channel, waiting, dialogs, traces, sleeps, sent, notes } = setup({
+      results: [busy, busy, { status: "answered", letter: "B" }],
+    });
+    await channel.ring(waiting);
+    expect(dialogs).toHaveLength(3);
+    expect(sleeps).toHaveLength(2);
+    expect(traces).toContain("Line busy, will ring when the call ends");
+    expect(traces.some((t) => t.startsWith("Line free after"))).toBe(true);
+    expect(sent).toEqual(["B"]);
+    expect(notes.join(" ")).not.toContain("could not call you");
+  });
+
+  it("gives up after the cap with a clear trace, and the question stays where it was", async () => {
+    const { channel, waiting, dialogs, traces, notes } = setup({ result: busy, busyWaitMs: 30_000 });
+    await channel.ring(waiting);
+    expect(dialogs.length).toBe(4); // the first try, then one after each of three 10 s looks
+    expect(traces.some((t) => t.startsWith("Line still busy after 30 s, gave up"))).toBe(true);
+    expect(notes[0]).toContain("busy");
+  });
+
+  it("does not ring afterwards if the question was answered meanwhile", async () => {
+    const attention: AttentionItem[] = [item("asked_question")];
+    const t = setup({ result: busy, attention });
+    // The question goes away during the wait.
+    const original = t.sleeps.push.bind(t.sleeps);
+    t.sleeps.push = (...args: number[]) => {
+      attention.length = 0;
+      return original(...args);
+    };
+    await t.channel.ring(t.waiting);
+    expect(t.dialogs).toHaveLength(1);
+    expect(t.traces.some((x) => x.startsWith("No longer waiting"))).toBe(true);
   });
 });
