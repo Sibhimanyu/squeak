@@ -140,3 +140,31 @@ import Testing
         if case .refused(let s) = GatewayUpdate.outcome(status: 500, body: Data("x".utf8)) { #expect(!s.isEmpty) } else { Issue.record("expected refused") }
     }
 }
+
+@Suite struct GatewayCheckTests {
+    private func view(_ v: String?, latest: String?, avail: Bool, state: GatewayStatusState = .ok) -> GatewayView {
+        GatewayView(status: GatewayStatus(state: state, version: v), latestVersion: latest, updateAvailable: avail)
+    }
+
+    @Test func versionLineCases() {
+        #expect(view("0.10.0", latest: "0.10.0", avail: false).versionLine == "Add-on 0.10.0 · up to date")
+        #expect(view("0.10.0", latest: "0.10.1", avail: true).versionLine == "Add-on 0.10.0 · 0.10.1 is available")
+        #expect(view("0.10.0", latest: nil, avail: false).versionLine == "Add-on 0.10.0")
+        #expect(view(nil, latest: nil, avail: false).versionLine == nil)
+        #expect(view("0.10.0", latest: "0.10.0", avail: false, state: .none).versionLine == nil)
+    }
+
+    @Test func checkedAtDecodes() throws {
+        let g = try JSONDecoder().decode(GatewayView.self, from: Data(#"{"status":{"state":"ok"},"checkedAt":1700000000000}"#.utf8))
+        #expect(g.checkedAt == 1700000000000)
+    }
+
+    @Test func requestAndOutcome() {
+        #expect(String(data: GatewayCheck.requestBody, encoding: .utf8) == "{}")
+        let ok = Data(#"{"ok":true,"latestVersion":"0.10.1","updateAvailable":true,"checkedAt":5}"#.utf8)
+        #expect(GatewayCheck.outcome(status: 200, body: ok) == .checked(latestVersion: "0.10.1", updateAvailable: true, checkedAt: 5))
+        #expect(GatewayCheck.outcome(status: 502, body: Data(#"{"error":"GitHub did not answer."}"#.utf8)) == .refused("GitHub did not answer."))
+        #expect(GatewayCheck.outcome(status: 404, body: Data()) == .unavailable)
+        if case .refused(let s) = GatewayCheck.outcome(status: 503, body: Data()) { #expect(!s.isEmpty) } else { Issue.record("expected refused") }
+    }
+}

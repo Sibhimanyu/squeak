@@ -317,6 +317,12 @@ public struct DaemonClient: Sendable {
         return GatewayUpdate.outcome(status: r.status, body: r.body)
     }
 
+    /// Asks the daemon to look for a newer add-on now.
+    public func checkGatewayUpdate() async throws -> GatewayCheckOutcome {
+        let r = try await post("/control/voice/gateway/check", body: GatewayCheck.requestBody, timeout: 30)
+        return GatewayCheck.outcome(status: r.status, body: r.body)
+    }
+
     /// Call history and the gateway's log; nil when the daemon predates the route or phone calls are not set up.
     public func voiceCalls() async throws -> CallsView? {
         let r = try await get("/control/voice/calls", token: true)

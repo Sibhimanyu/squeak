@@ -122,7 +122,8 @@ export class AddonUpdater {
    * already be written. A refusal before that is returned and `started` never runs.
    */
   async update(started: () => Promise<void> | void): Promise<UpdateOutcome> {
-    const latest = this.latestSeen;
+    // Look again right now so a version the Mac just found is honoured at once; the cache stands if this fails.
+    const latest = await this.look();
     if (!isNewer(latest, this.options.version)) return { ok: false, reason: "Already on the newest version." };
     const token = this.options.token;
     if (!token) return { ok: false, reason: NO_TOKEN };

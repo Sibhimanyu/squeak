@@ -125,7 +125,11 @@ describe("AddonUpdater.update", () => {
       expect(calls.some((c) => c.url === SUPERVISOR_UPDATE_URL)).toBe(false);
     }
     // Never looked: nothing is known, so nothing is updated.
-    const blind = new AddonUpdater({ version: "0.10.0", fetch: fakeFetch({}).fetchFn, token: TOKEN });
+    const blind = new AddonUpdater({
+      version: "0.10.0",
+      fetch: fakeFetch({ latest: new Error("offline") }).fetchFn,
+      token: TOKEN,
+    });
     expect((await blind.update(vi.fn())).ok).toBe(false);
     // Garbage in the config is not a version.
     const garbage = new AddonUpdater({
@@ -135,6 +139,24 @@ describe("AddonUpdater.update", () => {
     });
     await garbage.look();
     expect((await garbage.update(vi.fn())).ok).toBe(false);
+  });
+
+  it("looks again before deciding: a stale cache with a newer remote updates", async () => {
+    const f = fakeFetch({ latest: "0.10.1", supervisor: 200 });
+    const updater = new AddonUpdater({ version: "0.10.1", fetch: f.fetchFn, token: TOKEN });
+    await updater.look();
+    expect((await updater.update(vi.fn())).ok).toBe(false);
+    const g = fakeFetch({ latest: "0.10.2", supervisor: 200 });
+    (updater as unknown as { fetchFn: FetchLike }).fetchFn = g.fetchFn;
+    expect(await updater.update(vi.fn())).toEqual({ ok: true });
+    expect(updater.latest()).toBe("0.10.2");
+  });
+
+  it("falls back to the cached version when the fresh look fails", async () => {
+    const { updater } = await ready("0.10.0", "0.10.1", 200);
+    const g = fakeFetch({ latest: new Error("offline"), supervisor: 200 });
+    (updater as unknown as { fetchFn: FetchLike }).fetchFn = g.fetchFn;
+    expect(await updater.update(vi.fn())).toEqual({ ok: true });
   });
 
   it("posts to the fixed Supervisor address with the token from its options, after `started`", async () => {

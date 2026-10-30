@@ -285,6 +285,31 @@ final class ChannelsModel {
     private(set) var gatewayUpdating = false
     private var gatewayUpdateWatch: Task<Void, Never>?
 
+    /// Check for updates: spinner while it runs, "Checked just now" until the next refresh, hidden on an older daemon.
+    private(set) var gatewayChecking = false
+    private(set) var gatewayCheckedNow = false
+    private(set) var gatewayCheckUnavailable = false
+
+    func checkGatewayUpdate() async {
+        guard !gatewayChecking else { return }
+        gatewayError = nil
+        gatewayCheckedNow = false
+        if demo { return }
+        gatewayChecking = true
+        defer { gatewayChecking = false }
+        do {
+            switch try await client.checkGatewayUpdate() {
+            case .checked:
+                await refreshGateway()
+                gatewayCheckedNow = true
+            case .refused(let sentence): gatewayError = sentence
+            case .unavailable: gatewayCheckUnavailable = true
+            }
+        } catch {
+            gatewayError = "Squeak on this Mac did not answer."
+        }
+    }
+
     func updateGatewayAddon() async {
         guard !gatewayUpdating, !gatewayBusy, let target = gateway?.latestVersion, gateway?.updateAvailable == true else { return }
         gatewayError = nil
@@ -325,7 +350,7 @@ final class ChannelsModel {
         do {
             let v = try await client.gatewayView()
             gatewayAvailable = v != nil
-            if let v { gateway = v }
+            if let v { gateway = v; gatewayCheckedNow = false }
         } catch {
             // Keep what is shown.
         }

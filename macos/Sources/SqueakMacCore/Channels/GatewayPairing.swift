@@ -64,12 +64,14 @@ public struct GatewayView: Sendable, Equatable, Decodable {
     /// The newest add-on version the add-on knows of, and whether it is newer than the running one (computed by the daemon).
     public var latestVersion: String?
     public var updateAvailable: Bool
+    /// When the daemon last looked for a newer add-on (ms since 1970).
+    public var checkedAt: Double?
 
-    public init(pairing: GatewayPairing? = nil, status: GatewayStatus = GatewayStatus(), latestVersion: String? = nil, updateAvailable: Bool = false) {
-        self.pairing = pairing; self.status = status; self.latestVersion = latestVersion; self.updateAvailable = updateAvailable
+    public init(pairing: GatewayPairing? = nil, status: GatewayStatus = GatewayStatus(), latestVersion: String? = nil, updateAvailable: Bool = false, checkedAt: Double? = nil) {
+        self.pairing = pairing; self.status = status; self.latestVersion = latestVersion; self.updateAvailable = updateAvailable; self.checkedAt = checkedAt
     }
 
-    private enum Keys: String, CodingKey { case pairing, status, latestVersion, updateAvailable }
+    private enum Keys: String, CodingKey { case pairing, status, latestVersion, updateAvailable, checkedAt }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -77,10 +79,14 @@ public struct GatewayView: Sendable, Equatable, Decodable {
         status = (try? c.decode(GatewayStatus.self, forKey: .status)) ?? GatewayStatus()
         latestVersion = try? c.decode(String.self, forKey: .latestVersion)
         updateAvailable = (try? c.decode(Bool.self, forKey: .updateAvailable)) ?? false
+        checkedAt = try? c.decode(Double.self, forKey: .checkedAt)
     }
 
     /// "Add-on 0.9.2 · 0.10.0 is available", or nil when there is nothing to update to.
     public var updateLine: String? { GatewayText.updateLine(self) }
+
+    /// The line shown whenever the gateway is paired and reporting: available, up to date, or just the version.
+    public var versionLine: String? { GatewayText.versionLine(self) }
 
     /// True once a gateway has ever reported in, so the button reads "Pair again".
     public var isPaired: Bool { status.state != .none }
@@ -125,6 +131,16 @@ public enum GatewayText {
         let now = g.status.version.map { "Add-on \($0) · " } ?? ""
         return "\(now)\(latest) is available"
     }
+
+    /// "Add-on 0.10.0 · up to date", "Add-on 0.10.0 · 0.10.1 is available", plain "Add-on 0.10.0", or nil when the add-on has not reported a version.
+    public static func versionLine(_ g: GatewayView) -> String? {
+        if let line = updateLine(g) { return line }
+        guard g.status.state != .none, let v = g.status.version, !v.isEmpty else { return nil }
+        if !g.updateAvailable, let latest = g.latestVersion, latest == v { return "Add-on \(v) · up to date" }
+        return "Add-on \(v)"
+    }
+
+    public static let checkedJustNow = "Checked just now"
 
     public static let updateSlow = "Home Assistant is taking long: check the add-on in Home Assistant."
 
@@ -219,5 +235,30 @@ public enum GatewayUpdate {
         if (200..<300).contains(status), o?["ok"] as? Bool != false { return .done }
         if status == 404 && sentence == nil { return .unavailable }
         return .refused(sentence ?? "Squeak could not update the add-on. Try again, or update it in Home Assistant.")
+    }
+}
+
+/// What `POST /control/voice/gateway/check` came to.
+public enum GatewayCheckOutcome: Sendable, Equatable {
+    case checked(latestVersion: String?, updateAvailable: Bool, checkedAt: Double?)
+    /// The daemon's own plain sentence.
+    case refused(String)
+    /// A daemon without the route (404 and no sentence): the Check button hides.
+    case unavailable
+}
+
+public enum GatewayCheck {
+    public static let requestBody = Data("{}".utf8)
+
+    public static func outcome(status: Int, body: Data) -> GatewayCheckOutcome {
+        let o = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        let sentence = (o?["error"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        if (200..<300).contains(status), o?["ok"] as? Bool != false {
+            return .checked(latestVersion: o?["latestVersion"] as? String,
+                            updateAvailable: o?["updateAvailable"] as? Bool ?? false,
+                            checkedAt: (o?["checkedAt"] as? NSNumber)?.doubleValue)
+        }
+        if status == 404 && sentence == nil { return .unavailable }
+        return .refused(sentence ?? "Squeak could not check for an add-on update. Try again in a moment.")
     }
 }

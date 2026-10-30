@@ -1204,6 +1204,62 @@ describe("HookIngressServer gateway update route", () => {
   });
 });
 
+describe("HookIngressServer gateway check route", () => {
+  it("gates and shapes POST /control/voice/gateway/check", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/voice/gateway/check`;
+    const auth = { "x-squeak-token": harness.token };
+    const post = (body: string, headers: Record<string, string> = auth) =>
+      fetch(url, { method: "POST", headers, body });
+    type Out =
+      | { ok: true; latestVersion?: string; updateAvailable: boolean; checkedAt?: number }
+      | { ok: false; reason: string; status: 502 | 503 };
+    let outcome: Out = { ok: true, latestVersion: "0.10.1", updateAvailable: true, checkedAt: 5 };
+    let calls = 0;
+    const base = {
+      read: () => null,
+      pair: () => ({ ok: false as const, reason: "x" }),
+      approve: async () => ({ ok: true as const }),
+    };
+    server.setControl({ sessionMessage: () => null, reply: async () => null, voiceGateway: base });
+    expect((await post("{}")).status).toBe(404);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voiceGateway: {
+        ...base,
+        check: async () => {
+          calls += 1;
+          return outcome;
+        },
+      },
+    });
+    expect((await post("{}", {})).status).toBe(403);
+    expect((await fetch(url, { headers: auth })).status).toBe(405);
+    for (const bad of ["{nope", JSON.stringify({ x: 1 })]) expect((await post(bad)).status).toBe(400);
+    expect(calls).toBe(0);
+    const ok = await post("{}");
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ ok: true, latestVersion: "0.10.1", updateAvailable: true, checkedAt: 5 });
+    outcome = {
+      ok: false,
+      status: 502,
+      reason: "Could not look up the newest version. Check your internet connection.",
+    };
+    const failed = await post("{}");
+    expect(failed.status).toBe(502);
+    expect(await failed.json()).toEqual({
+      error: "Could not look up the newest version. Check your internet connection.",
+    });
+    outcome = { ok: false, status: 503, reason: "no relay" };
+    expect((await post("{}")).status).toBe(503);
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await post("{}")).status).toBe(503);
+  });
+});
+
 describe("HookIngressServer call history route", () => {
   it("gates, shapes and answers /control/voice/calls", async () => {
     const harness = await startServer();

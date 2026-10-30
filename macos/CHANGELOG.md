@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.14
+
+- Phone calls: Settings now always shows whether the Home Assistant add-on is up to date, with a Check for updates button, and an Update add-on button when a newer version exists. Squeak looks up the newest version itself, so a new version shows up straight away.
+
 ## 2.12.13
 
 - Phone calls: a Test call button in Settings › Phone calls rings you with a made-up question and shows how it went, like on the iPhone.

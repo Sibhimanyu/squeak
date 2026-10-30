@@ -89,6 +89,7 @@ import { CallTrace } from "../voice/call-trace.js";
 import { GatewayLogReader } from "../voice/gateway-log.js";
 import { GatewayStatusReader } from "../voice/gateway-status.js";
 import { isNewer } from "../voice/addon-update.js";
+import { AddonVersionCheck } from "../voice/addon-version-check.js";
 import { setEnvValues } from "../cliq/setup.js";
 import { resolveSqueakEnvPath } from "./paths.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
@@ -270,6 +271,8 @@ export class SqueakApp {
   private unwatchCaffeinate: (() => void) | null = null;
   private lastUpdateId = 0;
   private stopped = false;
+  /** The newest add-on version, looked up by the daemon itself (the add-on's own look is 6-hourly). */
+  private readonly addonVersions = new AddonVersionCheck();
 
   constructor(config: SqueakConfig) {
     this.config = config;
@@ -675,6 +678,7 @@ export class SqueakApp {
           pairing: this.gatewayClaim?.view() ?? this.gatewayPairing?.view() ?? null,
           status: this.gatewayStatusReader().peek(),
         }),
+        check: () => this.checkGatewayAddon(),
         pair: () => {
           const pairing = this.gatewayPairingFor();
           if (!pairing) {
@@ -1299,15 +1303,46 @@ export class SqueakApp {
   }
 
   private gatewayView() {
-    const { state, version, latestVersion, sipRegistered, sipError } = this.gatewayStatusReader().peek();
+    const { state, version, latestVersion: reported, sipRegistered, sipError } = this.gatewayStatusReader().peek();
+    // Look in the background when the last look is old; the view never waits for it.
+    const checkedAt = this.addonVersions.checkedAt();
+    if (checkedAt === undefined || Date.now() - checkedAt > 30 * 60_000) void this.addonVersions.latest();
+    const fetched = this.addonVersions.peek();
+    const latestVersion = isNewer(fetched, reported) || (reported === undefined && fetched) ? fetched : reported;
     return {
       state,
       ...(version !== undefined ? { version } : {}),
-      ...(latestVersion !== undefined ? { latestVersion } : {}),
+      ...(latestVersion != null ? { latestVersion } : {}),
       // Computed here so every surface agrees: strictly newer than the running version, false when either is unknown.
       updateAvailable: isNewer(latestVersion, version),
+      ...(checkedAt !== undefined ? { checkedAt } : {}),
       ...(sipRegistered !== undefined ? { sipRegistered } : {}),
       ...(sipError ? { sipError } : {}),
+    };
+  }
+
+  /** `POST /control/voice/gateway/check`: look up the newest add-on version now. */
+  private async checkGatewayAddon(): Promise<
+    | { ok: true; latestVersion?: string; updateAvailable: boolean; checkedAt?: number }
+    | { ok: false; reason: string; status: 502 | 503 }
+  > {
+    if (!this.voiceRelayLine) {
+      return { ok: false, reason: "Phone calls don't go through a Home Assistant add-on on this Mac.", status: 503 };
+    }
+    await this.addonVersions.latest(true);
+    if (!this.addonVersions.lastOk()) {
+      return {
+        ok: false,
+        reason: "Could not look up the newest version. Check your internet connection.",
+        status: 502,
+      };
+    }
+    const view = this.gatewayView();
+    return {
+      ok: true,
+      ...(view.latestVersion !== undefined ? { latestVersion: view.latestVersion } : {}),
+      updateAvailable: view.updateAvailable,
+      ...(view.checkedAt !== undefined ? { checkedAt: view.checkedAt } : {}),
     };
   }
 
