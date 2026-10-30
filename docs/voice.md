@@ -149,7 +149,7 @@ Dial Squeak's extension (the one in the add-on's options) from your 3CX app, fro
    message, and Telegram/Cliq get a note of what was sent. At most 20 messages an hour by phone. After a send the
    call ends ("Done. Your message was sent to ... Goodbye.").
 
-**Asking, with a Mac that answers (add-on 0.11.0 and Squeak for Mac 2.12.15 or newer).** The Mac says it can in the
+**Asking, with a Mac that answers (add-on 0.11.0 and Squeak for Mac 2.12.16 or newer).** The Mac says it can in the
 directory it publishes (`ask: true`); without that flag the steps above are exactly as before.
 
 - Once a chat is chosen: **1** to say a message or ask a question, **3** to hear where it stands (no recording), star

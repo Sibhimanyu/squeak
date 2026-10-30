@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.12.16
+
+- Calling Squeak: after your message is read back, press 1 to send it and hang up, 2 to ask it as a question and hear the answer, 3 to record again.
+- Calling Squeak: choose a chat, then press 3 to hear where it stands: its state, what it is doing now or its last message, what changed on disk, background work and when it last did anything. Questions and status are read-only: nothing is sent to the chat. Up to 3 answers per call.
+- Squeak rings your phone immediately when an agent waits on you, and the natural voice follows while it rings, so the line is never silent when you answer (needs Squeak Voice add-on 0.11.0).
+- New chat presets (names, models, thinking, workers) are now one shared setting: edit them on the Mac, iPhone or web and all three agree.
+- Set up Telegram and Zoho Cliq from your iPhone or the web (token, linked chats, webhook, owner); the iPhone asks for Face ID first.
+- The Conductor, Claude and Codex icons now appear throughout the Mac app, like on the iPhone.
+- Phone calls: a Test call button in Settings, and the iPhone and web can play the voice sample, pick the realistic voice, set quick workspaces and read the call log.
+
 ## 2.12.15
 
 - Removing Squeak: if you drag Squeak to the Trash, its background service now notices and cleans up after itself (hands Conductor back, stops, removes its hooks) and keeps your settings. The download also has an Uninstall Squeak item.
