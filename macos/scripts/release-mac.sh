@@ -44,6 +44,12 @@ fi
 
 step "Build, test, DMG, appcast"
 mkdir -p "$REL/macos/build"
+# The daemon the app embeds is compiled from this checkout (embed-daemon.sh runs its tsc): install when the lockfile changed.
+LOCKSUM="$(shasum -a 256 "$REL/package-lock.json" | cut -d' ' -f1)"
+if [ ! -x "$REL/node_modules/.bin/tsc" ] || [ "$(cat "$REL/node_modules/.lock-sum" 2>/dev/null)" != "$LOCKSUM" ]; then
+  echo "installing the daemon's dependencies (once per lockfile change)"
+  (cd "$REL" && npm ci --no-audit --no-fund --loglevel=error) && echo "$LOCKSUM" > "$REL/node_modules/.lock-sum"
+fi
 (cd "$REL/macos" && ./scripts/release.sh "$VERSION") > "$REL/macos/build/release-$VERSION.log" 2>&1 \
   || { tail -30 "$REL/macos/build/release-$VERSION.log" >&2; echo "release.sh failed; full log: $REL/macos/build/release-$VERSION.log" >&2; exit 1; }
 BUILD="$REL/macos/build"
