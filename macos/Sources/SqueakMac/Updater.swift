@@ -169,6 +169,13 @@ final class UpdateDelegate: NSObject, SPUUpdaterDelegate {
 
     func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) { onMain { QuitIntent.shared.beginUpdateQuit() } }
 
+    /// Sparkle installing on a quit the person chose must not reopen the app.
+    func updaterShouldRelaunchApplication(_ updater: SPUUpdater) -> Bool {
+        var relaunch = true
+        onMain { relaunch = !(QuitIntent.shared.explicitQuit || QuitIntent.shared.userQuit) }
+        return relaunch
+    }
+
     func updaterWillRelaunchApplication(_ updater: SPUUpdater) { onMain { QuitIntent.shared.beginUpdateQuit() } }
 
     /// The download is staged and installs on the next real quit. Nothing here holds Sparkle back,

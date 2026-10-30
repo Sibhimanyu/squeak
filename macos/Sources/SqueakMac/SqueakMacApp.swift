@@ -139,6 +139,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updating: intent.updating, hasAppWindows: NSApp.windows.contains(where: ActivationPolicyController.isAppWindow))
         switch decision {
         case .quit:
+            // A quit the person chose (not Sparkle's own) must stay a quit: an update staged to install on it
+            // installs, but never reopens the app or arms the relaunch watcher.
+            if !intent.updating { intent.userQuit = true }
             if QuitPolicy.shouldSaveRestore(decision: decision, updating: intent.updating, installPending: intent.installPending) {
                 AppModel.shared.saveUpdateRestore()
             }
@@ -162,13 +165,16 @@ final class QuitIntent {
     var updating = false
     /// Set when Sparkle has an update staged that installs on the next real quit.
     var installPending = false
+    /// Set when the app is terminating because the person quit it. Sparkle may still install a staged update then,
+    /// but nothing may bring the app back.
+    var userQuit = false
 
     /// Sparkle is about to quit the app to install an update. The quit must succeed, and the app must come back:
     /// Sparkle's own relaunch sometimes does not, so a detached watcher reopens it (RelaunchWatchdog), unless the
     /// person chose to quit.
     func beginUpdateQuit() {
         updating = true
-        if !explicitQuit { RelaunchWatchdog.arm() }
+        if !explicitQuit, !userQuit { RelaunchWatchdog.arm() }
     }
 
     func quitCompletely() {
