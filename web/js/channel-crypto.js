@@ -97,3 +97,6 @@ export async function verify(publicKeyX963Base64, message, signatureBase64) {
 
 /** What this client tells the Mac it reads (its presence `caps`): same as the iPhone, so a phone and a browser never fight over the format. "films" asks the Mac to list RasanAI films (`films` in the view; it sends none to a client that does not say so). */
 export const CAPABILITIES = ["z", "split", "films"];
+
+/** Added to the caps only while the Phone calls log is open: the Mac then writes the recent calls (`voice.calls`, up to ~200 KB). */
+export const CALLS_CAPABILITY = "calls";

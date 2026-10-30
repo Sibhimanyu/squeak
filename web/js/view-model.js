@@ -244,11 +244,57 @@ export function macHeat(view) {
   };
 }
 
-/** Phone calls (`voice`); null hides the page. */
+const CALL_KINDS = ["agent", "test", "incoming"];
+const CALL_OUTCOMES = ["answered", "unanswered", "failed", "moved_on"];
+const EVENT_KINDS = ["step", "said", "heard", "key", "warn"];
+
+function callEvent(e) {
+  if (!isObject(e) || typeof e.text !== "string") return null;
+  return {
+    at: num(e.at) ?? 0,
+    source: e.source === "add-on" ? "add-on" : "mac",
+    kind: EVENT_KINDS.includes(e.kind) ? e.kind : "step",
+    text: e.text,
+  };
+}
+
+/** One call of `voice.calls`; an unknown word reads as the safest: an agent call nobody answered (the Mac app's rule). */
+function callEntry(c) {
+  if (!isObject(c)) return null;
+  const at = num(c.at) ?? 0;
+  return {
+    id: nonEmpty(c.id) ?? `call-${Math.trunc(at)}`,
+    at,
+    kind: CALL_KINDS.includes(c.kind) ? c.kind : "agent",
+    reason: nonEmpty(c.reason),
+    label: nonEmpty(c.label),
+    outcome: CALL_OUTCOMES.includes(c.outcome) ? c.outcome : "unanswered",
+    letter: nonEmpty(c.letter),
+    sent: bool(c.sent),
+    durationMs: num(c.durationMs) ?? 0,
+    failure: nonEmpty(c.failure),
+    events: list(c.events, callEvent) ?? [],
+  };
+}
+
+/**
+ * Phone calls (`voice`); null hides the page. Every field after `lastTest` is optional (an older Mac omits it):
+ * `pin` ("set", "off", "none", "unknown"), `policy`, `pause` (`pauseKnown` says the key was sent at all; `pause`
+ * is then null = calls are on, or `{ until }`, until null = until turned back on), `natural` (`voices` is how a
+ * Mac says it can change it from a phone), `favorites`, `workspaces` and `calls` (only for a browser whose caps say "calls").
+ */
 export function voice(view) {
   const v = field(view, "voice");
   if (!isObject(v) || !nonEmpty(v.mode)) return null;
   const t = v.lastTest;
+  const p = v.policy;
+  const n = v.natural;
+  const choice = (x) => (x === "skip" ? "skip" : "ask");
+  const voices = isObject(n)
+    ? list(n.voices, (x) =>
+        isObject(x) && nonEmpty(x.id) && str(x.label) !== null ? { id: x.id, label: x.label } : null,
+      )
+    : null;
   return {
     mode: v.mode,
     isOn: v.mode !== "off",
@@ -258,6 +304,29 @@ export function voice(view) {
       isObject(t) && num(t.at) !== null && nonEmpty(t.status)
         ? { at: t.at, status: t.status, letter: nonEmpty(t.letter), reason: nonEmpty(t.reason) }
         : null,
+    pin: nonEmpty(v.pin),
+    policy: isObject(p) ? { outgoing: choice(p.outgoing), incoming: choice(p.incoming) } : null,
+    pauseKnown: isObject(v) && "pause" in v,
+    pause: isObject(v.pause) ? { until: num(v.pause.until) } : null,
+    natural: isObject(n)
+      ? {
+          installed: n.installed === true,
+          enabled: n.enabled === true,
+          voice: nonEmpty(n.voice),
+          voices: voices && voices.length > 0 ? voices : null,
+          // Whether this Mac can make a voice sample and leave it in the channel; absent from an older Mac.
+          sample: n.sample === true,
+        }
+      : null,
+    favorites: list(v.favorites, (f) =>
+      isObject(f) && int(f.n) !== null && f.n >= 1 && f.n <= 9 && nonEmpty(f.workspace)
+        ? { n: f.n, workspace: f.workspace, label: nonEmpty(f.label) ?? f.workspace }
+        : null,
+    ),
+    workspaces: list(v.workspaces, (w) =>
+      isObject(w) && nonEmpty(w.key) ? { key: w.key, label: nonEmpty(w.label) ?? w.key } : null,
+    ),
+    calls: list(v.calls, callEntry),
   };
 }
 

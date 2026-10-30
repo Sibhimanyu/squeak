@@ -220,6 +220,36 @@ final class ChannelsModel {
         await refreshVoice()
     }
 
+    // Test call ("Call me now"): the daemon's `lastTest` carries the result; this is only the press in flight.
+    private(set) var testPlacing = false
+    private(set) var testError: String?
+
+    func testCall() async {
+        testError = nil
+        if demo { return }
+        testPlacing = true
+        defer { testPlacing = false }
+        do {
+            switch try await client.testVoiceCall() {
+            case let .done(v): if let v { voice = v }
+            case let .refused(reason): testError = reason
+            case .outdated: testError = "Squeak on this Mac is older than test calls. Update it and try again."
+            }
+        } catch {
+            testError = "Could not place the call: Squeak on this Mac did not answer."
+        }
+        await pollTest()
+    }
+
+    /// While a test rings, read the view every 2 s until it is answered (the daemon ends it within a minute or so).
+    private func pollTest() async {
+        for _ in 0..<45 where voice?.isRinging == true {
+            try? await Task.sleep(for: .seconds(2))
+            if Task.isCancelled { return }
+            await refreshVoice()
+        }
+    }
+
     /// Replaces the quick workspaces and takes the daemon's answer as the truth.
     func setFavorites(_ list: [FavoriteWorkspace]) async {
         voiceError = nil

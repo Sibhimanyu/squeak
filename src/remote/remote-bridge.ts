@@ -1,3 +1,5 @@
+import { PHONE_CALLS_CAP } from "../voice/phone-voice.js";
+import { NATURAL_VOICE } from "../voice/natural-voice.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import type { AwakeEnd, AwakeState } from "../fleet/awake-session.js";
 import {
@@ -368,6 +370,8 @@ export const MEDIA_CHUNK_TIMEOUT_MS = 90_000;
 /** The newest user message a phone session row carries. */
 export const LAST_USER_CHARS = 200;
 export const MEDIA_TTL_MS = 30 * 60_000;
+/** One voice sample per device in this long. */
+export const VOICE_SAMPLE_GAP_MS = 5_000;
 
 /** What shows a workflow's card and takes its answers (workflows/rasanai/provider.ts). */
 export interface RemoteWorkflows {
@@ -925,6 +929,9 @@ export class RemoteBridge {
   private readonly mediaUploads = new Map<string, { media: Record<string, unknown>; expiresAt: number }>();
   /** Devices with an upload under way: one at a time each. */
   private readonly mediaBusy = new Set<string>();
+  /** Voice samples: devices making one now, and when each last asked. */
+  private readonly sampleBusy = new Set<string>();
+  private readonly sampleAt = new Map<string, number>();
   /** The first pass deletes every chunk an earlier run left; later ones only expired ones. */
   private mediaSwept = false;
   private pairingOpenUntil = 0;
@@ -1746,6 +1753,9 @@ export class RemoteBridge {
     }
     if (kind === "voice") {
       return this.handleVoice(device, id, command as unknown as Record<string, unknown>);
+    }
+    if (kind === "voiceSample") {
+      return this.handleVoiceSample(config, device, id, command as unknown as Record<string, unknown>);
     }
     if (kind === "telegramAvatar") {
       return this.handleTelegramAvatar(device, id, command as unknown as Record<string, unknown>);
@@ -2835,31 +2845,7 @@ export class RemoteBridge {
         return { write: true, result: { id, status: "sent", media: held.media } };
       }
       const bytes = await fs.promises.readFile(file.path);
-      const mediaId = crypto.randomBytes(12).toString("hex");
-      const chunks = Math.max(1, Math.ceil(bytes.length / MEDIA_CHUNK_BYTES));
-      const docs = Array.from({ length: chunks }, (_, index) => this.channel(config, "media", `${mediaId}-${index}`));
-      // Recorded before the first write, so a restart mid-upload still cleans up.
-      this.rememberMedia(docs, now + MEDIA_TTL_MS);
-      const upload = async (index: number) => {
-        const data = bytes.subarray(index * MEDIA_CHUNK_BYTES, (index + 1) * MEDIA_CHUNK_BYTES).toString("base64");
-        await this.deps.store.set(
-          docs[index]!,
-          { box: seal(config.key, { i: index, n: chunks, data }), at: now },
-          { timeoutMs: MEDIA_CHUNK_TIMEOUT_MS },
-        );
-      };
-      // Two at a time: on a thin uplink more in parallel only splits the same bandwidth and
-      // pushes each write toward its timeout.
-      for (let start = 0; start < chunks; start += 2) {
-        await Promise.all(Array.from({ length: Math.min(2, chunks - start) }, (_, offset) => upload(start + offset)));
-      }
-      const media = {
-        id: mediaId,
-        chunks,
-        bytes: bytes.length,
-        sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
-        mime: file.mime,
-      };
+      const media = await this.uploadMedia(config, bytes, file.mime, now);
       this.mediaUploads.set(cacheKey, { media, expiresAt: now + MEDIA_TTL_MS });
       this.log(
         device.name,
@@ -2872,6 +2858,107 @@ export class RemoteBridge {
       return refuse("Your Mac couldn't send that. Try again.");
     } finally {
       this.mediaBusy.delete(device.id);
+    }
+  }
+
+  /**
+   * Seals `bytes` into `media/<id>-<i>` chunks (two writes at a time) and answers the reference a phone fetches them
+   * by. Every chunk is on the ledger before its write, so a restart mid-upload still deletes it.
+   */
+  private async uploadMedia(
+    config: RemoteConfig,
+    bytes: Buffer,
+    mime: string,
+    now: number,
+  ): Promise<{ id: string; chunks: number; bytes: number; sha256: string; mime: string }> {
+    const mediaId = crypto.randomBytes(12).toString("hex");
+    const chunks = Math.max(1, Math.ceil(bytes.length / MEDIA_CHUNK_BYTES));
+    const docs = Array.from({ length: chunks }, (_, index) => this.channel(config, "media", `${mediaId}-${index}`));
+    this.rememberMedia(docs, now + MEDIA_TTL_MS);
+    const upload = async (index: number) => {
+      const data = bytes.subarray(index * MEDIA_CHUNK_BYTES, (index + 1) * MEDIA_CHUNK_BYTES).toString("base64");
+      await this.deps.store.set(
+        docs[index]!,
+        { box: seal(config.key, { i: index, n: chunks, data }), at: now },
+        { timeoutMs: MEDIA_CHUNK_TIMEOUT_MS },
+      );
+    };
+    // Two at a time: on a thin uplink more in parallel only splits the same bandwidth and
+    // pushes each write toward its timeout.
+    for (let start = 0; start < chunks; start += 2) {
+      await Promise.all(Array.from({ length: Math.min(2, chunks - start) }, (_, offset) => upload(start + offset)));
+    }
+    return {
+      id: mediaId,
+      chunks,
+      bytes: bytes.length,
+      sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+      mime,
+    };
+  }
+
+  /**
+   * "Play voice sample" from a phone: `{ v: 1, kind: "voiceSample", voice, nonce, expiresAt }`, exactly these keys.
+   * The Mac makes the sample through the Mac app's own preview function and leaves it as one sealed `media` chunk
+   * set (Realtime Database only), answered as `media` like a film's. It touches no chat and carries no words, so
+   * no Face ID. One at a time, and one per 5 s per device.
+   */
+  private async handleVoiceSample(
+    config: RemoteConfig,
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `voice sample: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const voice = this.deps.voice;
+    if (!voice?.preview || !this.deps.store.watch || this.deps.shared || command.v !== 1) {
+      return refuse("This Mac can't send a voice sample to a phone.", "not available");
+    }
+    if (Object.keys(command).sort().join(",") !== "expiresAt,kind,nonce,v,voice") {
+      return refuse("Not a voice sample this Mac understands.", "bad keys");
+    }
+    const name = command.voice;
+    const state = voice.state() as { natural?: { installed?: unknown; voices?: unknown } } | null;
+    const voices = Array.isArray(state?.natural?.voices) ? (state!.natural!.voices as { id?: unknown }[]) : [];
+    if (typeof name !== "string" || !NATURAL_VOICE.test(name) || !voices.some((entry) => entry?.id === name)) {
+      return refuse("Not a voice this Mac offers.", "unknown voice");
+    }
+    if (state?.natural?.installed !== true) {
+      return refuse("The realistic voice isn't installed on this Mac.", "not installed");
+    }
+    const now = this.now();
+    if (this.sampleBusy.has(device.id)) return refuse("Your Mac is still making the last sample.", "busy");
+    if (now - (this.sampleAt.get(device.id) ?? 0) < VOICE_SAMPLE_GAP_MS) {
+      return refuse("Wait a few seconds before playing another sample.", "rate limited");
+    }
+    this.sampleBusy.add(device.id);
+    this.sampleAt.set(device.id, now);
+    try {
+      let wav: Buffer | null = null;
+      try {
+        wav = await voice.preview(name);
+      } catch {
+        wav = null;
+      }
+      if (!wav || wav.length === 0) {
+        return refuse(
+          "Your Mac couldn't make the sample. Check that the voice is installed, then try again.",
+          "no sample",
+        );
+      }
+      const media = await this.uploadMedia(config, wav, "audio/wav", now);
+      this.log(device.name, "sent", `a voice sample (${Math.round(wav.length / 1024)} KB)`);
+      return { write: true, result: { id, status: "sent", media } };
+    } catch (error) {
+      logger.warn("remote voice sample upload failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return refuse("Your Mac couldn't send the sample. Try again.", "upload failed");
+    } finally {
+      this.sampleBusy.delete(device.id);
     }
   }
 
@@ -3102,7 +3189,8 @@ export class RemoteBridge {
    * Phone-call settings: `{ v: 1, kind: "voice", change: { callee: "101" | null } | { test: true }, nonce, expiresAt }`,
    * exactly these keys. Signature, freshness and nonce have already held. A callee is read again strictly in
    * voice/settings.ts (an internal extension or null) and ends in the same function as the Mac app's route; a test
-   * starts the made-up call and answers at once. Neither reaches an agent.
+   * starts the made-up call and answers at once. Neither reaches an agent. `{ natural }` and `{ favorites }` end in the
+   * Mac app route's stores too (voice/phone-voice.ts).
    */
   private async handleVoice(
     device: PairedDevice,
@@ -3538,7 +3626,7 @@ export class RemoteBridge {
       // What Telegram and Cliq may push, and which of them this Mac has. Absent: the page is hidden.
       ...(this.deps.notify ? { notify: this.deps.notify.state() } : {}),
       // Who phone calls ring, whether they are set up, and how the last test went. Absent: the page is hidden.
-      ...(this.deps.voice ? { voice: this.deps.voice.state() } : {}),
+      ...(this.deps.voice ? { voice: this.phoneVoice(this.deps.voice) } : {}),
       // The Mac can set the Telegram bot's photo to Squeak's logo. Absent on an older Mac: the button is hidden.
       ...(this.deps.telegramAvatar ? { telegramAvatar: true as const } : {}),
       // Usage › Details is offered: the numbers themselves come only in a `stats` command's answer.
@@ -3568,6 +3656,30 @@ export class RemoteBridge {
       // Whether "Show more" would find anything; older phones ignore it.
       recentMore: more,
     };
+  }
+
+  /** The voice view; the calls log rides along only for a phone that named `calls`, and never breaks the view. */
+  private phoneVoice(voice: NonNullable<RemoteBridgeDependencies["voice"]>): unknown {
+    // A phone is offered the sample only when this Mac can make one and leave media in the channel.
+    const state = this.withSampleOffer(voice, voice.state());
+    if (!voice.calls || !this.phoneCaps.includes(PHONE_CALLS_CAP) || typeof state !== "object" || state === null) {
+      return state;
+    }
+    try {
+      return { ...state, calls: voice.calls() };
+    } catch (error) {
+      logger.debug("could not list calls", { error: error instanceof Error ? error.message : String(error) });
+      return state;
+    }
+  }
+
+  /** `natural.sample: true` when a phone may ask for a voice sample (Realtime Database, own server, a preview here). */
+  private withSampleOffer(voice: NonNullable<RemoteBridgeDependencies["voice"]>, state: unknown): unknown {
+    if (!voice.preview || !this.deps.store.watch || this.deps.shared) return state;
+    if (typeof state !== "object" || state === null) return state;
+    const natural = (state as { natural?: unknown }).natural;
+    if (typeof natural !== "object" || natural === null) return state;
+    return { ...state, natural: { ...natural, sample: true } };
   }
 
   private phoneFilms(snapshot: FleetSnapshot): { films?: PhoneFilm[] } {

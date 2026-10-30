@@ -32,6 +32,10 @@ public enum ChannelCrypto {
     /// as things of their own, not chats ("films").
     public static let capabilities = ["z", "split", "films"]
 
+    /// Added only while the call history is on screen: `voice.calls` is large (up to ~200 KB), so the Mac writes it
+    /// only for a phone that names "calls".
+    public static let callsCapability = "calls"
+
     /// A box's plaintext: JSON, or a zero byte and raw DEFLATE of the JSON (remote-crypto.ts `seal`).
     static func json(_ plain: Data) throws -> Data {
         guard plain.first == 0 else { return plain }

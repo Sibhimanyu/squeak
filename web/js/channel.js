@@ -2,7 +2,7 @@
 // open, ask to pair, and send signed replies. Paths and shapes mirror
 // ios/SqueakCore Channel.swift and src/remote/remote-bridge.ts.
 
-import { CAPABILITIES, open, pairingCode, seal, sign } from "./channel-crypto.js";
+import { CALLS_CAPABILITY, CAPABILITIES, open, pairingCode, seal, sign } from "./channel-crypto.js";
 import { COMMAND_KINDS, shape } from "./command-shapes.js";
 import { toHex } from "./encoding.js";
 import { foldHistory, liveHandle, liveHistoryHandle, readTurn } from "./live.js";
@@ -91,10 +91,12 @@ export class Channel {
    * Tells the Mac a browser is looking, so it polls and publishes faster.
    * `watching` names the chat open on screen, only with "Show thinking live" on
    * (the Mac then publishes that chat's whole turn, history and queue until it
-   * is nil); `recent` asks for more than the default ten recent chats.
+   * is nil); `recent` asks for more than the default ten recent chats; `calls`
+   * adds the "calls" cap, so the Mac writes `voice.calls` too.
    */
-  async touchPresence({ watching = null, recent = null } = {}) {
-    const presence = { at: this.now(), caps: CAPABILITIES };
+  async touchPresence({ watching = null, recent = null, calls = false } = {}) {
+    // "calls" (the call log, up to ~200 KB) is asked for only while the Phone calls log is open.
+    const presence = { at: this.now(), caps: calls ? [...CAPABILITIES, CALLS_CAPABILITY] : CAPABILITIES };
     if (typeof watching === "string" && watching !== "") presence.watching = watching;
     if (typeof recent === "number" && recent > RECENT_DEFAULT)
       presence.recent = Math.min(RECENT_MAX, Math.trunc(recent));

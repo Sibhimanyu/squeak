@@ -20,6 +20,31 @@ import Testing
         #expect(cleared?.count == 1 && cleared?["callee"] is NSNull)
     }
 
+    @Test func testCallWordsMatchThePhone() throws {
+        func line(_ status: String, letter: String? = nil, reason: String? = nil) -> String? {
+            VoiceSettings.testLine(.init(status: status, letter: letter, reason: reason))
+        }
+        #expect(VoiceSettings.testLine(nil) == nil)
+        #expect(line("ringing") == "Ringing your phone…")
+        #expect(line("answered", letter: "A") == "You answered and pressed A. Nothing was sent anywhere.")
+        #expect(line("answered") == "You answered. No key was pressed.")
+        #expect(line("unanswered") == "Nobody picked up.")
+        #expect(line("failed", reason: "busy") == "The call failed: busy")
+        #expect(line("failed") == "The call failed: no reason given")
+        #expect(line("other") == nil)
+    }
+
+    @Test func testCallIsBlockedUntilThereIsSomeoneToRing() throws {
+        #expect(VoiceSettings(mode: "off").testBlockedReason == "Phone calls are not set up on this Mac.")
+        #expect(VoiceSettings(mode: "direct").testBlockedReason == "No extension is set yet, so no call can be placed.")
+        #expect(VoiceSettings(mode: "direct", callee: "101").testBlockedReason == nil)
+        #expect(VoiceSettings(mode: "gateway", defaultCallee: "102").testBlockedReason == nil)
+        let v = try JSONDecoder().decode(VoiceSettings.self, from: Data(#"{"mode":"direct","callee":"101","lastTest":{"at":5,"status":"ringing"}}"#.utf8))
+        #expect(v.isRinging && v.lastTest?.at == 5)
+        let body = try JSONSerialization.jsonObject(with: VoiceSettings.testRequestBody()) as? [String: Any]
+        #expect(body?.count == 1 && body?["test"] as? Bool == true)
+    }
+
     @Test func decodesTheDaemonsAnswer() throws {
         let body = Data(#"{"mode":"gateway","callee":"101","defaultCallee":null}"#.utf8)
         let v = try JSONDecoder().decode(VoiceSettings.self, from: body)

@@ -96,6 +96,7 @@ import { MacSpeaker, type Speaker } from "../voice/tts.js";
 import {
   naturalInstalled,
   naturalPaths,
+  NATURAL_VOICES,
   NaturalSettingsStore,
   NaturalSpeaker,
   NaturalVoice,
@@ -108,6 +109,7 @@ import { TEST_SCRIPT } from "../voice/test-script.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
 import { VoiceFavoritesStore, workspaceKeyOf } from "../voice/favorites.js";
 import { cutAtWord, speakable, spokenChat, spokenChats, spokenWorkspace } from "../voice/spoken-labels.js";
+import { applyPhoneVoiceChange, phoneCalls } from "../voice/phone-voice.js";
 import { VoiceSettingsStore } from "../voice/settings.js";
 import { findWhisper, WhisperTranscriber } from "../voice/transcribe.js";
 import { VoiceChannel } from "../voice/voice-channel.js";
@@ -522,6 +524,13 @@ export class SqueakApp {
             voice: {
               state: () => this.voiceView(),
               apply: (request) => this.applyVoiceSettings(request),
+              // The recent calls and their steps; sent only to a phone that says it reads them (`calls`).
+              calls: () => {
+                const trace = this.callTraceStore();
+                const history = this.callHistoryStore();
+                trace.deriveIncoming(history);
+                return phoneCalls(history, trace);
+              },
               test: () => this.testVoiceCall(),
               // The same function the Mac app's `POST /control/voice/preview` ends in.
               preview: (voice) => this.previewVoice(voice),
@@ -1281,6 +1290,7 @@ export class SqueakApp {
       natural: {
         installed: naturalInstalled(naturalPaths(this.config.supportDir)),
         ...this.naturalSettings.settings,
+        voices: NATURAL_VOICES,
       },
       ...(mode === "gateway" ? { gateway: this.gatewayView() } : {}),
       // Absent until a test has been asked for.
@@ -1432,6 +1442,22 @@ export class SqueakApp {
 
   /** The callee setting only (the phone's signed command, which handles pin actions itself). */
   private applyVoiceSettings(request: unknown) {
+    // The realistic voice and the quick workspaces end in the same stores as the Mac app's route.
+    const phone = applyPhoneVoiceChange(request, {
+      natural: {
+        installed: () => naturalInstalled(naturalPaths(this.config.supportDir)),
+        apply: (natural) => this.naturalSettings.apply(natural),
+      },
+      favorites: this.voiceFavorites,
+      knownWorkspaces: () => new Set(this.voiceWorkspaces().map((w) => w.key)),
+      currentFavorites: () => this.voiceFavorites.list(),
+    });
+    if (phone) {
+      if (phone.ok && typeof request === "object" && request !== null && "favorites" in request) {
+        void this.memoInbox?.publish().catch(() => undefined);
+      }
+      return phone.ok ? { ok: true as const, state: this.voiceView() } : phone;
+    }
     const outcome = this.voiceSettings.apply(request);
     if (outcome.ok) void this.memoInbox?.publish().catch(() => undefined);
     return outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome;

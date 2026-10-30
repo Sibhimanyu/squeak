@@ -144,6 +144,61 @@ describe("view readers", () => {
     expect(vm.telegramAvatar({ telegramAvatar: true })).toBe(true);
   });
 
+  it("reads the phone-call settings a Mac may send, and every one is optional", () => {
+    const plain = vm.voice({ voice: { mode: "gateway" } });
+    expect(plain).toMatchObject({
+      pin: null,
+      policy: null,
+      pauseKnown: false,
+      pause: null,
+      natural: null,
+      favorites: null,
+      workspaces: null,
+      calls: null,
+    });
+    const full = vm.voice({
+      voice: {
+        mode: "gateway",
+        pin: "set",
+        policy: { outgoing: "skip", incoming: "weird" },
+        pause: { until: 5 },
+        natural: { installed: true, enabled: true, voice: "af_heart", voices: [{ id: "af_heart", label: "Heart" }, 7] },
+        favorites: [
+          { n: 2, workspace: "w", label: "squeak" },
+          { n: 12, workspace: "x" },
+        ],
+        workspaces: [{ key: "w", label: "squeak" }, { label: "no key" }],
+        calls: [
+          {
+            id: "a",
+            at: 9,
+            kind: "bogus",
+            outcome: "bogus",
+            durationMs: 1000,
+            events: [{ at: 1, source: "add-on", kind: "said", text: "hi" }, { text: 3 }],
+          },
+        ],
+      },
+    });
+    expect(full.pin).toBe("set");
+    expect(full.policy).toEqual({ outgoing: "skip", incoming: "ask" });
+    expect(full.pauseKnown).toBe(true);
+    expect(full.pause).toEqual({ until: 5 });
+    expect(full.natural.voices).toEqual([{ id: "af_heart", label: "Heart" }]);
+    expect(full.natural.sample).toBe(false);
+    expect(
+      vm.voice({ voice: { mode: "gateway", natural: { installed: true, voice: "af_heart", sample: true } } }).natural
+        .sample,
+    ).toBe(true);
+    expect(full.favorites).toEqual([{ n: 2, workspace: "w", label: "squeak" }]);
+    expect(full.workspaces).toEqual([{ key: "w", label: "squeak" }]);
+    expect(full.calls[0]).toMatchObject({ kind: "agent", outcome: "unanswered", durationMs: 1000 });
+    expect(full.calls[0].events).toEqual([{ at: 1, source: "add-on", kind: "said", text: "hi" }]);
+    // `pause: null` is the key sent and calls on; `{ until: null }` is paused with no end.
+    expect(vm.voice({ voice: { mode: "direct", pause: null } })).toMatchObject({ pauseKnown: true, pause: null });
+    expect(vm.voice({ voice: { mode: "direct", pause: { until: null } } }).pause).toEqual({ until: null });
+  });
+
   it("reads awake settings with the iPhone's defaults for a switch the Mac omits", () => {
     expect(vm.awakeLidActions({ awakeLidActions: { mute: false } })).toEqual({
       displayOff: true,

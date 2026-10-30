@@ -371,6 +371,97 @@ describe("the Mac card", () => {
   });
 });
 
+describe("phone-call words and rules", () => {
+  it("words the pause line from the Mac's end time", () => {
+    const now = new Date(2026, 9, 30, 12, 0, 0).getTime();
+    expect(L.pauseLine(null, now)).toBe("Calls are on");
+    expect(L.pauseLine({ until: now - 1 }, now)).toBe("Calls are on");
+    expect(L.pauseLine({ until: null }, now)).toBe("Paused until you turn it back on");
+    expect(L.pauseLine({ until: now + 3_600_000 }, now)).toMatch(/^Paused until .*1.*:00/);
+    expect(L.isPaused({ until: now + 5 }, now)).toBe(true);
+    expect(L.PAUSE_OPTIONS.map((o) => o.title)).toEqual([
+      "For 1 hour",
+      "For 4 hours",
+      "Until tomorrow morning",
+      "Until I turn it back on",
+    ]);
+    expect(L.RESUME_OPTION).toEqual({ value: "resume", title: "Resume calls" });
+  });
+
+  it("says each PIN state as the iPhone does, and only loosening needs a confirmation", () => {
+    expect(L.pinStatus("set").title).toBe("Calling PIN is set");
+    expect(L.pinStatus("off").title).toBe("PIN protection is off");
+    expect(L.pinStatus("none").title).toBe("No PIN set");
+    expect(L.pinStatus("unknown").title).toBe("Checking PIN status");
+    expect(L.pinDone("resetOff")).toBe("The PIN is off.");
+    const ask = { outgoing: "ask", incoming: "ask" };
+    expect(L.loosens(ask, "skip", "ask")).toBe(true);
+    expect(L.loosens(ask, "ask", "skip")).toBe(true);
+    expect(L.loosens({ outgoing: "skip", incoming: "ask" }, "skip", "ask")).toBe(false);
+    expect(L.loosens({ outgoing: "skip", incoming: "skip" }, "ask", "skip")).toBe(false);
+  });
+
+  it("keeps quick workspaces to nine unique digits and sends only { n, workspace }", () => {
+    const list = [
+      { n: 1, workspace: "a", label: "A" },
+      { n: 3, workspace: "b", label: "B" },
+    ];
+    const cands = [
+      { key: "a", label: "A" },
+      { key: "b", label: "B" },
+      { key: "c", label: "C" },
+    ];
+    expect(L.favoritesAdded(list, cands)).toEqual(
+      [...list, { n: 2, workspace: "c", label: "C" }].sort((x, y) => x.n - y.n),
+    );
+    expect(L.favoritesAdded(list, cands.slice(0, 2))).toBeNull();
+    expect(L.availableDigits(list, 1)).toEqual([1, 2, 4, 5, 6, 7, 8, 9]);
+    expect(L.favoritesRenumbered(list, 1, 3)).toBeNull();
+    expect(L.favoritesRenumbered(list, 1, 2).map((f) => f.n)).toEqual([2, 3]);
+    expect(L.favoritesRemoved(list, 1)).toEqual([list[1]]);
+    expect(L.favoritesInput(list)).toEqual([
+      { n: 1, workspace: "a" },
+      { n: 3, workspace: "b" },
+    ]);
+    expect(() => shape("voice", { change: { favorites: L.favoritesInput(list) } })).not.toThrow();
+  });
+
+  it("words a call and its timeline, and Copy gets the plain text", () => {
+    const now = new Date(2026, 9, 30, 15, 0, 0).getTime();
+    const at = new Date(2026, 9, 30, 14, 2, 7, 123).getTime();
+    const call = {
+      id: "a",
+      at,
+      kind: "agent",
+      reason: "blocked_question",
+      label: "squeak · main",
+      outcome: "answered",
+      letter: "B",
+      sent: true,
+      durationMs: 72_000,
+      failure: null,
+      events: [{ at, source: "add-on", kind: "said", text: "Which one?" }],
+    };
+    expect(L.callWhen(at, now)).toBe("Today 14:02");
+    expect(L.callWhat(call)).toBe("squeak · main");
+    expect(L.callWhat({ ...call, label: null })).toBe("A question was waiting");
+    expect(L.callWhat({ ...call, kind: "test" })).toBe("Test call");
+    expect(L.callOutcome(call)).toBe("Answered, pressed B · sent");
+    expect(L.callOutcome({ ...call, outcome: "failed", failure: "no route" })).toBe("Could not be placed: no route");
+    expect(L.callOutcome({ ...call, outcome: "unanswered" })).toBe("Not answered");
+    expect(L.callDuration(72_000)).toBe("1 min 12 s");
+    expect(L.callDuration(180_000)).toBe("3 min");
+    expect(L.callDuration(400)).toBe("0 s");
+    expect(L.eventTime(at)).toBe("14:02:07.123");
+    expect(L.timelineExport(call)).toBe(
+      "Outgoing · squeak · main · 1 min 12 s · Answered, pressed B · sent\n14:02:07.123 [Add-on] Squeak said: \u201CWhich one?\u201D",
+    );
+    expect(L.callSummary({ ...call, kind: "incoming", label: null })).toBe(
+      "Incoming · 1 min 12 s · Message taken · sent to the chat",
+    );
+  });
+});
+
 /* ---------- the sections drawn, against a tiny fake DOM ---------- */
 
 function fakeNode(tag) {
@@ -500,5 +591,229 @@ describe("the sections as drawn", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(parts.S.overlays.read("telegram.approval", true)).toBe(true);
     expect(parts.S.problems.notify).toBe("Telegram isn't set up.");
+  });
+
+  describe("Phone calls", () => {
+    const base = {
+      mac: "S",
+      voice: {
+        mode: "gateway",
+        callee: "101",
+        pin: "set",
+        policy: { outgoing: "ask", incoming: "ask" },
+        pause: null,
+        natural: { installed: true, enabled: true, voice: "af_heart", voices: [{ id: "af_heart", label: "Heart" }] },
+        favorites: [{ n: 1, workspace: "w", label: "squeak" }],
+        workspaces: [{ key: "w", label: "squeak" }],
+      },
+    };
+    const buttons = (nodes, label) => nodes.flatMap((n) => find(n, (x) => x.tag === "button" && text(x) === label));
+    const wait = () => new Promise((r) => setTimeout(r, 0));
+    const reset = () => {
+      Object.assign(parts.S.voice, {
+        pinOpen: null,
+        pinVerified: false,
+        confirmPinOff: false,
+        confirmForgot: false,
+        policyAsk: null,
+        callsOpen: false,
+      });
+      Object.assign(parts.S.voice.pins, { current: "", next: "", again: "" });
+    };
+    afterEach(reset);
+
+    it("hides what an older Mac does not send", () => {
+      const nodes = parts.voiceSection(ctxFor({ mac: "S", voice: { mode: "direct", callee: "101" } }));
+      const all = nodes.map(text).join(" ");
+      expect(all).not.toContain("Pause calls");
+      expect(all).not.toContain("Quick workspaces");
+      expect(all).not.toContain("Call history");
+      expect(all).not.toContain("Calling PIN");
+      expect(all).not.toContain("Speak with this Mac");
+    });
+
+    it("sends a pause choice as { pause } and offers Resume only while paused", async () => {
+      const sent = [];
+      const commands = { voice: async (i) => (sent.push(i), { ok: true }) };
+      const nodes = parts.voiceSection(ctxFor(base, commands));
+      const menu = nodes.flatMap((n) =>
+        find(n, (x) => x.tag === "select" && x.attrs["aria-label"] === "Pause calls options"),
+      )[0];
+      expect(text(menu)).not.toContain("Resume calls");
+      menu.listeners.change({ target: { value: "4h" } });
+      await wait();
+      expect(sent).toEqual([{ change: { pause: "4h" } }]);
+      const paused = parts.voiceSection(
+        ctxFor({ ...base, voice: { ...base.voice, pause: { until: null } } }, commands),
+      );
+      expect(paused.map(text).join(" ")).toContain("Paused until you turn it back on");
+      expect(paused.map(text).join(" ")).toContain("Resume calls");
+    });
+
+    it("turns the PIN off only after a confirmation, then sends the reset with a null next", async () => {
+      const sent = [];
+      const commands = { voice: async (i) => (sent.push(i), { ok: true }) };
+      const draw = () => parts.voiceSection(ctxFor(base, commands));
+      buttons(draw(), "Turn PIN off")[0].listeners.click();
+      expect(sent).toEqual([]);
+      const confirm = draw();
+      expect(confirm.map(text).join(" ")).toContain("Turn the PIN off?");
+      expect(confirm.map(text).join(" ")).toContain("can't check it's you");
+      buttons(confirm, "Turn PIN off")[0].listeners.click();
+      await wait();
+      expect(sent).toEqual([{ change: { pinAction: { action: "reset", next: null } } }]);
+      expect(parts.S.voice.pinNote).toBe("The PIN is off.");
+    });
+
+    it("changes the PIN with the current one, keeps it off the page and clears it after", async () => {
+      const sent = [];
+      const commands = { voice: async (i) => (sent.push(i), { ok: true }) };
+      const draw = () => parts.voiceSection(ctxFor(base, commands));
+      buttons(draw(), "Change PIN")[0].listeners.click();
+      Object.assign(parts.S.voice.pins, { current: "1234", next: "567890", again: "567890" });
+      const go = buttons(draw(), "Save new PIN")[0];
+      expect(go.attrs.disabled).toBeUndefined();
+      go.listeners.click();
+      await wait();
+      expect(sent).toEqual([{ change: { pinAction: { action: "change", current: "1234", next: "567890" } } }]);
+      expect(parts.S.voice.pins).toEqual({ current: "", next: "", again: "" });
+      expect(draw().map(text).join(" ")).not.toContain("567890");
+    });
+
+    it("refuses a PIN that is too short or does not repeat", () => {
+      const draw = () => parts.voiceSection(ctxFor(base, {}));
+      buttons(draw(), "Change PIN")[0].listeners.click();
+      Object.assign(parts.S.voice.pins, { current: "1234", next: "5678", again: "5679" });
+      expect(buttons(draw(), "Save new PIN")[0].attrs.disabled).toBe("");
+      Object.assign(parts.S.voice.pins, { current: "1234", next: "12", again: "12" });
+      expect(buttons(draw(), "Save new PIN")[0].attrs.disabled).toBe("");
+    });
+
+    it("Forgot your PIN? asks to confirm it is you before any new PIN is chosen", async () => {
+      const sent = [];
+      const commands = { voice: async (i) => (sent.push(i), { ok: true }) };
+      const draw = () => parts.voiceSection(ctxFor(base, commands));
+      buttons(draw(), "Forgot your PIN?")[0].listeners.click();
+      expect(draw().map(text).join(" ")).toContain("Reset your calling PIN?");
+      expect(draw().map(text).join(" ")).not.toContain("Reset calling PIN");
+      buttons(draw(), "Yes, it's me")[0].listeners.click();
+      Object.assign(parts.S.voice.pins, { next: "135790", again: "135790" });
+      buttons(draw(), "Save new PIN")[0].listeners.click();
+      await wait();
+      expect(sent).toEqual([{ change: { pinAction: { action: "reset", next: "135790" } } }]);
+    });
+
+    it("sets or turns on a PIN when none is set or it is off", async () => {
+      const sent = [];
+      const commands = { voice: async (i) => (sent.push(i), { ok: true }) };
+      for (const [pin, title] of [
+        ["none", "Set a PIN"],
+        ["off", "Turn PIN on"],
+      ]) {
+        reset();
+        const draw = () => parts.voiceSection(ctxFor({ ...base, voice: { ...base.voice, pin } }, commands));
+        Object.assign(parts.S.voice.pins, { next: "135790", again: "135790" });
+        buttons(draw(), title)[0].listeners.click();
+        await wait();
+      }
+      expect(sent).toEqual([
+        { change: { pinAction: { action: "enable", next: "135790" } } },
+        { change: { pinAction: { action: "enable", next: "135790" } } },
+      ]);
+    });
+
+    it("loosening the PIN policy waits for a confirmation; tightening it does not", async () => {
+      const sent = [];
+      const commands = { voice: async (i) => (sent.push(i), { ok: true }) };
+      const draw = (policy) => parts.voiceSection(ctxFor({ ...base, voice: { ...base.voice, policy } }, commands));
+      const selects = (nodes) =>
+        nodes
+          .flatMap((n) => find(n, (x) => x.tag === "label" && text(x).includes("Calls Squeak makes to you")))
+          .flatMap((l) => find(l, (x) => x.tag === "select"));
+      selects(draw({ outgoing: "ask", incoming: "ask" }))[0].listeners.change({ target: { value: "skip" } });
+      await wait();
+      expect(sent).toEqual([]);
+      expect(draw({ outgoing: "ask", incoming: "ask" }).map(text).join(" ")).toContain("Stop asking for the PIN?");
+      buttons(draw({ outgoing: "ask", incoming: "ask" }), "Yes, stop asking")[0].listeners.click();
+      await wait();
+      expect(sent).toEqual([{ change: { pinAction: { action: "policy", outgoing: "skip", incoming: "ask" } } }]);
+      selects(draw({ outgoing: "skip", incoming: "ask" }))[0].listeners.change({ target: { value: "ask" } });
+      await wait();
+      expect(sent[1]).toEqual({ change: { pinAction: { action: "policy", outgoing: "ask", incoming: "ask" } } });
+    });
+
+    it("sends the voice toggle and the whole quick-workspace list, one key each", async () => {
+      const sent = [];
+      const commands = { voice: async (i) => (sent.push(i), { ok: true }) };
+      const nodes = parts.voiceSection(ctxFor(base, commands));
+      const toggleBox = nodes.flatMap((n) => find(n, (x) => x.attrs?.["data-sm"] === "voice-natural"))[0];
+      toggleBox.listeners.change({ target: { checked: false } });
+      await wait();
+      expect(sent[0]).toEqual({ change: { natural: { enabled: false } } });
+      buttons(nodes, "Remove")[0].listeners.click();
+      await wait();
+      expect(sent[1]).toEqual({ change: { favorites: [] } });
+      for (const input of sent) expect(() => shape("voice", input)).not.toThrow();
+    });
+
+    it("offers Play sample only when the Mac says it can send one", async () => {
+      const withSample = (sample) => ({
+        ...base,
+        voice: { ...base.voice, natural: { ...base.voice.natural, ...(sample ? { sample: true } : {}) } },
+      });
+      expect(parts.voiceSection(ctxFor(base, {})).map(text).join(" ")).not.toContain("Play sample");
+      const nodes = parts.voiceSection(ctxFor(withSample(true), {}));
+      expect(nodes.map(text).join(" ")).toContain("Play sample");
+      const button = nodes.flatMap((n) => find(n, (x) => x.attrs?.["data-sm"] === "voice-sample"))[0];
+      expect(button.attrs["aria-label"]).toBe("Play sample of selected voice");
+      // A Mac that left the realistic voice off shows no sample either.
+      const off = withSample(true);
+      off.voice.natural = { ...off.voice.natural, enabled: false };
+      expect(parts.voiceSection(ctxFor(off, {})).map(text).join(" ")).not.toContain("Play sample");
+    });
+
+    it("hides the voice and the quick workspaces from a Mac without natural.voices", () => {
+      const old = { ...base, voice: { ...base.voice, natural: { installed: true, enabled: true, voice: "af_heart" } } };
+      const all = parts.voiceSection(ctxFor(old, {})).map(text).join(" ");
+      expect(all).not.toContain("Quick workspaces");
+      expect(all).not.toContain("Speak with this Mac");
+      expect(all).not.toContain("Call history");
+    });
+
+    it("opening the call log asks for the calls cap, and shows the calls when they arrive", () => {
+      const wanted = [];
+      const ctx = (calls) => ({
+        ...ctxFor({ ...base, voice: { ...base.voice, ...(calls ? { calls } : {}) } }, {}),
+        sync: { state: { aliveAt: Date.now() }, wake() {}, wantCalls: (on) => wanted.push(on) },
+      });
+      const det = parts
+        .voiceSection(ctx())
+        .flatMap((n) => find(n, (x) => x.tag === "details" && text(x).includes("Call history")))[0];
+      det.listeners.toggle({ target: { open: true } });
+      expect(wanted).toEqual([true]);
+      expect(parts.voiceSection(ctx()).map(text).join(" ")).toContain("Loading the calls");
+      const calls = [
+        {
+          id: "a",
+          at: Date.now(),
+          kind: "agent",
+          reason: null,
+          label: "squeak · main",
+          outcome: "answered",
+          letter: "A",
+          sent: true,
+          durationMs: 4000,
+          failure: null,
+          events: [{ at: Date.now(), source: "mac", kind: "step", text: "Calling 101" }],
+        },
+      ];
+      const drawn = parts.voiceSection(ctx(calls)).map(text).join(" ");
+      expect(drawn).toContain("squeak · main");
+      expect(drawn).toContain("Calling 101");
+      expect(drawn).toContain("Copy");
+      expect(parts.voiceSection(ctx([])).map(text).join(" ")).toContain("No calls yet");
+      det.listeners.toggle({ target: { open: false } });
+      expect(wanted.at(-1)).toBe(false);
+    });
   });
 });

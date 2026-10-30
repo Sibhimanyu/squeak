@@ -48,6 +48,12 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   hotspotCommand: { box: string; sig: string; device: string };
   lidActionsCommandId: string;
   lidActionsCommand: { box: string; sig: string; device: string };
+  voiceNaturalCommandId: string;
+  voiceNaturalCommand: { box: string; sig: string; device: string };
+  voiceSampleCommandId: string;
+  voiceSampleCommand: { box: string; sig: string; device: string };
+  voiceFavoritesCommandId: string;
+  voiceFavoritesCommand: { box: string; sig: string; device: string };
   voicePauseCommandId: string;
   voicePauseCommand: { box: string; sig: string; device: string };
   voicePinPolicyCommandId: string;
@@ -95,6 +101,7 @@ function bridge(turn: string) {
   const awakeRequests: unknown[] = [];
   const controlChanges: unknown[] = [];
   const voiceApplied: unknown[] = [];
+  const voicePreviews: string[] = [];
   const pinActions: unknown[] = [];
   const statsRanges: unknown[] = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string; split?: unknown }> = [];
@@ -141,7 +148,14 @@ function bridge(turn: string) {
       },
     },
     voice: {
-      state: () => ({ mode: "gateway" }),
+      state: () => ({
+        mode: "gateway",
+        natural: { installed: true, voices: [{ id: "af_heart" }, { id: "am_adam" }] },
+      }),
+      preview: async (voice: string) => {
+        voicePreviews.push(voice);
+        return Buffer.from("RIFFwav");
+      },
       apply: (change: unknown) => {
         voiceApplied.push(change);
         return { ok: true as const, state: {} };
@@ -289,6 +303,7 @@ function bridge(turn: string) {
     hotspotRequests,
     awakeRequests,
     voiceApplied,
+    voicePreviews,
     pinActions,
     controlChanges,
     statsRanges,
@@ -430,6 +445,38 @@ describe("a reply made on the iPhone", () => {
     const policy = await remote.handleCommand(config, fixture.voicePinPolicyCommandId, fixture.voicePinPolicyCommand);
     expect(policy.result).toEqual({ id: fixture.voicePinPolicyCommandId, status: "sent" });
     expect(pinActions).toEqual([{ action: "policy", outgoing: "skip", incoming: "ask" }]);
+  });
+
+  it("passes the realistic voice and Quick workspaces the phone signs to the voice settings", async () => {
+    const { remote, config, voiceApplied } = bridge("turn-1");
+    const natural = await remote.handleCommand(config, fixture.voiceNaturalCommandId, fixture.voiceNaturalCommand);
+    expect(natural.result).toEqual({ id: fixture.voiceNaturalCommandId, status: "sent" });
+    const favorites = await remote.handleCommand(
+      config,
+      fixture.voiceFavoritesCommandId,
+      fixture.voiceFavoritesCommand,
+    );
+    expect(favorites.result).toEqual({ id: fixture.voiceFavoritesCommandId, status: "sent" });
+    expect(voiceApplied).toEqual([
+      { natural: { enabled: true, voice: "bf_emma" } },
+      {
+        favorites: [
+          { n: 1, workspace: "ws-1" },
+          { n: 3, workspace: "/Users/me/proj" },
+        ],
+      },
+    ]);
+  });
+
+  it("makes a voice sample when the phone signs a voiceSample request, and answers it as media", async () => {
+    const { remote, config, voicePreviews } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.voiceSampleCommandId, fixture.voiceSampleCommand);
+    expect(verdict.result).toMatchObject({
+      id: fixture.voiceSampleCommandId,
+      status: "sent",
+      media: { chunks: 1, bytes: 7, mime: "audio/wav" },
+    });
+    expect(voicePreviews).toEqual(["am_adam"]);
   });
 
   it("sets the fans when the phone signs a controls request", async () => {

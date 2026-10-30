@@ -24,6 +24,27 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public var favorites: [FavoriteWorkspace]?
     /// Workspaces a favourite can be picked from; nil from an older daemon.
     public var workspaces: [WorkspaceChoice]?
+    /// The newest test call ("Call me now"); nil until one has been asked for, or from an older daemon.
+    public var lastTest: LastTest?
+
+    public struct LastTest: Sendable, Equatable, Decodable {
+        public var at: Double
+        /// "ringing", "answered", "unanswered" or "failed".
+        public var status: String
+        public var letter: String?
+        public var reason: String?
+        public init(at: Double = 0, status: String, letter: String? = nil, reason: String? = nil) {
+            self.at = at; self.status = status; self.letter = letter; self.reason = reason
+        }
+        private enum Keys: String, CodingKey { case at, status, letter, reason }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Keys.self)
+            at = (try? c.decode(Double.self, forKey: .at)) ?? 0
+            status = (try? c.decode(String.self, forKey: .status)) ?? ""
+            letter = try? c.decode(String.self, forKey: .letter)
+            reason = try? c.decode(String.self, forKey: .reason)
+        }
+    }
 
     public init(mode: String = "off", callee: String? = nil, defaultCallee: String? = nil, pin: String? = nil, policy: PinPolicy? = nil,
                 pause: VoicePause? = nil, pauseKnown: Bool? = nil) {
@@ -31,7 +52,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         self.pause = pause; self.pauseKnown = pauseKnown ?? (pause != nil)
     }
 
-    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces }
+    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces, lastTest }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -45,6 +66,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         natural = try? c.decode(NaturalVoice.self, forKey: .natural)
         favorites = try? c.decode([FavoriteWorkspace].self, forKey: .favorites)
         workspaces = try? c.decode([WorkspaceChoice].self, forKey: .workspaces)
+        lastTest = try? c.decode(LastTest.self, forKey: .lastTest)
     }
 
     public var isOn: Bool { mode != "off" }
@@ -58,6 +80,33 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public static func normalized(_ typed: String) -> String? {
         let t = typed.trimmingCharacters(in: .whitespaces)
         return t.isEmpty ? nil : t
+    }
+
+    /// The same words the iPhone and the web say about the last test call; nil before any test.
+    public static func testLine(_ test: LastTest?) -> String? {
+        guard let test else { return nil }
+        switch test.status {
+        case "ringing": return "Ringing your phone…"
+        case "answered":
+            return test.letter.map { "You answered and pressed \($0). Nothing was sent anywhere." } ?? "You answered. No key was pressed."
+        case "unanswered": return "Nobody picked up."
+        case "failed": return "The call failed: \(test.reason ?? "no reason given")"
+        default: return nil
+        }
+    }
+
+    public var isRinging: Bool { lastTest?.status == "ringing" }
+
+    /// Why "Call me now" cannot be pressed (the footnote's own sentences), or nil when it can.
+    public var testBlockedReason: String? {
+        if !isOn { return "Phone calls are not set up on this Mac." }
+        if callee == nil && defaultCallee == nil { return "No extension is set yet, so no call can be placed." }
+        return nil
+    }
+
+    /// `{ "test": true }`: a test call, ringing with a made-up question and touching no chat.
+    public static func testRequestBody() -> Data {
+        (try? JSONSerialization.data(withJSONObject: ["test": true], options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 
     public static func requestBody(callee: String?) -> Data {

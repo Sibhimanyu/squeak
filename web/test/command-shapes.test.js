@@ -5,6 +5,8 @@ import { readHotspotRequest } from "../../src/fleet/hotspot.js";
 import { readControlChange } from "../../src/fleet/mac-controls.js";
 import { readNotifyRequest } from "../../src/fleet/notify-settings.js";
 import { checkWorkSplit } from "../../src/fleet/work-split.js";
+import { parsePinAction } from "../../src/voice/relay-protocol.js";
+import { readPauseChange } from "../../src/voice/settings.js";
 import { readLidActionsChange } from "../../src/remote/remote-bridge.js";
 import { Channel } from "../js/channel.js";
 import { generateDeviceKey, importChannelKey, open, verify } from "../js/channel-crypto.js";
@@ -40,6 +42,7 @@ describe("every command kind a browser sends", () => {
         "telegramAvatar",
         "usage",
         "voice",
+        "voiceSample",
         "workflow",
         "workspace",
       ].sort(),
@@ -182,6 +185,15 @@ describe("workspace and setup", () => {
   });
 });
 
+describe("voiceSample", () => {
+  it("names exactly one Kokoro voice", () => {
+    expect(shape("voiceSample", { voice: "am_adam" })).toEqual({ voice: "am_adam" });
+    for (const input of [{}, { voice: "AM_ADAM" }, { voice: "../x" }, { voice: 7 }, { voice: "am_adam", text: "hi" }]) {
+      expect(() => shape("voiceSample", input)).toThrow();
+    }
+  });
+});
+
 describe("usage, stats, telegramAvatar", () => {
   it("carry nothing but the envelope, or one range", () => {
     expect(shape("usage", {})).toEqual({});
@@ -309,6 +321,90 @@ describe("controls, notify, voice, hotspot", () => {
     bad("voice", { change: { pin: { current: "12", next: "5678" } } });
     bad("voice", { change: { pin: { current: "1234" } } });
     bad("voice", { change: { callee: "101", test: true } });
+  });
+
+  it("voice: pause, every PIN action, natural voice and quick workspaces match the Mac's readers", () => {
+    for (const choice of ["1h", "4h", "tomorrow", "forever", "resume"]) {
+      expect(shape("voice", { change: { pause: choice } })).toEqual({ change: { pause: choice } });
+      expect(readPauseChange({ pause: choice })).toBe(choice);
+    }
+    for (const choice of ["2h", "", null, 60]) {
+      bad("voice", { change: { pause: choice } });
+      expect(readPauseChange({ pause: choice })).toBeNull();
+    }
+    const actions = [
+      { action: "change", current: "1234", next: "567890" },
+      { action: "disable", current: "1234" },
+      { action: "enable", next: "135790" },
+      { action: "reset", next: "135790" },
+      { action: "reset", next: null },
+      { action: "policy", outgoing: "skip", incoming: "ask" },
+    ];
+    for (const action of actions) {
+      expect(shape("voice", { change: { pinAction: action } })).toEqual({ change: { pinAction: action } });
+      expect(parsePinAction(action)).toEqual(action);
+    }
+    const badActions = [
+      { action: "change", current: "1234" },
+      { action: "change", current: "12", next: "5678" },
+      { action: "disable", current: "12345678901234" },
+      { action: "disable", current: "1234", next: "5678" },
+      { action: "enable", next: "abcd" },
+      { action: "reset" },
+      { action: "reset", next: "12" },
+      { action: "policy", outgoing: "skip" },
+      { action: "policy", outgoing: "never", incoming: "ask" },
+      { action: "nope" },
+      "reset",
+      null,
+    ];
+    for (const action of badActions) {
+      bad("voice", { change: { pinAction: action } });
+      expect(parsePinAction(action)).toBeNull();
+    }
+    bad("voice", { change: { pinAction: { action: "reset", next: null }, pause: "1h" } });
+
+    expect(shape("voice", { change: { natural: { enabled: false } } })).toEqual({
+      change: { natural: { enabled: false } },
+    });
+    expect(shape("voice", { change: { natural: { voice: "am_adam" } } })).toEqual({
+      change: { natural: { voice: "am_adam" } },
+    });
+    expect(shape("voice", { change: { natural: { enabled: true, voice: "bf_emma" } } })).toEqual({
+      change: { natural: { enabled: true, voice: "bf_emma" } },
+    });
+    bad("voice", { change: { natural: {} } });
+    bad("voice", { change: { natural: { enabled: "yes" } } });
+    bad("voice", { change: { natural: { voice: "Heart" } } });
+    bad("voice", { change: { natural: { volume: 3 } } });
+
+    const list = [
+      { n: 1, workspace: "ws-id" },
+      { n: 3, workspace: "/Users/me/proj" },
+    ];
+    expect(shape("voice", { change: { favorites: list } })).toEqual({ change: { favorites: list } });
+    expect(shape("voice", { change: { favorites: [] } })).toEqual({ change: { favorites: [] } });
+    bad("voice", { change: { favorites: "x" } });
+    bad("voice", { change: { favorites: [{ n: 1, workspace: "a", label: "A" }] } });
+    bad("voice", { change: { favorites: [{ n: 0, workspace: "a" }] } });
+    bad("voice", { change: { favorites: [{ n: 10, workspace: "a" }] } });
+    bad("voice", { change: { favorites: [{ n: 1.5, workspace: "a" }] } });
+    bad("voice", {
+      change: {
+        favorites: [
+          { n: 1, workspace: "a" },
+          { n: 1, workspace: "b" },
+        ],
+      },
+    });
+    bad("voice", { change: { favorites: [{ n: 1, workspace: "" }] } });
+    bad("voice", { change: { favorites: [{ n: 1, workspace: "x".repeat(201) }] } });
+    bad(
+      "voice",
+      { change: { favorites: Array.from({ length: 10 }, (_, i) => ({ n: (i % 9) + 1, workspace: `w${i}` })) } },
+      /At most 9/,
+    );
+    bad("voice", { change: { natural: { enabled: true }, favorites: [] } });
   });
 
   it("hotspot matches the Mac's reader", () => {

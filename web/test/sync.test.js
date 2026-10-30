@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isStale, LATE_RESULT_MS, RESULT_TIMEOUT_MS, Sync } from "../js/sync.js";
+import { CALLS_LEASE_MS, isStale, LATE_RESULT_MS, RESULT_TIMEOUT_MS, Sync } from "../js/sync.js";
 
 /** A channel whose reads the test controls. */
 function fakeChannel() {
@@ -208,5 +208,31 @@ describe("Sync.reply", () => {
     expect(await stuck.sync.reply({}, "hi")).toEqual({ status: "unconfirmed" });
     ok.sync.stop();
     stuck.sync.stop();
+  });
+});
+
+describe("the calls cap", () => {
+  it("is asked for only while the Phone calls log holds its lease, and ends with it", async () => {
+    const channel = fakeChannel();
+    let clock = 1_000_000;
+    channel.now = () => clock;
+    const sent = [];
+    channel.touchPresence = async (options) => void sent.push(options.calls);
+    const sync = new Sync({ channel, signingKey: null, onState: () => {}, timers });
+    sync.start();
+    await tick();
+    expect(sync.callsWanted).toBe(false);
+    sync.wantCalls(true);
+    await tick();
+    expect(sent.at(-1)).toBe(true);
+    clock += CALLS_LEASE_MS - 1;
+    expect(sync.callsWanted).toBe(true);
+    clock += 2;
+    expect(sync.callsWanted).toBe(false); // not renewed: the next ping drops the cap
+    sync.wantCalls(true);
+    sync.wantCalls(false);
+    await tick();
+    expect(sent.at(-1)).toBe(false);
+    sync.stop();
   });
 });

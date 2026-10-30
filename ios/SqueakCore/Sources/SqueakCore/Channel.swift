@@ -224,9 +224,9 @@ public struct Channel: Sendable {
     /// Tells the Mac a phone is looking, so it polls and publishes faster.
     /// `watching` names the session open on screen, only in verbose mode;
     /// the Mac then publishes its whole turn (`liveTurn`) until it is nil.
-    public func touchPresence(watching: String? = nil, recent: Int? = nil, now: Date = Date()) async throws {
+    public func touchPresence(watching: String? = nil, recent: Int? = nil, calls: Bool = false, now: Date = Date()) async throws {
         let presence = Presence(at: Int64(now.timeIntervalSince1970 * 1000), watching: watching, recent: recent,
-                                caps: ChannelCrypto.capabilities)
+                                caps: ChannelCrypto.capabilities + (calls ? [ChannelCrypto.callsCapability] : []))
         let box = try ChannelCrypto.seal(presence, key: pairing.k)
         try await store.set(path("state", "presence"), ChannelDocument(box: box))
     }
@@ -790,6 +790,22 @@ public struct Channel: Sendable {
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = VoiceCommand(
             v: 1, kind: "voice", change: change,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// The signed document asking the Mac for a sample of one realistic voice (a WAV, left as `media` chunks).
+    public func voiceSampleDocument(
+        voice: String, signer: CommandSigner, now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = VoiceSampleCommand(
+            v: 1, kind: "voiceSample", voice: voice,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

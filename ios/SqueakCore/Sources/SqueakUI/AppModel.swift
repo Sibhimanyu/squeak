@@ -144,13 +144,28 @@ final class AppModel {
     /// Sent only once more is asked for, so a phone at the default writes the same presence as before.
     private var recentAsk: Int? { recentWanted > 10 ? recentWanted : nil }
 
+    /// The call history is on screen: presence then names "calls", so the Mac writes `voice.calls` (large) for us.
+    private(set) var callsOpen = false
+
+    func setCallsOpen(_ open: Bool) {
+        guard callsOpen != open else { return }
+        callsOpen = open
+        guard !demo, let channel else { return }
+        let watching = presenceWatching, recent = recentAsk
+        Task {
+            try? await channel.touchPresence(watching: watching, recent: recent, calls: open)
+            lastPresence = Date()
+            if open { await refresh() }
+        }
+    }
+
     /// Ask the Mac for 20 more recent chats; they arrive with the next view.
     func showMoreRecent() {
         guard recentWanted < 50 else { return }
         recentWanted = min(50, recentWanted + 20)
         guard !demo, let channel else { return }
-        let watching = presenceWatching, recent = recentAsk
-        Task { try? await channel.touchPresence(watching: watching, recent: recent) }
+        let watching = presenceWatching, recent = recentAsk, calls = callsOpen
+        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls) }
     }
 
     /// What presence tells the Mac to stream: only in verbose mode.
@@ -408,7 +423,7 @@ final class AppModel {
         liveTask?.cancel()
         liveTask = nil
         // Ask the Mac to stop (and delete) the live turn now rather than when presence lapses.
-        if wasStreaming, let channel { Task { try? await channel.touchPresence(watching: nil, recent: recentAsk) } }
+        if wasStreaming, let channel { Task { try? await channel.touchPresence(watching: nil, recent: recentAsk, calls: callsOpen) } }
     }
 
     /// The session on screen, or nil when none is. In verbose mode the Mac streams its turn.
@@ -429,7 +444,7 @@ final class AppModel {
         guard !demo, loop != nil, let channel else { return }
         let key = presenceWatching
         liveTask = Task { [weak self] in
-            try? await channel.touchPresence(watching: key, recent: recentAsk)
+            try? await channel.touchPresence(watching: key, recent: recentAsk, calls: callsOpen)
             self?.lastPresence = Date()
             guard let key else { return }
             guard let turns = await channel.liveTurns(for: key) else {
@@ -699,7 +714,7 @@ final class AppModel {
         guard let channel else { return }
         guard phase == .paired else { await tick(); return }
         do {
-            try await channel.touchPresence(watching: presenceWatching, recent: recentAsk)
+            try await channel.touchPresence(watching: presenceWatching, recent: recentAsk, calls: callsOpen)
             lastPresence = Date()
             problem = nil
         } catch {
@@ -738,7 +753,7 @@ final class AppModel {
             }
             // Tell the Mac someone is looking, so it publishes and polls faster.
             if Date().timeIntervalSince(lastPresence) > MacLiveness.pingEvery {
-                try await channel.touchPresence(watching: presenceWatching, recent: recentAsk)
+                try await channel.touchPresence(watching: presenceWatching, recent: recentAsk, calls: callsOpen)
                 lastPresence = Date()
             }
             let epoch = snapshotEpoch
@@ -1495,6 +1510,14 @@ final class AppModel {
             case .pause(let choice):
                 snapshot?.voice?.pause = choice == .resume ? .init(active: false)
                     : .init(active: true, until: choice == .forever ? nil : Date().addingTimeInterval(choice == .hour ? 3600 : 14400).timeIntervalSince1970 * 1000)
+            case .natural(let enabled, let voice):
+                if let enabled { snapshot?.voice?.natural?.enabled = enabled }
+                if let voice { snapshot?.voice?.natural?.voice = voice }
+            case .favorites(let list):
+                snapshot?.voice?.favorites = list.map { f in
+                    FavoriteWorkspace(n: f.n, workspace: f.workspace,
+                                      label: snapshot?.voice?.workspaces?.first { $0.key == f.workspace }?.label ?? f.label)
+                }
             case .test: snapshot?.voice?.lastTest = .init(at: Date().timeIntervalSince1970 * 1000, status: "answered", letter: "A")
             }
             return nil
@@ -1509,6 +1532,28 @@ final class AppModel {
             return nil
         } catch {
             return "Couldn't reach your Mac."
+        }
+    }
+
+    enum SampleAnswer { case audio(Data), refused(String) }
+
+    /// A sample of one realistic voice, made on the Mac and brought over as sealed `media` chunks (the same read path
+    /// as a film). No Face ID: it touches no chat and carries no words. Making it takes a few seconds on the Mac.
+    func loadVoiceSample(_ voice: String) async -> SampleAnswer {
+        if demo { return .refused("Samples play from your Mac, not in the demo.") }
+        guard let channel else { return .refused("Not connected to your Mac.") }
+        do {
+            let (id, document) = try channel.voiceSampleDocument(voice: voice, signer: signer)
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel, within: 90) else {
+                return .refused("Your Mac didn't answer. Is Squeak running?")
+            }
+            guard result.sent, let ref = result.media, ref.mime == "audio/wav" else {
+                return .refused(result.reason ?? VoiceParityText.sampleFailed)
+            }
+            return .audio(try await channel.media(ref))
+        } catch {
+            return .refused(VoiceParityText.sampleFailed)
         }
     }
 

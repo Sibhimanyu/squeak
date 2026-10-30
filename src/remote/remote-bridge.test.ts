@@ -4383,8 +4383,49 @@ describe("RemoteBridge phone-call settings from the phone", () => {
       const box = seal(payload.k, { v: 1, kind: "voice", nonce, expiresAt: NOW + 60_000, ...fields });
       return { box, sig: signer.sign(box), device: "iphone-1" };
     };
-    return { bridge, config, command, apply, test, voice, changePin, pinAction };
+    const presence = async (caps: string[]) => {
+      await store.set(`channels/${payload.c}/state/presence`, { box: seal(payload.k, { at: NOW, caps }) });
+      await bridge.tick();
+    };
+    return { bridge, config, command, apply, test, voice, changePin, pinAction, presence, store, payload, clock };
   }
+
+  it("sends the calls log only to a phone whose caps name calls, and never breaks the view", async () => {
+    const calls = [{ id: "c1", at: 1, kind: "agent", outcome: "answered", durationMs: 5, events: [] }];
+    const t = await voiceT({ calls: () => calls });
+    expect(t.bridge.phoneView().voice).not.toHaveProperty("calls");
+    await t.presence(["z", "calls"]);
+    expect(t.bridge.phoneView().voice).toMatchObject({ mode: "gateway", calls });
+    await t.presence(["z"]);
+    expect(t.bridge.phoneView().voice).not.toHaveProperty("calls");
+    t.bridge.stop();
+    const broken = await voiceT({
+      calls: () => {
+        throw new Error("boom");
+      },
+    });
+    await broken.presence(["calls"]);
+    expect(broken.bridge.phoneView().voice).toEqual({ mode: "gateway", callee: null, defaultCallee: null });
+    broken.bridge.stop();
+    const none = await voiceT();
+    await none.presence(["calls"]);
+    expect(none.bridge.phoneView().voice).not.toHaveProperty("calls");
+    none.bridge.stop();
+  });
+
+  it("hands natural and favorites changes to voice.apply unchanged", async () => {
+    const t = await voiceT();
+    const natural = await t.bridge.handleCommand(
+      t.config,
+      "n1",
+      t.command({ change: { natural: { enabled: false } } }),
+    );
+    expect(natural.result).toMatchObject({ id: "n1" });
+    expect(t.apply).toHaveBeenLastCalledWith({ natural: { enabled: false } });
+    await t.bridge.handleCommand(t.config, "n2", t.command({ change: { favorites: [{ n: 1, workspace: "w" }] } }));
+    expect(t.apply).toHaveBeenLastCalledWith({ favorites: [{ n: 1, workspace: "w" }] });
+    t.bridge.stop();
+  });
 
   it("shows who it rings, sets the extension, and clears it", async () => {
     const t = await voiceT();
@@ -4411,6 +4452,132 @@ describe("RemoteBridge phone-call settings from the phone", () => {
     expect(resumed.result).toEqual({ id: "p3", status: "sent" });
     expect(t.voice.pause()).toBeNull();
     t.bridge.stop();
+  });
+
+  describe("voice sample", () => {
+    const natural = {
+      installed: true,
+      enabled: true,
+      voice: "af_heart",
+      voices: [
+        { id: "af_heart", label: "Heart (female)" },
+        { id: "am_adam", label: "Adam (male)" },
+      ],
+    };
+    const sample = (voice: unknown = "am_adam", extra: Record<string, unknown> = {}) => ({
+      kind: "voiceSample",
+      voice,
+      ...extra,
+    });
+    const send = (t: Awaited<ReturnType<typeof voiceT>>, id: string, fields: Record<string, unknown>) => {
+      return t.bridge.handleCommand(t.config, id, t.command(fields as never));
+    };
+
+    it("is offered only on a streaming store with a preview, and old Macs omit it", async () => {
+      const on = await voiceT({ natural, streaming: true, preview: async () => Buffer.from("x") });
+      expect(on.bridge.phoneView().voice).toMatchObject({ natural: { installed: true, sample: true } });
+      const polling = await voiceT({ natural, preview: async () => Buffer.from("x") });
+      expect(polling.bridge.phoneView().voice).not.toHaveProperty("natural.sample");
+      const none = await voiceT({ natural, streaming: true });
+      expect(none.bridge.phoneView().voice).not.toHaveProperty("natural.sample");
+      for (const t of [on, polling, none]) t.bridge.stop();
+    });
+
+    it("makes the sample with the preview function and leaves it as sealed chunks", async () => {
+      const wav = crypto.randomBytes(MEDIA_CHUNK_BYTES + 99);
+      const preview = vi.fn(async () => wav);
+      const t = await voiceT({ natural, streaming: true, preview });
+      const verdict = await send(t, "s1", sample());
+      expect(preview).toHaveBeenCalledWith("am_adam");
+      const media = (
+        verdict.result as { media: { id: string; chunks: number; bytes: number; sha256: string; mime: string } }
+      ).media;
+      expect(verdict.result).toMatchObject({
+        id: "s1",
+        status: "sent",
+        media: { chunks: 2, bytes: wav.length, mime: "audio/wav" },
+      });
+      const joined = Buffer.concat(
+        Array.from({ length: media.chunks }, (_, index) => {
+          const doc = t.store.docs.get(`channels/${t.payload.c}/media/${media.id}-${index}`)!;
+          return Buffer.from(open<{ data: string }>(t.payload.k, doc.box).data, "base64");
+        }),
+      );
+      expect(joined.equals(wav)).toBe(true);
+      expect(crypto.createHash("sha256").update(joined).digest("hex")).toBe(media.sha256);
+      t.bridge.stop();
+    });
+
+    it("refuses extra keys, an unknown or malformed voice, and an uninstalled voice, making nothing", async () => {
+      const preview = vi.fn(async () => Buffer.from("x"));
+      const t = await voiceT({ natural, streaming: true, preview });
+      for (const [i, fields] of [
+        sample("am_adam", { text: "hi" }),
+        sample("bf_emma"),
+        sample("../etc"),
+        sample(7),
+        { kind: "voiceSample" },
+      ].entries()) {
+        const verdict = await send(t, `b${i}`, fields);
+        expect(verdict.result).toMatchObject({ status: "refused" });
+      }
+      expect(preview).not.toHaveBeenCalled();
+      t.bridge.stop();
+      const missing = await voiceT({ natural: { ...natural, installed: false }, streaming: true, preview });
+      expect((await send(missing, "n1", sample())).result).toEqual({
+        id: "n1",
+        status: "refused",
+        reason: "The realistic voice isn't installed on this Mac.",
+      });
+      missing.bridge.stop();
+    });
+
+    it("refuses when this Mac cannot carry media or make a sample", async () => {
+      const polling = await voiceT({ natural, preview: async () => Buffer.from("x") });
+      expect((await send(polling, "p1", sample())).result).toMatchObject({ status: "refused" });
+      const none = await voiceT({ natural, streaming: true });
+      expect((await send(none, "p2", sample())).result).toMatchObject({ status: "refused" });
+      for (const t of [polling, none]) t.bridge.stop();
+    });
+
+    it("says so when the sample could not be made, and writes no chunk", async () => {
+      const t = await voiceT({ natural, streaming: true, preview: async () => null });
+      const verdict = await send(t, "f1", sample());
+      expect(verdict.result).toMatchObject({ id: "f1", status: "refused" });
+      expect([...t.store.docs.keys()].some((key) => key.includes("/media/"))).toBe(false);
+      t.bridge.stop();
+    });
+
+    it("lets one device ask every 5 seconds, and only one at a time", async () => {
+      let release: (wav: Buffer) => void = () => undefined;
+      let calls = 0;
+      const preview = vi.fn(
+        () =>
+          new Promise<Buffer | null>((resolve) => {
+            calls += 1;
+            release = resolve;
+          }),
+      );
+      const t = await voiceT({ natural, streaming: true, preview });
+      const first = send(t, "r1", sample());
+      await vi.waitFor(() => expect(calls).toBe(1));
+      expect((await send(t, "r2", sample())).result).toMatchObject({
+        status: "refused",
+        reason: "Your Mac is still making the last sample.",
+      });
+      release(Buffer.from("wav"));
+      expect((await first).result).toMatchObject({ status: "sent" });
+      expect((await send(t, "r3", sample())).result).toMatchObject({
+        status: "refused",
+        reason: "Wait a few seconds before playing another sample.",
+      });
+      t.clock.t += 5_001;
+      const again = send(t, "r4", sample());
+      await vi.waitFor(() => expect(calls).toBe(2));
+      release(Buffer.from("wav"));
+      expect((await again).result).toMatchObject({ status: "sent" });
+      t.bridge.stop();
+    });
   });
 
   it("starts a test call and answers at once, touching no setting", async () => {

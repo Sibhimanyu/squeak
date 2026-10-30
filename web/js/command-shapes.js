@@ -54,8 +54,12 @@ export const LID_CLOSED_KEYS = ["displayOff", "mute", "lowPower", "freezeApps"];
 export const LID_OPEN_KEYS = ["screenOn", "mute", "lowPower", "freezeApps"];
 export const NOTIFY_CHANNELS = ["telegram", "cliq"];
 export const FINISHED_MODES = ["conductor", "all", "off"];
+export const PAUSE_CHOICES = ["1h", "4h", "tomorrow", "forever", "resume"];
+export const PIN_POLICIES = ["ask", "skip"];
+export const FAVORITES_MAX = 9;
 export const FILM_OPS = ["answer", "chat", "resume", "stop", "installTool"];
 
+const KOKORO_VOICE = /^[a-z]{2}_[a-z]+$/;
 const SESSION_ID = /^[A-Za-z0-9_-]{1,120}$/;
 const UPLOAD_ID = /^[A-Za-z0-9_-]{8,40}$/;
 const TASK_ID = /^[A-Za-z0-9_-]{8,80}$/;
@@ -213,7 +217,74 @@ function voiceChange(change) {
     }
     return { pin: { current: v.current, next: v.next } };
   }
+  if (key === "pause") {
+    if (!PAUSE_CHOICES.includes(v)) bad("Pick 1 hour, 4 hours, tomorrow morning, until turned back on, or resume.");
+    return { pause: v };
+  }
+  if (key === "pinAction") return { pinAction: pinActionShape(v) };
+  if (key === "natural") return { natural: naturalShape(v) };
+  if (key === "favorites") return { favorites: favoritesShape(v) };
   return bad(`"${key}" is not a phone-call setting.`);
+}
+
+/** The Mac's `parsePinAction` (voice/relay-protocol.ts): exactly the keys each action takes; a reset's `next` may be null. */
+function pinActionShape(v) {
+  if (!isObject(v) || !isString(v.action)) bad("That is not a PIN action.");
+  const keys = Object.keys(v).sort().join(",");
+  const digits = (x) => isString(x) && PIN.test(x);
+  const need = (ok) => {
+    if (!ok) bad("A pin is 4 to 12 digits.");
+  };
+  switch (v.action) {
+    case "change":
+      need(keys === "action,current,next" && digits(v.current) && digits(v.next));
+      return { action: "change", current: v.current, next: v.next };
+    case "disable":
+      need(keys === "action,current" && digits(v.current));
+      return { action: "disable", current: v.current };
+    case "enable":
+      need(keys === "action,next" && digits(v.next));
+      return { action: "enable", next: v.next };
+    case "reset":
+      need(keys === "action,next" && (v.next === null || digits(v.next)));
+      return { action: "reset", next: v.next };
+    case "policy":
+      if (
+        keys !== "action,incoming,outgoing" ||
+        !PIN_POLICIES.includes(v.outgoing) ||
+        !PIN_POLICIES.includes(v.incoming)
+      )
+        bad("When the PIN is asked is ask or skip, for each kind of call.");
+      return { action: "policy", outgoing: v.outgoing, incoming: v.incoming };
+    default:
+      return bad("That is not a PIN action.");
+  }
+}
+
+/** `NaturalSettingsStore`: at least one of `enabled` (boolean) and `voice` (a Kokoro name), nothing else. */
+function naturalShape(v) {
+  if (!isObject(v) || Object.keys(v).length === 0) bad("That is not a voice setting.");
+  for (const key of Object.keys(v)) if (key !== "enabled" && key !== "voice") bad("That is not a voice setting.");
+  if ("enabled" in v && typeof v.enabled !== "boolean") bad("Turn the natural voice on or off.");
+  if ("voice" in v && !(isString(v.voice) && KOKORO_VOICE.test(v.voice))) bad("That is not a Kokoro voice name.");
+  return defined({ enabled: v.enabled, voice: v.voice });
+}
+
+/** `VoiceFavoritesStore`: the whole list, at most nine, each exactly `{ n, workspace }`, each digit once. */
+function favoritesShape(v) {
+  if (!Array.isArray(v)) bad("favorites must be a list.");
+  if (v.length > FAVORITES_MAX) bad("At most 9 favourites.");
+  const used = new Set();
+  return v.map((entry) => {
+    if (!isObject(entry) || Object.keys(entry).sort().join(",") !== "n,workspace")
+      bad("Each favourite is { n, workspace }.");
+    if (!isInt(entry.n) || entry.n < 1 || entry.n > 9) bad("n is a digit from 1 to 9.");
+    if (used.has(entry.n)) bad("Each digit can be used once.");
+    used.add(entry.n);
+    if (!isString(entry.workspace) || entry.workspace === "" || entry.workspace.length > 200)
+      bad("workspace is a name of up to 200 characters.");
+    return { n: entry.n, workspace: entry.workspace };
+  });
 }
 
 const SHAPES = {
@@ -401,6 +472,12 @@ const SHAPES = {
   voice(input) {
     only(input, ["change"], "A phone-call setting");
     return { change: voiceChange(input.change) };
+  },
+
+  voiceSample(input) {
+    only(input, ["voice"], "A voice sample");
+    if (!(isString(input.voice) && KOKORO_VOICE.test(input.voice))) bad("Not a voice this Mac offers.");
+    return { voice: input.voice };
   },
 
   telegramAvatar(input) {

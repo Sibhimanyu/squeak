@@ -427,6 +427,232 @@ export function pinReady(current, next, again) {
   return isPin(current) && isPin(next) && next === again && next !== current;
 }
 
+/* ---------- Voice: pause, PIN, policy, quick workspaces, call log (words from the iPhone's and the Mac's pages) ---------- */
+
+/** The Pause calls menu: what is sent (`{ pause }`) and what the person reads. "resume" is added only while paused. */
+export const PAUSE_OPTIONS = [
+  { value: "1h", title: "For 1 hour" },
+  { value: "4h", title: "For 4 hours" },
+  { value: "tomorrow", title: "Until tomorrow morning" },
+  { value: "forever", title: "Until I turn it back on" },
+];
+export const RESUME_OPTION = { value: "resume", title: "Resume calls" };
+
+/** Calls are paused now: a pause with no end, or one that has not ended. */
+export function isPaused(pause, now = Date.now()) {
+  if (!pause) return false;
+  return pause.until === null || pause.until > now;
+}
+
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const dayClock = (ms) => new Date(ms).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+
+/** "Calls are on", "Paused until 3:40 PM" or "Paused until you turn it back on". */
+export function pauseLine(pause, now = Date.now()) {
+  if (!isPaused(pause, now)) return "Calls are on";
+  if (pause.until === null) return "Paused until you turn it back on";
+  const sameDay = new Date(pause.until).toDateString() === new Date(now).toDateString();
+  return `Paused until ${sameDay ? clock(pause.until) : dayClock(pause.until)}`;
+}
+
+export const PAUSE_FOOTER = "Cards still reach Telegram and your apps. “Call me now” still rings.";
+
+export const PIN_FOOTER =
+  "When required, the PIN is asked before a key answers the call. It is kept by whatever places the call, never in this browser.";
+
+/** The status card of the calling PIN (`voice.pin`): title, detail and whether it is protected. */
+export function pinStatus(state) {
+  switch (state) {
+    case "set":
+      return {
+        title: "Calling PIN is set",
+        detail: "Your 4 to 12 digit PIN is ready. The call settings on your Mac decide when it is requested.",
+        tone: "on",
+      };
+    case "off":
+      return {
+        title: "PIN protection is off",
+        detail: "Anyone who answers a call can reply by key. Turn protection on whenever you like.",
+        tone: "off",
+      };
+    case "none":
+      return { title: "No PIN set", detail: "Set a 4 to 12 digit PIN to let callers reply by key.", tone: "none" };
+    case "unknown":
+      return {
+        title: "Checking PIN status",
+        detail: "Waiting for your add-on to report PIN status. Update Squeak Voice to 0.5.0 or newer if this persists.",
+        tone: "unknown",
+      };
+    default:
+      return {
+        title: "Calling PIN",
+        detail: "Your PIN is kept with the service that places your calls.",
+        tone: "none",
+      };
+  }
+}
+
+/** The sentence after a PIN action went through (the action's `action` word, or "change"). */
+export function pinDone(action) {
+  switch (action) {
+    case "disable":
+      return "The PIN is off. Calls can be answered by key without one.";
+    case "enable":
+      return "The PIN is on. It applies from the next call.";
+    case "reset":
+      return "Your new PIN is set. It applies from the next call.";
+    case "resetOff":
+      return "The PIN is off.";
+    default:
+      return "Your pin is changed. It applies from the next call.";
+  }
+}
+
+/** The web has no Face ID, so the owner checks of the iPhone are a plain confirmation here, said as such. */
+export const OWNER_CHECK_NOTE =
+  "This browser can't check it's you the way Face ID does on your iPhone, so it asks you to confirm here.";
+
+export const PIN_OFF_WARNING = "Anyone who answers the call will then be able to reply by key.";
+export const POLICY_FOOTER = "Anyone who answers your phone could then answer your agents.";
+
+/** What "Don't ask" would loosen: needs a confirmation, the owner check on the iPhone. Asking again never does. */
+export function loosens(policy, outgoing, incoming) {
+  return (outgoing === "skip" && policy.outgoing !== "skip") || (incoming === "skip" && policy.incoming !== "skip");
+}
+
+export const POLICY_REASON = {
+  outgoing:
+    "Stop asking for the PIN on calls Squeak makes to you. Anyone who answers your phone could then answer your agents.",
+  incoming: "Stop asking for the PIN when you call Squeak.",
+};
+
+/** Whether a quick-workspace row can be added, and the list with it (lowest free digit, first workspace not yet used). */
+export function favoritesAdded(list, candidates) {
+  const used = new Set(list.map((f) => f.n));
+  const n = [1, 2, 3, 4, 5, 6, 7, 8, 9].find((d) => !used.has(d));
+  const w = candidates.find((c) => !list.some((f) => f.workspace === c.key));
+  if (n === undefined || !w) return null;
+  return [...list, { n, workspace: w.key, label: w.label }].sort((a, b) => a.n - b.n);
+}
+
+/** Digits a row may take: its own, and every digit no other row holds. */
+export function availableDigits(list, row) {
+  const others = new Set(list.filter((f) => f.n !== row).map((f) => f.n));
+  return [1, 2, 3, 4, 5, 6, 7, 8, 9].filter((d) => d === row || !others.has(d));
+}
+
+export function favoritesRenumbered(list, from, to) {
+  if (to < 1 || to > 9 || (from !== to && list.some((f) => f.n === to))) return null;
+  return list.map((f) => (f.n === from ? { ...f, n: to } : f)).sort((a, b) => a.n - b.n);
+}
+
+export const favoritesRetargeted = (list, n, key, label) =>
+  list.map((f) => (f.n === n ? { ...f, workspace: key, label } : f));
+
+export const favoritesRemoved = (list, n) => list.filter((f) => f.n !== n);
+
+/** The wire form of the whole list: exactly `{ n, workspace }` each. */
+export const favoritesInput = (list) => list.map((f) => ({ n: f.n, workspace: f.workspace }));
+
+/* The Mac app's CallText: the words of the call log. */
+
+const two = (n) => String(n).padStart(2, "0");
+const hhmm = (d) => `${two(d.getHours())}:${two(d.getMinutes())}`;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+export function callWhat(e) {
+  if (e.kind === "test") return "Test call";
+  if (e.kind === "incoming") return e.label ? `You called Squeak · ${e.label}` : "You called Squeak";
+  if (e.label) return e.label;
+  switch (e.reason) {
+    case "blocked_approval":
+      return "An approval was waiting";
+    case "blocked_question":
+    case "asked_question":
+      return "A question was waiting";
+    default:
+      return "An agent call";
+  }
+}
+
+export function callOutcome(e) {
+  switch (e.outcome) {
+    case "answered": {
+      if (e.kind === "incoming") return e.sent === true ? "Message taken · sent to the chat" : "Message taken";
+      let s = "Answered";
+      if (e.letter) s += `, pressed ${e.letter}`;
+      if (e.sent === true) s += " · sent";
+      else if (e.sent === false && e.letter) s += " · not sent";
+      return s;
+    }
+    case "failed":
+      return e.failure ? `Could not be placed: ${e.failure}` : "Could not be placed";
+    case "moved_on":
+      return "Answered, but the chat had moved on";
+    default:
+      return "Not answered";
+  }
+}
+
+/** "42 s", "1 min 12 s", "3 min". */
+export function callDuration(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  if (total < 60) return `${total} s`;
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return s === 0 ? `${m} min` : `${m} min ${s} s`;
+}
+
+/** "Today 14:02", "Yesterday 09:15", "Mon 3 Nov 14:02". */
+export function callWhen(ms, now = Date.now()) {
+  const d = new Date(ms);
+  const today = new Date(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return `Today ${hhmm(d)}`;
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${hhmm(d)}`;
+  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${hhmm(d)}`;
+}
+
+export function callRowText(e, now = Date.now()) {
+  return `${callWhen(e.at, now)} · ${callWhat(e)} · ${callOutcome(e)} · ${callDuration(e.durationMs)}`;
+}
+
+export const callsExport = (calls, now = Date.now()) => calls.map((c) => callRowText(c, now)).join("\n");
+
+/** "14:02:07.123". */
+export function eventTime(ms) {
+  const d = new Date(ms);
+  return `${hhmm(d)}:${two(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+}
+
+export const sourceTag = (source) => (source === "add-on" ? "Add-on" : "Mac");
+
+const KIND_LABELS = { step: "Step", said: "Squeak said", heard: "Heard", key: "Key", warn: "Warning" };
+export const eventKindLabel = (kind) => KIND_LABELS[kind] ?? "Step";
+
+/** What was said or heard is quoted. */
+export const eventBody = (e) => (e.kind === "said" || e.kind === "heard" ? `“${e.text}”` : e.text);
+
+export const eventLine = (e) =>
+  `${eventTime(e.at)} [${sourceTag(e.source)}] ${eventKindLabel(e.kind)}: ${eventBody(e)}`;
+
+/** One line at the top of an opened call: direction, who, total time, outcome. */
+export function callSummary(e) {
+  const parts = [e.kind === "incoming" ? "Incoming" : "Outgoing"];
+  if (e.kind !== "incoming") parts.push(callWhat(e));
+  parts.push(callDuration(e.durationMs), callOutcome(e));
+  return parts.join(" · ");
+}
+
+/** The whole timeline as plain text, one line per event: what Copy puts on the clipboard. */
+export const timelineExport = (e) => [callSummary(e), ...e.events.map(eventLine)].join("\n");
+
+export const CALLS_NONE = "No calls yet. When an agent is waiting on you, or you place a test call, it shows here.";
+export const CALLS_LOADING =
+  "Loading the calls from your Mac… If nothing appears, update Squeak on your Mac and open this again.";
+
 /* ---------- Telegram bot picture ---------- */
 
 export const AVATAR_COOLDOWN_MS = 30_000;

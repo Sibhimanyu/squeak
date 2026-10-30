@@ -29,6 +29,7 @@ export const RATE_HINTS = Object.freeze({
   start: { minGapMs: 15_000 },
   answer: { minGapMs: 15_000 },
   telegramAvatar: { minGapMs: 30_000 },
+  voiceSample: { minGapMs: 5_000, note: "one at a time" },
   history: { note: "one page at a time per chat" },
   media: { note: "one at a time" },
   usage: { minGapMs: 60_000, note: "the Mac refreshes at most once a minute whoever asks" },

@@ -138,3 +138,150 @@ final class VoiceCommandTests: XCTestCase {
         XCTAssertTrue(line(.init(active: true, until: (1_700_000_000 + 86_400) * 1000)).hasPrefix("Paused until Wed"))
     }
 }
+
+/// The voice parity fields (realistic voice, Quick workspaces, call history) and their commands.
+final class VoiceParityTests: XCTestCase {
+    let key = Data(repeating: 7, count: 32).base64EncodedString()
+
+    private func view(_ json: String) throws -> VoiceView { try JSONDecoder().decode(VoiceView.self, from: Data(json.utf8)) }
+
+    private struct AnyJSON: Decodable {
+        let value: Any
+        init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            if c.decodeNil() { value = NSNull() }
+            else if let v = try? c.decode(Bool.self) { value = v }
+            else if let v = try? c.decode(Int64.self) { value = v }
+            else if let v = try? c.decode(Double.self) { value = v }
+            else if let v = try? c.decode(String.self) { value = v }
+            else if let v = try? c.decode([AnyJSON].self) { value = v.map(\.value) }
+            else { value = (try c.decode([String: AnyJSON].self)).mapValues(\.value) }
+        }
+    }
+
+    /// The signed envelope's `change`, as sorted-key JSON; also checks the envelope's own five keys.
+    private func change(_ change: VoiceChange) throws -> String {
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: key, n: "Mac")
+        let ch = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())
+        let (_, doc) = try ch.voiceDocument(change, signer: SoftwareSigner())
+        let root = try ChannelCrypto.open(AnyJSON.self, box: doc.box, key: key).value as! [String: Any]
+        XCTAssertEqual(Set(root.keys), ["v", "kind", "change", "nonce", "expiresAt"])
+        return String(data: try JSONSerialization.data(withJSONObject: root["change"]!, options: [.sortedKeys, .fragmentsAllowed]), encoding: .utf8)!
+    }
+
+    func testOlderMacDecodesWithoutTheNewFields() throws {
+        let v = try view(#"{"mode":"gateway","callee":"1","defaultCallee":null}"#)
+        XCTAssertNil(v.natural); XCTAssertNil(v.favorites); XCTAssertNil(v.workspaces); XCTAssertNil(v.calls)
+        // natural without `voices` (a Mac before the picker) is not offered.
+        let n = try view(#"{"mode":"direct","natural":{"installed":true,"enabled":false,"voice":"af_heart"}}"#)
+        XCTAssertEqual(n.natural?.offered, false)
+    }
+
+    func testDecodesTheDocumentedView() throws {
+        let v = try view("""
+        {"mode":"gateway","natural":{"installed":true,"enabled":true,"voice":"af_heart","voices":[{"id":"af_heart","label":"Heart (female)"},{"id":"am_adam","label":"Adam (male)"}]},
+         "favorites":[{"n":1,"workspace":"ws1","label":"squeak · main"}],
+         "workspaces":[{"key":"ws1","label":"squeak · main"},{"key":"ws2","label":"blume"}],
+         "calls":[{"id":"a","at":1761800000000,"kind":"agent","reason":"blocked_question","label":"squeak · main","outcome":"answered","letter":"B","sent":true,"durationMs":42000,
+                   "events":[{"at":1761800001000,"source":"add-on","kind":"heard","text":"B"},{"at":1,"source":"x","kind":"y","text":"odd"}]},
+                  {"id":"b","at":2,"kind":"zzz","outcome":"failed","failure":"no route","durationMs":0}]}
+        """)
+        XCTAssertEqual(v.natural?.offered, true)
+        XCTAssertEqual(v.natural?.voices?.map(\.id), ["af_heart", "am_adam"])
+        XCTAssertEqual(v.favorites, [FavoriteWorkspace(n: 1, workspace: "ws1", label: "squeak · main")])
+        XCTAssertEqual(v.workspaces?.count, 2)
+        XCTAssertEqual(v.calls?.count, 2)
+        XCTAssertEqual(v.calls?[0].events[0].source, .addOn)
+        XCTAssertEqual(v.calls?[0].events[0].kind, .heard)
+        // Unknown words fall back, never fail the view.
+        XCTAssertEqual(v.calls?[0].events[1].source, .mac)
+        XCTAssertEqual(v.calls?[0].events[1].kind, .step)
+        XCTAssertEqual(v.calls?[1].kind, .agent)
+        XCTAssertEqual(CallText.outcomeSentence(v.calls![1]), "Could not be placed: no route")
+        XCTAssertEqual(CallText.outcomeSentence(v.calls![0]), "Answered, pressed B \u{00B7} sent")
+    }
+
+    func testNaturalAndFavoritesCommandsAreOneKeyWithExactShape() throws {
+        XCTAssertEqual(try change(.natural(enabled: false, voice: nil)), #"{"natural":{"enabled":false}}"#)
+        XCTAssertEqual(try change(.natural(enabled: nil, voice: "am_adam")), #"{"natural":{"voice":"am_adam"}}"#)
+        XCTAssertEqual(try change(.natural(enabled: true, voice: "bf_emma")), #"{"natural":{"enabled":true,"voice":"bf_emma"}}"#)
+        // Favourites carry n and workspace only: never the label.
+        XCTAssertEqual(
+            try change(.favorites([FavoriteWorkspace(n: 1, workspace: "ws1", label: "squeak"), FavoriteWorkspace(n: 3, workspace: "ws3", label: "x")])),
+            #"{"favorites":[{"n":1,"workspace":"ws1"},{"n":3,"workspace":"ws3"}]}"#)
+        XCTAssertEqual(try change(.favorites([])), #"{"favorites":[]}"#)
+    }
+
+    func testQuickWorkspaceRules() {
+        let offered = [WorkspaceChoice(key: "a", label: "A"), WorkspaceChoice(key: "b", label: "B")]
+        let one = QuickWorkspaces.added([], candidates: offered)!
+        XCTAssertEqual(one, [FavoriteWorkspace(n: 1, workspace: "a", label: "A")])
+        let two = QuickWorkspaces.added(one, candidates: offered)!
+        XCTAssertEqual(two.map(\.n), [1, 2])
+        XCTAssertNil(QuickWorkspaces.added(two, candidates: offered), "no candidate left")
+        XCTAssertNil(QuickWorkspaces.renumbered(two, from: 1, to: 2), "digit held by another row")
+        XCTAssertNil(QuickWorkspaces.renumbered(two, from: 1, to: 10))
+        XCTAssertEqual(QuickWorkspaces.renumbered(two, from: 2, to: 5)?.map(\.n), [1, 5])
+        XCTAssertEqual(QuickWorkspaces.availableNumbers(for: 1, in: two), [1, 3, 4, 5, 6, 7, 8, 9])
+        XCTAssertEqual(QuickWorkspaces.removed(two, n: 1).map(\.n), [2])
+        XCTAssertTrue(QuickWorkspaces.isValid(two, offered: offered, saved: []))
+        XCTAssertFalse(QuickWorkspaces.isValid([FavoriteWorkspace(n: 1, workspace: "a"), FavoriteWorkspace(n: 1, workspace: "b")], offered: offered, saved: []))
+        XCTAssertFalse(QuickWorkspaces.isValid([FavoriteWorkspace(n: 0, workspace: "a")], offered: offered, saved: []))
+        XCTAssertFalse(QuickWorkspaces.isValid([FavoriteWorkspace(n: 1, workspace: "zzz")], offered: offered, saved: []), "unknown workspace")
+        XCTAssertTrue(QuickWorkspaces.isValid([FavoriteWorkspace(n: 1, workspace: "zzz")], offered: offered, saved: [FavoriteWorkspace(n: 4, workspace: "zzz")]), "already saved")
+        XCTAssertFalse(QuickWorkspaces.isValid([FavoriteWorkspace(n: 1, workspace: String(repeating: "x", count: 201))], offered: [WorkspaceChoice(key: String(repeating: "x", count: 201), label: "")], saved: []))
+    }
+
+    func testCallsCapabilityIsOnlyAnnouncedWhileOpen() async throws {
+        XCTAssertFalse(ChannelCrypto.capabilities.contains("calls"))
+        XCTAssertEqual(ChannelCrypto.callsCapability, "calls")
+        XCTAssertLessThanOrEqual(ChannelCrypto.callsCapability.count, 20)
+        XCTAssertLessThanOrEqual(ChannelCrypto.capabilities.count + 1, 10)
+    }
+
+    func testCallTextWords() {
+        let e = CallEntry(id: "x", at: 0, kind: .incoming, label: "squeak", outcome: .answered, sent: true, durationMs: 72000)
+        XCTAssertEqual(CallText.what(e), "You called Squeak \u{00B7} squeak")
+        XCTAssertEqual(CallText.duration(ms: 72000), "1 min 12 s")
+        XCTAssertEqual(CallText.eventBody(CallEvent(at: 0, kind: .said, text: "Hi")), "\u{201C}Hi\u{201D}")
+    }
+}
+
+/// The `voiceSample` command: exactly five keys, and the view flag that offers it.
+final class VoiceSampleCommandTests: XCTestCase {
+    let key = Data(repeating: 7, count: 32).base64EncodedString()
+
+    private struct AnyKey: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+    private struct KeySet: Decodable {
+        let names: Set<String>
+        init(from decoder: Decoder) throws {
+            names = Set(try decoder.container(keyedBy: AnyKey.self).allKeys.map(\.stringValue))
+        }
+    }
+    private struct Fields: Decodable { let v: Int; let kind: String; let voice: String }
+
+    func testEnvelopeHasExactlyTheKeysTheMacReads() throws {
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: key, n: "Mac")
+        let ch = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())
+        let (_, doc) = try ch.voiceSampleDocument(voice: "am_adam", signer: SoftwareSigner())
+        XCTAssertNotNil(doc.sig)
+        let keys = try ChannelCrypto.open(KeySet.self, box: doc.box, key: key)
+        XCTAssertEqual(keys.names, ["v", "kind", "voice", "nonce", "expiresAt"])
+        let fields = try ChannelCrypto.open(Fields.self, box: doc.box, key: key)
+        XCTAssertEqual(fields.v, 1)
+        XCTAssertEqual(fields.kind, "voiceSample")
+        XCTAssertEqual(fields.voice, "am_adam")
+    }
+
+    func testSampleFlagDecodesAndOlderMacOmitsIt() throws {
+        let on = try JSONDecoder().decode(VoiceView.self, from: Data(#"{"mode":"gateway","natural":{"installed":true,"enabled":true,"voice":"af_heart","voices":[{"id":"af_heart","label":"Heart"}],"sample":true}}"#.utf8))
+        XCTAssertEqual(on.natural?.sample, true)
+        let old = try JSONDecoder().decode(VoiceView.self, from: Data(#"{"mode":"gateway","natural":{"installed":true,"enabled":true,"voice":"af_heart","voices":[{"id":"af_heart","label":"Heart"}]}}"#.utf8))
+        XCTAssertNil(old.natural?.sample)
+    }
+}

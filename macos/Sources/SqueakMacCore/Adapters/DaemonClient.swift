@@ -246,6 +246,15 @@ public struct DaemonClient: Sendable {
         return r.body
     }
 
+    /// Places a test call. `.done` carries the view with `lastTest` ringing; `.refused` the daemon's sentence.
+    public func testVoiceCall() async throws -> PinOutcome {
+        let r = try await post("/control/voice", body: VoiceSettings.testRequestBody())
+        if r.status == 404 { return .outdated }
+        if r.status == 400 { return .refused(PinOutcome.reason(from: r.body)) }
+        try Self.check(r.status)
+        return .done(try? JSONDecoder().decode(VoiceSettings.self, from: r.body))
+    }
+
     /// Pauses or resumes calls. nil = a daemon without the route (404).
     public func setVoicePause(_ choice: VoicePauseChoice) async throws -> VoiceSettings? {
         let r = try await post("/control/voice", body: choice.requestBody())

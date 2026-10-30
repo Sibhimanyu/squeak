@@ -38,6 +38,7 @@ struct VoiceSettingsPage: View {
                 } header: { Text("Phone calls") } footer: {
                     Footnote(footnote(v))
                 }
+                testSection(v)
                 if v.pauseKnown { pauseSection(v) }
                 if let natural = v.natural { naturalSection(natural) }
                 if let favorites = v.favorites { quickSection(favorites, candidates: v.workspaces ?? []) }
@@ -74,6 +75,28 @@ struct VoiceSettingsPage: View {
         let who = v.callee ?? v.defaultCallee
         let ringing = who.map { "Squeak rings \($0)." } ?? "No extension is set yet, so no call can be placed."
         return "\(ringing) \(how) Only an extension is accepted here, never an outside number."
+    }
+
+    // MARK: Test call
+
+    private func testSection(_ v: VoiceSettings) -> some View {
+        let busy = m.testPlacing || v.isRinging
+        let blocked = v.testBlockedReason
+        return Section {
+            LabeledContent {
+                HStack(spacing: 8) {
+                    if busy { ProgressView().controlSize(.small).accessibilityLabel("Calling") }
+                    Button(busy ? "Calling…" : "Call me now") { Task { await m.testCall() } }
+                        .disabled(busy || blocked != nil)
+                }
+            } label: {
+                Text("Call me now")
+                Text("Rings you with a made-up question. Nothing is sent to any chat.")
+            }
+            if let blocked { Footnote(blocked) }
+            if let e = m.testError { Footnote(e) }
+            else if let line = VoiceSettings.testLine(v.lastTest) { Footnote(line) }
+        } header: { Text("Test call") }
     }
 
     // MARK: Pause

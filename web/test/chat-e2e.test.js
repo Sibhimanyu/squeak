@@ -218,6 +218,14 @@ describe("presence", () => {
     expect((await presenceOf(w)).caps).toEqual(["z", "split", "films"]);
   });
 
+  it("adds the calls cap only while the Phone calls log is open", async () => {
+    const w = await world();
+    await w.channel.touchPresence({ calls: true });
+    expect((await presenceOf(w)).caps).toEqual(["z", "split", "films", "calls"]);
+    await w.channel.touchPresence({ calls: false });
+    expect((await presenceOf(w)).caps).toEqual(["z", "split", "films"]);
+  });
+
   it("names the open chat and asks for more recent chats, as the iPhone does", async () => {
     const w = await world();
     await w.channel.touchPresence({ watching: KEY, recent: 30 });

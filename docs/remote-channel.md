@@ -802,6 +802,37 @@ A third `change` shape changes the pin the gateway asks for (never logged, never
 Home Assistant add-on, which checks the current pin (five wrong guesses lock changes for ten minutes) and answers; the
 command's answer is that outcome. A Mac whose calls are placed directly refuses: its pin is in its own config.
 
+### Voice parity with the Mac app (2026-10-30)
+
+The phone can do what the Mac app's Voice settings do, including hearing a sample (below). Wire details for the apps:
+`.context/voice-parity-protocol.md`.
+
+- The view's `voice` already carries `natural` (`installed`, `enabled`, `voice`; now also `voices: [{ id, label }]`, the
+  picker list), `favorites` (`[{ n, workspace, label }]`, the Quick workspaces, `n` = keypad digit 1 to 9) and
+  `workspaces` (`[{ key, label }]`, what a favourite may name). `voice.calls` (the newest 20 calls with their steps) is
+  large, so it is written only for a phone whose presence `caps` name `calls`.
+- Two more `change` shapes, each exactly one key, ending in the Mac route's own stores (`NaturalSettingsStore.apply`,
+  `VoiceFavoritesStore.apply`): `{ "natural": { "enabled"?: bool, "voice"?: "af_heart" } }` and
+  `{ "favorites": [{ "n": 1, "workspace": "<key>" }] }` (replaces the list). A phone may only name a workspace this Mac
+  offers or already saved; the realistic voice must be installed. Logic and tests: `src/voice/phone-voice.ts`.
+- **Voice sample** (Play sample, iPhone and web): the signed command `{ v: 1, kind: "voiceSample", voice, nonce,
+expiresAt }`, exactly those keys, no Face ID (it touches no chat and carries no words). `voice` must match
+  `^[a-z]{2}_[a-z]+$` and be in `natural.voices`; the realistic voice must be installed. The Mac makes the sample
+  through the function behind `POST /control/voice/preview` (an 8 kHz mono 16-bit WAV, ~5 s, ~80-100 KB) and leaves it
+  as sealed `media` chunks through the same writer and ledger as a film (`uploadMedia`: 384 KB chunks, `remote-media.json`,
+  deleted after 30 min). The answer is `{ status: "sent", media: { id, chunks, bytes, sha256, mime: "audio/wav" } }`,
+  read by the same `Channel.media` / `fetchMediaBytes` a film uses (hash checked), or `{ status: "refused", reason }`
+  with a fixed sentence. One at a time, and one per 5 s per device. Realtime Database only: the direct same-Wi-Fi
+  path and the shared server carry no media, so the Mac sets `voice.natural.sample: true` in the phone view only when
+  it can make one and has a streaming store and its own server; a phone shows Play sample only when it is true (an
+  older Mac omits it, so the button is hidden). The phone plays it with `AVAudioPlayer` (`.playback`, like films, so
+  the silent switch does not mute it); the web plays a Blob in an `Audio` element, started from the tap with a silent
+  clip so the later `play()` is allowed. Tests: `remote-bridge.test.ts` ("voice sample"), `phone-interop.test.ts`,
+  `VoiceSampleCommandTests`, `web/test/voice-sample.test.js`.
+- Calls: `{ id, at, kind, reason?, label?, outcome, letter?, sent?, durationMs, failure?, events }`, `events` at most 40
+  lines `{ at, source, kind, text }` of at most 200 characters. The Mac route's data, clipped; no PIN is ever written
+  to the history or the trace.
+
 ## Setting up Firebase, and the shared server (2026-10-29)
 
 A new install chooses where the channel lives in Squeak for Mac (Settings › iPhone):

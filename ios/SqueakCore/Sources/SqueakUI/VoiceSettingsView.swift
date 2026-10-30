@@ -59,6 +59,14 @@ struct VoiceSettingsView: View {
                     Text("Rings you with a made-up question. Nothing is sent to any chat.")
                 }
                 if voice.pause != nil { PauseSection(voice: voice) }
+                // Only a Mac that sends its voice list takes these commands.
+                if let natural = voice.natural, natural.offered {
+                    if let list = voice.favorites {
+                        QuickWorkspacesSection(list: list, candidates: voice.workspaces ?? [])
+                    }
+                    NaturalVoiceSection(natural: natural)
+                    CallHistorySection()
+                }
                 // The pin lives with the placer of the call (the add-on, or this Mac); the Mac never shows it.
                 PinSection(voice: voice)
                 if let policy = voice.policy { PolicySection(policy: policy) }

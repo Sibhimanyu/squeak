@@ -14,6 +14,8 @@
 //   followed on one shared stream and read through `get` like everything else.
 
 export const PRESENCE_EVERY_MS = 20_000;
+/** The call log is asked for this long after the Phone calls log last said it is open (it renews while it is). */
+export const CALLS_LEASE_MS = 90_000;
 export const SAFETY_POLL_MS = 60_000;
 export const WAKE_DEBOUNCE_MS = 50;
 export const RESULT_POLL_MS = 1_500;
@@ -43,6 +45,8 @@ export class Sync {
     this.watchKey = null;
     /** How many recent chats to ask for ("Show more"). */
     this.recentWanted = 10;
+    /** Until when the Phone calls log is open (the "calls" cap), or 0. */
+    this.callsUntil = 0;
     this.stopLive = null;
     this.liveKey = null;
     this.state = { view: null, live: null, aliveAt: null, streamUp: false, syncedAt: null, error: null, rev: 0 };
@@ -146,10 +150,29 @@ export class Sync {
   async #presence() {
     if (!this.running) return;
     try {
-      await this.channel.touchPresence({ watching: this.watching, recent: this.recentWanted });
+      await this.channel.touchPresence({
+        watching: this.watching,
+        recent: this.recentWanted,
+        calls: this.callsWanted,
+      });
     } catch {
       // The next ping or pass says what is wrong.
     }
+  }
+
+  /** Whether the Phone calls log is open now: the presence then carries the "calls" cap. */
+  get callsWanted() {
+    return this.channel.now() < this.callsUntil;
+  }
+
+  /**
+   * The Phone calls log opened or closed (renewed while open: a lease, so leaving the page ends it within a
+   * presence ping). The cap is sent at once on a change, and the view then carries `voice.calls`.
+   */
+  wantCalls(on) {
+    const was = this.callsWanted;
+    this.callsUntil = on ? this.channel.now() + CALLS_LEASE_MS : 0;
+    if (was !== on) void this.#presence();
   }
 
   /** The chat the Mac is asked to stream: the one on screen, and only in verbose mode. */

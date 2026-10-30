@@ -28,6 +28,11 @@ let (voiceResetId, voiceResetDocument) = try channel.voiceDocument(.pinAction(.r
 let (voiceResetOffId, voiceResetOffDocument) = try channel.voiceDocument(.pinAction(.reset(next: nil)), signer: signer, now: madeAt)
 let (voiceEnableId, voiceEnableDocument) = try channel.voiceDocument(.pinAction(.enable(next: "135790")), signer: signer, now: madeAt)
 let (voicePolicyId, voicePolicyDocument) = try channel.voiceDocument(.pinAction(.policy(outgoing: .skip, incoming: .ask)), signer: signer, now: madeAt)
+let (voiceNaturalId, voiceNaturalDocument) = try channel.voiceDocument(.natural(enabled: true, voice: "bf_emma"), signer: signer, now: madeAt)
+let (voiceFavoritesId, voiceFavoritesDocument) = try channel.voiceDocument(
+    .favorites([FavoriteWorkspace(n: 1, workspace: "ws-1", label: "squeak"), FavoriteWorkspace(n: 3, workspace: "/Users/me/proj")]),
+    signer: signer, now: madeAt)
+let (voiceSampleId, voiceSampleDocument) = try channel.voiceSampleDocument(voice: "am_adam", signer: signer, now: madeAt)
 let (voicePauseId, voicePauseDocument) = try channel.voiceDocument(.pause(.fourHours), signer: signer, now: madeAt)
 let (voiceChangeId, voiceChangeDocument) = try channel.voiceDocument(.pinAction(.change(current: "4821", next: "135790")), signer: signer, now: madeAt)
 let (controlsId, controlsDocument) = try channel.controlsDocument(.fans("60"), signer: signer, now: madeAt)
@@ -122,6 +127,9 @@ let fixture: [String: Any] = [
     // What a closed lid does: mute off, pause chat apps on.
     "lidActionsCommandId": lidId,
     "lidActionsCommand": ["box": lidDocument.box, "sig": lidDocument.sig!, "device": lidDocument.device!],
+    // A realistic voice sample (voiceSample command): the Mac answers with media chunks.
+    "voiceSampleCommandId": voiceSampleId,
+    "voiceSampleCommand": ["box": voiceSampleDocument.box, "sig": voiceSampleDocument.sig!, "device": voiceSampleDocument.device!],
     // Calling-PIN actions (voice command, change.pinAction): disable, reset to a PIN, reset to off, enable, change.
     "voicePinDisableCommandId": voicePinId,
     "voicePinDisableCommand": ["box": voicePinDocument.box, "sig": voicePinDocument.sig!, "device": voicePinDocument.device!],
@@ -133,6 +141,10 @@ let fixture: [String: Any] = [
     "voicePinEnableCommand": ["box": voiceEnableDocument.box, "sig": voiceEnableDocument.sig!, "device": voiceEnableDocument.device!],
     "voicePinPolicyCommandId": voicePolicyId,
     "voicePinPolicyCommand": ["box": voicePolicyDocument.box, "sig": voicePolicyDocument.sig!, "device": voicePolicyDocument.device!],
+    "voiceNaturalCommandId": voiceNaturalId,
+    "voiceNaturalCommand": ["box": voiceNaturalDocument.box, "sig": voiceNaturalDocument.sig!, "device": voiceNaturalDocument.device!],
+    "voiceFavoritesCommandId": voiceFavoritesId,
+    "voiceFavoritesCommand": ["box": voiceFavoritesDocument.box, "sig": voiceFavoritesDocument.sig!, "device": voiceFavoritesDocument.device!],
     "voicePauseCommandId": voicePauseId,
     "voicePauseCommand": ["box": voicePauseDocument.box, "sig": voicePauseDocument.sig!, "device": voicePauseDocument.device!],
     "voicePinChangeCommandId": voiceChangeId,

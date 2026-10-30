@@ -22,6 +22,16 @@ export const NATURAL_DIR = "voice-tts";
 export const DEFAULT_NATURAL_VOICE = "af_heart";
 /** Kokoro voice ids are two letters, an underscore and a name (`af_heart`, `am_michael`, `bf_emma`). */
 export const NATURAL_VOICE = /^[a-z]{2}_[a-z]+$/;
+/** The voices the apps offer in their picker (the daemon accepts any Kokoro name); the Mac app lists the same. */
+export const NATURAL_VOICES: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "af_heart", label: "Heart (female)" },
+  { id: "af_bella", label: "Bella (female)" },
+  { id: "af_nicole", label: "Nicole (female)" },
+  { id: "bf_emma", label: "Emma (British female)" },
+  { id: "am_michael", label: "Michael (male)" },
+  { id: "am_adam", label: "Adam (male)" },
+  { id: "bm_george", label: "George (British male)" },
+];
 /** The worker makes about five seconds of speech a second here; a stuck one is killed after this. */
 const RENDER_TIMEOUT_MS = 30_000;
 /** Most time a call waits for its clips before ringing without the rest. */

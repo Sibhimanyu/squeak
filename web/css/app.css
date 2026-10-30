@@ -3275,3 +3275,38 @@ h2.dheading {
   padding: 4px 10px;
   cursor: pointer;
 }
+
+/* Phone calls: the call log and PIN fields */
+.sm-field-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0;
+}
+.sm-call summary {
+  display: block;
+}
+.sm-call-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sm-calls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sm-events {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.sm-event.warn {
+  color: var(--sq-needs-you);
+  font-weight: 600;
+}

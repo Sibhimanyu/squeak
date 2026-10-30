@@ -1688,6 +1688,14 @@ public struct VoiceView: Codable, Equatable, Sendable {
     public var policy: PinPolicy?
     /// Pause calls: nil from a Mac that does not send it (the row is hidden); present but not `active` = calls are on.
     public var pause: Pause?
+    /// The realistic voice; its controls show only when `natural.voices` is present.
+    public var natural: NaturalVoiceView?
+    /// Quick workspaces: keypad digit to workspace. Nil from a Mac that does not send it.
+    public var favorites: [FavoriteWorkspace]?
+    /// What a favourite may name.
+    public var workspaces: [WorkspaceChoice]?
+    /// The newest calls with their steps. Only sent to a phone whose presence caps name "calls".
+    public var calls: [CallEntry]?
 
     /// An unknown word reads as "ask", the safe side.
     public struct PinPolicy: Codable, Equatable, Sendable {
@@ -1728,7 +1736,7 @@ public struct VoiceView: Codable, Equatable, Sendable {
         enum CodingKeys: String, CodingKey { case until }
     }
 
-    enum CodingKeys: String, CodingKey { case mode, callee, defaultCallee, lastTest, pin, policy, pause }
+    enum CodingKeys: String, CodingKey { case mode, callee, defaultCallee, lastTest, pin, policy, pause, natural, favorites, workspaces, calls }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1738,6 +1746,10 @@ public struct VoiceView: Codable, Equatable, Sendable {
         lastTest = try c.decodeIfPresent(LastTest.self, forKey: .lastTest)
         pin = try c.decodeIfPresent(String.self, forKey: .pin)
         policy = try? c.decodeIfPresent(PinPolicy.self, forKey: .policy)
+        natural = try? c.decodeIfPresent(NaturalVoiceView.self, forKey: .natural)
+        favorites = try? c.decodeIfPresent([FavoriteWorkspace].self, forKey: .favorites)
+        workspaces = try? c.decodeIfPresent([WorkspaceChoice].self, forKey: .workspaces)
+        calls = try? c.decodeIfPresent([CallEntry].self, forKey: .calls)
         if c.contains(.pause) {
             pause = (try? c.decodeIfPresent(Pause.self, forKey: .pause)) ?? Pause(active: false)
         } else {
@@ -1753,6 +1765,10 @@ public struct VoiceView: Codable, Equatable, Sendable {
         try c.encodeIfPresent(lastTest, forKey: .lastTest)
         try c.encodeIfPresent(pin, forKey: .pin)
         try c.encodeIfPresent(policy, forKey: .policy)
+        try c.encodeIfPresent(natural, forKey: .natural)
+        try c.encodeIfPresent(favorites, forKey: .favorites)
+        try c.encodeIfPresent(workspaces, forKey: .workspaces)
+        try c.encodeIfPresent(calls, forKey: .calls)
         if let pause {
             if pause.active { try c.encode(pause, forKey: .pause) } else { try c.encodeNil(forKey: .pause) }
         }
@@ -1771,9 +1787,11 @@ public struct VoiceView: Codable, Equatable, Sendable {
     }
 
     public init(mode: String, callee: String? = nil, defaultCallee: String? = nil, lastTest: LastTest? = nil, pin: String? = nil,
-                policy: PinPolicy? = nil, pause: Pause? = nil) {
+                policy: PinPolicy? = nil, pause: Pause? = nil, natural: NaturalVoiceView? = nil,
+                favorites: [FavoriteWorkspace]? = nil, workspaces: [WorkspaceChoice]? = nil, calls: [CallEntry]? = nil) {
         self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.lastTest = lastTest; self.pin = pin
         self.policy = policy; self.pause = pause
+        self.natural = natural; self.favorites = favorites; self.workspaces = workspaces; self.calls = calls
     }
 
     public var isOn: Bool { mode != "off" }
@@ -1846,6 +1864,10 @@ public enum VoiceChange: Equatable, Sendable {
     case pinAction(PinAction)
     /// Pause or resume calls, as `{ "pause": "1h" }`.
     case pause(PauseChoice)
+    /// The realistic voice, as `{ "natural": { "enabled"?, "voice"? } }`. Only to a Mac that sends `natural.voices`.
+    case natural(enabled: Bool?, voice: String?)
+    /// Quick workspaces, replacing the whole list: `{ "favorites": [{ "n", "workspace" }] }` (no label).
+    case favorites([FavoriteWorkspace])
 }
 
 extension VoiceChange: Encodable {
@@ -1873,6 +1895,17 @@ extension VoiceChange: Encodable {
             try c.encode(action, forKey: Key("pinAction"))
         case .pause(let choice):
             try c.encode(choice.rawValue, forKey: Key("pause"))
+        case .natural(let enabled, let voice):
+            var inner = c.nestedContainer(keyedBy: Key.self, forKey: Key("natural"))
+            try inner.encodeIfPresent(enabled, forKey: Key("enabled"))
+            try inner.encodeIfPresent(voice, forKey: Key("voice"))
+        case .favorites(let list):
+            var inner = c.nestedUnkeyedContainer(forKey: Key("favorites"))
+            for f in list {
+                var item = inner.nestedContainer(keyedBy: Key.self)
+                try item.encode(f.n, forKey: Key("n"))
+                try item.encode(f.workspace, forKey: Key("workspace"))
+            }
         }
     }
 }
@@ -1882,6 +1915,18 @@ public struct VoiceCommand: Encodable, Equatable, Sendable {
     public let v: Int
     public let kind: String
     public let change: VoiceChange
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// Ask the Mac for a voice sample: it makes the WAV the Mac app's "Play sample" plays and leaves it in the channel
+/// as sealed `media` chunks, answered as `media`. Reaches no chat. Exactly these keys, no others.
+public struct VoiceSampleCommand: Encodable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    /// A Kokoro id from `natural.voices`.
+    public let voice: String
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
