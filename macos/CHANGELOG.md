@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.12.27
+
+- Restart to update: if macOS blocks the in-place install, Squeak now reopens itself within seconds instead of staying closed.
+- A blocked update says so plainly and offers Download update, Open App Management settings and Try again. Squeak remembers a Mac that blocks self-updates and leads with Download update next time.
+- A slow or background download is no longer reported as stalled while it is still receiving data.
+- The update log (~/Library/Logs/Squeak Mac/updates.log) now records the installer's own error.
+
 ## 2.12.26
 
 - Check for updates now always answers: from the menu-bar popup, Settings or the app menu it opens the update window on what is happening (checking, an update ready to restart into, up to date, or a problem), instead of doing nothing when an update is already waiting.
