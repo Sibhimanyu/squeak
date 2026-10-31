@@ -328,6 +328,26 @@ instruction and ask for the same ("go with B, then call me back"). The model's r
 - **Nobody picks up, or it cannot be placed**: Telegram and Cliq get a text with how it ended. Calls are recorded in
   the history with reason `callback`.
 
+## Staying on the line while it works (add-on 0.15.0)
+
+After a message the person approved (the yes at the read-back), a voice-first call no longer just says "Sent. Goodbye."
+It asks: "Sent. Want me to stay on the line while it works? Say yes to hold, or no to hang up." A no (or two unclear
+answers) hangs up; a call back asked for with the send hangs up too, since that was the choice already made.
+
+- **Hold**: "Okay, I'll stay on the line. Press 1 any time to hear what it's thinking, or hash to hang up." The add-on
+  waits on the keypad and checks in with the Mac every 10 s (`talk` turns with phase `hold`, no recording, answered
+  `next: "hold"` with an empty text, which says nothing). Every 45 s of quiet it says "Still working. Press 1 to hear
+  what it's thinking."
+- **Peek (key 1)**: a `peek` turn; the Mac reads the newest steps of the chat in plain words (`thinkingReadout`: "Right
+  now: ... Before that: ... Earlier: ...", thinking summaries and notes in their own words, tools as labels, no paths,
+  secrets removed, nothing from your own messages). Read-only, no model.
+- **When it stops** (finished, asking, blocked, error): the Mac says how it ended (`endedReadout`) and invites a
+  question, and the call goes back to listening, so the conversation carries on. A chat that never starts working is
+  waited for 60 s, then reported ("I don't see it working yet."). The hold ends after 10 minutes ("You'll get a card
+  when it's done") or when the chat disappears. Hash hangs up at any time.
+- Offered only to an add-on that runs the hold loop (`HOLD_ADDON`, 0.15.0); older ones hang up after the send as
+  before. `MemoInbox` `hold` dependency: `supported`, `state`, `ended`, `peek`.
+
 ## How a recording ends, keys, busy lines, and the line itself (add-on 0.11.2)
 
 - A message recording ends on the first of: `#` (hash), 2.5 s of quiet after speech was heard (energy-based, read from

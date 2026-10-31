@@ -6,7 +6,7 @@ import { talkFlow } from "./talk-flow.js";
 
 type Take = { durationMs: number; ended?: "key" | "limit" | "silence" | "no-speech" } | null;
 
-function fakeCall(takes: Take[]): PhoneCall & { said: string[] } {
+function fakeCall(takes: Take[], keys: Array<string | null> = []): PhoneCall & { said: string[] } {
   const call = {
     peer: "35210",
     open: true,
@@ -16,7 +16,7 @@ function fakeCall(takes: Take[]): PhoneCall & { said: string[] } {
       call.said.push(text);
     },
     async key() {
-      return null;
+      return keys.shift() ?? null;
     },
     async beep() {},
     async record() {
@@ -32,7 +32,7 @@ function fakeCall(takes: Take[]): PhoneCall & { said: string[] } {
   return call;
 }
 
-const talk = (text: string, next: "listen" | "confirm" | "end"): DownMessage => ({
+const talk = (text: string, next: "listen" | "confirm" | "end" | "hold"): DownMessage => ({
   v: 1,
   id: "i",
   at: 1,
@@ -104,5 +104,68 @@ describe("talkFlow", () => {
     const reply: DownMessage = { v: 1, id: "i", at: 1, status: "refused", reason: "That call is no longer open." };
     expect(await talkFlow(refused, setup([reply]).deps, info)).toBe("keys");
     expect(refused.said).toEqual(["That call is no longer open."]);
+  });
+
+  describe("on hold", () => {
+    it("waits through silent check-ins, speaks what the Mac says, and listens again when the work is done", async () => {
+      const t = setup([
+        talk("Sent. Want me to stay on the line while it works? Say yes to hold, or no to hang up.", "confirm"),
+        talk("Okay, I'll stay on the line. Press 1 any time to hear what it's thinking, or hash to hang up.", "hold"),
+        talk("", "hold"),
+        talk("", "hold"),
+        talk("squeak is done. All 40 tests pass. Ask me anything about it, or tell me what to do next.", "listen"),
+        talk("Okay. Goodbye.", "end"),
+      ]);
+      const call = fakeCall([{ durationMs: 2000 }, { durationMs: 900 }, { durationMs: 1500 }]);
+      expect(await talkFlow(call, t.deps, info)).toBe("ended");
+      expect(t.asked.map((a) => a.phase)).toEqual(["say", "confirm", "hold", "hold", "hold", "say"]);
+      expect(call.said).toEqual([
+        "Sent. Want me to stay on the line while it works? Say yes to hold, or no to hang up.",
+        "Okay, I'll stay on the line. Press 1 any time to hear what it's thinking, or hash to hang up.",
+        "squeak is done. All 40 tests pass. Ask me anything about it, or tell me what to do next.",
+        "Okay. Goodbye.",
+      ]);
+    });
+
+    it("asks what the agent is thinking when 1 is pressed, with no recording, then carries on holding", async () => {
+      const phases: Array<{ phase: TalkPhase; bytes: number }> = [];
+      const replies = [
+        talk("I'll stay.", "hold"),
+        talk("Right now: reading the config.", "hold"),
+        talk("It is done.", "end"),
+      ];
+      const deps = {
+        uplink: {
+          talk: async (_callId: string, phase: TalkPhase, audio: Buffer) => {
+            phases.push({ phase, bytes: audio.length });
+            return replies.shift() ?? null;
+          },
+        },
+        encode: async () => Buffer.from("opus"),
+      };
+      const call = fakeCall([{ durationMs: 2000 }], ["1", null]);
+      expect(await talkFlow(call, deps, info)).toBe("ended");
+      expect(phases).toEqual([
+        { phase: "say", bytes: 4 },
+        { phase: "peek", bytes: 0 },
+        { phase: "hold", bytes: 0 },
+      ]);
+      expect(call.said).toContain("Right now: reading the config.");
+    });
+
+    it("hangs up on hash without asking the Mac", async () => {
+      const t = setup([talk("I'll stay.", "hold")]);
+      const call = fakeCall([{ durationMs: 2000 }], ["#"]);
+      expect(await talkFlow(call, t.deps, info)).toBe("ended");
+      expect(t.asked.map((a) => a.phase)).toEqual(["say"]);
+      expect(call.said.at(-1)).toBe("Goodbye.");
+    });
+
+    it("falls back to the keypad when the Mac stops answering during the hold", async () => {
+      const t = setup([talk("I'll stay.", "hold"), null]);
+      const call = fakeCall([{ durationMs: 2000 }]);
+      expect(await talkFlow(call, t.deps, info)).toBe("keys");
+      expect(call.said.at(-1)).toBe("I could not reach your Mac. You can use the keypad.");
+    });
   });
 });
