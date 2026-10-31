@@ -58,7 +58,8 @@ export class CallDialog {
   ) {}
 
   private get canAnswer(): boolean {
-    return this.script.options.length > 0 && (this.pin !== null || !this.pinRequired);
+    // A voice call talks without options (a call back has none): its words are the answer, and keys 1 to 8 do nothing.
+    return (this.script.options.length > 0 || this.script.voice === true) && (this.pin !== null || !this.pinRequired);
   }
 
   /** A pin is asked for before the question. */

@@ -410,7 +410,21 @@ describe("ChatConverser", () => {
     }
   });
 
-  it("reads only the four intents", () => {
+  it("reads a call back request, and a send that asks for one", () => {
+    expect(readConverse({ intent: "callback", spoken: "ok", message: "the tests" })).toEqual({
+      intent: "callback",
+      spoken: "ok",
+      message: "the tests",
+    });
+    expect(readConverse({ intent: "send", spoken: "ok", message: "B", callback: true })).toMatchObject({
+      callback: true,
+    });
+    expect(readConverse({ intent: "send", spoken: "ok", message: "B", callback: "yes" })).not.toHaveProperty(
+      "callback",
+    );
+  });
+
+  it("reads only the five intents", () => {
     expect(readConverse({ intent: "answer", spoken: "Yes." })).toEqual({ intent: "answer", spoken: "Yes." });
     expect(readConverse({ intent: "end" })).toEqual({ intent: "end", spoken: "" });
     expect(readConverse({ intent: "other", spoken: "x" })).toBeNull();

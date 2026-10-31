@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import { item, QUESTION } from "./fixtures.js";
-import { CallDialog, clipOption, clipQuestion, composeScript, FULL_TEXT_NOTE, shouldCall } from "./script.js";
+import {
+  CALLBACK_INVITATION,
+  CallDialog,
+  clipOption,
+  clipQuestion,
+  composeCallbackScript,
+  composeScript,
+  FULL_TEXT_NOTE,
+  shouldCall,
+} from "./script.js";
 
 describe("shouldCall", () => {
   it("rings only for what waits on you", () => {
@@ -197,5 +206,36 @@ describe("a voice-first call", () => {
       expect(script.question).toContain("Press star");
     }
     expect(composeScript(item(), QUESTION, true, true).question).toContain("Options. 1,");
+  });
+});
+
+describe("composeCallbackScript", () => {
+  const done = item("finished_unreviewed", { state: "finished", title: "Fix the parser" }).session;
+
+  it("says the work is done, how it ended, and invites a question when it can talk", () => {
+    const script = composeCallbackScript(done, "I fixed the parser. All 40 tests pass.", true);
+    expect(script.greeting).toContain("Fix the parser is done, as you asked.");
+    expect(script.question).toBe(`I fixed the parser. All 40 tests pass. ${CALLBACK_INVITATION}`);
+    expect(script).toMatchObject({ voice: true, options: [], followUp: { label: expect.any(String) } });
+    expect(script.keypad).toContain("Press 9");
+  });
+
+  it("only tells when the add-on cannot talk it through, with no keys that answer nothing", () => {
+    const script = composeCallbackScript(done, "Done.", false);
+    expect(script.voice).toBeUndefined();
+    expect(script.options).toEqual([]);
+    expect(script.followUp).toBeUndefined();
+    expect(script.question).toContain("Open Squeak to reply.");
+  });
+
+  it("says when it stopped on an error rather than finished", () => {
+    const failed = item("errored", { state: "error", title: "Fix the parser" }).session;
+    expect(composeCallbackScript(failed, null, true).greeting).toContain("stopped on an error");
+  });
+
+  it("clips a long last message and says the rest is on the phone", () => {
+    const long = Array.from({ length: 60 }, (_, i) => `Sentence ${i} is here.`).join(" ");
+    const script = composeCallbackScript(done, long, true);
+    expect(script.question).toContain(FULL_TEXT_NOTE);
   });
 });

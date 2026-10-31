@@ -15,7 +15,7 @@ export const MAX_CALLS = 200;
 export const DEFAULT_LIST = 100;
 
 export type CallKind = "agent" | "test" | "incoming";
-export type CallReason = "blocked_approval" | "blocked_question" | "asked_question";
+export type CallReason = "blocked_approval" | "blocked_question" | "asked_question" | "callback";
 export type CallOutcome = "answered" | "unanswered" | "failed" | "moved_on";
 
 export interface CallEntry {
@@ -38,7 +38,7 @@ export const MAX_SUMMARY = 160;
 
 export type CallRecord = Omit<CallEntry, "id">;
 
-const REASONS: ReadonlySet<string> = new Set(["blocked_approval", "blocked_question", "asked_question"]);
+const REASONS: ReadonlySet<string> = new Set(["blocked_approval", "blocked_question", "asked_question", "callback"]);
 const OUTCOMES: ReadonlySet<string> = new Set(["answered", "unanswered", "failed", "moved_on"]);
 
 /** Builds a clean entry from anything: only known fields, clipped, the letter only if it is a letter. */

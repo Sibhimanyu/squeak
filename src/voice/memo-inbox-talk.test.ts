@@ -34,6 +34,8 @@ describe("MemoInbox: a voice-first call", () => {
   let converse: NonNullable<MemoInboxDependencies["converse"]>;
   const seen: Array<{ utterance: string; question: string; options: unknown; callId: string }> = [];
   const ended: string[] = [];
+  const callbacks: Array<{ target: string; label: string; note: string; afterSend: boolean }> = [];
+  let callbackAnswer: { ok: true } | { ok: false; reason: string } = { ok: true };
 
   beforeEach(async () => {
     db = new FakeRtdb();
@@ -43,6 +45,8 @@ describe("MemoInbox: a voice-first call", () => {
     notes.length = 0;
     seen.length = 0;
     ended.length = 0;
+    callbacks.length = 0;
+    callbackAnswer = { ok: true };
     canSend = true;
     converse = async (_t, _l, input) => {
       seen.push(input);
@@ -63,6 +67,10 @@ describe("MemoInbox: a voice-first call", () => {
       note: (text) => notes.push(text),
       converse: (t, l, i) => converse(t, l, i),
       endCall: (id) => ended.push(id),
+      requestCallback: (target, label, note, afterSend) => {
+        callbacks.push({ target, label, note, afterSend });
+        return callbackAnswer;
+      },
       now: () => clock,
     });
     inbox.registerCall("call-1", "c1", "squeak voice", { question: "Which one?", options: OPTIONS });
@@ -92,6 +100,104 @@ describe("MemoInbox: a voice-first call", () => {
     return doc ? readDown(key, id, doc) : null;
   }
   const text = (down: DownMessage | null): string => (down?.status === "talk" ? down.text : "");
+
+  describe("a call back request", () => {
+    it("is remembered when the person ends the call asking for one, and the call ends", async () => {
+      converse = async () => ({ intent: "callback", spoken: "ok", message: "  the tests and docs " });
+      const down = await talk("say", "call me back when you're done with the tests");
+      expect(down).toMatchObject({
+        status: "talk",
+        next: "end",
+        text: "Okay, I'll call you back when squeak voice is done. Goodbye.",
+      });
+      expect(callbacks).toEqual([
+        { target: "c1", label: "squeak voice", note: "the tests and docs", afterSend: false },
+      ]);
+      expect(sent).toEqual([]);
+      expect(ended).toEqual(["call-1"]);
+    });
+
+    it("says why when the Mac will not take it, and keeps listening", async () => {
+      converse = async () => ({ intent: "callback", spoken: "ok" });
+      callbackAnswer = {
+        ok: false,
+        reason: "Nothing is running in squeak voice right now, so there is nothing to wait for.",
+      };
+      const down = await talk("say", "call me back when it is done");
+      expect(down).toMatchObject({ next: "listen", text: expect.stringContaining("Nothing is running") });
+      expect(ended).toEqual([]);
+    });
+
+    it("is not promised when the Mac cannot arrange one", async () => {
+      const bare = new MemoInbox({
+        store,
+        channel,
+        key,
+        transcriber: { transcribe: async () => heard },
+        targets: () => [{ target: "c1", label: "squeak voice", workspace: null }],
+        canSend: () => true,
+        send: async () => ({ status: "started", via: "conductor", delivery: "sent" }) as never,
+        caller: () => "35210",
+        note: () => undefined,
+        converse: async () => ({ intent: "callback", spoken: "ok" }),
+        now: () => clock,
+      });
+      bare.registerCall("call-9", "c1", "squeak voice", { question: "Which one?", options: OPTIONS });
+      const id = newMessageId();
+      heard = "call me back";
+      await store.set(
+        upPath(channel, id),
+        sealUp(key, {
+          v: 1,
+          id,
+          at: clock,
+          expiresAt: clock + 60_000,
+          kind: "talk",
+          dirVersion: "call-9",
+          choice: 1,
+          phase: "say",
+          audio: Buffer.from("opus").toString("base64"),
+        } as UpMessage),
+      );
+      await bare.pass();
+      const down = readDown(key, id, (await store.get(downPath(channel, id)))!);
+      expect(down).toMatchObject({ next: "listen", text: "I can't arrange a call back from here yet." });
+      bare.stop();
+    });
+
+    it("on a send, reads the call back too, and arranges it only after the yes and the send", async () => {
+      converse = async () => ({ intent: "send", spoken: "ok", message: "B", callback: true });
+      const proposal = await talk("say", "go with the second one and call me back when it's done");
+      expect(text(proposal)).toBe(
+        "I'll tell it option B: Open a PR first, then call you back when it's done. Say yes to send.",
+      );
+      expect(callbacks).toEqual([]);
+      const done = await talk("confirm", "yes");
+      expect(text(done)).toBe("Sent. I'll call you back when it's done. Goodbye.");
+      expect(sent).toEqual(["c1:B"]);
+      expect(callbacks).toEqual([{ target: "c1", label: "squeak voice", note: "", afterSend: true }]);
+    });
+
+    it("arranges nothing when the person says no, or the send does not go", async () => {
+      converse = async () => ({ intent: "send", spoken: "ok", message: "Merge it.", callback: true });
+      await talk("say", "merge it and call me back");
+      await talk("confirm", "no");
+      expect(callbacks).toEqual([]);
+      await talk("say", "merge it and call me back");
+      canSend = false;
+      const refused = await talk("confirm", "yes");
+      expect(text(refused)).toContain("busy right now");
+      expect(callbacks).toEqual([]);
+    });
+
+    it("does not ask for a call back on a send that did not ask for one", async () => {
+      converse = async () => ({ intent: "send", spoken: "ok", message: "B" });
+      await talk("say", "second one");
+      const done = await talk("confirm", "yes");
+      expect(text(done)).toBe("Sent. Goodbye.");
+      expect(callbacks).toEqual([]);
+    });
+  });
 
   describe("a call in", () => {
     const talkIn = async (said: string, version: string, extra: Record<string, unknown> = {}) =>

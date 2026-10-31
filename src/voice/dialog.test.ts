@@ -105,6 +105,20 @@ describe("CallDialog voice first", () => {
     expect(dialog.key("#")).toEqual([{ type: "play", text: voice.question }, { type: "converse" }]);
   });
 
+  it("converses with no options too (a call back), but a key answers nothing", () => {
+    const callBack: CallScript = { ...voice, options: [] };
+    const dialog = new CallDialog(callBack, null, false);
+    expect(dialog.start()).toEqual([
+      { type: "play", text: `${callBack.greeting} ${callBack.question}` },
+      { type: "converse" },
+    ]);
+    expect(dialog.key("1")).toEqual([]);
+    expect(dialog.key("9")).toEqual([{ type: "follow", kind: "message" }]);
+    // Not voice first and no options: still tell-only, as before.
+    const tellOnly: CallScript = { greeting: callBack.greeting, question: callBack.question, options: [] };
+    expect(new CallDialog(tellOnly, null, false).start()).toHaveLength(1);
+  });
+
   it("does not converse when nothing can be answered by key", () => {
     expect(new CallDialog(voice, null).start()).toEqual([
       { type: "play", text: `${voice.greeting} ${voice.question}` },
