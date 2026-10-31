@@ -407,6 +407,12 @@ final class ChannelsModel {
         }
     }
 
+    /// Clears "Updated to …" (the menu bar popup's Dismiss).
+    func dismissGatewayUpdate() {
+        gatewayUpdatePhase = nil
+        gatewayUpdateWatch?.cancel()
+    }
+
     private func watchGatewayUpdate(to target: String) {
         gatewayUpdateWatch?.cancel()
         var watch = GatewayUpdateWatch(target: target, from: gateway?.status.version, requestedAt: Date())

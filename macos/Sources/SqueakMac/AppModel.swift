@@ -729,8 +729,13 @@ final class AppModel {
     /// Reads the awake session (and the hotspot) for the menu bar, every 20 seconds for as long as
     /// the app runs: the countdown beside the duck must not wait for the popover to open.
     func pollAwake() async {
+        var round = 0
         while !Task.isCancelled {
             await readAwake()
+            // The phone-call add-on's update shows in the popup like the app's own: look once a minute, not only when
+            // Settings is open (the daemon itself checks for a newer add-on every 6 hours).
+            if round % 3 == 0, !demoMode { await channels.refreshGateway() }
+            round += 1
             try? await Task.sleep(for: .seconds(20))
         }
     }

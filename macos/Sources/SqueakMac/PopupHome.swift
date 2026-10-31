@@ -179,14 +179,43 @@ struct PopupHomeTop: View {
         }
     }
 
+    /// The phone-call add-on has an update to offer, is updating, or has just finished (or failed to).
+    private var addonUpdateShown: Bool {
+        let channels = model.channels
+        return channels.gatewayUpdatePhase != nil || channels.gateway?.updateAvailable == true
+    }
+
+    /// The Home Assistant add-on's update, the way the Mac app's own update shows above: offered, in progress, done.
+    @ViewBuilder private func addonUpdateRow(_ channels: ChannelsModel) -> some View {
+        if channels.gatewayUpdating {
+            HStack(spacing: Space.s) {
+                ProgressView().controlSize(.small)
+                Text(GatewayText.updating).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if case .updated(let version) = channels.gatewayUpdatePhase {
+            updateRow("Phone-call add-on updated to \(version)", action: "Dismiss") { channels.dismissGatewayUpdate() }
+        } else if channels.gatewayUpdatePhase == .timedOut {
+            updateRow(GatewayText.updateTimedOut, action: "Check again") { Task { await channels.checkGatewayUpdate() } }
+        } else if let error = channels.gatewayError, channels.gateway?.updateAvailable == true {
+            updateRow(error, action: "Try again") { Task { await channels.updateGatewayAddon() } }
+        } else if channels.gateway?.updateAvailable == true, let latest = channels.gateway?.latestVersion {
+            updateRow("Phone-call add-on \(latest) is available", action: "Update") {
+                Task { await channels.updateGatewayAddon() }
+            }
+        }
+    }
+
     @ViewBuilder private var banners: some View {
         let showHelp = model.health != nil && model.connectionHelp != nil
         let updater = model.updater
-        let showUpdate = updater.flow.phase != .idle || model.updateNote != nil
+        let channels = model.channels
+        let showUpdate = updater.flow.phase != .idle || model.updateNote != nil || addonUpdateShown
         if showHelp || model.launchOfferPending || showUpdate || model.tips.tip != nil {
             VStack(alignment: .leading, spacing: 4) {
                 UpdateBanner(updater: updater)
                 if let note = model.updateNote { updateRow(note, action: "Dismiss") { model.dismissUpdateNote() } }
+                addonUpdateRow(channels)
                 if showHelp, let help = model.connectionHelp {
                     HStack(alignment: .top, spacing: Space.s) {
                         Text(help).font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(3).fixedSize(horizontal: false, vertical: true)

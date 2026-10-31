@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.30
+
+- The menu bar popup now shows a phone-call add-on update the way it shows an app update: "Phone-call add-on 0.11.7 is available" with Update, then progress, then "Updated to …" with Dismiss. The popup checks once a minute, so you no longer have to open Settings to see it.
+
 ## 2.12.29
 
 - Phone calls: Update add-on now waits up to 15 minutes for Home Assistant to install and restart the add-on (a small Home Assistant machine takes several), and if it still says it did not update, keeps watching and changes to "Updated" when the new version reports in.
