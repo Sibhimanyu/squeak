@@ -216,12 +216,7 @@ export function phoneLine(
 ): {
   call(callee: string, dialog: CallDialog, audio?: Clip[], macVoice?: boolean): Promise<CallResult>;
 } {
-  const place = async (
-    callee: string,
-    dialog: CallDialog,
-    audio?: Clip[],
-    macVoice = false,
-  ): Promise<CallResult> => {
+  const place = async (callee: string, dialog: CallDialog, audio?: Clip[], macVoice = false): Promise<CallResult> => {
     const result = await placeCall(callee, dialog, audio, macVoice);
     const measured = result.status === "answered" ? quality() : null;
     return result.status === "answered" && measured ? { ...result, quality: measured } : result;
