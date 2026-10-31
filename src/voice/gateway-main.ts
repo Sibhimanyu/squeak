@@ -21,6 +21,7 @@ import type { CallResult } from "./baresip-line.js";
 import type { CallDialog } from "./dialog.js";
 import { readVoiceConfig, readVoiceRelayConfig, type VoiceEnv } from "./config.js";
 import { VoiceGateway } from "./gateway.js";
+import { talkFlow } from "./talk-flow.js";
 import { followUpFlow, handleIncoming, inboundPrompts } from "./inbound-flow.js";
 import { DirectoryCache } from "./directory-cache.js";
 import { incomingGate, PinKeeper } from "./pin-keeper.js";
@@ -210,6 +211,8 @@ export async function resolveCredentials(
 export interface FollowUpInfo {
   callId: string;
   label: string;
+  /** The script is voice first: after the question the call listens and talks (`talkFlow`), keys are the fallback. */
+  voice?: boolean;
 }
 
 /** An outbound call on the shared phone: ring, then the dialog. */
@@ -221,6 +224,8 @@ export function phoneLine(
   quality: () => CallQuality | null = () => null,
   /** Runs the 9 (a message for the chat) and 0 (its status) keys of a call that offers them. */
   followUp?: (call: PhoneCall, info: FollowUpInfo, kind: "message" | "status") => Promise<"back" | "ended">,
+  /** Talks a voice-first call through after its question: "ended" is done, "keys" falls back to the keypad. */
+  converse?: (call: PhoneCall, info: FollowUpInfo) => Promise<"ended" | "keys">,
 ): {
   call(
     callee: string,
@@ -263,6 +268,7 @@ export function phoneLine(
       dialog,
       onEvent ? (line) => onEvent("info", line) : undefined,
       follow && followUp ? (kind) => followUp(call, follow, kind) : undefined,
+      follow?.voice && converse ? () => converse(call, follow) : undefined,
     );
   };
   return {
@@ -503,6 +509,17 @@ export async function runGateway(): Promise<number> {
               },
               { callId: info.callId, label: info.label, ask: directoryCache?.current()?.ask === true },
               kind,
+            ),
+          (call, info) =>
+            talkFlow(
+              call,
+              {
+                uplink,
+                encode: encodeOpus,
+                trace: (line) => note("info", line),
+                seed: (clips) => phone.seed?.(clips),
+              },
+              info,
             ),
         ),
         onEvent: note,

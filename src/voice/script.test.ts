@@ -171,3 +171,31 @@ describe("CallDialog", () => {
     expect(dialog.key("0")).toEqual([]);
   });
 });
+
+describe("a voice-first call", () => {
+  it("is one short opening with no options or keys, and keeps the keypad's wording for a fallback", () => {
+    const script = composeScript(item(), QUESTION, true, true, true);
+    expect(script.voice).toBe(true);
+    expect(script.question).toContain("Which one?");
+    expect(script.question.endsWith("Just tell me what to do, or ask me anything about it.")).toBe(true);
+    expect(script.question).not.toContain("Options");
+    expect(script.question).not.toContain("Merge now");
+    expect(script.question).not.toMatch(/press/i);
+    expect(script.followUp).toEqual({ label: expect.stringContaining("squeak") });
+    expect(script.options.map((o) => o.letter)).toEqual(["A", "B"]);
+    expect(script.keypad).toContain("Options. 1, Merge now, recommended. 2, Open a PR first.");
+    expect(script.keypad).toContain("Press star to hear this again, or hash to hang up.");
+  });
+
+  it("is the keypad call as always when keys cannot answer, or voice is not asked for", () => {
+    for (const script of [
+      composeScript(item(), QUESTION, false, true, true),
+      composeScript(item(), QUESTION, true, true),
+    ]) {
+      expect(script.voice).toBeUndefined();
+      expect(script.keypad).toBeUndefined();
+      expect(script.question).toContain("Press star");
+    }
+    expect(composeScript(item(), QUESTION, true, true).question).toContain("Options. 1,");
+  });
+});

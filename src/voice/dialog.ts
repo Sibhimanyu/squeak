@@ -18,6 +18,13 @@ export interface CallScript {
    * spoken name. Absent: the keypad is the options alone, as before (an add-on without it ignores the field).
    */
   followUp?: { label: string };
+  /**
+   * Voice first: `question` is one short opening with no option list and no key instructions; after it the call
+   * listens and talks (`converse`), and the keypad is only a fallback. Absent: the keypad as always.
+   */
+  voice?: true;
+  /** The keypad's own wording (the options and the star and hash keys), said only when a voice call falls back to keys. */
+  keypad?: string;
 }
 
 export type DialogAction =
@@ -25,6 +32,8 @@ export type DialogAction =
   | { type: "answer"; letter: string }
   /** 9: record a message for the chat; 0: read out its status. The gateway runs it, then asks the question again. */
   | { type: "follow"; kind: "message" | "status" }
+  /** Voice first: listen and talk after the question was played. The gateway runs it; "keys" falls back to `keypadActions`. */
+  | { type: "converse" }
   | { type: "hangup"; text?: string };
 
 /** Wrong PINs allowed in one call. */
@@ -74,13 +83,25 @@ export class CallDialog {
     return out;
   }
 
+  /** The call talks rather than reads out keys: voice first, and a key could answer it. */
+  private get converses(): boolean {
+    return this.script.voice === true && this.canAnswer;
+  }
+
   start(): DialogAction[] {
     if (this.asksPin) {
       this.stage = "pin";
       return [{ type: "play", text: `${this.script.greeting} Please enter your PIN, then press hash.` }];
     }
     this.stage = "question";
-    return [{ type: "play", text: `${this.script.greeting} ${this.script.question}` }];
+    const play: DialogAction = { type: "play", text: `${this.script.greeting} ${this.script.question}` };
+    return this.converses ? [play, { type: "converse" }] : [play];
+  }
+
+  /** A voice call that could not carry on by voice: the keypad's wording, and the keys work as they do on any call. */
+  keypadActions(): DialogAction[] {
+    this.stage = "question";
+    return [{ type: "play", text: this.script.keypad ?? this.script.question }];
   }
 
   key(digit: string): DialogAction[] {
@@ -107,7 +128,8 @@ export class CallDialog {
     this.entered = "";
     if (ok) {
       this.stage = "question";
-      return [{ type: "play", text: this.script.question }];
+      const play: DialogAction = { type: "play", text: this.script.question };
+      return this.converses ? [play, { type: "converse" }] : [play];
     }
     this.tries += 1;
     if (this.tries >= MAX_PIN_TRIES) {
@@ -119,7 +141,7 @@ export class CallDialog {
 
   /** The question once more, after a follow-up (a status read out) has had its say. */
   replay(): DialogAction[] {
-    return this.stage === "question" ? [{ type: "play", text: this.script.question }] : [];
+    return this.stage === "question" ? [{ type: "play", text: this.script.keypad ?? this.script.question }] : [];
   }
 
   private questionKey(digit: string): DialogAction[] {
@@ -131,7 +153,7 @@ export class CallDialog {
       return [{ type: "follow", kind: digit === "9" ? "message" : "status" }];
     }
     if (digit === "*") {
-      return [{ type: "play", text: this.script.question }];
+      return [{ type: "play", text: this.script.keypad ?? this.script.question }];
     }
     const index = /^[1-8]$/.test(digit) ? Number(digit) - 1 : -1;
     const option = this.canAnswer ? this.script.options[index] : undefined;

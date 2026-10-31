@@ -31,7 +31,7 @@ export interface GatewayDependencies {
       dialog: CallDialog,
       audio?: Clip[],
       macVoice?: boolean,
-      followUp?: { callId: string; label: string },
+      followUp?: { callId: string; label: string; voice?: boolean },
     ): Promise<CallResult>;
   };
   /** The extension to ring when a request names none. A request may name one, but only an internal extension (checked on reading it). */
@@ -233,7 +233,9 @@ export class VoiceGateway {
               ),
               request.audio,
               request.audioFollows === true,
-              request.script.followUp && answerable ? { callId: id, label: request.script.followUp.label } : undefined,
+              request.script.followUp && answerable
+                ? { callId: id, label: request.script.followUp.label, voice: request.script.voice === true }
+                : undefined,
             )
           : { status: "failed", reason: "No phone extension is set. Set it in Squeak's settings on your Mac." };
       } finally {

@@ -314,6 +314,8 @@ function isScript(value: unknown): value is CallScript {
   ) {
     return false;
   }
+  if (value.voice !== undefined && value.voice !== true) return false;
+  if (value.keypad !== undefined && !(typeof value.keypad === "string" && value.keypad.length <= 2000)) return false;
   return value.options.every(
     (option) =>
       isRecord(option) &&

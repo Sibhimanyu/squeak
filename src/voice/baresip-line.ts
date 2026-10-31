@@ -277,7 +277,7 @@ export class BaresipLine {
           return;
         }
         // Follow-ups (a message, a status) are the gateway's; this direct line never offers them.
-        if (action.type === "follow") return;
+        if (action.type === "follow" || action.type === "converse") return;
         hangingUp = true;
         if (action.text) await delay((await play(action.text)) + GOODBYE_PAD_MS);
         send("hangup");

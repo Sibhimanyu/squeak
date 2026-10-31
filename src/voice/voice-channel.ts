@@ -44,6 +44,8 @@ export interface VoiceChannelDependencies {
   idleSeconds?: () => Promise<number | null>;
   /** The call may offer a message for the chat (9) and its status (0): the Mac's inbox and the add-on can take them. */
   followUp?: () => boolean;
+  /** The call may be voice first (`composeScript`'s `voice`): the Mac can converse and the add-on can talk it through. */
+  voiceFirst?: () => boolean;
   policy: CallPolicy;
   /** True while the person has paused calls (voice/settings.ts); cards still go everywhere else. */
   paused?: () => boolean;
@@ -163,8 +165,20 @@ export class VoiceChannel {
     const canAnswer =
       canReplyFromCard(current, this.deps.replier) &&
       (typeof this.deps.canTakeKeys === "function" ? this.deps.canTakeKeys() : this.deps.canTakeKeys);
-    const script = composeScript(current, text, canAnswer, safely(() => this.deps.followUp?.() ?? false) ?? false);
-    const follow = script.followUp ? { target, label: script.followUp.label } : undefined;
+    const script = composeScript(
+      current,
+      text,
+      canAnswer,
+      safely(() => this.deps.followUp?.() ?? false) ?? false,
+      safely(() => this.deps.voiceFirst?.() ?? false) ?? false,
+    );
+    const follow = script.followUp
+      ? {
+          target,
+          label: script.followUp.label,
+          ...(script.voice ? { script: { question: script.question, options: script.options } } : {}),
+        }
+      : undefined;
 
     this.calling = true;
     this.deps.policy.record(episode, now, retry);

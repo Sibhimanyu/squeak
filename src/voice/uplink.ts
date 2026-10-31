@@ -7,6 +7,7 @@ import {
   UP_TTL_MS,
   upPath,
   type DownMessage,
+  type TalkPhase,
   type UpMessage,
 } from "./memo-protocol.js";
 
@@ -19,6 +20,8 @@ export interface Uplink {
   ask(memoId: string): Promise<DownMessage | null>;
   /** Where a chat stands, to read aloud. */
   status(choice: number, dirVersion: string): Promise<DownMessage | null>;
+  /** One turn of a voice-first call: what the person said (or their yes or no), and what to say and do next. */
+  talk(callId: string, phase: TalkPhase, audio: Buffer): Promise<DownMessage | null>;
 }
 
 export type UplinkStore = Pick<RtdbRest, "get" | "set" | "delete" | "watch">;
@@ -83,6 +86,25 @@ export class RelayUplink implements Uplink {
       { v: 1, id: newMessageId(), at, expiresAt: at + UP_TTL_MS, kind: "status", dirVersion, choice },
       // The Mac reads the status out in its own voice before it answers (up to 20 s), so it gets longer than a send.
       this.options.sendWaitMs ?? 45_000,
+    );
+  }
+
+  talk(callId: string, phase: TalkPhase, audio: Buffer): Promise<DownMessage | null> {
+    const at = this.now();
+    return this.exchange(
+      {
+        v: 1,
+        id: newMessageId(),
+        at,
+        expiresAt: at + UP_TTL_MS,
+        kind: "talk",
+        dirVersion: callId,
+        choice: 1,
+        phase,
+        audio: audio.toString("base64"),
+      },
+      // Transcribing, a model working out the answer and the Mac's voice: as long as an ask, and a little more.
+      90_000,
     );
   }
 

@@ -97,6 +97,9 @@ export function clipOption(title: string): string {
   return tidy(words(head).slice(0, MAX_OPTION_WORDS).join(" ")).replace(/[.!?]+$/, "");
 }
 
+/** The end of a voice-first opening: no options, no keys, only an invitation to speak. */
+export const VOICE_INVITATION = "Just tell me what to do, or ask me anything about it.";
+
 function describe(kind: AttentionKind): string {
   switch (kind) {
     case "blocked_approval":
@@ -118,6 +121,8 @@ export function composeScript(
   canAnswer: boolean,
   /** The add-on can take a message for this chat (9) and read its status (0): said, and named in the script. */
   followUp = false,
+  /** The add-on and the Mac can talk the call through (`converse`): one short opening, then listening; keys are a fallback. */
+  voice = false,
 ): CallScript {
   // The chat's own name as you know it from the sidebar ("App quitting loop"), else its workspace; never the branch
   // or a dot ("squeak · main"), which a voice reads as noise.
@@ -144,9 +149,21 @@ export function composeScript(
   const follow = followUp && canAnswer;
   if (follow) parts.push("Press 9 to send a message or ask a question about it, or 0 to hear where it stands.");
   parts.push("Press star to hear this again, or hash to hang up.");
+  const keypad = parts.join(" ");
+  // Voice first needs something to answer (the dialog's own rule): the options go to the model as context, never aloud.
+  if (voice && canAnswer && options.length > 0) {
+    return {
+      greeting,
+      question: [asked?.text, VOICE_INVITATION].filter(Boolean).join(" "),
+      options,
+      followUp: { label },
+      voice: true,
+      keypad,
+    };
+  }
   return {
     greeting,
-    question: parts.join(" "),
+    question: keypad,
     options: canAnswer ? options : [],
     ...(follow ? { followUp: { label } } : {}),
   };

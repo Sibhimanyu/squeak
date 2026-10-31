@@ -202,3 +202,19 @@ describe("pinctl", () => {
     expect(readResult(key, "c1", seal({ status: "pinctl", ok: true, state: "maybe" }), [])).toBeNull();
   });
 });
+
+describe("a voice-first script", () => {
+  const voiceRequest = (script: Record<string, unknown>): CallRequest =>
+    ({ ...request, script: { ...request.script, ...script } }) as CallRequest;
+
+  it("round-trips voice and keypad", () => {
+    const sent = voiceRequest({ voice: true, keypad: "Options. 1, yes.", followUp: { label: "squeak" } });
+    expect(readRequest(key, "abc", sealRequest(key, sent), NOW)).toEqual({ ok: true, request: sent });
+  });
+
+  it("refuses a voice flag that is not true and a keypad that is not a short string", () => {
+    for (const bad of [{ voice: false }, { voice: "yes" }, { keypad: 5 }, { keypad: "x".repeat(2001) }]) {
+      expect(readRequest(key, "abc", sealRequest(key, voiceRequest(bad)), NOW).ok).toBe(false);
+    }
+  });
+});

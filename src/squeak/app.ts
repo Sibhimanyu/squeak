@@ -91,7 +91,7 @@ import { DirectLine } from "../voice/direct-line.js";
 import { PinKeeper, type PinPolicy, type PinState } from "../voice/pin-keeper.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import { OLD_ADDON, relayLineFor, type RelayLine } from "../voice/relay-line.js";
-import { addonSupports, FOLLOW_UP_ADDON, LATE_CLIPS_ADDON } from "../voice/addon-update.js";
+import { addonSupports, FOLLOW_UP_ADDON, LATE_CLIPS_ADDON, VOICE_FIRST_ADDON } from "../voice/addon-update.js";
 import { GatewayPairing } from "../voice/pairing-window.js";
 import { GatewayClaim } from "../voice/gateway-claim.js";
 import { RENDEZVOUS_DATABASE } from "../voice/claim-protocol.js";
@@ -126,7 +126,7 @@ import { NaturalInstaller } from "../voice/natural-setup.js";
 import { TEST_SCRIPT } from "../voice/test-script.js";
 import { readIdleSeconds } from "../fleet/user-idle.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
-import { ChatQuestioner, statusReadout, type ChatBriefInputs } from "../voice/chat-brief.js";
+import { ChatConverser, ChatQuestioner, statusReadout, type ChatBriefInputs } from "../voice/chat-brief.js";
 import { VoiceFavoritesStore, workspaceKeyOf } from "../voice/favorites.js";
 import { LastChatStore } from "../voice/last-chat.js";
 import { cutAtWord, speakable, spokenChat, spokenChats, spokenWorkspace } from "../voice/spoken-labels.js";
@@ -269,6 +269,7 @@ export class SqueakApp {
   private readonly backgroundWork = new BackgroundWorkReader();
   /** Answers a spoken question about one chat: `claude` with no tools, a short leash (voice/chat-brief.ts). */
   private readonly chatQuestioner: ChatQuestioner;
+  private readonly chatConverser: ChatConverser;
   private readonly subagents = new SubagentActivityReader(this.backgroundWork);
   private readonly claudeRefresher: ClaudeLimitsRefresher;
   /** What Squeak Hands holds, for the Mac app's permission explainer (GET /control/hands/grants). */
@@ -873,6 +874,9 @@ export class SqueakApp {
     this.chatQuestioner = new ChatQuestioner(
       claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), null, 40_000),
     );
+    this.chatConverser = new ChatConverser(
+      claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), null, 40_000),
+    );
     // Only a Refresh press reaches this: no timer, no model call, and the
     // Keychain is read only then.
     this.claudeRefresher = new ClaudeLimitsRefresher(this.claudeLimits, () => fetchClaudeUsage());
@@ -1162,6 +1166,12 @@ export class SqueakApp {
         const input = this.chatBriefInputs(target, label);
         if (!input) throw new Error("chat not found");
         return this.chatQuestioner.ask(question, input);
+      },
+      // Voice-first calls: what a spoken reply meant. It only proposes words; the person's yes sends them.
+      converse: async (target, label, say) => {
+        const input = this.chatBriefInputs(target, label);
+        if (!input) throw new Error("chat not found");
+        return this.chatConverser.converse(say, input);
       },
       speech: async (text) => (await this.promptClips.clips([text]))[0],
       note: (text) => this.announceCallNote(text),
@@ -2079,7 +2089,8 @@ export class SqueakApp {
           lateClips,
           trace: (text) => this.traceMac("step", text),
           // A call out names the chat that asked, so 9 (a message) and 0 (its status) work on it.
-          registerFollowUp: (callId, follow) => this.memoInbox?.registerCall(callId, follow.target, follow.label),
+          registerFollowUp: (callId, follow) =>
+            this.memoInbox?.registerCall(callId, follow.target, follow.label, follow.script),
         },
       );
       this.voiceLine = line;
@@ -2093,6 +2104,9 @@ export class SqueakApp {
         idleSeconds: () => readIdleSeconds(),
         followUp: () =>
           this.memoInbox !== null && addonSupports(this.gatewayStatusReader().peek().version, FOLLOW_UP_ADDON),
+        // Talking a call through needs the inbox (and whisper), its model, and an add-on that runs the talk loop.
+        voiceFirst: () =>
+          this.memoInbox !== null && addonSupports(this.gatewayStatusReader().peek().version, VOICE_FIRST_ADDON),
         policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voiceRelay.quiet }),
       });
     }

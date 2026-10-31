@@ -100,6 +100,11 @@ export async function runDialog(
    * again; "ended": the follow-up finished the call (a message sent says goodbye). Absent: the keys do nothing.
    */
   followUp?: (kind: "message" | "status") => Promise<"back" | "ended">,
+  /**
+   * Voice first: talks the call through after the question (listen, answer, read back, send). "ended": it finished
+   * the call; "keys" (or absent): the keypad's wording is said and the keys work as on any call.
+   */
+  converse?: () => Promise<"ended" | "keys">,
 ): Promise<CallResult> {
   let letter: string | null = null;
   call.trace = trace ?? null;
@@ -116,6 +121,17 @@ export async function runDialog(
       } else if (action.type === "play") {
         trace?.(`said: ${action.text}`);
         await call.say(action.text);
+      } else if (action.type === "converse") {
+        trace?.("step: Voice first, listening");
+        const outcome = converse ? await converse() : "keys";
+        if (outcome === "ended") {
+          await call.hangup();
+          return { status: "answered", letter };
+        }
+        trace?.("step: Falling back to the keypad");
+        actions = dialog.keypadActions();
+        again = true;
+        break;
       } else if (action.type === "follow") {
         trace?.(`key: ${action.kind === "message" ? "9 (your own message)" : "0 (status)"}`);
         const outcome = followUp ? await followUp(action.kind) : "back";

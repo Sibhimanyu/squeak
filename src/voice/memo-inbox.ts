@@ -4,7 +4,11 @@ import type { RtdbRest } from "../remote/rtdb-rest.js";
 import type { ReplyFailureHandler, ReplyOutcome } from "../fleet/session-reply.js";
 import { logger } from "../utils/logger.js";
 import { chunkClips, type Clip } from "./clips.js";
+import { spokenAnswer } from "./chat-brief.js";
 import { ASK_FAILED, inboundPrompts } from "./inbound-flow.js";
+import { clipOption } from "./script.js";
+import { judgeTranscript } from "./transcript-quality.js";
+import type { ChoiceOption } from "../fleet/choices.js";
 import {
   audioDocId,
   audioPath,
@@ -83,6 +87,16 @@ export interface MemoInboxDependencies {
   answer?: (target: string, label: string, question: string) => Promise<string>;
   /** The Mac's recording of an answer's words; undefined (or a failure) leaves it to the add-on. */
   speech?: (text: string) => Promise<Clip | undefined>;
+  /**
+   * Voice-first calls out: works out what a spoken reply was (a question to answer, an instruction to propose, the
+   * end of the call). Read-only like `answer`; its output only ever chooses the words of a proposal the person must
+   * confirm by voice, never sends anything. Throws when it cannot. Absent: the Mac takes no `talk`.
+   */
+  converse?: (
+    target: string,
+    label: string,
+    input: { utterance: string; question: string; options: ChoiceOption[] },
+  ) => Promise<{ intent: "answer" | "send" | "end" | "unclear"; spoken: string; message?: string }>;
   /** A line for the call trace. */
   trace?: (kind: TraceKind, text: string, extra?: { ms?: number; label?: string }) => void;
   now?: () => number;
@@ -116,6 +130,42 @@ const MAX_SPOKEN_LABEL = 60;
 const ANSWER_BUDGET_MS = 45_000;
 /** Questions and status read-outs an hour: a model call each, so a stuck loop is stopped here too. */
 const MAX_ANSWERS_PER_HOUR = 40;
+/** Turns a person gets on one voice-first call (each is a model call), and how long a read-back waits for a yes. */
+const MAX_TALK_TURNS = 8;
+const PROPOSAL_TTL_MS = 5 * 60_000;
+/** A message by phone is a sentence or two, not a document. */
+const MAX_TALK_MESSAGE_CHARS = 600;
+/** A yes or no is a few words; anything longer than this is never taken as one. */
+const MAX_CONFIRM_WORDS = 8;
+const YES = /\b(?:yes|yeah|yep|yup|sure|send(?: it)?|do it|go ahead|correct|confirm|okay|ok|please do)\b/i;
+const NO = /\b(?:no|nope|cancel|don'?t|do not|wait|stop|never ?mind|not yet)\b/i;
+const GOODBYE = /^\W*(?:good ?bye|bye(?: bye)?|that'?s all|that is all|hang up)\W*$/i;
+const TALK_SAYS = {
+  closed: "That call is no longer open.",
+  sorry: "Sorry, I didn't catch that. Tell me what to do, or ask me anything about it.",
+  unclear: "Sorry, I didn't get that. Tell me what to do, or ask me anything about it.",
+  failed: "I could not work that out. You can try again.",
+  again: "Say yes to send it, or no to cancel.",
+  giveUp: "I won't send it. Goodbye.",
+  declined: "Okay, I won't send it. What would you like to do?",
+  gone: "That message is no longer waiting. Tell me what to do again.",
+  sent: "Sent. Goodbye.",
+  bye: "Goodbye.",
+  turns: "That is as much as I can do by voice on one call. Goodbye.",
+};
+
+/** A model's proposed message: control characters out, whitespace collapsed, at most 600 characters. */
+export function cleanMessage(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return (
+    raw
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, MAX_TALK_MESSAGE_CHARS)
+  );
+}
 
 /** A workspace name read aloud: no longer than 60 characters, cut at a word. */
 function spokenLabel(label: string): string {
@@ -143,7 +193,19 @@ export class MemoInbox {
   /** Directory versions the gateway may still be reading from, each as the targets by number. */
   private readonly versions = new Map<string, string[]>();
   /** Calls out that may take a message for, or read the status of, the chat that asked: the call's id is their "version". */
-  private readonly calls = new Map<string, { target: string; label: string; at: number }>();
+  private readonly calls = new Map<
+    string,
+    {
+      target: string;
+      label: string;
+      at: number;
+      /** What the call asked, for the model's context (voice first only). */
+      script?: { question: string; options: ChoiceOption[] };
+      /** The one message read back and awaiting the person's yes; never set by anything but their own `say` turn. */
+      proposal?: { message: string; at: number; tries: number } | undefined;
+      turns: number;
+    }
+  >();
   private published: { version: string; at: number } | null = null;
   /** Audio document ids written for each directory version, so they go when the version does. */
   private readonly audioDocs = new Map<string, string[]>();
@@ -384,10 +446,15 @@ export class MemoInbox {
   }
 
   /** The call `callId` is about this chat: its id then names a one-chat list for memos and status (9 and 0 on the keypad). */
-  registerCall(callId: string, target: string, label: string): void {
+  registerCall(
+    callId: string,
+    target: string,
+    label: string,
+    script?: { question: string; options: ChoiceOption[] },
+  ): void {
     const now = this.now();
     for (const [id, call] of this.calls) if (now - call.at > CALL_TARGET_TTL_MS) this.calls.delete(id);
-    this.calls.set(callId, { target, label, at: now });
+    this.calls.set(callId, { target, label, at: now, turns: 0, ...(script ? { script } : {}) });
   }
 
   /** The chats a list version names by number: a published list, or the one chat a call out is about. */
@@ -547,29 +614,168 @@ export class MemoInbox {
     }
 
     if (message.kind === "status" || message.kind === "ask") return this.handleAnswer(message);
+    if (message.kind === "talk") return this.handleTalk(message);
 
     const pending = this.pending.get(message.memoId);
     if (!pending) return this.refuse(message.id, "That message is no longer waiting.");
     this.pending.delete(message.memoId);
+    const delivered = await this.deliver(pending.target, pending.label, pending.text);
+    if (!delivered.sent) return this.refuse(message.id, delivered.reason);
+    return { v: 1, id: message.id, at: this.now(), status: "sent" };
+  }
+
+  /**
+   * Sends words the person has confirmed to a chat, through the same replier as every other surface: the hourly limit,
+   * whether the chat can still take one, the send, and the notes. The one place a phone message leaves the Mac.
+   */
+  private async deliver(
+    target: string,
+    label: string,
+    text: string,
+  ): Promise<{ sent: true } | { sent: false; reason: string }> {
+    const now = this.now();
     while (this.sends.length > 0 && now - this.sends[0]! > 60 * 60_000) this.sends.shift();
     if (this.sends.length >= MAX_SENDS_PER_HOUR)
-      return this.refuse(message.id, "Too many messages by phone this hour.");
-    if (!this.deps.canSend(pending.target)) {
-      this.deps.trace?.("warn", `${pending.label} is busy, nothing sent`, { label: pending.label });
-      return this.refuse(message.id, `${pending.label} is busy right now. Send it from the app.`);
+      return { sent: false, reason: "Too many messages by phone this hour." };
+    if (!this.deps.canSend(target)) {
+      this.deps.trace?.("warn", `${label} is busy, nothing sent`, { label });
+      return { sent: false, reason: `${label} is busy right now. Send it from the app.` };
     }
     this.sends.push(now);
-    this.rememberLast(pending.target);
-    const outcome = await this.deps.send(pending.target, pending.text, (reason) => {
-      this.deps.note(`The message you phoned in for ${pending.label} did not go through: ${reason}`);
+    this.rememberLast(target);
+    const outcome = await this.deps.send(target, text, (reason) => {
+      this.deps.note(`The message you phoned in for ${label} did not go through: ${reason}`);
     });
     if (outcome.status === "refused" || outcome.status === "unconfirmed") {
-      this.deps.trace?.("warn", outcome.reason.slice(0, 200), { label: pending.label });
-      return this.refuse(message.id, outcome.reason.slice(0, 200));
+      this.deps.trace?.("warn", outcome.reason.slice(0, 200), { label });
+      return { sent: false, reason: outcome.reason.slice(0, 200) };
     }
-    this.deps.trace?.("step", `Sent to ${pending.label}`, { label: pending.label });
-    const shown = pending.text.length > 200 ? `${pending.text.slice(0, 200)}…` : pending.text;
-    this.deps.note(`Sent by phone to ${pending.label}: “${shown}”`);
-    return { v: 1, id: message.id, at: this.now(), status: "sent" };
+    this.deps.trace?.("step", `Sent to ${label}`, { label });
+    const shown = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+    this.deps.note(`Sent by phone to ${label}: \u201c${shown}\u201d`);
+    return { sent: true };
+  }
+
+  private async talkReply(
+    id: string,
+    text: string,
+    next: "listen" | "confirm" | "end",
+    label: string,
+  ): Promise<DownMessage> {
+    this.deps.trace?.("said", text, { label });
+    const spoken = await this.answerAudio(text);
+    return { v: 1, id, at: this.now(), status: "talk", text, next, ...(spoken ? { audio: spoken } : {}) };
+  }
+
+  /**
+   * One turn of a voice-first call out. Only a call the Mac itself registered can talk (never a published list), and a
+   * message leaves only from a `confirm` turn whose own recorded words said yes to the one proposal the person's
+   * `say` turn made. The model chooses the proposal's words and nothing else: it cannot send, and a `say` turn never
+   * reaches `deliver`.
+   */
+  private async handleTalk(message: Extract<UpMessage, { kind: "talk" }>): Promise<DownMessage> {
+    const { converse, trace } = this.deps;
+    const now = this.now();
+    const call = this.calls.get(message.dirVersion);
+    if (message.choice !== 1 || !call || now - call.at > CALL_TARGET_TTL_MS) {
+      return this.refuse(message.id, TALK_SAYS.closed);
+    }
+    if (!converse) return this.refuse(message.id, "Your Mac cannot talk through a call yet.");
+    const { label, target } = call;
+    const reply = (text: string, next: "listen" | "confirm" | "end"): Promise<DownMessage> =>
+      this.talkReply(message.id, text, next, label);
+
+    const audio = Buffer.from(message.audio, "base64");
+    let heard: string;
+    const began = Date.now();
+    try {
+      heard = await this.deps.transcriber.transcribe(audio);
+    } catch (error) {
+      logger.warn("voice talk could not be transcribed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      trace?.("warn", "Could not transcribe the recording", { label });
+      heard = "";
+    }
+    trace?.("heard", heard || "(nothing)", { ms: Date.now() - began, label });
+    const words = heard.trim().split(/\s+/).filter(Boolean);
+
+    if (message.phase === "confirm") {
+      const proposal = call.proposal;
+      if (!proposal || now - proposal.at > PROPOSAL_TTL_MS) {
+        call.proposal = undefined;
+        return reply(TALK_SAYS.gone, "listen");
+      }
+      const yes = YES.test(heard);
+      const no = NO.test(heard);
+      if (words.length > MAX_CONFIRM_WORDS || yes === no) {
+        proposal.tries += 1;
+        if (proposal.tries >= 2) {
+          call.proposal = undefined;
+          return reply(TALK_SAYS.giveUp, "end");
+        }
+        return reply(TALK_SAYS.again, "confirm");
+      }
+      // Taken first, so a repeated or replayed confirm can never send the same words twice.
+      call.proposal = undefined;
+      if (no) return reply(TALK_SAYS.declined, "listen");
+      const delivered = await this.deliver(target, label, proposal.message);
+      return reply(delivered.sent ? TALK_SAYS.sent : delivered.reason, "end");
+    }
+
+    // A new thing said: whatever was read back before is no longer on offer.
+    call.proposal = undefined;
+    if (GOODBYE.test(heard)) return reply(TALK_SAYS.bye, "end");
+    if (judgeTranscript(heard, 5_000) === "silence") return reply(TALK_SAYS.sorry, "listen");
+    if (call.turns >= MAX_TALK_TURNS) return reply(TALK_SAYS.turns, "end");
+    while (this.answers.length > 0 && now - this.answers[0]! > 60 * 60_000) this.answers.shift();
+    if (this.answers.length >= MAX_ANSWERS_PER_HOUR)
+      return this.refuse(message.id, "Too many questions by phone this hour.");
+    call.turns += 1;
+    this.answers.push(now);
+    this.rememberLast(target);
+    let decided: Awaited<ReturnType<NonNullable<MemoInboxDependencies["converse"]>>>;
+    try {
+      decided = await Promise.race([
+        converse(target, label, {
+          utterance: heard.slice(0, 600),
+          question: call.script?.question ?? "",
+          options: call.script?.options ?? [],
+        }),
+        new Promise<never>((_, rejectTurn) =>
+          setTimeout(() => rejectTurn(new Error("took too long")), ANSWER_BUDGET_MS).unref(),
+        ),
+      ]);
+    } catch (error) {
+      logger.warn("voice talk failed", { error: error instanceof Error ? error.message : String(error) });
+      trace?.("warn", "Could not work out what was said", { label });
+      return reply(TALK_SAYS.failed, "listen");
+    }
+    switch (decided.intent) {
+      case "answer": {
+        const text = spokenAnswer(String(decided.spoken ?? ""), MAX_ANSWER_CHARS);
+        return reply(text || TALK_SAYS.unclear, "listen");
+      }
+      case "end":
+        return reply(TALK_SAYS.bye, "end");
+      case "send": {
+        const proposed = cleanMessage(decided.message);
+        if (!proposed) return reply(TALK_SAYS.unclear, "listen");
+        let phrase: string;
+        const letter = /^[A-Ha-h]$/.test(proposed) ? proposed.toUpperCase() : null;
+        if (letter) {
+          const option = call.script?.options.find((o) => o.letter === letter);
+          if (!option) return reply(TALK_SAYS.unclear, "listen");
+          phrase = `option ${letter}: ${clipOption(option.title)}`;
+        } else {
+          phrase = spokenAnswer(proposed, 400) || spokenAnswer(String(decided.spoken ?? ""), 200);
+        }
+        if (!phrase) return reply(TALK_SAYS.unclear, "listen");
+        call.proposal = { message: letter ?? proposed, at: now, tries: 0 };
+        return reply(`I'll tell it${letter ? " " : ": "}${phrase.replace(/[.!?]+$/, "")}. Say yes to send.`, "confirm");
+      }
+      default:
+        return reply(TALK_SAYS.unclear, "listen");
+    }
   }
 }

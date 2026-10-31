@@ -1,6 +1,7 @@
 import type { RtdbRest } from "../remote/rtdb-rest.js";
 import type { CallResult } from "./baresip-line.js";
 import type { Clip } from "./clips.js";
+import type { ChoiceOption } from "../fleet/choices.js";
 import type { CallScript } from "./dialog.js";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import { audioPath, callAudioId, sealAudio } from "./memo-protocol.js";
@@ -22,7 +23,17 @@ import {
 /** What a call needs from a line: the script to read, and whether a key may answer it. */
 export interface VoiceLine {
   /** `follow`: the chat that asked, so the call may take a message for it or read its status (the call's id names it). */
-  call(script: CallScript, answerable: boolean, follow?: { target: string; label: string }): Promise<CallResult>;
+  call(script: CallScript, answerable: boolean, follow?: CallFollow): Promise<CallResult>;
+}
+
+/**
+ * The chat that asked, so the call may take a message for it or read its status. `script` is what the call said (the
+ * question and the options), kept on the Mac as context for a voice-first call's answers.
+ */
+export interface CallFollow {
+  target: string;
+  label: string;
+  script?: { question: string; options: ChoiceOption[] };
 }
 
 /** After a request expires the gateway may still be mid-call; this is the longest one it allows. */
@@ -57,7 +68,7 @@ export interface RelayLineOptions {
    */
   lateClips?: () => boolean;
   /** Tells the inbox which chat a call is about (by the call's id), before the request goes out. */
-  registerFollowUp?: (callId: string, follow: { target: string; label: string }) => void;
+  registerFollowUp?: (callId: string, follow: CallFollow) => void;
   /** A line for the call trace: when dialling started, and when each clip was made and sent. */
   trace?: (text: string) => void;
   now?: () => number;
@@ -75,10 +86,10 @@ export class RelayLine implements VoiceLine {
     this.now = options.now ?? Date.now;
   }
 
-  async call(script: CallScript, answerable: boolean, follow?: { target: string; label: string }): Promise<CallResult> {
+  async call(script: CallScript, answerable: boolean, follow?: CallFollow): Promise<CallResult> {
     const { key } = this.options;
     const id = newCallId();
-    if (follow && script.followUp) this.options.registerFollowUp?.(id, follow);
+    if (follow && (script.followUp || script.voice)) this.options.registerFollowUp?.(id, follow);
     if (this.options.clips && this.options.lateClips?.()) return this.callWithLateClips(id, script, answerable);
     // Made first: the request's clock starts when it is written, not while the voice is being recorded.
     const audio = await this.options.clips?.(script, answerable).catch(() => undefined);

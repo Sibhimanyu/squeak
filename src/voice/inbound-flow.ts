@@ -30,7 +30,7 @@ export interface InboundDependencies {
   allowed?: () => boolean;
   /** Who can take a message now, and the one extension allowed to call in (read from the Mac's sealed list). */
   directory: () => Promise<DirectoryDoc | null>;
-  uplink: Uplink;
+  uplink: Omit<Uplink, "talk">;
   /** Turns a recorded WAV into the small Opus memo that travels. */
   encode: (wavFile: string) => Promise<Buffer>;
   /**
@@ -204,7 +204,7 @@ const STILL_WORKING_GAP_MS = 10_000;
  * While the Mac works on an answer: says "Still working on it." after the first wait, and again only after the gap, as
  * long as the work goes on and the last one has been said. Returns what stops it.
  */
-function reassure(call: PhoneCall, deps: InboundDependencies): () => void {
+export function reassure(call: PhoneCall, deps: Pick<InboundDependencies, "trace">): () => void {
   let stopped = false;
   let saying = false;
   let lastAt = 0;
@@ -278,7 +278,7 @@ export async function handleIncoming(incoming: IncomingCall, deps: InboundDepend
 }
 
 /** Says it, and writes down that it was said. */
-async function speak(call: PhoneCall, deps: InboundDependencies, text: string): Promise<void> {
+async function speak(call: PhoneCall, deps: Pick<InboundDependencies, "trace">, text: string): Promise<void> {
   deps.trace?.(`said: ${text}`);
   await call.say(text);
 }

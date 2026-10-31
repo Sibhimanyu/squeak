@@ -76,3 +76,51 @@ describe("CallDialog follow-ups (9 a message, 0 the status)", () => {
     expect(dialog.key("0")).toEqual([{ type: "follow", kind: "status" }]);
   });
 });
+
+describe("CallDialog voice first", () => {
+  const voice: CallScript = {
+    ...script,
+    options: [
+      { letter: "A", title: "a" },
+      { letter: "B", title: "b" },
+    ],
+    question: "Which one? Just tell me what to do, or ask me anything about it.",
+    voice: true,
+    followUp: { label: "squeak" },
+    keypad: "Which one? Options. 1, a. 2, b. Press star to hear this again, or hash to hang up.",
+  };
+
+  it("plays the opening and then converses, with no PIN", () => {
+    const dialog = new CallDialog(voice, null, false);
+    expect(dialog.start()).toEqual([
+      { type: "play", text: `${voice.greeting} ${voice.question}` },
+      { type: "converse" },
+    ]);
+  });
+
+  it("converses only after a right PIN", () => {
+    const dialog = new CallDialog(voice, "4821");
+    expect(dialog.start()).toHaveLength(1);
+    for (const d of "4821") dialog.key(d);
+    expect(dialog.key("#")).toEqual([{ type: "play", text: voice.question }, { type: "converse" }]);
+  });
+
+  it("does not converse when nothing can be answered by key", () => {
+    expect(new CallDialog(voice, null).start()).toEqual([
+      { type: "play", text: `${voice.greeting} ${voice.question}` },
+    ]);
+  });
+
+  it("falls back to the keypad's wording, and the keys then work as on any call", () => {
+    const dialog = new CallDialog(voice, null, false);
+    dialog.start();
+    expect(dialog.keypadActions()).toEqual([{ type: "play", text: voice.keypad }]);
+    expect(dialog.key("2")[0]).toEqual({ type: "answer", letter: "B" });
+    const again = new CallDialog(voice, null, false);
+    again.start();
+    again.keypadActions();
+    expect(again.key("*")).toEqual([{ type: "play", text: voice.keypad }]);
+    expect(again.replay()).toEqual([{ type: "play", text: voice.keypad }]);
+    expect(again.key("#")).toEqual([{ type: "hangup" }]);
+  });
+});

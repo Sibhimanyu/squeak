@@ -111,14 +111,35 @@ export type UpMessage =
   /** The recording is a question about its chat: answer it aloud; send nothing to the chat. */
   | { v: 1; id: string; at: number; expiresAt: number; kind: "ask"; memoId: string }
   /** Read out where a chat stands: no recording. Names the chat as a memo does. */
-  | { v: 1; id: string; at: number; expiresAt: number; kind: "status"; dirVersion: string; choice: number };
+  | { v: 1; id: string; at: number; expiresAt: number; kind: "status"; dirVersion: string; choice: number }
+  /**
+   * One turn of a voice-first call out: a recording of what the person said. `dirVersion` is the call's id (never a
+   * published list), `choice` is always 1. `phase` "confirm" is the person's yes or no to a message read back.
+   */
+  | {
+      v: 1;
+      id: string;
+      at: number;
+      expiresAt: number;
+      kind: "talk";
+      dirVersion: string;
+      choice: number;
+      phase: TalkPhase;
+      audio: string;
+    };
+
+/** What a voice-first call's turn is: what the person said, or whether to send what was read back to them. */
+export type TalkPhase = "say" | "confirm";
+export type TalkNext = "listen" | "confirm" | "end";
 
 export type DownMessage =
   | { v: 1; id: string; at: number; status: "transcript"; text: string; label: string; audio?: Clip }
   | { v: 1; id: string; at: number; status: "sent" }
   /** What to read aloud for an `ask` or `status`: plain sentences, at most `MAX_ANSWER_CHARS`. */
   | { v: 1; id: string; at: number; status: "answer"; text: string; audio?: Clip }
-  | { v: 1; id: string; at: number; status: "refused"; reason: string };
+  | { v: 1; id: string; at: number; status: "refused"; reason: string }
+  /** What to say for a `talk` turn, and what the call does next: listen again, listen for yes or no, or end. */
+  | { v: 1; id: string; at: number; status: "talk"; text: string; audio?: Clip; next: TalkNext };
 
 export function sealDirectory(key: string, doc: DirectoryDoc): ChannelDoc {
   return sealBody(key, "dir", "current", doc, doc.at);
@@ -227,6 +248,17 @@ export function readUp(
     }
     return { ok: true, message: { ...base, kind: "status", dirVersion, choice } };
   }
+  if (body.kind === "talk") {
+    const { dirVersion, choice, phase, audio } = body;
+    if (typeof dirVersion !== "string" || dirVersion.length === 0 || dirVersion.length > 64) {
+      return { ok: false, reason: "not a voice message" };
+    }
+    if (choice !== 1 || (phase !== "say" && phase !== "confirm")) return { ok: false, reason: "not a voice message" };
+    if (typeof audio !== "string" || audio.length === 0 || audio.length > MAX_AUDIO_CHARS) {
+      return { ok: false, reason: "no audio" };
+    }
+    return { ok: true, message: { ...base, kind: "talk", dirVersion, choice, phase, audio } };
+  }
   return { ok: false, reason: "not a voice message" };
 }
 
@@ -260,6 +292,18 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
         ...base,
         status: "answer",
         text: body.text.slice(0, MAX_ANSWER_CHARS),
+        ...(spoken ? { audio: spoken } : {}),
+      };
+    }
+    case "talk": {
+      if (typeof body.text !== "string" || body.text.trim() === "") return null;
+      if (body.next !== "listen" && body.next !== "confirm" && body.next !== "end") return null;
+      const spoken = readClip(body.audio);
+      return {
+        ...base,
+        status: "talk",
+        text: body.text.slice(0, MAX_ANSWER_CHARS),
+        next: body.next,
         ...(spoken ? { audio: spoken } : {}),
       };
     }

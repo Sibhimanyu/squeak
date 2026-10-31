@@ -129,3 +129,30 @@ describe("runDialog follow-ups", () => {
     expect(result).toEqual({ status: "answered", letter: null });
   });
 });
+
+describe("runDialog voice first", () => {
+  const voice: CallScript = {
+    ...script,
+    question: "Which? Just tell me.",
+    voice: true,
+    followUp: { label: "squeak" },
+    keypad: "Which? Press 1 for A. Press 2 for B.",
+  };
+
+  it("hangs up when the conversation ended the call, without reading the keypad", async () => {
+    const call = fakeCall([]);
+    const result = await runDialog(call, new CallDialog(voice, null, false), undefined, undefined, async () => "ended");
+    expect(result).toEqual({ status: "answered", letter: null });
+    expect(call.hungUp).toBe(true);
+    expect(call.said).toEqual([`${voice.greeting} ${voice.question}`]);
+  });
+
+  it("falls back to the keypad's wording and keys when the conversation hands over, or there is none", async () => {
+    for (const converse of [async () => "keys" as const, undefined]) {
+      const call = fakeCall(["2"]);
+      const result = await runDialog(call, new CallDialog(voice, null, false), undefined, undefined, converse);
+      expect(result).toEqual({ status: "answered", letter: "B" });
+      expect(call.said).toEqual([`${voice.greeting} ${voice.question}`, voice.keypad, "Sent B. Goodbye."]);
+    }
+  });
+});
