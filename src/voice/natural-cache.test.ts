@@ -271,7 +271,10 @@ describe("priority and warm-up", () => {
     );
     voices.push(natural);
     await natural.warm();
-    await new Promise((r) => setTimeout(r, 400));
+    // The restart is a new process: how long it takes depends on the machine's load, so wait for it, not for a clock.
+    for (let waited = 0; fs.readFileSync(marks, "utf8").length < 2 && waited < 8_000; waited += 50) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
     expect(fs.readFileSync(marks, "utf8").length).toBe(2);
   });
 
