@@ -13,13 +13,13 @@ import Observation
 
     public var active: Bool { loading || playing }
 
-    public func play(voice: String, client: DaemonClient) {
+    public func play(voice: String, engine: String? = nil, client: DaemonClient) {
         stop()
         loading = true
         let request = generation
         task = Task { [weak self] in
             do {
-                let data = try await client.previewNaturalVoice(voice)
+                let data = try await client.previewNaturalVoice(voice, engine: engine)
                 guard let self, !Task.isCancelled, self.generation == request else { return }
                 let player = try AVAudioPlayer(data: data)
                 self.player = player

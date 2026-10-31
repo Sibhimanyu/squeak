@@ -4,6 +4,7 @@ import http from "node:http";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
+import { isEngineId, type EngineId } from "../voice/voice-engines.js";
 import { normalizeHookPayload } from "./hook-protocol.js";
 import { parseCursor } from "./transcript.js";
 import type { AgentKind, HookEvent } from "./types.js";
@@ -150,7 +151,7 @@ export interface IngressControl {
    */
   voice?: {
     read(): unknown;
-    preview?(voice: string): Promise<Buffer | null>;
+    preview?(voice: string, engine?: string): Promise<Buffer | null>;
     apply(
       request: unknown,
     ):
@@ -160,14 +161,19 @@ export interface IngressControl {
   };
   /**
    * Installing the realistic call voice from an app (voice/natural-setup.ts), token-gated, no CORS header, 405 for
-   * other methods: `GET /control/voice/natural/setup` answers `{ state: "idle" | "running" | "ready" | "failed",
-   * step?, text?, percent?, bytes?, totalBytes?, code?, error? }` (`error` is one fixed sentence, never a path or
-   * command output); `POST` (body `{}`) starts the install in the background and answers the same status, joining one
-   * that already runs. 400 `{ error }` when it is already installed; 503 when unavailable.
+   * other methods: `GET /control/voice/natural/setup[?engine=<id>]` answers `{ engine, state: "idle" | "running" |
+   * "ready" | "failed", step?, text?, percent?, bytes?, totalBytes?, code?, error? }` (`error` is one fixed sentence,
+   * never a path or command output; a running install of any engine is the answer whatever engine is asked);
+   * `POST` (body `{}` or `{ engine }`, absent = Kokoro) starts the install in the background and answers the same
+   * status, joining one that already runs (one at a time across engines). 400 `{ error }` when it is already installed
+   * or the engine is unknown; 503 when unavailable. `POST /control/voice/natural/remove` (body `{ engine }`) deletes an
+   * engine's folder and answers `{ ok: true }`; 400 `{ error }` for the engine in use, one that is installing, or
+   * Kokoro while it is the only one.
    */
   voiceNatural?: {
-    status(): unknown;
-    start(): { ok: true } | { ok: false; reason: string };
+    status(engine?: EngineId): unknown;
+    start(engine?: EngineId): { ok: true } | { ok: false; reason: string };
+    remove?(engine: EngineId): { ok: true } | { ok: false; reason: string };
   };
   /**
    * Pairing the Home Assistant gateway (voice/pairing-window.ts), all token-gated, no CORS header:
@@ -1066,19 +1072,20 @@ export class HookIngressServer {
           respond(response, 400, "bad json");
           return;
         }
+        const keys = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? Object.keys(parsed) : [];
+        const asked = parsed as { voice?: unknown; engine?: unknown };
+        // `{ voice }` or `{ voice, engine }`: the engine's own list decides whether the voice is one it has.
         if (
-          typeof parsed !== "object" ||
-          parsed === null ||
-          Array.isArray(parsed) ||
-          Object.keys(parsed).length !== 1 ||
-          !("voice" in parsed) ||
-          typeof parsed.voice !== "string" ||
-          !/^[a-z]{2}_[a-z]+$/.test(parsed.voice)
+          !keys.includes("voice") ||
+          keys.some((key) => key !== "voice" && key !== "engine") ||
+          typeof asked.voice !== "string" ||
+          !/^[A-Za-z0-9_]{1,40}$/.test(asked.voice) ||
+          (asked.engine !== undefined && !isEngineId(asked.engine))
         ) {
           respond(response, 400, "invalid voice");
           return;
         }
-        void preview(parsed.voice)
+        void preview(asked.voice, asked.engine as EngineId | undefined)
           .then((wav) => {
             if (response.destroyed) return;
             if (!wav) {
@@ -1096,24 +1103,68 @@ export class HookIngressServer {
     }
 
     if ((request.url ?? "").split("?")[0] === "/control/voice/natural/setup") {
-      request.resume();
       if (request.method !== "GET" && request.method !== "POST") {
+        request.resume();
         respond(response, 405, "method not allowed");
         return;
       }
       const natural = control.voiceNatural;
       if (!natural) {
+        request.resume();
         respond(response, 503, "voice setup unavailable");
         return;
       }
-      if (request.method === "POST") {
-        const started = natural.start();
+      if (request.method === "GET") {
+        request.resume();
+        const asked = new URL(request.url ?? "", "http://localhost").searchParams.get("engine");
+        if (asked !== null && !isEngineId(asked)) {
+          respondJson(response, 400, { error: "That is not a voice engine." });
+          return;
+        }
+        respondJson(response, 200, natural.status(asked ?? undefined));
+        return;
+      }
+      readSmallJson(request, response, (body) => {
+        const engine = (body as { engine?: unknown } | null)?.engine;
+        if (engine !== undefined && !isEngineId(engine)) {
+          respondJson(response, 400, { error: "That is not a voice engine." });
+          return;
+        }
+        const started = natural.start(engine);
         if (!started.ok) {
           respondJson(response, 400, { error: started.reason });
           return;
         }
+        respondJson(response, 200, natural.status(engine));
+      });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/voice/natural/remove") {
+      if (request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
       }
-      respondJson(response, 200, natural.status());
+      const remove = control.voiceNatural?.remove;
+      if (!remove) {
+        request.resume();
+        respond(response, 503, "voice setup unavailable");
+        return;
+      }
+      readSmallJson(request, response, (body) => {
+        const engine = (body as { engine?: unknown } | null)?.engine;
+        if (!isEngineId(engine)) {
+          respondJson(response, 400, { error: "That is not a voice engine." });
+          return;
+        }
+        const removed = remove(engine);
+        if (!removed.ok) {
+          respondJson(response, 400, { error: removed.reason });
+          return;
+        }
+        respondJson(response, 200, { ok: true });
+      });
       return;
     }
 
@@ -1794,6 +1845,32 @@ function safeEquals(left: string, right: string): boolean {
     return false;
   }
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+/** The small JSON body of a control request (up to 4 KB; an empty body is `{}`), then `onBody`; a bad one is answered 400. */
+function readSmallJson(request: http.IncomingMessage, response: http.ServerResponse, onBody: (body: unknown) => void) {
+  let body = "";
+  let aborted = false;
+  request.on("error", () => {
+    aborted = true;
+  });
+  request.on("data", (chunk: Buffer) => {
+    body += chunk.toString("utf8");
+    if (body.length > 4096 && !aborted) {
+      aborted = true;
+      respond(response, 413, "payload too large");
+      request.destroy();
+    }
+  });
+  request.on("end", () => {
+    if (aborted) return;
+    try {
+      const parsed: unknown = body.trim() === "" ? {} : JSON.parse(body);
+      onBody(typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : null);
+    } catch {
+      respond(response, 400, "bad json");
+    }
+  });
 }
 
 function respondJson(response: http.ServerResponse, status: number, value: unknown): void {

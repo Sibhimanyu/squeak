@@ -48,6 +48,7 @@ export function phoneCalls(
 
 export interface PhoneVoiceContext {
   natural: {
+    /** Whether any engine of the realistic voice is on this Mac. */
     installed(): boolean;
     apply(request: unknown): { ok: true } | { ok: false; reason: string };
   };
@@ -60,9 +61,10 @@ export interface PhoneVoiceContext {
 export type PhoneVoiceOutcome = { ok: true } | { ok: false; reason: string };
 
 /**
- * `{ natural: { enabled?, voice? } }` or `{ favorites: [{ n, workspace }] }`, exactly one key. Returns null for any
+ * `{ natural: { enabled?, voice?, engine?, emotion? } }` or `{ favorites: [{ n, workspace }] }`, exactly one key. Returns null for any
  * other change (the caller handles callee, pause, policy). A phone may only name a workspace this Mac offers (or one
- * already saved), and the realistic voice must be installed.
+ * already saved), and the realistic voice must be installed (any engine). A phone can switch to an engine that is installed; it cannot
+ * start the multi-gigabyte install of one (the Mac does that).
  */
 export function applyPhoneVoiceChange(request: unknown, ctx: PhoneVoiceContext): PhoneVoiceOutcome | null {
   if (typeof request !== "object" || request === null || Array.isArray(request)) return null;

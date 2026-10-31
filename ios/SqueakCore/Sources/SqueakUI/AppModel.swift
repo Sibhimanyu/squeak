@@ -1574,9 +1574,22 @@ final class AppModel {
             case .pause(let choice):
                 snapshot?.voice?.pause = choice == .resume ? .init(active: false)
                     : .init(active: true, until: choice == .forever ? nil : Date().addingTimeInterval(choice == .hour ? 3600 : 14400).timeIntervalSince1970 * 1000)
-            case .natural(let enabled, let voice):
+            case .natural(let enabled, let voice, let engine, let emotion):
                 if let enabled { snapshot?.voice?.natural?.enabled = enabled }
-                if let voice { snapshot?.voice?.natural?.voice = voice }
+                if let engine {
+                    snapshot?.voice?.natural?.engine = engine
+                    if let e = snapshot?.voice?.natural?.engines?.first(where: { $0.id == engine }) {
+                        snapshot?.voice?.natural?.voice = e.voice
+                        snapshot?.voice?.natural?.voices = e.voices
+                    }
+                }
+                if let emotion { snapshot?.voice?.natural?.emotion = emotion }
+                if let voice {
+                    snapshot?.voice?.natural?.voice = voice
+                    if let i = snapshot?.voice?.natural?.engines?.firstIndex(where: { $0.id == (engine ?? snapshot?.voice?.natural?.engine) }) {
+                        snapshot?.voice?.natural?.engines?[i].voice = voice
+                    }
+                }
             case .favorites(let list):
                 snapshot?.voice?.favorites = list.map { f in
                     FavoriteWorkspace(n: f.n, workspace: f.workspace,
@@ -1603,11 +1616,11 @@ final class AppModel {
 
     /// A sample of one realistic voice, made on the Mac and brought over as sealed `media` chunks (the same read path
     /// as a film). No Face ID: it touches no chat and carries no words. Making it takes a few seconds on the Mac.
-    func loadVoiceSample(_ voice: String) async -> SampleAnswer {
+    func loadVoiceSample(_ voice: String, engine: String? = nil) async -> SampleAnswer {
         if demo { return .refused("Samples play from your Mac, not in the demo.") }
         guard let channel else { return .refused("Not connected to your Mac.") }
         do {
-            let (id, document) = try channel.voiceSampleDocument(voice: voice, signer: signer)
+            let (id, document) = try channel.voiceSampleDocument(voice: voice, engine: engine, signer: signer)
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel, within: 90) else {
                 return .refused("Your Mac didn't answer. Is Squeak running?")

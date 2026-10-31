@@ -257,16 +257,19 @@ public struct DaemonClient: Sendable {
     }
 
     /// Turns the Mac's realistic call voice on or off, or picks its voice. nil = a daemon without the route (404).
-    public func setNaturalVoice(enabled: Bool? = nil, voice: String? = nil) async throws -> VoiceSettings? {
-        let r = try await post("/control/voice", body: NaturalVoice.requestBody(enabled: enabled, voice: voice))
+    public func setNaturalVoice(enabled: Bool? = nil, voice: String? = nil, engine: String? = nil,
+                                emotion: NaturalEmotion? = nil) async throws -> VoiceSettings? {
+        let r = try await post("/control/voice", body: NaturalVoice.requestBody(enabled: enabled, voice: voice, engine: engine, emotion: emotion))
         if r.status == 404 { return nil }
         try Self.check(r.status)
         return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
     }
 
     /// A fixed WAV sample made locally using the call voice. Never places a call or changes its settings.
-    public func previewNaturalVoice(_ voice: String) async throws -> Data {
-        let body = try JSONSerialization.data(withJSONObject: ["voice": voice])
+    public func previewNaturalVoice(_ voice: String, engine: String? = nil) async throws -> Data {
+        var object = ["voice": voice]
+        if let engine { object["engine"] = engine }
+        let body = try JSONSerialization.data(withJSONObject: object)
         let r = try await post("/control/voice/preview", body: body, timeout: 65)
         try Self.check(r.status)
         return r.body
@@ -281,12 +284,21 @@ public struct DaemonClient: Sendable {
     }
 
     /// Starts the install in the daemon (or joins the one that runs). Never downloads anything in this process.
-    public func startNaturalSetup() async throws -> NaturalSetupOutcome {
-        let r = try await post("/control/voice/natural/setup", body: NaturalSetup.requestBody, timeout: 15)
+    public func startNaturalSetup(engine: String? = nil) async throws -> NaturalSetupOutcome {
+        let r = try await post("/control/voice/natural/setup", body: NaturalSetup.requestBody(engine: engine), timeout: 15)
         if r.status == 404 || r.status == 503 { return .outdated }
         if r.status == 400 { return .refused(PinOutcome.reason(from: r.body)) }
         try Self.check(r.status)
         return .started(try decode(NaturalSetupStatus.self, r.body))
+    }
+
+    /// Deletes an installed engine's folder. Refusals (the current engine, the only one) carry the daemon's sentence.
+    public func removeNaturalEngine(_ engine: String) async throws -> NaturalRemoveOutcome {
+        let r = try await post("/control/voice/natural/remove", body: NaturalSetup.removeBody(engine: engine), timeout: 30)
+        if r.status == 404 || r.status == 503 { return .outdated }
+        if r.status == 400 { return .refused(PinOutcome.reason(from: r.body)) }
+        try Self.check(r.status)
+        return .removed
     }
 
     /// Places a test call. `.done` carries the view with `lastTest` ringing; `.refused` the daemon's sentence.

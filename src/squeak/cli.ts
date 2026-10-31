@@ -48,7 +48,7 @@ Commands:
   cliq-relay       Set up two-way Zoho Cliq; writes the handlers to paste (--rotate: new secret)
   voice-relay      Make the key Squeak and the Home Assistant voice gateway share; prints the add-on options
   voice-gateway    Run the voice gateway (the Home Assistant add-on runs this)
-  voice-tts-setup  Install the realistic voice for phone calls on this Mac (Kokoro, about 350 MB once)
+  voice-tts-setup  Install the realistic voice for phone calls on this Mac (Kokoro, about 350 MB once; --engine qwen3|ming|chatterbox for an expressive one, about 4 GB)
   voice-test       Ring your phone with a made-up question, to check the PBX setup (docs/voice.md)
   help             Show this message`);
 }
@@ -234,7 +234,15 @@ export async function main(argv: string[]): Promise<void> {
     }
     case "voice-tts-setup": {
       const { runNaturalSetup } = await import("../voice/natural-setup.js");
-      process.exitCode = await runNaturalSetup(path.dirname(resolveSqueakEnvPath()));
+      const { isEngineId } = await import("../voice/voice-engines.js");
+      const at = argv.indexOf("--engine");
+      const engine = at === -1 ? "kokoro" : argv[at + 1];
+      if (!isEngineId(engine)) {
+        console.log("Usage: squeak voice-tts-setup [--engine kokoro|qwen3|ming|chatterbox]");
+        process.exitCode = 1;
+        return;
+      }
+      process.exitCode = await runNaturalSetup(path.dirname(resolveSqueakEnvPath()), console.log, engine);
       return;
     }
     case "voice-test": {

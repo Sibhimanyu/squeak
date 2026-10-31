@@ -114,7 +114,9 @@ describe("applyPhoneVoiceChange", () => {
     expect(applyPhoneVoiceChange({ natural: { enabled: false } }, ctx)).toEqual({ ok: true });
     expect(natural.settings.enabled).toBe(false);
     expect(applyPhoneVoiceChange({ natural: { voice: "am_adam" } }, ctx)).toEqual({ ok: true });
-    expect(natural.settings).toEqual({ enabled: false, voice: "am_adam" });
+    expect(natural.settings).toMatchObject({ enabled: false, voice: "am_adam", engine: "kokoro" });
+    expect(applyPhoneVoiceChange({ natural: { emotion: "strong" } }, ctx)).toEqual({ ok: true });
+    expect(natural.settings.emotion).toBe("strong");
   });
 
   it("refuses a bad natural change, extra keys, and an uninstalled voice", () => {

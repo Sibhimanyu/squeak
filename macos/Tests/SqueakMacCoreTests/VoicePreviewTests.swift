@@ -44,6 +44,18 @@ private actor PreviewTransport: HTTPTransport {
         #expect(!preview.active && preview.error == nil)
     }
 
+    @Test func previewCarriesTheEngineWhenGiven() async {
+        let transport = PreviewTransport()
+        let client = DaemonClient(baseURL: URL(string: "http://127.0.0.1:8477")!, transport: transport, tokenProvider: { "t" })
+        let preview = VoicePreview()
+        preview.play(voice: "Ryan", engine: "qwen3", client: client)
+        await waitForRequest(transport)
+        let body = await transport.first()?.body.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: String]
+        #expect(body == ["voice": "Ryan", "engine": "qwen3"])
+        preview.stop()
+        await transport.finish(503)
+    }
+
     @Test func failuresEndLoadingAndCanBeCleared() async {
         let transport = PreviewTransport()
         let client = DaemonClient(baseURL: URL(string: "http://127.0.0.1:8477")!, transport: transport, tokenProvider: { "test-token" })

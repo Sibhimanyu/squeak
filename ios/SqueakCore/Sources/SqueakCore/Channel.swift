@@ -848,12 +848,12 @@ public struct Channel: Sendable {
 
     /// The signed document asking the Mac for a sample of one realistic voice (a WAV, left as `media` chunks).
     public func voiceSampleDocument(
-        voice: String, signer: CommandSigner, now: Date = Date()
+        voice: String, engine: String? = nil, signer: CommandSigner, now: Date = Date()
     ) throws -> (id: String, document: ChannelDocument) {
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = VoiceSampleCommand(
-            v: 1, kind: "voiceSample", voice: voice,
+            v: 1, kind: "voiceSample", voice: voice, engine: engine,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

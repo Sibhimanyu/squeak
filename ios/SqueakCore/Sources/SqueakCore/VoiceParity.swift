@@ -15,6 +15,45 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
     /// True when this Mac can make a voice sample and leave it in the channel (Realtime Database, a preview here).
     /// Absent from an older Mac: the Play sample button is then hidden.
     public var sample: Bool?
+    /// The engine speaking calls now (`kokoro`, `qwen3`, `ming`, `chatterbox`), `off`/`subtle`/`strong`, and every
+    /// engine this Mac knows. All absent from a Mac that predates engines: the phone then shows today's Kokoro-only
+    /// controls.
+    public var engine: String?
+    public var emotion: String?
+    public var engines: [EngineChoice]?
+
+    public struct EngineChoice: Codable, Equatable, Sendable, Identifiable, Hashable {
+        public var id: String
+        public var label: String
+        public var summary: String
+        public var size: String
+        public var installed: Bool
+        public var emotion: Bool
+        public var voices: [VoiceChoice]
+        public var voice: String
+        public var licence: String
+
+        public init(id: String, label: String, summary: String = "", size: String = "", installed: Bool, emotion: Bool = false,
+                    voices: [VoiceChoice] = [], voice: String = "", licence: String = "") {
+            self.id = id; self.label = label; self.summary = summary; self.size = size; self.installed = installed
+            self.emotion = emotion; self.voices = voices; self.voice = voice; self.licence = licence
+        }
+
+        enum CodingKeys: String, CodingKey { case id, label, summary, size, installed, emotion, voices, voice, licence }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = (try? c.decode(String.self, forKey: .id)) ?? ""
+            label = (try? c.decode(String.self, forKey: .label)) ?? id
+            summary = (try? c.decode(String.self, forKey: .summary)) ?? ""
+            size = (try? c.decode(String.self, forKey: .size)) ?? ""
+            installed = (try? c.decode(Bool.self, forKey: .installed)) ?? false
+            emotion = (try? c.decode(Bool.self, forKey: .emotion)) ?? false
+            voices = (try? c.decode([VoiceChoice].self, forKey: .voices)) ?? []
+            voice = (try? c.decode(String.self, forKey: .voice)) ?? ""
+            licence = (try? c.decode(String.self, forKey: .licence)) ?? ""
+        }
+    }
 
     public struct VoiceChoice: Codable, Equatable, Sendable, Identifiable, Hashable {
         public var id: String
@@ -22,11 +61,13 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
         public init(id: String, label: String) { self.id = id; self.label = label }
     }
 
-    public init(installed: Bool, enabled: Bool, voice: String, voices: [VoiceChoice]? = nil, sample: Bool? = nil) {
+    public init(installed: Bool, enabled: Bool, voice: String, voices: [VoiceChoice]? = nil, sample: Bool? = nil,
+                engine: String? = nil, emotion: String? = nil, engines: [EngineChoice]? = nil) {
         self.installed = installed; self.enabled = enabled; self.voice = voice; self.voices = voices; self.sample = sample
+        self.engine = engine; self.emotion = emotion; self.engines = engines
     }
 
-    enum CodingKeys: String, CodingKey { case installed, enabled, voice, voices, sample }
+    enum CodingKeys: String, CodingKey { case installed, enabled, voice, voices, sample, engine, emotion, engines }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -35,10 +76,47 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
         voice = (try? c.decode(String.self, forKey: .voice)) ?? ""
         voices = try? c.decode([VoiceChoice].self, forKey: .voices)
         sample = try? c.decode(Bool.self, forKey: .sample)
+        engine = try? c.decode(String.self, forKey: .engine)
+        emotion = try? c.decode(String.self, forKey: .emotion)
+        engines = try? c.decode([EngineChoice].self, forKey: .engines)
     }
 
     /// The controls show only for a Mac that sends its voice list.
     public var offered: Bool { voices?.isEmpty == false }
+
+    /// True when this Mac sends engines, so the engine and emotion pickers show.
+    public var hasEngines: Bool { engines?.isEmpty == false }
+
+    /// The engine speaking now; nil for a Mac without engines.
+    public var currentEngine: EngineChoice? {
+        guard let engines, !engines.isEmpty else { return nil }
+        return engines.first { $0.id == engine } ?? engines.first { $0.id == "kokoro" }
+    }
+
+    /// Only installed engines can be picked; a phone cannot start a multi-GB install.
+    public var pickableEngines: [EngineChoice] { (engines ?? []).filter(\.installed) }
+    public var greyedEngines: [EngineChoice] { (engines ?? []).filter { !$0.installed } }
+
+    /// The voices of the engine speaking now (the top-level list for a Mac without engines).
+    public var currentVoices: [VoiceChoice] { currentEngine?.voices ?? voices ?? [] }
+
+    /// Emotion shows only for an engine that has it; Kokoro and an older Mac have none.
+    public var showsEmotion: Bool { currentEngine?.emotion == true }
+
+    /// `off`, `subtle` or `strong`; anything else (or absent) reads as the default, subtle.
+    public var emotionLevel: String { EmotionLevel.all.contains(emotion ?? "") ? emotion! : EmotionLevel.subtle }
+
+    /// The voice to send a sample request for, and the engine to name in it (nil for a Mac without engines, so the
+    /// request is today's bytes).
+    public var sampleEngine: String? { hasEngines ? currentEngine?.id : nil }
+}
+
+public enum EmotionLevel {
+    public static let off = "off", subtle = "subtle", strong = "strong"
+    public static let all = [off, subtle, strong]
+    public static func label(_ level: String) -> String {
+        switch level { case off: return "Off"; case strong: return "Strong"; default: return "Subtle" }
+    }
 }
 
 /// A workspace a call can pick with one key: `n` is the keypad digit 1 to 9.
@@ -345,6 +423,10 @@ public enum VoiceParityText {
     public static let voiceFooter = "The words never leave your Mac. If speech fails during a call, the plain voice speaks and the call still goes."
     public static let quickFooter = "On a call, Squeak reads these first. Press the number to pick the workspace, then the chat."
     public static let noWorkspaces = "No workspaces yet \u{2014} open a chat in Conductor."
+    public static let engineTitle = "Engine"
+    public static let engineGreyed = "Set up on your Mac"
+    public static let emotionTitle = "Emotion"
+    public static let emotionFooter = "How much feeling the voice puts into each line, chosen from the words."
     public static let samplePlay = "Play sample"
     public static let sampleStop = "Stop sample"
     public static let sampleMaking = "Making sample\u{2026}"

@@ -4624,6 +4624,32 @@ describe("RemoteBridge phone-call settings from the phone", () => {
       t.bridge.stop();
     });
 
+    it("makes a sample of another engine, checked against that engine's own voices and install", async () => {
+      const engines = {
+        ...natural,
+        engine: "kokoro",
+        engines: [
+          { id: "kokoro", installed: true, voices: natural.voices },
+          { id: "ming", installed: true, voices: [{ id: "US_Emma", label: "Emma (female)" }] },
+          { id: "qwen3", installed: false, voices: [{ id: "ryan", label: "Ryan (male)" }] },
+        ],
+      };
+      const preview = vi.fn<(voice: string, engine?: string) => Promise<Buffer>>(async () => Buffer.from("x"));
+      const t = await voiceT({ natural: engines, streaming: true, preview });
+      expect((await send(t, "e1", sample("US_Emma", { engine: "ming" }))).result).toMatchObject({ status: "sent" });
+      expect(preview).toHaveBeenCalledWith("US_Emma", "ming");
+      for (const [i, fields] of [
+        sample("am_adam", { engine: "ming" }),
+        sample("ryan", { engine: "qwen3" }),
+        sample("ryan", { engine: "elevenlabs" }),
+        sample("US_Emma", { engine: 7 }),
+      ].entries()) {
+        expect((await send(t, `e${i + 2}`, fields)).result).toMatchObject({ status: "refused" });
+      }
+      expect(preview).toHaveBeenCalledTimes(1);
+      t.bridge.stop();
+    });
+
     it("refuses extra keys, an unknown or malformed voice, and an uninstalled voice, making nothing", async () => {
       const preview = vi.fn(async () => Buffer.from("x"));
       const t = await voiceT({ natural, streaming: true, preview });

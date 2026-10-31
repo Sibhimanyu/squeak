@@ -16,6 +16,9 @@ struct VoiceSettingsPage: View {
     @State private var pairingGateway = false
     @State private var showingCalls = false
     @State private var preview = VoicePreview()
+    /// The engine being looked at in the realistic-voice list (nil = the one in use), and voices picked before switching.
+    @State private var browsedEngine: String?
+    @State private var pickedVoices: [String: String] = [:]
     @State private var personaStyle: VoicePersona.Style = .terse
     @State private var personaCustom = ""
 
@@ -209,7 +212,129 @@ struct VoiceSettingsPage: View {
         }
     }
 
-    private func naturalSection(_ n: NaturalVoice) -> some View {
+    @ViewBuilder private func naturalSection(_ n: NaturalVoice) -> some View {
+        if n.hasEngines { enginesSection(n) } else { kokoroOnlySection(n) }
+    }
+
+    // The daemon sent `natural.engines`: a list to choose from, with each engine's own voices and emotion.
+    private func enginesSection(_ n: NaturalVoice) -> some View {
+        let selected = browsedEngine.flatMap { n.engine($0) != nil ? $0 : nil } ?? n.currentEngineID
+        let anyRunning = m.naturalSetup?.isRunning == true
+        return Section {
+            if n.installed {
+                Toggle(isOn: Binding(get: { n.enabled }, set: { on in preview.stop(); Task { await m.setNatural(enabled: on) } })) {
+                    Text("Speak with this Mac's voice")
+                    Text("A realistic voice made on this Mac, played in the call.")
+                }
+                .disabled(m.pauseBusy)
+            }
+            ForEach(n.engines) { engine in engineRow(engine, n: n, selected: selected == engine.id, anyRunning: anyRunning) }
+            if let engine = n.engine(selected), engine.installed {
+                let options = n.voiceOptions(for: selected)
+                let current = pickedVoices[selected] ?? n.voice(for: selected) ?? ""
+                if !options.isEmpty {
+                    Picker("Voice", selection: Binding(get: { current }, set: { id in
+                        preview.stop()
+                        pickedVoices[selected] = id
+                        if selected == n.currentEngineID { Task { await m.setNatural(voice: id) } }
+                    })) {
+                        ForEach(options) { Text($0.label).tag($0.id) }
+                        if !options.contains(where: { $0.id == current }) { Text(current).tag(current) }
+                    }
+                    .disabled(m.pauseBusy)
+                }
+                if engine.emotion {
+                    Picker("Emotion", selection: Binding(get: { n.emotionLevel }, set: { level in
+                        preview.stop(); Task { await m.setNatural(emotion: level) }
+                    })) {
+                        ForEach(NaturalEmotion.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(m.pauseBusy)
+                } else {
+                    Footnote(NaturalVoice.noEmotionSentence)
+                }
+                HStack(spacing: 8) {
+                    Button {
+                        if preview.active { preview.stop() }
+                        else { preview.play(voice: current, engine: selected, client: m.client) }
+                    } label: {
+                        Label(preview.active ? "Stop sample" : "Play sample", systemImage: preview.active ? "stop.fill" : "play.fill")
+                    }
+                    .disabled(current.isEmpty || (m.pauseBusy && !preview.active))
+                    .accessibilityLabel(preview.active ? "Stop voice sample" : "Play sample of \(engine.label)")
+                    .help("Hear this voice on your Mac without placing a call or switching to it.")
+                    if preview.loading {
+                        ProgressView().controlSize(.small).accessibilityLabel("Making voice sample")
+                        Text("Making sample…").foregroundStyle(.secondary)
+                    } else if preview.playing {
+                        Text("Playing on this Mac").foregroundStyle(.secondary)
+                    }
+                }
+                if let error = preview.error { Footnote(error) }
+            }
+            if let note = m.naturalSetupNote { Footnote(note) }
+            if let setup = m.naturalSetup, setup.state == .failed {
+                Label(setup.failureLine, systemImage: "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(Theme.error)
+                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            }
+        } header: { Text("Voice") } footer: {
+            Footnote("Samples play on this Mac without placing a call. The words never leave it. If speech fails during a call, the plain voice speaks and the call still goes.")
+        }
+    }
+
+    private func engineRow(_ engine: NaturalEngine, n: NaturalVoice, selected: Bool, anyRunning: Bool) -> some View {
+        let inUse = engine.id == n.currentEngineID
+        let setup = m.naturalSetup
+        let installing = setup?.isRunning == true && setup?.concerns(engine.id) == true
+        let failed = setup?.state == .failed && setup?.concerns(engine.id) == true
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Button { browsedEngine = engine.id; preview.stop() } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(selected ? Theme.duck : .secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(engine.label)
+                            Text([engine.summary, engine.size, engine.licence].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                Spacer()
+                if installing {
+                    EmptyView()
+                } else if !engine.installed {
+                    Button(failed ? "Retry" : "Set up") { Task { await m.startNaturalSetup(engine: engine.id) } }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(anyRunning)
+                } else if inUse {
+                    Text("In use").font(.callout).foregroundStyle(.secondary)
+                } else {
+                    Button("Use") {
+                        preview.stop()
+                        let voice = pickedVoices[engine.id]
+                        Task { await m.setNatural(voice: voice, engine: engine.id) }
+                    }
+                    .disabled(m.pauseBusy)
+                    Button("Remove", role: .destructive) { Task { await m.removeNaturalEngine(engine.id) } }
+                        .disabled(m.pauseBusy || anyRunning)
+                }
+            }
+            if installing, let setup {
+                if let fraction = setup.fraction { ProgressView(value: fraction) } else { ProgressView().controlSize(.small) }
+                Text(setup.progressLine).font(.callout).foregroundStyle(.secondary)
+                Text("You can close Settings: it keeps going. Calls use the plain voice until it is ready.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func kokoroOnlySection(_ n: NaturalVoice) -> some View {
         Section {
             if n.installed {
                 Toggle(isOn: Binding(get: { n.enabled }, set: { on in preview.stop(); Task { await m.setNatural(enabled: on) } })) {

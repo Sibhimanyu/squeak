@@ -834,6 +834,71 @@ describe("HookIngressServer control routes", () => {
     expect(await refused.json()).toEqual({ error: "The realistic voice is already installed." });
   });
 
+  it("takes an engine for the realistic voice install, preview and removal, and refuses an unknown one", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const base = `http://127.0.0.1:${harness.port}/control/voice`;
+    const headers = { "x-squeak-token": harness.token };
+    const asked: unknown[] = [];
+    const previews: unknown[] = [];
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voice: {
+        read: () => ({}),
+        apply: () => {
+          throw new Error("must not save settings");
+        },
+        preview: async (voice, engine) => {
+          previews.push([voice, engine]);
+          return Buffer.from("RIFFsample");
+        },
+      },
+      voiceNatural: {
+        status: (engine) => ({ state: "idle", engine: engine ?? "kokoro" }),
+        start: (engine) => {
+          asked.push(["start", engine]);
+          return { ok: true };
+        },
+        remove: (engine) => {
+          asked.push(["remove", engine]);
+          return engine === "qwen3"
+            ? { ok: false, reason: "That voice engine is in use. Choose another first." }
+            : { ok: true };
+        },
+      },
+    });
+    const post = (route: string, body: string) => fetch(`${base}${route}`, { method: "POST", headers, body });
+    expect(await (await fetch(`${base}/natural/setup?engine=ming`, { headers })).json()).toEqual({
+      state: "idle",
+      engine: "ming",
+    });
+    expect((await fetch(`${base}/natural/setup?engine=nope`, { headers })).status).toBe(400);
+    expect((await post("/natural/setup", '{"engine":"chatterbox"}')).status).toBe(200);
+    expect((await post("/natural/setup", "")).status).toBe(200);
+    expect((await post("/natural/setup", '{"engine":"nope"}')).status).toBe(400);
+    expect((await post("/natural/setup", "bad")).status).toBe(400);
+    expect(asked).toEqual([
+      ["start", "chatterbox"],
+      ["start", undefined],
+    ]);
+    expect((await fetch(`${base}/natural/remove`, { method: "POST", body: '{"engine":"ming"}' })).status).toBe(403);
+    expect((await fetch(`${base}/natural/remove`, { headers })).status).toBe(405);
+    expect((await post("/natural/remove", "{}")).status).toBe(400);
+    expect((await post("/natural/remove", '{"engine":"ming"}')).status).toBe(200);
+    const refused = await post("/natural/remove", '{"engine":"qwen3"}');
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "That voice engine is in use. Choose another first." });
+    expect((await post("/preview", '{"voice":"US_Emma","engine":"ming"}')).status).toBe(200);
+    expect((await post("/preview", '{"voice":"ryan"}')).status).toBe(200);
+    expect((await post("/preview", '{"voice":"ryan","engine":"nope"}')).status).toBe(400);
+    expect((await post("/preview", '{"voice":"ryan","engine":"qwen3","x":1}')).status).toBe(400);
+    expect(previews).toEqual([
+      ["US_Emma", "ming"],
+      ["ryan", undefined],
+    ]);
+  });
+
   it("takes pin actions on /control/voice only with the token, awaits them, and never echoes a pin", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;

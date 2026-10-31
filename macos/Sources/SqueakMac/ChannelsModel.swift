@@ -207,13 +207,13 @@ final class ChannelsModel {
     }
 
     /// Turns the realistic call voice on or off, or picks its voice; takes the daemon's answer as the truth.
-    func setNatural(enabled: Bool? = nil, voice: String? = nil) async {
+    func setNatural(enabled: Bool? = nil, voice: String? = nil, engine: String? = nil, emotion: NaturalEmotion? = nil) async {
         voiceError = nil
         if demo { return }
         pauseBusy = true
         defer { pauseBusy = false }
         do {
-            if let answered = try await client.setNaturalVoice(enabled: enabled, voice: voice) {
+            if let answered = try await client.setNaturalVoice(enabled: enabled, voice: voice, engine: engine, emotion: emotion) {
                 self.voice = answered
             } else {
                 voiceError = "Squeak on this Mac is older than this setting. Update it and try again."
@@ -258,11 +258,11 @@ final class ChannelsModel {
         if status.isRunning { watchNaturalSetup() }
     }
 
-    func startNaturalSetup() async {
+    func startNaturalSetup(engine: String? = nil) async {
         if demo || naturalSetup?.isRunning == true { return }
         naturalSetupNote = nil
         do {
-            switch try await client.startNaturalSetup() {
+            switch try await client.startNaturalSetup(engine: engine) {
             case let .started(status): naturalSetup = status; watchNaturalSetup()
             case let .refused(sentence):
                 naturalSetupNote = sentence
@@ -272,6 +272,22 @@ final class ChannelsModel {
         } catch {
             naturalSetupNote = NaturalSetup.unreachableSentence
         }
+    }
+
+    /// Deletes an installed engine; the daemon's sentence explains a refusal.
+    func removeNaturalEngine(_ engine: String) async {
+        if demo { return }
+        naturalSetupNote = nil
+        do {
+            switch try await client.removeNaturalEngine(engine) {
+            case .removed: break
+            case let .refused(sentence): naturalSetupNote = sentence
+            case .outdated: naturalSetupNote = NaturalSetup.outdatedSentence
+            }
+        } catch {
+            naturalSetupNote = "Could not remove it: Squeak on this Mac did not answer."
+        }
+        await refreshVoice()
     }
 
     private func watchNaturalSetup() {

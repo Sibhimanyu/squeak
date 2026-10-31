@@ -873,9 +873,15 @@ The phone can do what the Mac app's Voice settings do, including hearing a sampl
   `VoiceFavoritesStore.apply`): `{ "natural": { "enabled"?: bool, "voice"?: "af_heart" } }` and
   `{ "favorites": [{ "n": 1, "workspace": "<key>" }] }` (replaces the list). A phone may only name a workspace this Mac
   offers or already saved; the realistic voice must be installed. Logic and tests: `src/voice/phone-voice.ts`.
+- **Voice engines** (`.context/voice-engines-spec.md`): `natural` may also carry `"engine"` (`kokoro` | `qwen3` | `ming` |
+  `chatterbox`) and `"emotion"` (`off` | `subtle` | `strong`), both optional, through the same `apply` as the Mac. A phone
+  can only pick an installed engine; installs and removals happen on the Mac only, never by a phone command. The view's
+  `natural` gains `engine`, `emotion` and `engines[]` (`id`, `label`, `summary`, `size`, `installed`, `emotion`, `voices`,
+  `voice`, `licence`), all optional, so an older phone ignores them.
 - **Voice sample** (Play sample, iPhone and web): the signed command `{ v: 1, kind: "voiceSample", voice, nonce,
 expiresAt }`, exactly those keys, no Face ID (it touches no chat and carries no words). `voice` must match
-  `^[a-z]{2}_[a-z]+$` and be in `natural.voices`; the realistic voice must be installed. The Mac makes the sample
+  `^[a-z]{2}_[a-z]+$` and be in the voices of the engine it is made with (`natural.voices`, or the chosen engine's list).
+  An optional `engine` key is sent only to a Mac that lists `natural.engines`. The realistic voice must be installed. The Mac makes the sample
   through the function behind `POST /control/voice/preview` (an 8 kHz mono 16-bit WAV, ~5 s, ~80-100 KB) and leaves it
   as sealed `media` chunks through the same writer and ledger as a film (`uploadMedia`: 384 KB chunks, `remote-media.json`,
   deleted after 30 min). The answer is `{ status: "sent", media: { id, chunks, bytes, sha256, mime: "audio/wav" } }`,

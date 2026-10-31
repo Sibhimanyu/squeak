@@ -17,32 +17,39 @@ import {
   type LineStats,
 } from "./natural-cache.js";
 import { CallDialog, type CallScript } from "./dialog.js";
+import { WORKER_MARKER } from "./natural-worker-mlx.js";
 import type { Speaker } from "./tts.js";
+import {
+  DEFAULT_ENGINE,
+  DEFAULT_NATURAL_VOICE,
+  engineDir,
+  engineHasVoice,
+  ENGINE_IDS,
+  isEngineId,
+  NATURAL_VOICE,
+  NATURAL_VOICES,
+  VOICE_ENGINES,
+  type EngineId,
+} from "./voice-engines.js";
+import { DEFAULT_EMOTION, EMOTION_LEVELS, moodFor, type EmotionLevel, type Mood } from "./voice-mood.js";
 
 /**
- * A realistic voice for phone calls, made on this Mac: Kokoro-82M running locally (helpers: a Python venv and the
- * model in `<support>/voice-tts/`, put there by `squeak voice-tts-setup`). The Home Assistant add-on can only run
+ * A realistic voice for phone calls, made on this Mac: Kokoro-82M, or one of three expressive engines on mlx-audio
+ * (voice-engines.ts), running locally (helpers: a Python venv and the model in the engine's own folder of the support
+ * directory, put there by `squeak voice-tts-setup`). The Home Assistant add-on can only run
  * espeak-ng or Piper on a small box, so the Mac renders the call's words and sends them with the request
  * (relay-protocol.ts `audio`); a Mac that places the call itself plays them directly. On any failure the plain
  * voice speaks, so a call is never lost to a speech problem.
  */
 
-export const NATURAL_DIR = "voice-tts";
-export const DEFAULT_NATURAL_VOICE = "af_heart";
-/** Kokoro voice ids are two letters, an underscore and a name (`af_heart`, `am_michael`, `bf_emma`). */
-export const NATURAL_VOICE = /^[a-z]{2}_[a-z]+$/;
-/** The voices the apps offer in their picker (the daemon accepts any Kokoro name); the Mac app lists the same. */
-export const NATURAL_VOICES: ReadonlyArray<{ id: string; label: string }> = [
-  { id: "af_heart", label: "Heart (female)" },
-  { id: "af_bella", label: "Bella (female)" },
-  { id: "af_nicole", label: "Nicole (female)" },
-  { id: "bf_emma", label: "Emma (British female)" },
-  { id: "am_michael", label: "Michael (male)" },
-  { id: "am_adam", label: "Adam (male)" },
-  { id: "bm_george", label: "George (British male)" },
-];
+export const NATURAL_DIR = VOICE_ENGINES.kokoro.folder;
+export { DEFAULT_NATURAL_VOICE, NATURAL_VOICE, NATURAL_VOICES };
 /** The worker makes about five seconds of speech a second here; a stuck one is killed after this. */
 const RENDER_TIMEOUT_MS = 30_000;
+/** An expressive engine loads gigabytes of weights before it answers: its first start is given longer. */
+const MLX_START_TIMEOUT_MS = 120_000;
+/** And a render is given longer too: they speak slower than Kokoro, and a long sentence is ten seconds of audio. */
+const MLX_RENDER_TIMEOUT_MS = 60_000;
 /** Most time a call waits for its clips before ringing without the rest. */
 export const CLIPS_BUDGET_MS = 25_000;
 /** An add-on that cannot take clips after dialling gets them in the request, so the ring waits: keep that short. */
@@ -56,73 +63,166 @@ export const TAIL_SILENCE_MS = 250;
 export interface NaturalPaths {
   dir: string;
   python: string;
+  /** What the worker gets as its first argument: Kokoro's model file, an MLX engine's weights folder. */
   model: string;
+  /** Its second: Kokoro's voice list, an MLX engine's own folder. */
   voices: string;
   worker: string;
+  /** Which engine these are (absent: Kokoro). */
+  engine?: EngineId;
+  /** The files that prove the engine installed besides the Python and the worker (absent: `model` and `voices`). */
+  required?: string[];
 }
 
-export function naturalPaths(supportDir: string): NaturalPaths {
-  const dir = path.join(supportDir, NATURAL_DIR);
+export function naturalPaths(supportDir: string, engine: EngineId = DEFAULT_ENGINE): NaturalPaths {
+  const dir = engineDir(supportDir, engine);
+  const python = path.join(dir, "venv", "bin", "python3");
+  const worker = path.join(dir, "worker.py");
+  if (engine === "kokoro") {
+    return { dir, python, model: path.join(dir, "kokoro.onnx"), voices: path.join(dir, "voices.bin"), worker };
+  }
   return {
     dir,
-    python: path.join(dir, "venv", "bin", "python3"),
-    model: path.join(dir, "kokoro.onnx"),
-    voices: path.join(dir, "voices.bin"),
-    worker: path.join(dir, "worker.py"),
+    python,
+    model: path.join(dir, "model"),
+    voices: dir,
+    worker,
+    engine,
+    required: VOICE_ENGINES[engine].repos.flatMap((repo) => repo.proof.map((file) => path.join(dir, repo.dir, file))),
   };
+}
+
+/**
+ * Puts this version's worker script in an installed engine's folder before it starts, so a fix to the script reaches
+ * MLX engines set up by an older Squeak without running setup again. A folder that cannot be written keeps its script.
+ */
+export function refreshWorker(paths: NaturalPaths): void {
+  if (!paths.engine || paths.engine === "kokoro") return;
+  const script = VOICE_ENGINES[paths.engine].worker;
+  try {
+    if (!fs.existsSync(paths.worker)) return;
+    const current = fs.readFileSync(paths.worker, "utf8");
+    // Only a script Squeak wrote: one put there by hand is left as it is.
+    if (current === script || !current.startsWith(WORKER_MARKER)) return;
+    fs.writeFileSync(paths.worker, script, { mode: 0o600 });
+  } catch {
+    // The script already there still speaks.
+  }
 }
 
 /** Whether everything the worker needs is on disk. */
 export function naturalInstalled(paths: NaturalPaths): boolean {
-  return [paths.python, paths.model, paths.voices, paths.worker].every((file) => fs.existsSync(file));
+  return [paths.python, paths.worker, ...(paths.required ?? [paths.model, paths.voices])].every((file) =>
+    fs.existsSync(file),
+  );
 }
 
 export interface NaturalSettings {
   enabled: boolean;
+  /** The current engine's voice. */
   voice: string;
+  /** Absent in a caller that knows only Kokoro: Kokoro. */
+  engine?: EngineId;
+  /** Absent: subtle. Engines without emotion ignore it. */
+  emotion?: EmotionLevel;
+  /** Each engine's own pick. */
+  voices?: Partial<Record<EngineId, string>>;
 }
 
-/** `voice-natural.json`: on by default once installed, and which Kokoro voice. */
+/**
+ * `voice-natural.json`: on by default once installed, which engine, each engine's voice and how much emotion. The
+ * first form of the file (`{ enabled, voice }`) reads as Kokoro with that voice, and `voice` (Kokoro's) is still
+ * written, so an older daemon that reads the file after a rollback keeps working.
+ */
 export class NaturalSettingsStore {
-  private current: NaturalSettings = { enabled: true, voice: DEFAULT_NATURAL_VOICE };
+  private current: Required<Omit<NaturalSettings, "voice">> = {
+    enabled: true,
+    engine: DEFAULT_ENGINE,
+    emotion: DEFAULT_EMOTION,
+    voices: {},
+  };
 
-  constructor(private readonly file: string) {
+  constructor(
+    private readonly file: string,
+    /** Whether an engine is on disk; a switch to one that is not is refused. Absent: every engine counts. */
+    private readonly installed: (engine: EngineId) => boolean = () => true,
+  ) {
     try {
       const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
       if (typeof raw.enabled === "boolean") this.current.enabled = raw.enabled;
-      if (typeof raw.voice === "string" && NATURAL_VOICE.test(raw.voice)) this.current.voice = raw.voice;
+      if (isEngineId(raw.engine)) this.current.engine = raw.engine;
+      if (EMOTION_LEVELS.includes(raw.emotion as EmotionLevel)) this.current.emotion = raw.emotion as EmotionLevel;
+      if (typeof raw.voices === "object" && raw.voices !== null) {
+        for (const id of ENGINE_IDS) {
+          const voice = (raw.voices as Record<string, unknown>)[id];
+          if (engineHasVoice(id, voice)) this.current.voices[id] = voice;
+        }
+      }
+      if (this.current.voices.kokoro === undefined && engineHasVoice("kokoro", raw.voice)) {
+        this.current.voices.kokoro = raw.voice;
+      }
     } catch {
       // The defaults stand.
     }
   }
 
-  get settings(): NaturalSettings {
-    return { ...this.current };
+  get settings(): Required<NaturalSettings> {
+    const { engine } = this.current;
+    return {
+      enabled: this.current.enabled,
+      engine,
+      emotion: this.current.emotion,
+      voices: { ...this.current.voices },
+      voice: this.current.voices[engine] ?? VOICE_ENGINES[engine].defaultVoice,
+    };
   }
 
-  /** `{ enabled?, voice? }`, at least one, nothing else. */
+  /** `{ enabled?, voice?, engine?, emotion? }`, at least one, nothing else; a voice is for the engine set with it. */
   apply(request: unknown): { ok: true } | { ok: false; reason: string } {
     if (typeof request !== "object" || request === null || Array.isArray(request)) {
       return { ok: false, reason: "That is not a voice setting." };
     }
     const record = request as Record<string, unknown>;
     const keys = Object.keys(record);
-    if (keys.length === 0 || keys.some((key) => key !== "enabled" && key !== "voice")) {
+    const known = ["enabled", "voice", "engine", "emotion"];
+    if (keys.length === 0 || keys.some((key) => !known.includes(key))) {
       return { ok: false, reason: "That is not a voice setting." };
     }
     if (record.enabled !== undefined && typeof record.enabled !== "boolean") {
       return { ok: false, reason: "Turn the natural voice on or off." };
     }
-    if (record.voice !== undefined && !(typeof record.voice === "string" && NATURAL_VOICE.test(record.voice))) {
-      return { ok: false, reason: "That is not a Kokoro voice name." };
+    if (record.engine !== undefined && !isEngineId(record.engine)) {
+      return { ok: false, reason: "That is not a voice engine." };
+    }
+    const engine = (record.engine as EngineId | undefined) ?? this.current.engine;
+    if (engine !== this.current.engine && !this.installed(engine)) {
+      return { ok: false, reason: `Set up ${VOICE_ENGINES[engine].label} on the Mac first.` };
+    }
+    if (record.voice !== undefined && !engineHasVoice(engine, record.voice)) {
+      return {
+        ok: false,
+        reason: engine === "kokoro" ? "That is not a Kokoro voice name." : "That is not a voice this engine has.",
+      };
+    }
+    if (record.emotion !== undefined && !EMOTION_LEVELS.includes(record.emotion as EmotionLevel)) {
+      return { ok: false, reason: "Choose Off, Subtle or Strong." };
     }
     const next = {
       enabled: (record.enabled as boolean | undefined) ?? this.current.enabled,
-      voice: (record.voice as string | undefined) ?? this.current.voice,
+      engine,
+      emotion: (record.emotion as EmotionLevel | undefined) ?? this.current.emotion,
+      voices: {
+        ...this.current.voices,
+        ...(record.voice !== undefined ? { [engine]: record.voice as string } : {}),
+      },
     };
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      fs.writeFileSync(this.file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+      fs.writeFileSync(
+        this.file,
+        `${JSON.stringify({ ...next, voice: next.voices.kokoro ?? DEFAULT_NATURAL_VOICE }, null, 2)}\n`,
+        { mode: 0o600 },
+      );
     } catch {
       return { ok: false, reason: "This Mac could not save the voice setting." };
     }
@@ -167,6 +267,7 @@ class WorkerProc {
   start(): Promise<void> {
     if (this.ready) return this.ready;
     this.starts += 1;
+    refreshWorker(this.paths);
     const child = spawn(this.paths.python, [this.paths.worker, this.paths.model, this.paths.voices], {
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -221,7 +322,13 @@ class WorkerProc {
   }
 
   /** 24 kHz mono PCM of `text`, or null if the worker could not make it. One at a time per worker. */
-  render(text: string, voice: string, speed: number): Promise<Int16Array | null> {
+  render(
+    text: string,
+    voice: string,
+    speed: number,
+    mood: Mood = "neutral",
+    level: EmotionLevel = "off",
+  ): Promise<Int16Array | null> {
     const run = async (): Promise<Int16Array | null> => {
       this.stopping = false;
       let startupTimer: ReturnType<typeof setTimeout> | undefined;
@@ -229,10 +336,13 @@ class WorkerProc {
         await Promise.race([
           this.start(),
           new Promise<never>((_, reject) => {
-            startupTimer = setTimeout(() => {
-              this.child?.kill("SIGKILL");
-              reject(new Error("the voice worker took too long to start"));
-            }, RENDER_TIMEOUT_MS);
+            startupTimer = setTimeout(
+              () => {
+                this.child?.kill("SIGKILL");
+                reject(new Error("the voice worker took too long to start"));
+              },
+              this.paths.engine ? MLX_START_TIMEOUT_MS : RENDER_TIMEOUT_MS,
+            );
           }),
         ]);
       } catch (error) {
@@ -248,11 +358,14 @@ class WorkerProc {
       const id = this.nextId++;
       const out = path.join(this.tmp, `${this.tag}${id}.wav`);
       const done = new Promise<boolean>((resolve) => this.pending.set(id, { resolve, out }));
-      const timer = setTimeout(() => {
-        logger.warn("voice natural speech timed out; restarting the worker");
-        child.kill("SIGKILL");
-      }, RENDER_TIMEOUT_MS);
-      child.stdin.write(`${JSON.stringify({ id, text, voice, speed, out })}\n`);
+      const timer = setTimeout(
+        () => {
+          logger.warn("voice natural speech timed out; restarting the worker");
+          child.kill("SIGKILL");
+        },
+        this.paths.engine ? MLX_RENDER_TIMEOUT_MS : RENDER_TIMEOUT_MS,
+      );
+      child.stdin.write(`${JSON.stringify({ id, text, voice, speed, out, mood, level })}\n`);
       const ok = await done;
       clearTimeout(timer);
       try {
@@ -277,7 +390,7 @@ class WorkerProc {
 }
 
 export interface NaturalVoiceOptions {
-  /** Where rendered sentences are kept (default `<natural dir>/cache`). */
+  /** Where rendered sentences are kept (default `<engine folder>/cache`). */
   cacheDir?: string;
   cacheMaxBytes?: number;
   /** Wait before restarting a kept-warm worker that died (doubles per failure, five tries). */
@@ -303,17 +416,35 @@ export interface LineOptions {
   onSentence?: (sentence: SentenceReady) => void;
 }
 
+/** How a piece of speech is made: the engine, its mood (from the words, unless the person turned emotion off). */
+interface Delivery {
+  engine: EngineId;
+  mood: Mood;
+  level: EmotionLevel;
+}
+
+/** What one engine owns while it is in use: its workers and its slice of the sentence cache. */
+interface EngineRuntime {
+  id: EngineId;
+  paths: NaturalPaths;
+  urgent: WorkerProc;
+  /** Kokoro's niced second worker; the single-worker engines have none (urgent and background share one). */
+  background: WorkerProc | null;
+  cache: SentenceCache;
+}
+
 const SPEED = 1.0;
 const WARM_TEXT = "Hello.";
 
 /**
- * The natural voice: a sentence cache over up to two Python workers (urgent at normal priority, background niced).
- * Renders for one worker are serial, so the CPU is never hammered by two at once on the same priority.
+ * The natural voice: a sentence cache over the Python workers of the current engine. Kokoro runs two (urgent at
+ * normal priority, background niced); the MLX engines run one, since a second copy would double the GPU memory and
+ * nice does nothing for the GPU. Renders for one worker are serial, so the CPU is never hammered by two at once.
+ * Switching engine stops the old engine's workers and starts the new one's.
  */
 export class NaturalVoice {
-  private readonly urgent: WorkerProc;
-  private readonly background: WorkerProc;
-  private readonly cache: SentenceCache;
+  private readonly runtimes = new Map<EngineId, EngineRuntime>();
+  private active: EngineId | null = null;
   private readonly tmp = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-natural-"));
   private readonly inflight = new Map<string, Promise<Int16Array | null>>();
   private keepWarm = false;
@@ -325,43 +456,109 @@ export class NaturalVoice {
   private readonly restartDelayMs: number;
   private readonly backgroundIdleMs: number;
   private readonly now: () => number;
+  private readonly pathsFor: (engine: EngineId) => NaturalPaths;
 
   constructor(
-    private readonly paths: NaturalPaths,
+    /** One engine's paths, or where to find each engine's (a plain set of paths serves whichever engine is asked). */
+    paths: NaturalPaths | ((engine: EngineId) => NaturalPaths),
     private readonly settings: () => NaturalSettings,
-    options: NaturalVoiceOptions = {},
+    private readonly options: NaturalVoiceOptions = {},
   ) {
     this.restartDelayMs = options.restartDelayMs ?? 2_000;
     this.backgroundIdleMs = options.backgroundIdleMs ?? 30_000;
     this.now = options.now ?? Date.now;
-    this.urgent = new WorkerProc(paths, this.tmp, "u", null, () => this.urgentDied());
-    this.background = new WorkerProc(paths, this.tmp, "b", BACKGROUND_NICE);
-    this.cache = new SentenceCache(
-      options.cacheDir ?? path.join(paths.dir, "cache"),
-      engineTag(paths),
-      options.cacheMaxBytes,
-    );
+    this.pathsFor = typeof paths === "function" ? paths : () => paths;
+  }
+
+  /** The engine in use now. */
+  get engine(): EngineId {
+    return this.settings().engine ?? DEFAULT_ENGINE;
+  }
+
+  private get level(): EmotionLevel {
+    return this.settings().emotion ?? DEFAULT_EMOTION;
+  }
+
+  private runtime(id: EngineId): EngineRuntime {
+    let runtime = this.runtimes.get(id);
+    if (!runtime) {
+      const paths = this.pathsFor(id);
+      const single = VOICE_ENGINES[id].workers === 1;
+      runtime = {
+        id,
+        paths,
+        urgent: new WorkerProc(paths, this.tmp, `u${id}`, null, () => {
+          if (this.active === id) this.urgentDied();
+        }),
+        background: single ? null : new WorkerProc(paths, this.tmp, `b${id}`, BACKGROUND_NICE),
+        cache: new SentenceCache(
+          this.options.cacheDir ?? path.join(paths.dir, "cache"),
+          engineTag(paths, id),
+          this.options.cacheMaxBytes,
+        ),
+      };
+      this.runtimes.set(id, runtime);
+    }
+    return runtime;
+  }
+
+  /** The runtime of the engine in use; a change of engine since the last look stops the old engine's workers. */
+  private current(): EngineRuntime {
+    const id = this.engine;
+    if (this.active !== null && this.active !== id) {
+      this.stopRuntime(this.active);
+      this.restartFailures = 0;
+    }
+    this.active = id;
+    return this.runtime(id);
+  }
+
+  private stopRuntime(id: EngineId): void {
+    const runtime = this.runtimes.get(id);
+    if (!runtime) return;
+    runtime.urgent.stop();
+    runtime.background?.stop();
   }
 
   /** Installed and switched on. */
   get usable(): boolean {
-    return this.settings().enabled && naturalInstalled(this.paths);
+    return this.settings().enabled && naturalInstalled(this.pathsFor(this.engine));
   }
 
   /** Cache hit rate since this daemon started (0..1; null before any look). */
   get cacheHitRate(): number | null {
-    const total = this.cache.totalHits + this.cache.totalMisses;
-    return total === 0 ? null : this.cache.totalHits / total;
+    let hits = 0;
+    let misses = 0;
+    for (const runtime of this.runtimes.values()) {
+      hits += runtime.cache.totalHits;
+      misses += runtime.cache.totalMisses;
+    }
+    return hits + misses === 0 ? null : hits / (hits + misses);
+  }
+
+  /** How the current engine speaks `text`: the mood its words ask for at the person's level. */
+  private delivery(text: string, engine = this.engine): Delivery {
+    return VOICE_ENGINES[engine].emotion
+      ? { engine, ...moodFor(text, this.level) }
+      : { engine, mood: "neutral", level: "off" };
+  }
+
+  /** What the sentence cache keys a voice by: for the expressive engines, the mood and level are part of it. */
+  private voiceKey(voice: string, delivery: Delivery): string {
+    return delivery.engine === "kokoro" ? voice : `${voice}|${delivery.mood}|${delivery.level}`;
   }
 
   /**
    * Starts the worker now and renders a tiny sentence, so the first real call does not pay for loading the model;
-   * and keeps it alive (a worker that dies is started again). Call after the daemon starts and after setup.
+   * and keeps it alive (a worker that dies is started again). Call after the daemon starts, after setup and after
+   * the engine is changed.
    */
   async warm(): Promise<boolean> {
     if (!this.usable) return false;
     this.keepWarm = true;
-    const pcm = await this.urgent.render(WARM_TEXT, this.settings().voice, SPEED);
+    const runtime = this.current();
+    const delivery = this.delivery(WARM_TEXT);
+    const pcm = await runtime.urgent.render(WARM_TEXT, this.settings().voice, SPEED, delivery.mood, delivery.level);
     if (pcm) this.restartFailures = 0;
     return pcm !== null;
   }
@@ -378,29 +575,43 @@ export class NaturalVoice {
     this.restartTimer.unref?.();
   }
 
-  /** 24 kHz mono PCM of `text` (one piece, no cache), or null if the worker could not make it. */
-  render(text: string, voice?: string, priority: RenderPriority = "urgent"): Promise<Int16Array | null> {
-    if (voice ? !NATURAL_VOICE.test(voice) || !naturalInstalled(this.paths) : !this.usable)
+  /**
+   * 24 kHz mono PCM of `text` (one piece, no cache), or null if the worker could not make it. `engine` names one
+   * other than the current (a preview before switching).
+   */
+  render(
+    text: string,
+    voice?: string,
+    priority: RenderPriority = "urgent",
+    engine?: EngineId,
+  ): Promise<Int16Array | null> {
+    const id = engine ?? this.engine;
+    if (voice ? !engineHasVoice(id, voice) || !naturalInstalled(this.pathsFor(id)) : !this.usable) {
       return Promise.resolve(null);
-    const proc = this.procFor(priority);
-    return proc.render(text, voice ?? this.settings().voice, SPEED);
+    }
+    const runtime = engine === undefined || engine === this.engine ? this.current() : this.runtime(id);
+    const delivery = this.delivery(text, id);
+    const proc = this.procFor(runtime, priority);
+    return proc.render(text, voice ?? this.settings().voice, SPEED, delivery.mood, delivery.level);
   }
 
-  private procFor(priority: RenderPriority): WorkerProc {
-    if (priority === "urgent") return this.urgent;
+  /** The background worker where an engine has one, else the only worker. */
+  private procFor(runtime: EngineRuntime, priority: RenderPriority): WorkerProc {
+    if (priority === "urgent" || !runtime.background) return runtime.urgent;
     this.backgroundBusy += 1;
     if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
     this.backgroundTimer = null;
-    return this.background;
+    return runtime.background;
   }
 
-  private backgroundDone(): void {
+  private backgroundDone(runtime: EngineRuntime): void {
+    if (!runtime.background) return;
     this.backgroundBusy = Math.max(0, this.backgroundBusy - 1);
     if (this.backgroundBusy > 0) return;
     if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
     this.backgroundTimer = setTimeout(() => {
       this.backgroundTimer = null;
-      if (this.backgroundBusy === 0) this.background.stop();
+      if (this.backgroundBusy === 0) runtime.background?.stop();
     }, this.backgroundIdleMs);
     this.backgroundTimer.unref?.();
   }
@@ -410,24 +621,27 @@ export class NaturalVoice {
     text: string,
     voice: string,
     priority: RenderPriority,
+    delivery: Delivery,
   ): Promise<{ pcm: Int16Array; cached: boolean; ms: number } | null> {
-    const key = this.cache.key(voice, SPEED, text);
-    const hit = this.cache.get(key);
+    const runtime = this.current();
+    const key = runtime.cache.key(this.voiceKey(voice, delivery), SPEED, text);
+    const hit = runtime.cache.get(key);
     if (hit) return { pcm: hit, cached: true, ms: 0 };
     const began = this.now();
-    const flight = `${priority}:${key}`;
+    const flight = `${runtime.id}:${priority}:${key}`;
     let made = this.inflight.get(flight);
     if (!made) {
       made = (async () => {
         try {
-          const pcm = await this.render(text, voice, priority);
+          const proc = this.procFor(runtime, priority);
+          const pcm = await proc.render(text, voice, SPEED, delivery.mood, delivery.level);
           if (!pcm || pcm.length === 0) return null;
           const line = downsampleToLine(pcm);
-          this.cache.put(key, line);
+          runtime.cache.put(key, line);
           return line;
         } finally {
           this.inflight.delete(flight);
-          if (priority === "background") this.backgroundDone();
+          if (priority === "background") this.backgroundDone(runtime);
         }
       })();
       this.inflight.set(flight, made);
@@ -439,14 +653,16 @@ export class NaturalVoice {
   /**
    * The words as one padded 8 kHz line, made of cached sentences plus whatever is missing, which is rendered in
    * order (all queued at once on the worker) so the first sentence is ready first. Null if any sentence failed.
+   * The whole line has one mood.
    */
   async line(text: string, options: LineOptions = {}): Promise<Int16Array | null> {
     const voice = options.voice ?? this.settings().voice;
     const priority = options.priority ?? "urgent";
     const parts = splitSentences(text);
     if (parts.length === 0) return null;
+    const delivery = this.delivery(text);
     const began = this.now();
-    const renders = parts.map((part) => this.sentence(part, voice, priority));
+    const renders = parts.map((part) => this.sentence(part, voice, priority, delivery));
     const pieces: Int16Array[] = [];
     const stats: LineStats = { sentences: parts.length, hits: 0, renderMs: [] };
     let failed = false;
@@ -462,6 +678,8 @@ export class NaturalVoice {
       options.onSentence?.({ index, total: parts.length, pcm: made.pcm, cached: made.cached });
     }
     const info = {
+      engine: delivery.engine,
+      mood: delivery.mood,
       priority,
       sentences: stats.sentences,
       cacheHits: stats.hits,
@@ -477,26 +695,29 @@ export class NaturalVoice {
 
   /**
    * Renders (niced, in the background) whatever of these phrases is not cached yet, one at a time; resolves when
-   * done. Cheap to call again: cached sentences cost a file look.
+   * done. Cheap to call again: cached sentences cost a file look. Call it again after the engine changes.
    */
   prewarm(texts: readonly string[], voice?: string): Promise<{ rendered: number; cached: number }> {
     const run = async (): Promise<{ rendered: number; cached: number }> => {
       let rendered = 0;
       let cached = 0;
       if (!this.usable) return { rendered, cached };
+      const engine = this.engine;
       const useVoice = voice ?? this.settings().voice;
       const seen = new Set<string>();
       for (const text of texts) {
+        const delivery = this.delivery(text);
         for (const part of splitSentences(text)) {
-          const key = this.cache.key(useVoice, SPEED, part);
+          const key = this.current().cache.key(this.voiceKey(useVoice, delivery), SPEED, part);
           if (seen.has(key)) continue;
           seen.add(key);
-          if (this.cache.has(key)) {
+          if (this.current().cache.has(key)) {
             cached += 1;
             continue;
           }
-          if (!this.usable) return { rendered, cached };
-          const made = await this.sentence(part, useVoice, "background");
+          // The engine changed under us: the next prewarm (started by the change) makes these for the new one.
+          if (!this.usable || this.engine !== engine) return { rendered, cached };
+          const made = await this.sentence(part, useVoice, "background", delivery);
           if (made && !made.cached) rendered += 1;
         }
       }
@@ -508,9 +729,13 @@ export class NaturalVoice {
     return result;
   }
 
-  /** A fixed sample through the same engine and telephone filter, without changing call settings. */
-  async preview(voice: string): Promise<Buffer | null> {
-    const pcm = await this.render(VOICE_PREVIEW_TEXT, voice);
+  /**
+   * A fixed sample through the same engine and telephone filter, without changing call settings. `engine` names one
+   * other than the current, so the picker can audition before switching; its worker stops again afterwards.
+   */
+  async preview(voice: string, engine?: EngineId): Promise<Buffer | null> {
+    const pcm = await this.render(VOICE_PREVIEW_TEXT, voice, "urgent", engine);
+    if (engine !== undefined && engine !== this.engine) this.stopRuntime(engine);
     return pcm?.length ? wavOfPcm(padLine(downsampleToLine(pcm))) : null;
   }
 
@@ -538,17 +763,18 @@ export class NaturalVoice {
     if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
     this.restartTimer = null;
     this.backgroundTimer = null;
-    this.urgent.stop();
-    this.background.stop();
+    for (const id of this.runtimes.keys()) this.stopRuntime(id);
     fs.rmSync(this.tmp, { recursive: true, force: true });
   }
 }
 
-/** The engine's identity for the cache: a replaced model file changes every key. */
-function engineTag(paths: NaturalPaths): string {
+/** The engine's identity for the cache: a replaced model file (or another engine) changes every key. */
+function engineTag(paths: NaturalPaths, engine: EngineId): string {
   try {
-    const stat = fs.statSync(paths.model);
-    return `${stat.size}-${Math.round(stat.mtimeMs)}`;
+    const stat = fs.statSync(paths.required?.[0] ?? paths.model);
+    const own = `${stat.size}-${Math.round(stat.mtimeMs)}`;
+    // Kokoro's tag stays as it was, so its saved sentences remain good.
+    return engine === "kokoro" ? own : `${engine}-${VOICE_ENGINES[engine].model}-${own}`;
   } catch {
     return "none";
   }

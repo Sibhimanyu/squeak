@@ -211,6 +211,7 @@ final class VoiceParityTests: XCTestCase {
         XCTAssertEqual(try change(.natural(enabled: false, voice: nil)), #"{"natural":{"enabled":false}}"#)
         XCTAssertEqual(try change(.natural(enabled: nil, voice: "am_adam")), #"{"natural":{"voice":"am_adam"}}"#)
         XCTAssertEqual(try change(.natural(enabled: true, voice: "bf_emma")), #"{"natural":{"enabled":true,"voice":"bf_emma"}}"#)
+        XCTAssertEqual(try change(.natural(enabled: nil, voice: nil, engine: "qwen3", emotion: "strong")), #"{"natural":{"emotion":"strong","engine":"qwen3"}}"#)
         // Favourites carry n and workspace only: never the label.
         XCTAssertEqual(
             try change(.favorites([FavoriteWorkspace(n: 1, workspace: "ws1", label: "squeak"), FavoriteWorkspace(n: 3, workspace: "ws3", label: "x")])),
@@ -289,5 +290,62 @@ final class VoiceSampleCommandTests: XCTestCase {
         XCTAssertEqual(on.natural?.sample, true)
         let old = try JSONDecoder().decode(VoiceView.self, from: Data(#"{"mode":"gateway","natural":{"installed":true,"enabled":true,"voice":"af_heart","voices":[{"id":"af_heart","label":"Heart"}]}}"#.utf8))
         XCTAssertNil(old.natural?.sample)
+    }
+}
+
+/// Engines on the phone: tolerant decoding, what can be picked, and the sample request's `engine`.
+final class VoiceEnginesTests: XCTestCase {
+    let json = #"""
+    {"installed":true,"enabled":true,"voice":"Ryan","voices":[{"id":"Ryan","label":"Ryan (male)"}],"sample":true,
+     "engine":"qwen3","emotion":"strong",
+     "engines":[
+      {"id":"kokoro","label":"Kokoro","summary":"fast","size":"350 MB","installed":true,"emotion":false,"voices":[{"id":"af_heart","label":"Heart"}],"voice":"af_heart","licence":"Apache-2.0"},
+      {"id":"qwen3","label":"Qwen3-TTS","installed":true,"emotion":true,"voices":[{"id":"Ryan","label":"Ryan (male)"}],"voice":"Ryan"},
+      {"id":"ming","label":"Ming","installed":false,"emotion":true}]}
+    """#
+
+    func testDecodesEnginesAndPicksOnlyInstalled() throws {
+        let n = try JSONDecoder().decode(NaturalVoiceView.self, from: Data(json.utf8))
+        XCTAssertTrue(n.hasEngines)
+        XCTAssertEqual(n.currentEngine?.id, "qwen3")
+        XCTAssertEqual(n.pickableEngines.map(\.id), ["kokoro", "qwen3"])
+        XCTAssertEqual(n.greyedEngines.map(\.id), ["ming"])
+        XCTAssertEqual(n.currentVoices.map(\.id), ["Ryan"])
+        XCTAssertTrue(n.showsEmotion)
+        XCTAssertEqual(n.emotionLevel, "strong")
+        XCTAssertEqual(n.sampleEngine, "qwen3")
+        XCTAssertEqual(n.engines?[2].voices, [])
+    }
+
+    func testOlderMacHasNoEnginesNoEmotionAndTodaysSampleBytes() throws {
+        let n = try JSONDecoder().decode(NaturalVoiceView.self, from: Data(#"{"installed":true,"enabled":true,"voice":"af_heart","voices":[{"id":"af_heart","label":"Heart"}]}"#.utf8))
+        XCTAssertFalse(n.hasEngines)
+        XCTAssertNil(n.currentEngine)
+        XCTAssertFalse(n.showsEmotion)
+        XCTAssertNil(n.sampleEngine)
+        XCTAssertEqual(n.currentVoices.map(\.id), ["af_heart"])
+        XCTAssertEqual(n.emotionLevel, "subtle")
+    }
+
+    func testKokoroShowsNoEmotion() throws {
+        var n = try JSONDecoder().decode(NaturalVoiceView.self, from: Data(json.utf8))
+        n.engine = "kokoro"
+        XCTAssertFalse(n.showsEmotion)
+    }
+
+    func testSampleCommandCarriesEngineOnlyWhenGiven() throws {
+        let key = Data(repeating: 7, count: 32).base64EncodedString()
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: key, n: "Mac")
+        let ch = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())
+        struct Keys: Decodable {
+            let names: Set<String>
+            struct K: CodingKey { var stringValue: String; var intValue: Int? { nil }
+                init?(stringValue: String) { self.stringValue = stringValue }; init?(intValue: Int) { nil } }
+            init(from d: Decoder) throws { names = Set(try d.container(keyedBy: K.self).allKeys.map(\.stringValue)) }
+        }
+        let withEngine = try ch.voiceSampleDocument(voice: "Ryan", engine: "qwen3", signer: SoftwareSigner())
+        XCTAssertEqual(try ChannelCrypto.open(Keys.self, box: withEngine.document.box, key: key).names, ["v", "kind", "voice", "engine", "nonce", "expiresAt"])
+        let without = try ch.voiceSampleDocument(voice: "am_adam", signer: SoftwareSigner())
+        XCTAssertEqual(try ChannelCrypto.open(Keys.self, box: without.document.box, key: key).names, ["v", "kind", "voice", "nonce", "expiresAt"])
     }
 }

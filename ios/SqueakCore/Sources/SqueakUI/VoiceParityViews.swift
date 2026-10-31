@@ -27,7 +27,8 @@ struct NaturalVoiceSection: View {
                 .disabled(busy)
                 .frame(minHeight: 44)
                 if natural.enabled {
-                    let voices = natural.voices ?? []
+                    if natural.hasEngines { engineRows }
+                    let voices = natural.currentVoices
                     HStack {
                         Text("Voice")
                         Spacer()
@@ -42,6 +43,7 @@ struct NaturalVoiceSection: View {
                         .disabled(busy)
                     }
                     .frame(minHeight: 44)
+                    if natural.showsEmotion { emotionRow }
                     if natural.sample == true { sampleRow }
                 }
             } else {
@@ -60,11 +62,59 @@ struct NaturalVoiceSection: View {
         }
     }
 
+    /// Installed engines can be picked; the rest are greyed with where to set them up.
+    @ViewBuilder private var engineRows: some View {
+        HStack {
+            Text(VoiceParityText.engineTitle)
+            Spacer()
+            Picker(VoiceParityText.engineTitle, selection: Binding(get: { natural.currentEngine?.id ?? "" }, set: { id in
+                if id != natural.currentEngine?.id { send(.natural(enabled: nil, voice: nil, engine: id)) }
+            })) {
+                ForEach(natural.pickableEngines) { Text($0.label).tag($0.id) }
+            }
+            .labelsHidden()
+            .disabled(busy)
+        }
+        .frame(minHeight: 44)
+        if let summary = natural.currentEngine?.summary, !summary.isEmpty {
+            Text(summary).font(.footnote).foregroundStyle(Theme.muted)
+        }
+        ForEach(natural.greyedEngines) { e in
+            HStack {
+                Text(e.label)
+                Spacer()
+                Text(VoiceParityText.engineGreyed).font(.footnote)
+            }
+            .foregroundStyle(Theme.muted)
+            .frame(minHeight: 44)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var emotionRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(VoiceParityText.emotionTitle)
+                Spacer()
+                Picker(VoiceParityText.emotionTitle, selection: Binding(get: { natural.emotionLevel }, set: { level in
+                    if level != natural.emotionLevel { send(.natural(enabled: nil, voice: nil, emotion: level)) }
+                })) {
+                    ForEach(EmotionLevel.all, id: \.self) { Text(EmotionLevel.label($0)).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 220)
+                .disabled(busy)
+            }
+            .frame(minHeight: 44)
+            Text(VoiceParityText.emotionFooter).font(.footnote).foregroundStyle(Theme.muted)
+        }
+    }
+
     private var sampleRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
                 Button {
-                    if sample.active { sample.stop() } else { sample.play(voice: natural.voice, model: model) }
+                    if sample.active { sample.stop() } else { sample.play(voice: natural.voice, engine: natural.sampleEngine, model: model) }
                 } label: {
                     Label(sample.active ? VoiceParityText.sampleStop : VoiceParityText.samplePlay,
                           systemImage: sample.active ? "stop.fill" : "play.fill")
@@ -84,6 +134,8 @@ struct NaturalVoiceSection: View {
         }
         // A different voice or leaving the page ends the sample; a late answer never plays.
         .onChange(of: natural.voice) { _, _ in sample.stop() }
+        .onChange(of: natural.engine) { _, _ in sample.stop() }
+        .onChange(of: natural.emotion) { _, _ in sample.stop() }
         .onDisappear { sample.stop() }
     }
 
@@ -319,12 +371,12 @@ final class VoiceSamplePlayer: NSObject, AVAudioPlayerDelegate {
 
     var active: Bool { loading || playing }
 
-    func play(voice: String, model: AppModel) {
+    func play(voice: String, engine: String? = nil, model: AppModel) {
         stop()
         loading = true
         let request = generation
         task = Task { [weak self] in
-            let answer = await model.loadVoiceSample(voice)
+            let answer = await model.loadVoiceSample(voice, engine: engine)
             guard let self, !Task.isCancelled, self.generation == request else { return }
             switch answer {
             case .refused(let reason):

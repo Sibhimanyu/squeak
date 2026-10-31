@@ -247,27 +247,158 @@ public enum PauseText {
     }
 }
 
-/// `natural`: Kokoro on this Mac (`squeak voice-tts-setup` installs it); the daemon owns the rules.
+/// One voice an engine can speak with: its id (what the daemon accepts) and the label to show.
+public struct NaturalVoiceOption: Sendable, Equatable, Decodable, Identifiable, Hashable {
+    public var id: String
+    public var label: String
+    public init(id: String, label: String? = nil) { self.id = id; self.label = label ?? id }
+
+    private enum Keys: String, CodingKey { case id, label }
+
+    public init(from decoder: Decoder) throws {
+        // A bare string is also an id (an older daemon listed names only).
+        if let single = try? decoder.singleValueContainer().decode(String.self) { id = single; label = single; return }
+        let c = try decoder.container(keyedBy: Keys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = (try? c.decode(String.self, forKey: .label)) ?? id
+    }
+}
+
+/// How strongly an expressive engine colours a line's mood. The daemon owns the mapping; the app only names it.
+public enum NaturalEmotion: String, Sendable, CaseIterable, Identifiable {
+    case off, subtle, strong
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .off: "Off"
+        case .subtle: "Subtle"
+        case .strong: "Strong"
+        }
+    }
+}
+
+/// One speech engine in `natural.engines`. Everything here is the daemon's word; nothing is computed in the app.
+public struct NaturalEngine: Sendable, Equatable, Decodable, Identifiable, Hashable {
+    public var id: String
+    public var label: String
+    public var summary: String
+    /// "about 3 GB"; nil when the daemon gave none.
+    public var size: String?
+    public var installed: Bool
+    /// Whether the engine has an emotion control (Kokoro does not).
+    public var emotion: Bool
+    public var voices: [NaturalVoiceOption]
+    /// The voice this engine speaks with now.
+    public var voice: String?
+    public var licence: String?
+
+    public init(id: String, label: String? = nil, summary: String = "", size: String? = nil, installed: Bool = false,
+                emotion: Bool = false, voices: [NaturalVoiceOption] = [], voice: String? = nil, licence: String? = nil) {
+        self.id = id; self.label = label ?? id; self.summary = summary; self.size = size; self.installed = installed
+        self.emotion = emotion; self.voices = voices; self.voice = voice; self.licence = licence
+    }
+
+    private enum Keys: String, CodingKey { case id, label, summary, size, installed, emotion, voices, voice, licence }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = (try? c.decode(String.self, forKey: .label)) ?? id
+        summary = (try? c.decode(String.self, forKey: .summary)) ?? ""
+        size = try? c.decode(String.self, forKey: .size)
+        installed = (try? c.decode(Bool.self, forKey: .installed)) ?? false
+        emotion = (try? c.decode(Bool.self, forKey: .emotion)) ?? false
+        voices = (try? c.decode([NaturalVoiceOption].self, forKey: .voices)) ?? []
+        voice = try? c.decode(String.self, forKey: .voice)
+        licence = try? c.decode(String.self, forKey: .licence)
+    }
+
+    /// The voice to pick first: the engine's own, else its first.
+    public var defaultVoice: String? { voice ?? voices.first?.id }
+}
+
+/// `natural`: the realistic voice this Mac makes (`squeak voice-tts-setup` installs it); the daemon owns the rules.
+/// A daemon that predates engines sends none of `engine`, `emotion`, `engines`: that is Kokoro alone, as before.
 public struct NaturalVoice: Sendable, Equatable, Decodable {
     public var installed: Bool
     public var enabled: Bool
     public var voice: String
+    /// The current engine's id; nil from a daemon without engines (Kokoro).
+    public var engine: String?
+    /// "off", "subtle" or "strong"; nil from a daemon without engines.
+    public var emotion: String?
+    /// Every engine the daemon knows; empty from a daemon without engines.
+    public var engines: [NaturalEngine]
+    /// The current engine's voices; empty from an older daemon (Kokoro's list below stands in).
+    public var voices: [NaturalVoiceOption]
 
-    public init(installed: Bool, enabled: Bool, voice: String) {
+    public init(installed: Bool, enabled: Bool, voice: String, engine: String? = nil, emotion: String? = nil,
+                engines: [NaturalEngine] = [], voices: [NaturalVoiceOption] = []) {
         self.installed = installed; self.enabled = enabled; self.voice = voice
+        self.engine = engine; self.emotion = emotion; self.engines = engines; self.voices = voices
     }
 
-    /// A few of Kokoro's English voices; the daemon accepts any Kokoro name.
+    private enum Keys: String, CodingKey { case installed, enabled, voice, engine, emotion, engines, voices }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        installed = try c.decode(Bool.self, forKey: .installed)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        voice = try c.decode(String.self, forKey: .voice)
+        engine = try? c.decode(String.self, forKey: .engine)
+        emotion = try? c.decode(String.self, forKey: .emotion)
+        engines = (try? c.decode([NaturalEngine].self, forKey: .engines)) ?? []
+        voices = (try? c.decode([NaturalVoiceOption].self, forKey: .voices)) ?? []
+    }
+
+    /// A few of Kokoro's English voices; the daemon accepts any Kokoro name. Used only without a daemon list.
     public static let voices: [(id: String, title: String)] = [
         ("af_heart", "Heart (female)"), ("af_bella", "Bella (female)"), ("af_nicole", "Nicole (female)"),
         ("bf_emma", "Emma (British female)"), ("am_michael", "Michael (male)"), ("am_adam", "Adam (male)"),
         ("bm_george", "George (British male)"),
     ]
 
-    public static func requestBody(enabled: Bool? = nil, voice: String? = nil) -> Data {
+    public static let kokoroID = "kokoro"
+
+    /// True when the daemon listed engines; false = today's Kokoro-only view.
+    public var hasEngines: Bool { !engines.isEmpty }
+
+    public var currentEngineID: String { engine ?? Self.kokoroID }
+
+    public func engine(_ id: String) -> NaturalEngine? { engines.first { $0.id == id } }
+
+    public var currentEngine: NaturalEngine? { engine(currentEngineID) }
+
+    /// The voices to offer for an engine: the daemon's list, else (current engine, or Kokoro) what is known.
+    public func voiceOptions(for engineID: String) -> [NaturalVoiceOption] {
+        if let listed = engine(engineID)?.voices, !listed.isEmpty { return listed }
+        if engineID == currentEngineID, !voices.isEmpty { return voices }
+        if engineID == Self.kokoroID { return Self.voices.map { NaturalVoiceOption(id: $0.id, label: $0.title) } }
+        return []
+    }
+
+    /// The voice an engine speaks with now (the current engine's top-level `voice`).
+    public func voice(for engineID: String) -> String? {
+        engineID == currentEngineID ? voice : engine(engineID)?.defaultVoice
+    }
+
+    /// Whether the emotion picker shows for an engine: only when the daemon says it has one.
+    public func hasEmotion(_ engineID: String) -> Bool { engine(engineID)?.emotion ?? false }
+
+    /// The emotion level in force; "subtle" when the daemon said nothing or something unknown.
+    public var emotionLevel: NaturalEmotion { emotion.flatMap(NaturalEmotion.init(rawValue:)) ?? .subtle }
+
+    /// Sentence under the engine list for Kokoro-like engines with no emotion control.
+    public static let noEmotionSentence = "This engine has no emotion control."
+
+    /// `{ "natural": { enabled?, voice?, engine?, emotion? } }`: only what changed.
+    public static func requestBody(enabled: Bool? = nil, voice: String? = nil, engine: String? = nil,
+                                   emotion: NaturalEmotion? = nil) -> Data {
         var inner: [String: Any] = [:]
         if let enabled { inner["enabled"] = enabled }
         if let voice { inner["voice"] = voice }
+        if let engine { inner["engine"] = engine }
+        if let emotion { inner["emotion"] = emotion.rawValue }
         return (try? JSONSerialization.data(withJSONObject: ["natural": inner], options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 }

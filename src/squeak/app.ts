@@ -117,7 +117,6 @@ import { MacSpeaker, type Speaker } from "../voice/tts.js";
 import {
   naturalInstalled,
   naturalPaths,
-  NATURAL_VOICES,
   NaturalSettingsStore,
   NaturalSpeaker,
   NaturalVoice,
@@ -130,6 +129,7 @@ import {
 } from "../voice/natural-voice.js";
 import type { VoiceLine } from "../voice/relay-line.js";
 import { NaturalInstaller } from "../voice/natural-setup.js";
+import { ENGINE_IDS, isEngineId, VOICE_ENGINES, type EngineId } from "../voice/voice-engines.js";
 import { TEST_SCRIPT } from "../voice/test-script.js";
 import { readIdleSeconds } from "../fleet/user-idle.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
@@ -442,8 +442,13 @@ export class SqueakApp {
     );
     this.lastVoiceChat = new LastChatStore(path.join(config.supportDir, "voice-last-chat.json"));
     this.voiceCallbacks = new CallbackRequests(path.join(config.supportDir, "voice-callbacks.json"));
-    this.naturalSettings = new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json"));
-    this.naturalVoice = new NaturalVoice(naturalPaths(config.supportDir), () => this.naturalSettings.settings);
+    this.naturalSettings = new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json"), (engine) =>
+      naturalInstalled(naturalPaths(config.supportDir, engine)),
+    );
+    this.naturalVoice = new NaturalVoice(
+      (engine) => naturalPaths(config.supportDir, engine),
+      () => this.naturalSettings.settings,
+    );
     // Start the realistic voice's worker now and render the fixed call phrases while no call waits on them.
     if (this.naturalVoice.usable) {
       void this.naturalVoice
@@ -454,8 +459,8 @@ export class SqueakApp {
     this.naturalInstaller = new NaturalInstaller(config.supportDir, {
       log: (detail) => logger.warn("realistic voice setup failed", { detail }),
     });
-    this.promptClips = new PromptClipCache(this.naturalVoice, () => this.naturalSettings.settings.voice);
-    this.readBackClips = new ReadBackClips(this.naturalVoice, () => this.naturalSettings.settings.voice);
+    this.promptClips = new PromptClipCache(this.naturalVoice, () => this.naturalVoiceKey());
+    this.readBackClips = new ReadBackClips(this.naturalVoice, () => this.naturalVoiceKey());
     this.telegramStatus = new TelegramStatus({
       sender: telegram ? { sendMessage: (chatId, text) => telegram.sendMessage(chatId, text) } : null,
       allowedChatIds: config.allowedChatIds,
@@ -621,7 +626,7 @@ export class SqueakApp {
               },
               test: () => this.testVoiceCall(),
               // The same function the Mac app's `POST /control/voice/preview` ends in.
-              preview: (voice) => this.previewVoice(voice),
+              preview: (voice, engine) => this.previewVoice(voice, engine),
               changePin: (current, next) => this.changeVoicePin(current, next),
               gatewayUpdate: async () => {
                 const outcome = await this.updateGatewayAddon();
@@ -760,10 +765,14 @@ export class SqueakApp {
       voice: {
         read: () => this.voiceView(),
         apply: (request) => this.applyVoice(request),
-        preview: (voice) => this.previewVoice(voice),
+        preview: (voice, engine) => this.previewVoice(voice, engine),
       },
       // The Mac app's "Set up realistic voice": the install runs here, in the background, one at a time.
-      voiceNatural: { status: () => this.naturalInstaller.status(), start: () => this.naturalInstaller.start() },
+      voiceNatural: {
+        status: (engine) => this.naturalInstaller.status(engine),
+        start: (engine) => this.naturalInstaller.start(engine),
+        remove: (engine) => this.naturalInstaller.remove(engine, this.naturalSettings.settings.engine),
+      },
       // Not behind voiceRelay: pairing is how the Mac gets one.
       voiceGateway: {
         read: () =>
@@ -1471,14 +1480,68 @@ export class SqueakApp {
 
   private previewingVoice = false;
 
-  private async previewVoice(voice: string): Promise<Buffer | null> {
+  private async previewVoice(voice: string, engine?: string): Promise<Buffer | null> {
+    if (engine !== undefined && !isEngineId(engine)) return null;
     if (this.previewingVoice) return null;
     this.previewingVoice = true;
     try {
-      return await this.naturalVoice.preview(voice);
+      return await this.naturalVoice.preview(voice, engine);
     } finally {
       this.previewingVoice = false;
     }
+  }
+
+  /**
+   * The realistic voice in `voiceView`: `installed`, `enabled`, `voice` and `voices` are the current engine's (what a
+   * client that knows only Kokoro reads), `engines` lists every engine with its own voices and pick.
+   */
+  private naturalView() {
+    const { enabled, engine, emotion, voices, voice } = this.naturalSettings.settings;
+    const installed = (id: EngineId) => naturalInstalled(naturalPaths(this.config.supportDir, id));
+    return {
+      installed: installed(engine),
+      enabled,
+      voice,
+      voices: VOICE_ENGINES[engine].voices,
+      engine,
+      emotion,
+      engines: ENGINE_IDS.map((id) => {
+        const spec = VOICE_ENGINES[id];
+        return {
+          id,
+          label: spec.label,
+          summary: spec.summary,
+          size: spec.size,
+          installed: installed(id),
+          emotion: spec.emotion,
+          voices: spec.voices,
+          voice: voices[id] ?? spec.defaultVoice,
+          licence: spec.licence,
+        };
+      }),
+    };
+  }
+
+  /** What the prompt and read-back caches key a voice by: another engine, voice or emotion level never reuses a clip. */
+  private naturalVoiceKey(): string {
+    const { engine, voice, emotion } = this.naturalSettings.settings;
+    return `${engine}:${voice}:${VOICE_ENGINES[engine].emotion ? emotion : "none"}`;
+  }
+
+  /**
+   * The one place the realistic voice's settings change (the Mac app's route and the phone's signed command). A new
+   * engine, voice or emotion level starts the engine and makes the fixed call phrases again while no call waits.
+   */
+  private applyNatural(request: unknown): { ok: true } | { ok: false; reason: string } {
+    const before = this.naturalVoiceKey();
+    const outcome = this.naturalSettings.apply(request);
+    if (outcome.ok && this.naturalVoiceKey() !== before && this.naturalVoice.usable) {
+      void this.naturalVoice
+        .warm()
+        .then(() => this.naturalVoice.prewarm(fixedPhrases()))
+        .catch(() => undefined);
+    }
+    return outcome;
   }
 
   /** Whether voice is set up and who it rings: what `GET /control/voice` carries. */
@@ -1496,11 +1559,7 @@ export class SqueakApp {
       favorites: this.voiceFavorites.list(),
       workspaces: this.voiceWorkspaces(),
       // The realistic voice this Mac makes for calls (`squeak voice-tts-setup` installs it).
-      natural: {
-        installed: naturalInstalled(naturalPaths(this.config.supportDir)),
-        ...this.naturalSettings.settings,
-        voices: NATURAL_VOICES,
-      },
+      natural: this.naturalView(),
       ...(mode === "gateway" ? { gateway: this.gatewayView() } : {}),
       // Absent until a test has been asked for.
       ...(this.voiceTest ? { lastTest: this.voiceTest } : {}),
@@ -1702,8 +1761,8 @@ export class SqueakApp {
     // The realistic voice and the quick workspaces end in the same stores as the Mac app's route.
     const phone = applyPhoneVoiceChange(request, {
       natural: {
-        installed: () => naturalInstalled(naturalPaths(this.config.supportDir)),
-        apply: (natural) => this.naturalSettings.apply(natural),
+        installed: () => ENGINE_IDS.some((id) => naturalInstalled(naturalPaths(this.config.supportDir, id))),
+        apply: (natural) => this.applyNatural(natural),
       },
       favorites: this.voiceFavorites,
       knownWorkspaces: () => new Set(this.voiceWorkspaces().map((w) => w.key)),
@@ -1745,7 +1804,7 @@ export class SqueakApp {
     if (typeof request === "object" && request !== null && !Array.isArray(request) && "natural" in request) {
       const keys = Object.keys(request);
       const natural = keys.length === 1 ? (request as { natural: unknown }).natural : null;
-      const outcome = this.naturalSettings.apply(natural);
+      const outcome = this.applyNatural(natural);
       return Promise.resolve(outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome);
     }
     if (typeof request === "object" && request !== null && !Array.isArray(request) && "favorites" in request) {

@@ -1886,7 +1886,8 @@ public enum VoiceChange: Equatable, Sendable {
     /// Pause or resume calls, as `{ "pause": "1h" }`.
     case pause(PauseChoice)
     /// The realistic voice, as `{ "natural": { "enabled"?, "voice"? } }`. Only to a Mac that sends `natural.voices`.
-    case natural(enabled: Bool?, voice: String?)
+    /// `engine` and `emotion` go only to a Mac that sends `natural.engines`.
+    case natural(enabled: Bool?, voice: String?, engine: String? = nil, emotion: String? = nil)
     /// Quick workspaces, replacing the whole list: `{ "favorites": [{ "n", "workspace" }] }` (no label).
     case favorites([FavoriteWorkspace])
 }
@@ -1916,10 +1917,12 @@ extension VoiceChange: Encodable {
             try c.encode(action, forKey: Key("pinAction"))
         case .pause(let choice):
             try c.encode(choice.rawValue, forKey: Key("pause"))
-        case .natural(let enabled, let voice):
+        case .natural(let enabled, let voice, let engine, let emotion):
             var inner = c.nestedContainer(keyedBy: Key.self, forKey: Key("natural"))
             try inner.encodeIfPresent(enabled, forKey: Key("enabled"))
             try inner.encodeIfPresent(voice, forKey: Key("voice"))
+            try inner.encodeIfPresent(engine, forKey: Key("engine"))
+            try inner.encodeIfPresent(emotion, forKey: Key("emotion"))
         case .favorites(let list):
             var inner = c.nestedUnkeyedContainer(forKey: Key("favorites"))
             for f in list {
@@ -1948,6 +1951,8 @@ public struct VoiceSampleCommand: Encodable, Equatable, Sendable {
     public let kind: String
     /// A Kokoro id from `natural.voices`.
     public let voice: String
+    /// An engine id from `natural.engines`; left out (today's bytes) when absent.
+    public let engine: String?
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

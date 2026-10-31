@@ -1,5 +1,5 @@
 import { PHONE_CALLS_CAP } from "../voice/phone-voice.js";
-import { NATURAL_VOICE } from "../voice/natural-voice.js";
+import { isEngineId } from "../voice/voice-engines.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import type { AwakeEnd, AwakeState } from "../fleet/awake-session.js";
 import {
@@ -749,7 +749,7 @@ export interface RemoteBridgeDependencies {
      * The sample the Mac app's "Play sample" plays (an 8 kHz mono WAV made with the call voice); null when it could
      * not be made or one is being made. Absent: the phone is not offered a sample.
      */
-    preview?(voice: string): Promise<Buffer | null>;
+    preview?(voice: string, engine?: string): Promise<Buffer | null>;
   } | null;
   hotspot?: {
     state(): HotspotState;
@@ -2921,7 +2921,7 @@ export class RemoteBridge {
   }
 
   /**
-   * "Play voice sample" from a phone: `{ v: 1, kind: "voiceSample", voice, nonce, expiresAt }`, exactly these keys.
+   * "Play voice sample" from a phone: `{ v: 1, kind: "voiceSample", voice, engine?, nonce, expiresAt }`, exactly these keys.
    * The Mac makes the sample through the Mac app's own preview function and leaves it as one sealed `media` chunk
    * set (Realtime Database only), answered as `media` like a film's. It touches no chat and carries no words, so
    * no Face ID. One at a time, and one per 5 s per device.
@@ -2940,16 +2940,37 @@ export class RemoteBridge {
     if (!voice?.preview || !this.deps.store.watch || this.deps.shared || command.v !== 1) {
       return refuse("This Mac can't send a voice sample to a phone.", "not available");
     }
-    if (Object.keys(command).sort().join(",") !== "expiresAt,kind,nonce,v,voice") {
+    // `engine` is optional (an older phone sends none): the sample is of that engine, else of the current one.
+    const keys = Object.keys(command).sort().join(",");
+    if (keys !== "expiresAt,kind,nonce,v,voice" && keys !== "engine,expiresAt,kind,nonce,v,voice") {
       return refuse("Not a voice sample this Mac understands.", "bad keys");
     }
     const name = command.voice;
-    const state = voice.state() as { natural?: { installed?: unknown; voices?: unknown } } | null;
-    const voices = Array.isArray(state?.natural?.voices) ? (state!.natural!.voices as { id?: unknown }[]) : [];
-    if (typeof name !== "string" || !NATURAL_VOICE.test(name) || !voices.some((entry) => entry?.id === name)) {
+    const state = voice.state() as {
+      natural?: {
+        installed?: unknown;
+        voices?: unknown;
+        engine?: unknown;
+        engines?: Array<{ id?: unknown; installed?: unknown; voices?: unknown }>;
+      };
+    } | null;
+    if (command.engine !== undefined && !isEngineId(command.engine)) {
+      return refuse("Not a voice engine this Mac offers.", "unknown engine");
+    }
+    // The engine's own entry decides the voices and whether it is installed; a Mac without `engines` is Kokoro-only.
+    const entry =
+      command.engine === undefined || command.engine === state?.natural?.engine
+        ? undefined
+        : state?.natural?.engines?.find((candidate) => candidate?.id === command.engine);
+    if (command.engine !== undefined && command.engine !== state?.natural?.engine && !entry) {
+      return refuse("Not a voice engine this Mac offers.", "unknown engine");
+    }
+    const offered = entry ?? state?.natural;
+    const voices = Array.isArray(offered?.voices) ? (offered!.voices as { id?: unknown }[]) : [];
+    if (typeof name !== "string" || !/^[A-Za-z0-9_]{1,40}$/.test(name) || !voices.some((item) => item?.id === name)) {
       return refuse("Not a voice this Mac offers.", "unknown voice");
     }
-    if (state?.natural?.installed !== true) {
+    if (offered?.installed !== true) {
       return refuse("The realistic voice isn't installed on this Mac.", "not installed");
     }
     const now = this.now();
@@ -2962,7 +2983,10 @@ export class RemoteBridge {
     try {
       let wav: Buffer | null = null;
       try {
-        wav = await voice.preview(name);
+        wav =
+          command.engine === undefined
+            ? await voice.preview(name)
+            : await voice.preview(name, command.engine as string);
       } catch {
         wav = null;
       }

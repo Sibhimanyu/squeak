@@ -60,6 +60,36 @@ percent, bytes, totalBytes, code, error }`. A failure is one fixed sentence by `
 paths and command output go only to the daemon's log. The app polls while it runs, so closing Settings does not stop it,
 and the toggle and Voice picker appear when the daemon reports `installed`.
 
+**Voice engines.** The realistic voice has four engines (`voice-engines.ts`), each in its own folder of the support
+directory so removing one is deleting a folder: `kokoro` (`voice-tts/`, small, plain, no emotion), and three expressive
+ones on mlx-audio that run on the Mac's GPU: `qwen3` (Qwen3-TTS CustomVoice, preset speakers, Apache-2.0), `ming` (Ming
+3.0 TTS, built-in voices, MIT) and `chatterbox` (clones a reference clip, MIT). Each has `voice-tts-<id>/` with
+`venv/` (Python 3.10 to 3.12 for Apple silicon, found among Homebrew's and `~/.local/bin`'s), `worker.py` and its
+weights in `model/` (not the global Hugging Face cache). Setup fetches the repo's files with curl (resume, stall
+detection, retries; progress in bytes), but first looks for each file in the Hugging Face cache (`$HF_HUB_CACHE`,
+`$HF_HOME/hub`, `~/.cache/huggingface/hub`) or a folder named by `SQUEAK_VOICE_WEIGHTS_DIR` (`<repo name>/<file>`) and
+hard-links a file of exactly the right size instead ("Using files already on this Mac"); a half download is a `.part`
+file, never taken as installed. Chatterbox's reference clips are made with Kokoro at setup (Kokoro is installed first
+when missing). The MLX engines run **one** worker (urgent and background share it); Kokoro keeps two.
+
+- Settings `voice-natural.json`: `{ enabled, engine, voices: { <engine>: <voice> }, emotion: off | subtle | strong,
+voice }` (`voice` is Kokoro's, still written for a rolled-back daemon; the old `{ enabled, voice }` reads as Kokoro).
+  `apply` takes any subset of `enabled`, `voice` (for the engine set in the same request, else the current one),
+  `engine` (refused unless installed: "Set up <label> on the Mac first.") and `emotion`; the Mac app's route and the
+  phone's signed `natural` command end in the same `applyNatural`, which restarts the engine and prewarms the fixed
+  phrases after a change. A phone can switch to an installed engine but never start an install.
+- Mood comes from the words (`voice-mood.ts` `moodOf`: urgent, cheerful, apologetic, sympathetic, warm, neutral; one per
+  line) and each worker maps `(mood, level)` to its own controls; `off` is neutral for every line. Worker requests
+  carry `mood` and `level`; every worker writes 24 kHz mono PCM16. The sentence cache key holds engine, model identity,
+  voice, mood and level (Kokoro's keys are unchanged).
+- `GET /control/voice` `natural`: the current engine's `installed`, `enabled`, `voice`, `voices` as before, plus
+  `engine`, `emotion` and `engines: [{ id, label, summary, size, installed, emotion, voices, voice, licence }]`.
+- Routes (token-gated, no CORS): `POST /control/voice/natural/setup` takes an optional `{ engine }` (absent = Kokoro;
+  one install at a time across engines), `GET ...setup[?engine=]` answers the status plus `engine`;
+  `POST /control/voice/natural/remove` `{ engine }` deletes a folder (never the engine in use, nor Kokoro while it is
+  the only one); `POST /control/voice/preview` and the phone's `voiceSample` command take an optional `engine` (default
+  current) so a voice can be auditioned before switching. `squeak voice-tts-setup [--engine <id>]` is the terminal form.
+
 ## Direct setup
 
 When an agent is waiting on you (blocked on an approval, blocked on a question, or finished on a question), Squeak can
