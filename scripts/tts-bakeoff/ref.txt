@@ -1,0 +1,1 @@
+I checked the logs this morning, and everything looks fine. The new build is faster, the tests are green, and I think we can ship it after lunch.

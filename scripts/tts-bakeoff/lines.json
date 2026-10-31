@@ -1,0 +1,10 @@
+[
+  {"id": "01-greeting", "emotion": "friendly, a little urgent", "text": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?"},
+  {"id": "02-blocked", "emotion": "urgent, concerned", "text": "Heads up. Fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes."},
+  {"id": "03-done", "emotion": "cheerful, pleased", "text": "Good news! Fix the parser is done, as you asked. It added three retries with backoff, and all the tests pass."},
+  {"id": "04-options", "emotion": "neutral, clear", "text": "Options. 1, Merge now, recommended. 2, Open a PR first."},
+  {"id": "05-wrong-pin", "emotion": "gentle, apologetic", "text": "Sorry, that PIN is not right. Try again, then press hash."},
+  {"id": "06-taking-while", "emotion": "warm, reassuring", "text": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye."},
+  {"id": "07-failed", "emotion": "disappointed, sympathetic", "text": "Oh no. The build failed in conductor relay. TypeScript says the session ID is undefined on line 42."},
+  {"id": "08-callback", "emotion": "warm, upbeat", "text": "Okay, I'll call you back when squeak voice is done. Talk soon, goodbye!"}
+]

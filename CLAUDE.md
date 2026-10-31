@@ -376,6 +376,13 @@ prompt"`). Only `idle` is typed into. Its `procStart` is **UTC**, while
   (`<!-- squeak:ask-format:start/end -->`) in `$CODEX_HOME/AGENTS.md` (`~/.codex`); both back up first and
   `uninstall-hooks` removes only these. `SQUEAK_ASK_FORMAT=off` then `install-hooks` removes it.
 
+- **Call voices were chosen by a measured bake-off; read it before changing one.** `docs/voice-tts-bakeoff.md`
+  (2026-10-31, 22 variants of 11 local TTS models on the M5 Pro: Whisper WER on the 8 kHz phone copy, seconds per
+  line, memory, what each emotion control does) and the rerunnable harness `scripts/tts-bakeoff/` (`CONTRACT.md` is
+  the brief for adding a model; `envs/`, `out/` stay out of git). WER says the words survive the line, never that the
+  emotion is right: that needs ears. Qwen3 VoiceDesign re-invents its voice every render; CustomVoice's
+  Chinese-native speakers garbled "Squeak".
+
 ## The phone channel (docs/remote-channel.md)
 
 - **The Mac trusts a key, not a server.** `RemoteBridge.handleCommand` runs a

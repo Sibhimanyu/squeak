@@ -1,0 +1,1320 @@
+[
+ {
+  "variant": "chatterbox-clone-emotion",
+  "model": "Chatterbox (mlx-audio, fp16)",
+  "device": "mlx",
+  "notes": "clone of ref.wav; exaggeration/cfg_weight per line by emotion (urgent/cheerful 0.8-0.9 with cfg 0.25-0.3; neutral/gentle 0.4 with cfg 0.4-0.5); values appended to spoken_text",
+  "load": 1.12,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 2.26,
+    "audio": 4.48
+   },
+   "02-blocked": {
+    "heard": "Heads up. Fix the parser is blocked on an approval. It wants to run the database migration and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 3.37,
+    "audio": 7.4
+   },
+   "03-done": {
+    "heard": "Good news! Fix the parser is done as you asked. It added three retries with back off and all the tests passed.",
+    "wer": 0.14285714285714285,
+    "gen": 3.19,
+    "audio": 6.92
+   },
+   "04-options": {
+    "heard": "Options. One, merge now, recommended. Two, open a PR first.",
+    "wer": 0.0,
+    "gen": 2.63,
+    "audio": 5.8
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 2.15,
+    "audio": 4.4
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 2.13,
+    "audio": 4.48
+   },
+   "07-failed": {
+    "heard": "Oh no! The build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 3.66,
+    "audio": 7.6
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when this week voice is done. Talk soon. Goodbye.",
+    "wer": 0.15384615384615385,
+    "gen": 1.79,
+    "audio": 3.6
+   }
+  },
+  "n": 8,
+  "wer": 0.03708791208791209,
+  "gen_avg": 2.6475,
+  "rtf": 0.4740376007162041
+ },
+ {
+  "variant": "chatterbox-clone-ex0.5",
+  "model": "Chatterbox (mlx-audio, fp16)",
+  "device": "mlx",
+  "notes": "clone of ref.wav; exaggeration=0.5, cfg_weight=0.5 for all lines",
+  "load": 1.52,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Sweet. Your agent needs an answer. Which way should we go?",
+    "wer": 0.07142857142857142,
+    "gen": 2.35,
+    "audio": 4.0
+   },
+   "02-blocked": {
+    "heard": "Heads up! Fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 3.99,
+    "audio": 8.24
+   },
+   "03-done": {
+    "heard": "Good news! Fix the parser is done, as you asked. It added three retries with back-offs and all the tests passed.",
+    "wer": 0.14285714285714285,
+    "gen": 3.2,
+    "audio": 6.76
+   },
+   "04-options": {
+    "heard": "Options. One, merge now, recommended. Two, open a PR first.",
+    "wer": 0.0,
+    "gen": 2.72,
+    "audio": 5.76
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 1.82,
+    "audio": 3.88
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.93,
+    "audio": 4.12
+   },
+   "07-failed": {
+    "heard": "Oh no. The build failed in Conductor Relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 3.89,
+    "audio": 8.04
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Sweet Voice is done. Talk soon. Goodbye.",
+    "wer": 0.07692307692307693,
+    "gen": 2.98,
+    "audio": 4.56
+   }
+  },
+  "n": 8,
+  "wer": 0.0364010989010989,
+  "gen_avg": 2.8600000000000003,
+  "rtf": 0.5044091710758378
+ },
+ {
+  "variant": "chatterbox-turbo-clone-tags",
+  "model": "Chatterbox Turbo (mlx-audio, fp16)",
+  "device": "mlx",
+  "notes": "clone of ref.wav; Turbo ignores exaggeration/cfg; paralinguistic tags [sigh]/[chuckle] added on fitting lines, words unchanged",
+  "load": 4.28,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 4.62,
+    "audio": 5.16
+   },
+   "02-blocked": {
+    "heard": "Heads up. Fix the parser as blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.04,
+    "gen": 6.56,
+    "audio": 8.32
+   },
+   "03-done": {
+    "heard": "Good news. Six the parser is done, as you asked. It added three retries with back off and all the tests pass.",
+    "wer": 0.14285714285714285,
+    "gen": 5.73,
+    "audio": 8.0
+   },
+   "04-options": {
+    "heard": "Options. 1. Merge Now. Recommended. 2. Open a PR first.",
+    "wer": 0.0,
+    "gen": 4.84,
+    "audio": 5.88
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 3.81,
+    "audio": 4.84
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 4.45,
+    "audio": 5.6
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 7.13,
+    "audio": 8.52
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon. Goodbye!",
+    "wer": 0.0,
+    "gen": 5.93,
+    "audio": 6.44
+   }
+  },
+  "n": 8,
+  "wer": 0.022857142857142857,
+  "gen_avg": 5.38375,
+  "rtf": 0.8163381349507203
+ },
+ {
+  "variant": "csm-clone",
+  "model": "CSM-1B (mlx-community/csm-1b-8bit, mlx-audio)",
+  "device": "mlx",
+  "notes": "Voice clone: ref.wav + ref.txt as the speaker-0 context segment (mlx-audio voice_match).",
+  "load": 5.26,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Cleek. Your agent needs an answer. Which way should we go?",
+    "wer": 0.07142857142857142,
+    "gen": 1.63,
+    "audio": 3.6
+   },
+   "02-blocked": {
+    "heard": "Heads up! Fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 2.94,
+    "audio": 6.32
+   },
+   "03-done": {
+    "heard": "Good news. Fix the parser is done as you asked. It added three retries with back off and all the tests passed.",
+    "wer": 0.14285714285714285,
+    "gen": 2.6,
+    "audio": 5.76
+   },
+   "04-options": {
+    "heard": "Options. One merge now recommended. Two open a PR first.",
+    "wer": 0.0,
+    "gen": 3.84,
+    "audio": 8.32
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right, try again, then press hash.",
+    "wer": 0.0,
+    "gen": 3.36,
+    "audio": 7.6
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.84,
+    "audio": 3.68
+   },
+   "07-failed": {
+    "heard": "Oh no. The build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 2.87,
+    "audio": 6.0
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.68,
+    "audio": 3.68
+   }
+  },
+  "n": 8,
+  "wer": 0.026785714285714284,
+  "gen_avg": 2.5949999999999998,
+  "rtf": 0.4617437722419928
+ },
+ {
+  "variant": "dia-clone",
+  "model": "Dia 1.6B (mlx-community/Dia-1.6B-fp16, mlx-audio)",
+  "device": "mlx",
+  "notes": "Voice clone: ref.wav as audio prompt, ref transcript prefixed as [S1] text, then [S1] + line.",
+  "load": 1.94,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should",
+    "wer": 0.14285714285714285,
+    "gen": 9.67,
+    "audio": 4.03
+   },
+   "02-blocked": {
+    "heard": "Heads up, fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 11.9,
+    "audio": 5.4
+   },
+   "03-done": {
+    "heard": "Good news. Six the parser is done as you asked. It added three retries with back off and all the tests...",
+    "wer": 0.19047619047619047,
+    "gen": 9.8,
+    "audio": 4.47
+   },
+   "04-options": {
+    "heard": "Options 1, merge now recommended. 2, open a PR",
+    "wer": 0.1,
+    "gen": 6.64,
+    "audio": 3.1
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 5.38,
+    "audio": 2.41
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done.",
+    "wer": 0.058823529411764705,
+    "gen": 6.42,
+    "audio": 2.86
+   },
+   "07-failed": {
+    "heard": "Oh no! The build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 11.76,
+    "audio": 5.5
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon! Goodbye!",
+    "wer": 0.0,
+    "gen": 10.38,
+    "audio": 4.77
+   }
+  },
+  "n": 8,
+  "wer": 0.06151960784313725,
+  "gen_avg": 8.99375,
+  "rtf": 2.211124769514444
+ },
+ {
+  "variant": "dia-clone-nonverbal",
+  "model": "Dia 1.6B (mlx-community/Dia-1.6B-fp16, mlx-audio)",
+  "device": "mlx",
+  "notes": "Voice clone: ref.wav as audio prompt, ref transcript prefixed as [S1] text, then [S1] + line. Non-verbals like (laughs)/(sighs) inserted on lines 03, 05, 07, 08 only (others plain).",
+  "load": 1.73,
+  "lines": {
+   "03-done": {
+    "heard": "Good news! Fix the parser is done, as you asked. It added three retries with back-offs and all the test paths.",
+    "wer": 0.19047619047619047,
+    "gen": 17.19,
+    "audio": 8.31
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 6.58,
+    "audio": 2.91
+   },
+   "07-failed": {
+    "heard": "Oh no. The build failed in conductor relay. TypeScript says the session ID is undefined online.",
+    "wer": 0.21052631578947367,
+    "gen": 9.97,
+    "audio": 4.56
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon, goodbye!",
+    "wer": 0.0,
+    "gen": 8.38,
+    "audio": 3.59
+   }
+  },
+  "n": 4,
+  "wer": 0.10025062656641603,
+  "gen_avg": 10.530000000000001,
+  "rtf": 2.174496644295302
+ },
+ {
+  "variant": "kokoro-af_heart",
+  "model": "kokoro-onnx (Kokoro-82M)",
+  "device": "cpu (onnxruntime)",
+  "notes": "Kokoro has no emotion control; voice af_heart, speed 1.0, lang en-us, same text for every line. This is Squeak's current voice.",
+  "load": 0.367,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 1.196,
+    "audio": 4.267
+   },
+   "02-blocked": {
+    "heard": "Heads up, fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 1.978,
+    "audio": 8.149
+   },
+   "03-done": {
+    "heard": "Good news, fix the parser is done as you asked. It added three retries with back off and all the tests pass.",
+    "wer": 0.09523809523809523,
+    "gen": 1.672,
+    "audio": 6.592
+   },
+   "04-options": {
+    "heard": "Options, one merge now recommended. Two, open a PR first.",
+    "wer": 0.0,
+    "gen": 1.783,
+    "audio": 4.373
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry that PIN is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 1.561,
+    "audio": 3.605
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.715,
+    "audio": 4.309
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 1.673,
+    "audio": 6.933
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon, goodbye.",
+    "wer": 0.0,
+    "gen": 1.257,
+    "audio": 4.032
+   }
+  },
+  "n": 8,
+  "wer": 0.011904761904761904,
+  "gen_avg": 1.6043749999999999,
+  "rtf": 0.30371509701845717
+ },
+ {
+  "variant": "kyutai-defaultvoice-plain",
+  "model": "Kyutai TTS 1.6B (en_fr), moshi_mlx bf16",
+  "device": "mlx",
+  "notes": "No emotion control: text only, voice embedding unmute-prod-website/default_voice.wav (CC0), cfg distilled 1.0 (conditioning), temp 0.6. Seed fixed.",
+  "load": 1.6,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Cleek, your agent needs an answer. Which way should we go?",
+    "wer": 0.07142857142857142,
+    "gen": 8.67,
+    "audio": 4.64
+   },
+   "02-blocked": {
+    "heard": "Heads up. Fix the parser is blocked on an approval. It wants to run the database migration and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 14.52,
+    "audio": 8.8
+   },
+   "03-done": {
+    "heard": "Good news! Fix the parser is done, as you asked. It added three retries with back-off and all the tests passed.",
+    "wer": 0.14285714285714285,
+    "gen": 17.08,
+    "audio": 7.44
+   },
+   "04-options": {
+    "heard": "options. Merge now recommended to open a PR first.",
+    "wer": 0.2,
+    "gen": 16.73,
+    "audio": 5.12
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that PIN is not right. Try again, then press SASH.",
+    "wer": 0.09090909090909091,
+    "gen": 11.27,
+    "audio": 3.6
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 12.87,
+    "audio": 6.0
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 16.13,
+    "audio": 7.68
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon, goodbye.",
+    "wer": 0.0,
+    "gen": 10.55,
+    "audio": 5.44
+   }
+  },
+  "n": 8,
+  "wer": 0.06314935064935065,
+  "gen_avg": 13.4775,
+  "rtf": 2.2130541871921183
+ },
+ {
+  "variant": "kyutai-expresso-emotion",
+  "model": "Kyutai TTS 1.6B (en_fr), moshi_mlx bf16",
+  "device": "mlx",
+  "notes": "Per-line Expresso speaker ex03 style clip as voice embedding (happy/confused/narration/sad-sympathetic/calm), same speaker across lines. Expresso voices are CC-BY-NC (non-commercial). temp 0.6.",
+  "load": 1.6,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak, your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 10.66,
+    "audio": 4.96
+   },
+   "02-blocked": {
+    "heard": "Heads up, fix the parser is blocked on an approval. It wants to run the database migration and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 22.45,
+    "audio": 10.4
+   },
+   "03-done": {
+    "heard": "Good news. Six the parser is done as you asked. It added three retries with back off and all the tests pass.",
+    "wer": 0.14285714285714285,
+    "gen": 16.39,
+    "audio": 7.76
+   },
+   "04-options": {
+    "heard": "options. One, merge now, recommended. Two, open a PR first.",
+    "wer": 0.0,
+    "gen": 12.74,
+    "audio": 4.88
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pain is not right. Try again, then press hash.",
+    "wer": 0.09090909090909091,
+    "gen": 10.07,
+    "audio": 4.48
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 11.13,
+    "audio": 5.04
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in Conductor Relay. TypeScript says the session ID is undefined on Line 42.",
+    "wer": 0.0,
+    "gen": 15.64,
+    "audio": 7.28
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 10.42,
+    "audio": 5.52
+   }
+  },
+  "n": 8,
+  "wer": 0.02922077922077922,
+  "gen_avg": 13.6875,
+  "rtf": 2.176073131955485
+ },
+ {
+  "variant": "ming3-clone-emotion",
+  "model": "Ming-3.0-tts 0.5B (mlx-audio bf16)",
+  "device": "mlx",
+  "notes": "Clone of ROOT/ref.wav + per-line Ming3 JSON caption: emotion (\u9ad8\u5174/\u60b2\u4f24/\u6050\u60e7/\u4e2d\u6027) + speed/pitch/volume levels.",
+  "load": 2.27,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 1.38,
+    "audio": 4.9
+   },
+   "02-blocked": {
+    "heard": "Heads up. Fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 2.33,
+    "audio": 8.1
+   },
+   "03-done": {
+    "heard": "Good news. Six the parser is done as you asked. It added three retries with back off and all the tests pass.",
+    "wer": 0.14285714285714285,
+    "gen": 2.0,
+    "audio": 7.2
+   },
+   "04-options": {
+    "heard": "Options. One merge now. Recommended. Two. Open a PR first.",
+    "wer": 0.0,
+    "gen": 1.58,
+    "audio": 5.6
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 1.32,
+    "audio": 4.5
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.41,
+    "audio": 4.6
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 2.0,
+    "audio": 7.0
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.56,
+    "audio": 4.6
+   }
+  },
+  "n": 8,
+  "wer": 0.017857142857142856,
+  "gen_avg": 1.6975,
+  "rtf": 0.2920430107526882
+ },
+ {
+  "variant": "ming3-clone-plain",
+  "model": "Ming-3.0-tts 0.5B (mlx-audio bf16)",
+  "device": "mlx",
+  "notes": "Clone of ROOT/ref.wav, no caption (baseline).",
+  "load": 2.27,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 1.34,
+    "audio": 4.4
+   },
+   "02-blocked": {
+    "heard": "Heads up, 6th of parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.08,
+    "gen": 2.21,
+    "audio": 7.8
+   },
+   "03-done": {
+    "heard": "Good news. Six the parser is done as you asked. It added three retries with back-off and all the tests passed.",
+    "wer": 0.19047619047619047,
+    "gen": 2.0,
+    "audio": 6.7
+   },
+   "04-options": {
+    "heard": "Options, 1,000 now, recommended. 2. Open a PR first.",
+    "wer": 0.1,
+    "gen": 1.67,
+    "audio": 5.5
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 1.18,
+    "audio": 4.2
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.35,
+    "audio": 4.6
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 2.02,
+    "audio": 6.8
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.37,
+    "audio": 4.5
+   }
+  },
+  "n": 8,
+  "wer": 0.04630952380952381,
+  "gen_avg": 1.6425,
+  "rtf": 0.2952808988764045
+ },
+ {
+  "variant": "ming3-freeform",
+  "model": "Ming-3.0-tts 0.5B (mlx-audio bf16)",
+  "device": "mlx",
+  "notes": "Voice design: English freeform delivery sentence per line, zero speaker embedding (voice is whatever the instruction yields).",
+  "load": 2.27,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 1.39,
+    "audio": 4.5
+   },
+   "02-blocked": {
+    "heard": "Heads up. Fix the parser is blocked on an approval. It wants to run the database migration and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 2.24,
+    "audio": 8.0
+   },
+   "03-done": {
+    "heard": "Good news, Sixaparter is done. As you asked, it added three retries with back-off and all the tests passed.",
+    "wer": 0.2857142857142857,
+    "gen": 1.7,
+    "audio": 6.0
+   },
+   "04-options": {
+    "heard": "Options 1. Merge Now. Recommended 2. Open a PR first.",
+    "wer": 0.0,
+    "gen": 1.54,
+    "audio": 5.1
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 1.29,
+    "audio": 4.6
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.23,
+    "audio": 4.5
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 2.02,
+    "audio": 7.2
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.63,
+    "audio": 3.7
+   }
+  },
+  "n": 8,
+  "wer": 0.03571428571428571,
+  "gen_avg": 1.63,
+  "rtf": 0.2990825688073394
+ },
+ {
+  "variant": "ming3-usemma-emotion",
+  "model": "Ming-3.0-tts 0.5B (mlx-audio bf16)",
+  "device": "mlx",
+  "notes": "Built-in voice US_Emma (ip caption) with the same per-line emotion/speed/pitch caption as clone-emotion.",
+  "load": 2.27,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 1.36,
+    "audio": 4.5
+   },
+   "02-blocked": {
+    "heard": "Heads up, fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 2.22,
+    "audio": 8.0
+   },
+   "03-done": {
+    "heard": "Good news! Fix the parser is done as you asked. It added three retries with back-off and all the tests passed.",
+    "wer": 0.14285714285714285,
+    "gen": 1.83,
+    "audio": 6.5
+   },
+   "04-options": {
+    "heard": "Options, merge now, recommended. 2. Open a PR first.",
+    "wer": 0.1,
+    "gen": 1.58,
+    "audio": 5.4
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 1.34,
+    "audio": 4.7
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.25,
+    "audio": 4.7
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 2.3,
+    "audio": 7.7
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when squeak voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.37,
+    "audio": 4.2
+   }
+  },
+  "n": 8,
+  "wer": 0.030357142857142857,
+  "gen_avg": 1.65625,
+  "rtf": 0.2899343544857768
+ },
+ {
+  "variant": "orpheus-tara-plain",
+  "model": "Orpheus 3B ft (mlx-community/orpheus-3b-0.1-ft-4bit, mlx-audio)",
+  "device": "mlx",
+  "notes": "Built-in voice tara, plain text, no tags.",
+  "load": 3.87,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello? This is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 5.45,
+    "audio": 7.68
+   },
+   "02-blocked": {
+    "heard": "Heads up, fix the parser is blocked on an approval. It wants to run the database migration. It can't continue until you say yes.",
+    "wer": 0.04,
+    "gen": 9.78,
+    "audio": 12.97
+   },
+   "03-done": {
+    "heard": "Good news! Fix the parser is done as you asked. It added three retries with back off and all the tests passed.",
+    "wer": 0.14285714285714285,
+    "gen": 6.65,
+    "audio": 9.05
+   },
+   "04-options": {
+    "heard": "Options. 1. Merge Mal. Recommended. 2. Open a PR first.",
+    "wer": 0.1,
+    "gen": 6.69,
+    "audio": 9.13
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pen is not right. Try again, then press hash.",
+    "wer": 0.09090909090909091,
+    "gen": 4.87,
+    "audio": 6.74
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 6.54,
+    "audio": 8.45
+   },
+   "07-failed": {
+    "heard": "Oh no. But those failed and conduct a relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.2631578947368421,
+    "gen": 6.87,
+    "audio": 9.22
+   },
+   "08-callback": {
+    "heard": "Okay. I'll call you back when the Greek voice is done. Talk soon. Goodbye.",
+    "wer": 0.15384615384615385,
+    "gen": 5.23,
+    "audio": 7.34
+   }
+  },
+  "n": 8,
+  "wer": 0.09884628529365372,
+  "gen_avg": 6.51,
+  "rtf": 0.7378860867101161
+ },
+ {
+  "variant": "orpheus-tara-tags",
+  "model": "Orpheus 3B ft (mlx-community/orpheus-3b-0.1-ft-4bit, mlx-audio)",
+  "device": "mlx",
+  "notes": "Voice tara; inline emotion tags (<chuckle>, <sigh>) inserted where the line's emotion fits; words unchanged.",
+  "load": 3.65,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 7.23,
+    "audio": 9.56
+   },
+   "02-blocked": {
+    "heard": "Heads up. Fixed the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.04,
+    "gen": 7.35,
+    "audio": 9.9
+   },
+   "03-done": {
+    "heard": "Good news. Six the parser is done, as you asked. It added three retries with back off and all the tests passed.",
+    "wer": 0.19047619047619047,
+    "gen": 10.73,
+    "audio": 13.91
+   },
+   "04-options": {
+    "heard": "Options. One, merge now, recommended. Two, open up TR first.",
+    "wer": 0.2,
+    "gen": 7.35,
+    "audio": 8.62
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pen is not right. Try again, bend press hash.",
+    "wer": 0.18181818181818182,
+    "gen": 5.16,
+    "audio": 6.4
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Bye.",
+    "wer": 0.058823529411764705,
+    "gen": 7.46,
+    "audio": 9.05
+   },
+   "07-failed": {
+    "heard": "Oh no. The build failed and conductor remay. TypeScript says the session idea is undefined on line 42.",
+    "wer": 0.15789473684210525,
+    "gen": 9.24,
+    "audio": 10.07
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when squeak voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 6.78,
+    "audio": 7.51
+   }
+  },
+  "n": 8,
+  "wer": 0.10362657981853028,
+  "gen_avg": 7.6625,
+  "rtf": 0.8171154358837643
+ },
+ {
+  "variant": "qwen3-customvoice-serena-instruct",
+  "model": "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-8bit",
+  "device": "mlx",
+  "notes": "CustomVoice preset speaker; emotion given as instruct text. Text spoken verbatim.",
+  "load": 6.61,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Greg, your agent needs an answer. Which way should we go?",
+    "wer": 0.07142857142857142,
+    "gen": 2.635,
+    "audio": 5.12
+   },
+   "02-blocked": {
+    "heard": "Heads up. Fix the parser is blocked on an approval. It wants to run the database migration and it can continue until you say yes.",
+    "wer": 0.04,
+    "gen": 12.148,
+    "audio": 10.48
+   },
+   "03-done": {
+    "heard": "\"Gameez, fix the parser is done,\" as you asked. It added three retries with backups and all the tests passed.",
+    "wer": 0.19047619047619047,
+    "gen": 10.065,
+    "audio": 8.48
+   },
+   "04-options": {
+    "heard": "Options merge now recommended to open a PR first.",
+    "wer": 0.2,
+    "gen": 8.108,
+    "audio": 6.96
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pain is not right. Try again, then press hash.",
+    "wer": 0.09090909090909091,
+    "gen": 7.121,
+    "audio": 6.56
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card where it's done. Goodbye.",
+    "wer": 0.058823529411764705,
+    "gen": 3.558,
+    "audio": 5.44
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in conductor really. TapScript says the session ID is undefined on line 42.",
+    "wer": 0.10526315789473684,
+    "gen": 10.163,
+    "audio": 8.56
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when squeak voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 33.389,
+    "audio": 5.92
+   }
+  },
+  "n": 8,
+  "wer": 0.0946125675150443,
+  "gen_avg": 10.898375,
+  "rtf": 1.5157684283727397
+ },
+ {
+  "variant": "qwen3-voicedesign-instruct",
+  "model": "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit",
+  "device": "mlx",
+  "notes": "VoiceDesign: one fixed voice description + the line's emotion in the instruct text. Text spoken verbatim.",
+  "load": 19.78,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 1.561,
+    "audio": 4.48
+   },
+   "02-blocked": {
+    "heard": "Heads up! Fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 2.778,
+    "audio": 7.92
+   },
+   "03-done": {
+    "heard": "Good news. Six of parser is done as you asked. It added three retries with back off and all the tests passed.",
+    "wer": 0.23809523809523808,
+    "gen": 2.36,
+    "audio": 7.76
+   },
+   "04-options": {
+    "heard": "Options. One, merge now, recommended. Two, open a PR first.",
+    "wer": 0.0,
+    "gen": 1.598,
+    "audio": 5.52
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry that pin is not right. Try again then press hash.",
+    "wer": 0.0,
+    "gen": 1.315,
+    "audio": 4.48
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.45,
+    "audio": 4.8
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 2.314,
+    "audio": 7.28
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when squeak voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.343,
+    "audio": 4.48
+   }
+  },
+  "n": 8,
+  "wer": 0.02976190476190476,
+  "gen_avg": 1.839875,
+  "rtf": 0.3150470890410959
+ },
+ {
+  "variant": "spark-clone",
+  "model": "Spark-TTS 0.5B (mlx-audio bf16)",
+  "device": "mlx",
+  "notes": "Zero-shot clone of ROOT/ref.wav + ref.txt; no emotion control exists, delivery follows the reference.",
+  "load": 2.18,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 1.81,
+    "audio": 5.12
+   },
+   "02-blocked": {
+    "heard": "Heads up. Fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 2.61,
+    "audio": 8.74
+   },
+   "03-done": {
+    "heard": "Good news. Fix the parser is done as you asked. It added three retries with back off and all the tests pass.",
+    "wer": 0.09523809523809523,
+    "gen": 2.33,
+    "audio": 7.78
+   },
+   "04-options": {
+    "heard": "Taviya, one merge now, recommended, to open a PR first.",
+    "wer": 0.2,
+    "gen": 1.5,
+    "audio": 4.76
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 1.18,
+    "audio": 3.94
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.46,
+    "audio": 5.02
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in Conductor Relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 2.1,
+    "audio": 7.4
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon. Goodbye!",
+    "wer": 0.0,
+    "gen": 1.42,
+    "audio": 4.5
+   }
+  },
+  "n": 8,
+  "wer": 0.036904761904761905,
+  "gen_avg": 1.80125,
+  "rtf": 0.30490901396529835
+ },
+ {
+  "variant": "spark-female-pitchspeed",
+  "model": "Spark-TTS 0.5B (mlx-audio bf16)",
+  "device": "mlx",
+  "notes": "Controllable mode: gender=female, per-line pitch/speed level (urgent/cheerful = high, apologetic/sad = low, neutral = moderate). Spark has no true emotion control; this is a crude prosody proxy.",
+  "load": 2.18,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 1.08,
+    "audio": 3.28
+   },
+   "02-blocked": {
+    "heard": "Heads up! Fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 2.26,
+    "audio": 7.28
+   },
+   "03-done": {
+    "heard": "Good news! Fix the parser is done as you asked. It added three retries with back off and all the tests passed.",
+    "wer": 0.14285714285714285,
+    "gen": 1.97,
+    "audio": 6.54
+   },
+   "04-options": {
+    "heard": "Options 1. Merch Now recommended. 2. Open a PR first.",
+    "wer": 0.1,
+    "gen": 1.39,
+    "audio": 4.48
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, the pin is not right. Try again, then press hash.",
+    "wer": 0.09090909090909091,
+    "gen": 1.33,
+    "audio": 4.3
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 1.82,
+    "audio": 6.0
+   },
+   "07-failed": {
+    "heard": "Oh no! The build failed in Conductor Relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 2.72,
+    "audio": 9.16
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when weak voice is done. Talk soon. Goodbye.",
+    "wer": 0.07692307692307693,
+    "gen": 1.38,
+    "audio": 4.24
+   }
+  },
+  "n": 8,
+  "wer": 0.05133616383616384,
+  "gen_avg": 1.74375,
+  "rtf": 0.3080830388692579
+ },
+ {
+  "variant": "voxcpm2-clone-plain",
+  "model": "VoxCPM2 2B (mlx-audio bf16)",
+  "device": "mlx",
+  "notes": "Clone of ROOT/ref.wav only (baseline).",
+  "load": 1.94,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak, your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 6.41,
+    "audio": 4.48
+   },
+   "02-blocked": {
+    "heard": "Heads up. Fix the parser is blocked on an approval. It wants to run the database migration and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 11.76,
+    "audio": 8.32
+   },
+   "03-done": {
+    "heard": "Good news! Fix the parser is done as you asked. It added three retries with back-off and all the tests pass.",
+    "wer": 0.09523809523809523,
+    "gen": 14.47,
+    "audio": 7.84
+   },
+   "04-options": {
+    "heard": "options. One, merge now, recommended. Two, open a PR first.",
+    "wer": 0.0,
+    "gen": 8.44,
+    "audio": 6.4
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 8.49,
+    "audio": 5.44
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 7.15,
+    "audio": 4.64
+   },
+   "07-failed": {
+    "heard": "Oh no, the build failed in Conductor Relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 8.97,
+    "audio": 7.2
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 6.33,
+    "audio": 4.0
+   }
+  },
+  "n": 8,
+  "wer": 0.011904761904761904,
+  "gen_avg": 9.0025,
+  "rtf": 1.490480132450331
+ },
+ {
+  "variant": "voxcpm2-clone-styled",
+  "model": "VoxCPM2 2B (mlx-audio bf16)",
+  "device": "mlx",
+  "notes": "Clone of ROOT/ref.wav plus the per-line '(<delivery description>)' prefix.",
+  "load": 1.94,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak, your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 5.76,
+    "audio": 4.32
+   },
+   "02-blocked": {
+    "heard": "Heads up, fix the parser is blocked on an approval. It wants to run the database migration, and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 9.66,
+    "audio": 6.88
+   },
+   "03-done": {
+    "heard": "Good news. Six the parser is done as you asked. It added three retries with back off and all the tests pass.",
+    "wer": 0.14285714285714285,
+    "gen": 12.27,
+    "audio": 9.12
+   },
+   "04-options": {
+    "heard": "Options 1. Merge now. Recommended 2. Open a PR first.",
+    "wer": 0.0,
+    "gen": 8.81,
+    "audio": 5.76
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 6.14,
+    "audio": 4.64
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 16.65,
+    "audio": 5.76
+   },
+   "07-failed": {
+    "heard": "Oh no. The build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 20.68,
+    "audio": 9.44
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 7.19,
+    "audio": 4.64
+   }
+  },
+  "n": 8,
+  "wer": 0.017857142857142856,
+  "gen_avg": 10.895,
+  "rtf": 1.7238924050632913
+ },
+ {
+  "variant": "voxcpm2-design-emotion",
+  "model": "VoxCPM2 2B (mlx-audio bf16)",
+  "device": "mlx",
+  "notes": "Voice design: '(A young woman, <delivery description>)text' per line, no reference.",
+  "load": 1.94,
+  "lines": {
+   "01-greeting": {
+    "heard": "Hello, this is Squeak. Your agent needs an answer. Which way should we go?",
+    "wer": 0.0,
+    "gen": 4.67,
+    "audio": 4.0
+   },
+   "02-blocked": {
+    "heard": "Heads up, fix the parser is blocked on an approval. It wants to run the database migration and it can't continue until you say yes.",
+    "wer": 0.0,
+    "gen": 7.0,
+    "audio": 6.08
+   },
+   "03-done": {
+    "heard": "Good news. Fix the parser is done as you asked. It added three retries with back off and all the tests passed.",
+    "wer": 0.14285714285714285,
+    "gen": 8.4,
+    "audio": 7.52
+   },
+   "04-options": {
+    "heard": "Options 1. Merge now, recommended. 2. Open a PR first.",
+    "wer": 0.0,
+    "gen": 5.6,
+    "audio": 4.8
+   },
+   "05-wrong-pin": {
+    "heard": "Sorry, that pin is not right. Try again, then press hash.",
+    "wer": 0.0,
+    "gen": 10.16,
+    "audio": 8.16
+   },
+   "06-taking-while": {
+    "heard": "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+    "wer": 0.0,
+    "gen": 9.37,
+    "audio": 8.16
+   },
+   "07-failed": {
+    "heard": "Oh no! The build failed in conductor relay. TypeScript says the session ID is undefined on line 42.",
+    "wer": 0.0,
+    "gen": 7.64,
+    "audio": 6.72
+   },
+   "08-callback": {
+    "heard": "Okay, I'll call you back when Squeak Voice is done. Talk soon. Goodbye.",
+    "wer": 0.0,
+    "gen": 4.9,
+    "audio": 4.16
+   }
+  },
+  "n": 8,
+  "wer": 0.017857142857142856,
+  "gen_avg": 7.2175,
+  "rtf": 1.1641129032258064
+ }
+]

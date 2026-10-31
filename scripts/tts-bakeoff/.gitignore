@@ -1,0 +1,7 @@
+# Made by a run, never committed: venvs, model folders, audio, the listening page.
+envs/
+out/
+phone/
+logs/
+index.html
+__pycache__/
