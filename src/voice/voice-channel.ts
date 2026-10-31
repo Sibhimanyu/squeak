@@ -51,6 +51,8 @@ export interface VoiceChannelDependencies {
   followUp?: () => boolean;
   /** The call may be voice first (`composeScript`'s `voice`): the Mac can converse and the add-on can talk it through. */
   voiceFirst?: () => boolean;
+  /** The owner's persona is terse: openings drop the greeting and the invitation. Read at each call. */
+  terse?: () => boolean;
   policy: CallPolicy;
   /**
    * "Call me back when you're done" requests made on a call (voice/callbacks.ts): watched against the fleet, and each
@@ -193,6 +195,7 @@ export class VoiceChannel {
       canAnswer,
       safely(() => this.deps.followUp?.() ?? false) ?? false,
       safely(() => this.deps.voiceFirst?.() ?? false) ?? false,
+      safely(() => this.deps.terse?.() ?? false) ?? false,
     );
     const follow = script.followUp
       ? {
@@ -349,7 +352,7 @@ export class VoiceChannel {
     const text = safely(() => this.deps.replier.lastTurnText(target));
     const canAnswer = typeof this.deps.canTakeKeys === "function" ? this.deps.canTakeKeys() : this.deps.canTakeKeys;
     const voice = canAnswer && (safely(() => this.deps.callbackVoice?.() ?? false) ?? false);
-    const script = composeCallbackScript(session, text, voice);
+    const script = composeCallbackScript(session, text, voice, safely(() => this.deps.terse?.() ?? false) ?? false);
     const follow: CallFollow | undefined = script.followUp
       ? { target, label: script.followUp.label, script: { question: script.question, options: [] } }
       : undefined;

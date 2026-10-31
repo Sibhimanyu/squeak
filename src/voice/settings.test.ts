@@ -3,7 +3,16 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { pauseUntil, readPauseChange, readVoiceChange, VoiceSettingsStore } from "./settings.js";
+import {
+  isTerse,
+  MAX_PERSONA_CHARS,
+  pauseUntil,
+  personaInstruction,
+  readPauseChange,
+  readPersonaChange,
+  readVoiceChange,
+  VoiceSettingsStore,
+} from "./settings.js";
 
 describe("readVoiceChange", () => {
   it("takes an internal extension or null, nothing else", () => {
@@ -100,5 +109,64 @@ describe("pause calls", () => {
     now = at + 3_600_000;
     expect(store.pause()).toBeNull();
     expect(JSON.parse(fs.readFileSync(f, "utf8")).pause).toBeUndefined();
+  });
+});
+
+describe("the call's persona", () => {
+  const store = (): { file: string; store: VoiceSettingsStore } => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "squeak-persona-")), "voice-settings.json");
+    return { file, store: new VoiceSettingsStore(file) };
+  };
+
+  it("reads exactly a style, and a custom one needs its text", () => {
+    expect(readPersonaChange({ persona: { style: "terse" } })).toEqual({ style: "terse" });
+    expect(readPersonaChange({ persona: { style: "friendly", custom: "ignored" } })).toEqual({ style: "friendly" });
+    expect(readPersonaChange({ persona: { style: "custom", custom: "  dry\u0000 and\nblunt " } })).toEqual({
+      style: "custom",
+      custom: "dry and blunt",
+    });
+    expect(readPersonaChange({ persona: { style: "custom", custom: "x".repeat(900) } })?.custom).toHaveLength(
+      MAX_PERSONA_CHARS,
+    );
+    for (const bad of [
+      { persona: { style: "custom" } },
+      { persona: { style: "custom", custom: "   " } },
+      { persona: { style: "rude" } },
+      { persona: { style: "terse", extra: 1 } },
+      { persona: "terse" },
+      { persona: { style: "terse" }, callee: "101" },
+      {},
+      null,
+    ]) {
+      expect(readPersonaChange(bad)).toBeNull();
+    }
+  });
+
+  it("is terse by default, and only friendly keeps the pleasantries", () => {
+    expect(isTerse(undefined)).toBe(true);
+    expect(isTerse({ style: "terse" })).toBe(true);
+    expect(isTerse({ style: "custom", custom: "dry" })).toBe(true);
+    expect(isTerse({ style: "friendly" })).toBe(false);
+    expect(personaInstruction(undefined)).toContain("No greetings");
+    expect(personaInstruction({ style: "friendly" })).toContain("Warm");
+    expect(personaInstruction({ style: "custom", custom: "like a pirate" })).toContain("like a pirate");
+  });
+
+  it("is saved, survives a reload, and is not lost when the extension or a pause changes", () => {
+    const { file, store: settings } = store();
+    expect(settings.apply({ persona: { style: "custom", custom: "dry and blunt" } })).toMatchObject({ ok: true });
+    expect(settings.apply({ callee: "101" })).toMatchObject({ ok: true });
+    expect(settings.apply({ pause: "1h" })).toMatchObject({ ok: true });
+    expect(settings.settings).toMatchObject({ callee: "101", persona: { style: "custom", custom: "dry and blunt" } });
+    expect(new VoiceSettingsStore(file).settings.persona).toEqual({ style: "custom", custom: "dry and blunt" });
+    expect(settings.apply({ pause: "resume" })).toMatchObject({ ok: true });
+    expect(settings.settings.persona).toEqual({ style: "custom", custom: "dry and blunt" });
+  });
+
+  it("says what is wrong with a persona it cannot take, and changes nothing", () => {
+    const { store: settings } = store();
+    const outcome = settings.apply({ persona: { style: "custom" } });
+    expect(outcome).toMatchObject({ ok: false });
+    expect(settings.settings.persona).toBeUndefined();
   });
 });

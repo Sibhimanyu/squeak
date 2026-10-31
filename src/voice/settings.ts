@@ -15,11 +15,71 @@ export interface VoicePause {
   until: number | null;
 }
 
+export const PERSONA_STYLES = ["terse", "friendly", "custom"] as const;
+export type PersonaStyle = (typeof PERSONA_STYLES)[number];
+export const MAX_PERSONA_CHARS = 300;
+
+/** How the call's assistant speaks. Absent means terse: these are calls to the owner, not to a customer. */
+export interface VoicePersona {
+  style: PersonaStyle;
+  /** The owner's own description of the character; only used (and only kept) with style "custom". */
+  custom?: string;
+}
+
+export const DEFAULT_PERSONA: VoicePersona = { style: "terse" };
+
 export interface VoiceSettings {
   callee: string | null;
   /** Present only while calls are paused. */
   pause?: VoicePause;
+  /** Absent until the owner picks one: the terse default. */
+  persona?: VoicePersona;
 }
+
+/** A custom persona as text for the model: control characters out, whitespace collapsed, clipped. */
+export function cleanPersonaText(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return (
+    raw
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, MAX_PERSONA_CHARS)
+  );
+}
+
+/** `{ persona: { style, custom? } }`, exactly those keys; a custom style needs its text. Null otherwise. */
+export function readPersonaChange(value: unknown): VoicePersona | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length !== 1 || keys[0] !== "persona") return null;
+  const raw = (value as Record<string, unknown>).persona;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (Object.keys(record).some((key) => key !== "style" && key !== "custom")) return null;
+  const style = PERSONA_STYLES.find((candidate) => candidate === record.style);
+  if (!style) return null;
+  const custom = cleanPersonaText(record.custom);
+  if (style === "custom") return custom ? { style, custom } : null;
+  return { style };
+}
+
+/** What the model is told about how to speak (voice/chat-brief.ts adds it to its rules, which it never overrides). */
+export function personaInstruction(persona: VoicePersona | undefined): string {
+  const current = persona ?? DEFAULT_PERSONA;
+  if (current.style === "friendly") {
+    return "Warm and polite, like a helpful colleague: a friendly word is fine, still brief.";
+  }
+  if (current.style === "custom" && current.custom) {
+    return `The owner describes how you should sound: ${current.custom}`;
+  }
+  return "Terse, like a teammate on a quick internal call, not customer service. No greetings, no thanks, no apologies, no pleasantries and no offers of more help. Lead with the answer in the fewest words that are complete.";
+}
+
+/** Whether the fixed lines of a call (opening, invitations) drop the pleasantries: every style but friendly. */
+export const isTerse = (persona: VoicePersona | undefined): boolean =>
+  (persona ?? DEFAULT_PERSONA).style !== "friendly";
 
 export const PAUSE_CHOICES = ["1h", "4h", "tomorrow", "forever", "resume"] as const;
 export type PauseChoice = (typeof PAUSE_CHOICES)[number];
@@ -76,8 +136,8 @@ export class VoiceSettingsStore {
     const pause = this.current.pause;
     if (!pause) return null;
     if (pause.until !== null && pause.until <= this.now()) {
-      const { callee } = this.current;
-      this.save({ callee });
+      const { callee, persona } = this.current;
+      this.save({ callee, ...(persona ? { persona } : {}) });
       return null;
     }
     return { ...pause };
@@ -89,6 +149,8 @@ export class VoiceSettingsStore {
       const settings: VoiceSettings = {
         callee: typeof raw.callee === "string" && EXTENSION.test(raw.callee) ? raw.callee : null,
       };
+      const persona = readPersonaChange({ persona: raw.persona });
+      if (persona) settings.persona = persona;
       const pause = raw.pause;
       if (typeof pause === "object" && pause !== null && !Array.isArray(pause)) {
         const until = (pause as Record<string, unknown>).until;
@@ -121,16 +183,22 @@ export class VoiceSettingsStore {
   apply(request: unknown): { ok: true; settings: VoiceSettings } | { ok: false; reason: string } {
     const failed = { ok: false as const, reason: "This Mac could not save the voice settings." };
     const isPause = typeof request === "object" && request !== null && !Array.isArray(request) && "pause" in request;
+    const keep = this.current.persona ? { persona: this.current.persona } : {};
     let next: VoiceSettings;
-    if (isPause) {
+    if (typeof request === "object" && request !== null && !Array.isArray(request) && "persona" in request) {
+      const persona = readPersonaChange(request);
+      if (!persona)
+        return { ok: false, reason: "Pick terse, friendly, or custom (with a description up to 300 characters)." };
+      next = { callee: this.current.callee, persona, ...(this.current.pause ? { pause: this.current.pause } : {}) };
+    } else if (isPause) {
       const choice = readPauseChange(request);
       if (!choice) return { ok: false, reason: "Pause for 1h, 4h, tomorrow, forever, or resume." };
-      next = { callee: this.current.callee };
+      next = { callee: this.current.callee, ...keep };
       if (choice !== "resume") next.pause = { until: pauseUntil(choice, this.now()) };
     } else {
       const change = readVoiceChange(request);
       if (!change) return { ok: false, reason: "That is not an extension: use 2 to 6 digits." };
-      next = { callee: change.callee, ...(this.current.pause ? { pause: this.current.pause } : {}) };
+      next = { callee: change.callee, ...keep, ...(this.current.pause ? { pause: this.current.pause } : {}) };
     }
     if (!this.save(next)) return failed;
     return { ok: true, settings: { ...next } };

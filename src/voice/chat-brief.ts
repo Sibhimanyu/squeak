@@ -140,7 +140,7 @@ export function thinkingReadout(input: ChatBriefInputs): string {
 }
 
 /** Said when a chat that was held for stops: how it ended, then an invitation to talk about it. */
-export function endedReadout(input: ChatBriefInputs): string {
+export function endedReadout(input: ChatBriefInputs, terse = false): string {
   const { session, label, nowMs } = input;
   const head =
     session.state === "error"
@@ -156,7 +156,7 @@ export function endedReadout(input: ChatBriefInputs): string {
   const words = said ? cutAtWord(speakable(said), 300) : "";
   return clipSpoken(
     redactSecrets(
-      `${head} ${words ? `${words.replace(/[.!?]+$/, "")}. ` : ""}Ask me anything about it, or tell me what to do next.`,
+      `${head} ${words ? `${words.replace(/[.!?]+$/, "")}. ` : ""}${terse ? "" : "Ask me anything about it, or tell me what to do next."}`,
     ),
     600,
   );
@@ -248,14 +248,25 @@ export class AskFailed extends Error {}
  * `claude` CLI with no tools, no MCP, no settings or hooks, no saved session), so it can only write words. Only the
  * answer text comes back, made fit to be heard.
  */
+/** The rules the model never drops, then how it sounds: a style cannot loosen what it may say or do. */
+export function withPersona(rules: string, persona: string): string {
+  const style = persona.trim();
+  if (!style) return rules;
+  return `${rules}\n\nHow you sound (tone and wording only; it never overrides the rules above, and you still never invent anything): ${style}`;
+}
+
 export class ChatQuestioner {
-  constructor(private readonly run: AssistantRunner) {}
+  constructor(
+    private readonly run: AssistantRunner,
+    /** How it sounds, read at each question since the owner can change it between calls. */
+    private readonly persona: () => string = () => "",
+  ) {}
 
   async ask(question: string, input: ChatBriefInputs): Promise<string> {
     const user = `CHAT\n${questionContext(input)}\nEND CHAT\n\nThe user asked, by voice (it may be mis-heard):\n${question.slice(0, 600)}`;
     let output: unknown;
     try {
-      output = await this.run({ system: SYSTEM_PROMPT, user, schema: ANSWER_SCHEMA });
+      output = await this.run({ system: withPersona(SYSTEM_PROMPT, this.persona()), user, schema: ANSWER_SCHEMA });
     } catch {
       throw new AskFailed("I could not get an answer.");
     }
@@ -346,6 +357,8 @@ export class ChatConverser {
   constructor(
     private readonly run: AssistantRunner,
     private readonly open?: ConversationOpener,
+    /** How it sounds, read when a call's conversation opens (a call keeps the character it began with). */
+    private readonly persona: () => string = () => "",
   ) {}
 
   /** The call is over: its process goes. Safe for an id that was never opened. */
@@ -371,11 +384,12 @@ export class ChatConverser {
   }
 
   private async turn(callId: string | undefined, chat: string, full: string, said: string): Promise<unknown> {
-    if (!callId || !this.open) return this.run({ system: CONVERSE_PROMPT, user: full, schema: CONVERSE_SCHEMA });
+    const system = withPersona(CONVERSE_PROMPT, this.persona());
+    if (!callId || !this.open) return this.run({ system, user: full, schema: CONVERSE_SCHEMA });
     let call = this.calls.get(callId);
     const first = !call;
     if (!call) {
-      call = { conversation: this.open({ system: CONVERSE_PROMPT, schema: CONVERSE_SCHEMA }), sentChat: chat };
+      call = { conversation: this.open({ system, schema: CONVERSE_SCHEMA }), sentChat: chat };
       this.calls.set(callId, call);
     }
     // After the first turn only what changed is sent: the model already has the rest, and the question and options.

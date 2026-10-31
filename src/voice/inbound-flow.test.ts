@@ -99,6 +99,32 @@ function setup(call: FakeCall, overrides: Partial<InboundDependencies> = {}, pee
 
 const keys = (text: string): string[] => text.split("");
 
+describe("call in, terse persona", () => {
+  const terse: DirectoryDoc = { ...directory, terse: true, ask: true, talk: true };
+
+  it("says no hello before the PIN or the chat menu, and no invitation once the chat is chosen", async () => {
+    const call = new FakeCall([...keys("4821#"), "2"]);
+    const t = setup(call, {
+      directory: async () => terse,
+      talk: async () => "ended",
+    });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.join(" | ")).not.toContain("Hello, this is Squeak");
+    expect(call.said[0]).toBe("Please enter your PIN, then press hash. Press star to start over.");
+    expect(call.said).toContain("blume · hub.");
+    expect(call.said.join(" | ")).not.toContain("Go ahead");
+  });
+
+  it("keeps the hello for a friendly persona, and makes the same prompts ahead of time", () => {
+    expect(inboundPrompts({ ...directory, ask: true, talk: true }, true)).toContain(
+      "Hello, this is Squeak. Please enter your PIN, then press hash. Press star to start over.",
+    );
+    const prompts = inboundPrompts(terse, true);
+    expect(prompts.join(" | ")).not.toContain("Hello, this is Squeak");
+    expect(prompts).toContain("squeak · voice.");
+  });
+});
+
 describe("call-in conversation (a Mac that talks)", () => {
   const talking: DirectoryDoc = { ...directory, ask: true, talk: true };
 
