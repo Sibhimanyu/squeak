@@ -211,9 +211,14 @@ struct SettingsSidebar: View {
             model.settingsSection = section
         } label: {
             HStack(spacing: 12) {
-                Group { if section == .conductor { AgentMark(.conductor, size: Metrics.sidebarIcon + 4) } else {
-                    Lucide(section.symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted)
-                } }
+                Group {
+                    switch section {
+                    case .conductor: AgentMark(.conductor, size: Metrics.sidebarIcon + 4)
+                    case .telegram: ServiceMark(service: .telegram, size: Metrics.sidebarIcon + 4)
+                    case .cliq: ServiceMark(service: .cliq, size: Metrics.sidebarIcon + 4)
+                    default: Lucide(section.symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted)
+                    }
+                }
                     .frame(width: Metrics.sidebarIcon)
                 if !isCollapsed {
                     Text(verbatim: section.title)

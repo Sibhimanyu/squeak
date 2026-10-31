@@ -9,16 +9,18 @@ import SwiftUI
 enum AgentMarkImages {
     @MainActor private static var cache: [AgentMarkAsset: NSImage] = [:]
 
-    static func url(_ mark: AgentMarkAsset) -> URL? {
+    static func url(_ mark: AgentMarkAsset) -> URL? { url(fileName: mark.fileName) }
+
+    static func url(fileName: String) -> URL? {
         if let r = Bundle.main.resourceURL {
-            let u = r.appendingPathComponent("brand/agents/\(mark.fileName)")
+            let u = r.appendingPathComponent("brand/agents/\(fileName)")
             if FileManager.default.fileExists(atPath: u.path) { return u }
         }
         let roots = [URL(fileURLWithPath: FileManager.default.currentDirectoryPath), Bundle.main.executableURL?.deletingLastPathComponent()]
         for case let start? in roots {
             var dir = start
             for _ in 0..<8 {
-                for rel in ["macos/assets/agents/\(mark.fileName)", "assets/agents/\(mark.fileName)"] {
+                for rel in ["macos/assets/agents/\(fileName)", "assets/agents/\(fileName)"] {
                     let u = dir.appendingPathComponent(rel)
                     if FileManager.default.fileExists(atPath: u.path) { return u }
                 }
@@ -61,6 +63,51 @@ struct AgentMark: View {
             } else {
                 Color.clear
             }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The services' own app icons, bundled alongside the agent marks so they work without the apps installed.
+struct ServiceMark: View {
+    enum Service: String { case telegram, cliq }
+    let service: Service
+    var size: CGFloat = 20
+
+    @MainActor private static var images: [Service: NSImage] = [:]
+
+    private var image: NSImage? {
+        if let cached = Self.images[service] { return cached }
+        guard let url = AgentMarkImages.url(fileName: "agent-\(service.rawValue).png"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        Self.images[service] = image
+        return image
+    }
+
+    var body: some View {
+        Group {
+            if let image { Image(nsImage: image).resizable().interpolation(.high).scaledToFit() }
+            else { Lucide(service == .telegram ? .send : .messageSquare, size: size * 0.8, color: Theme.muted) }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The actual Terminal icon from macOS, with a symbol fallback if the app is unavailable.
+struct TerminalMark: View {
+    var size: CGFloat = 20
+    private static let image: NSImage? = {
+        let url = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }()
+
+    var body: some View {
+        Group {
+            if let image = Self.image { Image(nsImage: image).resizable().interpolation(.high).scaledToFit() }
+            else { Lucide(.squareTerminal, size: size * 0.8, color: Theme.muted) }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)

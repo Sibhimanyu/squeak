@@ -442,6 +442,8 @@ struct SidebarView: View {
                 if let mark {
                     AgentMark(mark, size: Metrics.sidebarIcon + (mark == .conductor || mark == .claude ? 4 : 0))
                         .frame(width: Metrics.sidebarIcon)
+                } else if f == .source(.terminal) {
+                    TerminalMark(size: Metrics.sidebarIcon + 4).frame(width: Metrics.sidebarIcon)
                 } else {
                     Lucide(symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted).frame(width: Metrics.sidebarIcon)
                 }
