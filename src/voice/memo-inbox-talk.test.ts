@@ -22,7 +22,8 @@ describe("MemoInbox: a voice-first call", () => {
   let heard = "";
   let canSend = true;
   let converse: NonNullable<MemoInboxDependencies["converse"]>;
-  const seen: Array<{ utterance: string; question: string; options: unknown }> = [];
+  const seen: Array<{ utterance: string; question: string; options: unknown; callId: string }> = [];
+  const ended: string[] = [];
 
   beforeEach(async () => {
     db = new FakeRtdb();
@@ -31,6 +32,7 @@ describe("MemoInbox: a voice-first call", () => {
     sent.length = 0;
     notes.length = 0;
     seen.length = 0;
+    ended.length = 0;
     canSend = true;
     converse = async (_t, _l, input) => {
       seen.push(input);
@@ -50,6 +52,7 @@ describe("MemoInbox: a voice-first call", () => {
       caller: () => "35210",
       note: (text) => notes.push(text),
       converse: (t, l, i) => converse(t, l, i),
+      endCall: (id) => ended.push(id),
       now: () => clock,
     });
     inbox.registerCall("call-1", "c1", "squeak voice", { question: "Which one?", options: OPTIONS });
@@ -89,7 +92,16 @@ describe("MemoInbox: a voice-first call", () => {
 
   it("gives the model the call's question and options as context", async () => {
     await talk("say", "go with the second one");
-    expect(seen).toEqual([{ utterance: "go with the second one", question: "Which one?", options: OPTIONS }]);
+    expect(seen).toEqual([
+      { utterance: "go with the second one", question: "Which one?", options: OPTIONS, callId: "call-1" },
+    ]);
+  });
+
+  it("tells the model's side the call is over when it ends, and not before", async () => {
+    await talk("say", "go with the second one");
+    expect(ended).toEqual([]);
+    await talk("confirm", "yes please");
+    expect(ended).toEqual(["call-1"]);
   });
 
   it("reads a decision back, and sends it only after the person says yes", async () => {
@@ -262,9 +274,9 @@ describe("MemoInbox: a voice-first call", () => {
     expect(message.startsWith("go on [2J xxx")).toBe(true);
   });
 
-  it("allows eight turns on one call", async () => {
+  it("allows thirty turns on one call", async () => {
     converse = async () => ({ intent: "answer", spoken: "Fine." });
-    for (let i = 0; i < 8; i++) expect(await talk("say", `question ${i}`)).toMatchObject({ next: "listen" });
+    for (let i = 0; i < 30; i++) expect(await talk("say", `question ${i}`)).toMatchObject({ next: "listen" });
     expect(await talk("say", "one more question")).toMatchObject({ next: "end" });
   });
 

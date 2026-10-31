@@ -284,6 +284,18 @@ when each clip was sent, and what played first.
   “<first 80 characters>”". It is on by default, replaces the earlier longer "Sent by phone" note, and is held for a
   channel that is muted or in its quiet hours. Failures of a call in are still announced as before.
 
+## One conversation per call (calls out, voice first)
+
+A voice-first call keeps one `claude` process (Haiku, no tools, no MCP, no settings) open for its whole length
+(`claudeConversationOpener`, `--input-format stream-json`): each turn is a stdin message ended by a `result` event, so
+no turn after the first pays a process start and the model remembers what was said earlier on the call. The first turn
+carries the chat, the question and the options; later turns carry only what was said, plus an updated CHAT block when
+the chat changed. The chat block now includes its last six messages (what you asked, what it answered), so "what did it
+do last time" has an answer. Up to 30 turns a call. The process is closed when the call ends (goodbye, a send, giving
+up, aged out) and after 5 minutes idle; a dead or stuck one is dropped and the next turn starts fresh with the whole
+picture. Sending is unchanged: the model only proposes words, and your spoken yes at the read-back sends them.
+Measured against the real CLI: ~1.3-2.2 s a turn after the first.
+
 ## How a recording ends, keys, busy lines, and the line itself (add-on 0.11.2)
 
 - A message recording ends on the first of: `#` (hash), 2.5 s of quiet after speech was heard (energy-based, read from

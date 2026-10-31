@@ -1,6 +1,6 @@
 import type { Activity } from "../fleet/activity.js";
 import type { BackgroundTask } from "../fleet/background-work.js";
-import type { AssistantRunner } from "../fleet/assistant.js";
+import type { AssistantRunner, Conversation, ConversationOpener } from "../fleet/assistant.js";
 import { isStalled } from "../fleet/attention.js";
 import { stripMarkdown, summarizeOutcome } from "../fleet/card-text.js";
 import type { GitState } from "../fleet/git-state.js";
@@ -23,12 +23,16 @@ export interface ChatBriefInputs {
   /** The current turn's steps, or null. */
   activity: Activity | null;
   background: BackgroundTask[];
+  /** The chat's last few messages, oldest first (what you asked, what it answered), or absent. */
+  history?: Array<{ role: "user" | "assistant"; text: string }>;
   nowMs: number;
 }
 
 const MAX_STEPS = 8;
 const MAX_STEP_CHARS = 200;
 const MAX_TURN_CHARS = 1500;
+const MAX_HISTORY_CHARS = 500;
+const MAX_HISTORY_MESSAGES = 6;
 
 /** How long ago, in words a person says. */
 export function spokenAge(fromIso: string, nowMs: number): string {
@@ -180,6 +184,16 @@ export function questionContext(input: ChatBriefInputs): string {
   }
   const last = input.lastTurnText ?? session.detail;
   if (last) lines.push("its last message:", stripMarkdown(last).slice(0, MAX_TURN_CHARS));
+  const earlier = (input.history ?? [])
+    .map((message) => ({ ...message, text: stripMarkdown(message.text).replace(/\s+/g, " ").trim() }))
+    .filter((message) => message.text)
+    .slice(-MAX_HISTORY_MESSAGES);
+  if (earlier.length > 0) {
+    lines.push("earlier in this chat, oldest first:");
+    for (const message of earlier) {
+      lines.push(`- ${message.role === "user" ? "you asked" : "it said"}: ${message.text.slice(0, MAX_HISTORY_CHARS)}`);
+    }
+  }
   return redactSecrets(lines.join("\n"));
 }
 
@@ -229,10 +243,12 @@ export interface ConverseInput {
   /** What the call asked them, and the lettered options it had. */
   question: string;
   options: Array<{ letter: string; title: string }>;
+  /** The call's id: turns with the same id are one conversation and the model remembers them. */
+  callId?: string;
 }
 
-const CONVERSE_PROMPT = `You are Squeak's phone assistant. The coding agent in this chat asked the person a question (QUESTION, with its lettered OPTIONS) and rang them. The person replied by voice; it may be mis-heard. Decide which one it is:
-- answer: they asked about the chat or what is going on. Reply in "spoken" in at most three short spoken sentences using only the CHAT block; never invent anything, and say you do not know if the CHAT block does not say.
+const CONVERSE_PROMPT = `You are Squeak's phone assistant, talking with the person on a live call. This is a conversation: remember what was said earlier on the call, so follow-ups like "and the second one?" or "why?" work. The coding agent in this chat asked the person a question (QUESTION, with its lettered OPTIONS) and rang them. The person replied by voice; it may be mis-heard. Decide which one it is:
+- answer: they asked about the chat or what is going on. Reply in "spoken" in at most three short spoken sentences using only the CHAT block (a later CHAT block replaces an earlier one; it includes earlier messages in the chat, so you can say what was asked and done before); never invent anything, and say you do not know if the CHAT block does not say.
 - send: they decided or gave an instruction for the agent. "message" is the instruction in the person's own words, concise and complete; if they simply chose an option, "message" is only that option's letter. "spoken" is a one-line restatement.
 - end: they are done and want to hang up.
 - unclear: you cannot tell what they want.
@@ -268,19 +284,54 @@ export function readConverse(output: unknown): Converse | null {
  * words; nothing it returns is sent anywhere until the person says yes to the read-back.
  */
 export class ChatConverser {
-  constructor(private readonly run: AssistantRunner) {}
+  /** One open conversation per call, so a call's turns share one process and one memory. */
+  private readonly calls = new Map<string, { conversation: Conversation; sentChat: string }>();
+
+  constructor(
+    private readonly run: AssistantRunner,
+    private readonly open?: ConversationOpener,
+  ) {}
+
+  /** The call is over: its process goes. Safe for an id that was never opened. */
+  end(callId: string): void {
+    this.calls.get(callId)?.conversation.close();
+    this.calls.delete(callId);
+  }
 
   async converse(say: ConverseInput, input: ChatBriefInputs): Promise<Converse> {
     const options = say.options.map((option) => `${option.letter}) ${option.title.slice(0, 200)}`).join("\n");
-    const user = `CHAT\n${questionContext(input)}\nEND CHAT\n\nQUESTION\n${say.question.slice(0, 600)}\n\nOPTIONS\n${options || "(none)"}\n\nThe person said, by voice (it may be mis-heard):\n${say.utterance.slice(0, 600)}`;
+    const chat = questionContext(input);
+    const said = `The person said, by voice (it may be mis-heard):\n${say.utterance.slice(0, 600)}`;
+    const full = `CHAT\n${chat}\nEND CHAT\n\nQUESTION\n${say.question.slice(0, 600)}\n\nOPTIONS\n${options || "(none)"}\n\n${said}`;
     let output: unknown;
     try {
-      output = await this.run({ system: CONVERSE_PROMPT, user, schema: CONVERSE_SCHEMA });
+      output = await this.turn(say.callId, chat, full, said);
     } catch {
       throw new AskFailed("I could not work that out.");
     }
     const read = readConverse(output);
     if (!read) throw new AskFailed("I could not work that out.");
     return read;
+  }
+
+  private async turn(callId: string | undefined, chat: string, full: string, said: string): Promise<unknown> {
+    if (!callId || !this.open) return this.run({ system: CONVERSE_PROMPT, user: full, schema: CONVERSE_SCHEMA });
+    let call = this.calls.get(callId);
+    const first = !call;
+    if (!call) {
+      call = { conversation: this.open({ system: CONVERSE_PROMPT, schema: CONVERSE_SCHEMA }), sentChat: chat };
+      this.calls.set(callId, call);
+    }
+    // After the first turn only what changed is sent: the model already has the rest, and the question and options.
+    const user = first ? full : call.sentChat === chat ? said : `CHAT (updated)\n${chat}\nEND CHAT\n\n${said}`;
+    try {
+      const output = await call.conversation.ask(user);
+      call.sentChat = chat;
+      return output;
+    } catch (error) {
+      // A dead or stuck process is dropped, and the next turn starts a fresh one with the whole picture.
+      this.end(callId);
+      throw error;
+    }
   }
 }

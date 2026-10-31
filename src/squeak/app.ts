@@ -10,7 +10,7 @@ import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import { CliqChannel } from "../cliq/channel.js";
 import { CliqWebhook } from "../cliq/client.js";
 import { CliqRelayInbox } from "../cliq/inbox.js";
-import { claudeCliRunner, FleetAssistant } from "../fleet/assistant.js";
+import { claudeCliRunner, claudeConversationOpener, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
 import { fetchClaudeUsage } from "../fleet/claude-usage-api.js";
@@ -874,8 +874,10 @@ export class SqueakApp {
     this.chatQuestioner = new ChatQuestioner(
       claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), null, 40_000),
     );
+    // One `claude` per call, kept up between turns; the one-shot runner is only the fallback.
     this.chatConverser = new ChatConverser(
       claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), null, 40_000),
+      claudeConversationOpener(config.claudeBin, path.join(config.supportDir, "assistant")),
     );
     // Only a Refresh press reaches this: no timer, no model call, and the
     // Keychain is read only then.
@@ -1173,6 +1175,7 @@ export class SqueakApp {
         if (!input) throw new Error("chat not found");
         return this.chatConverser.converse(say, input);
       },
+      endCall: (callId) => this.chatConverser.end(callId),
       speech: async (text) => (await this.promptClips.clips([text]))[0],
       note: (text) => this.announceCallNote(text),
       trace: (kind, text, extra) => this.traceMac(kind, text, extra),
@@ -1196,6 +1199,7 @@ export class SqueakApp {
       label,
       nowMs,
       lastTurnText: safely(() => this.router.lastTurnText(target), null),
+      history: safely(() => this.router.transcript(target, 8).messages, []),
       activity: session.transcriptPath
         ? safely(() => readActivity(session.agent, session.transcriptPath!), null)
         : null,

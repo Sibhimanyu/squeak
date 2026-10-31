@@ -95,8 +95,10 @@ export interface MemoInboxDependencies {
   converse?: (
     target: string,
     label: string,
-    input: { utterance: string; question: string; options: ChoiceOption[] },
+    input: { utterance: string; question: string; options: ChoiceOption[]; callId: string },
   ) => Promise<{ intent: "answer" | "send" | "end" | "unclear"; spoken: string; message?: string }>;
+  /** A voice-first call is over (said goodbye, sent, gave up, or aged out): whatever it kept for the model can go. */
+  endCall?: (callId: string) => void;
   /** A line for the call trace. */
   trace?: (kind: TraceKind, text: string, extra?: { ms?: number; label?: string }) => void;
   now?: () => number;
@@ -131,7 +133,7 @@ const ANSWER_BUDGET_MS = 45_000;
 /** Questions and status read-outs an hour: a model call each, so a stuck loop is stopped here too. */
 const MAX_ANSWERS_PER_HOUR = 40;
 /** Turns a person gets on one voice-first call (each is a model call), and how long a read-back waits for a yes. */
-const MAX_TALK_TURNS = 8;
+const MAX_TALK_TURNS = 30;
 const PROPOSAL_TTL_MS = 5 * 60_000;
 /** A message by phone is a sentence or two, not a document. */
 const MAX_TALK_MESSAGE_CHARS = 600;
@@ -453,7 +455,11 @@ export class MemoInbox {
     script?: { question: string; options: ChoiceOption[] },
   ): void {
     const now = this.now();
-    for (const [id, call] of this.calls) if (now - call.at > CALL_TARGET_TTL_MS) this.calls.delete(id);
+    for (const [id, call] of this.calls) {
+      if (now - call.at <= CALL_TARGET_TTL_MS) continue;
+      this.calls.delete(id);
+      this.deps.endCall?.(id);
+    }
     this.calls.set(callId, { target, label, at: now, turns: 0, ...(script ? { script } : {}) });
   }
 
@@ -682,8 +688,10 @@ export class MemoInbox {
     }
     if (!converse) return this.refuse(message.id, "Your Mac cannot talk through a call yet.");
     const { label, target } = call;
-    const reply = (text: string, next: "listen" | "confirm" | "end"): Promise<DownMessage> =>
-      this.talkReply(message.id, text, next, label);
+    const reply = (text: string, next: "listen" | "confirm" | "end"): Promise<DownMessage> => {
+      if (next === "end") this.deps.endCall?.(message.dirVersion);
+      return this.talkReply(message.id, text, next, label);
+    };
 
     const audio = Buffer.from(message.audio, "base64");
     let heard: string;
@@ -741,6 +749,7 @@ export class MemoInbox {
           utterance: heard.slice(0, 600),
           question: call.script?.question ?? "",
           options: call.script?.options ?? [],
+          callId: message.dirVersion,
         }),
         new Promise<never>((_, rejectTurn) =>
           setTimeout(() => rejectTurn(new Error("took too long")), ANSWER_BUDGET_MS).unref(),

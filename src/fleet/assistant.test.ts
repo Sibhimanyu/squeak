@@ -4,7 +4,13 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { buildAssistantContext, claudeCliRunner, FleetAssistant, parseAssistantAnswer } from "./assistant.js";
+import {
+  buildAssistantContext,
+  claudeCliRunner,
+  claudeConversationOpener,
+  FleetAssistant,
+  parseAssistantAnswer,
+} from "./assistant.js";
 import { canTakeMessageNow } from "./fleet-controller.js";
 import type { FleetSnapshot } from "./fleet-monitor.js";
 import type { FleetSession } from "./types.js";
@@ -219,5 +225,60 @@ describe("canTakeMessageNow", () => {
 
   it("needs a replier", () => {
     expect(canTakeMessageNow(session(), null)).toBe(false);
+  });
+});
+
+describe("claudeConversationOpener", () => {
+  // A stand-in for `claude`: one stream-json user message in, one result out, the process stays up.
+  function fakeClaude(dir: string, body: string): string {
+    const bin = path.join(dir, "claude");
+    fs.writeFileSync(bin, `#!/usr/bin/env node\n${body}`, { mode: 0o755 });
+    return bin;
+  }
+  const echo = `
+let turn = 0;
+process.stdin.setEncoding("utf8");
+let buf = "";
+process.stdin.on("data", (d) => {
+  buf += d;
+  let i;
+  while ((i = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    const text = JSON.parse(line).message.content[0].text;
+    turn += 1;
+    process.stdout.write(JSON.stringify({ type: "result", structured_output: { turn, pid: process.pid, text } }) + "\\n");
+  }
+});
+`;
+
+  it("answers every turn from one process", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-conv-"));
+    const conversation = claudeConversationOpener(fakeClaude(dir, echo), dir)({ system: "s", schema: {} });
+    const first = (await conversation.ask("one")) as { turn: number; pid: number; text: string };
+    const second = (await conversation.ask("two")) as { turn: number; pid: number; text: string };
+    conversation.close();
+    expect(first).toMatchObject({ turn: 1, text: "one" });
+    expect(second).toMatchObject({ turn: 2, text: "two" });
+    expect(second.pid).toBe(first.pid);
+  });
+
+  it("rejects a turn that gets no answer, and every turn after a close", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-conv-"));
+    const silent = fakeClaude(dir, "process.stdin.resume();");
+    const stuck = claudeConversationOpener(silent, dir, 150)({ system: "s", schema: {} });
+    await expect(stuck.ask("hello")).rejects.toThrow("took too long");
+    await expect(stuck.ask("again")).rejects.toThrow("closed");
+
+    const live = claudeConversationOpener(fakeClaude(dir, echo), dir)({ system: "s", schema: {} });
+    live.close();
+    live.close();
+    await expect(live.ask("late")).rejects.toThrow("closed");
+  });
+
+  it("rejects the turn when the process dies", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-conv-"));
+    const dying = fakeClaude(dir, "process.stdin.once('data', () => process.exit(1));");
+    const conversation = claudeConversationOpener(dying, dir)({ system: "s", schema: {} });
+    await expect(conversation.ask("hello")).rejects.toThrow();
   });
 });
