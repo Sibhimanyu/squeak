@@ -123,6 +123,8 @@ export function composeScript(
   followUp = false,
   /** The add-on and the Mac can talk the call through (`converse`): one short opening, then listening; keys are a fallback. */
   voice = false,
+  /** Calls are to the owner: no "Hello, this is Squeak" and no invitation to talk (the beep says it). */
+  terse = false,
 ): CallScript {
   // The chat's own name as you know it from the sidebar ("App quitting loop"), else its workspace; never the branch
   // or a dot ("squeak · main"), which a voice reads as noise.
@@ -131,7 +133,9 @@ export function composeScript(
   const options = (choices?.options ?? []).slice(0, MAX_KEYPAD_OPTIONS);
   const askedRaw = choices?.question ?? summarizeOutcome(lastText, 600);
   const asked = askedRaw ? clipQuestion(askedRaw) : null;
-  const greeting = `Hello, this is Squeak. ${label} ${describe(item.kind)}.`;
+  const greeting = terse
+    ? `${label} ${describe(item.kind)}.`
+    : `Hello, this is Squeak. ${label} ${describe(item.kind)}.`;
 
   const parts: string[] = [];
   if (asked) parts.push(asked.cut ? `${asked.text} ${FULL_TEXT_NOTE}` : asked.text);
@@ -154,7 +158,7 @@ export function composeScript(
   if (voice && canAnswer && options.length > 0) {
     return {
       greeting,
-      question: [asked?.text, VOICE_INVITATION].filter(Boolean).join(" "),
+      question: [asked?.text, terse ? "" : VOICE_INVITATION].filter(Boolean).join(" "),
       options,
       followUp: { label },
       voice: true,
@@ -181,18 +185,19 @@ export function composeCallbackScript(
   session: AttentionItem["session"],
   lastText: string | null,
   voice: boolean,
+  terse = false,
 ): CallScript {
   const label = chatTitle(session) ? spokenChat(session) : spokenWorkspace(session);
   const ended =
     session.state === "error" ? "stopped on an error" : session.state === "finished" ? "is done" : "has stopped";
-  const greeting = `Hello, this is Squeak. ${label} ${ended}, as you asked.`;
+  const greeting = terse ? `${label} ${ended}.` : `Hello, this is Squeak. ${label} ${ended}, as you asked.`;
   const outcome = summarizeOutcome(lastText, 600);
   const clipped = outcome ? clipQuestion(outcome) : null;
   const said = clipped ? (clipped.cut ? `${clipped.text} ${FULL_TEXT_NOTE}` : clipped.text) : "";
   if (voice) {
     return {
       greeting,
-      question: [said, CALLBACK_INVITATION].filter(Boolean).join(" "),
+      question: [said, terse ? "" : CALLBACK_INVITATION].filter(Boolean).join(" "),
       options: [],
       followUp: { label },
       voice: true,

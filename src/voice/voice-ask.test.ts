@@ -11,6 +11,7 @@ import {
   spokenAnswer,
   statusReadout,
   thinkingReadout,
+  withPersona,
 } from "./chat-brief.js";
 import type { ChatBriefInputs } from "./chat-brief.js";
 import { session } from "./fixtures.js";
@@ -614,5 +615,62 @@ describe("readouts for someone on hold", () => {
     expect(endedReadout(inputs({ session: session({ state: "finished", asks: "Want a PR?" }) }))).toContain(
       "asking you something",
     );
+  });
+});
+
+describe("the assistant's persona", () => {
+  it("adds how it sounds after the rules, and says the rules still hold", () => {
+    const system = withPersona("RULES.", "Terse.");
+    expect(system.startsWith("RULES.")).toBe(true);
+    expect(system).toContain("Terse.");
+    expect(system).toContain("never overrides the rules above");
+    expect(withPersona("RULES.", "  ")).toBe("RULES.");
+  });
+
+  it("is in the system prompt of an answer and of a conversation, read when it starts", async () => {
+    let persona = "Terse.";
+    const systems: string[] = [];
+    const run = async (prompt: { system: string }): Promise<unknown> => {
+      systems.push(prompt.system);
+      return { answer: "Passing.", intent: "answer", spoken: "Passing." };
+    };
+    await new ChatQuestioner(run, () => persona).ask("how is it?", inputs());
+    await new ChatConverser(run, undefined, () => persona).converse(
+      { utterance: "how is it?", question: "", options: [] },
+      inputs(),
+    );
+    persona = "Dry.";
+    await new ChatConverser(run, undefined, () => persona).converse(
+      { utterance: "how is it?", question: "", options: [] },
+      inputs(),
+    );
+    expect(systems[0]).toContain("Terse.");
+    expect(systems[1]).toContain("Terse.");
+    expect(systems[2]).toContain("Dry.");
+    expect(systems[2]).not.toContain("Terse.");
+  });
+
+  it("is chosen once for a call's conversation", async () => {
+    let persona = "Terse.";
+    const opened: string[] = [];
+    const converser = new ChatConverser(
+      async () => ({}),
+      ({ system }) => {
+        opened.push(system);
+        return { ask: async () => ({ intent: "answer", spoken: "ok" }), close: () => undefined };
+      },
+      () => persona,
+    );
+    await converser.converse({ utterance: "a", question: "", options: [], callId: "c1" }, inputs());
+    persona = "Dry.";
+    await converser.converse({ utterance: "b", question: "", options: [], callId: "c1" }, inputs());
+    expect(opened).toHaveLength(1);
+    expect(opened[0]).toContain("Terse.");
+  });
+
+  it("leaves the invitation out of how a chat ended when terse", () => {
+    const done = inputs({ session: session({ state: "finished" }), lastTurnText: "Released 2.1.0." });
+    expect(endedReadout(done, true)).toBe("squeak voice is done. Released 2.1.0.");
+    expect(endedReadout(done)).toContain("Ask me anything about it");
   });
 });

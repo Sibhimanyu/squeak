@@ -185,6 +185,27 @@ final class ChannelsModel {
 
     private(set) var pauseBusy = false
 
+    /// Saves how the call's assistant speaks and takes the daemon's answer as the truth.
+    func setPersona(_ persona: VoicePersona) async {
+        voiceError = nil
+        guard persona.isSavable else {
+            voiceError = "Describe the character, or pick Terse or Friendly."
+            return
+        }
+        if demo { voice?.persona = persona; return }
+        pauseBusy = true
+        defer { pauseBusy = false }
+        do {
+            if let answered = try await client.setVoicePersona(persona) {
+                voice = answered
+            } else {
+                voiceError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            voiceError = "Could not save: Squeak on this Mac did not answer."
+        }
+    }
+
     /// Turns the realistic call voice on or off, or picks its voice; takes the daemon's answer as the truth.
     func setNatural(enabled: Bool? = nil, voice: String? = nil) async {
         voiceError = nil

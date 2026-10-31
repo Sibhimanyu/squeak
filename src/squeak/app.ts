@@ -145,7 +145,7 @@ import { VoiceFavoritesStore, workspaceKeyOf } from "../voice/favorites.js";
 import { LastChatStore } from "../voice/last-chat.js";
 import { cutAtWord, speakable, spokenChat, spokenChats, spokenWorkspace } from "../voice/spoken-labels.js";
 import { applyPhoneVoiceChange, phoneCalls } from "../voice/phone-voice.js";
-import { VoiceSettingsStore } from "../voice/settings.js";
+import { DEFAULT_PERSONA, isTerse, personaInstruction, VoiceSettingsStore } from "../voice/settings.js";
 import { findWhisper, WhisperTranscriber } from "../voice/transcribe.js";
 import { callNoteAllowed, callSentText, parseSentNote } from "../voice/call-summary.js";
 import { CallbackRequests } from "../voice/callbacks.js";
@@ -888,13 +888,16 @@ export class SqueakApp {
       this.claudeLimits.record(limits),
     );
     this.assistant = new FleetAssistant(claudeRunner);
+    const persona = (): string => personaInstruction(this.voiceSettings.settings.persona);
     this.chatQuestioner = new ChatQuestioner(
       claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), null, 40_000),
+      persona,
     );
     // One `claude` per call, kept up between turns; the one-shot runner is only the fallback.
     this.chatConverser = new ChatConverser(
       claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), null, 40_000),
       claudeConversationOpener(config.claudeBin, path.join(config.supportDir, "assistant")),
+      persona,
     );
     // Only a Refresh press reaches this: no timer, no model call, and the
     // Keychain is read only then.
@@ -1198,6 +1201,7 @@ export class SqueakApp {
         return this.chatConverser.converse({ ...say, options }, input);
       },
       endCall: (callId) => this.chatConverser.end(callId),
+      terse: () => isTerse(this.voiceSettings.settings.persona),
       // Offered after a message the person approved: stay on the line while it works, a key for its thinking.
       hold: {
         supported: () => addonSupports(this.gatewayStatusReader().peek().version, HOLD_ADDON),
@@ -1207,7 +1211,7 @@ export class SqueakApp {
         },
         ended: (target, label) => {
           const input = this.chatBriefInputs(target, label);
-          return input ? endedReadout(input) : "It has stopped.";
+          return input ? endedReadout(input, isTerse(this.voiceSettings.settings.persona)) : "It has stopped.";
         },
         peek: (target, label) => {
           const input = this.chatBriefInputs(target, label);
@@ -1488,6 +1492,7 @@ export class SqueakApp {
       pin: this.voicePinState(),
       ...this.voicePolicyView(),
       pause: this.voiceSettings.pause(),
+      persona: this.voiceSettings.settings.persona ?? DEFAULT_PERSONA,
       favorites: this.voiceFavorites.list(),
       workspaces: this.voiceWorkspaces(),
       // The realistic voice this Mac makes for calls (`squeak voice-tts-setup` installs it).
@@ -1711,6 +1716,7 @@ export class SqueakApp {
       return phone.ok ? { ok: true as const, state: this.voiceView() } : phone;
     }
     const outcome = this.voiceSettings.apply(request);
+    // A persona change decides what the next call in says first: publish the list again so the add-on sees it.
     if (outcome.ok) void this.memoInbox?.publish().catch(() => undefined);
     return outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome;
   }
@@ -2171,6 +2177,7 @@ export class SqueakApp {
           this.memoInbox !== null && addonSupports(this.gatewayStatusReader().peek().version, VOICE_FIRST_ADDON),
         policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voiceRelay.quiet }),
         // "Call me back when you're done" is taken on a call (needs the inbox); an older add-on is told by a call.
+        terse: () => isTerse(this.voiceSettings.settings.persona),
         callbacks: this.voiceCallbacks,
         callbackVoice: () =>
           this.memoInbox !== null && addonSupports(this.gatewayStatusReader().peek().version, CALLBACK_ADDON),
