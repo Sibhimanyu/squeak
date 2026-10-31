@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { NATURAL_WORKER_PY } from "./natural-worker.js";
 import { CHATTERBOX_WORKER_PY, MING_WORKER_PY, QWEN3_WORKER_PY } from "./natural-worker-mlx.js";
+import { DESIGNED_VOICES_FILE, designedVoicesJson, QWEN3_DESIGNED_VOICES } from "./qwen3-designed-voices.js";
 
 /**
  * The engines that can make the call voice (docs/voice.md, "Voice engines"): Kokoro (small, plain) and three
@@ -59,6 +60,8 @@ export interface VoiceEngine {
   /** Names the weights for the sentence cache: a different model never reuses another's clips. */
   model: string;
   repos: readonly EngineRepo[];
+  /** Small files Squeak writes beside the worker, at setup and whenever they changed (name: contents). */
+  files?: Readonly<Record<string, string>>;
   /** pip packages of the venv (MLX engines). */
   packages: readonly string[];
   worker: string;
@@ -97,6 +100,8 @@ export const VOICE_ENGINES: Readonly<Record<EngineId, VoiceEngine>> = {
       { id: "ryan", label: "Ryan (male, English)" },
       { id: "eric", label: "Eric (male, Chinese-native, clear English)" },
       { id: "sohee", label: "Sohee (female, Korean-native, clear English)" },
+      { id: "ono_anna", label: "Anna (female, Japanese-native, light accent)" },
+      ...QWEN3_DESIGNED_VOICES.map(({ id, label }) => ({ id, label })),
     ],
     defaultVoice: "aiden",
     folder: "voice-tts-qwen3",
@@ -111,6 +116,7 @@ export const VOICE_ENGINES: Readonly<Record<EngineId, VoiceEngine>> = {
     ],
     packages: MLX_PACKAGES,
     worker: QWEN3_WORKER_PY,
+    files: { [DESIGNED_VOICES_FILE]: designedVoicesJson() },
   },
   ming: {
     id: "ming",

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { naturalInstalled, naturalPaths, type NaturalPaths } from "./natural-voice.js";
+import { naturalInstalled, naturalPaths, writeEngineFiles, type NaturalPaths } from "./natural-voice.js";
 import { REFERENCE_CLIPS_PY, REFERENCE_TEXT } from "./natural-worker-mlx.js";
 import { DEFAULT_ENGINE, ENGINE_IDS, VOICE_ENGINES, referenceClip, type EngineId } from "./voice-engines.js";
 
@@ -544,6 +544,7 @@ async function installMlxEngine(
     }
     say({ step: "finishing", text: "Finishing up…", percent: 99 });
     fs.writeFileSync(paths.worker, engine.worker, { mode: 0o600 });
+    writeEngineFiles(paths.dir, engine.files);
     const refsThere = !needsKokoro || engine.voices.every((voice) => fs.existsSync(referenceClip(paths.dir, voice.id)));
     if (!naturalInstalled(paths) || !refsThere) {
       options.log?.("setup finished but a file is still missing");

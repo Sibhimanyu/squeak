@@ -16,6 +16,7 @@ import {
   renderCallClips,
 } from "./natural-voice.js";
 import { WORKER_MARKER } from "./natural-worker-mlx.js";
+import { DESIGNED_VOICES_FILE, designedVoicesJson, QWEN3_DESIGNED_VOICES } from "./qwen3-designed-voices.js";
 import { VOICE_ENGINES, type EngineId } from "./voice-engines.js";
 import { openBody, readRequest, sealRequest } from "./relay-protocol.js";
 import { randomBytes } from "node:crypto";
@@ -458,6 +459,27 @@ describe("refreshWorker", () => {
     fs.writeFileSync(paths.worker, `${WORKER_MARKER}\n# an older worker\n`);
     refreshWorker(paths);
     expect(fs.readFileSync(paths.worker, "utf8")).toBe(VOICE_ENGINES.ming.worker);
+    fs.rmSync(support, { recursive: true, force: true });
+  });
+});
+
+describe("designed Qwen3 voices", () => {
+  it("are offered as qwen3 voices and written beside its worker, refreshed when they change", () => {
+    const ids = VOICE_ENGINES.qwen3.voices.map((voice) => voice.id);
+    for (const voice of QWEN3_DESIGNED_VOICES) {
+      expect(ids).toContain(voice.id);
+      expect(Buffer.from(voice.embedding, "base64").length).toBe(2048 * 4);
+    }
+    const support = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-designed-"));
+    const paths = naturalPaths(support, "qwen3");
+    fs.mkdirSync(paths.dir, { recursive: true });
+    fs.writeFileSync(paths.worker, `${WORKER_MARKER}\n# an older worker\n`);
+    refreshWorker(paths);
+    const file = path.join(paths.dir, DESIGNED_VOICES_FILE);
+    expect(Object.keys(JSON.parse(fs.readFileSync(file, "utf8")))).toEqual(QWEN3_DESIGNED_VOICES.map((v) => v.id));
+    fs.writeFileSync(file, "{}");
+    refreshWorker(paths);
+    expect(fs.readFileSync(file, "utf8")).toBe(designedVoicesJson());
     fs.rmSync(support, { recursive: true, force: true });
   });
 });

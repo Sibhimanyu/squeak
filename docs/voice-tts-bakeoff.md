@@ -121,3 +121,27 @@ open -g -a Terminal progress.command   # optional live view of downloads and cli
 `CONTRACT.md` is the brief each runner was written to: venv per model, warm-up line excluded from timings, the same
 words spoken (tags allowed), and the emotion steering recorded in `notes`. Give it to an agent when adding a model.
 Never keep the `envs/`, `out/` or `phone/` folders in git. They are gitignored and hold many GB.
+
+## Designed Qwen3 voices (2026-10-31, second round)
+
+Squeak also offers Qwen3 voices made from a description (`src/voice/qwen3-designed-voices.ts`), because the presets
+include few native English speakers. VoiceDesign alone changes speaker between renders, so five ways to keep one
+voice were measured on the same 8 lines (scripts in `scripts/tts-bakeoff/designed/`):
+
+| approach | same-speaker consistency off / strong | WER | emotion moves | s/line |
+|---|---|---|---|---|
+| presets (Aiden, Ryan): the bar | 0.61–0.75 / 0.63–0.71 | 1.8–5.5% | yes | 3.7 |
+| VoiceDesign with a fixed seed | 0.40–0.59 / 0.32–0.50 | 1.8–4.7% | yes | 2.1 |
+| Base: clone a neutral designed clip | 0.58–0.85 / n/a | 1.2–4.9% | no | 2.7 |
+| Base: speaker embedding plus `instruct` | 0.54–0.84 / 0.50–0.56 | 1.2–2.3% | yes, but it drifts | 1.95 |
+| one designed clip per mood, cloned | 0.58–0.85 / 0.37–0.60 | 1.2–6.0% | yes | 2.0 |
+| **CustomVoice with the designed embedding in a spare speaker row** | 0.46–0.77 / 0.48–0.70 | 1.2–3.6% | yes, as for the presets | 1.9 |
+
+The winner is the last row. Each voice is one neutral VoiceDesign clip (seed 1234), turned into a 2048-float speaker
+embedding by the Base model's speaker encoder. The CustomVoice worker writes that embedding into the last row of its
+speaker table (`spk_id["designed"]`) and uses the preset path, so the emotion instructions work unchanged and nothing
+more is downloaded. Consistency is the mean-centred cosine of speaker embeddings between lines: raw cosine is
+saturated (0.955–0.98 even for two different presets). Kept: warm American woman (WER 1.8% / 3.6%), calm deep British
+man (1.9% / 3.1%) and friendly Indian-English woman (3.1% / 2.9%). Left out: an energetic young American man, who
+stayed borderline (consistency 0.59 / 0.52) after two descriptions. Ono Anna (4.4%) was added to the presets on
+request. Making a new voice needs VoiceDesign (about 2.2 GB) and the Base model's 24 MB speaker encoder, once.

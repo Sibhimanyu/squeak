@@ -118,13 +118,48 @@ INSTRUCT = {
 }
 
 
+def designed_voices(model):
+    """Squeak's designed voices (qwen3-designed-voices.ts): one speaker embedding each, put in a spare row of the
+    speaker table when asked for, so emotion instructions work as for the presets."""
+    path = os.path.join(sys.argv[2], "designed-voices.json")
+    if not os.path.exists(path):
+        return lambda voice: voice
+    import base64
+
+    import mlx.core as mx
+
+    with open(path) as handle:
+        embeddings = json.load(handle)
+    config = model.config.talker_config
+    slot = config.vocab_size - 1
+    config.spk_id["designed"] = slot
+    if "designed" not in model.supported_speakers:
+        model.supported_speakers.append("designed")
+    table = model.talker.get_input_embeddings()
+    current = [None]
+
+    def speaker(voice):
+        if voice not in embeddings:
+            return voice
+        if current[0] != voice:
+            vector = np.frombuffer(base64.b64decode(embeddings[voice]), dtype="<f4")
+            weight = table.weight
+            weight[slot] = mx.array(vector).astype(weight.dtype)
+            mx.eval(weight)
+            current[0] = voice
+        return "designed"
+
+    return speaker
+
+
 def main():
     model = load_model(sys.argv[1])
+    speaker = designed_voices(model)
 
     def make(request):
         mood = request.get("mood", "neutral")
         level = request.get("level", "off")
-        options = {"voice": request.get("voice", "ryan"), "lang_code": "en", "verbose": False}
+        options = {"voice": speaker(request.get("voice", "aiden")), "lang_code": "en", "verbose": False}
         if level in ("subtle", "strong"):
             options["instruct"] = INSTRUCT.get(mood, INSTRUCT["neutral"])[level]
         return collect(model.generate(text=request["text"], **options))

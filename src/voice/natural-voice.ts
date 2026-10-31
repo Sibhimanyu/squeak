@@ -98,15 +98,25 @@ export function naturalPaths(supportDir: string, engine: EngineId = DEFAULT_ENGI
  */
 export function refreshWorker(paths: NaturalPaths): void {
   if (!paths.engine || paths.engine === "kokoro") return;
-  const script = VOICE_ENGINES[paths.engine].worker;
+  const engine = VOICE_ENGINES[paths.engine];
   try {
     if (!fs.existsSync(paths.worker)) return;
     const current = fs.readFileSync(paths.worker, "utf8");
-    // Only a script Squeak wrote: one put there by hand is left as it is.
-    if (current === script || !current.startsWith(WORKER_MARKER)) return;
-    fs.writeFileSync(paths.worker, script, { mode: 0o600 });
+    // Only a script Squeak wrote: one put there by hand is left as it is, and so are the files beside it.
+    if (!current.startsWith(WORKER_MARKER)) return;
+    if (current !== engine.worker) fs.writeFileSync(paths.worker, engine.worker, { mode: 0o600 });
+    writeEngineFiles(paths.dir, engine.files);
   } catch {
     // The script already there still speaks.
+  }
+}
+
+/** An engine's small data files (the designed voices), rewritten only when they differ. */
+export function writeEngineFiles(dir: string, files: Readonly<Record<string, string>> | undefined): void {
+  for (const [name, contents] of Object.entries(files ?? {})) {
+    const file = path.join(dir, name);
+    if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === contents) continue;
+    fs.writeFileSync(file, contents, { mode: 0o600 });
   }
 }
 
