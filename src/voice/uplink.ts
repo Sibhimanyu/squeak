@@ -73,7 +73,7 @@ export class RelayUplink implements Uplink {
     const at = this.now();
     return this.exchange(
       { v: 1, id: newMessageId(), at, expiresAt: at + UP_TTL_MS, kind: "ask", memoId },
-      this.options.askWaitMs ?? 60_000,
+      this.options.askWaitMs ?? 80_000,
     );
   }
 
@@ -81,7 +81,8 @@ export class RelayUplink implements Uplink {
     const at = this.now();
     return this.exchange(
       { v: 1, id: newMessageId(), at, expiresAt: at + UP_TTL_MS, kind: "status", dirVersion, choice },
-      this.options.sendWaitMs ?? 30_000,
+      // The Mac reads the status out in its own voice before it answers (up to 20 s), so it gets longer than a send.
+      this.options.sendWaitMs ?? 45_000,
     );
   }
 

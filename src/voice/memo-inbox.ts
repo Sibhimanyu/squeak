@@ -101,6 +101,12 @@ const KEEP_VERSIONS = 8;
 const REPUBLISH_MS = 30 * 60_000;
 const REMEMBER = 200;
 const READ_BACK_BUDGET_MS = 8_000;
+/**
+ * An answer or status read out in the Mac's voice: several sentences, about a second each and more when the voice is
+ * busy. A budget shorter than that leaves the add-on to say it in its plain voice, the "different voice" heard on a
+ * status. The add-on waits for it (uplink.ts), and says "Still working on it" meanwhile.
+ */
+const ANSWER_AUDIO_BUDGET_MS = 20_000;
 /** A phone is not a keyboard: this many sends an hour is a stuck loop, not a person. */
 const MAX_SENDS_PER_HOUR = 20;
 const MAX_SPOKEN_LABEL = 60;
@@ -391,7 +397,7 @@ export class MemoInbox {
     try {
       return await Promise.race([
         this.deps.speech(text),
-        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), READ_BACK_BUDGET_MS).unref()),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ANSWER_AUDIO_BUDGET_MS).unref()),
       ]);
     } catch {
       return undefined;
