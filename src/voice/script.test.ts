@@ -17,7 +17,7 @@ describe("shouldCall", () => {
 describe("composeScript", () => {
   it("reads the question and one key per lettered option", () => {
     const script = composeScript(item(), QUESTION, true);
-    expect(script.greeting).toContain("squeak · voice");
+    expect(script.greeting).toContain("squeak has a question");
     expect(script.question).toContain("Which one?");
     expect(script.question).toContain("Options. 1, Merge now, recommended. 2, Open a PR first.");
     expect(script.question).not.toContain(FULL_TEXT_NOTE);
@@ -26,7 +26,9 @@ describe("composeScript", () => {
 
   it("offers a message (9) and the status (0) only when asked to and keys may answer", () => {
     const script = composeScript(item(), QUESTION, true, true);
-    expect(script.question).toContain("Press 9 to send your own message, or 0 to hear where the chat stands.");
+    expect(script.question).toContain(
+      "Press 9 to send a message or ask a question about it, or 0 to hear where it stands.",
+    );
     expect(script.followUp).toEqual({ label: expect.stringContaining("squeak") });
     expect(composeScript(item(), QUESTION, true).followUp).toBeUndefined();
     expect(composeScript(item(), QUESTION, false, true).followUp).toBeUndefined();

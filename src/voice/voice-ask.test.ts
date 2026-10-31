@@ -120,7 +120,7 @@ describe("calling in with a Mac that answers questions", () => {
     expect(t.log.sends).toHaveLength(1);
     expect(t.log.asks).toEqual([]);
     expect(t.call.said.join(" | ")).toContain(
-      "Press 1 to say a message or ask a question, or 3 to hear where it stands.",
+      "Press 9 to say a message or ask a question, or 0 to hear where it stands.",
     );
     expect(t.call.said).toContain(readBackSentence("is the build passing", "blume hub", true));
     expect(t.call.said.at(-1)).toBe("Done. Your message was sent to blume hub. Goodbye.");
@@ -157,8 +157,8 @@ describe("calling in with a Mac that answers questions", () => {
     const t = await run(["2", "3", "*", "1", "3", "#"]);
     expect(t.call.said.filter((s) => s === "Blume hub is working.")).toHaveLength(3);
     expect(
-      t.call.said.filter((s) => s.startsWith("Blume hub. Press 1 to say")).length +
-        t.call.said.filter((s) => s.includes("Press 1 to say a message")).length,
+      t.call.said.filter((s) => s.startsWith("Blume hub. Press 9 to say")).length +
+        t.call.said.filter((s) => s.includes("Press 9 to say a message")).length,
     ).toBeGreaterThanOrEqual(2);
   });
 
@@ -203,7 +203,7 @@ describe("calling in with a Mac that answers questions", () => {
   });
 
   it("invalid keys at the action menu are ignored twice, then the call ends; hash hangs up", async () => {
-    const a = await run(["2", "7", "9"]);
+    const a = await run(["2", "7", "8"]);
     expect(a.log.memos).toBe(0);
     expect(a.call.said.at(-1)).toBe("Goodbye.");
     const b = await run(["2", "#"]);

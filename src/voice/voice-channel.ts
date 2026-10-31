@@ -15,6 +15,12 @@ import type { CallPolicy } from "./policy.js";
 import type { VoiceLine } from "./relay-line.js";
 import { composeScript, shouldCall } from "./script.js";
 
+/** Idle for this long and the person has left the Mac: a call is then the way to reach them. */
+export const AWAY_AFTER_S = 90;
+/** A question that sat in front of someone at the Mac this long goes to the phone anyway (a meeting, a video). */
+export const AT_MAC_HOLD_MS = 15 * 60_000;
+const AT_MAC_LOOK_MS = 30_000;
+
 /** How long a card waits before Squeak rings: long enough that you may have answered it already. */
 export const DEFAULT_GRACE_MS = 45_000;
 const FAILURE_NOTE_GAP_MS = 60 * 60_000;
@@ -31,6 +37,11 @@ export interface VoiceChannelDependencies {
    * only tells you. A function is read at each call, since an app can change the pin at runtime.
    */
   canTakeKeys: boolean | (() => boolean);
+  /**
+   * Seconds since the person last touched this Mac's keyboard or mouse; null when unknown. Someone at the Mac sees the
+   * question on screen, so the call waits until they have been away (`AWAY_AFTER_S`), up to `AT_MAC_HOLD_MS`.
+   */
+  idleSeconds?: () => Promise<number | null>;
   /** The call may offer a message for the chat (9) and its status (0): the Mac's inbox and the add-on can take them. */
   followUp?: () => boolean;
   policy: CallPolicy;
@@ -69,6 +80,8 @@ export class VoiceChannel {
   private unsubscribe: (() => void) | null = null;
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private calling = false;
+  /** Episodes waiting for the person to leave the Mac, so a repeat push does not start a second wait. */
+  private readonly holding = new Set<string>();
   private lastFailureNote = Number.NEGATIVE_INFINITY;
 
   private readonly followUp: MissedCallFollowUp;
@@ -143,6 +156,7 @@ export class VoiceChannel {
       logger.info("voice call skipped", { reason: refusal });
       return;
     }
+    if (!retry && (await this.holdWhileAtMac(item, episode)) === "gone") return;
     const target = replyTargetFor(current.session);
     const text = safely(() => this.deps.replier.lastTurnText(target));
     const stamp = turnStamp(text);
@@ -224,6 +238,41 @@ export class VoiceChannel {
     this.trace("step", "Not answered");
     this.writeDown(current, placedAt, { outcome: result.status === "answered" ? "answered" : "unanswered" });
     if (result.status !== "answered") this.followUp.missed(current, episode, retry, text);
+  }
+
+  /**
+   * While the person is at this Mac the call waits: they can see the question and answer it there. Returns "go" once
+   * they have been away for `AWAY_AFTER_S` (or it cannot be told, or the hold ran out), "gone" when the question was
+   * answered or moved on meanwhile (or a wait for it is already running).
+   */
+  private async holdWhileAtMac(item: AttentionItem, episode: string): Promise<"go" | "gone"> {
+    const idle = this.deps.idleSeconds;
+    if (!idle || this.holding.has(episode)) return this.holding.has(episode) ? "gone" : "go";
+    const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    const began = this.now();
+    this.holding.add(episode);
+    try {
+      let said = false;
+      for (;;) {
+        const seconds = await idle().catch(() => null);
+        if (seconds === null || seconds >= AWAY_AFTER_S) return "go";
+        if (this.now() - began >= AT_MAC_HOLD_MS) {
+          this.trace("step", "Still at the Mac after a long wait: calling anyway");
+          return "go";
+        }
+        if (!said) {
+          this.trace("step", "At the Mac: holding the call, the question is on screen");
+          said = true;
+        }
+        await sleep(AT_MAC_LOOK_MS);
+        if (!this.stillWaiting(item) || this.deps.paused?.()) {
+          this.trace("step", "Answered at the Mac: no call needed");
+          return "gone";
+        }
+      }
+    } finally {
+      this.holding.delete(episode);
+    }
   }
 
   private trace(kind: "step" | "said" | "warn" | "key", text: string, extra?: { ms?: number; label?: string }): void {

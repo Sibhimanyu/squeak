@@ -124,6 +124,7 @@ import {
 import type { VoiceLine } from "../voice/relay-line.js";
 import { NaturalInstaller } from "../voice/natural-setup.js";
 import { TEST_SCRIPT } from "../voice/test-script.js";
+import { readIdleSeconds } from "../fleet/user-idle.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
 import { ChatQuestioner, statusReadout, type ChatBriefInputs } from "../voice/chat-brief.js";
 import { VoiceFavoritesStore, workspaceKeyOf } from "../voice/favorites.js";
@@ -2089,6 +2090,7 @@ export class SqueakApp {
         ...base,
         line,
         canTakeKeys: true,
+        idleSeconds: () => readIdleSeconds(),
         followUp: () =>
           this.memoInbox !== null && addonSupports(this.gatewayStatusReader().peek().version, FOLLOW_UP_ADDON),
         policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voiceRelay.quiet }),

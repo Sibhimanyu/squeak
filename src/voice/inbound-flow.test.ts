@@ -477,7 +477,7 @@ describe("the chat used last", () => {
     const call = new FakeCall(["1", "1", "3"]);
     const t = setup(call, { pin: () => null, directory: async () => ({ ...withLast, ask: true }) });
     await handleIncoming(t.incoming, t.deps);
-    expect(call.said.some((s) => s.startsWith("blume · hub. Press 1 to say a message or ask a question"))).toBe(true);
+    expect(call.said.some((s) => s.startsWith("blume · hub. Press 9 to say a message or ask a question"))).toBe(true);
   });
 
   it("leaves a directory without it unchanged", async () => {

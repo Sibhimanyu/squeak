@@ -391,7 +391,12 @@ export class LiveCall implements PhoneCall {
   async hangup(): Promise<void> {
     if (!this.open) return;
     this.ctx.send("hangup");
-    await Promise.race([this.closed, delay(3000)]);
+    await Promise.race([this.closed, delay(2000)]);
+    // The PBX or the far phone may not have dropped it: say it once more rather than leave the line open.
+    if (this.open) {
+      this.ctx.send("hangup");
+      await Promise.race([this.closed, delay(2000)]);
+    }
   }
 }
 

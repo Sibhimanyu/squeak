@@ -94,7 +94,7 @@ const recordPrompt = (label: string): string =>
   `${label}. Speak your message after the beep, and press hash when you are done.`;
 /** The first question once a chat is chosen, with a Mac that answers: say or ask something, or hear its status. */
 const actionPrompt = (label: string): string =>
-  `${label}. Press 1 to say a message or ask a question, or 3 to hear where it stands. ${AGAIN}, or hash to hang up.`;
+  `${label}. Press 9 to say a message or ask a question, or 0 to hear where it stands. ${AGAIN}, or hash to hang up.`;
 /** Offered first when the Mac names the chat used last: 1 takes it, 2 goes to the menus. */
 export const lastChatPrompt = (label: string, greet: boolean): string =>
   `${greet ? `${GREETING} ` : ""}Press 1 for ${label}, the last one you used. Press 2 for another chat. ${AGAIN}, or hash to hang up.`;
@@ -407,9 +407,10 @@ async function actionKey(
   for (let attempt = 0; attempt < 2 && call.open; attempt++) {
     const key = await menuKey(call, deps, actionPrompt(label));
     if (key === null || key === "#") return null;
-    if (key === "1") return "message";
-    if (key === "3") {
-      deps.trace?.("key: 3 (status)");
+    // The same keys as a call out (9 a message or question, 0 the status); 1 and 3, the older ones, still work.
+    if (key === "9" || key === "1") return "message";
+    if (key === "0" || key === "3") {
+      deps.trace?.("key: 0 (status)");
       return "status";
     }
   }

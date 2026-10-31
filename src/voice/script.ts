@@ -1,9 +1,10 @@
 import { summarizeOutcome, stripMarkdown } from "../fleet/card-text.js";
 import { parseChoices } from "../fleet/choices.js";
-import { cardLabel } from "../fleet/radar.js";
+import { chatTitle } from "../fleet/radar.js";
 import { shouldPush } from "../fleet/attention.js";
 import type { AttentionItem, AttentionKind } from "../fleet/types.js";
 import type { CallScript } from "./dialog.js";
+import { spokenChat, spokenWorkspace } from "./spoken-labels.js";
 
 export { CallDialog, MAX_PIN_TRIES, type CallScript, type DialogAction } from "./dialog.js";
 
@@ -33,8 +34,8 @@ function say(text: string): string {
     .trim();
 }
 
-/** About 15 seconds of speech. */
-export const MAX_QUESTION_WORDS = 35;
+/** About 10 seconds of speech: the rest is on the phone, or one key away. */
+export const MAX_QUESTION_WORDS = 25;
 /** An option is a handful of words, not a sentence. */
 export const MAX_OPTION_WORDS = 6;
 export const FULL_TEXT_NOTE = "The full text is on your phone.";
@@ -118,7 +119,9 @@ export function composeScript(
   /** The add-on can take a message for this chat (9) and read its status (0): said, and named in the script. */
   followUp = false,
 ): CallScript {
-  const label = say(cardLabel(item.session));
+  // The chat's own name as you know it from the sidebar ("App quitting loop"), else its workspace; never the branch
+  // or a dot ("squeak · main"), which a voice reads as noise.
+  const label = chatTitle(item.session) ? spokenChat(item.session) : spokenWorkspace(item.session);
   const choices = item.kind === "asked_question" || item.kind === "blocked_question" ? parseChoices(lastText) : null;
   const options = (choices?.options ?? []).slice(0, MAX_KEYPAD_OPTIONS);
   const askedRaw = choices?.question ?? summarizeOutcome(lastText, 600);
@@ -139,7 +142,7 @@ export function composeScript(
     parts.push("Open Squeak to answer.");
   }
   const follow = followUp && canAnswer;
-  if (follow) parts.push("Press 9 to send your own message, or 0 to hear where the chat stands.");
+  if (follow) parts.push("Press 9 to send a message or ask a question about it, or 0 to hear where it stands.");
   parts.push("Press star to hear this again, or hash to hang up.");
   return {
     greeting,
