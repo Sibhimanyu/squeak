@@ -284,9 +284,11 @@ describe("priority and warm-up", () => {
     expect(result).toEqual({ rendered: 2, cached: 0 });
     await natural.clip("A question for the person.");
     const byText = Object.fromEntries(requests().flatMap((r) => (r.text ? [[r.text, r.nice]] : [])));
+    // Background workers are set to nice 10; an urgent one keeps its parent's, which a CI runner may not have at 0.
+    const base = os.getPriority(0);
     expect(byText["Hello, this is Squeak."]).toBe(10);
     expect(byText["Goodbye for now, friend."]).toBe(10);
-    expect(byText["A question for the person."]).toBe(0);
+    expect(byText["A question for the person."]).toBe(base);
     // Pre-rendered pieces are then instant for a call, and prewarming again does nothing.
     const before = requests().length;
     await natural.clip("Hello, this is Squeak. Goodbye for now, friend.", { priority: "urgent" });
