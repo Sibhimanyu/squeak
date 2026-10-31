@@ -76,13 +76,14 @@ step "Pages: appcast and DMG"
 
 step "Waiting for the live appcast and DMG"
 WANT="$(stat -f %z "$BUILD/$DMG")"
-for _ in $(seq 1 60); do
+# Pages took 6-9 minutes to build a 55 MB DMG on 2026-10-31 (2.12.33 and 2.12.34 both outran a 5-minute wait), so allow 15.
+for _ in $(seq 1 180); do
   seen="$(curl -fsS --max-time 15 "https://sibhimanyu.github.io/squeak/appcast.xml?$RANDOM" 2>/dev/null | sed -n 's/.*<sparkle:shortVersionString>\([^<]*\)<.*/\1/p' | head -1 || true)"
   size="$(curl -fsSI --max-time 15 "https://sibhimanyu.github.io/squeak/download/$DMG" 2>/dev/null | tr -d '\r' | sed -n 's/^[Cc]ontent-[Ll]ength: //p' | tail -1 || true)"
   [ "$seen" = "$VERSION" ] && [ "$size" = "$WANT" ] && break
   sleep 5
 done
-[ "$seen" = "$VERSION" ] && [ "$size" = "$WANT" ] || { echo "Published, but the live appcast says '$seen' and the DMG is '$size' bytes (want $WANT) after 5 minutes. Check Pages." >&2; exit 1; }
+[ "$seen" = "$VERSION" ] && [ "$size" = "$WANT" ] || { echo "Published, but the live appcast says '$seen' and the DMG is '$size' bytes (want $WANT) after 15 minutes. Check Pages." >&2; exit 1; }
 
 step "Website release.json and the version commit"
 (cd "$REL/website" && { [ -d node_modules ] || npm ci --silent; } && npm run release --silent) >/dev/null 2>&1 || echo "(website release.json not updated: run 'npm run release' in website/)"
