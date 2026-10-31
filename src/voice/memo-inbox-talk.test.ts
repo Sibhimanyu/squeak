@@ -4,7 +4,17 @@ import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { generateChannel } from "../remote/remote-crypto.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { MemoInbox, cleanMessage, type MemoInboxDependencies } from "./memo-inbox.js";
-import { downPath, newMessageId, readDown, sealUp, upPath, type DownMessage, type UpMessage } from "./memo-protocol.js";
+import {
+  dirPath,
+  downPath,
+  newMessageId,
+  readDirectory,
+  readDown,
+  sealUp,
+  upPath,
+  type DownMessage,
+  type UpMessage,
+} from "./memo-protocol.js";
 
 const { channelId: channel, key } = generateChannel();
 const OPTIONS = [
@@ -22,7 +32,8 @@ describe("MemoInbox: a voice-first call", () => {
   let heard = "";
   let canSend = true;
   let converse: NonNullable<MemoInboxDependencies["converse"]>;
-  const seen: Array<{ utterance: string; question: string; options: unknown }> = [];
+  const seen: Array<{ utterance: string; question: string; options: unknown; callId: string }> = [];
+  const ended: string[] = [];
 
   beforeEach(async () => {
     db = new FakeRtdb();
@@ -31,6 +42,7 @@ describe("MemoInbox: a voice-first call", () => {
     sent.length = 0;
     notes.length = 0;
     seen.length = 0;
+    ended.length = 0;
     canSend = true;
     converse = async (_t, _l, input) => {
       seen.push(input);
@@ -50,6 +62,7 @@ describe("MemoInbox: a voice-first call", () => {
       caller: () => "35210",
       note: (text) => notes.push(text),
       converse: (t, l, i) => converse(t, l, i),
+      endCall: (id) => ended.push(id),
       now: () => clock,
     });
     inbox.registerCall("call-1", "c1", "squeak voice", { question: "Which one?", options: OPTIONS });
@@ -80,6 +93,60 @@ describe("MemoInbox: a voice-first call", () => {
   }
   const text = (down: DownMessage | null): string => (down?.status === "talk" ? down.text : "");
 
+  describe("a call in", () => {
+    const talkIn = async (said: string, version: string, extra: Record<string, unknown> = {}) =>
+      talk("say", said, { callId: "in-call-1", dirVersion: version, choice: 1, ...extra });
+
+    async function published(): Promise<string> {
+      // The inbox needs `ask` (describe and answer) for the directory to carry `talk`.
+      await inbox.publish();
+      return readDirectory(key, (await store.get(dirPath(channel)))!, clock)!.version;
+    }
+
+    it("names a chat of the published list, with its own conversation, and sends nothing on a question", async () => {
+      const version = await published();
+      converse = async (_t, label, input) => {
+        seen.push(input);
+        return { intent: "answer", spoken: `${label} is fine.` };
+      };
+      const down = await talkIn("how is it going?", version);
+      expect(down).toMatchObject({ status: "talk", next: "listen", text: "squeak voice is fine." });
+      expect(seen.at(-1)).toMatchObject({ callId: "in:in-call-1", question: "", options: [] });
+      expect(sent).toEqual([]);
+    });
+
+    it("sends only after a yes, and ends the call's conversation", async () => {
+      const version = await published();
+      converse = async () => ({ intent: "send", spoken: "ok", message: "Go ahead and merge it." });
+      const proposal = await talkIn("go ahead and merge it", version);
+      expect(proposal).toMatchObject({ next: "confirm" });
+      expect(sent).toEqual([]);
+      const done = await talk("confirm", "yes", { callId: "in-call-1", dirVersion: version, choice: 1 });
+      expect(done).toMatchObject({ status: "talk", text: "Sent. Goodbye.", next: "end" });
+      expect(sent).toEqual(["c1:Go ahead and merge it."]);
+      expect(ended).toEqual(["in:in-call-1"]);
+    });
+
+    it("refuses a version or chat number that is not in a published list", async () => {
+      const version = await published();
+      expect((await talkIn("hello", "nope", {}))?.status).toBe("refused");
+      expect((await talkIn("hello", version, { choice: 9 }))?.status).toBe("refused");
+    });
+
+    it("keeps two calls' conversations apart", async () => {
+      const version = await published();
+      await talkIn("one", version);
+      await talk("say", "two", { callId: "in-call-2", dirVersion: version, choice: 1 });
+      expect(seen.map((s) => s.callId)).toEqual(["in:in-call-1", "in:in-call-2"]);
+    });
+
+    it("rejects a malformed call id or a choice outside the list", async () => {
+      const version = await published();
+      expect((await talkIn("hello", version, { callId: "bad id!" })) ?? null).toBeNull();
+      expect((await talkIn("hello", version, { choice: 0 })) ?? null).toBeNull();
+    });
+  });
+
   it("answers a question aloud and listens again, sending nothing", async () => {
     converse = async () => ({ intent: "answer", spoken: "It is **passing**." });
     const down = await talk("say", "is the build passing");
@@ -89,7 +156,16 @@ describe("MemoInbox: a voice-first call", () => {
 
   it("gives the model the call's question and options as context", async () => {
     await talk("say", "go with the second one");
-    expect(seen).toEqual([{ utterance: "go with the second one", question: "Which one?", options: OPTIONS }]);
+    expect(seen).toEqual([
+      { utterance: "go with the second one", question: "Which one?", options: OPTIONS, callId: "call-1" },
+    ]);
+  });
+
+  it("tells the model's side the call is over when it ends, and not before", async () => {
+    await talk("say", "go with the second one");
+    expect(ended).toEqual([]);
+    await talk("confirm", "yes please");
+    expect(ended).toEqual(["call-1"]);
   });
 
   it("reads a decision back, and sends it only after the person says yes", async () => {
@@ -262,9 +338,9 @@ describe("MemoInbox: a voice-first call", () => {
     expect(message.startsWith("go on [2J xxx")).toBe(true);
   });
 
-  it("allows eight turns on one call", async () => {
+  it("allows thirty turns on one call", async () => {
     converse = async () => ({ intent: "answer", spoken: "Fine." });
-    for (let i = 0; i < 8; i++) expect(await talk("say", `question ${i}`)).toMatchObject({ next: "listen" });
+    for (let i = 0; i < 30; i++) expect(await talk("say", `question ${i}`)).toMatchObject({ next: "listen" });
     expect(await talk("say", "one more question")).toMatchObject({ next: "end" });
   });
 

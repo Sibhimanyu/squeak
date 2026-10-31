@@ -417,6 +417,102 @@ describe("ChatConverser", () => {
   });
 });
 
+describe("ChatConverser on one call", () => {
+  function fakeOpener() {
+    const opened: Array<{ asked: string[]; closed: boolean }> = [];
+    const open = (): { ask(user: string): Promise<unknown>; close(): void } => {
+      const record = { asked: [] as string[], closed: false };
+      opened.push(record);
+      return {
+        ask: async (user: string) => {
+          record.asked.push(user);
+          return { intent: "answer", spoken: `turn ${record.asked.length}` };
+        },
+        close: () => {
+          record.closed = true;
+        },
+      };
+    };
+    return { open, opened };
+  }
+  const oneShot = async () => ({ intent: "answer", spoken: "one shot" });
+  const say = (utterance: string, callId = "call-1") => ({ utterance, question: "Which?", options: [], callId });
+
+  it("keeps one conversation for a call and sends the chat again only when it changed", async () => {
+    const { open, opened } = fakeOpener();
+    const converser = new ChatConverser(oneShot, open);
+    expect((await converser.converse(say("first"), inputs())).spoken).toBe("turn 1");
+    expect((await converser.converse(say("second"), inputs())).spoken).toBe("turn 2");
+    await converser.converse(say("third"), inputs({ lastTurnText: "A new message." }));
+    expect(opened).toHaveLength(1);
+    const [one, two, three] = opened[0]!.asked;
+    expect(one).toContain("CHAT\n");
+    expect(one).toContain("Which?");
+    expect(two).not.toContain("CHAT");
+    expect(two).toContain("second");
+    expect(three).toContain("CHAT (updated)");
+    expect(three).toContain("A new message.");
+  });
+
+  it("gives each call its own conversation and closes one when it ends", async () => {
+    const { open, opened } = fakeOpener();
+    const converser = new ChatConverser(oneShot, open);
+    await converser.converse(say("a", "call-1"), inputs());
+    await converser.converse(say("b", "call-2"), inputs());
+    expect(opened).toHaveLength(2);
+    converser.end("call-1");
+    expect(opened[0]!.closed).toBe(true);
+    expect(opened[1]!.closed).toBe(false);
+    converser.end("never-opened");
+  });
+
+  it("drops a conversation that fails and starts a fresh one with the whole picture next turn", async () => {
+    let failing = true;
+    const opened: string[][] = [];
+    const open = () => {
+      const asked: string[] = [];
+      opened.push(asked);
+      return {
+        ask: async (user: string) => {
+          asked.push(user);
+          if (failing) throw new Error("dead");
+          return { intent: "answer", spoken: "back" };
+        },
+        close: () => {},
+      };
+    };
+    const converser = new ChatConverser(oneShot, open);
+    await expect(converser.converse(say("x"), inputs())).rejects.toThrow("I could not work that out.");
+    failing = false;
+    expect((await converser.converse(say("y"), inputs())).spoken).toBe("back");
+    expect(opened).toHaveLength(2);
+    expect(opened[1]![0]).toContain("CHAT\n");
+  });
+
+  it("uses the one-shot runner with no opener or no call id", async () => {
+    const { open, opened } = fakeOpener();
+    expect((await new ChatConverser(oneShot).converse(say("a"), inputs())).spoken).toBe("one shot");
+    const converser = new ChatConverser(oneShot, open);
+    expect((await converser.converse({ utterance: "a", question: "", options: [] }, inputs())).spoken).toBe("one shot");
+    expect(opened).toHaveLength(0);
+  });
+
+  it("tells the model what was asked and answered earlier in the chat", async () => {
+    const { open, opened } = fakeOpener();
+    await new ChatConverser(oneShot, open).converse(
+      say("what did I ask before?"),
+      inputs({
+        history: [
+          { role: "user", text: "Add a retry to the uploader" },
+          { role: "assistant", text: "Added three retries with backoff." },
+        ],
+      }),
+    );
+    expect(opened[0]!.asked[0]).toContain("you asked: Add a retry to the uploader");
+    expect(opened[0]!.asked[0]).toContain("it said: Added three retries with backoff.");
+  });
+});
+
 describe("talk messages", () => {
   const { key } = generateChannel();
   const NOW = 1_800_000_000_000;

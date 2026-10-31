@@ -75,6 +75,11 @@ export interface DirectoryDoc {
    */
   ask?: true;
   /**
+   * The Mac can talk a call in through (`talk` messages naming a chat of this list, with a `callId`): once a chat is
+   * chosen the call is a conversation and the keypad only a fallback. Absent from an older Mac, and the keys go on.
+   */
+  talk?: true;
+  /**
    * The chat the person used last (a message sent or a question asked by phone), else the newest one waiting on them:
    * offered first, before any menu. `choice` indexes the version's chats as a memo's does, whether or not a menu lists
    * it. Absent from an older Mac, and the call goes straight to the menus as it always has.
@@ -126,6 +131,8 @@ export type UpMessage =
       choice: number;
       phase: TalkPhase;
       audio: string;
+      /** A call in: names the call (its conversation), and `dirVersion` and `choice` name the chat in the list. */
+      callId?: string;
     };
 
 /** What a voice-first call's turn is: what the person said, or whether to send what was read back to them. */
@@ -193,6 +200,7 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
   }
   return {
     ...(body.ask === true ? { ask: true as const } : {}),
+    ...(body.talk === true ? { talk: true as const } : {}),
     v: 1,
     at: body.at,
     version: body.version,
@@ -249,15 +257,34 @@ export function readUp(
     return { ok: true, message: { ...base, kind: "status", dirVersion, choice } };
   }
   if (body.kind === "talk") {
-    const { dirVersion, choice, phase, audio } = body;
+    const { dirVersion, choice, phase, audio, callId } = body;
     if (typeof dirVersion !== "string" || dirVersion.length === 0 || dirVersion.length > 64) {
       return { ok: false, reason: "not a voice message" };
     }
-    if (choice !== 1 || (phase !== "say" && phase !== "confirm")) return { ok: false, reason: "not a voice message" };
+    if (callId !== undefined && (typeof callId !== "string" || !/^[A-Za-z0-9_-]{4,64}$/.test(callId))) {
+      return { ok: false, reason: "not a voice message" };
+    }
+    // A call out is always chat 1 of its own one-chat list; a call in names a chat of the published list.
+    const choiceOk =
+      callId === undefined
+        ? choice === 1
+        : typeof choice === "number" && Number.isInteger(choice) && choice >= 1 && choice <= MAX_CHOICES;
+    if (!choiceOk || (phase !== "say" && phase !== "confirm")) return { ok: false, reason: "not a voice message" };
     if (typeof audio !== "string" || audio.length === 0 || audio.length > MAX_AUDIO_CHARS) {
       return { ok: false, reason: "no audio" };
     }
-    return { ok: true, message: { ...base, kind: "talk", dirVersion, choice, phase, audio } };
+    return {
+      ok: true,
+      message: {
+        ...base,
+        kind: "talk",
+        dirVersion,
+        choice: choice as number,
+        phase,
+        audio,
+        ...(callId !== undefined ? { callId: callId as string } : {}),
+      },
+    };
   }
   return { ok: false, reason: "not a voice message" };
 }

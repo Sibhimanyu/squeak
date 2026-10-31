@@ -92,6 +92,19 @@ describe("MemoInbox: questions and status are read-only", () => {
     expect(again?.ask).toBeUndefined();
   });
 
+  it("says in the directory that it can talk a call through only with a converser too", async () => {
+    expect(readDirectory(key, (await store.get(dirPath(channel)))!, clock)?.talk).toBeUndefined();
+    const talker = make({
+      describe: () => "x",
+      answer: async () => "y",
+      converse: async () => ({ intent: "answer", spoken: "z" }),
+    });
+    await talker.publish();
+    const dir = readDirectory(key, (await store.get(dirPath(channel)))!, clock);
+    expect(dir).toMatchObject({ ask: true, talk: true });
+    expect(dir?.version).not.toBe(version);
+  });
+
   it("reads the status of the chat a call out is about, named by the call's id", async () => {
     inbox.registerCall("call-1", "c9", "motion graphics");
     const down = await upload({ kind: "status", dirVersion: "call-1", choice: 1 });

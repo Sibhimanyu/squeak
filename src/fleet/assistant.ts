@@ -294,6 +294,147 @@ export function claudeCliRunner(
     });
 }
 
+/** One running `claude` that keeps a conversation: each `ask` is a turn, and it remembers the turns before. */
+export interface Conversation {
+  ask(user: string): Promise<unknown>;
+  /** Ends the process. Safe to call twice; a pending `ask` rejects. */
+  close(): void;
+}
+
+export type ConversationOpener = (prompt: { system: string; schema: object }) => Conversation;
+
+/** A turn that gets no answer is a dead line, not a slow one. */
+const TURN_TIMEOUT_MS = 40_000;
+/** A call nobody speaks on for this long is over, whatever the caller forgot to close. */
+const IDLE_CLOSE_MS = 5 * 60_000;
+
+/**
+ * Like `claudeCliRunner`, but the process stays up for a whole call: turns go in on stdin as stream-json user
+ * messages and each ends at a `result` event. That drops the process start from every turn after the first and
+ * gives the model the earlier turns for free (and its prompt cache). Same lockdown: no tools, no MCP, no
+ * settings (so no hooks), no saved session.
+ */
+export function claudeConversationOpener(
+  claudeBin: string,
+  cwd: string,
+  timeoutMs: number = TURN_TIMEOUT_MS,
+  idleMs: number = IDLE_CLOSE_MS,
+): ConversationOpener {
+  return ({ system, schema }) => {
+    fs.mkdirSync(cwd, { recursive: true });
+    const child = spawn(
+      claudeBin,
+      [
+        "-p",
+        "--model",
+        MODEL,
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--setting-sources",
+        "",
+        "--disable-slash-commands",
+        "--no-session-persistence",
+        "--system-prompt",
+        system,
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--json-schema",
+        JSON.stringify(schema),
+      ],
+      { cwd, env: buildCodexChildEnv(process.env), stdio: ["pipe", "pipe", "pipe"] },
+    );
+    let closed = false;
+    let pending: { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout } | null =
+      null;
+    let idle: NodeJS.Timeout | null = null;
+    let buffered = "";
+
+    const settle = (error: Error | null, value?: unknown): void => {
+      const turn = pending;
+      if (!turn) return;
+      pending = null;
+      clearTimeout(turn.timer);
+      if (error) turn.reject(error);
+      else turn.resolve(value);
+    };
+    const close = (): void => {
+      if (closed) return;
+      closed = true;
+      if (idle) clearTimeout(idle);
+      settle(new Error("the call's assistant was closed"));
+      child.stdin.end();
+      child.kill("SIGTERM");
+    };
+    const rearm = (): void => {
+      if (idle) clearTimeout(idle);
+      idle = setTimeout(close, idleMs);
+      idle.unref();
+    };
+    const onLine = (line: string): void => {
+      let event: { type?: unknown; is_error?: boolean; result?: unknown; structured_output?: unknown };
+      try {
+        event = JSON.parse(line) as typeof event;
+      } catch {
+        return;
+      }
+      if (event.type !== "result") return;
+      if (event.is_error) {
+        settle(new Error(typeof event.result === "string" ? event.result : "the assistant failed"));
+        return;
+      }
+      try {
+        settle(null, event.structured_output ?? JSON.parse(String(event.result ?? "")));
+      } catch {
+        settle(new Error("the assistant's answer could not be read"));
+      }
+    };
+    child.stdout.on("data", (chunk: Buffer) => {
+      buffered += chunk.toString("utf8");
+      let newline = buffered.indexOf("\n");
+      while (newline >= 0) {
+        onLine(buffered.slice(0, newline));
+        buffered = buffered.slice(newline + 1);
+        newline = buffered.indexOf("\n");
+      }
+    });
+    child.stderr.resume();
+    // A write to a dead process must not crash the daemon.
+    child.stdin.on("error", () => settle(new Error("the call's assistant is gone")));
+    child.on("error", (error) => {
+      closed = true;
+      settle(error);
+    });
+    child.on("close", () => {
+      closed = true;
+      if (idle) clearTimeout(idle);
+      settle(new Error("the call's assistant ended"));
+    });
+    rearm();
+
+    return {
+      ask: (user) =>
+        new Promise((resolve, reject) => {
+          if (closed) return reject(new Error("the call's assistant is closed"));
+          if (pending) return reject(new Error("the assistant is still answering"));
+          const timer = setTimeout(() => {
+            settle(new Error("the assistant took too long"));
+            close();
+          }, timeoutMs);
+          pending = { resolve, reject, timer };
+          rearm();
+          child.stdin.write(
+            `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: user }] } })}\n`,
+          );
+        }),
+      close,
+    };
+  };
+}
+
 function cannotSendReply(session: FleetSession): string {
   const label = sessionLabel(session);
   switch (session.state) {

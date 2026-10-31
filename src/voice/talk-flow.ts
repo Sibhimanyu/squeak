@@ -40,7 +40,7 @@ const SAYS = {
 export async function talkFlow(
   call: PhoneCall,
   deps: TalkDependencies,
-  info: { callId: string; label: string },
+  info: { callId: string; label: string; from?: { dirVersion: string; choice: number } },
 ): Promise<"ended" | "keys"> {
   const speak = async (text: string): Promise<void> => {
     deps.trace?.(`said: ${text}`);
@@ -64,7 +64,7 @@ export async function talkFlow(
     const stop = reassure(call, deps);
     let reply;
     try {
-      reply = await deps.uplink.talk(info.callId, phase, await deps.encode(recording.file));
+      reply = await deps.uplink.talk(info.callId, phase, await deps.encode(recording.file), info.from);
     } finally {
       stop();
     }

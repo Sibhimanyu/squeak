@@ -99,6 +99,55 @@ function setup(call: FakeCall, overrides: Partial<InboundDependencies> = {}, pee
 
 const keys = (text: string): string[] => text.split("");
 
+describe("call-in conversation (a Mac that talks)", () => {
+  const talking: DirectoryDoc = { ...directory, ask: true, talk: true };
+
+  it("goes from the chat's key straight into the conversation, with no say/ask/status keys", async () => {
+    const call = new FakeCall([...keys("4821#"), "2"]);
+    const talks: Array<{ label: string; callId: string; from: { dirVersion: string; choice: number } }> = [];
+    const t = setup(call, {
+      directory: async () => talking,
+      talk: async (_call, info) => {
+        talks.push(info);
+        return "ended";
+      },
+    });
+    await handleIncoming(t.incoming, t.deps);
+    expect(talks).toHaveLength(1);
+    expect(talks[0]).toMatchObject({ label: "blume · hub", from: { dirVersion: "v1", choice: 2 } });
+    expect(talks[0]!.callId).toMatch(/^[A-Za-z0-9_-]{4,64}$/);
+    expect(call.said.join(" | ")).toContain("blume · hub. Go ahead: ask me about it, or tell me what to do.");
+    expect(call.said.join(" | ")).not.toContain("Press 9");
+    expect(t.memos).toEqual([]);
+  });
+
+  it("falls back to the keys when the conversation cannot reach the Mac", async () => {
+    const call = new FakeCall([...keys("4821#"), "2", "#"]);
+    const t = setup(call, { directory: async () => talking, talk: async () => "keys" });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.join(" | ")).toContain("Press 9 to say a message or ask a question");
+  });
+
+  it("keeps the keys for a Mac that does not talk, or an add-on with no talk flow", async () => {
+    for (const overrides of [
+      { directory: async () => ({ ...directory, ask: true }) as DirectoryDoc, talk: async () => "ended" as const },
+      { directory: async () => talking },
+    ]) {
+      const call = new FakeCall([...keys("4821#"), "2", "#"]);
+      const t = setup(call, overrides);
+      await handleIncoming(t.incoming, t.deps);
+      expect(call.said.join(" | ")).toContain("Press 9 to say a message or ask a question");
+      expect(call.said.join(" | ")).not.toContain("Go ahead: ask me about it");
+    }
+  });
+
+  it("makes the conversation's opening ahead of time for each chat", () => {
+    const prompts = inboundPrompts(talking, true);
+    expect(prompts).toContain("squeak · voice. Go ahead: ask me about it, or tell me what to do.");
+    expect(inboundPrompts({ ...directory, ask: true }, true).join(" ")).not.toContain("Go ahead: ask me about it");
+  });
+});
+
 describe("call-in flow", () => {
   it("skips the PIN when the gateway is set to, and goes straight to the chats", async () => {
     const call = new FakeCall(["2", "1"]);

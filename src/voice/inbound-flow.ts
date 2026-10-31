@@ -40,6 +40,14 @@ export interface InboundDependencies {
   trace?: (line: string) => void;
   /** Gives the phone the Mac's recording of the read-back, so the add-on does not have to make it mid-call. */
   seed?: (clips: Clip[]) => void;
+  /**
+   * Talks the call through once a chat is chosen (`talkFlow`), with a Mac that offers it (`DirectoryDoc.talk`).
+   * "ended": it finished; "keys": the Mac could not be reached or refused, and the keypad goes on. Absent: the keypad.
+   */
+  talk?: (
+    call: PhoneCall,
+    info: { callId: string; label: string; from: { dirVersion: string; choice: number } },
+  ) => Promise<"ended" | "keys">;
 }
 
 /**
@@ -95,6 +103,8 @@ const recordPrompt = (label: string): string =>
 /** The first question once a chat is chosen, with a Mac that answers: say or ask something, or hear its status. */
 const actionPrompt = (label: string): string =>
   `${label}. Press 9 to say a message or ask a question, or 0 to hear where it stands. ${AGAIN}, or hash to hang up.`;
+/** Said once a chat is chosen, with a Mac that talks: the conversation starts at the beep. */
+const talkPrompt = (label: string): string => `${label}. Go ahead: ask me about it, or tell me what to do.`;
 /** Offered first when the Mac names the chat used last: 1 takes it, 2 goes to the menus. */
 export const lastChatPrompt = (label: string, greet: boolean): string =>
   `${greet ? `${GREETING} ` : ""}Press 1 for ${label}, the last one you used. Press 2 for another chat. ${AGAIN}, or hash to hang up.`;
@@ -173,9 +183,14 @@ export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean):
   ];
   const pin = askPin ? [`${GREETING} ${SAYS.pin}`, SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
   const ask = directory?.ask === true;
+  const talks = directory?.talk === true && directory.ask === true;
   const perChat = directory
     ? allLabels(directory).flatMap((label) =>
-        ask ? [actionPrompt(label), sentLine(label)] : [recordPrompt(label), sentLine(label)],
+        talks
+          ? [talkPrompt(label), actionPrompt(label), sentLine(label)]
+          : ask
+            ? [actionPrompt(label), sentLine(label)]
+            : [recordPrompt(label), sentLine(label)],
       )
     : [];
   if (ask) fixed.push(SAYS.recordAsk, SAYS.askFail, SAYS.followUp, SAYS.limit);
@@ -333,6 +348,19 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
   }
   target ??= await pickTarget(call, deps, directory, greet);
   if (target === null) return bye(call, deps, SAYS.bye);
+
+  // 3a. With a Mac that talks: the rest of the call is a conversation about this chat. Only if the Mac cannot be
+  // reached does it fall back to the keys below.
+  if (directory.talk === true && directory.ask === true && deps.talk && call.open) {
+    await speak(call, deps, talkPrompt(target.label));
+    const outcome = await deps.talk(call, {
+      callId: crypto.randomBytes(9).toString("base64url"),
+      label: target.label,
+      from: { dirVersion: directory.version, choice: chosen(target) },
+    });
+    if (outcome === "ended") return;
+    deps.trace?.("step: Talking did not work, back to the keys");
+  }
 
   // 3. With a Mac that answers questions: say or ask something, or hear the chat's status; each answer may be followed
   // by something else about the same chat (at most MAX_ANSWERS_PER_CALL in all). Without one: record, hear it, send.

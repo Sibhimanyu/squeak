@@ -284,6 +284,27 @@ when each clip was sent, and what played first.
   “<first 80 characters>”". It is on by default, replaces the earlier longer "Sent by phone" note, and is held for a
   channel that is muted or in its quiet hours. Failures of a call in are still announced as before.
 
+## One conversation per call (calls out, voice first)
+
+A voice-first call keeps one `claude` process (Haiku, no tools, no MCP, no settings) open for its whole length
+(`claudeConversationOpener`, `--input-format stream-json`): each turn is a stdin message ended by a `result` event, so
+no turn after the first pays a process start and the model remembers what was said earlier on the call. The first turn
+carries the chat, the question and the options; later turns carry only what was said, plus an updated CHAT block when
+the chat changed. The chat block now includes its last six messages (what you asked, what it answered), so "what did it
+do last time" has an answer. Up to 30 turns a call. The process is closed when the call ends (goodbye, a send, giving
+up, aged out) and after 5 minutes idle; a dead or stuck one is dropped and the next turn starts fresh with the whole
+picture. Sending is unchanged: the model only proposes words, and your spoken yes at the read-back sends them.
+Measured against the real CLI: ~1.3-2.2 s a turn after the first.
+
+**Calling in is the same conversation (add-on 0.13.0).** The directory carries `talk: true` when the Mac can converse
+(`DirectoryDoc.talk`; with `ask`). After the chat is chosen the add-on says "<chat>. Go ahead: ask me about it, or tell
+me what to do." and runs the same `talkFlow`, each turn a `talk` message with a `callId` (the call's own id, so calls
+never share a conversation) and `dirVersion` + `choice` naming a chat of the published list; the Mac makes the call's
+record on its first turn (`in:<callId>`) and refuses a version or number the list does not hold. A call in has no
+script, so the options are read from the lettered options in the chat's last message, if any. The yes before a send, the
+hourly limits and the read-only model are unchanged; if the Mac cannot be reached the keypad menus take over. An older
+Mac sends no `talk` and an older add-on ignores it, so the keys stay as they were.
+
 ## How a recording ends, keys, busy lines, and the line itself (add-on 0.11.2)
 
 - A message recording ends on the first of: `#` (hash), 2.5 s of quiet after speech was heard (energy-based, read from
