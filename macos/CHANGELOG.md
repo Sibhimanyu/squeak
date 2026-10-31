@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.31
+
+- Checking for updates when Squeak is already current now says so: "You’re up to date, Squeak 2.12.31 is the latest version" instead of an empty "Squeak Update" card, and the update window shows the version you are running.
+
 ## 2.12.30
 
 - The menu bar popup now shows a phone-call add-on update the way it shows an app update: "Phone-call add-on 0.11.7 is available" with Update, then progress, then "Updated to …" with Dismiss. The popup checks once a minute, so you no longer have to open Settings to see it.

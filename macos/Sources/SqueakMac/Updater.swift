@@ -384,7 +384,9 @@ final class AppUpdater {
     var presentation: UpdatePresentationState {
         if permissionAction != nil { return .permission }
         switch flow.phase {
-        case .idle: return .idle
+        // The window is open and nothing is pending (a check that found nothing ends here): that is "up to date",
+        // not an empty card.
+        case .idle: return .current
         case .checking: return .checking
         case .available: return .available
         case .downloading: return .downloading
@@ -398,7 +400,7 @@ final class AppUpdater {
     var statusTitle: String {
         if permissionAction != nil { return "Keep Squeak up to date?" }
         switch flow.phase {
-        case .idle: return "Squeak Update"
+        case .idle: return "You’re up to date"
         case .checking: return "Checking for updates"
         case .available(let v): return "Squeak \(v) is available"
         case .downloading: return "Downloading update"
@@ -414,7 +416,7 @@ final class AppUpdater {
     var statusDetail: String {
         if permissionAction != nil { return "Squeak can check for updates and download them in the background. You can change this any time in Settings." }
         switch flow.phase {
-        case .idle: return ""
+        case .idle: return "Squeak \(AppModel.appVersion) is the latest version."
         case .checking: return "Looking for the latest version of Squeak."
         case .available: return availableNotes.first ?? (informationOnly ? "Read about this version." : "A newer version is available.")
         case .downloading(_, let p): return p.map { "\(Int(($0 * 100).rounded()))% downloaded" } ?? "Downloading a verified update."
@@ -1007,7 +1009,7 @@ private struct UpdateStatusView: View {
             Spacer()
             Button("Restart to update") { owner.installNow() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
         case .downloading, .checking:
-            Text("Squeak for Mac").font(Typo.meta).foregroundStyle(Theme.subtle)
+            Text("Squeak for Mac · \(AppModel.appVersion)").font(Typo.meta).foregroundStyle(Theme.subtle)
             Spacer()
             if owner.actions.contains(.cancel) {
                 Button("Cancel") { owner.cancel() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
@@ -1033,7 +1035,7 @@ private struct UpdateStatusView: View {
                 }
             }
         case .current, .idle:
-            Text("Squeak for Mac").font(Typo.meta).foregroundStyle(Theme.subtle)
+            Text("Squeak for Mac · \(AppModel.appVersion)").font(Typo.meta).foregroundStyle(Theme.subtle)
             Spacer()
             Button("Done") { owner.dismissStatus(); owner.closeUpdateWindowOnly() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
         }
