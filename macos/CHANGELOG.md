@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.12.34
+
+- Qwen3-TTS has four more call voices: Anna, and three designed ones, a warm American woman, a calm deep British man and a friendly Indian-English woman. Each keeps the same voice through a whole call while its emotion follows what the line says.
+- Settings › Voice: choosing a voice engine and its voice is clearer, and Setup and Settings move between each other more smoothly.
+- The sidebars show Telegram's and Cliq's own app icons.
+
 ## 2.12.33
 
 - Settings › Voice: choose the voice engine for calls. Kokoro (today's voice, fast and plain) stays the default; Qwen3-TTS, Ming and Chatterbox are expressive and sound urgent, cheerful, apologetic or warm to suit what each line says. Each has its own voices, an Emotion setting (Off, Subtle, Strong), Play sample, and Set up / Remove. Setting one up uses model files already on this Mac when it has them.
