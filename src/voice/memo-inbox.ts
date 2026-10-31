@@ -129,6 +129,11 @@ export interface MemoInboxDependencies {
   };
   /** The owner's persona is terse (voice/settings.ts): calls in drop the pleasantries. Read at each publish. */
   terse?: () => boolean;
+  /**
+   * Which voice the Mac records the prompts in (engine, voice, emotion). Part of the list's version, so a change of
+   * voice publishes the list again and the add-on gets recordings in the new voice instead of keeping the old ones.
+   */
+  voiceKey?: () => string;
   /** A voice-first call is over (said goodbye, sent, gave up, or aged out): whatever it kept for the model can go. */
   endCall?: (callId: string) => void;
   /** A line for the call trace. */
@@ -364,6 +369,7 @@ export class MemoInbox {
           last,
           talk: Boolean(this.canAsk && this.deps.converse),
           terse: Boolean(this.deps.terse?.()),
+          voice: this.deps.voiceKey?.() ?? null,
           targets: targets.map((t) => t.target),
         }),
       )

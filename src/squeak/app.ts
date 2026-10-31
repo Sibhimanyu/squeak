@@ -1185,6 +1185,7 @@ export class SqueakApp {
       lastChat: this.lastVoiceChat,
       // The call-in dialog in the Mac's own voice: every prompt, and the read-back of each message.
       audioClips: (texts) => this.promptClips.clips(texts),
+      voiceKey: () => this.promptVoiceKey(),
       // Only what was heard is rendered per call; the fixed suffix per chat is kept, and the two are joined.
       readBack: (text, label, ask) => this.readBackClips.clip(text, label, ask),
       prepareReadBack: (labels, ask) => this.readBackClips.prepare(labels, ask),
@@ -1523,6 +1524,11 @@ export class SqueakApp {
   }
 
   /** What the prompt and read-back caches key a voice by: another engine, voice or emotion level never reuses a clip. */
+  /** The voice call-in prompts are recorded in: the Mac's when it can speak, else the add-on's own. */
+  private promptVoiceKey(): string {
+    return this.naturalVoice.usable ? this.naturalVoiceKey() : "add-on";
+  }
+
   private naturalVoiceKey(): string {
     const { engine, voice, emotion } = this.naturalSettings.settings;
     return `${engine}:${voice}:${VOICE_ENGINES[engine].emotion ? emotion : "none"}`;
@@ -1533,13 +1539,17 @@ export class SqueakApp {
    * engine, voice or emotion level starts the engine and makes the fixed call phrases again while no call waits.
    */
   private applyNatural(request: unknown): { ok: true } | { ok: false; reason: string } {
-    const before = this.naturalVoiceKey();
+    const before = this.promptVoiceKey();
     const outcome = this.naturalSettings.apply(request);
-    if (outcome.ok && this.naturalVoiceKey() !== before && this.naturalVoice.usable) {
-      void this.naturalVoice
-        .warm()
-        .then(() => this.naturalVoice.prewarm(fixedPhrases()))
-        .catch(() => undefined);
+    if (outcome.ok && this.promptVoiceKey() !== before) {
+      // The call-in prompts were recorded in the old voice: publish them again (the list's version names the voice).
+      void this.memoInbox?.publish().catch(() => undefined);
+      if (this.naturalVoice.usable) {
+        void this.naturalVoice
+          .warm()
+          .then(() => this.naturalVoice.prewarm(fixedPhrases()))
+          .catch(() => undefined);
+      }
     }
     return outcome;
   }

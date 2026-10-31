@@ -27,6 +27,7 @@ describe("MemoInbox", () => {
   let transcript: string | Error;
   let busy: Set<string>;
   let favs: Array<{ n: number; workspace: string; label: string }>;
+  let voiceKey: string;
   const traces: Array<[string, string]> = [];
   const sent: Array<{ target: string; text: string }> = [];
   const notes: string[] = [];
@@ -42,6 +43,7 @@ describe("MemoInbox", () => {
     transcript = "tell it to go with option B";
     busy = new Set();
     favs = [];
+    voiceKey = "kokoro:af_heart:none";
     traces.length = 0;
     sent.length = 0;
     notes.length = 0;
@@ -64,6 +66,7 @@ describe("MemoInbox", () => {
       },
       caller: () => "35210",
       favorites: () => favs,
+      voiceKey: () => voiceKey,
       trace: (kind, text) => traces.push([kind, text]),
       note: (text) => notes.push(text),
       now: () => clock,
@@ -121,6 +124,14 @@ describe("MemoInbox", () => {
     await inbox.publish();
     expect(await directory()).toBeNull();
     targets = [{ target: "c9", label: "other", workspace: null }];
+    await inbox.publish();
+    expect((await directory())!.version).not.toBe(first);
+  });
+
+  it("publishes again when the Mac's voice changes, so the add-on gets prompts in the new voice", async () => {
+    await inbox.publish();
+    const first = (await directory())!.version;
+    voiceKey = "qwen3:designed_warm_woman:strong";
     await inbox.publish();
     expect((await directory())!.version).not.toBe(first);
   });
