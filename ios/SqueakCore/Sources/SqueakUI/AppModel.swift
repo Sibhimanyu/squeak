@@ -1596,6 +1596,7 @@ final class AppModel {
                                       label: snapshot?.voice?.workspaces?.first { $0.key == f.workspace }?.label ?? f.label)
                 }
             case .test: snapshot?.voice?.lastTest = .init(at: Date().timeIntervalSince1970 * 1000, status: "answered", letter: "A")
+            case .hold: break
             }
             return nil
         }
