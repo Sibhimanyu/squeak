@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.33
+
+- Settings › Voice: choose the voice engine for calls. Kokoro (today's voice, fast and plain) stays the default; Qwen3-TTS, Ming and Chatterbox are expressive and sound urgent, cheerful, apologetic or warm to suit what each line says. Each has its own voices, an Emotion setting (Off, Subtle, Strong), Play sample, and Set up / Remove. Setting one up uses model files already on this Mac when it has them.
+
 ## 2.12.32
 
 - Settings › Phone calls › How it talks: pick Terse (the new default: no greeting, no thanks, short and direct), Friendly, or describe a character of your own. It changes the tone and wording of what Squeak says on a call; what it can read or do stays the same. Applies from the next call.
