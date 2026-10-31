@@ -16,6 +16,8 @@ struct VoiceSettingsPage: View {
     @State private var pairingGateway = false
     @State private var showingCalls = false
     @State private var preview = VoicePreview()
+    @State private var personaStyle: VoicePersona.Style = .terse
+    @State private var personaCustom = ""
     @FocusState private var extensionFocused: Bool
 
     private var m: ChannelsModel { app.channels }
@@ -45,6 +47,7 @@ struct VoiceSettingsPage: View {
                 }
                 testSection(v)
                 if v.pauseKnown { pauseSection(v) }
+                if let persona = v.persona { personaSection(persona) }
                 if let natural = v.natural { naturalSection(natural) }
                 if let favorites = v.favorites { quickSection(favorites, candidates: v.workspaces ?? []) }
                 callsSection
@@ -69,7 +72,11 @@ struct VoiceSettingsPage: View {
         .task {
             await m.refreshVoice()
             await m.refreshNaturalSetup()
-            if !loaded { typed = m.voice?.callee ?? ""; loaded = true }
+            if !loaded {
+                typed = m.voice?.callee ?? ""
+                if let p = m.voice?.persona { personaStyle = p.style; personaCustom = p.custom }
+                loaded = true
+            }
         }
     }
 
@@ -174,6 +181,38 @@ struct VoiceSettingsPage: View {
     }
 
     // MARK: Natural voice
+
+    private func personaSection(_ saved: VoicePersona) -> some View {
+        let draft = VoicePersona(style: personaStyle, custom: personaCustom)
+        return Section {
+            Picker("Character", selection: $personaStyle) {
+                ForEach(VoicePersona.Style.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: personaStyle) { _, style in
+                // Terse and Friendly take effect at once; Custom waits for its description and Save.
+                if style != .custom { Task { await m.setPersona(VoicePersona(style: style)) } }
+            }
+            Footnote(personaStyle.summary)
+            if personaStyle == .custom {
+                TextField("", text: $personaCustom,
+                          prompt: Text("e.g. Dry and blunt. Skip small talk. Say \"yep\" and \"nope\"."), axis: .vertical)
+                    .lineLimit(2...5)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: personaCustom) { _, text in
+                        if text.count > VoicePersona.maxCustomLength { personaCustom = String(text.prefix(VoicePersona.maxCustomLength)) }
+                    }
+                HStack {
+                    Text("\(personaCustom.count)/\(VoicePersona.maxCustomLength)").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Save") { Task { await m.setPersona(draft) } }
+                        .disabled(!draft.isSavable || m.pauseBusy || (saved.style == .custom && saved.custom == VoicePersona.cleaned(personaCustom)))
+                }
+            }
+        } header: { Text("How it talks") } footer: {
+            Footnote("Applies to the next call. It changes tone and wording only: what it can read or do on a call stays the same.")
+        }
+    }
 
     private func naturalSection(_ n: NaturalVoice) -> some View {
         Section {

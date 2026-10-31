@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.32
+
+- Settings › Phone calls › How it talks: pick Terse (the new default: no greeting, no thanks, short and direct), Friendly, or describe a character of your own. It changes the tone and wording of what Squeak says on a call; what it can read or do stays the same. Applies from the next call.
+
 ## 2.12.31
 
 - Checking for updates when Squeak is already current now says so: "You’re up to date, Squeak 2.12.31 is the latest version" instead of an empty "Squeak Update" card, and the update window shows the version you are running.

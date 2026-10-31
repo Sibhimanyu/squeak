@@ -26,6 +26,8 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public var workspaces: [WorkspaceChoice]?
     /// The newest test call ("Call me now"); nil until one has been asked for, or from an older daemon.
     public var lastTest: LastTest?
+    /// How the call's assistant speaks; nil from a daemon that predates it (hide the section).
+    public var persona: VoicePersona?
 
     public struct LastTest: Sendable, Equatable, Decodable {
         public var at: Double
@@ -66,7 +68,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         self.pause = pause; self.pauseKnown = pauseKnown ?? (pause != nil)
     }
 
-    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces, lastTest }
+    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces, lastTest, persona }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -81,6 +83,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         favorites = try? c.decode([FavoriteWorkspace].self, forKey: .favorites)
         workspaces = try? c.decode([WorkspaceChoice].self, forKey: .workspaces)
         lastTest = try? c.decode(LastTest.self, forKey: .lastTest)
+        persona = try? c.decode(VoicePersona.self, forKey: .persona)
     }
 
     public var isOn: Bool { mode != "off" }
@@ -128,6 +131,60 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public static func requestBody(callee: String?) -> Data {
         let object: [String: Any] = ["callee": callee as Any? ?? NSNull()]
         return (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+}
+
+/// How the call's assistant speaks (`persona: { style, custom? }`). These calls are to you, not to a customer, so the
+/// default is terse: no greeting, no thanks, no offers of more help. The daemon owns the rules and the wording.
+public struct VoicePersona: Sendable, Equatable, Decodable {
+    public enum Style: String, Sendable, CaseIterable, Identifiable {
+        case terse, friendly, custom
+        public var id: String { rawValue }
+        public var title: String {
+            switch self {
+            case .terse: return "Terse"
+            case .friendly: return "Friendly"
+            case .custom: return "Custom"
+            }
+        }
+        public var summary: String {
+            switch self {
+            case .terse: return "No greetings or thanks. Short and direct, like a teammate on a quick call."
+            case .friendly: return "Warm and polite, with a greeting at the start of a call."
+            case .custom: return "Describe the character yourself."
+            }
+        }
+    }
+
+    /// Longest custom description the daemon keeps.
+    public static let maxCustomLength = 300
+
+    public var style: Style
+    public var custom: String
+
+    public init(style: Style = .terse, custom: String = "") { self.style = style; self.custom = custom }
+
+    private enum Keys: String, CodingKey { case style, custom }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        style = (try? c.decode(String.self, forKey: .style)).flatMap(Style.init(rawValue:)) ?? .terse
+        custom = (try? c.decode(String.self, forKey: .custom)) ?? ""
+    }
+
+    /// The description as it will be sent: whitespace collapsed, clipped to what the daemon keeps.
+    public static func cleaned(_ typed: String) -> String {
+        String(typed.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").prefix(maxCustomLength))
+    }
+
+    /// Whether this can be saved: a custom character needs its description.
+    public var isSavable: Bool { style != .custom || !Self.cleaned(custom).isEmpty }
+
+    /// `{ "persona": { "style": …, "custom": … } }`; the description only travels with the custom style.
+    public func requestBody() -> Data {
+        var inner: [String: Any] = ["style": style.rawValue]
+        if style == .custom { inner["custom"] = Self.cleaned(custom) }
+        return (try? JSONSerialization.data(withJSONObject: ["persona": inner], options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 }
 

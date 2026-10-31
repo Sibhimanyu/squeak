@@ -72,6 +72,8 @@ export function readBackParts(text: string, label: string, ask = false): { head:
 /** What the Mac says when it cannot answer a question (also what the add-on says when the Mac is silent). */
 export const ASK_FAILED = "I could not get an answer. You can try again.";
 const GREETING = "Hello, this is Squeak.";
+/** The opening words of a call in: none for a terse persona (the owner knows who is calling). */
+const hello = (terse: boolean): string => (terse ? "" : `${GREETING} `);
 const AGAIN = "Press star to hear this again";
 
 /** Every fixed sentence the flow says: also what is made ahead of time, so it is ready the moment a call connects. */
@@ -104,10 +106,11 @@ const recordPrompt = (label: string): string =>
 const actionPrompt = (label: string): string =>
   `${label}. Press 9 to say a message or ask a question, or 0 to hear where it stands. ${AGAIN}, or hash to hang up.`;
 /** Said once a chat is chosen, with a Mac that talks: the conversation starts at the beep. */
-const talkPrompt = (label: string): string => `${label}. Go ahead: ask me about it, or tell me what to do.`;
+const talkPrompt = (label: string, terse = false): string =>
+  terse ? `${label}.` : `${label}. Go ahead: ask me about it, or tell me what to do.`;
 /** Offered first when the Mac names the chat used last: 1 takes it, 2 goes to the menus. */
-export const lastChatPrompt = (label: string, greet: boolean): string =>
-  `${greet ? `${GREETING} ` : ""}Press 1 for ${label}, the last one you used. Press 2 for another chat. ${AGAIN}, or hash to hang up.`;
+export const lastChatPrompt = (label: string, greet: boolean, terse = false): string =>
+  `${greet ? hello(terse) : ""}Press 1 for ${label}, the last one you used. Press 2 for another chat. ${AGAIN}, or hash to hang up.`;
 /** Said when the recording came back as silence or a stock hallucination; the key is "record again" for the flow. */
 export const heardNothingPrompt = (recordAgain: string): string =>
   `I didn't hear anything. Press ${recordAgain} to record again, or hash to cancel.`;
@@ -124,14 +127,14 @@ function menuPrompt(directory: DirectoryDoc, greet: boolean): string {
     .slice(0, MENU_CHOICES)
     .map((item) => `Press ${item.n} for ${item.label}.`)
     .join(" ");
-  return `${greet ? `${GREETING} ` : ""}Which chat? ${menu} ${MENU_END}`;
+  return `${greet ? hello(directory.terse === true) : ""}Which chat? ${menu} ${MENU_END}`;
 }
 
 /** The first thing said after the PIN when favourites are set: one key picks the workspace. */
 function workspaceMenuPrompt(directory: DirectoryDoc, greet: boolean): string {
   const menu = (directory.workspaces ?? []).map((w) => `Press ${w.n} for ${w.label}.`).join(" ");
   const other = directory.items.length > 0 ? " Press 0 for other chats." : "";
-  return `${greet ? `${GREETING} ` : ""}Which workspace? ${menu}${other} ${MENU_END}`;
+  return `${greet ? hello(directory.terse === true) : ""}Which workspace? ${menu}${other} ${MENU_END}`;
 }
 
 function chatMenuPrompt(workspace: DirectoryWorkspace): string {
@@ -181,13 +184,14 @@ export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean):
     SAYS.noSpeech,
     SAYS.cap,
   ];
-  const pin = askPin ? [`${GREETING} ${SAYS.pin}`, SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
+  const terse = directory?.terse === true;
+  const pin = askPin ? [`${hello(terse)}${SAYS.pin}`, SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
   const ask = directory?.ask === true;
   const talks = directory?.talk === true && directory.ask === true;
   const perChat = directory
     ? allLabels(directory).flatMap((label) =>
         talks
-          ? [talkPrompt(label), actionPrompt(label), sentLine(label)]
+          ? [talkPrompt(label, terse), actionPrompt(label), sentLine(label)]
           : ask
             ? [actionPrompt(label), sentLine(label)]
             : [recordPrompt(label), sentLine(label)],
@@ -195,7 +199,7 @@ export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean):
     : [];
   if (ask) fixed.push(SAYS.recordAsk, SAYS.askFail, SAYS.followUp, SAYS.limit);
   fixed.push(heardNothingPrompt(ask ? "3" : "2"));
-  const last = directory?.last ? [lastChatPrompt(directory.last.label, !askPin)] : [];
+  const last = directory?.last ? [lastChatPrompt(directory.last.label, !askPin, terse)] : [];
   // With a last chat the offer carries the greeting, so the menus behind "another chat" do not.
   const greetMenus = !askPin && last.length === 0;
   return [
@@ -282,7 +286,7 @@ export async function handleIncoming(incoming: IncomingCall, deps: InboundDepend
   call.trace = deps.trace ?? null;
   deps.trace?.(`step: Call in answered from extension ${incoming.peer || "unknown"}`);
   try {
-    await conversation(call, deps);
+    await conversation(call, deps, directory.terse === true);
   } catch (error) {
     logger.warn("voice call-in failed", { error: error instanceof Error ? error.message : String(error) });
     deps.trace?.("step: The call-in failed");
@@ -302,14 +306,14 @@ async function bye(call: PhoneCall, deps: InboundDependencies, text: string): Pr
   await speak(call, deps, text);
 }
 
-async function conversation(call: PhoneCall, deps: InboundDependencies): Promise<void> {
+async function conversation(call: PhoneCall, deps: InboundDependencies, terse: boolean): Promise<void> {
   // 1. The PIN, unless this gateway is set to take the caller's extension as proof.
   // Read once per call: a pin changed from an app applies from the next one.
   const pin = deps.pin();
   let known = pin === null;
   for (let attempt = 0; attempt < PIN_TRIES && call.open && !known; attempt++) {
     // The PIN prompt is said but its digits are never written down.
-    await speak(call, deps, attempt === 0 ? `${GREETING} ${SAYS.pin}` : SAYS.pinAgain);
+    await speak(call, deps, attempt === 0 ? `${hello(terse)}${SAYS.pin}` : SAYS.pinAgain);
     call.redactKeys = true;
     const typed = await readDigits(call, { maxLength: 12, timeoutMs: PIN_WAIT_MS }).finally(() => {
       call.redactKeys = false;
@@ -332,7 +336,11 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
     const offered = directory.last;
     let another = false;
     for (let attempt = 0; attempt < 2 && call.open && target === null && !another; attempt++) {
-      const key = await menuKey(call, deps, lastChatPrompt(offered.label, greet && attempt === 0));
+      const key = await menuKey(
+        call,
+        deps,
+        lastChatPrompt(offered.label, greet && attempt === 0, directory.terse === true),
+      );
       if (key === null || key === "#") return bye(call, deps, SAYS.bye);
       if (key === "1") {
         deps.trace?.(`key: 1 (${offered.label}, the last one used)`);
@@ -352,7 +360,7 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
   // 3a. With a Mac that talks: the rest of the call is a conversation about this chat. Only if the Mac cannot be
   // reached does it fall back to the keys below.
   if (directory.talk === true && directory.ask === true && deps.talk && call.open) {
-    await speak(call, deps, talkPrompt(target.label));
+    await speak(call, deps, talkPrompt(target.label, directory.terse === true));
     const outcome = await deps.talk(call, {
       callId: crypto.randomBytes(9).toString("base64url"),
       label: target.label,

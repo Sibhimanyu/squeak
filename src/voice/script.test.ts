@@ -239,3 +239,34 @@ describe("composeCallbackScript", () => {
     expect(script.question).toContain(FULL_TEXT_NOTE);
   });
 });
+
+describe("terse calls", () => {
+  const waiting = item("asked_question", { title: "Fix the parser" });
+
+  it("drops the greeting and the invitation from a voice-first opening", () => {
+    const script = composeScript(waiting, QUESTION, true, true, true, true);
+    expect(script.greeting).toBe("Fix the parser has a question for you.");
+    expect(script.question).toBe("I can ship it two ways. Which one?");
+    expect(script).toMatchObject({ voice: true });
+  });
+
+  it("keeps both for a friendly one, and the keypad's wording is untouched", () => {
+    const script = composeScript(waiting, QUESTION, true, true, true, false);
+    expect(script.greeting).toContain("Hello, this is Squeak.");
+    expect(script.question).toContain("Just tell me what to do");
+    expect(composeScript(waiting, QUESTION, true, true, true, true).keypad).toContain("Press star to hear this again");
+  });
+
+  it("drops the greeting from a plain keypad call too", () => {
+    expect(composeScript(waiting, QUESTION, true, false, false, true).greeting).toBe(
+      "Fix the parser has a question for you.",
+    );
+  });
+
+  it("is terse for a call back as well", () => {
+    const done = item("finished_unreviewed", { state: "finished", title: "Fix the parser" }).session;
+    const script = composeCallbackScript(done, "Fixed it.", true, true);
+    expect(script.greeting).toBe("Fix the parser is done.");
+    expect(script.question).toBe("Fixed it.");
+  });
+});

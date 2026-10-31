@@ -248,6 +248,14 @@ public struct DaemonClient: Sendable {
         return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
     }
 
+    /// Sets how the call's assistant speaks. nil = a daemon without it (404); a 400 is the daemon's own sentence.
+    public func setVoicePersona(_ persona: VoicePersona) async throws -> VoiceSettings? {
+        let r = try await post("/control/voice", body: persona.requestBody())
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
+    }
+
     /// Turns the Mac's realistic call voice on or off, or picks its voice. nil = a daemon without the route (404).
     public func setNaturalVoice(enabled: Bool? = nil, voice: String? = nil) async throws -> VoiceSettings? {
         let r = try await post("/control/voice", body: NaturalVoice.requestBody(enabled: enabled, voice: voice))

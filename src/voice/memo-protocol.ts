@@ -80,6 +80,10 @@ export interface DirectoryDoc {
    */
   talk?: true;
   /**
+   * The owner's persona is terse: a call in drops "Hello, this is Squeak." from its prompts. Absent: as before.
+   */
+  terse?: true;
+  /**
    * The chat the person used last (a message sent or a question asked by phone), else the newest one waiting on them:
    * offered first, before any menu. `choice` indexes the version's chats as a memo's does, whether or not a menu lists
    * it. Absent from an older Mac, and the call goes straight to the menus as it always has.
@@ -205,6 +209,7 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
   return {
     ...(body.ask === true ? { ask: true as const } : {}),
     ...(body.talk === true ? { talk: true as const } : {}),
+    ...(body.terse === true ? { terse: true as const } : {}),
     v: 1,
     at: body.at,
     version: body.version,

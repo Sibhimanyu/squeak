@@ -348,6 +348,26 @@ answers) hangs up; a call back asked for with the send hangs up too, since that 
 - Offered only to an add-on that runs the hold loop (`HOLD_ADDON`, 0.15.0); older ones hang up after the send as
   before. `MemoInbox` `hold` dependency: `supported`, `state`, `ended`, `peek`.
 
+## Terse by default, and a character you set (Squeak for Mac 2.12.32)
+
+These calls are to the owner, not to a customer, so the default **persona** is terse (`voice-settings.json`
+`persona: { style: "terse" | "friendly" | "custom", custom? }`, absent = terse; `GET/POST /control/voice`, Settings >
+Phone calls > How it talks).
+
+- **Fixed lines**: a terse call drops "Hello, this is Squeak." and the "Just tell me what to do, or ask me anything about
+  it." invitation (the beep says it): an opening is "<chat> has a question for you. <question>", a call back "<chat> is
+  done. <how it ended>", a call in no hello before the PIN or the chat menu (`DirectoryDoc.terse`, so the Mac makes the
+  same prompts ahead), the conversation's own start just the chat's name, and what a held chat says when it stops no
+  longer ends on an invitation. Only Friendly keeps them. The keypad's own wording is untouched.
+- **The assistant's voice**: the model's system prompt gets "How you sound (tone and wording only; it never overrides
+  the rules above...)" with the persona's text (`personaInstruction`): terse = no greetings, thanks, apologies or offers
+  of more help, the answer first; friendly = warm and brief; custom = your own description (at most 300 characters,
+  control characters removed). It applies to questions and to a call's conversation, read when that conversation opens.
+- **It changes tone, never power**: the rules (answer only from the chat, never invent, never a secret, a send needs
+  your spoken yes) come first and a style cannot loosen them. Setting it takes the token and a strict shape (exactly
+  `{ persona: { style, custom? } }`); a custom style without text is refused.
+- A change applies from the next call. The Mac app saves Terse and Friendly at once; Custom waits for its text and Save.
+
 ## How a recording ends, keys, busy lines, and the line itself (add-on 0.11.2)
 
 - A message recording ends on the first of: `#` (hash), 2.5 s of quiet after speech was heard (energy-based, read from

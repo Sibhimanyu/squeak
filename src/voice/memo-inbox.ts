@@ -127,6 +127,8 @@ export interface MemoInboxDependencies {
     /** The agent's thinking so far, spoken; null when it cannot be read. */
     peek: (target: string, label: string) => string | null;
   };
+  /** The owner's persona is terse (voice/settings.ts): calls in drop the pleasantries. Read at each publish. */
+  terse?: () => boolean;
   /** A voice-first call is over (said goodbye, sent, gave up, or aged out): whatever it kept for the model can go. */
   endCall?: (callId: string) => void;
   /** A line for the call trace. */
@@ -361,6 +363,7 @@ export class MemoInbox {
           caller,
           last,
           talk: Boolean(this.canAsk && this.deps.converse),
+          terse: Boolean(this.deps.terse?.()),
           targets: targets.map((t) => t.target),
         }),
       )
@@ -383,6 +386,7 @@ export class MemoInbox {
       ...(last ? { last } : {}),
       ...(this.canAsk ? { ask: true as const } : {}),
       ...(this.canAsk && this.deps.converse ? { talk: true as const } : {}),
+      ...(this.deps.terse?.() ? { terse: true as const } : {}),
     };
     const audio = this.audioDocs.get(version);
     await this.deps.store.set(
