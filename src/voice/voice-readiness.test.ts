@@ -24,6 +24,19 @@ function make() {
 }
 
 describe("VoiceReadinessTracker", () => {
+  it("records again in a further pass after sending, and is ready in full only at the end", () => {
+    const { tracker } = make();
+    tracker.begin("a", "Charlotte");
+    tracker.recording("a");
+    tracker.progress("a", 10, 34);
+    tracker.sending("a", 10, 34);
+    tracker.progress("a", 11, 34);
+    expect(tracker.state).toMatchObject({ state: "preparing", step: "recording", done: 11, total: 34 });
+    tracker.sending("a", 34, 34);
+    tracker.ready("a");
+    expect(tracker.state).toEqual({ state: "ready", voice: "Charlotte", since: 1000 });
+  });
+
   it("goes loading, recording, sending, ready", () => {
     const { tracker, tick } = make();
     tracker.begin("a", "Sohee");

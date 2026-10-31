@@ -92,7 +92,9 @@ export class VoiceReadinessTracker {
     const value = this.active(key);
     if (!value) return;
     this.early = { done, total };
-    if (value.step !== "recording") return;
+    if (value.step === "loading") return;
+    // A further pass (the first one hit its minute of speech) records again after sending.
+    if (value.step === "sending") return this.set(key, { ...value, step: "recording", done, total });
     if (value.done === done && value.total === total) return;
     this.set(key, { ...value, done, total }, true);
   }

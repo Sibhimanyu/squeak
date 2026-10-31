@@ -5,7 +5,7 @@ import { generateChannel } from "../remote/remote-crypto.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { chunkClips, clipBytes, MAX_AUDIO_DOC_BYTES, readClip, type Clip } from "./clips.js";
 import { DirectoryCache } from "./directory-cache.js";
-import { readBackSentence } from "./inbound-flow.js";
+import { inboundPrompts, readBackSentence } from "./inbound-flow.js";
 import { MemoInbox } from "./memo-inbox.js";
 import { LEAD_SILENCE_MS, padLine, PromptClipCache, TAIL_SILENCE_MS } from "./natural-voice.js";
 import {
@@ -182,6 +182,45 @@ describe("PromptClipCache progress", () => {
 });
 
 describe("MemoInbox audio", () => {
+  it("records the prompts in further passes until all are there, publishing each, and tells once at the end", async () => {
+    const db = new FakeRtdb();
+    const store = new RtdbRest(await db.start());
+    const { channelId, key } = generateChannel();
+    const targets = [{ target: "c1", label: "squeak", workspace: null as string | null }];
+    const passes: number[] = [];
+    const published: string[] = [];
+    let made = 0;
+    const inbox = new MemoInbox({
+      store,
+      channel: channelId,
+      key,
+      transcriber: { transcribe: async () => "hello there" },
+      targets: () => targets,
+      canSend: () => true,
+      send: async () => ({ status: "started" }) as never,
+      caller: () => "35210",
+      note: () => undefined,
+      // A slow voice: three more prompts per pass.
+      audioClips: async (texts) => {
+        made = Math.min(texts.length, made + 3);
+        passes.push(made);
+        return texts.slice(0, made).map((text) => clipOf(text, 200));
+      },
+      voiceKey: () => "qwen3:aiden:subtle",
+      audioPublished: (version) => published.push(version),
+    });
+    const readDir = async () => readDirectory(key, (await store.get(dirPath(channelId)))!, Date.now())!;
+    await inbox.publish();
+    for (let i = 0; i < 200 && published.length === 0; i++) await new Promise((r) => setTimeout(r, 25));
+    const total = [...new Set([...inboundPrompts(await readDir(), true), ...inboundPrompts(await readDir(), false)])]
+      .length;
+    expect(passes.length).toBeGreaterThan(1);
+    expect(passes.at(-1)).toBe(Math.min(total, 3 * passes.length));
+    expect(published).toHaveLength(1);
+    inbox.stop();
+    await db.stop();
+  });
+
   it("writes audio documents, names them without changing the version, and cleans old ones", async () => {
     const db = new FakeRtdb();
     const store = new RtdbRest(await db.start());

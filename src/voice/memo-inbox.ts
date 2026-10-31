@@ -155,6 +155,8 @@ interface Pending {
 
 const PENDING_TTL_MS = 10 * 60_000;
 const MAX_PENDING = 20;
+/** Most recording passes for one list's prompts (each up to a minute of speech). */
+const MAX_AUDIO_PASSES = 8;
 const KEEP_VERSIONS = 8;
 const REPUBLISH_MS = 30 * 60_000;
 const REMEMBER = 200;
@@ -415,23 +417,31 @@ export class MemoInbox {
     const { store, channel, key } = this.deps;
     const texts = [...new Set([...inboundPrompts(doc, true), ...inboundPrompts(doc, false)])];
     const voiceKey = this.deps.voiceKey?.() ?? null;
-    const clips = await this.deps.audioClips!(texts);
-    if (this.stopped) return;
-    if (clips.length === 0) {
-      this.deps.audioPublished?.(doc.version, voiceKey);
-      return;
-    }
-    const groups = chunkClips(clips).slice(0, MAX_AUDIO_DOCS);
-    const ids: string[] = [];
-    for (const [index, group] of groups.entries()) {
-      const id = audioDocId(doc.version, index);
-      await store.set(audioPath(channel, id), sealAudio(key, id, doc.version, group, this.now()));
-      ids.push(id);
-    }
-    // A newer list came out while this rendered: its own audio follows; this one's documents are cleaned with it.
-    this.audioDocs.set(doc.version, ids);
-    if (this.published?.version === doc.version) {
-      await store.set(dirPath(channel), sealDirectory(key, { ...doc, audio: ids }));
+    // One pass records at most a minute of speech (PromptClipCache), so a slow voice leaves most prompts to the
+    // add-on's own (Piper). Each pass is published as soon as it is made, then the next records what is still missing
+    // (the made ones are cached), until all are there, a pass adds nothing, or the list or the voice changed.
+    let previous = -1;
+    for (let pass = 0; pass < MAX_AUDIO_PASSES; pass += 1) {
+      const clips = await this.deps.audioClips!(texts);
+      if (this.stopped) return;
+      const stale = this.published?.version !== doc.version || (this.deps.voiceKey?.() ?? null) !== voiceKey;
+      const more = !stale && clips.length < texts.length && clips.length > previous && pass + 1 < MAX_AUDIO_PASSES;
+      previous = clips.length;
+      if (clips.length > 0) {
+        const groups = chunkClips(clips).slice(0, MAX_AUDIO_DOCS);
+        const ids: string[] = [];
+        for (const [index, group] of groups.entries()) {
+          const id = audioDocId(doc.version, index);
+          await store.set(audioPath(channel, id), sealAudio(key, id, doc.version, group, this.now()));
+          ids.push(id);
+        }
+        // A newer list came out while this rendered: its own audio follows; this one's documents are cleaned with it.
+        this.audioDocs.set(doc.version, ids);
+        if (this.published?.version === doc.version) {
+          await store.set(dirPath(channel), sealDirectory(key, { ...doc, audio: ids }));
+        }
+      }
+      if (!more) break;
     }
     this.deps.audioPublished?.(doc.version, voiceKey);
     await this.dropStaleAudio();
