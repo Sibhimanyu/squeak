@@ -13,11 +13,18 @@ export interface CallScript {
   question: string;
   /** The options on the keypad; empty when there is nothing to press. */
   options: ChoiceOption[];
+  /**
+   * The call may also take a message for the chat that asked (9) or read out where it stands (0): the chat's
+   * spoken name. Absent: the keypad is the options alone, as before (an add-on without it ignores the field).
+   */
+  followUp?: { label: string };
 }
 
 export type DialogAction =
   | { type: "play"; text: string }
   | { type: "answer"; letter: string }
+  /** 9: record a message for the chat; 0: read out its status. The gateway runs it, then asks the question again. */
+  | { type: "follow"; kind: "message" | "status" }
   | { type: "hangup"; text?: string };
 
 /** Wrong PINs allowed in one call. */
@@ -110,10 +117,18 @@ export class CallDialog {
     return [{ type: "play", text: "That PIN is not right. Try again, then press hash." }];
   }
 
+  /** The question once more, after a follow-up (a status read out) has had its say. */
+  replay(): DialogAction[] {
+    return this.stage === "question" ? [{ type: "play", text: this.script.question }] : [];
+  }
+
   private questionKey(digit: string): DialogAction[] {
     if (digit === "#") {
       this.stage = "done";
       return [{ type: "hangup" }];
+    }
+    if (this.script.followUp && this.canAnswer && (digit === "9" || digit === "0")) {
+      return [{ type: "follow", kind: digit === "9" ? "message" : "status" }];
     }
     if (digit === "*") {
       return [{ type: "play", text: this.script.question }];

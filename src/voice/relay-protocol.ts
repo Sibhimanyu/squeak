@@ -308,6 +308,12 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 function isScript(value: unknown): value is CallScript {
   if (!isRecord(value) || typeof value.greeting !== "string" || typeof value.question !== "string") return false;
   if (!Array.isArray(value.options) || value.options.length > 8) return false;
+  if (
+    value.followUp !== undefined &&
+    !(isRecord(value.followUp) && typeof value.followUp.label === "string" && value.followUp.label.length <= 200)
+  ) {
+    return false;
+  }
   return value.options.every(
     (option) =>
       isRecord(option) &&

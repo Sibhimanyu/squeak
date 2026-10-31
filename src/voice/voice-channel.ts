@@ -31,6 +31,8 @@ export interface VoiceChannelDependencies {
    * only tells you. A function is read at each call, since an app can change the pin at runtime.
    */
   canTakeKeys: boolean | (() => boolean);
+  /** The call may offer a message for the chat (9) and its status (0): the Mac's inbox and the add-on can take them. */
+  followUp?: () => boolean;
   policy: CallPolicy;
   /** True while the person has paused calls (voice/settings.ts); cards still go everywhere else. */
   paused?: () => boolean;
@@ -147,7 +149,8 @@ export class VoiceChannel {
     const canAnswer =
       canReplyFromCard(current, this.deps.replier) &&
       (typeof this.deps.canTakeKeys === "function" ? this.deps.canTakeKeys() : this.deps.canTakeKeys);
-    const script = composeScript(current, text, canAnswer);
+    const script = composeScript(current, text, canAnswer, safely(() => this.deps.followUp?.() ?? false) ?? false);
+    const follow = script.followUp ? { target, label: script.followUp.label } : undefined;
 
     this.calling = true;
     this.deps.policy.record(episode, now, retry);
@@ -157,7 +160,7 @@ export class VoiceChannel {
     this.trace("said", `${script.greeting} ${script.question}`);
     let result: CallResult;
     try {
-      result = await this.deps.line.call(script, canAnswer);
+      result = await this.deps.line.call(script, canAnswer, follow);
       // The line is in use (a call in, or another call out): the request is not lost, it rings once the line is free.
       if (result.status === "failed" && result.reason === LINE_BUSY_REASON) {
         const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -179,7 +182,7 @@ export class VoiceChannel {
             this.trace("warn", "No longer waiting, so the call was not placed after the line freed up");
             break;
           }
-          result = await this.deps.line.call(script, canAnswer);
+          result = await this.deps.line.call(script, canAnswer, follow);
           if (result.status !== "failed" || result.reason !== LINE_BUSY_REASON)
             this.trace("step", `Line free after ${Math.round(waited / 1000)} s, ringing now`);
         }

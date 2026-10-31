@@ -91,7 +91,7 @@ import { DirectLine } from "../voice/direct-line.js";
 import { PinKeeper, type PinPolicy, type PinState } from "../voice/pin-keeper.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import { OLD_ADDON, relayLineFor, type RelayLine } from "../voice/relay-line.js";
-import { addonSupports, LATE_CLIPS_ADDON } from "../voice/addon-update.js";
+import { addonSupports, FOLLOW_UP_ADDON, LATE_CLIPS_ADDON } from "../voice/addon-update.js";
 import { GatewayPairing } from "../voice/pairing-window.js";
 import { GatewayClaim } from "../voice/gateway-claim.js";
 import { RENDEZVOUS_DATABASE } from "../voice/claim-protocol.js";
@@ -2074,7 +2074,12 @@ export class SqueakApp {
           });
           return clips;
         },
-        { lateClips, trace: (text) => this.traceMac("step", text) },
+        {
+          lateClips,
+          trace: (text) => this.traceMac("step", text),
+          // A call out names the chat that asked, so 9 (a message) and 0 (its status) work on it.
+          registerFollowUp: (callId, follow) => this.memoInbox?.registerCall(callId, follow.target, follow.label),
+        },
       );
       this.voiceLine = line;
       this.voiceRelayLine = line;
@@ -2084,6 +2089,8 @@ export class SqueakApp {
         ...base,
         line,
         canTakeKeys: true,
+        followUp: () =>
+          this.memoInbox !== null && addonSupports(this.gatewayStatusReader().peek().version, FOLLOW_UP_ADDON),
         policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voiceRelay.quiet }),
       });
     }

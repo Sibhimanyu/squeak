@@ -59,6 +59,7 @@ updated this way: copy the new files again, then press Update in Home Assistant.
 ## Notes
 
 - When the PIN is asked is set in the Squeak app (Settings > Phone calls > When Squeak asks for the PIN): separately for calls Squeak makes to you and for calls you make to Squeak. Only the one extension set in Squeak's Settings may call in either way. An older `call_in_pin: skip` option, if still in your options, only sets the starting value for calls you make.
+- 0.11.7: when Squeak rings you with a question, the call also offers 9 (send your own message to that chat: speak it, hear it back, send) and 0 (hear where the chat stands, then the question again). The Mac offers it only to an add-on of 0.11.7 or newer.
 - 0.11.6: asking for a chat's status (or asking a question) is read out in the Mac's voice instead of switching to the add-on's plain voice: the Mac now gets up to 20 seconds to record the answer, and the add-on waits for it.
 - 0.11.5: calls start talking sooner: the Mac's voice clips are fetched together instead of one after another (they used to trickle in 2-3 seconds apart), and the add-on no longer makes the same words itself with its slow voice while the Mac's clips are on their way.
 - 0.11.4: the Mac's recordings of the call prompts (the greeting, the menus, "One moment", "Goodbye") are kept in the add-on's data folder, so the first call after a restart or an update opens with the Mac's voice at once instead of waiting for the connection or for this machine to make the words itself.

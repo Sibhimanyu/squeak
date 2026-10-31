@@ -24,6 +24,15 @@ describe("composeScript", () => {
     expect(script.options.map((o) => o.letter)).toEqual(["A", "B"]);
   });
 
+  it("offers a message (9) and the status (0) only when asked to and keys may answer", () => {
+    const script = composeScript(item(), QUESTION, true, true);
+    expect(script.question).toContain("Press 9 to send your own message, or 0 to hear where the chat stands.");
+    expect(script.followUp).toEqual({ label: expect.stringContaining("squeak") });
+    expect(composeScript(item(), QUESTION, true).followUp).toBeUndefined();
+    expect(composeScript(item(), QUESTION, false, true).followUp).toBeUndefined();
+    expect(composeScript(item(), QUESTION, false, true).question).not.toContain("Press 9");
+  });
+
   it("offers no keys when a reply cannot go back, and says where to answer", () => {
     const script = composeScript(item(), QUESTION, false);
     expect(script.options).toEqual([]);

@@ -100,6 +100,8 @@ const MAX_PENDING = 20;
 const KEEP_VERSIONS = 8;
 const REPUBLISH_MS = 30 * 60_000;
 const REMEMBER = 200;
+/** A call out names its chat for this long: longer than any call lasts. */
+const CALL_TARGET_TTL_MS = 30 * 60_000;
 const READ_BACK_BUDGET_MS = 8_000;
 /**
  * An answer or status read out in the Mac's voice: several sentences, about a second each and more when the voice is
@@ -140,6 +142,8 @@ export class MemoInbox {
   private readonly pending = new Map<string, Pending>();
   /** Directory versions the gateway may still be reading from, each as the targets by number. */
   private readonly versions = new Map<string, string[]>();
+  /** Calls out that may take a message for, or read the status of, the chat that asked: the call's id is their "version". */
+  private readonly calls = new Map<string, { target: string; label: string; at: number }>();
   private published: { version: string; at: number } | null = null;
   /** Audio document ids written for each directory version, so they go when the version does. */
   private readonly audioDocs = new Map<string, string[]>();
@@ -379,6 +383,26 @@ export class MemoInbox {
     }
   }
 
+  /** The call `callId` is about this chat: its id then names a one-chat list for memos and status (9 and 0 on the keypad). */
+  registerCall(callId: string, target: string, label: string): void {
+    const now = this.now();
+    for (const [id, call] of this.calls) if (now - call.at > CALL_TARGET_TTL_MS) this.calls.delete(id);
+    this.calls.set(callId, { target, label, at: now });
+  }
+
+  /** The chats a list version names by number: a published list, or the one chat a call out is about. */
+  private targetsOf(version: string): string[] | undefined {
+    const call = this.calls.get(version);
+    return this.versions.get(version) ?? (call ? [call.target] : undefined);
+  }
+
+  /** What to call a chat: as listed now, else as the call out named it, else by number. */
+  private labelOf(version: string, target: string, choice: number): string {
+    return (
+      this.deps.targets().find((t) => t.target === target)?.label ?? this.calls.get(version)?.label ?? `chat ${choice}`
+    );
+  }
+
   /** Notes the chat used by phone and republishes, so the next call offers it first. */
   private rememberLast(target: string): void {
     const { lastChat } = this.deps;
@@ -419,10 +443,10 @@ export class MemoInbox {
     let label: string;
     let question = "";
     if (message.kind === "status") {
-      const found = this.versions.get(message.dirVersion)?.[message.choice - 1];
+      const found = this.targetsOf(message.dirVersion)?.[message.choice - 1];
       if (!found) return this.refuse(message.id, "That list is out of date. Call again.");
       target = found;
-      label = this.deps.targets().find((t) => t.target === found)?.label ?? `chat ${message.choice}`;
+      label = this.labelOf(message.dirVersion, found, message.choice);
     } else {
       // Not deleted: the same recording may be sent after it was asked about, or asked again.
       const pending = this.pending.get(message.memoId);
@@ -471,10 +495,10 @@ export class MemoInbox {
     for (const [memoId, pending] of this.pending) if (now - pending.at > PENDING_TTL_MS) this.pending.delete(memoId);
 
     if (message.kind === "memo") {
-      const targets = this.versions.get(message.dirVersion);
+      const targets = this.targetsOf(message.dirVersion);
       const target = targets?.[message.choice - 1];
       if (!target) return this.refuse(message.id, "That list is out of date. Call again.");
-      const label = this.deps.targets().find((t) => t.target === target)?.label ?? `chat ${message.choice}`;
+      const label = this.labelOf(message.dirVersion, target, message.choice);
       const { trace } = this.deps;
       const audio = Buffer.from(message.audio, "base64");
       trace?.("step", `Recording received (${Math.max(1, Math.round(audio.length / 1024))} KB)`, { label });

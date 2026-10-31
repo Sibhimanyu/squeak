@@ -111,7 +111,13 @@ function describe(kind: AttentionKind): string {
  * The script for one call. `lastText` is the agent's whole last message (a card's 180-character detail
  * is no use for reading options out); `canAnswer` is whether a reply could go back right now.
  */
-export function composeScript(item: AttentionItem, lastText: string | null, canAnswer: boolean): CallScript {
+export function composeScript(
+  item: AttentionItem,
+  lastText: string | null,
+  canAnswer: boolean,
+  /** The add-on can take a message for this chat (9) and read its status (0): said, and named in the script. */
+  followUp = false,
+): CallScript {
   const label = say(cardLabel(item.session));
   const choices = item.kind === "asked_question" || item.kind === "blocked_question" ? parseChoices(lastText) : null;
   const options = (choices?.options ?? []).slice(0, MAX_KEYPAD_OPTIONS);
@@ -132,6 +138,13 @@ export function composeScript(item: AttentionItem, lastText: string | null, canA
   } else {
     parts.push("Open Squeak to answer.");
   }
+  const follow = followUp && canAnswer;
+  if (follow) parts.push("Press 9 to send your own message, or 0 to hear where the chat stands.");
   parts.push("Press star to hear this again, or hash to hang up.");
-  return { greeting, question: parts.join(" "), options: canAnswer ? options : [] };
+  return {
+    greeting,
+    question: parts.join(" "),
+    options: canAnswer ? options : [],
+    ...(follow ? { followUp: { label } } : {}),
+  };
 }

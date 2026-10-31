@@ -48,3 +48,31 @@ describe("CallDialog with a pin required (unchanged)", () => {
     expect(none.key("1")).toEqual([]);
   });
 });
+
+describe("CallDialog follow-ups (9 a message, 0 the status)", () => {
+  const withFollow: CallScript = { ...script, followUp: { label: "squeak" } };
+
+  it("offers them only when the script names a chat and keys may answer", () => {
+    const open = new CallDialog(withFollow, null, false);
+    open.start();
+    expect(open.key("9")).toEqual([{ type: "follow", kind: "message" }]);
+    expect(open.key("0")).toEqual([{ type: "follow", kind: "status" }]);
+    expect(open.replay()).toEqual([{ type: "play", text: withFollow.question }]);
+
+    const plain = new CallDialog(script, null, false);
+    plain.start();
+    expect(plain.key("9")).toEqual([]);
+
+    const noKeys = new CallDialog(withFollow, null);
+    noKeys.start();
+    expect(noKeys.key("0")).toEqual([]);
+  });
+
+  it("waits for the PIN first: 9 and 0 are digits of it until it is right", () => {
+    const dialog = new CallDialog(withFollow, "9090");
+    dialog.start();
+    expect(dialog.key("9")).toEqual([]);
+    for (const d of "090#") dialog.key(d);
+    expect(dialog.key("0")).toEqual([{ type: "follow", kind: "status" }]);
+  });
+});

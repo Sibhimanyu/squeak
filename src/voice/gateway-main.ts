@@ -21,10 +21,10 @@ import type { CallResult } from "./baresip-line.js";
 import type { CallDialog } from "./dialog.js";
 import { readVoiceConfig, readVoiceRelayConfig, type VoiceEnv } from "./config.js";
 import { VoiceGateway } from "./gateway.js";
-import { handleIncoming, inboundPrompts } from "./inbound-flow.js";
+import { followUpFlow, handleIncoming, inboundPrompts } from "./inbound-flow.js";
 import { DirectoryCache } from "./directory-cache.js";
 import { incomingGate, PinKeeper } from "./pin-keeper.js";
-import { runDialog, type Phone } from "./phone.js";
+import { runDialog, type Phone, type PhoneCall } from "./phone.js";
 import { SipPhone } from "./sip-phone.js";
 import { RelayUplink } from "./uplink.js";
 import type { CallQuality } from "./line-quality.js";
@@ -206,6 +206,12 @@ export async function resolveCredentials(
   return { ...paired, source: "paired now" };
 }
 
+/** The chat an outbound call can take a message for or read the status of: the call's id names it on the Mac. */
+export interface FollowUpInfo {
+  callId: string;
+  label: string;
+}
+
 /** An outbound call on the shared phone: ring, then the dialog. */
 export function phoneLine(
   phone: Phone,
@@ -213,11 +219,25 @@ export function phoneLine(
   now: () => number = Date.now,
   /** The line quality of the call that just ended (set by the phone's `onQuality`); attached to an answered result. */
   quality: () => CallQuality | null = () => null,
+  /** Runs the 9 (a message for the chat) and 0 (its status) keys of a call that offers them. */
+  followUp?: (call: PhoneCall, info: FollowUpInfo, kind: "message" | "status") => Promise<"back" | "ended">,
 ): {
-  call(callee: string, dialog: CallDialog, audio?: Clip[], macVoice?: boolean): Promise<CallResult>;
+  call(
+    callee: string,
+    dialog: CallDialog,
+    audio?: Clip[],
+    macVoice?: boolean,
+    follow?: FollowUpInfo,
+  ): Promise<CallResult>;
 } {
-  const place = async (callee: string, dialog: CallDialog, audio?: Clip[], macVoice = false): Promise<CallResult> => {
-    const result = await placeCall(callee, dialog, audio, macVoice);
+  const place = async (
+    callee: string,
+    dialog: CallDialog,
+    audio?: Clip[],
+    macVoice = false,
+    follow?: FollowUpInfo,
+  ): Promise<CallResult> => {
+    const result = await placeCall(callee, dialog, audio, macVoice, follow);
     const measured = result.status === "answered" ? quality() : null;
     return result.status === "answered" && measured ? { ...result, quality: measured } : result;
   };
@@ -226,6 +246,7 @@ export function phoneLine(
     dialog: CallDialog,
     audio?: Clip[],
     macVoice = false,
+    follow?: FollowUpInfo,
   ): Promise<CallResult> => {
     // The Mac's own recordings first: prewarm then finds them made and speaks only what is missing.
     if (audio) phone.seed?.(audio);
@@ -236,17 +257,23 @@ export function phoneLine(
     const dialled = await phone.dial(callee);
     if (dialled.status === "unanswered") return { status: "unanswered" };
     if (dialled.status === "failed") return { status: "failed", reason: dialled.reason };
-    return runDialog(dialled.call, dialog, onEvent ? (line) => onEvent("info", line) : undefined);
+    const call = dialled.call;
+    return runDialog(
+      call,
+      dialog,
+      onEvent ? (line) => onEvent("info", line) : undefined,
+      follow && followUp ? (kind) => followUp(call, follow, kind) : undefined,
+    );
   };
   return {
-    async call(callee, dialog, audio) {
-      if (!onEvent) return place(callee, dialog, audio);
+    async call(callee, dialog, audio, macVoice, follow) {
+      if (!onEvent) return place(callee, dialog, audio, macVoice, follow);
       const began = now();
       // The extension is a number on the PBX, not a secret; the script (the question) never goes in.
       onEvent("info", `Call placed to extension ${callee}`);
       let result: CallResult;
       try {
-        result = await place(callee, dialog, audio);
+        result = await place(callee, dialog, audio, macVoice, follow);
       } catch (error) {
         onEvent(
           "warn",
@@ -451,11 +478,33 @@ export async function runGateway(): Promise<number> {
         logger.info("the pin is turned off: a call takes a key answer without asking for one");
       }
       let publishStatus: () => void = () => undefined;
+      // One uplink for the calls in and for the follow-ups of a call out (a message for the chat, its status).
+      const uplink = new RelayUplink({ store, channel: relay.channel, key: relay.key });
+      let directoryCache: DirectoryCache | null = null;
       const gateway = new VoiceGateway({
         store,
         channel: relay.channel,
         key: relay.key,
-        line: phoneLine(phone, note, Date.now, () => lastQuality),
+        line: phoneLine(
+          phone,
+          note,
+          Date.now,
+          () => lastQuality,
+          (call, info, kind) =>
+            followUpFlow(
+              call,
+              {
+                pin: () => null,
+                directory: async () => null,
+                uplink,
+                encode: encodeOpus,
+                trace: (line) => note("info", line),
+                seed: (clips) => phone.seed?.(clips),
+              },
+              { callId: info.callId, label: info.label, ask: directoryCache?.current()?.ask === true },
+              kind,
+            ),
+        ),
         onEvent: note,
         callee: voice.callee,
         pin: () => pins.current(),
@@ -475,7 +524,7 @@ export async function runGateway(): Promise<number> {
       // The Mac's recordings of every prompt are seeded before anything is made here, so the add-on synthesizes only
       // what is still missing.
       const directory = new DirectoryCache(store, relay.channel, relay.key, Date.now, (clips) => phone.seed?.(clips));
-      const uplink = new RelayUplink({ store, channel: relay.channel, key: relay.key });
+      directoryCache = directory;
       phone.onIncoming((incoming) => {
         void handleIncoming(incoming, {
           pin: callInPin,

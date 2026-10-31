@@ -276,6 +276,8 @@ export class BaresipLine {
           armKeyTimer(await play(action.text));
           return;
         }
+        // Follow-ups (a message, a status) are the gateway's; this direct line never offers them.
+        if (action.type === "follow") return;
         hangingUp = true;
         if (action.text) await delay((await play(action.text)) + GOODBYE_PAD_MS);
         send("hangup");

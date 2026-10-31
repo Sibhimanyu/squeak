@@ -370,6 +370,34 @@ async function conversation(call: PhoneCall, deps: InboundDependencies): Promise
 
 type Done = "done" | { text: string };
 
+/**
+ * What an outbound call offers beside its options: a message for the chat that asked (9) or its status (0), run with
+ * the same flows as a call in. The Mac knows the call's id as a one-chat list (`MemoInbox.registerCall`), so the chat
+ * is item 1 of that "version". "ended": the flow said goodbye (a message sent, or cancelled); "back": ask the question again.
+ */
+export async function followUpFlow(
+  call: PhoneCall,
+  deps: InboundDependencies,
+  info: { callId: string; label: string; ask: boolean },
+  kind: "message" | "status",
+): Promise<"back" | "ended"> {
+  const item: DirectoryItem = { n: 1, label: info.label, choice: 1 };
+  const directory: DirectoryDoc = {
+    v: 1,
+    at: Date.now(),
+    version: info.callId,
+    caller: null,
+    items: [item],
+    ...(info.ask ? { ask: true as const } : {}),
+  };
+  const counter = { answers: 0 };
+  const outcome =
+    kind === "status"
+      ? await statusFlow(call, deps, directory, item, counter)
+      : await messageFlow(call, deps, directory, item, info.ask, counter);
+  return outcome === "done" || !call.open ? "ended" : "back";
+}
+
 /** One of the two things to do with a chat: 1 say or ask, 3 its status. Null: hash, silence or two wrong keys. */
 async function actionKey(
   call: PhoneCall,

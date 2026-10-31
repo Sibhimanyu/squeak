@@ -21,7 +21,8 @@ import {
 
 /** What a call needs from a line: the script to read, and whether a key may answer it. */
 export interface VoiceLine {
-  call(script: CallScript, answerable: boolean): Promise<CallResult>;
+  /** `follow`: the chat that asked, so the call may take a message for it or read its status (the call's id names it). */
+  call(script: CallScript, answerable: boolean, follow?: { target: string; label: string }): Promise<CallResult>;
 }
 
 /** After a request expires the gateway may still be mid-call; this is the longest one it allows. */
@@ -55,6 +56,8 @@ export interface RelayLineOptions {
    * and `clips` is given an `onClip` to hand over each clip as it is made. False or absent: the old way, clips first.
    */
   lateClips?: () => boolean;
+  /** Tells the inbox which chat a call is about (by the call's id), before the request goes out. */
+  registerFollowUp?: (callId: string, follow: { target: string; label: string }) => void;
   /** A line for the call trace: when dialling started, and when each clip was made and sent. */
   trace?: (text: string) => void;
   now?: () => number;
@@ -72,9 +75,10 @@ export class RelayLine implements VoiceLine {
     this.now = options.now ?? Date.now;
   }
 
-  async call(script: CallScript, answerable: boolean): Promise<CallResult> {
+  async call(script: CallScript, answerable: boolean, follow?: { target: string; label: string }): Promise<CallResult> {
     const { key } = this.options;
     const id = newCallId();
+    if (follow && script.followUp) this.options.registerFollowUp?.(id, follow);
     if (this.options.clips && this.options.lateClips?.()) return this.callWithLateClips(id, script, answerable);
     // Made first: the request's clock starts when it is written, not while the voice is being recorded.
     const audio = await this.options.clips?.(script, answerable).catch(() => undefined);
@@ -325,7 +329,7 @@ export function relayLineFor(
   relay: { channel: string; key: string },
   settings: { settings: { callee: string | null } },
   clips?: RelayLineOptions["clips"],
-  extra: Pick<RelayLineOptions, "lateClips" | "trace"> = {},
+  extra: Pick<RelayLineOptions, "lateClips" | "trace" | "registerFollowUp"> = {},
 ): RelayLine {
   return new RelayLine({
     store,

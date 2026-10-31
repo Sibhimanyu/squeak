@@ -92,6 +92,16 @@ describe("MemoInbox: questions and status are read-only", () => {
     expect(again?.ask).toBeUndefined();
   });
 
+  it("reads the status of the chat a call out is about, named by the call's id", async () => {
+    inbox.registerCall("call-1", "c9", "motion graphics");
+    const down = await upload({ kind: "status", dirVersion: "call-1", choice: 1 });
+    expect(down).toMatchObject({ status: "answer", text: "motion graphics is working." });
+    // Only the one chat, and only the call's own id: anything else is an out-of-date list.
+    expect(await upload({ kind: "status", dirVersion: "call-1", choice: 2 })).toMatchObject({ status: "refused" });
+    expect(await upload({ kind: "status", dirVersion: "call-2", choice: 1 })).toMatchObject({ status: "refused" });
+    expect(sent).toEqual([]);
+  });
+
   it("answers a status from what it knows, and sends and types nothing", async () => {
     const down = await upload({ kind: "status", dirVersion: version, choice: 1 });
     expect(down).toMatchObject({ status: "answer", text: "squeak voice is working." });

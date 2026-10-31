@@ -106,3 +106,26 @@ describe("runDialog trace", () => {
     expect(lines.filter((l) => l.startsWith("key: ")).every((l) => !/\d/.test(l))).toBe(true);
   });
 });
+
+describe("runDialog follow-ups", () => {
+  const withFollow: CallScript = { ...script, followUp: { label: "squeak" } };
+
+  it("asks the question again after a status, and still takes an option", async () => {
+    const call = fakeCall(["0", "2"]);
+    const seen: string[] = [];
+    const result = await runDialog(call, new CallDialog(withFollow, null, false), undefined, async (kind) => {
+      seen.push(kind);
+      return "back";
+    });
+    expect(seen).toEqual(["status"]);
+    expect(call.said.at(-2)).toBe(withFollow.question);
+    expect(result).toEqual({ status: "answered", letter: "B" });
+  });
+
+  it("ends the call when the follow-up did (a message sent says goodbye itself)", async () => {
+    const call = fakeCall(["9", "1"]);
+    const result = await runDialog(call, new CallDialog(withFollow, null, false), undefined, async () => "ended");
+    expect(call.hungUp).toBe(true);
+    expect(result).toEqual({ status: "answered", letter: null });
+  });
+});

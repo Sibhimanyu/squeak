@@ -95,6 +95,11 @@ export async function runDialog(
   call: PhoneCall,
   dialog: CallDialog,
   trace?: (line: string) => void,
+  /**
+   * Runs a follow-up the person asked for (a message for the chat, or its status). "back": the question is asked
+   * again; "ended": the follow-up finished the call (a message sent says goodbye). Absent: the keys do nothing.
+   */
+  followUp?: (kind: "message" | "status") => Promise<"back" | "ended">,
 ): Promise<CallResult> {
   let letter: string | null = null;
   call.trace = trace ?? null;
@@ -102,6 +107,8 @@ export async function runDialog(
   call.redactKeys = true;
   let actions: DialogAction[] = dialog.start();
   while (call.open) {
+    // A follow-up that came back swaps in the question again, said at once rather than after waiting for a key.
+    let again = false;
     for (const action of actions) {
       if (action.type === "answer") {
         letter = action.letter;
@@ -109,6 +116,16 @@ export async function runDialog(
       } else if (action.type === "play") {
         trace?.(`said: ${action.text}`);
         await call.say(action.text);
+      } else if (action.type === "follow") {
+        trace?.(`key: ${action.kind === "message" ? "9 (your own message)" : "0 (status)"}`);
+        const outcome = followUp ? await followUp(action.kind) : "back";
+        if (outcome === "ended") {
+          await call.hangup();
+          return { status: "answered", letter };
+        }
+        actions = dialog.replay();
+        again = true;
+        break;
       } else {
         if (action.text) {
           trace?.(`said: ${action.text}`);
@@ -118,6 +135,7 @@ export async function runDialog(
         return { status: "answered", letter };
       }
     }
+    if (again) continue;
     const key = await call.key(KEY_TIMEOUT_MS);
     if (key === null) break;
     actions = dialog.key(key);
