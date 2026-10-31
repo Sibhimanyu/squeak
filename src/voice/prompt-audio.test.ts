@@ -165,6 +165,22 @@ describe("PromptClipCache", () => {
   });
 });
 
+describe("PromptClipCache progress", () => {
+  it("reports after each clip, cached or made, with the number wanted", async () => {
+    const natural = { usable: true, clip: async (text: string): Promise<Clip | null> => clipOf(text, 800) };
+    const cache = new PromptClipCache(natural, () => "af_heart");
+    const first: Array<[number, number]> = [];
+    await cache.clips(["a", "b", "a"], (done, total) => first.push([done, total]));
+    expect(first).toEqual([
+      [1, 2],
+      [2, 2],
+    ]);
+    const second: Array<[number, number]> = [];
+    await cache.clips(["a", "b"], (done, total) => second.push([done, total]));
+    expect(second).toEqual(first);
+  });
+});
+
 describe("MemoInbox audio", () => {
   it("writes audio documents, names them without changing the version, and cleans old ones", async () => {
     const db = new FakeRtdb();
@@ -172,6 +188,7 @@ describe("MemoInbox audio", () => {
     const { channelId, key } = generateChannel();
     let targets = [{ target: "c1", label: "squeak", workspace: null as string | null }];
     const seen: string[][] = [];
+    const published: Array<[string, string | null]> = [];
     const inbox = new MemoInbox({
       store,
       channel: channelId,
@@ -186,6 +203,8 @@ describe("MemoInbox audio", () => {
         seen.push(texts);
         return [clipOf(texts[0]!, 800)];
       },
+      voiceKey: () => "kokoro:af_heart:none",
+      audioPublished: (version, voiceKey) => published.push([version, voiceKey]),
       readBack: async (text, label) => clipOf(readBackSentence(text, label), 400),
     });
     const wait = async (ok: () => Promise<boolean>) => {
@@ -198,6 +217,9 @@ describe("MemoInbox audio", () => {
     await wait(async () => ((await readDir()).audio?.length ?? 0) > 0);
     const withAudio = await readDir();
     expect(withAudio.version).toBe(first.version);
+    // Told once, after the directory naming the audio was written.
+    await wait(async () => published.length > 0);
+    expect(published).toEqual([[first.version, "kokoro:af_heart:none"]]);
     expect(withAudio.audio).toEqual([audioDocId(first.version, 0)]);
     expect(
       readAudio(key, withAudio.audio![0]!, (await store.get(audioPath(channelId, withAudio.audio![0]!)))!),

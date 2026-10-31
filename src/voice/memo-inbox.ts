@@ -134,6 +134,11 @@ export interface MemoInboxDependencies {
    * voice publishes the list again and the add-on gets recordings in the new voice instead of keeping the old ones.
    */
   voiceKey?: () => string;
+  /**
+   * The prompts' audio is out: the directory naming it is written (or there was none to name). `voiceKey` is the one
+   * the list was made for, so a caller can ignore a pass for a voice it has since changed.
+   */
+  audioPublished?: (version: string, voiceKey: string | null) => void;
   /** A voice-first call is over (said goodbye, sent, gave up, or aged out): whatever it kept for the model can go. */
   endCall?: (callId: string) => void;
   /** A line for the call trace. */
@@ -409,8 +414,13 @@ export class MemoInbox {
   private async publishAudio(doc: DirectoryDoc): Promise<void> {
     const { store, channel, key } = this.deps;
     const texts = [...new Set([...inboundPrompts(doc, true), ...inboundPrompts(doc, false)])];
+    const voiceKey = this.deps.voiceKey?.() ?? null;
     const clips = await this.deps.audioClips!(texts);
-    if (clips.length === 0 || this.stopped) return;
+    if (this.stopped) return;
+    if (clips.length === 0) {
+      this.deps.audioPublished?.(doc.version, voiceKey);
+      return;
+    }
     const groups = chunkClips(clips).slice(0, MAX_AUDIO_DOCS);
     const ids: string[] = [];
     for (const [index, group] of groups.entries()) {
@@ -423,6 +433,7 @@ export class MemoInbox {
     if (this.published?.version === doc.version) {
       await store.set(dirPath(channel), sealDirectory(key, { ...doc, audio: ids }));
     }
+    this.deps.audioPublished?.(doc.version, voiceKey);
     await this.dropStaleAudio();
     if (this.deps.prepareReadBack && !this.stopped) {
       const labels = [...doc.items, ...(doc.workspaces ?? []).flatMap((w) => w.chats)].map((i) => i.label);

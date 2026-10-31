@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.35
+
+- Settings › Voice says when a new voice is ready for calls. After you change the engine, voice or emotion, Squeak loads the voice, re-records the call prompts and sends them to the phone add-on; the line shows each step ("recording call prompts, 12 of 34…") and then "ready for calls". Until then a call may still use the old voice.
+- Play sample works again after switching engines; it could get stuck and keep saying it couldn't play.
+
 ## 2.12.34
 
 - Qwen3-TTS has four more call voices: Anna, and three designed ones, a warm American woman, a calm deep British man and a friendly Indian-English woman. Each keeps the same voice through a whole call while its emotion follows what the line says.

@@ -851,7 +851,8 @@ export class PromptClipCache {
     private readonly maxSeconds = PROMPT_RENDER_SECONDS,
   ) {}
 
-  async clips(texts: readonly string[]): Promise<Clip[]> {
+  /** `onProgress(done, total)` runs after each prompt that has a clip, cached or made. */
+  async clips(texts: readonly string[], onProgress?: (done: number, total: number) => void): Promise<Clip[]> {
     if (!this.natural.usable) return [];
     const voice = this.voice();
     const wanted = new Map<string, string>(texts.map((text) => [`${voice}\n${text}`, text]));
@@ -866,7 +867,10 @@ export class PromptClipCache {
           renderedBytes += Math.floor((clip.mulaw.length * 3) / 4);
         }
       }
-      if (clip) out.push(clip);
+      if (clip) {
+        out.push(clip);
+        onProgress?.(out.length, wanted.size);
+      }
     }
     for (const id of [...this.made.keys()]) if (!wanted.has(id)) this.made.delete(id);
     return out;

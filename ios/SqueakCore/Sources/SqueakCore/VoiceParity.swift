@@ -21,6 +21,8 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
     public var engine: String?
     public var emotion: String?
     public var engines: [EngineChoice]?
+    /// Whether a changed voice is ready for calls yet. Absent from a Mac that predates it: no line is shown.
+    public var readiness: VoiceReadiness?
 
     public struct EngineChoice: Codable, Equatable, Sendable, Identifiable, Hashable {
         public var id: String
@@ -62,12 +64,12 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
     }
 
     public init(installed: Bool, enabled: Bool, voice: String, voices: [VoiceChoice]? = nil, sample: Bool? = nil,
-                engine: String? = nil, emotion: String? = nil, engines: [EngineChoice]? = nil) {
+                engine: String? = nil, emotion: String? = nil, engines: [EngineChoice]? = nil, readiness: VoiceReadiness? = nil) {
         self.installed = installed; self.enabled = enabled; self.voice = voice; self.voices = voices; self.sample = sample
-        self.engine = engine; self.emotion = emotion; self.engines = engines
+        self.engine = engine; self.emotion = emotion; self.engines = engines; self.readiness = readiness
     }
 
-    enum CodingKeys: String, CodingKey { case installed, enabled, voice, voices, sample, engine, emotion, engines }
+    enum CodingKeys: String, CodingKey { case installed, enabled, voice, voices, sample, engine, emotion, engines, readiness }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -79,6 +81,7 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
         engine = try? c.decode(String.self, forKey: .engine)
         emotion = try? c.decode(String.self, forKey: .emotion)
         engines = try? c.decode([EngineChoice].self, forKey: .engines)
+        readiness = try? c.decode(VoiceReadiness.self, forKey: .readiness)
     }
 
     /// The controls show only for a Mac that sends its voice list.
@@ -109,6 +112,94 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
     /// The voice to send a sample request for, and the engine to name in it (nil for a Mac without engines, so the
     /// request is today's bytes).
     public var sampleEngine: String? { hasEngines ? currentEngine?.id : nil }
+}
+
+/// A new voice getting ready for calls (engine loads, call-in prompts are recorded, the add-on gets them).
+/// Tolerant: an unknown state or step reads as absent, never a failed view.
+public struct VoiceReadiness: Codable, Equatable, Sendable {
+    public enum State: String, Codable, Sendable { case preparing, ready, failed }
+    public enum Step: String, Codable, Sendable { case loading, recording, sending }
+    public struct Partial: Codable, Equatable, Sendable {
+        public var recorded: Int
+        public var total: Int
+        public init(recorded: Int, total: Int) { self.recorded = recorded; self.total = total }
+    }
+
+    public var state: State
+    public var step: Step?
+    public var done: Int?
+    public var total: Int?
+    public var partial: Partial?
+    public var voice: String
+    /// Milliseconds since 1970: of the change (preparing) or of becoming ready.
+    public var since: Double
+    public var reason: String?
+
+    public init(state: State, step: Step? = nil, done: Int? = nil, total: Int? = nil, partial: Partial? = nil,
+                voice: String = "", since: Double = 0, reason: String? = nil) {
+        self.state = state; self.step = step; self.done = done; self.total = total; self.partial = partial
+        self.voice = voice; self.since = since; self.reason = reason
+    }
+
+    enum CodingKeys: String, CodingKey { case state, step, done, total, partial, voice, since, reason }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = try c.decode(State.self, forKey: .state)
+        step = try? c.decode(Step.self, forKey: .step)
+        done = try? c.decode(Int.self, forKey: .done)
+        total = try? c.decode(Int.self, forKey: .total)
+        partial = try? c.decode(Partial.self, forKey: .partial)
+        voice = (try? c.decode(String.self, forKey: .voice)) ?? ""
+        since = (try? c.decode(Double.self, forKey: .since)) ?? 0
+        reason = try? c.decode(String.self, forKey: .reason)
+    }
+}
+
+/// The one line under the voice controls, drawn from `natural.readiness`. Same sentences as the Mac app.
+public struct VoiceReadinessLine: Equatable, Sendable {
+    public enum Style: Sendable { case working, done, warning }
+    public var style: Style
+    public var text: String
+    /// 0...1 for the thin bar while recording prompts; nil otherwise.
+    public var progress: Double?
+
+    /// How long "is ready for calls" stays after becoming ready.
+    public static let readyShownSeconds = 60.0
+    public static let failedSentence = "The new voice could not start; calls use the add-on's voice."
+
+    /// Nil when there is nothing to say (no readiness, or the ready line has gone away).
+    public static func make(_ r: VoiceReadiness?, now: Date = Date()) -> VoiceReadinessLine? {
+        guard let r else { return nil }
+        let name = r.voice.isEmpty ? "The voice" : r.voice
+        switch r.state {
+        case .preparing:
+            let head = "Getting \(r.voice.isEmpty ? "the voice" : r.voice) ready for calls: "
+            switch r.step ?? .loading {
+            case .loading:
+                return VoiceReadinessLine(style: .working, text: head + "loading the voice\u{2026}", progress: nil)
+            case .recording:
+                if let done = r.done, let total = r.total, total > 0 {
+                    let d = max(0, min(done, total))
+                    return VoiceReadinessLine(style: .working, text: head + "recording call prompts (\(d) of \(total))\u{2026}",
+                                              progress: Double(d) / Double(total))
+                }
+                return VoiceReadinessLine(style: .working, text: head + "recording call prompts\u{2026}", progress: nil)
+            case .sending:
+                return VoiceReadinessLine(style: .working, text: head + "sending to the phone add-on\u{2026}", progress: nil)
+            }
+        case .ready:
+            if let p = r.partial, p.total > 0, p.recorded < p.total {
+                return VoiceReadinessLine(style: .warning, text: "\(name) is ready for calls; \(p.recorded) of \(p.total) prompts are still in the add-on's voice until the next update.", progress: nil)
+            }
+            let age = now.timeIntervalSince1970 - r.since / 1000
+            guard age < readyShownSeconds else { return nil }
+            return VoiceReadinessLine(style: .done, text: "\(name) is ready for calls.", progress: nil)
+        case .failed:
+            let reason = (r.reason?.isEmpty == false) ? r.reason! : failedSentence
+            return VoiceReadinessLine(style: .warning, text: reason, progress: nil)
+        }
+    }
 }
 
 public enum EmotionLevel {

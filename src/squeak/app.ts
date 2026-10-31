@@ -133,6 +133,7 @@ import { ENGINE_IDS, isEngineId, VOICE_ENGINES, type EngineId } from "../voice/v
 import { TEST_SCRIPT } from "../voice/test-script.js";
 import { readIdleSeconds } from "../fleet/user-idle.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
+import { readinessVoiceLabel, VoiceReadinessTracker } from "../voice/voice-readiness.js";
 import {
   ChatConverser,
   ChatQuestioner,
@@ -269,6 +270,12 @@ export class SqueakApp {
   } | null = null;
   /** Calling in: transcribes a phoned-in message and sends it (src/voice/memo-inbox.ts); null without the relay or Whisper. */
   private memoInbox: MemoInbox | null = null;
+  /** Whether the current voice is ready for calls (`voiceView().natural.readiness`). */
+  private readonly voiceReadiness = new VoiceReadinessTracker((_value, progressOnly) =>
+    this.nudgeReadiness(progressOnly),
+  );
+  private readinessNudgedAt = 0;
+  private readinessNudge: NodeJS.Timeout | null = null;
   private memoUnwatch: (() => void) | null = null;
   private memoTimer: NodeJS.Timeout | null = null;
   /** The extension to ring, edited from the Mac app (voice-settings.json). */
@@ -449,13 +456,6 @@ export class SqueakApp {
       (engine) => naturalPaths(config.supportDir, engine),
       () => this.naturalSettings.settings,
     );
-    // Start the realistic voice's worker now and render the fixed call phrases while no call waits on them.
-    if (this.naturalVoice.usable) {
-      void this.naturalVoice
-        .warm()
-        .then(() => this.naturalVoice.prewarm(fixedPhrases()))
-        .catch(() => undefined);
-    }
     this.naturalInstaller = new NaturalInstaller(config.supportDir, {
       log: (detail) => logger.warn("realistic voice setup failed", { detail }),
     });
@@ -914,6 +914,9 @@ export class SqueakApp {
     this.cliq = this.createCliq();
     this.voice = this.createVoice();
     this.memoInbox = this.createMemoInbox();
+    // Start the realistic voice's worker now and render the fixed call phrases while no call waits on them. Readiness
+    // starts as preparing: it is ready once the first publish to the add-on is out.
+    this.prepareVoice();
 
     this.controller = new FleetController({
       telegram: this.telegram,
@@ -1061,6 +1064,7 @@ export class SqueakApp {
     this.cliq?.stop();
     this.voice?.stop();
     this.stopMemoInbox();
+    if (this.readinessNudge) clearTimeout(this.readinessNudge);
     this.stopTraceWatch();
     this.voiceSpeaker?.dispose();
     this.naturalVoice.stop();
@@ -1184,8 +1188,18 @@ export class SqueakApp {
       favorites: () => this.voiceFavorites.list().map((fav) => ({ ...fav, label: this.spokenFavoriteLabel(fav) })),
       lastChat: this.lastVoiceChat,
       // The call-in dialog in the Mac's own voice: every prompt, and the read-back of each message.
-      audioClips: (texts) => this.promptClips.clips(texts),
+      audioClips: async (texts) => {
+        const key = this.promptVoiceKey();
+        const clips = await this.promptClips.clips(texts, (done, total) =>
+          this.voiceReadiness.progress(key, done, total),
+        );
+        this.voiceReadiness.sending(key, clips.length, new Set(texts).size);
+        return clips;
+      },
       voiceKey: () => this.promptVoiceKey(),
+      audioPublished: (_version, voiceKey) => {
+        if (voiceKey !== null) this.voiceReadiness.ready(voiceKey);
+      },
       // Only what was heard is rendered per call; the fixed suffix per chat is kept, and the two are joined.
       readBack: (text, label, ask) => this.readBackClips.clip(text, label, ask),
       prepareReadBack: (labels, ask) => this.readBackClips.prepare(labels, ask),
@@ -1543,15 +1557,65 @@ export class SqueakApp {
     const outcome = this.naturalSettings.apply(request);
     if (outcome.ok && this.promptVoiceKey() !== before) {
       // The call-in prompts were recorded in the old voice: publish them again (the list's version names the voice).
+      this.prepareVoice();
       void this.memoInbox?.publish().catch(() => undefined);
-      if (this.naturalVoice.usable) {
-        void this.naturalVoice
-          .warm()
-          .then(() => this.naturalVoice.prewarm(fixedPhrases()))
-          .catch(() => undefined);
-      }
     }
     return outcome;
+  }
+
+  /**
+   * Gets the current voice ready for calls and tracks it in `voiceReadiness`: loads the engine and renders the fixed
+   * phrases while no call waits, then (with a memo inbox) the prompts are recorded and sent to the add-on, which makes
+   * it ready. Without one, ready once the engine is warm. A newer change restarts it; the old voice's reports are
+   * ignored by key.
+   */
+  private prepareVoice(): void {
+    const key = this.promptVoiceKey();
+    const usable = this.naturalVoice.usable;
+    const publishes = this.memoInbox !== null;
+    const label = usable ? this.naturalVoiceLabel() : "the add-on's voice";
+    if (!usable) {
+      if (publishes) this.voiceReadiness.begin(key, label, "sending");
+      else this.voiceReadiness.beginReady(key, label);
+      return;
+    }
+    this.voiceReadiness.begin(key, label);
+    void this.naturalVoice
+      .warm()
+      .then(async (warmed) => {
+        if (!warmed) {
+          this.voiceReadiness.fail(key);
+          return;
+        }
+        if (this.memoInbox) this.voiceReadiness.recording(key);
+        await this.naturalVoice.prewarm(fixedPhrases());
+        if (!this.memoInbox) this.voiceReadiness.ready(key);
+      })
+      .catch(() => this.voiceReadiness.fail(key));
+  }
+
+  /** The current voice's name as a sentence says it ("Sohee"). */
+  private naturalVoiceLabel(): string {
+    const { engine, voice } = this.naturalSettings.settings;
+    const found = VOICE_ENGINES[engine].voices.find((item) => item.id === voice);
+    return readinessVoiceLabel(found?.label ?? voice);
+  }
+
+  /** Phones and the cloud learn of a readiness change; progress alone at most every 2 s, the last one never lost. */
+  private nudgeReadiness(progressOnly: boolean): void {
+    const send = () => {
+      this.readinessNudgedAt = Date.now();
+      if (this.readinessNudge) clearTimeout(this.readinessNudge);
+      this.readinessNudge = null;
+      this.remote?.changed();
+    };
+    if (!progressOnly) return send();
+    const wait = 2_000 - (Date.now() - this.readinessNudgedAt);
+    if (wait <= 0) return send();
+    if (!this.readinessNudge) {
+      this.readinessNudge = setTimeout(send, wait);
+      this.readinessNudge.unref?.();
+    }
   }
 
   /** Whether voice is set up and who it rings: what `GET /control/voice` carries. */
@@ -1569,11 +1633,16 @@ export class SqueakApp {
       favorites: this.voiceFavorites.list(),
       workspaces: this.voiceWorkspaces(),
       // The realistic voice this Mac makes for calls (`squeak voice-tts-setup` installs it).
-      natural: this.naturalView(),
+      natural: { ...this.naturalView(), ...this.readinessView() },
       ...(mode === "gateway" ? { gateway: this.gatewayView() } : {}),
       // Absent until a test has been asked for.
       ...(this.voiceTest ? { lastTest: this.voiceTest } : {}),
     };
+  }
+
+  private readinessView(): { readiness?: NonNullable<VoiceReadinessTracker["state"]> } {
+    const readiness = this.voiceReadiness.state;
+    return readiness ? { readiness } : {};
   }
 
   private gatewayView() {

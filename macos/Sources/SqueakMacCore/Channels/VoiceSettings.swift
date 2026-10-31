@@ -331,14 +331,17 @@ public struct NaturalVoice: Sendable, Equatable, Decodable {
     public var engines: [NaturalEngine]
     /// The current engine's voices; empty from an older daemon (Kokoro's list below stands in).
     public var voices: [NaturalVoiceOption]
+    /// Whether a changed voice is ready for calls yet; nil from a daemon that predates it (no line).
+    public var readiness: VoiceReadiness?
 
     public init(installed: Bool, enabled: Bool, voice: String, engine: String? = nil, emotion: String? = nil,
-                engines: [NaturalEngine] = [], voices: [NaturalVoiceOption] = []) {
+                engines: [NaturalEngine] = [], voices: [NaturalVoiceOption] = [], readiness: VoiceReadiness? = nil) {
         self.installed = installed; self.enabled = enabled; self.voice = voice
         self.engine = engine; self.emotion = emotion; self.engines = engines; self.voices = voices
+        self.readiness = readiness
     }
 
-    private enum Keys: String, CodingKey { case installed, enabled, voice, engine, emotion, engines, voices }
+    private enum Keys: String, CodingKey { case installed, enabled, voice, engine, emotion, engines, voices, readiness }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -349,6 +352,7 @@ public struct NaturalVoice: Sendable, Equatable, Decodable {
         emotion = try? c.decode(String.self, forKey: .emotion)
         engines = (try? c.decode([NaturalEngine].self, forKey: .engines)) ?? []
         voices = (try? c.decode([NaturalVoiceOption].self, forKey: .voices)) ?? []
+        readiness = try? c.decode(VoiceReadiness.self, forKey: .readiness)
     }
 
     /// A few of Kokoro's English voices; the daemon accepts any Kokoro name. Used only without a daemon list.

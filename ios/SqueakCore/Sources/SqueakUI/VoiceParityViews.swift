@@ -8,6 +8,34 @@ import UIKit
 /// Settings › Phone calls › Voice: the realistic voice, as on the Mac. Shown only for a Mac that sends
 /// `natural.voices`; an older Mac would refuse the commands. "Play sample" shows only when the Mac says
 /// `natural.sample` (it can leave the sound in the channel); the Mac makes it, this phone plays it.
+/// One line from `natural.readiness`; the words are `VoiceReadinessLine`'s. The ready line leaves after a minute,
+/// so the clock re-reads every few seconds.
+struct VoiceReadinessRow: View {
+    let readiness: VoiceReadiness?
+
+    var body: some View {
+        if readiness != nil {
+            TimelineView(.periodic(from: .now, by: 5)) { context in
+                if let line = VoiceReadinessLine.make(readiness, now: context.date) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top, spacing: 8) {
+                            switch line.style {
+                            case .working: ProgressView().controlSize(.small)
+                            case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.muted)
+                            case .warning: Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.error)
+                            }
+                            Text(line.text).font(.footnote).foregroundStyle(line.style == .warning ? Theme.error : Theme.muted)
+                        }
+                        if let p = line.progress { ProgressView(value: p).progressViewStyle(.linear) }
+                    }
+                    .padding(.vertical, 4)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+}
+
 struct NaturalVoiceSection: View {
     @Environment(AppModel.self) private var model
     let natural: NaturalVoiceView
@@ -44,6 +72,7 @@ struct NaturalVoiceSection: View {
                     }
                     .frame(minHeight: 44)
                     if natural.showsEmotion { emotionRow }
+                    VoiceReadinessRow(readiness: natural.readiness)
                     if natural.sample == true { sampleRow }
                 }
             } else {

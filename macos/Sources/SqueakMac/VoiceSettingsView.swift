@@ -77,6 +77,16 @@ struct VoiceSettingsPage: View {
             await openRequestedControl(proxy)
         }
         }
+        .task(id: m.voice?.natural?.readiness?.isPreparing ?? false) {
+            // While a voice is being made ready, read the state every 2 s; stop once it is.
+            guard m.voice?.natural?.readiness?.isPreparing == true else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                if Task.isCancelled { return }
+                await m.refreshVoice()
+                if m.voice?.natural?.readiness?.isPreparing != true { return }
+            }
+        }
         .onDisappear { preview.stop(); m.stopWatchingNaturalSetup() }
         .onChange(of: m.voice?.natural) { _, _ in preview.stop() }
         .sheet(isPresented: $pairingGateway, onDismiss: { m.endGatewayPairing() }) { GatewayPairSheet().environment(app) }
@@ -306,6 +316,7 @@ struct VoiceSettingsPage: View {
                 }
                 if let error = preview.error { Footnote(error) }
             }
+            readinessLine(n)
             if let error = m.voiceError { Footnote(error) }
             if let note = m.naturalSetupNote { Footnote(note) }
             if let setup = m.naturalSetup, setup.state == .failed {
@@ -376,6 +387,31 @@ struct VoiceSettingsPage: View {
         }
     }
 
+    /// One line about whether the changed voice is ready for calls (the words live in `VoiceReadiness`).
+    @ViewBuilder private func readinessLine(_ n: NaturalVoice) -> some View {
+        if let r = n.readiness {
+            TimelineView(.periodic(from: .now, by: 5)) { context in
+                if let line = r.line(now: context.date) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            switch line.kind {
+                            case .preparing: ProgressView().controlSize(.small).accessibilityHidden(true)
+                            case .ready: Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
+                            case .warning: Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.error)
+                            }
+                            Text(line.text).font(.callout)
+                                .foregroundStyle(line.kind == .warning ? Theme.error : .secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let fraction = line.fraction { ProgressView(value: fraction).accessibilityHidden(true) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+
     private func kokoroOnlySection(_ n: NaturalVoice) -> some View {
         Section {
             if n.installed {
@@ -413,6 +449,7 @@ struct VoiceSettingsPage: View {
             } else {
                 naturalInstall(m.naturalSetup)
             }
+            readinessLine(n)
         } header: { Text("Voice") } footer: {
             Footnote("Samples play on this Mac without placing a call. The words never leave it. If speech fails during a call, the plain voice speaks and the call still goes.")
         }
