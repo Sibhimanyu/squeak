@@ -9,6 +9,9 @@ import type { CallResult } from "./baresip-line.js";
 import { item, QUESTION } from "./fixtures.js";
 import { CallPolicy } from "./policy.js";
 import { CallHistory } from "./call-history.js";
+import { CallbackRequests } from "./callbacks.js";
+import type { CallScript } from "./dialog.js";
+import { session } from "./fixtures.js";
 import { VoiceChannel } from "./voice-channel.js";
 
 function setup(
@@ -253,5 +256,168 @@ describe("VoiceChannel when the line is busy (a call in, usually)", () => {
     await t.channel.ring(t.waiting);
     expect(t.dialogs).toHaveLength(1);
     expect(t.traces.some((x) => x.startsWith("No longer waiting"))).toBe(true);
+  });
+});
+
+describe("VoiceChannel call backs", () => {
+  function callbackSetup(
+    options: {
+      state?: "working" | "finished" | "error" | "idle";
+      attention?: AttentionItem[];
+      result?: CallResult;
+      paused?: () => boolean;
+      voice?: boolean;
+      gap?: number;
+      now?: () => number;
+    } = {},
+  ) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-voice-callbacks-"));
+    const now = options.now ?? (() => 1_000_000);
+    const callbacks = new CallbackRequests(path.join(dir, "cb.json"), now);
+    const chat = { current: session({ state: options.state ?? "working", title: "Fix the parser" }) };
+    const snapshot = { sessions: [chat.current], attention: options.attention ?? [] };
+    const notes: string[] = [];
+    const scripts: Array<{ script: CallScript; answerable: boolean; follow: unknown }> = [];
+    const written: Array<{ reason?: string; outcome: string }> = [];
+    let changed: (() => void) | null = null;
+    const channel = new VoiceChannel({
+      monitor: {
+        onPush: () => () => undefined,
+        onSnapshot: (listener: (snapshot: never) => void) => {
+          changed = () => listener(snapshot as never);
+          return () => undefined;
+        },
+        snapshot: snapshot as never,
+        refresh: vi.fn().mockResolvedValue(undefined),
+      },
+      replier: { lastTurnText: () => "I fixed the parser. All tests pass.", send: async () => ({}) as never },
+      line: {
+        call: async (script, answerable, follow) => {
+          scripts.push({ script, answerable, follow });
+          return options.result ?? { status: "answered", letter: undefined as never };
+        },
+      },
+      canTakeKeys: true,
+      policy: new CallPolicy({ minGapMs: options.gap ?? 0, quiet: null }),
+      callbacks,
+      callbackVoice: () => options.voice ?? true,
+      ...(options.paused ? { paused: options.paused } : {}),
+      history: { record: (call) => (written.push(call), null) },
+      note: (text) => notes.push(text),
+      now,
+      sleep: async () => undefined,
+    });
+    const settle = (state: "working" | "finished" | "error" | "idle"): void => {
+      chat.current.state = state;
+      snapshot.sessions = [chat.current];
+      changed?.();
+    };
+    return { channel, callbacks, chat, snapshot, notes, scripts, written, settle };
+  }
+  const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it("rings once when the chat stops after working, then forgets the request", async () => {
+    const t = callbackSetup();
+    const target = "c1";
+    t.callbacks.add(target, "squeak", "the parser", true);
+    t.channel.start();
+    await flush();
+    expect(t.scripts).toEqual([]);
+    t.settle("finished");
+    await flush();
+    expect(t.scripts).toHaveLength(1);
+    expect(t.scripts[0]!.script.greeting).toContain("Fix the parser is done, as you asked.");
+    expect(t.scripts[0]!.script).toMatchObject({ voice: true, options: [] });
+    expect(t.scripts[0]!.follow).toMatchObject({ target, script: { options: [] } });
+    expect(t.callbacks.list()).toEqual([]);
+    expect(t.written).toMatchObject([{ reason: "callback", outcome: "answered" }]);
+    t.settle("finished");
+    await flush();
+    expect(t.scripts).toHaveLength(1);
+    t.channel.stop();
+  });
+
+  it("does not ring while the chat is still working", async () => {
+    const t = callbackSetup();
+    t.callbacks.add("c1", "squeak", "", true);
+    t.channel.start();
+    t.settle("working");
+    await flush();
+    expect(t.scripts).toEqual([]);
+    expect(t.callbacks.list()).toHaveLength(1);
+    t.channel.stop();
+  });
+
+  it("marks a chat that started working after a send, then rings when it stops", async () => {
+    const t = callbackSetup({ state: "finished" });
+    t.callbacks.add("c1", "squeak", "", false);
+    t.channel.start();
+    await flush();
+    expect(t.scripts).toEqual([]);
+    t.settle("working");
+    await flush();
+    t.settle("finished");
+    await flush();
+    expect(t.scripts).toHaveLength(1);
+    t.channel.stop();
+  });
+
+  it("leaves it to the ordinary call when the chat stopped to ask a question", async () => {
+    const asking = item("asked_question", { title: "Fix the parser" });
+    const t = callbackSetup({ attention: [{ ...asking, session: { ...asking.session, key: "conductor:1" } }] });
+    t.callbacks.add("c1", "squeak", "", true);
+    t.channel.start();
+    t.settle("finished");
+    await flush();
+    expect(t.scripts).toEqual([]);
+    expect(t.callbacks.list()).toEqual([]);
+    t.channel.stop();
+  });
+
+  it("holds the call while paused or in a gap after another call, and keeps the request", async () => {
+    let paused = true;
+    const t = callbackSetup({ paused: () => paused });
+    const request = t.callbacks.add("c1", "squeak", "", true)!;
+    await t.channel.ringCallback(request, t.chat.current);
+    expect(t.scripts).toEqual([]);
+    expect(t.callbacks.list()).toHaveLength(1);
+    paused = false;
+    await t.channel.ringCallback(request, t.chat.current);
+    expect(t.scripts).toHaveLength(1);
+  });
+
+  it("tells the person in a text when nobody picks up, and does not ring twice", async () => {
+    const t = callbackSetup({ result: { status: "unanswered" } });
+    const request = t.callbacks.add("c1", "squeak", "", true)!;
+    await t.channel.ringCallback(request, t.chat.current);
+    expect(t.notes[0]).toContain("nobody picked up");
+    expect(t.notes[0]).toContain("I fixed the parser. All tests pass.");
+    expect(t.written).toMatchObject([{ reason: "callback", outcome: "unanswered" }]);
+    expect(t.callbacks.list()).toEqual([]);
+  });
+
+  it("says in a text why a call back could not be placed", async () => {
+    const t = callbackSetup({ result: { status: "failed", reason: "The gateway did not answer." } });
+    const request = t.callbacks.add("c1", "squeak", "", true)!;
+    await t.channel.ringCallback(request, t.chat.current);
+    expect(t.notes[0]).toContain("could not call you back");
+    expect(t.notes[0]).toContain("The gateway did not answer.");
+  });
+
+  it("only tells (no talking) when the add-on cannot talk a call back through", async () => {
+    const t = callbackSetup({ voice: false });
+    const request = t.callbacks.add("c1", "squeak", "", true)!;
+    await t.channel.ringCallback(request, t.chat.current);
+    expect(t.scripts[0]!.script.voice).toBeUndefined();
+    expect(t.scripts[0]!.follow).toBeUndefined();
+  });
+
+  it("drops a request whose chat is gone", async () => {
+    const t = callbackSetup();
+    t.callbacks.add("gone", "other", "", true);
+    t.channel.start();
+    await flush();
+    expect(t.callbacks.list()).toEqual([]);
+    t.channel.stop();
   });
 });

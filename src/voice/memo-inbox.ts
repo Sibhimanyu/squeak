@@ -96,7 +96,23 @@ export interface MemoInboxDependencies {
     target: string,
     label: string,
     input: { utterance: string; question: string; options: ChoiceOption[]; callId: string },
-  ) => Promise<{ intent: "answer" | "send" | "end" | "unclear"; spoken: string; message?: string }>;
+  ) => Promise<{
+    intent: "answer" | "send" | "end" | "callback" | "unclear";
+    spoken: string;
+    message?: string;
+    callback?: boolean;
+  }>;
+  /**
+   * "Call me back when you're done": remembers the request and has Squeak ring once the chat's work has ended. It
+   * checks the chat itself and says no in a sentence fit to be heard. `afterSend` is a request made together with a
+   * message just sent, so the work has not started yet. Absent: a call cannot ask for one.
+   */
+  requestCallback?: (
+    target: string,
+    label: string,
+    note: string,
+    afterSend: boolean,
+  ) => { ok: true } | { ok: false; reason: string };
   /** A voice-first call is over (said goodbye, sent, gave up, or aged out): whatever it kept for the model can go. */
   endCall?: (callId: string) => void;
   /** A line for the call trace. */
@@ -152,6 +168,8 @@ const TALK_SAYS = {
   declined: "Okay, I won't send it. What would you like to do?",
   gone: "That message is no longer waiting. Tell me what to do again.",
   sent: "Sent. Goodbye.",
+  sentCallback: "Sent. I'll call you back when it's done. Goodbye.",
+  noCallback: "I can't arrange a call back from here yet.",
   bye: "Goodbye.",
   turns: "That is as much as I can do by voice on one call. Goodbye.",
 };
@@ -204,7 +222,7 @@ export class MemoInbox {
       /** What the call asked, for the model's context (voice first only). */
       script?: { question: string; options: ChoiceOption[] };
       /** The one message read back and awaiting the person's yes; never set by anything but their own `say` turn. */
-      proposal?: { message: string; at: number; tries: number } | undefined;
+      proposal?: { message: string; at: number; tries: number; callback?: boolean } | undefined;
       turns: number;
     }
   >();
@@ -753,7 +771,13 @@ export class MemoInbox {
       call.proposal = undefined;
       if (no) return reply(TALK_SAYS.declined, "listen");
       const delivered = await this.deliver(target, label, proposal.message);
-      return reply(delivered.sent ? TALK_SAYS.sent : delivered.reason, "end");
+      if (!delivered.sent) return reply(delivered.reason, "end");
+      // The call back is asked for only after the send went, and only for what the person said yes to.
+      const calling = proposal.callback
+        ? this.deps.requestCallback?.(target, label, proposal.message.length > 1 ? proposal.message : "", true)
+        : undefined;
+      if (calling?.ok) trace?.("step", `Call back requested for ${label}`, { label });
+      return reply(calling?.ok ? TALK_SAYS.sentCallback : TALK_SAYS.sent, "end");
     }
 
     // A new thing said: whatever was read back before is no longer on offer.
@@ -792,6 +816,14 @@ export class MemoInbox {
       }
       case "end":
         return reply(TALK_SAYS.bye, "end");
+      case "callback": {
+        const request = this.deps.requestCallback;
+        if (!request) return reply(TALK_SAYS.noCallback, "listen");
+        const calling = request(target, label, cleanMessage(decided.message), false);
+        if (!calling.ok) return reply(calling.reason, "listen");
+        trace?.("step", `Call back requested for ${label}`, { label });
+        return reply(`Okay, I'll call you back when ${label} is done. Goodbye.`, "end");
+      }
       case "send": {
         const proposed = cleanMessage(decided.message);
         if (!proposed) return reply(TALK_SAYS.unclear, "listen");
@@ -805,8 +837,12 @@ export class MemoInbox {
           phrase = spokenAnswer(proposed, 400) || spokenAnswer(String(decided.spoken ?? ""), 200);
         }
         if (!phrase) return reply(TALK_SAYS.unclear, "listen");
-        call.proposal = { message: letter ?? proposed, at: now, tries: 0 };
-        return reply(`I'll tell it${letter ? " " : ": "}${phrase.replace(/[.!?]+$/, "")}. Say yes to send.`, "confirm");
+        const callBack = decided.callback === true && Boolean(this.deps.requestCallback);
+        call.proposal = { message: letter ?? proposed, at: now, tries: 0, ...(callBack ? { callback: true } : {}) };
+        return reply(
+          `I'll tell it${letter ? " " : ": "}${phrase.replace(/[.!?]+$/, "")}${callBack ? ", then call you back when it's done" : ""}. Say yes to send.`,
+          "confirm",
+        );
       }
       default:
         return reply(TALK_SAYS.unclear, "listen");

@@ -168,3 +168,43 @@ export function composeScript(
     ...(follow ? { followUp: { label } } : {}),
   };
 }
+
+/** What a call back invites once it has said how the work ended: questions, or the next thing to do. */
+export const CALLBACK_INVITATION = "Ask me anything about it, or tell me what to do next.";
+
+/**
+ * The script for a call back ("call me back when you're done"): how the work ended, in a few words. Voice first when
+ * the add-on can talk it through (a call with no options), else it only tells; it cannot take a key answer because
+ * nothing is asked.
+ */
+export function composeCallbackScript(
+  session: AttentionItem["session"],
+  lastText: string | null,
+  voice: boolean,
+): CallScript {
+  const label = chatTitle(session) ? spokenChat(session) : spokenWorkspace(session);
+  const ended =
+    session.state === "error" ? "stopped on an error" : session.state === "finished" ? "is done" : "has stopped";
+  const greeting = `Hello, this is Squeak. ${label} ${ended}, as you asked.`;
+  const outcome = summarizeOutcome(lastText, 600);
+  const clipped = outcome ? clipQuestion(outcome) : null;
+  const said = clipped ? (clipped.cut ? `${clipped.text} ${FULL_TEXT_NOTE}` : clipped.text) : "";
+  if (voice) {
+    return {
+      greeting,
+      question: [said, CALLBACK_INVITATION].filter(Boolean).join(" "),
+      options: [],
+      followUp: { label },
+      voice: true,
+      keypad:
+        "Press 9 to send a message or ask a question about it, or 0 to hear where it stands. Press star to hear this again, or hash to hang up.",
+    };
+  }
+  return {
+    greeting,
+    question: [said, "Open Squeak to reply. Press star to hear this again, or hash to hang up."]
+      .filter(Boolean)
+      .join(" "),
+    options: [],
+  };
+}

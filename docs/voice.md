@@ -305,6 +305,29 @@ script, so the options are read from the lettered options in the chat's last mes
 hourly limits and the read-only model are unchanged; if the Mac cannot be reached the keypad menus take over. An older
 Mac sends no `talk` and an older add-on ignores it, so the keys stay as they were.
 
+## Call me back when you're done (add-on 0.14.0)
+
+On a voice-first call (out or in) the person can end it with "call me back when you're done with the tests", or give an
+instruction and ask for the same ("go with B, then call me back"). The model's reply to such an utterance is the
+`callback` intent (or `send` with `callback: true`); `MemoInbox` carries it out with `requestCallback`, never the model.
+
+- **Plain request**: the chat must be working (`App.requestCallback`); otherwise the call says "Nothing is running in
+  <chat> right now, so there is nothing to wait for." and keeps listening. Otherwise: "Okay, I'll call you back when
+  <chat> is done. Goodbye." and the call ends. Nothing is sent to the chat.
+- **With a send**: the read-back says "...then call you back when it's done. Say yes to send." Only the yes sends, and
+  only a send that went arranges the call back ("Sent. I'll call you back when it's done. Goodbye.").
+- **Kept** in `voice-callbacks.json` (0600): chat, spoken name, a clipped note, when. One per chat, 20 at most, 12 hours.
+- **Fires** (`VoiceChannel.checkCallbacks`, on every fleet snapshot, `judgeCallback`): when the chat has been seen
+  working since the request and is no longer working (finished, idle, error). A request made with a send waits up to
+  10 minutes for the chat to start working. If the chat stopped to ask something, the ordinary call for that question
+  covers it and the request is dropped. Paused, quiet hours, the 5 minute gap or a call in progress hold it (looked at
+  again every minute); it is spent by its one call.
+- **The call**: "Hello, this is Squeak. <chat> is done, as you asked." plus the end of its last message, then "Ask me
+  anything about it, or tell me what to do next." It is a voice call with no options (`CallDialog` converses without
+  options; keys 1 to 8 do nothing, 9 and 0 work). An add-on older than 0.14.0 gets a short call that only tells.
+- **Nobody picks up, or it cannot be placed**: Telegram and Cliq get a text with how it ended. Calls are recorded in
+  the history with reason `callback`.
+
 ## How a recording ends, keys, busy lines, and the line itself (add-on 0.11.2)
 
 - A message recording ends on the first of: `#` (hash), 2.5 s of quiet after speech was heard (energy-based, read from

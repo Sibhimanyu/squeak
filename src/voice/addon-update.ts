@@ -61,6 +61,9 @@ export const FOLLOW_UP_ADDON = "0.11.7";
 /** The add-on that talks a call out through by voice (`talk`): listens after the question, answers, reads back, sends. */
 export const VOICE_FIRST_ADDON = "0.12.0";
 
+/** The add-on whose dialog talks a call with no options through (a call back: "call me back when you're done"). */
+export const CALLBACK_ADDON = "0.14.0";
+
 /** Whether an add-on reporting `version` is at least `minimum`; false when its version is unknown. */
 export function addonSupports(version: string | null | undefined, minimum: string): boolean {
   return cleanVersion(version) !== null && !isNewer(minimum, version);

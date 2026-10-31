@@ -91,7 +91,13 @@ import { DirectLine } from "../voice/direct-line.js";
 import { PinKeeper, type PinPolicy, type PinState } from "../voice/pin-keeper.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
 import { OLD_ADDON, relayLineFor, type RelayLine } from "../voice/relay-line.js";
-import { addonSupports, FOLLOW_UP_ADDON, LATE_CLIPS_ADDON, VOICE_FIRST_ADDON } from "../voice/addon-update.js";
+import {
+  addonSupports,
+  CALLBACK_ADDON,
+  FOLLOW_UP_ADDON,
+  LATE_CLIPS_ADDON,
+  VOICE_FIRST_ADDON,
+} from "../voice/addon-update.js";
 import { GatewayPairing } from "../voice/pairing-window.js";
 import { GatewayClaim } from "../voice/gateway-claim.js";
 import { RENDEZVOUS_DATABASE } from "../voice/claim-protocol.js";
@@ -134,6 +140,7 @@ import { applyPhoneVoiceChange, phoneCalls } from "../voice/phone-voice.js";
 import { VoiceSettingsStore } from "../voice/settings.js";
 import { findWhisper, WhisperTranscriber } from "../voice/transcribe.js";
 import { callNoteAllowed, callSentText, parseSentNote } from "../voice/call-summary.js";
+import { CallbackRequests } from "../voice/callbacks.js";
 import { VoiceChannel } from "../voice/voice-channel.js";
 import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from "../telegram/client.js";
 import type { TelegramChat, TelegramConversationTarget, TelegramUpdate } from "../types.js";
@@ -260,6 +267,7 @@ export class SqueakApp {
   private readonly voiceSettings: VoiceSettingsStore;
   private readonly voiceFavorites: VoiceFavoritesStore;
   private readonly lastVoiceChat: LastChatStore;
+  private readonly voiceCallbacks: CallbackRequests;
   /** The Cliq webhook the channel posts through, for one-off notes (an awake session's end). */
   private cliqWebhook: CliqWebhook | null = null;
   /** Plain-language questions from Cliq, answered through the Mac's own `claude`. */
@@ -425,6 +433,7 @@ export class SqueakApp {
       this.workspaceLabel(key),
     );
     this.lastVoiceChat = new LastChatStore(path.join(config.supportDir, "voice-last-chat.json"));
+    this.voiceCallbacks = new CallbackRequests(path.join(config.supportDir, "voice-callbacks.json"));
     this.naturalSettings = new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json"));
     this.naturalVoice = new NaturalVoice(naturalPaths(config.supportDir), () => this.naturalSettings.settings);
     // Start the realistic voice's worker now and render the fixed call phrases while no call waits on them.
@@ -1181,10 +1190,30 @@ export class SqueakApp {
         return this.chatConverser.converse({ ...say, options }, input);
       },
       endCall: (callId) => this.chatConverser.end(callId),
+      requestCallback: (target, label, note, afterSend) => this.requestCallback(target, label, note, afterSend),
       speech: async (text) => (await this.promptClips.clips([text]))[0],
       note: (text) => this.announceCallNote(text),
       trace: (kind, text, extra) => this.traceMac(kind, text, extra),
     });
+  }
+
+  /**
+   * A call back asked for on a call. Without a message just sent, the chat must be working: there is nothing to wait
+   * for otherwise, and saying so beats a promise that never rings.
+   */
+  private requestCallback(
+    target: string,
+    label: string,
+    note: string,
+    afterSend: boolean,
+  ): { ok: true } | { ok: false; reason: string } {
+    const session = this.runtime.monitor.snapshot.sessions.find((s) => replyTargetFor(s) === target);
+    if (!session) return { ok: false, reason: "I can't find that chat any more." };
+    if (!afterSend && session.state !== "working") {
+      return { ok: false, reason: `Nothing is running in ${label} right now, so there is nothing to wait for.` };
+    }
+    const request = this.voiceCallbacks.add(target, label, note, session.state === "working");
+    return request ? { ok: true } : { ok: false, reason: "There are too many call backs waiting already." };
   }
 
   /** What a call may read about one chat: its state, steps, last message, changes and background work. */
@@ -2117,6 +2146,10 @@ export class SqueakApp {
         voiceFirst: () =>
           this.memoInbox !== null && addonSupports(this.gatewayStatusReader().peek().version, VOICE_FIRST_ADDON),
         policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voiceRelay.quiet }),
+        // "Call me back when you're done" is taken on a call (needs the inbox); an older add-on is told by a call.
+        callbacks: this.voiceCallbacks,
+        callbackVoice: () =>
+          this.memoInbox !== null && addonSupports(this.gatewayStatusReader().peek().version, CALLBACK_ADDON),
       });
     }
     if (voiceRelay) {
