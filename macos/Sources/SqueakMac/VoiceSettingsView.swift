@@ -18,21 +18,17 @@ struct VoiceSettingsPage: View {
     @State private var preview = VoicePreview()
     @State private var personaStyle: VoicePersona.Style = .terse
     @State private var personaCustom = ""
-    @FocusState private var extensionFocused: Bool
 
     private var m: ChannelsModel { app.channels }
 
     var body: some View {
-        ScrollViewReader { proxy in
         Form {
-            if !m.voiceOutdated || m.voice != nil { checklistSection(proxy) }
             if let v = m.voice, v.isOn {
                 Section {
                     LabeledContent {
                         HStack {
                             TextField("", text: $typed, prompt: Text(v.defaultCallee ?? "101"))
                                 .textFieldStyle(.roundedBorder).frame(width: 110)
-                                .focused($extensionFocused)
                                 .onSubmit(save)
                             Button("Save", action: save).disabled(!changed(v) || m.voiceSaving)
                         }
@@ -64,7 +60,6 @@ struct VoiceSettingsPage: View {
             }
         }
         .settingsForm()
-        }
         .onDisappear { preview.stop(); m.stopWatchingNaturalSetup() }
         .onChange(of: m.voice?.natural) { _, _ in preview.stop() }
         .sheet(isPresented: $pairingGateway, onDismiss: { m.endGatewayPairing() }) { GatewayPairSheet().environment(app) }
@@ -284,72 +279,6 @@ struct VoiceSettingsPage: View {
         }
     }
 
-    // MARK: Setup checklist
-
-    private func checklistSection(_ proxy: ScrollViewProxy) -> some View {
-        let list = PhoneCallsChecklist(m.phoneFacts)
-        return Section {
-            ForEach(list.steps) { step in checklistRow(step, proxy) }
-        } header: { Text("Phone calls setup") } footer: {
-            Text(list.summaryLine)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(list.isReady ? Theme.done : Color.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func checklistRow(_ step: PhoneCallsStep, _ proxy: ScrollViewProxy) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            checklistMark(step.state).frame(width: 16)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(step.title + (step.isOptional ? " (optional)" : "")).font(.system(size: 13, weight: .medium))
-                Text(step.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 8)
-            if let action = step.action {
-                Button(action.label) { run(action, proxy) }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .disabled(actionDisabled(action))
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(step.title): \(step.state == .done ? "done" : "needs attention"). \(step.detail)")
-    }
-
-    @ViewBuilder private func checklistMark(_ state: PhoneCallsStep.State) -> some View {
-        switch state {
-        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.done)
-        case .todo: Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.needsYou)
-        case .blocked, .unknown: Image(systemName: "circle").foregroundStyle(Theme.muted)
-        case .working: ProgressView().controlSize(.small)
-        }
-    }
-
-    private func actionDisabled(_ action: PhoneCallsAction) -> Bool {
-        switch action {
-        case .pairGateway: m.gatewayConnecting || m.gatewayUpdating
-        case .updateAddon: m.gatewayBusy || m.gatewayUpdating || m.gatewayConnecting
-        case .testCall: m.testPlacing
-        case .installVoice, .retryVoice: m.naturalSetup?.isRunning == true
-        case .setExtension, .setPin: false
-        }
-    }
-
-    private func run(_ action: PhoneCallsAction, _ proxy: ScrollViewProxy) {
-        switch action {
-        case .pairGateway: pairingGateway = true
-        case .updateAddon: Task { await m.updateGatewayAddon() }
-        case .testCall: Task { await m.testCall() }
-        case .installVoice, .retryVoice: Task { await m.startNaturalSetup() }
-        case .setExtension:
-            withAnimation { proxy.scrollTo("extension", anchor: .center) }
-            extensionFocused = true
-        case .setPin:
-            withAnimation { proxy.scrollTo("pin", anchor: .center) }
-            open(.turnOn)
-        }
-    }
-
     // MARK: Calls
 
     private var callsSection: some View {
@@ -400,7 +329,6 @@ struct VoiceSettingsPage: View {
                 Button(g.isPaired ? "Pair again" : "Add gateway") { pairingGateway = true }.disabled(m.gatewayConnecting || m.gatewayUpdating)
                 if g.updateAvailable {
                     Button("Update add-on") { Task { await m.updateGatewayAddon() } }
-                        .buttonStyle(PrimaryButtonStyle())
                         .disabled(m.gatewayBusy || m.gatewayUpdating || m.gatewayConnecting)
                 }
                 if g.isPaired, !m.gatewayCheckUnavailable {
@@ -410,7 +338,6 @@ struct VoiceSettingsPage: View {
                             Text(m.gatewayUpdatePhase == .timedOut ? "Check again" : "Check for updates")
                         }
                     }
-                    .buttonStyle(SecondaryButtonStyle())
                     .disabled(m.gatewayChecking || m.gatewayUpdating || m.gatewayConnecting)
                 }
                 Spacer()

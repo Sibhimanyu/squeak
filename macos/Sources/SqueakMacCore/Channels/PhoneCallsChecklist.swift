@@ -1,6 +1,6 @@
 import Foundation
 
-/// Settings › Voice › "Phone calls setup": one list of what a phone line owner still has to do, derived only from
+/// Settings › Setup › "Phone calls setup": one list of what a phone line owner still has to do, derived only from
 /// what the daemon already says (`GET /control/voice`, the gateway view, the realistic voice install). It decides
 /// nothing the daemon does not already know; it words it and names the one button each step needs.
 public struct PhoneCallsFacts: Sendable, Equatable {
