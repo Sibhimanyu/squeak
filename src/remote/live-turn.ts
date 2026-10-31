@@ -32,7 +32,7 @@ export const LIVE_STEPS = 50;
 export const LIVE_STEP_CHARS = 4_000;
 /** How much of the chat before this turn the phone is shown: about four exchanges. */
 export const HISTORY_MESSAGES = 8;
-export const HISTORY_CHARS = 2_000;
+export const HISTORY_CHARS = 6_000;
 /** The transcript is read this often while watched; a write needs a change too. */
 export const LIVE_INTERVAL_MS = 1_000;
 export const LIVE_QUEUE_TEXT_CHARS = 2_000;
