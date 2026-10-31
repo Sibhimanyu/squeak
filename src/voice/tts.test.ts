@@ -46,28 +46,42 @@ describe("PiperSpeaker", () => {
     async () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "held-piper-"));
       const ticks = path.join(dir, "ticks");
+      const go = path.join(dir, "go");
+      const tone = path.join(dir, "tone.wav");
       const binary = path.join(dir, "piper");
-      // Ten 50 ms steps of "work" (each leaves a mark), then piper's output.
+      execFileSync("ffmpeg", [
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:duration=1",
+        "-ar",
+        "22050",
+        "-ac",
+        "1",
+        tone,
+      ]);
+      // Works (a mark every 50 ms) until told to finish, then writes a WAV made beforehand.
       fs.writeFileSync(
         binary,
-        `#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = "--output_file" ] && out="$2"; shift; done\ncat > /dev/null\nfor i in 1 2 3 4 5 6 7 8 9 10; do echo x >> "${ticks}"; sleep 0.05; done\nffmpeg -y -loglevel error -f lavfi -i sine=frequency=440:duration=1 -ar 22050 -ac 1 "$out"\n`,
+        `#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = "--output_file" ] && out="$2"; shift; done\ncat > /dev/null\nwhile [ ! -f "${go}" ]; do echo x >> "${ticks}"; sleep 0.05; done\ncp "${tone}" "$out"\n`,
         { mode: 0o755 },
       );
       const fallback = plain("plain");
-      const speaker = new PiperSpeaker({ binary, model: "unused", timeoutMs: 3000 }, fallback);
-      let call = false;
+      const speaker = new PiperSpeaker({ binary, model: "unused", timeoutMs: 2500 }, fallback);
+      // A call is up from the start: piper is stopped at the first look.
+      let call = true;
       speaker.holdWhile(() => call);
       const made = speaker.speak("a prompt made ahead");
-      // Niced, it may start late on a busy machine: hold only once it is working.
-      const began = Date.now();
-      while (!fs.existsSync(ticks) && Date.now() - began < 10_000) await new Promise((r) => setTimeout(r, 20));
-      call = true;
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const during = fs.readFileSync(ticks, "utf8").length;
-      // Held past the 3 s limit: still not killed, and no further work done.
-      await new Promise((resolve) => setTimeout(resolve, 3500));
-      expect(fs.readFileSync(ticks, "utf8").length).toBe(during);
-      expect(during).toBeLessThan(20);
+      await new Promise((resolve) => setTimeout(resolve, 2800));
+      const marks = () => (fs.existsSync(ticks) ? fs.readFileSync(ticks, "utf8").length : 0);
+      const during = marks();
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      // Stood still, and held past its 2.5 s limit without being killed.
+      expect(marks()).toBe(during);
+      fs.writeFileSync(go, "");
       call = false;
       expect((await made).durationMs).toBeGreaterThan(900);
       expect(fallback.spoken).toEqual([]);
