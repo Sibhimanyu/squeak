@@ -119,6 +119,49 @@ export function statusReadout(input: ChatBriefInputs): string {
   return clipSpoken(out.slice(0, 5).join(" "));
 }
 
+const HEARD_STEPS = 4;
+
+/**
+ * What the agent is thinking and doing, for someone on hold who pressed a key: its newest steps, thinking summaries
+ * and notes first in their own words, tool calls as plain labels. No model, no paths.
+ */
+export function thinkingReadout(input: ChatBriefInputs): string {
+  const steps = (input.activity?.steps ?? []).filter((step) => step.kind !== "you");
+  const lines: string[] = [];
+  for (const step of [...steps].reverse()) {
+    const words = stepWords(step.text, 120).replace(/[.!?]+$/, "");
+    if (words) lines.push(words);
+    if (lines.length >= HEARD_STEPS) break;
+  }
+  if (lines.length === 0) return "It has not written anything I can read out yet.";
+  const [now, ...before] = lines;
+  const out = [`Right now: ${now}.`, ...before.map((line, i) => `${i === 0 ? "Before that" : "Earlier"}: ${line}.`)];
+  return clipSpoken(redactSecrets(out.join(" ")), 500);
+}
+
+/** Said when a chat that was held for stops: how it ended, then an invitation to talk about it. */
+export function endedReadout(input: ChatBriefInputs): string {
+  const { session, label, nowMs } = input;
+  const head =
+    session.state === "error"
+      ? `${label} stopped on an error.`
+      : session.state === "awaiting_approval"
+        ? `${label} is waiting for you to approve something.`
+        : session.state === "awaiting_input" || (session.state === "finished" && session.asks)
+          ? `${label} is asking you something.`
+          : session.state === "finished"
+            ? `${label} is done.`
+            : stateSentence(session, label, nowMs);
+  const said = summarizeOutcome(input.lastTurnText ?? session.detail, 400);
+  const words = said ? cutAtWord(speakable(said), 300) : "";
+  return clipSpoken(
+    redactSecrets(
+      `${head} ${words ? `${words.replace(/[.!?]+$/, "")}. ` : ""}Ask me anything about it, or tell me what to do next.`,
+    ),
+    600,
+  );
+}
+
 /** Things that look like a secret, never to be read aloud. */
 export function redactSecrets(text: string): string {
   return text

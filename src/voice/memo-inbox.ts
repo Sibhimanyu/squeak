@@ -113,6 +113,20 @@ export interface MemoInboxDependencies {
     note: string,
     afterSend: boolean,
   ) => { ok: true } | { ok: false; reason: string };
+  /**
+   * Staying on the line while a chat works. After a message the person approved, the call offers to hold; on hold it
+   * checks in and a key asks what the agent is thinking. Read-only. Absent (or `supported()` false, an add-on that does
+   * not run the hold loop): no hold is offered.
+   */
+  hold?: {
+    supported: () => boolean;
+    /** "working", "stopped" (finished, asking, blocked, error, idle), or null when the chat is gone. */
+    state: (target: string, label: string) => "working" | "stopped" | null;
+    /** Said when it has stopped: how it ended, and an invitation to talk about it. */
+    ended: (target: string, label: string) => string;
+    /** The agent's thinking so far, spoken; null when it cannot be read. */
+    peek: (target: string, label: string) => string | null;
+  };
   /** A voice-first call is over (said goodbye, sent, gave up, or aged out): whatever it kept for the model can go. */
   endCall?: (callId: string) => void;
   /** A line for the call trace. */
@@ -151,6 +165,10 @@ const MAX_ANSWERS_PER_HOUR = 40;
 /** Turns a person gets on one voice-first call (each is a model call), and how long a read-back waits for a yes. */
 const MAX_TALK_TURNS = 30;
 const PROPOSAL_TTL_MS = 5 * 60_000;
+/** On hold: how long a chat that never starts is waited for, how long in all, and how often a silence is broken. */
+const HOLD_START_MS = 60_000;
+const HOLD_MAX_MS = 10 * 60_000;
+const HOLD_REASSURE_MS = 45_000;
 /** A message by phone is a sentence or two, not a document. */
 const MAX_TALK_MESSAGE_CHARS = 600;
 /** A yes or no is a few words; anything longer than this is never taken as one. */
@@ -170,6 +188,14 @@ const TALK_SAYS = {
   sent: "Sent. Goodbye.",
   sentCallback: "Sent. I'll call you back when it's done. Goodbye.",
   noCallback: "I can't arrange a call back from here yet.",
+  offerHold: "Sent. Want me to stay on the line while it works? Say yes to hold, or no to hang up.",
+  holding: "Okay, I'll stay on the line. Press 1 any time to hear what it's thinking, or hash to hang up.",
+  noHold: "Okay. Goodbye.",
+  stillWorking: "Still working. Press 1 to hear what it's thinking.",
+  noStart: "I don't see it working yet.",
+  longHold: "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
+  lostChat: "I lost track of that chat. Goodbye.",
+  cannotSee: "I can't see what it's doing.",
   bye: "Goodbye.",
   turns: "That is as much as I can do by voice on one call. Goodbye.",
 };
@@ -223,6 +249,10 @@ export class MemoInbox {
       script?: { question: string; options: ChoiceOption[] };
       /** The one message read back and awaiting the person's yes; never set by anything but their own `say` turn. */
       proposal?: { message: string; at: number; tries: number; callback?: boolean } | undefined;
+      /** A sent message was followed by "stay on the line?": waiting for the person's yes or no. */
+      offer?: { at: number; tries: number } | undefined;
+      /** The person is on hold while the chat works. */
+      hold?: { since: number; seenWorking: boolean; lastSaid: number } | undefined;
       turns: number;
     }
   >();
@@ -693,12 +723,52 @@ export class MemoInbox {
   private async talkReply(
     id: string,
     text: string,
-    next: "listen" | "confirm" | "end",
+    next: "listen" | "confirm" | "end" | "hold",
     label: string,
   ): Promise<DownMessage> {
+    // A hold check-in with nothing to say is a silent "keep waiting".
+    if (!text) return { v: 1, id, at: this.now(), status: "talk", text: "", next };
     this.deps.trace?.("said", text, { label });
     const spoken = await this.answerAudio(text);
     return { v: 1, id, at: this.now(), status: "talk", text, next, ...(spoken ? { audio: spoken } : {}) };
+  }
+
+  /** One check-in (`hold`) or key press (`peek`) of a call that is holding while a chat works. */
+  private async handleHold(
+    phase: "hold" | "peek",
+    call: NonNullable<ReturnType<MemoInbox["calls"]["get"]>>,
+    target: string,
+    label: string,
+    now: number,
+    reply: (text: string, next: "listen" | "confirm" | "end" | "hold") => Promise<DownMessage>,
+  ): Promise<DownMessage> {
+    const hold = this.deps.hold;
+    const state = call.hold;
+    if (!hold || !state) return reply(TALK_SAYS.closed, "end");
+    if (phase === "peek") {
+      state.lastSaid = now;
+      return reply(hold.peek(target, label) || TALK_SAYS.cannotSee, "hold");
+    }
+    const seen = hold.state(target, label);
+    if (seen === null) {
+      call.hold = undefined;
+      return reply(TALK_SAYS.lostChat, "end");
+    }
+    if (seen === "working") state.seenWorking = true;
+    if (seen === "stopped" && (state.seenWorking || now - state.since > HOLD_START_MS)) {
+      call.hold = undefined;
+      const ended = hold.ended(target, label);
+      return reply(state.seenWorking ? ended : `${TALK_SAYS.noStart} ${ended}`, "listen");
+    }
+    if (now - state.since > HOLD_MAX_MS) {
+      call.hold = undefined;
+      return reply(TALK_SAYS.longHold, "end");
+    }
+    if (now - state.lastSaid > HOLD_REASSURE_MS) {
+      state.lastSaid = now;
+      return reply(TALK_SAYS.stillWorking, "hold");
+    }
+    return reply("", "hold");
   }
 
   /**
@@ -731,10 +801,15 @@ export class MemoInbox {
     }
     if (!converse) return this.refuse(message.id, "Your Mac cannot talk through a call yet.");
     const { label, target } = call;
-    const reply = (text: string, next: "listen" | "confirm" | "end"): Promise<DownMessage> => {
+    const reply = (text: string, next: "listen" | "confirm" | "end" | "hold"): Promise<DownMessage> => {
       if (next === "end") this.deps.endCall?.(callKey);
       return this.talkReply(message.id, text, next, label);
     };
+
+    // A hold check-in or a peek is a key press: no recording, no model, nothing sent.
+    if (message.phase === "hold" || message.phase === "peek") {
+      return this.handleHold(message.phase, call, target, label, now, reply);
+    }
 
     const audio = Buffer.from(message.audio, "base64");
     let heard: string;
@@ -750,6 +825,28 @@ export class MemoInbox {
     }
     trace?.("heard", heard || "(nothing)", { ms: Date.now() - began, label });
     const words = heard.trim().split(/\s+/).filter(Boolean);
+
+    if (message.phase === "confirm" && call.offer) {
+      const offer = call.offer;
+      if (now - offer.at > PROPOSAL_TTL_MS) {
+        call.offer = undefined;
+        return reply(TALK_SAYS.bye, "end");
+      }
+      const yes = YES.test(heard);
+      const no = NO.test(heard);
+      if (words.length > MAX_CONFIRM_WORDS || yes === no) {
+        offer.tries += 1;
+        if (offer.tries >= 2) {
+          call.offer = undefined;
+          return reply(TALK_SAYS.noHold, "end");
+        }
+        return reply(TALK_SAYS.offerHold, "confirm");
+      }
+      call.offer = undefined;
+      if (no) return reply(TALK_SAYS.noHold, "end");
+      call.hold = { since: now, seenWorking: false, lastSaid: now };
+      return reply(TALK_SAYS.holding, "hold");
+    }
 
     if (message.phase === "confirm") {
       const proposal = call.proposal;
@@ -777,7 +874,13 @@ export class MemoInbox {
         ? this.deps.requestCallback?.(target, label, proposal.message.length > 1 ? proposal.message : "", true)
         : undefined;
       if (calling?.ok) trace?.("step", `Call back requested for ${label}`, { label });
-      return reply(calling?.ok ? TALK_SAYS.sentCallback : TALK_SAYS.sent, "end");
+      if (calling?.ok) return reply(TALK_SAYS.sentCallback, "end");
+      // Asking the person, not assuming: a quick job may be worth waiting for, a long one is not.
+      if (this.deps.hold?.supported()) {
+        call.offer = { at: now, tries: 0 };
+        return reply(TALK_SAYS.offerHold, "confirm");
+      }
+      return reply(TALK_SAYS.sent, "end");
     }
 
     // A new thing said: whatever was read back before is no longer on offer.

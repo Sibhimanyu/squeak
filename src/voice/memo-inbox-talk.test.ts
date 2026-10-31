@@ -36,6 +36,8 @@ describe("MemoInbox: a voice-first call", () => {
   const ended: string[] = [];
   const callbacks: Array<{ target: string; label: string; note: string; afterSend: boolean }> = [];
   let callbackAnswer: { ok: true } | { ok: false; reason: string } = { ok: true };
+  let holdSupported = false;
+  let chatState: "working" | "stopped" | null = "working";
 
   beforeEach(async () => {
     db = new FakeRtdb();
@@ -47,6 +49,8 @@ describe("MemoInbox: a voice-first call", () => {
     ended.length = 0;
     callbacks.length = 0;
     callbackAnswer = { ok: true };
+    holdSupported = false;
+    chatState = "working";
     canSend = true;
     converse = async (_t, _l, input) => {
       seen.push(input);
@@ -67,6 +71,12 @@ describe("MemoInbox: a voice-first call", () => {
       note: (text) => notes.push(text),
       converse: (t, l, i) => converse(t, l, i),
       endCall: (id) => ended.push(id),
+      hold: {
+        supported: () => holdSupported,
+        state: () => chatState,
+        ended: () => "squeak voice is done. Ask me anything about it, or tell me what to do next.",
+        peek: () => "Right now: reading the config.",
+      },
       requestCallback: (target, label, note, afterSend) => {
         callbacks.push({ target, label, note, afterSend });
         return callbackAnswer;
@@ -80,7 +90,7 @@ describe("MemoInbox: a voice-first call", () => {
     await db.stop();
   });
 
-  async function talk(phase: "say" | "confirm", said: string, extra: Record<string, unknown> = {}) {
+  async function talk(phase: "say" | "confirm" | "hold" | "peek", said: string, extra: Record<string, unknown> = {}) {
     heard = said;
     const id = newMessageId();
     const body = {
@@ -100,6 +110,95 @@ describe("MemoInbox: a voice-first call", () => {
     return doc ? readDown(key, id, doc) : null;
   }
   const text = (down: DownMessage | null): string => (down?.status === "talk" ? down.text : "");
+
+  describe("holding while the chat works", () => {
+    const holdTurn = (phase: "hold" | "peek") => talk(phase, "", { audio: "" });
+    async function sendAndAcceptHold(): Promise<void> {
+      holdSupported = true;
+      converse = async () => ({ intent: "send", spoken: "ok", message: "Release it." });
+      await talk("say", "release it");
+      const offer = await talk("confirm", "yes");
+      expect(offer).toMatchObject({
+        next: "confirm",
+        text: "Sent. Want me to stay on the line while it works? Say yes to hold, or no to hang up.",
+      });
+      expect(await talk("confirm", "yes please")).toMatchObject({ next: "hold" });
+    }
+
+    it("offers to stay on the line after a send, and ends on a no", async () => {
+      holdSupported = true;
+      converse = async () => ({ intent: "send", spoken: "ok", message: "Release it." });
+      await talk("say", "release it");
+      const offer = await talk("confirm", "yes");
+      expect(offer).toMatchObject({ next: "confirm" });
+      expect(sent).toEqual(["c1:Release it."]);
+      expect(await talk("confirm", "no thanks")).toMatchObject({ text: "Okay. Goodbye.", next: "end" });
+      expect(ended).toEqual(["call-1"]);
+    });
+
+    it("does not offer when the add-on cannot hold, or when a call back was asked for instead", async () => {
+      converse = async () => ({ intent: "send", spoken: "ok", message: "Release it." });
+      await talk("say", "release it");
+      expect(await talk("confirm", "yes")).toMatchObject({ text: "Sent. Goodbye.", next: "end" });
+      holdSupported = true;
+      converse = async () => ({ intent: "send", spoken: "ok", message: "Release it.", callback: true });
+      await talk("say", "release it and call me back");
+      expect(await talk("confirm", "yes")).toMatchObject({ next: "end" });
+    });
+
+    it("checks in silently while the chat works, and says how it ended once it stops", async () => {
+      await sendAndAcceptHold();
+      expect(await holdTurn("hold")).toMatchObject({ status: "talk", text: "", next: "hold" });
+      chatState = "stopped";
+      expect(await holdTurn("hold")).toMatchObject({
+        text: "squeak voice is done. Ask me anything about it, or tell me what to do next.",
+        next: "listen",
+      });
+      // The hold is over: another check-in is refused.
+      expect(await holdTurn("hold")).toMatchObject({ next: "end" });
+    });
+
+    it("reads what the agent is thinking on a peek, and sends nothing", async () => {
+      await sendAndAcceptHold();
+      const before = sent.length;
+      expect(await holdTurn("peek")).toMatchObject({ text: "Right now: reading the config.", next: "hold" });
+      expect(sent.length).toBe(before);
+    });
+
+    it("breaks a long silence with a reminder of the peek key", async () => {
+      await sendAndAcceptHold();
+      clock += 50_000;
+      expect(await holdTurn("hold")).toMatchObject({ text: "Still working. Press 1 to hear what it's thinking." });
+      clock += 10_000;
+      expect(await holdTurn("hold")).toMatchObject({ text: "", next: "hold" });
+    });
+
+    it("does not call a chat that has not started done, until it has waited a minute", async () => {
+      await sendAndAcceptHold();
+      chatState = "stopped";
+      clock += 5_000;
+      expect(await holdTurn("hold")).toMatchObject({ next: "hold", text: "" });
+      clock += 60_000;
+      expect(await holdTurn("hold")).toMatchObject({
+        next: "listen",
+        text: expect.stringContaining("I don't see it working yet."),
+      });
+    });
+
+    it("lets go after ten minutes, and when the chat is gone", async () => {
+      await sendAndAcceptHold();
+      clock += 11 * 60_000;
+      expect(await holdTurn("hold")).toMatchObject({ next: "end", text: expect.stringContaining("taking a while") });
+      await sendAndAcceptHold();
+      chatState = null;
+      expect(await holdTurn("hold")).toMatchObject({ next: "end", text: expect.stringContaining("lost track") });
+    });
+
+    it("refuses a hold check-in on a call that is not holding", async () => {
+      holdSupported = true;
+      expect(await holdTurn("hold")).toMatchObject({ next: "end" });
+    });
+  });
 
   describe("a call back request", () => {
     it("is remembered when the person ends the call asking for one, and the call ends", async () => {

@@ -64,6 +64,9 @@ export const VOICE_FIRST_ADDON = "0.12.0";
 /** The add-on whose dialog talks a call with no options through (a call back: "call me back when you're done"). */
 export const CALLBACK_ADDON = "0.14.0";
 
+/** The add-on that can stay on the line while a chat works (`hold`: check-ins, and a key for what it is thinking). */
+export const HOLD_ADDON = "0.15.0";
+
 /** Whether an add-on reporting `version` is at least `minimum`; false when its version is unknown. */
 export function addonSupports(version: string | null | undefined, minimum: string): boolean {
   return cleanVersion(version) !== null && !isNewer(minimum, version);
