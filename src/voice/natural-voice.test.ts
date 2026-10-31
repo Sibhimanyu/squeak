@@ -190,6 +190,7 @@ describe("engines in one NaturalVoice", () => {
       console.log(JSON.stringify({ready:true}));
       readline.createInterface({input:process.stdin}).on("line", line => {
         const request = JSON.parse(line);
+        if (request.text.includes("never answers")) return;
         fs.appendFileSync(${JSON.stringify(record)}, JSON.stringify({ ...request, pid: process.pid, worker: process.argv[1], model: process.argv[2] }) + "\\n");
         const wav = Buffer.alloc(44 + 9600);
         wav.write("data", 36);
@@ -237,6 +238,25 @@ describe("engines in one NaturalVoice", () => {
         ["neutral", "off"],
         ["neutral", "off"],
       ]);
+    } finally {
+      natural.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("settles a render whose worker is stopped by a switch, so later renders and samples are not stuck behind it", async () => {
+    const { dir, pathsFor } = fakeEngines();
+    const settings: NaturalSettings = { enabled: true, voice: "ryan", engine: "qwen3", emotion: "subtle" };
+    const natural = new NaturalVoice(pathsFor, () => settings, { cacheDir: path.join(dir, "cache") });
+    try {
+      const stuck = natural.render("This one never answers.");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      settings.engine = "ming";
+      settings.voice = "US_Emma";
+      expect(await natural.line("Squeak needs an answer.")).not.toBeNull();
+      expect(await stuck).toBeNull();
+      // The stopped engine works again for a sample.
+      expect(await natural.preview("aiden", "qwen3")).not.toBeNull();
     } finally {
       natural.stop();
       fs.rmSync(dir, { recursive: true, force: true });

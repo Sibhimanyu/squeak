@@ -396,6 +396,10 @@ class WorkerProc {
     this.child?.kill(signal);
     this.child = null;
     this.ready = null;
+    // Renders waiting on the stopped process fail now. Left waiting, the exit no longer counts as this worker's, so they
+    // never settled, and every render queued behind them (and the one sample the app may ask for) hung for good.
+    for (const waiting of this.pending.values()) waiting.resolve(false);
+    this.pending.clear();
   }
 }
 

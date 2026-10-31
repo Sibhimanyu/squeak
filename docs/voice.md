@@ -411,7 +411,11 @@ hash | silence | cap | no speech`.
   `Line busy, will ring when the call ends`, tries again every 10 s for up to 3 minutes, then gives up with a trace and
   leaves the question in the app. The existing minimum gap between calls still applies.
 - No speech is made during a call. The natural voice runs only in advance (add-on start, a changed directory, ringing),
-  and a pre-render waits for a call to end. A line that is missing mid-call comes from the plain voice and logs
+  and a pre-render waits for a call to end. A Piper render already running when a call is answered is stopped
+  (`SIGSTOP` to its process group) until the call ends, and the time stopped does not count against its 25 s limit:
+  even at nice 15 a slow box broke a call's audio up while Piper ran (add-on 0.16.1). Once the Mac has sent
+  recordings, the add-on waits 5 minutes (not 20 s) for a new list's before making its own: an expressive Mac voice
+  takes a minute or more for a prompt set, and copies made here first are only replaced. A line that is missing mid-call comes from the plain voice and logs
   `voice line made during a call`. The line rests on a long silence file between clips, so RTP never stops. Every clip is
   padded with 300 ms of silence, and a clip that is not 8 kHz mono PCM16 is logged (`voice clip is not 8 kHz mono PCM16`).
 - At the end of a call the log carries `Line quality: good|fair|poor (<callstat lines>)`; when baresip's reply is not a

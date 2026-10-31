@@ -94,6 +94,8 @@ export function padClip(made: { file: string; durationMs: number }): { file: str
 export interface Speaker {
   /** Writes `text` to a new WAV file and returns its path and length. */
   speak(text: string): Promise<{ file: string; durationMs: number }>;
+  /** A slow voice is told when to stand still: while a call's audio plays, it must not take the CPU. */
+  holdWhile?(held: () => boolean): void;
   dispose(): void;
 }
 
@@ -208,6 +210,8 @@ function logSpeechTime(engine: "plain" | "natural", text: string, began: number)
   } else logger.debug("voice speech made", fields);
 }
 
+/** How often a running Piper checks whether a call has started (and must stop) or ended (and may go on). */
+const HOLD_POLL_MS = 200;
 /** Longest Piper may take for one prompt. */
 const PIPER_TIMEOUT_MS = 25_000;
 
@@ -231,6 +235,12 @@ export class PiperSpeaker implements Speaker {
     private readonly paths: PiperPaths,
     private readonly fallback: Speaker,
   ) {}
+
+  private held: () => boolean = () => false;
+
+  holdWhile(held: () => boolean): void {
+    this.held = held;
+  }
 
   /** The same words are spoken again on "press star": say them once. */
   private readonly spoken = new Map<string, { file: string; durationMs: number }>();
@@ -266,19 +276,52 @@ export class PiperSpeaker implements Speaker {
             "--sentence_silence",
             "0.3",
           ],
-          { stdio: ["pipe", "ignore", "pipe"] },
+          // Its own process group, so Piper and anything it starts can be stopped and resumed together.
+          { stdio: ["pipe", "ignore", "pipe"], detached: true },
         );
+        const signal = (name: NodeJS.Signals): void => {
+          try {
+            if (child.pid) process.kill(-child.pid, name);
+          } catch {
+            // Already gone.
+          }
+        };
         let stderr = "";
-        // A slow machine must not hold a ringing call: past this, the plain voice answers instead.
-        const limit = setTimeout(() => child.kill("SIGKILL"), this.paths.timeoutMs ?? PIPER_TIMEOUT_MS);
+        // A slow machine must not hold a ringing call: past this, the plain voice answers instead. Time spent
+        // stopped for a call does not count.
+        let left = this.paths.timeoutMs ?? PIPER_TIMEOUT_MS;
+        let since = Date.now();
+        let limit: NodeJS.Timeout | null = setTimeout(() => signal("SIGKILL"), left);
+        // Even at nice 15 a small machine broke a call's audio up while a prompt was being made (2026-10-31): a call
+        // that is answered mid-render stops Piper until it ends.
+        let stopped = false;
+        const watch = setInterval(() => {
+          const hold = this.held();
+          if (hold && !stopped) {
+            signal("SIGSTOP");
+            stopped = true;
+            if (limit) clearTimeout(limit);
+            limit = null;
+            left -= Date.now() - since;
+          } else if (!hold && stopped) {
+            signal("SIGCONT");
+            stopped = false;
+            since = Date.now();
+            limit = setTimeout(() => signal("SIGKILL"), Math.max(1000, left));
+          }
+        }, HOLD_POLL_MS);
+        const done = (): void => {
+          clearInterval(watch);
+          if (limit) clearTimeout(limit);
+        };
         child.stderr.on("data", (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-500)));
         child.on("error", (error) => {
-          clearTimeout(limit);
+          done();
           reject(error);
         });
         // "exit", not "close": a killed shell script leaves its children holding the pipes open.
         child.on("exit", (code) => {
-          clearTimeout(limit);
+          done();
           if (code === 0) resolve();
           else reject(new Error(`piper exited ${code}: ${stderr.trim()}`));
         });
@@ -334,7 +377,9 @@ export class CachedSpeaker implements Speaker {
       /** A quick voice for a line that is missing mid-call (the plain one); absent: the main voice, logged. */
       plain?: Speaker | null;
     } = { callActive: () => false },
-  ) {}
+  ) {
+    inner.holdWhile?.(() => this.live.callActive());
+  }
 
   async speak(text: string): Promise<{ file: string; durationMs: number }> {
     const { file, durationMs } = await this.speakDetailed(text);

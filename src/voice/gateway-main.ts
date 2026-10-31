@@ -40,6 +40,8 @@ import type { Clip } from "./clips.js";
 /** Where Home Assistant puts an add-on's options. */
 /** How long the add-on waits for the Mac's recordings of the call-in prompts before making them itself. */
 const PREWARM_WAIT_MS = 20_000;
+/** The same wait once the Mac is known to send recordings. */
+const MAC_AUDIO_WAIT_MS = 5 * 60_000;
 const ADDON_OPTIONS = "/data/options.json";
 /** Channel, key and database address once paired (0600): what the removed database_url/channel/key options held. */
 const PAIRING_FILE = "/data/pairing.json";
@@ -570,11 +572,17 @@ export async function runGateway(): Promise<number> {
       // Without the Mac's recordings the add-on makes them, but not at once: the Mac publishes them just after the list,
       // and a prompt made here first is a prompt the Mac's voice then replaces.
       let warmTimer: NodeJS.Timeout | null = null;
+      // Once the Mac has sent recordings, a new list's take longer to come (an expressive voice makes a prompt set in
+      // a minute or more), and this machine's own copies would only be replaced: give the Mac much longer.
+      let macRecords = false;
       const warm = (doc: Awaited<ReturnType<typeof directory.refresh>>): void => {
         if (warmTimer) clearTimeout(warmTimer);
         const run = (): void => phone.prewarm?.(inboundPrompts(doc, callInPin() !== null));
-        if (doc?.audio?.length) return run();
-        warmTimer = setTimeout(run, PREWARM_WAIT_MS);
+        if (doc?.audio?.length) {
+          macRecords = true;
+          return run();
+        }
+        warmTimer = setTimeout(run, macRecords ? MAC_AUDIO_WAIT_MS : PREWARM_WAIT_MS);
         warmTimer.unref?.();
       };
       warm(null);
