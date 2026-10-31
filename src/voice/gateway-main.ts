@@ -552,6 +552,17 @@ export async function runGateway(): Promise<number> {
           encode: encodeOpus,
           trace: (line) => note("info", line),
           seed: (clips) => phone.seed?.(clips),
+          talk: (call, info) =>
+            talkFlow(
+              call,
+              {
+                uplink,
+                encode: encodeOpus,
+                trace: (line) => note("info", line),
+                seed: (clips) => phone.seed?.(clips),
+              },
+              info,
+            ),
         }).catch((error: unknown) =>
           logger.warn("voice call-in failed", { error: error instanceof Error ? error.message : String(error) }),
         );

@@ -4,7 +4,17 @@ import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { generateChannel } from "../remote/remote-crypto.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { MemoInbox, cleanMessage, type MemoInboxDependencies } from "./memo-inbox.js";
-import { downPath, newMessageId, readDown, sealUp, upPath, type DownMessage, type UpMessage } from "./memo-protocol.js";
+import {
+  dirPath,
+  downPath,
+  newMessageId,
+  readDirectory,
+  readDown,
+  sealUp,
+  upPath,
+  type DownMessage,
+  type UpMessage,
+} from "./memo-protocol.js";
 
 const { channelId: channel, key } = generateChannel();
 const OPTIONS = [
@@ -82,6 +92,60 @@ describe("MemoInbox: a voice-first call", () => {
     return doc ? readDown(key, id, doc) : null;
   }
   const text = (down: DownMessage | null): string => (down?.status === "talk" ? down.text : "");
+
+  describe("a call in", () => {
+    const talkIn = async (said: string, version: string, extra: Record<string, unknown> = {}) =>
+      talk("say", said, { callId: "in-call-1", dirVersion: version, choice: 1, ...extra });
+
+    async function published(): Promise<string> {
+      // The inbox needs `ask` (describe and answer) for the directory to carry `talk`.
+      await inbox.publish();
+      return readDirectory(key, (await store.get(dirPath(channel)))!, clock)!.version;
+    }
+
+    it("names a chat of the published list, with its own conversation, and sends nothing on a question", async () => {
+      const version = await published();
+      converse = async (_t, label, input) => {
+        seen.push(input);
+        return { intent: "answer", spoken: `${label} is fine.` };
+      };
+      const down = await talkIn("how is it going?", version);
+      expect(down).toMatchObject({ status: "talk", next: "listen", text: "squeak voice is fine." });
+      expect(seen.at(-1)).toMatchObject({ callId: "in:in-call-1", question: "", options: [] });
+      expect(sent).toEqual([]);
+    });
+
+    it("sends only after a yes, and ends the call's conversation", async () => {
+      const version = await published();
+      converse = async () => ({ intent: "send", spoken: "ok", message: "Go ahead and merge it." });
+      const proposal = await talkIn("go ahead and merge it", version);
+      expect(proposal).toMatchObject({ next: "confirm" });
+      expect(sent).toEqual([]);
+      const done = await talk("confirm", "yes", { callId: "in-call-1", dirVersion: version, choice: 1 });
+      expect(done).toMatchObject({ status: "talk", text: "Sent. Goodbye.", next: "end" });
+      expect(sent).toEqual(["c1:Go ahead and merge it."]);
+      expect(ended).toEqual(["in:in-call-1"]);
+    });
+
+    it("refuses a version or chat number that is not in a published list", async () => {
+      const version = await published();
+      expect((await talkIn("hello", "nope", {}))?.status).toBe("refused");
+      expect((await talkIn("hello", version, { choice: 9 }))?.status).toBe("refused");
+    });
+
+    it("keeps two calls' conversations apart", async () => {
+      const version = await published();
+      await talkIn("one", version);
+      await talk("say", "two", { callId: "in-call-2", dirVersion: version, choice: 1 });
+      expect(seen.map((s) => s.callId)).toEqual(["in:in-call-1", "in:in-call-2"]);
+    });
+
+    it("rejects a malformed call id or a choice outside the list", async () => {
+      const version = await published();
+      expect((await talkIn("hello", version, { callId: "bad id!" })) ?? null).toBeNull();
+      expect((await talkIn("hello", version, { choice: 0 })) ?? null).toBeNull();
+    });
+  });
 
   it("answers a question aloud and listens again, sending nothing", async () => {
     converse = async () => ({ intent: "answer", spoken: "It is **passing**." });

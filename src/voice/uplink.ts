@@ -21,7 +21,13 @@ export interface Uplink {
   /** Where a chat stands, to read aloud. */
   status(choice: number, dirVersion: string): Promise<DownMessage | null>;
   /** One turn of a voice-first call: what the person said (or their yes or no), and what to say and do next. */
-  talk(callId: string, phase: TalkPhase, audio: Buffer): Promise<DownMessage | null>;
+  talk(
+    callId: string,
+    phase: TalkPhase,
+    audio: Buffer,
+    /** A call in: the chat of the published list this call talks about. Absent: a call out, whose id names its chat. */
+    from?: { dirVersion: string; choice: number },
+  ): Promise<DownMessage | null>;
 }
 
 export type UplinkStore = Pick<RtdbRest, "get" | "set" | "delete" | "watch">;
@@ -89,7 +95,12 @@ export class RelayUplink implements Uplink {
     );
   }
 
-  talk(callId: string, phase: TalkPhase, audio: Buffer): Promise<DownMessage | null> {
+  talk(
+    callId: string,
+    phase: TalkPhase,
+    audio: Buffer,
+    from?: { dirVersion: string; choice: number },
+  ): Promise<DownMessage | null> {
     const at = this.now();
     return this.exchange(
       {
@@ -98,8 +109,9 @@ export class RelayUplink implements Uplink {
         at,
         expiresAt: at + UP_TTL_MS,
         kind: "talk",
-        dirVersion: callId,
-        choice: 1,
+        dirVersion: from ? from.dirVersion : callId,
+        choice: from ? from.choice : 1,
+        ...(from ? { callId } : {}),
         phase,
         audio: audio.toString("base64"),
       },

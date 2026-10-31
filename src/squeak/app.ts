@@ -1173,7 +1173,12 @@ export class SqueakApp {
       converse: async (target, label, say) => {
         const input = this.chatBriefInputs(target, label);
         if (!input) throw new Error("chat not found");
-        return this.chatConverser.converse(say, input);
+        // A call in has no script: the options are whatever the agent's last message lettered, if it did.
+        const options =
+          say.options.length > 0
+            ? say.options
+            : (parseChoices(input.lastTurnText ?? input.session.detail ?? null)?.options ?? []);
+        return this.chatConverser.converse({ ...say, options }, input);
       },
       endCall: (callId) => this.chatConverser.end(callId),
       speech: async (text) => (await this.promptClips.clips([text]))[0],

@@ -296,6 +296,15 @@ up, aged out) and after 5 minutes idle; a dead or stuck one is dropped and the n
 picture. Sending is unchanged: the model only proposes words, and your spoken yes at the read-back sends them.
 Measured against the real CLI: ~1.3-2.2 s a turn after the first.
 
+**Calling in is the same conversation (add-on 0.13.0).** The directory carries `talk: true` when the Mac can converse
+(`DirectoryDoc.talk`; with `ask`). After the chat is chosen the add-on says "<chat>. Go ahead: ask me about it, or tell
+me what to do." and runs the same `talkFlow`, each turn a `talk` message with a `callId` (the call's own id, so calls
+never share a conversation) and `dirVersion` + `choice` naming a chat of the published list; the Mac makes the call's
+record on its first turn (`in:<callId>`) and refuses a version or number the list does not hold. A call in has no
+script, so the options are read from the lettered options in the chat's last message, if any. The yes before a send, the
+hourly limits and the read-only model are unchanged; if the Mac cannot be reached the keypad menus take over. An older
+Mac sends no `talk` and an older add-on ignores it, so the keys stay as they were.
+
 ## How a recording ends, keys, busy lines, and the line itself (add-on 0.11.2)
 
 - A message recording ends on the first of: `#` (hash), 2.5 s of quiet after speech was heard (energy-based, read from

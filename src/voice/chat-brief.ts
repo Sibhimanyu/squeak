@@ -302,7 +302,7 @@ export class ChatConverser {
     const options = say.options.map((option) => `${option.letter}) ${option.title.slice(0, 200)}`).join("\n");
     const chat = questionContext(input);
     const said = `The person said, by voice (it may be mis-heard):\n${say.utterance.slice(0, 600)}`;
-    const full = `CHAT\n${chat}\nEND CHAT\n\nQUESTION\n${say.question.slice(0, 600)}\n\nOPTIONS\n${options || "(none)"}\n\n${said}`;
+    const full = `CHAT\n${chat}\nEND CHAT\n\nQUESTION\n${say.question.slice(0, 600) || "(none: the person rang you; the chat's last message is the best guide to what is pending)"}\n\nOPTIONS\n${options || "(none)"}\n\n${said}`;
     let output: unknown;
     try {
       output = await this.turn(say.callId, chat, full, said);
