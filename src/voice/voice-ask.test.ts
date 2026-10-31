@@ -4,11 +4,13 @@ import {
   ChatConverser,
   ChatQuestioner,
   clipSpoken,
+  endedReadout,
   questionContext,
   readConverse,
   redactSecrets,
   spokenAnswer,
   statusReadout,
+  thinkingReadout,
 } from "./chat-brief.js";
 import type { ChatBriefInputs } from "./chat-brief.js";
 import { session } from "./fixtures.js";
@@ -554,5 +556,63 @@ describe("talk messages", () => {
     expect(readDown(key, "d1", sealDown(key, good))).toEqual(good);
     expect(readDown(key, "d1", sealDown(key, { ...good, next: "send" } as unknown as DownMessage))).toBeNull();
     expect(readDown(key, "d1", sealDown(key, { ...good, text: " " }))).toBeNull();
+  });
+});
+
+describe("readouts for someone on hold", () => {
+  it("reads the newest steps as what the agent is doing and thinking, without paths", () => {
+    const text = thinkingReadout(
+      inputs({
+        activity: {
+          total: 5,
+          steps: [
+            { kind: "you", text: "Release it", at: null },
+            { kind: "thinking", text: "I should check the version in /Users/me/app/package.json first", at: null },
+            { kind: "tool", text: "Run the tests", at: null },
+            { kind: "note", text: "Tests pass, bumping the version now", at: null },
+          ],
+        },
+      }),
+    );
+    expect(text.startsWith("Right now: Tests pass, bumping the version now.")).toBe(true);
+    expect(text).toContain("Before that: Run the tests.");
+    expect(text).toContain("Earlier: I should check the version");
+    expect(text).not.toContain("/Users/me");
+    expect(text).not.toContain("Release it");
+  });
+
+  it("says so when there is nothing to read out yet", () => {
+    expect(thinkingReadout(inputs({ activity: { total: 0, steps: [] } }))).toBe(
+      "It has not written anything I can read out yet.",
+    );
+    expect(thinkingReadout(inputs({ activity: null }))).toContain("not written anything");
+  });
+
+  it("never reads a secret out loud", () => {
+    const text = thinkingReadout(
+      inputs({
+        activity: { total: 1, steps: [{ kind: "note", text: "Using token: sk-ant-abcdefghijklmnop12345", at: null }] },
+      }),
+    );
+    expect(text).not.toContain("sk-ant");
+  });
+
+  it("says how a chat ended and invites a question", () => {
+    const done = endedReadout(
+      inputs({
+        session: session({ state: "finished" }),
+        lastTurnText: "Released version 2.1.0. All checks passed.",
+      }),
+    );
+    expect(done).toContain("squeak voice is done.");
+    expect(done).toContain("Released version 2.1.0");
+    expect(done.endsWith("Ask me anything about it, or tell me what to do next.")).toBe(true);
+    expect(endedReadout(inputs({ session: session({ state: "error" }) }))).toContain("stopped on an error");
+    expect(endedReadout(inputs({ session: session({ state: "awaiting_approval" }) }))).toContain(
+      "waiting for you to approve",
+    );
+    expect(endedReadout(inputs({ session: session({ state: "finished", asks: "Want a PR?" }) }))).toContain(
+      "asking you something",
+    );
   });
 });

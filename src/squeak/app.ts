@@ -95,6 +95,7 @@ import {
   addonSupports,
   CALLBACK_ADDON,
   FOLLOW_UP_ADDON,
+  HOLD_ADDON,
   LATE_CLIPS_ADDON,
   VOICE_FIRST_ADDON,
 } from "../voice/addon-update.js";
@@ -132,7 +133,14 @@ import { NaturalInstaller } from "../voice/natural-setup.js";
 import { TEST_SCRIPT } from "../voice/test-script.js";
 import { readIdleSeconds } from "../fleet/user-idle.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
-import { ChatConverser, ChatQuestioner, statusReadout, type ChatBriefInputs } from "../voice/chat-brief.js";
+import {
+  ChatConverser,
+  ChatQuestioner,
+  endedReadout,
+  statusReadout,
+  thinkingReadout,
+  type ChatBriefInputs,
+} from "../voice/chat-brief.js";
 import { VoiceFavoritesStore, workspaceKeyOf } from "../voice/favorites.js";
 import { LastChatStore } from "../voice/last-chat.js";
 import { cutAtWord, speakable, spokenChat, spokenChats, spokenWorkspace } from "../voice/spoken-labels.js";
@@ -1190,6 +1198,22 @@ export class SqueakApp {
         return this.chatConverser.converse({ ...say, options }, input);
       },
       endCall: (callId) => this.chatConverser.end(callId),
+      // Offered after a message the person approved: stay on the line while it works, a key for its thinking.
+      hold: {
+        supported: () => addonSupports(this.gatewayStatusReader().peek().version, HOLD_ADDON),
+        state: (target, label) => {
+          const input = this.chatBriefInputs(target, label);
+          return input ? (input.session.state === "working" ? "working" : "stopped") : null;
+        },
+        ended: (target, label) => {
+          const input = this.chatBriefInputs(target, label);
+          return input ? endedReadout(input) : "It has stopped.";
+        },
+        peek: (target, label) => {
+          const input = this.chatBriefInputs(target, label);
+          return input ? thinkingReadout(input) : null;
+        },
+      },
       requestCallback: (target, label, note, afterSend) => this.requestCallback(target, label, note, afterSend),
       speech: async (text) => (await this.promptClips.clips([text]))[0],
       note: (text) => this.announceCallNote(text),

@@ -20,7 +20,12 @@ export interface TalkDependencies {
   seed?: (clips: Clip[]) => void;
 }
 
-const MAX_TURNS = 10;
+const MAX_TURNS = 30;
+/** On hold: how often the line asks the Mac how the work is going, and the most it stays (the Mac ends it sooner). */
+const HOLD_POLL_MS = 10_000;
+const HOLD_MAX_MS = 11 * 60_000;
+/** The key that asks what the agent is thinking while on hold. */
+const PEEK_KEY = "1";
 const TURN_MS = 30_000;
 /** Under this a recording is a click or a breath, not speech. */
 const MIN_TALK_MS = 600;
@@ -32,6 +37,43 @@ const SAYS = {
   wrong: "Something went wrong. You can use the keypad.",
   turns: "That is as much as I can do by voice on one call. Goodbye.",
 };
+
+/**
+ * Waits on the line while a chat works: every few seconds it asks the Mac how it is going, and the peek key asks what
+ * the agent is thinking. "listen": the work stopped and the Mac said how, so the conversation goes on; "ended": hash,
+ * the Mac ended it or the person hung up; "keys": the Mac could not be reached.
+ */
+async function holdLine(
+  call: PhoneCall,
+  deps: TalkDependencies,
+  info: { callId: string; from?: { dirVersion: string; choice: number } },
+  speak: (text: string) => Promise<void>,
+): Promise<"listen" | "ended" | "keys"> {
+  const began = Date.now();
+  while (call.open && Date.now() - began < HOLD_MAX_MS) {
+    const key = await call.key(HOLD_POLL_MS);
+    if (!call.open) return "ended";
+    if (key === "#") {
+      await speak("Goodbye.");
+      return "ended";
+    }
+    const phase: TalkPhase = key === PEEK_KEY ? "peek" : "hold";
+    const reply = await deps.uplink.talk(info.callId, phase, Buffer.alloc(0), info.from);
+    if (!reply) {
+      await speak(SAYS.noMac);
+      return "keys";
+    }
+    if (reply.status !== "talk") {
+      await speak(reply.status === "refused" ? reply.reason : SAYS.wrong);
+      return "keys";
+    }
+    if (reply.audio) deps.seed?.([reply.audio]);
+    if (reply.text) await speak(reply.text);
+    if (reply.next === "hold") continue;
+    return reply.next === "end" ? "ended" : "listen";
+  }
+  return "ended";
+}
 
 /**
  * Listens and talks until the call is done. "ended": it said goodbye (or the person hung up); "keys": the Mac could
@@ -80,6 +122,12 @@ export async function talkFlow(
     if (reply.audio) deps.seed?.([reply.audio]);
     await speak(reply.text);
     if (reply.next === "end") return "ended";
+    if (reply.next === "hold") {
+      const held = await holdLine(call, deps, info, speak);
+      if (held !== "listen") return held;
+      phase = "say";
+      continue;
+    }
     phase = reply.next === "confirm" ? "confirm" : "say";
   }
   if (call.open) await speak(SAYS.turns);

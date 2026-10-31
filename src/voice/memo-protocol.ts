@@ -136,8 +136,12 @@ export type UpMessage =
     };
 
 /** What a voice-first call's turn is: what the person said, or whether to send what was read back to them. */
-export type TalkPhase = "say" | "confirm";
-export type TalkNext = "listen" | "confirm" | "end";
+export type TalkPhase = "say" | "confirm" | "hold" | "peek";
+/**
+ * "hold": the call stays on the line while the chat works (`text` may be empty: nothing to say yet). The add-on then
+ * checks in with `hold` turns, and a key asks for `peek` (what the agent is thinking). Both carry no recording.
+ */
+export type TalkNext = "listen" | "confirm" | "end" | "hold";
 
 export type DownMessage =
   | { v: 1; id: string; at: number; status: "transcript"; text: string; label: string; audio?: Clip }
@@ -269,8 +273,11 @@ export function readUp(
       callId === undefined
         ? choice === 1
         : typeof choice === "number" && Number.isInteger(choice) && choice >= 1 && choice <= MAX_CHOICES;
-    if (!choiceOk || (phase !== "say" && phase !== "confirm")) return { ok: false, reason: "not a voice message" };
-    if (typeof audio !== "string" || audio.length === 0 || audio.length > MAX_AUDIO_CHARS) {
+    if (!choiceOk || !["say", "confirm", "hold", "peek"].includes(phase as string))
+      return { ok: false, reason: "not a voice message" };
+    // A hold check-in or a peek is a key press, not speech: no recording goes with it.
+    const spoken = phase === "say" || phase === "confirm";
+    if (typeof audio !== "string" || (spoken && audio.length === 0) || audio.length > MAX_AUDIO_CHARS) {
       return { ok: false, reason: "no audio" };
     }
     return {
@@ -280,7 +287,7 @@ export function readUp(
         kind: "talk",
         dirVersion,
         choice: choice as number,
-        phase,
+        phase: phase as TalkPhase,
         audio,
         ...(callId !== undefined ? { callId: callId as string } : {}),
       },
@@ -323,8 +330,9 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
       };
     }
     case "talk": {
-      if (typeof body.text !== "string" || body.text.trim() === "") return null;
-      if (body.next !== "listen" && body.next !== "confirm" && body.next !== "end") return null;
+      if (typeof body.text !== "string") return null;
+      if (body.next !== "listen" && body.next !== "confirm" && body.next !== "end" && body.next !== "hold") return null;
+      if (body.text.trim() === "" && body.next !== "hold") return null;
       const spoken = readClip(body.audio);
       return {
         ...base,
