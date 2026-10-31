@@ -385,16 +385,24 @@ final class ChannelsModel {
         if demo { return }
         gatewayBusy = true
         defer { gatewayBusy = false }
+        // The request can take over a minute (Home Assistant is asked, and the Firebase hops are slow): say so at once
+        // instead of leaving a dimmed button.
+        gatewayUpdatePhase = .updating
         do {
             switch try await client.updateGatewayAddon() {
             case .done: watchGatewayUpdate(to: target)
-            case .refused(let sentence): gatewayError = sentence
-            case .unavailable: gatewayError = "Squeak on this Mac is older than this setting. Update it and try again."
+            case .refused(let sentence):
+                gatewayUpdatePhase = nil
+                gatewayError = sentence
+            case .unavailable:
+                gatewayUpdatePhase = nil
+                gatewayError = "Squeak on this Mac is older than this setting. Update it and try again."
             }
         } catch let error as URLError where error.code == .timedOut {
             // The answer was lost, not refused: the add-on may well be updating, so watch for it like a yes.
             watchGatewayUpdate(to: target)
         } catch {
+            gatewayUpdatePhase = nil
             gatewayError = "Squeak on this Mac did not answer."
         }
     }

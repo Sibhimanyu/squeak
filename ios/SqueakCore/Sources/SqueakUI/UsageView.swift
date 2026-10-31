@@ -20,6 +20,17 @@ struct UsageView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
+                    if refreshFailed, let note = refreshNote {
+                        // Up top, not in the fine print: the readings below are old until this is fixed.
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Couldn't refresh").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.needsYou)
+                            Text(note).font(.footnote).foregroundStyle(Theme.ink)
+                            if note.localizedCaseInsensitiveContains("sign-in") {
+                                Text("Use Claude Code on your Mac once, then press Refresh.").font(.footnote).foregroundStyle(Theme.muted)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
                     if let snapshot = model.snapshot, let usage = snapshot.usage {
                         claude(usage.claude)
                         codex(usage.codex)
@@ -45,7 +56,7 @@ struct UsageView: View {
                             : "Your Mac hasn't sent usage yet. Update Squeak on your Mac to see it here.")
                             .foregroundStyle(Theme.muted)
                     }
-                    Text(refreshNote ?? "Usage refreshes when you open this, and on Refresh. It asks your Mac for a new Claude reading and fetches usage without consuming tokens, at most once a minute.")
+                    Text((refreshFailed ? nil : refreshNote) ?? "Usage refreshes when you open this, and on Refresh. It asks your Mac for a new Claude reading and fetches usage without consuming tokens, at most once a minute.")
                         .font(.footnote).foregroundStyle(Theme.muted)
                 }
                 .padding(20)
@@ -74,6 +85,12 @@ struct UsageView: View {
             refreshedOnOpen = true
             await refresh()
         }
+    }
+
+    /// The Mac answered with a reason instead of a reading ("Updated just now." and "Already up to date…" are the good answers).
+    private var refreshFailed: Bool {
+        guard let note = refreshNote else { return false }
+        return !note.hasPrefix("Updated") && !note.hasPrefix("Already up to date")
     }
 
     private func refresh() async {
@@ -112,7 +129,8 @@ struct UsageView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(title).font(.headline).accessibilityAddTraits(.isHeader)
                 Spacer()
-                if let asOf { Text(asOf).font(.footnote).foregroundStyle(Theme.muted) }
+                // Older than an hour is a warning, not a caption.
+                if let asOf { Text(asOf).font(.footnote).foregroundStyle(Theme.needsYou) }
             }
             content()
         }

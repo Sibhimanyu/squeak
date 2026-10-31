@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.28
+
+- Phone calls: pressing Update add-on shows "Updating the add-on…" at once and keeps the page responsive while Home Assistant is asked, instead of leaving a dimmed button.
+
 ## 2.12.27
 
 - Restart to update: if macOS blocks the in-place install, Squeak now reopens itself within seconds instead of staying closed.
