@@ -356,15 +356,32 @@ export class FleetController {
     if (!card || card.turn === null || this.turnOf(replyTargetFor(session)) === card.turn) {
       return false;
     }
-    await this.stripButtons(location.chatId, messageId);
+    await this.stripButtons(location.chatId, messageId, card.label);
     return true;
   }
 
-  private async stripButtons(chatId: number, messageId: number): Promise<void> {
+  /**
+   * Settle a card whose question is answered or gone. With a label the card
+   * collapses to one line in place, so a chat does not keep every old
+   * question above the live ones; without one only the buttons go.
+   */
+  private async stripButtons(chatId: number, messageId: number, label?: string): Promise<void> {
     this.deps.store.markCardSettled(chatId, messageId);
     try {
-      await this.tg().editMessageReplyMarkup(chatId, messageId, []);
+      if (label) {
+        await this.tg().editMessageText(chatId, messageId, `✓ **${label}** — settled`, []);
+      } else {
+        await this.tg().editMessageReplyMarkup(chatId, messageId, []);
+      }
     } catch (error) {
+      if (label && !isTelegramMessageNotModifiedError(error)) {
+        // The text edit failed (too old to edit, deleted): the buttons must still go.
+        try {
+          await this.tg().editMessageReplyMarkup(chatId, messageId, []);
+        } catch {
+          // Nothing more to do; the card is already marked settled.
+        }
+      }
       logger.debug("could not strip a settled card", { error: error instanceof Error ? error.message : String(error) });
     }
   }
@@ -394,7 +411,7 @@ export class FleetController {
         settled = stamp !== card.turn;
       }
       if (settled) {
-        await this.stripButtons(card.chatId, card.messageId);
+        await this.stripButtons(card.chatId, card.messageId, card.label);
       }
     }
   }

@@ -270,14 +270,20 @@ export class FleetStore {
   }
 
   /** Cards that still carry live buttons, newest day only: the ones to strip once their question is settled. */
-  listLiveCards(): { chatId: number; messageId: number; target: string; turn: string | null }[] {
+  listLiveCards(): { chatId: number; messageId: number; target: string; label: string; turn: string | null }[] {
     return this.db
       .prepare(
-        `SELECT chat_id as chatId, message_id as messageId, conductor_session_id as target, turn
+        `SELECT chat_id as chatId, message_id as messageId, conductor_session_id as target, label, turn
          FROM fleet_reply_target
          WHERE buttons = 1 AND created_at > datetime('now', '-1 day')`,
       )
-      .all() as { chatId: number; messageId: number; target: string; turn: string | null }[];
+      .all() as {
+      chatId: number;
+      messageId: number;
+      target: string;
+      label: string;
+      turn: string | null;
+    }[];
   }
 
   markCardSettled(chatId: number, messageId: number): void {

@@ -112,6 +112,7 @@ async function fixture(
       return nextId++;
     }),
     editMessageReplyMarkup: vi.fn(async () => undefined),
+    editMessageText: vi.fn(async () => undefined),
   };
 
   const sends: Array<{ sessionId: string; text: string }> = [];
@@ -198,7 +199,7 @@ describe("FleetController replies", () => {
 
     expect(sends).toEqual([]);
     expect(result.notice).toContain("moved on");
-    expect(telegram.editMessageReplyMarkup).toHaveBeenCalledWith(42, 100, []);
+    expect(telegram.editMessageText).toHaveBeenCalledWith(42, 100, expect.stringContaining("settled"), []);
   });
 
   it("refuses a swipe-reply to a card whose turn has moved on", async () => {
@@ -216,6 +217,18 @@ describe("FleetController replies", () => {
     const { controller, telegram, sessions, store, pushFinish } = await fixture();
     await pushFinish();
     expect(store.listLiveCards()).toHaveLength(1);
+    sessions[0]!.state = "working";
+
+    await (controller as unknown as { stripSettledCards(s: unknown): Promise<void> }).stripSettledCards({ sessions });
+
+    expect(telegram.editMessageText).toHaveBeenCalledWith(42, 100, expect.stringContaining("settled"), []);
+    expect(store.listLiveCards()).toHaveLength(0);
+  });
+
+  it("still strips the buttons when the settled card's text cannot be edited", async () => {
+    const { controller, telegram, sessions, store, pushFinish } = await fixture();
+    await pushFinish();
+    telegram.editMessageText.mockRejectedValueOnce(new Error("message can't be edited"));
     sessions[0]!.state = "working";
 
     await (controller as unknown as { stripSettledCards(s: unknown): Promise<void> }).stripSettledCards({ sessions });
