@@ -62,33 +62,94 @@ struct NaturalVoiceSection: View {
         }
     }
 
-    /// Installed engines can be picked; the rest are greyed with where to set them up.
-    @ViewBuilder private var engineRows: some View {
-        HStack {
-            Text(VoiceParityText.engineTitle)
-            Spacer()
-            Picker(VoiceParityText.engineTitle, selection: Binding(get: { natural.currentEngine?.id ?? "" }, set: { id in
-                if id != natural.currentEngine?.id { send(.natural(enabled: nil, voice: nil, engine: id)) }
-            })) {
-                ForEach(natural.pickableEngines) { Text($0.label).tag($0.id) }
+    /// Keep model choice together on its own screen, including models that need installation on the Mac.
+    private var engineRows: some View {
+        NavigationLink {
+            enginePicker
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "waveform")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Voice model")
+                    if let engine = natural.currentEngine {
+                        Text(engine.label).font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                }
+                Spacer(minLength: 0)
+                if busy { ProgressView().controlSize(.small) }
             }
-            .labelsHidden()
-            .disabled(busy)
-        }
-        .frame(minHeight: 44)
-        if let summary = natural.currentEngine?.summary, !summary.isEmpty {
-            Text(summary).font(.footnote).foregroundStyle(Theme.muted)
-        }
-        ForEach(natural.greyedEngines) { e in
-            HStack {
-                Text(e.label)
-                Spacer()
-                Text(VoiceParityText.engineGreyed).font(.footnote)
-            }
-            .foregroundStyle(Theme.muted)
             .frame(minHeight: 44)
-            .accessibilityElement(children: .combine)
         }
+        .disabled(busy)
+    }
+
+    private var enginePicker: some View {
+        List {
+            Section {
+                ForEach(natural.pickableEngines) { engine in
+                    Button {
+                        if engine.id != natural.currentEngine?.id {
+                            send(.natural(enabled: nil, voice: nil, engine: engine.id))
+                        }
+                    } label: {
+                        engineRow(engine, selected: engine.id == natural.currentEngine?.id)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(busy)
+                    .accessibilityAddTraits(engine.id == natural.currentEngine?.id ? .isSelected : [])
+                }
+            } header: {
+                Text("Installed on your Mac")
+            } footer: {
+                Text("Choose the model that speaks during phone calls.")
+            }
+            if !natural.greyedEngines.isEmpty {
+                Section {
+                    ForEach(natural.greyedEngines) { engine in
+                        engineRow(engine, selected: false, unavailable: true)
+                    }
+                } header: {
+                    Text("More models")
+                } footer: {
+                    Text("Install these models in Phone calls settings on your Mac.")
+                }
+            }
+            if let problem {
+                Section { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg.ignoresSafeArea())
+        .navigationTitle("Voice model")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func engineRow(_ engine: NaturalVoiceView.EngineChoice, selected: Bool, unavailable: Bool = false) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(engine.label).font(.body.weight(.medium)).foregroundStyle(Theme.ink)
+                if !engine.summary.isEmpty {
+                    Text(engine.summary).font(.footnote).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if unavailable {
+                    Text(engine.size.isEmpty ? VoiceParityText.engineGreyed : "\(VoiceParityText.engineGreyed) · \(engine.size)")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
+            }
+            Spacer(minLength: 8)
+            if selected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Theme.done)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private var emotionRow: some View {
