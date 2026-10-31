@@ -2,6 +2,8 @@ import LocalAuthentication
 import SqueakMacCore
 import SwiftUI
 
+enum VoiceSettingsTarget { case extensionToRing, pin }
+
 /// Settings › Phone calls: which extension Squeak rings when an agent is waiting on you. The PBX details live
 /// where the call is placed (the Home Assistant add-on, or this Mac's config); only this one changes day to day.
 struct VoiceSettingsPage: View {
@@ -18,10 +20,13 @@ struct VoiceSettingsPage: View {
     @State private var preview = VoicePreview()
     @State private var personaStyle: VoicePersona.Style = .terse
     @State private var personaCustom = ""
+    @FocusState private var extensionFocused: Bool
+    @FocusState private var pinFocused: Bool
 
     private var m: ChannelsModel { app.channels }
 
     var body: some View {
+        ScrollViewReader { proxy in
         Form {
             if let v = m.voice, v.isOn {
                 Section {
@@ -29,6 +34,7 @@ struct VoiceSettingsPage: View {
                         HStack {
                             TextField("", text: $typed, prompt: Text(v.defaultCallee ?? "101"))
                                 .textFieldStyle(.roundedBorder).frame(width: 110)
+                                .focused($extensionFocused)
                                 .onSubmit(save)
                             Button("Save", action: save).disabled(!changed(v) || m.voiceSaving)
                         }
@@ -60,10 +66,6 @@ struct VoiceSettingsPage: View {
             }
         }
         .settingsForm()
-        .onDisappear { preview.stop(); m.stopWatchingNaturalSetup() }
-        .onChange(of: m.voice?.natural) { _, _ in preview.stop() }
-        .sheet(isPresented: $pairingGateway, onDismiss: { m.endGatewayPairing() }) { GatewayPairSheet().environment(app) }
-        .sheet(isPresented: $showingCalls) { CallsSheet().environment(app) }
         .task {
             await m.refreshVoice()
             await m.refreshNaturalSetup()
@@ -72,6 +74,30 @@ struct VoiceSettingsPage: View {
                 if let p = m.voice?.persona { personaStyle = p.style; personaCustom = p.custom }
                 loaded = true
             }
+            await openRequestedControl(proxy)
+        }
+        }
+        .onDisappear { preview.stop(); m.stopWatchingNaturalSetup() }
+        .onChange(of: m.voice?.natural) { _, _ in preview.stop() }
+        .sheet(isPresented: $pairingGateway, onDismiss: { m.endGatewayPairing() }) { GatewayPairSheet().environment(app) }
+        .sheet(isPresented: $showingCalls) { CallsSheet().environment(app) }
+    }
+
+    private func openRequestedControl(_ proxy: ScrollViewProxy) async {
+        guard let target = app.voiceSettingsTarget else { return }
+        app.voiceSettingsTarget = nil
+        guard let voice = m.voice, voice.isOn else { return }
+        switch target {
+        case .extensionToRing:
+            await Task.yield()
+            proxy.scrollTo("extension", anchor: .center)
+            extensionFocused = true
+        case .pin:
+            guard let state = voice.pinState else { return }
+            if state == .none || state == .off { open(.turnOn) }
+            await Task.yield()
+            proxy.scrollTo("pin", anchor: .center)
+            if state == .none || state == .off { pinFocused = true }
         }
     }
 
@@ -626,7 +652,14 @@ struct VoiceSettingsPage: View {
     private func pinButtons<A: View, B: View>(_ a: A, _ b: B) -> some View { HStack { a; b; Spacer() } }
 
     private func pinField(_ label: String, _ text: Binding<String>) -> some View {
-        SecureField(label, text: text).textFieldStyle(.roundedBorder).frame(maxWidth: 220)
+        Group {
+            if label == "New PIN" {
+                SecureField(label, text: text).focused($pinFocused)
+            } else {
+                SecureField(label, text: text)
+            }
+        }
+        .textFieldStyle(.roundedBorder).frame(maxWidth: 220)
     }
 
     private func pinActions(_ title: String, enabled: Bool, _ go: @escaping () async -> Bool) -> some View {

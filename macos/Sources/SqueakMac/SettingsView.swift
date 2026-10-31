@@ -283,9 +283,14 @@ private struct SettingsPage: View {
     var body: some View {
         VStack(alignment: .center, spacing: 0) {
             HStack(alignment: .center, spacing: Space.m) {
-                Group { if section == .conductor { AgentMark(.conductor, size: 18) } else {
-                    Lucide(section.symbol, size: 18, color: section.headerColor)
-                } }
+                Group {
+                    switch section {
+                    case .conductor: AgentMark(.conductor, size: 22)
+                    case .telegram: ServiceMark(service: .telegram, size: 26)
+                    case .cliq: ServiceMark(service: .cliq, size: 26)
+                    default: Lucide(section.symbol, size: 18, color: section.headerColor)
+                    }
+                }
                     .frame(width: 38, height: 38)
                     .background(section.headerColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Radius.control))
                     .accessibilityHidden(true)

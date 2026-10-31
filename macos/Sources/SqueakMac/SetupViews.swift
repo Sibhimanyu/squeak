@@ -13,7 +13,6 @@ struct SetupSettings: View {
         let flow = model.setupFlow
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s) {
-                Text("Setup").font(Typo.title).foregroundStyle(Theme.ink)
                 Text("What Squeak set up, and what you skipped. Open any part to do it now.")
                     .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 ForEach(SetupStage.listed) { stage in row(stage, flow) }
@@ -102,7 +101,12 @@ struct SetupSettings: View {
         case .updateAddon: Task { await m.updateGatewayAddon() }
         case .testCall: Task { await m.testCall() }
         case .installVoice, .retryVoice: Task { await m.startNaturalSetup() }
-        case .setExtension, .setPin: model.openSettings(.voice)
+        case .setExtension:
+            model.voiceSettingsTarget = .extensionToRing
+            model.openSettings(.voice)
+        case .setPin:
+            model.voiceSettingsTarget = .pin
+            model.openSettings(.voice)
         }
     }
 

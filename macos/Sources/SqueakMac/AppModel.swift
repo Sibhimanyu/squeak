@@ -1159,6 +1159,8 @@ final class AppModel {
     /// Settings is a mode of the main window: the page on screen, or nil while it shows sessions.
     /// Leaving and coming back keeps the sidebar filter and the open chat, which Settings never touches.
     var settingsSection: SettingsSection?
+    /// One-time destination requested by the phone-call setup checklist.
+    var voiceSettingsTarget: VoiceSettingsTarget?
     /// The page the next visit starts on, so reopening Settings lands where it was left.
     @ObservationIgnored private var lastSettingsSection: SettingsSection = .general
 
