@@ -25,7 +25,7 @@ export interface GatewayDependencies {
   channel: string;
   key: string;
   /** Places the call to the owner's phone and runs the dialog (`BaresipLine.call`). */
-  line: { call(callee: string, dialog: CallDialog, audio?: Clip[]): Promise<CallResult> };
+  line: { call(callee: string, dialog: CallDialog, audio?: Clip[], macVoice?: boolean): Promise<CallResult> };
   /** The extension to ring when a request names none. A request may name one, but only an internal extension (checked on reading it). */
   callee: string | null;
   /** Read at each call, so a pin changed from an app applies at once. Null: calls tell, never take an answer. */
@@ -70,6 +70,9 @@ const REMEMBER = 200;
  * to the Mac, mirrored: a request counts only if it is sealed with the key, names its own id, is fresh and
  * is new; it is claimed (deleted) before the call so a copy cannot ring twice.
  */
+/** Clip documents read at once while a call follows the Mac's clips. */
+const CLIP_BATCH = 6;
+
 export class VoiceGateway {
   private readonly now: () => number;
   private unwatch: (() => void) | null = null;
@@ -221,6 +224,7 @@ export class VoiceGateway {
                 answerable ? (this.deps.pinRequired?.() ?? true) : true,
               ),
               request.audio,
+              request.audioFollows === true,
             )
           : { status: "failed", reason: "No phone extension is set. Set it in Squeak's settings on your Mac." };
       } finally {
@@ -265,18 +269,29 @@ export class VoiceGateway {
       try {
         for (;;) {
           if (stopped) break;
-          const docId = callAudioId(id, next);
-          const doc = await store.get(audioPath(channel, docId));
-          if (!doc) break;
-          next += 1;
-          const read = readAudio(key, docId, doc);
-          if (read && read.version === id && !stopped) {
-            seed(read.clips);
-            this.deps.onEvent?.(
-              "info",
-              `Mac voice clip ${next} arrived ${((this.now() - began) / 1000).toFixed(1)} s into the call`,
-            );
+          // Several at once: each read is a round trip on a slow link, and the clips are already all there.
+          const first = next;
+          const docs = await Promise.all(
+            Array.from({ length: CLIP_BATCH }, (_, i) => {
+              const docId = callAudioId(id, first + i);
+              return store.get(audioPath(channel, docId)).then((doc) => ({ docId, doc }));
+            }),
+          );
+          let got = 0;
+          for (const { docId, doc } of docs) {
+            if (!doc) break;
+            got += 1;
+            next += 1;
+            const read = readAudio(key, docId, doc);
+            if (read && read.version === id && !stopped) {
+              seed(read.clips);
+              this.deps.onEvent?.(
+                "info",
+                `Mac voice clip ${next} arrived ${((this.now() - began) / 1000).toFixed(1)} s into the call`,
+              );
+            }
           }
+          if (got < CLIP_BATCH) break;
         }
       } catch {
         // The next event or poll tries again.

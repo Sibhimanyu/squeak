@@ -214,18 +214,30 @@ export function phoneLine(
   /** The line quality of the call that just ended (set by the phone's `onQuality`); attached to an answered result. */
   quality: () => CallQuality | null = () => null,
 ): {
-  call(callee: string, dialog: CallDialog, audio?: Clip[]): Promise<CallResult>;
+  call(callee: string, dialog: CallDialog, audio?: Clip[], macVoice?: boolean): Promise<CallResult>;
 } {
-  const place = async (callee: string, dialog: CallDialog, audio?: Clip[]): Promise<CallResult> => {
-    const result = await placeCall(callee, dialog, audio);
+  const place = async (
+    callee: string,
+    dialog: CallDialog,
+    audio?: Clip[],
+    macVoice = false,
+  ): Promise<CallResult> => {
+    const result = await placeCall(callee, dialog, audio, macVoice);
     const measured = result.status === "answered" ? quality() : null;
     return result.status === "answered" && measured ? { ...result, quality: measured } : result;
   };
-  const placeCall = async (callee: string, dialog: CallDialog, audio?: Clip[]): Promise<CallResult> => {
+  const placeCall = async (
+    callee: string,
+    dialog: CallDialog,
+    audio?: Clip[],
+    macVoice = false,
+  ): Promise<CallResult> => {
     // The Mac's own recordings first: prewarm then finds them made and speaks only what is missing.
     if (audio) phone.seed?.(audio);
-    // Make what it will say while the phone rings, so the first word is there the moment you pick up.
-    phone.prewarm?.(dialog.prompts());
+    // Make what it will say while the phone rings, so the first word is there the moment you pick up. Not when the
+    // Mac's voice is on its way: making the same words here only keeps this machine busy, and a line the clip has not
+    // reached yet is said by the quick plain voice rather than waiting.
+    if (!macVoice) phone.prewarm?.(dialog.prompts());
     const dialled = await phone.dial(callee);
     if (dialled.status === "unanswered") return { status: "unanswered" };
     if (dialled.status === "failed") return { status: "failed", reason: dialled.reason };
