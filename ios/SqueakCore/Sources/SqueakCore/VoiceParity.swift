@@ -526,3 +526,136 @@ public enum VoiceParityText {
     public static let sampleBroke = "The sample couldn\u{2019}t finish playing. Try again."
     public static let historyFooter = "Every call Squeak made, and what happened."
 }
+
+/// When to ring, as the Mac describes it (`voice.hold`). Every key is optional on the wire; a missing one reads as the
+/// Mac's default, and a value outside its range is pulled into it.
+public struct VoiceHold: Codable, Equatable, Sendable {
+    public var holdAtMac: Bool
+    public var graceSeconds: Int
+    public var awayAfterSeconds: Int
+    public var sawItAwayAfterSeconds: Int
+    public var maxHoldMinutes: Int
+
+    public static let defaults = VoiceHold()
+
+    public init(holdAtMac: Bool = true, graceSeconds: Int = 45, awayAfterSeconds: Int = 90,
+                sawItAwayAfterSeconds: Int = 180, maxHoldMinutes: Int = 15) {
+        self.holdAtMac = holdAtMac
+        self.graceSeconds = HoldField.graceSeconds.clamp(graceSeconds)
+        self.awayAfterSeconds = HoldField.awayAfterSeconds.clamp(awayAfterSeconds)
+        self.sawItAwayAfterSeconds = HoldField.sawItAwayAfterSeconds.clamp(sawItAwayAfterSeconds)
+        self.maxHoldMinutes = HoldField.maxHoldMinutes.clamp(maxHoldMinutes)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = VoiceHold.defaults
+        // A key of the wrong type reads as the default rather than failing the whole view.
+        self.init(
+            holdAtMac: (try? c.decodeIfPresent(Bool.self, forKey: .holdAtMac)) ?? d.holdAtMac,
+            graceSeconds: (try? c.decodeIfPresent(Int.self, forKey: .graceSeconds)) ?? d.graceSeconds,
+            awayAfterSeconds: (try? c.decodeIfPresent(Int.self, forKey: .awayAfterSeconds)) ?? d.awayAfterSeconds,
+            sawItAwayAfterSeconds: (try? c.decodeIfPresent(Int.self, forKey: .sawItAwayAfterSeconds)) ?? d.sawItAwayAfterSeconds,
+            maxHoldMinutes: (try? c.decodeIfPresent(Int.self, forKey: .maxHoldMinutes)) ?? d.maxHoldMinutes)
+    }
+
+    enum CodingKeys: String, CodingKey { case holdAtMac, graceSeconds, awayAfterSeconds, sawItAwayAfterSeconds, maxHoldMinutes }
+
+    /// The change that moves `self` to `field`'s new value: one key, clamped, nil when nothing would change.
+    public func change(_ field: HoldField, to value: Int) -> VoiceHoldChange? {
+        let v = field.clamp(value)
+        guard v != field.value(in: self) else { return nil }
+        var c = VoiceHoldChange()
+        switch field {
+        case .graceSeconds: c.graceSeconds = v
+        case .awayAfterSeconds: c.awayAfterSeconds = v
+        case .sawItAwayAfterSeconds: c.sawItAwayAfterSeconds = v
+        case .maxHoldMinutes: c.maxHoldMinutes = v
+        }
+        return c
+    }
+
+    /// The toggle's change; nil when it already is that.
+    public func change(holdAtMac on: Bool) -> VoiceHoldChange? {
+        on == holdAtMac ? nil : VoiceHoldChange(holdAtMac: on)
+    }
+}
+
+/// Only the keys being changed; the Mac validates each strictly.
+public struct VoiceHoldChange: Equatable, Sendable {
+    public var holdAtMac: Bool?
+    public var graceSeconds: Int?
+    public var awayAfterSeconds: Int?
+    public var sawItAwayAfterSeconds: Int?
+    public var maxHoldMinutes: Int?
+    public init(holdAtMac: Bool? = nil, graceSeconds: Int? = nil, awayAfterSeconds: Int? = nil,
+                sawItAwayAfterSeconds: Int? = nil, maxHoldMinutes: Int? = nil) {
+        self.holdAtMac = holdAtMac; self.graceSeconds = graceSeconds; self.awayAfterSeconds = awayAfterSeconds
+        self.sawItAwayAfterSeconds = sawItAwayAfterSeconds; self.maxHoldMinutes = maxHoldMinutes
+    }
+}
+
+/// One of the four numbers, with its range (the Mac's), step and plain label.
+public enum HoldField: CaseIterable, Sendable {
+    case graceSeconds, awayAfterSeconds, sawItAwayAfterSeconds, maxHoldMinutes
+
+    public var range: ClosedRange<Int> {
+        switch self {
+        case .graceSeconds: return 15...600
+        case .awayAfterSeconds: return 30...900
+        case .sawItAwayAfterSeconds: return 30...1800
+        case .maxHoldMinutes: return 1...120
+        }
+    }
+
+    /// How far a stepper moves.
+    public var step: Int {
+        switch self {
+        case .graceSeconds, .awayAfterSeconds, .sawItAwayAfterSeconds: return 15
+        case .maxHoldMinutes: return 1
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .graceSeconds: return "Ring after"
+        case .awayAfterSeconds: return "I\u{2019}ve left the Mac after"
+        case .sawItAwayAfterSeconds: return "If I was at the Mac when it asked, wait"
+        case .maxHoldMinutes: return "Ring anyway after holding"
+        }
+    }
+
+    public func clamp(_ v: Int) -> Int { min(max(v, range.lowerBound), range.upperBound) }
+
+    public func value(in hold: VoiceHold) -> Int {
+        switch self {
+        case .graceSeconds: return hold.graceSeconds
+        case .awayAfterSeconds: return hold.awayAfterSeconds
+        case .sawItAwayAfterSeconds: return hold.sawItAwayAfterSeconds
+        case .maxHoldMinutes: return hold.maxHoldMinutes
+        }
+    }
+
+    /// "45 seconds", "3 minutes", "1 min 30 s" style, from the field's own unit.
+    public func display(_ v: Int) -> String {
+        if self == .maxHoldMinutes { return v == 1 ? "1 minute" : "\(v) minutes" }
+        if v < 60 { return "\(v) seconds" }
+        let m = v / 60, s = v % 60
+        if s == 0 { return m == 1 ? "1 minute" : "\(m) minutes" }
+        return "\(m) min \(s) s"
+    }
+
+    /// The value as shown with the stepper, e.g. "idle 3 minutes" for the two idle fields.
+    public func detail(_ v: Int) -> String {
+        switch self {
+        case .awayAfterSeconds, .sawItAwayAfterSeconds: return "\(display(v)) idle"
+        default: return display(v)
+        }
+    }
+}
+
+public enum HoldText {
+    public static let title = "When to call"
+    public static let toggle = "Hold the call while I\u{2019}m at the Mac"
+    public static let footer = "While you are at the Mac, Squeak waits instead of ringing, and drops the call if you answer there. If you saw the question and then stepped away, it waits longer before ringing."
+}

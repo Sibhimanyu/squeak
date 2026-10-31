@@ -1,6 +1,11 @@
 import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { Clip } from "./clips.js";
+import type { AnswerFollower } from "./answer-audio.js";
 import {
+  audioPath,
   downPath,
+  readAudio,
+  replyAudioId,
   newMessageId,
   readDown,
   sealUp,
@@ -28,6 +33,11 @@ export interface Uplink {
     /** A call in: the chat of the published list this call talks about. Absent: a call out, whose id names its chat. */
     from?: { dirVersion: string; choice: number },
   ): Promise<DownMessage | null>;
+  /**
+   * Follows the later sentences of an answer the Mac is still making (`audioFollows` on its reply): the documents
+   * `replyaudio-<messageId>-<n>`, n from 1. Absent in a test double: the answer is spoken whole.
+   */
+  followAnswer?(messageId: string, count: number): AnswerFollower;
 }
 
 export type UplinkStore = Pick<RtdbRest, "get" | "set" | "delete" | "watch">;
@@ -118,6 +128,78 @@ export class RelayUplink implements Uplink {
       // Transcribing, a model working out the answer and the Mac's voice: as long as an ask, and a little more.
       90_000,
     );
+  }
+
+  followAnswer(messageId: string, count: number): AnswerFollower {
+    const { store, channel, key } = this.options;
+    const clips = new Map<number, Clip>();
+    const waiters = new Set<() => void>();
+    let stopped = false;
+    let busy = false;
+    let again = false;
+    const pull = async (): Promise<void> => {
+      if (stopped) return;
+      if (busy) {
+        again = true;
+        return;
+      }
+      busy = true;
+      try {
+        // In order: the next sentence only, and on while they are there.
+        for (let index = 1; index < count && !stopped; index += 1) {
+          if (clips.has(index)) continue;
+          const docId = replyAudioId(messageId, index);
+          const doc = await store.get(audioPath(channel, docId));
+          if (!doc) break;
+          const read = readAudio(key, docId, doc);
+          // A document that does not check out is as good as missing: the add-on speaks that sentence itself.
+          if (read && read.version === messageId && read.clips.length === 1) clips.set(index, read.clips[0]!);
+          else break;
+          for (const wake of [...waiters]) wake();
+        }
+      } catch {
+        // The next event or poll tries again.
+      } finally {
+        busy = false;
+        if (again) {
+          again = false;
+          void pull();
+        }
+      }
+    };
+    const unwatch = store.watch(`channels/${channel}/voicedir`, () => void pull());
+    const poll = setInterval(() => void pull(), 1000);
+    poll.unref?.();
+    void pull();
+    return {
+      wait: (index, timeoutMs) =>
+        new Promise<Clip | null>((resolve) => {
+          const have = clips.get(index);
+          if (have) return resolve(have);
+          const done = (): void => {
+            const clip = clips.get(index);
+            if (clip || stopped) finish(clip ?? null);
+          };
+          const finish = (clip: Clip | null): void => {
+            clearTimeout(timer);
+            waiters.delete(done);
+            resolve(clip);
+          };
+          const timer = setTimeout(() => finish(null), timeoutMs);
+          timer.unref?.();
+          waiters.add(done);
+        }),
+      stop: () => {
+        if (stopped) return;
+        stopped = true;
+        unwatch();
+        clearInterval(poll);
+        for (const wake of [...waiters]) wake();
+        for (let index = 1; index < count; index += 1) {
+          void Promise.resolve(store.delete(audioPath(channel, replyAudioId(messageId, index)))).catch(() => undefined);
+        }
+      },
+    };
   }
 
   private async exchange(message: UpMessage, waitMs: number): Promise<DownMessage | null> {

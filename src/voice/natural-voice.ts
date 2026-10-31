@@ -760,6 +760,30 @@ export class NaturalVoice {
     return { text, mulaw: encodeMulaw(line).toString("base64") };
   }
 
+  /**
+   * The words one sentence at a time, each as its own telephone clip, handed over in order the moment it is made, so
+   * the first can be sent while the rest are still rendering (`onSentence` order as `line`). The sentences are those
+   * of `splitSentences`; a sentence that could not be made is skipped (its index is missing). The clip text is the
+   * sentence's own words. Only the first clip carries lead silence and only the last tail silence: the line adds a
+   * pad of its own between clips. Resolves when every sentence has been tried.
+   */
+  async sentenceClips(
+    text: string,
+    onClip: (part: { index: number; total: number; clip: Clip }) => void,
+    options: Omit<LineOptions, "onSentence"> = {},
+  ): Promise<void> {
+    const parts = splitSentences(text);
+    await this.line(text, {
+      ...options,
+      onSentence: ({ index, total, pcm }) => {
+        const words = parts[index];
+        if (!words) return;
+        const line = assembleLine([pcm], index === 0 ? LEAD_SILENCE_MS : 0, index === total - 1 ? TAIL_SILENCE_MS : 0);
+        onClip({ index, total, clip: { text: words, mulaw: encodeMulaw(line).toString("base64") } });
+      },
+    });
+  }
+
   /** The words as an 8 kHz WAV file, for a call this Mac places itself. Null if they could not be made. */
   async wav(text: string, options: LineOptions = {}): Promise<{ file: string; durationMs: number } | null> {
     const line = await this.line(text, options);

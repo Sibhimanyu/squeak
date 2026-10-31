@@ -219,6 +219,36 @@ final class VoiceParityTests: XCTestCase {
         XCTAssertEqual(try change(.favorites([])), #"{"favorites":[]}"#)
     }
 
+    func testHoldViewDecodesOptionalAndClamps() throws {
+        XCTAssertNil(try view(#"{"mode":"direct"}"#).hold)
+        // Missing keys are the defaults; wrong types and out-of-range numbers never fail the view.
+        let d = try view(#"{"mode":"direct","hold":{}}"#).hold
+        XCTAssertEqual(d, VoiceHold.defaults)
+        let h = try view(#"{"mode":"direct","hold":{"holdAtMac":false,"graceSeconds":5,"awayAfterSeconds":"x","sawItAwayAfterSeconds":99999,"maxHoldMinutes":30}}"#).hold
+        XCTAssertEqual(h, VoiceHold(holdAtMac: false, graceSeconds: 15, awayAfterSeconds: 90, sawItAwayAfterSeconds: 1800, maxHoldMinutes: 30))
+        XCTAssertEqual(try view(#"{"mode":"direct","hold":"nope"}"#).hold, nil)
+    }
+
+    func testHoldCommandIsOneKeyWithOnlyChangedKeys() throws {
+        XCTAssertEqual(try change(.hold(VoiceHoldChange(holdAtMac: false))), #"{"hold":{"holdAtMac":false}}"#)
+        XCTAssertEqual(try change(.hold(VoiceHoldChange(graceSeconds: 120, maxHoldMinutes: 30))),
+                       #"{"hold":{"graceSeconds":120,"maxHoldMinutes":30}}"#)
+        let h = VoiceHold.defaults
+        XCTAssertNil(h.change(.graceSeconds, to: 45))
+        XCTAssertNil(h.change(holdAtMac: true))
+        XCTAssertEqual(h.change(.graceSeconds, to: 5), VoiceHoldChange(graceSeconds: 15))
+        XCTAssertEqual(h.change(.sawItAwayAfterSeconds, to: 5000), VoiceHoldChange(sawItAwayAfterSeconds: 1800))
+        XCTAssertEqual(h.change(holdAtMac: false), VoiceHoldChange(holdAtMac: false))
+    }
+
+    func testHoldWords() {
+        XCTAssertEqual(HoldField.graceSeconds.display(45), "45 seconds")
+        XCTAssertEqual(HoldField.sawItAwayAfterSeconds.detail(180), "3 minutes idle")
+        XCTAssertEqual(HoldField.awayAfterSeconds.detail(90), "1 min 30 s idle")
+        XCTAssertEqual(HoldField.maxHoldMinutes.display(1), "1 minute")
+        XCTAssertEqual(HoldField.maxHoldMinutes.display(15), "15 minutes")
+    }
+
     func testQuickWorkspaceRules() {
         let offered = [WorkspaceChoice(key: "a", label: "A"), WorkspaceChoice(key: "b", label: "B")]
         let one = QuickWorkspaces.added([], candidates: offered)!

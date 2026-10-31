@@ -14,6 +14,7 @@ import {
   type DirectoryWorkspace,
 } from "./memo-protocol.js";
 import { judgeTranscript } from "./transcript-quality.js";
+import { speakReply } from "./answer-audio.js";
 import type { Uplink } from "./uplink.js";
 
 export interface InboundDependencies {
@@ -109,8 +110,13 @@ const actionPrompt = (label: string): string =>
 const talkPrompt = (label: string, terse = false): string =>
   terse ? `${label}.` : `${label}. Go ahead: ask me about it, or tell me what to do.`;
 /** Offered first when the Mac names the chat used last: 1 takes it, 2 goes to the menus. */
-export const lastChatPrompt = (label: string, greet: boolean, terse = false): string =>
-  `${greet ? hello(terse) : ""}Press 1 for ${label}, the last one you used. Press 2 for another chat. ${AGAIN}, or hash to hang up.`;
+export const lastChatPrompt = (
+  label: string,
+  greet: boolean,
+  terse = false,
+  why: "used" | "waiting" = "used",
+): string =>
+  `${greet ? hello(terse) : ""}Press 1 for ${label}, ${why === "waiting" ? "it's waiting on you" : "the last one you used"}. Press 2 for another chat. ${AGAIN}, or hash to hang up.`;
 /** Said when the recording came back as silence or a stock hallucination; the key is "record again" for the flow. */
 export const heardNothingPrompt = (recordAgain: string): string =>
   `I didn't hear anything. Press ${recordAgain} to record again, or hash to cancel.`;
@@ -199,7 +205,7 @@ export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean):
     : [];
   if (ask) fixed.push(SAYS.recordAsk, SAYS.askFail, SAYS.followUp, SAYS.limit);
   fixed.push(heardNothingPrompt(ask ? "3" : "2"));
-  const last = directory?.last ? [lastChatPrompt(directory.last.label, !askPin, terse)] : [];
+  const last = directory?.last ? [lastChatPrompt(directory.last.label, !askPin, terse, directory.last.why)] : [];
   // With a last chat the offer carries the greeting, so the menus behind "another chat" do not.
   const greetMenus = !askPin && last.length === 0;
   return [
@@ -339,7 +345,7 @@ async function conversation(call: PhoneCall, deps: InboundDependencies, terse: b
       const key = await menuKey(
         call,
         deps,
-        lastChatPrompt(offered.label, greet && attempt === 0, directory.terse === true),
+        lastChatPrompt(offered.label, greet && attempt === 0, directory.terse === true, offered.why),
       );
       if (key === null || key === "#") return bye(call, deps, SAYS.bye);
       if (key === "1") {
@@ -479,8 +485,7 @@ async function statusFlow(
       : { text: "" };
   }
   deps.trace?.("step: Status read out");
-  if (heard.audio) deps.seed?.([heard.audio]);
-  await speak(call, deps, heard.text);
+  await speakReply(call, heard, deps);
   return { text: heard.text };
 }
 
@@ -573,8 +578,7 @@ async function messageFlow(
       }
       if (reply?.status === "answer") {
         deps.trace?.("step: Question answered");
-        if (reply.audio) deps.seed?.([reply.audio]);
-        await speak(call, deps, reply.text);
+        await speakReply(call, reply, deps);
         return { text: reply.text };
       }
       askFails += 1;

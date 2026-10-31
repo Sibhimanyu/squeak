@@ -49,6 +49,7 @@ struct VoiceSettingsPage: View {
                 }
                 testSection(v)
                 if v.pauseKnown { pauseSection(v) }
+                if let hold = v.hold { holdSection(hold) }
                 if let persona = v.persona { personaSection(persona) }
                 if let natural = v.natural { naturalSection(natural) }
                 if let favorites = v.favorites { quickSection(favorites, candidates: v.workspaces ?? []) }
@@ -212,6 +213,43 @@ struct VoiceSettingsPage: View {
     }
 
     // MARK: Natural voice
+
+    private func holdSection(_ h: CallHold) -> some View {
+        func edit(_ change: (inout CallHold) -> Void) {
+            var next = h
+            change(&next)
+            Task { await m.setHold(next.clamped) }
+        }
+        return Section {
+            Toggle(isOn: Binding(get: { h.holdAtMac }, set: { on in edit { $0.holdAtMac = on } })) {
+                Text("Hold the call while I'm at the Mac")
+                Text("Squeak waits instead of ringing while you are using this Mac.")
+            }
+            Stepper(value: Binding(get: { h.graceSeconds }, set: { v in edit { $0.graceSeconds = v } }),
+                    in: CallHold.graceRange, step: CallHold.graceStep) {
+                LabeledContent("Ring after", value: CallHold.span(seconds: h.graceSeconds))
+            }
+            Stepper(value: Binding(get: { h.awayAfterSeconds }, set: { v in edit { $0.awayAfterSeconds = v } }),
+                    in: CallHold.awayRange, step: CallHold.awayStep) {
+                LabeledContent("I've left the Mac after", value: CallHold.span(seconds: h.awayAfterSeconds) + " idle")
+            }
+            .disabled(!h.holdAtMac)
+            Stepper(value: Binding(get: { h.sawItAwayAfterSeconds }, set: { v in edit { $0.sawItAwayAfterSeconds = v } }),
+                    in: CallHold.sawItRange, step: CallHold.sawItStep) {
+                LabeledContent("If I was at the Mac when it asked, wait", value: CallHold.span(seconds: h.sawItAwayAfterSeconds) + " idle")
+            }
+            .disabled(!h.holdAtMac)
+            Stepper(value: Binding(get: { h.maxHoldMinutes }, set: { v in edit { $0.maxHoldMinutes = v } }),
+                    in: CallHold.maxHoldRange, step: CallHold.maxHoldStep) {
+                LabeledContent("Ring anyway after holding", value: CallHold.minutes(h.maxHoldMinutes))
+            }
+            .disabled(!h.holdAtMac)
+            if let e = m.voiceError { Footnote(e) }
+        } header: { Text("When to call") } footer: {
+            Footnote("If you were at the Mac when the question came, you probably saw it, so Squeak waits the longer idle time before counting you as away. Questions you answer meanwhile never ring.")
+        }
+        .disabled(m.pauseBusy)
+    }
 
     private func personaSection(_ saved: VoicePersona) -> some View {
         let draft = VoicePersona(style: personaStyle, custom: personaCustom)

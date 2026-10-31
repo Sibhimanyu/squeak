@@ -7,7 +7,7 @@ import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { generateChannel } from "../remote/remote-crypto.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { LastChatStore } from "./last-chat.js";
-import { MemoInbox, type MemoTarget } from "./memo-inbox.js";
+import { LAST_CHAT_FRESH_MS, MemoInbox, type MemoTarget } from "./memo-inbox.js";
 import {
   dirPath,
   downPath,
@@ -88,6 +88,15 @@ describe("MemoInbox last chat", () => {
     return { id, down: doc ? readDown(key, id, doc) : null };
   }
 
+  it("forgets a chat used by phone hours ago: the one waiting is offered instead", () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "squeak-last-")), "last.json");
+    const store = new LastChatStore(file);
+    store.set("c1", 1_000);
+    expect(store.recent(LAST_CHAT_FRESH_MS, 1_000 + LAST_CHAT_FRESH_MS)).toBe("c1");
+    expect(store.recent(LAST_CHAT_FRESH_MS, 1_000 + LAST_CHAT_FRESH_MS + 1)).toBeNull();
+    expect(store.get()).toBe("c1");
+  });
+
   it("names nothing when no chat was used and none waits (an old directory)", async () => {
     await inbox.publish();
     expect((await directory())!.last).toBeUndefined();
@@ -96,14 +105,14 @@ describe("MemoInbox last chat", () => {
   it("falls back to the newest chat that waits on the person", async () => {
     targets[1]!.waiting = true;
     await inbox.publish();
-    expect((await directory())!.last).toEqual({ choice: 2, label: "blume · hub" });
+    expect((await directory())!.last).toEqual({ choice: 2, label: "blume · hub", why: "waiting" });
   });
 
   it("prefers the last chat used by phone, and ignores one that can no longer take a message", async () => {
     targets[1]!.waiting = true;
     last = "c1";
     await inbox.publish();
-    expect((await directory())!.last).toEqual({ choice: 1, label: "squeak · voice" });
+    expect((await directory())!.last).toEqual({ choice: 1, label: "squeak · voice", why: "used" });
     last = "gone";
     targets[1]!.waiting = false;
     await inbox.publish();
@@ -129,7 +138,7 @@ describe("MemoInbox last chat", () => {
     expect(sent).toEqual(["c2"]);
     expect(last).toBe("c2");
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect((await directory())!.last).toEqual({ choice: 2, label: "blume · hub" });
+    expect((await directory())!.last).toEqual({ choice: 2, label: "blume · hub", why: "used" });
   });
 
   it("lists a last chat that no menu holds, off every menu, so a memo can name it", async () => {
@@ -138,7 +147,7 @@ describe("MemoInbox last chat", () => {
     await inbox.publish();
     const dir = (await directory())!;
     expect(dir.items).toHaveLength(6);
-    expect(dir.last).toEqual({ choice: 7, label: "chat 7" });
+    expect(dir.last).toEqual({ choice: 7, label: "chat 7", why: "used" });
     const memo = await upload({
       v: 1,
       kind: "memo",

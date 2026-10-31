@@ -84,11 +84,12 @@ export interface DirectoryDoc {
    */
   terse?: true;
   /**
-   * The chat the person used last (a message sent or a question asked by phone), else the newest one waiting on them:
-   * offered first, before any menu. `choice` indexes the version's chats as a memo's does, whether or not a menu lists
-   * it. Absent from an older Mac, and the call goes straight to the menus as it always has.
+   * The chat offered first, before any menu: the one used by phone in the last two hours, else the newest waiting on
+   * the person. `why` says which, so the prompt says it truly ("the last one you used" or "it's waiting on you");
+   * absent from an older Mac, which reads as used. `choice` indexes the version's
+   * chats as a memo's does, whether or not a menu lists it. No `last` at all: the call goes straight to the menus.
    */
-  last?: { choice: number; label: string };
+  last?: { choice: number; label: string; why?: "used" | "waiting" };
   /** Ids of the audio documents (`voicedir/audio-<version>-<i>`) holding the Mac's recordings of this list's prompts. */
   audio?: string[];
 }
@@ -99,6 +100,14 @@ const AUDIO_ID = /^[A-Za-z0-9_-]{1,80}$/;
 export const audioDocId = (version: string, index: number): string => `audio-${version}-${index}`;
 /** The Mac's clips for one outbound call, one document each, written while the phone rings (`audioFollows`). */
 export const callAudioId = (callId: string, index: number): string => `callaudio-${callId}-${index}`;
+/**
+ * One later sentence of a spoken answer (`audioFollows` on an `answer` or `talk`), keyed by the answer's own message id;
+ * `n` counts from 1, since sentence 0 travels in the answer. Same sealing and document shape as `callaudio-`.
+ */
+export const replyAudioId = (messageId: string, index: number): string => `replyaudio-${messageId}-${index}`;
+export const REPLY_AUDIO_PREFIX = "replyaudio-";
+/** Most sentences an answer may be sent in (an answer is at most MAX_ANSWER_CHARS); more is spoken as one clip. */
+export const MAX_ANSWER_PARTS = 30;
 export const audioPath = (channel: string, id: string): string => `channels/${channel}/${DIR_KIND}/${id}`;
 
 /** One audio document: the Mac's clips for call-in prompts, sealed apart from the list so the list stays small. */
@@ -147,14 +156,44 @@ export type TalkPhase = "say" | "confirm" | "hold" | "peek";
  */
 export type TalkNext = "listen" | "confirm" | "end" | "hold";
 
+/**
+ * The rest of a spoken answer is still being made (add-on 0.17.0 and newer): `audio` is the clip of `parts[0]` only
+ * and `parts` lists every sentence in order, each exactly the words its clip says. Sentence n (n >= 1) follows as the
+ * document `replyAudioId(<this message's id>, n)`; one that never arrives is spoken by the add-on's quick plain voice.
+ */
+export interface AudioFollows {
+  parts: string[];
+}
+
 export type DownMessage =
   | { v: 1; id: string; at: number; status: "transcript"; text: string; label: string; audio?: Clip }
   | { v: 1; id: string; at: number; status: "sent" }
   /** What to read aloud for an `ask` or `status`: plain sentences, at most `MAX_ANSWER_CHARS`. */
-  | { v: 1; id: string; at: number; status: "answer"; text: string; audio?: Clip }
+  | { v: 1; id: string; at: number; status: "answer"; text: string; audio?: Clip; audioFollows?: AudioFollows }
   | { v: 1; id: string; at: number; status: "refused"; reason: string }
   /** What to say for a `talk` turn, and what the call does next: listen again, listen for yes or no, or end. */
-  | { v: 1; id: string; at: number; status: "talk"; text: string; audio?: Clip; next: TalkNext };
+  | {
+      v: 1;
+      id: string;
+      at: number;
+      status: "talk";
+      text: string;
+      audio?: Clip;
+      audioFollows?: AudioFollows;
+      next: TalkNext;
+    };
+
+/** `audioFollows` from a sealed message: only with a first clip that says `parts[0]`, and well-formed parts. */
+function readFollows(value: unknown, first: Clip | undefined): AudioFollows | undefined {
+  if (!first || !isRecord(value) || !Array.isArray(value.parts)) return undefined;
+  const { parts } = value;
+  if (parts.length < 2 || parts.length > MAX_ANSWER_PARTS) return undefined;
+  if (!parts.every((part) => typeof part === "string" && part.length > 0 && part.length <= MAX_ANSWER_CHARS)) {
+    return undefined;
+  }
+  if (parts[0] !== first.text) return undefined;
+  return { parts: parts as string[] };
+}
 
 export function sealDirectory(key: string, doc: DirectoryDoc): ChannelDoc {
   return sealBody(key, "dir", "current", doc, doc.at);
@@ -198,7 +237,8 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
     const raw = body.last;
     if (!isRecord(raw) || typeof raw.label !== "string" || typeof raw.choice !== "number") return null;
     if (!Number.isInteger(raw.choice) || raw.choice < 1 || raw.choice > MAX_CHOICES) return null;
-    last = { choice: raw.choice, label: raw.label.slice(0, 80) };
+    const why = raw.why === "used" || raw.why === "waiting" ? raw.why : undefined;
+    last = { choice: raw.choice, label: raw.label.slice(0, 80), ...(why ? { why } : {}) };
   }
   let audio: string[] | undefined;
   if (body.audio !== undefined) {
@@ -327,11 +367,13 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
     case "answer": {
       if (typeof body.text !== "string" || body.text.trim() === "") return null;
       const spoken = readClip(body.audio);
+      const follows = readFollows(body.audioFollows, spoken);
       return {
         ...base,
         status: "answer",
         text: body.text.slice(0, MAX_ANSWER_CHARS),
         ...(spoken ? { audio: spoken } : {}),
+        ...(follows ? { audioFollows: follows } : {}),
       };
     }
     case "talk": {
@@ -339,12 +381,14 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
       if (body.next !== "listen" && body.next !== "confirm" && body.next !== "end" && body.next !== "hold") return null;
       if (body.text.trim() === "" && body.next !== "hold") return null;
       const spoken = readClip(body.audio);
+      const follows = readFollows(body.audioFollows, spoken);
       return {
         ...base,
         status: "talk",
         text: body.text.slice(0, MAX_ANSWER_CHARS),
         next: body.next,
         ...(spoken ? { audio: spoken } : {}),
+        ...(follows ? { audioFollows: follows } : {}),
       };
     }
     case "refused":

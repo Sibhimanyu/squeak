@@ -843,6 +843,11 @@ round trip over 300 ms; poor is over 60 ms, 5% or 400 ms (what G.711 without los
 buffer tolerate; ITU-T G.114 for the round trip). The apps add "Line quality: poor." to the test line when it is there;
 older ones ignore the key.
 
+The view's `voice` also carries `hold`: `{ holdAtMac, graceSeconds, awayAfterSeconds, sawItAwayAfterSeconds, maxHoldMinutes }`
+(all present; absent on an older Mac, so the phone hides the group). The signed `voice` command takes `{ hold: { ...some of
+those keys } }`: exactly the one outer key, whole integers in range (15 to 600, 30 to 900, 30 to 1800, 1 to 120), merged onto the
+saved rules. Rules in docs/voice.md, "When to call".
+
 The command is one signed envelope, exactly these keys:
 
 ```json

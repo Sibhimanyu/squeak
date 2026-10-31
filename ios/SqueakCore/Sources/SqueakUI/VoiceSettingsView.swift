@@ -59,6 +59,7 @@ struct VoiceSettingsView: View {
                     Text("Rings you with a made-up question. Nothing is sent to any chat.")
                 }
                 if voice.pause != nil { PauseSection(voice: voice) }
+                if let hold = voice.hold { HoldSection(hold: hold) }
                 // Only a Mac that sends its voice list takes these commands.
                 if let natural = voice.natural, natural.offered {
                     if let list = voice.favorites {
@@ -506,6 +507,47 @@ private struct PinSection: View {
         case .enable?: return "The PIN is on. It applies from the next call."
         case .reset(let next)?: return next == nil ? "The PIN is off." : "Your new PIN is set. It applies from the next call."
         default: return "Your pin is changed. It applies from the next call."
+        }
+    }
+}
+
+/// When to ring: the hold rules. Shown only for a Mac that sends `voice.hold`.
+private struct HoldSection: View {
+    @Environment(AppModel.self) private var model
+    let hold: VoiceHold
+    @State private var busy = false
+    @State private var problem: String?
+
+    var body: some View {
+        Section {
+            Toggle(HoldText.toggle, isOn: Binding(
+                get: { hold.holdAtMac },
+                set: { if let c = hold.change(holdAtMac: $0) { send(c) } }))
+                .frame(minHeight: 44)
+                .disabled(busy)
+            ForEach(HoldField.allCases, id: \.self) { field in
+                Stepper(value: Binding(
+                    get: { field.value(in: hold) },
+                    set: { if let c = hold.change(field, to: $0) { send(c) } }),
+                        in: field.range, step: field.step) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(field.title)
+                        Text(field.detail(field.value(in: hold))).font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                }
+                .frame(minHeight: 44)
+                .disabled(busy)
+            }
+            if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+        } header: { Text(HoldText.title) } footer: { Text(HoldText.footer) }
+    }
+
+    private func send(_ change: VoiceHoldChange) {
+        problem = nil
+        busy = true
+        Task {
+            problem = await model.changeVoice(.hold(change))
+            busy = false
         }
     }
 }

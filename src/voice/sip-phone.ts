@@ -61,7 +61,9 @@ export function summarizeCallStats(data: string): string | null {
 const STATS_EVERY_MS = 8_000;
 
 /** End-of-speech rules for a recording: how long a quiet spell after speech ends it, and how long to wait for any. */
-export const END_SILENCE_MS = 2_500;
+/** 1.6 s, down from 2.5: on a real call (2026-10-31) every turn waited out the full quiet spell after the person
+ * had plainly finished, adding a second to each answer; a natural pause mid-sentence is under a second. */
+export const END_SILENCE_MS = 1_600;
 export const NO_SPEECH_MS = 8_000;
 const FRAME_SAMPLES = 160; // 20 ms at 8 kHz
 const MIN_SPEECH_RMS = 300;

@@ -96,6 +96,7 @@ import {
   CALLBACK_ADDON,
   FOLLOW_UP_ADDON,
   HOLD_ADDON,
+  ANSWER_STREAM_ADDON,
   LATE_CLIPS_ADDON,
   VOICE_FIRST_ADDON,
 } from "../voice/addon-update.js";
@@ -1244,6 +1245,10 @@ export class SqueakApp {
       },
       requestCallback: (target, label, note, afterSend) => this.requestCallback(target, label, note, afterSend),
       speech: async (text) => (await this.promptClips.clips([text]))[0],
+      // An add-on from 0.17.0 plays an answer sentence by sentence as it is made; an older one gets one whole clip.
+      speechStream: (text, onPart) => this.naturalVoice.sentenceClips(text, onPart),
+      streamsAnswers: () =>
+        this.naturalVoice.usable && addonSupports(this.gatewayStatusReader().peek().version, ANSWER_STREAM_ADDON),
       note: (text) => this.announceCallNote(text),
       trace: (kind, text, extra) => this.traceMac(kind, text, extra),
     });
@@ -1630,6 +1635,8 @@ export class SqueakApp {
       ...this.voicePolicyView(),
       pause: this.voiceSettings.pause(),
       persona: this.voiceSettings.settings.persona ?? DEFAULT_PERSONA,
+      // When a question rings the phone: every key present, the defaults where the owner changed nothing.
+      hold: this.voiceSettings.hold(),
       favorites: this.voiceFavorites.list(),
       workspaces: this.voiceWorkspaces(),
       // The realistic voice this Mac makes for calls (`squeak voice-tts-setup` installs it).
@@ -2316,6 +2323,7 @@ export class SqueakApp {
         policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voiceRelay.quiet }),
         // "Call me back when you're done" is taken on a call (needs the inbox); an older add-on is told by a call.
         terse: () => isTerse(this.voiceSettings.settings.persona),
+        hold: () => this.voiceSettings.hold(),
         callbacks: this.voiceCallbacks,
         callbackVoice: () =>
           this.memoInbox !== null && addonSupports(this.gatewayStatusReader().peek().version, CALLBACK_ADDON),
@@ -2345,6 +2353,7 @@ export class SqueakApp {
       ...base,
       line: direct,
       canTakeKeys: () => pins.answerable(),
+      hold: () => this.voiceSettings.hold(),
       policy: new CallPolicy({ minGapMs: DEFAULT_MIN_GAP_MIN_MS, quiet: voice.quiet }),
     });
   }

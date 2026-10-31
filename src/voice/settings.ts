@@ -28,8 +28,69 @@ export interface VoicePersona {
 
 export const DEFAULT_PERSONA: VoicePersona = { style: "terse" };
 
+/** When a question rings the phone (voice-channel.ts): every key optional in the file, all present once read. */
+export interface HoldSettings {
+  /** Hold the call while the person is at the Mac. */
+  holdAtMac: boolean;
+  /** Seconds a question waits before Squeak rings. */
+  graceSeconds: number;
+  /** Idle this long means the person has left the Mac. */
+  awayAfterSeconds: number;
+  /** Idle this long counts as away for a question that came while the person was at the Mac (they likely saw it). */
+  sawItAwayAfterSeconds: number;
+  /** Ring anyway after holding this long at the Mac. */
+  maxHoldMinutes: number;
+}
+
+export const DEFAULT_HOLD: HoldSettings = {
+  holdAtMac: true,
+  graceSeconds: 45,
+  awayAfterSeconds: 90,
+  sawItAwayAfterSeconds: 180,
+  maxHoldMinutes: 15,
+};
+
+/** Inclusive integer ranges of the four numbers. */
+export const HOLD_RANGES = {
+  graceSeconds: [15, 600],
+  awayAfterSeconds: [30, 900],
+  sawItAwayAfterSeconds: [30, 1800],
+  maxHoldMinutes: [1, 120],
+} as const;
+
+export const HOLD_REFUSAL =
+  "Hold settings: holdAtMac true or false; ring after 15 to 600 s; away after 30 to 900 s; saw-it away after 30 to 1800 s; ring anyway after 1 to 120 min.";
+
+/** `{ hold: { ...some of the keys } }`, exactly the one outer key; whole integers in range, no unknown keys. Null otherwise. */
+export function readHoldChange(value: unknown): Partial<HoldSettings> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length !== 1 || keys[0] !== "hold") return null;
+  const raw = (value as Record<string, unknown>).hold;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const names = Object.keys(record);
+  if (names.length === 0) return null;
+  const out: Partial<HoldSettings> = {};
+  for (const name of names) {
+    if (name === "holdAtMac") {
+      if (typeof record.holdAtMac !== "boolean") return null;
+      out.holdAtMac = record.holdAtMac;
+      continue;
+    }
+    const range = (HOLD_RANGES as Record<string, readonly [number, number]>)[name];
+    const number = record[name];
+    if (!range || typeof number !== "number" || !Number.isInteger(number)) return null;
+    if (number < range[0] || number > range[1]) return null;
+    (out as Record<string, number>)[name] = number;
+  }
+  return out;
+}
+
 export interface VoiceSettings {
   callee: string | null;
+  /** Absent until the owner changes one: the defaults (`DEFAULT_HOLD`). */
+  hold?: Partial<HoldSettings>;
   /** Present only while calls are paused. */
   pause?: VoicePause;
   /** Absent until the owner picks one: the terse default. */
@@ -131,13 +192,18 @@ export class VoiceSettingsStore {
     return this.current;
   }
 
+  /** The hold rules in force: the defaults with whatever the owner changed. */
+  hold(): HoldSettings {
+    return { ...DEFAULT_HOLD, ...this.current.hold };
+  }
+
   /** The pause in force now, or null; an elapsed one is cleared here, in memory and in the file. */
   pause(): VoicePause | null {
     const pause = this.current.pause;
     if (!pause) return null;
     if (pause.until !== null && pause.until <= this.now()) {
-      const { callee, persona } = this.current;
-      this.save({ callee, ...(persona ? { persona } : {}) });
+      const { callee, persona, hold } = this.current;
+      this.save({ callee, ...(persona ? { persona } : {}), ...(hold ? { hold } : {}) });
       return null;
     }
     return { ...pause };
@@ -151,6 +217,9 @@ export class VoiceSettingsStore {
       };
       const persona = readPersonaChange({ persona: raw.persona });
       if (persona) settings.persona = persona;
+      // A damaged key reads as its default; the rest of the saved rules stay.
+      const hold = readSavedHold(raw.hold);
+      if (hold) settings.hold = hold;
       const pause = raw.pause;
       if (typeof pause === "object" && pause !== null && !Array.isArray(pause)) {
         const until = (pause as Record<string, unknown>).until;
@@ -182,15 +251,24 @@ export class VoiceSettingsStore {
 
   apply(request: unknown): { ok: true; settings: VoiceSettings } | { ok: false; reason: string } {
     const failed = { ok: false as const, reason: "This Mac could not save the voice settings." };
-    const isPause = typeof request === "object" && request !== null && !Array.isArray(request) && "pause" in request;
-    const keep = this.current.persona ? { persona: this.current.persona } : {};
+    const isKey = (key: string): boolean =>
+      typeof request === "object" && request !== null && !Array.isArray(request) && key in request;
+    const keep = {
+      ...(this.current.persona ? { persona: this.current.persona } : {}),
+      ...(this.current.hold ? { hold: this.current.hold } : {}),
+    };
+    const keepPause = this.current.pause ? { pause: this.current.pause } : {};
     let next: VoiceSettings;
-    if (typeof request === "object" && request !== null && !Array.isArray(request) && "persona" in request) {
+    if (isKey("hold")) {
+      const change = readHoldChange(request);
+      if (!change) return { ok: false, reason: HOLD_REFUSAL };
+      next = { callee: this.current.callee, ...keep, ...keepPause, hold: { ...this.current.hold, ...change } };
+    } else if (isKey("persona")) {
       const persona = readPersonaChange(request);
       if (!persona)
         return { ok: false, reason: "Pick terse, friendly, or custom (with a description up to 300 characters)." };
-      next = { callee: this.current.callee, persona, ...(this.current.pause ? { pause: this.current.pause } : {}) };
-    } else if (isPause) {
+      next = { callee: this.current.callee, ...keep, persona, ...keepPause };
+    } else if (isKey("pause")) {
       const choice = readPauseChange(request);
       if (!choice) return { ok: false, reason: "Pause for 1h, 4h, tomorrow, forever, or resume." };
       next = { callee: this.current.callee, ...keep };
@@ -198,9 +276,20 @@ export class VoiceSettingsStore {
     } else {
       const change = readVoiceChange(request);
       if (!change) return { ok: false, reason: "That is not an extension: use 2 to 6 digits." };
-      next = { callee: change.callee, ...keep, ...(this.current.pause ? { pause: this.current.pause } : {}) };
+      next = { callee: change.callee, ...keep, ...keepPause };
     }
     if (!this.save(next)) return failed;
     return { ok: true, settings: { ...next } };
   }
+}
+
+/** The saved `hold` object, keeping each key that is valid and dropping the rest (an old or edited file). */
+function readSavedHold(raw: unknown): Partial<HoldSettings> | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const out: Partial<HoldSettings> = {};
+  for (const [name, value] of Object.entries(raw)) {
+    const one = readHoldChange({ hold: { [name]: value } });
+    if (one) Object.assign(out, one);
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }

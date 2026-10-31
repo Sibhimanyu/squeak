@@ -13,19 +13,20 @@ import { answeredSummary } from "./call-summary.js";
 import { MissedCallFollowUp } from "./missed-call.js";
 import { judgeCallback, type CallbackRequest, type CallbackRequests } from "./callbacks.js";
 import { LINE_BUSY_REASON } from "./phone.js";
+import { DEFAULT_HOLD, type HoldSettings } from "./settings.js";
 import type { CallPolicy } from "./policy.js";
 import type { CallFollow, VoiceLine } from "./relay-line.js";
 import type { CallScript } from "./dialog.js";
 import { composeCallbackScript, composeScript, shouldCall } from "./script.js";
 
 /** Idle for this long and the person has left the Mac: a call is then the way to reach them. */
-export const AWAY_AFTER_S = 90;
+export const AWAY_AFTER_S = DEFAULT_HOLD.awayAfterSeconds;
 /** A question that sat in front of someone at the Mac this long goes to the phone anyway (a meeting, a video). */
-export const AT_MAC_HOLD_MS = 15 * 60_000;
+export const AT_MAC_HOLD_MS = DEFAULT_HOLD.maxHoldMinutes * 60_000;
 const AT_MAC_LOOK_MS = 30_000;
 
 /** How long a card waits before Squeak rings: long enough that you may have answered it already. */
-export const DEFAULT_GRACE_MS = 45_000;
+export const DEFAULT_GRACE_MS = DEFAULT_HOLD.graceSeconds * 1000;
 const FAILURE_NOTE_GAP_MS = 60 * 60_000;
 /** A call that finds the line busy (a call in, usually) waits this long in all for it to end, looking this often. */
 export const BUSY_WAIT_MS = 3 * 60_000;
@@ -63,6 +64,8 @@ export interface VoiceChannelDependencies {
   callbackVoice?: () => boolean;
   /** True while the person has paused calls (voice/settings.ts); cards still go everywhere else. */
   paused?: () => boolean;
+  /** The owner's hold rules (voice/settings.ts), read at each call; absent: `DEFAULT_HOLD`, and `graceMs` for the grace. */
+  hold?: () => HoldSettings;
   graceMs?: number;
   /** A one-off note to Telegram and Cliq: what an answer by phone did, or why a call failed. */
   note: (text: string) => void;
@@ -154,9 +157,18 @@ export class VoiceChannel {
       void this.ring(item, episode).catch((error: unknown) => {
         logger.warn("voice call failed", { error: error instanceof Error ? error.message : String(error) });
       });
-    }, this.deps.graceMs ?? DEFAULT_GRACE_MS);
+    }, this.graceMs());
     timer.unref();
     this.timers.set(episode, timer);
+  }
+
+  private holdRules(): HoldSettings {
+    return safely(() => this.deps.hold?.()) ?? DEFAULT_HOLD;
+  }
+
+  private graceMs(): number {
+    const rules = safely(() => this.deps.hold?.());
+    return rules ? rules.graceSeconds * 1000 : (this.deps.graceMs ?? DEFAULT_GRACE_MS);
   }
 
   /** The item as it is now, or null when it has been answered or moved on during the grace. */
@@ -405,21 +417,36 @@ export class VoiceChannel {
    */
   private async holdWhileAtMac(item: AttentionItem, episode: string): Promise<"go" | "gone"> {
     const idle = this.deps.idleSeconds;
+    const rules = this.holdRules();
+    if (!rules.holdAtMac) return "go";
     if (!idle || this.holding.has(episode)) return this.holding.has(episode) ? "gone" : "go";
     const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     const began = this.now();
     this.holding.add(episode);
     try {
       let said = false;
+      // Idle seconds at the first look: under the away line means at the Mac when the question came, so likely seen.
+      let sawIt: boolean | null = null;
       for (;;) {
         const seconds = await idle().catch(() => null);
-        if (seconds === null || seconds >= AWAY_AFTER_S) return "go";
-        if (this.now() - began >= AT_MAC_HOLD_MS) {
+        if (seconds === null) return "go";
+        sawIt ??= seconds < rules.awayAfterSeconds;
+        const awayAfter = sawIt ? rules.sawItAwayAfterSeconds : rules.awayAfterSeconds;
+        if (seconds >= awayAfter) {
+          if (sawIt) this.trace("step", `At the Mac when it came: calling after ${awayText(awayAfter)} away`);
+          return "go";
+        }
+        if (this.now() - began >= rules.maxHoldMinutes * 60_000) {
           this.trace("step", "Still at the Mac after a long wait: calling anyway");
           return "go";
         }
         if (!said) {
-          this.trace("step", "At the Mac: holding the call, the question is on screen");
+          this.trace(
+            "step",
+            sawIt
+              ? `At the Mac when it came: holding the call until ${awayText(awayAfter)} away`
+              : "Away when it came: holding the call",
+          );
           said = true;
         }
         await sleep(AT_MAC_LOOK_MS);
@@ -495,6 +522,10 @@ export class VoiceChannel {
     return "sent";
   }
 }
+
+/** "3 min" or "90 s" for a trace line. */
+const awayText = (seconds: number): string =>
+  seconds >= 120 && seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`;
 
 const summaryOf = (summary: string | null): { summary?: string } => (summary ? { summary } : {});
 

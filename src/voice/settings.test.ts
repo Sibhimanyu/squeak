@@ -4,10 +4,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_HOLD,
   isTerse,
   MAX_PERSONA_CHARS,
   pauseUntil,
   personaInstruction,
+  readHoldChange,
   readPauseChange,
   readPersonaChange,
   readVoiceChange,
@@ -168,5 +170,63 @@ describe("the call's persona", () => {
     const outcome = settings.apply({ persona: { style: "custom" } });
     expect(outcome).toMatchObject({ ok: false });
     expect(settings.settings.persona).toBeUndefined();
+  });
+});
+
+describe("hold settings", () => {
+  it("reads whole integers in range, some keys at a time, and refuses the rest", () => {
+    expect(readHoldChange({ hold: { graceSeconds: 15, maxHoldMinutes: 120, holdAtMac: false } })).toEqual({
+      graceSeconds: 15,
+      maxHoldMinutes: 120,
+      holdAtMac: false,
+    });
+    for (const bad of [
+      { hold: {} },
+      { hold: { graceSeconds: 14 } },
+      { hold: { graceSeconds: 601 } },
+      { hold: { awayAfterSeconds: 29 } },
+      { hold: { awayAfterSeconds: 901 } },
+      { hold: { sawItAwayAfterSeconds: 29 } },
+      { hold: { sawItAwayAfterSeconds: 1801 } },
+      { hold: { maxHoldMinutes: 0 } },
+      { hold: { maxHoldMinutes: 121 } },
+      { hold: { graceSeconds: 45.5 } },
+      { hold: { graceSeconds: "45" } },
+      { hold: { holdAtMac: "yes" } },
+      { hold: { other: 1 } },
+      { hold: [] },
+      { hold: { graceSeconds: 45 }, callee: "101" },
+      { hold: null },
+    ]) {
+      expect(readHoldChange(bad)).toBeNull();
+    }
+  });
+
+  it("defaults for an old file, saves a change, merges the next and keeps it across other changes", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "voice-settings-"));
+    const file = path.join(dir, "voice-settings.json");
+    fs.writeFileSync(file, JSON.stringify({ callee: "101" }));
+    const store = new VoiceSettingsStore(file);
+    expect(store.hold()).toEqual(DEFAULT_HOLD);
+    expect(store.apply({ hold: { graceSeconds: 60 } }).ok).toBe(true);
+    expect(store.apply({ hold: { sawItAwayAfterSeconds: 300 } }).ok).toBe(true);
+    expect(store.apply({ persona: { style: "friendly" } }).ok).toBe(true);
+    expect(store.apply({ pause: "1h" }).ok).toBe(true);
+    expect(store.apply({ callee: "102" }).ok).toBe(true);
+    const wanted = { ...DEFAULT_HOLD, graceSeconds: 60, sawItAwayAfterSeconds: 300 };
+    expect(store.hold()).toEqual(wanted);
+    expect(new VoiceSettingsStore(file).hold()).toEqual(wanted);
+    expect(new VoiceSettingsStore(file).settings.persona).toEqual({ style: "friendly" });
+    expect(new VoiceSettingsStore(file).pause()).not.toBeNull();
+    const refused = store.apply({ hold: { graceSeconds: 5 } });
+    expect(refused.ok).toBe(false);
+    expect(store.hold()).toEqual(wanted);
+  });
+
+  it("keeps the valid keys of a damaged file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "voice-settings-"));
+    const file = path.join(dir, "voice-settings.json");
+    fs.writeFileSync(file, JSON.stringify({ callee: null, hold: { graceSeconds: 5, awayAfterSeconds: 120, x: 1 } }));
+    expect(new VoiceSettingsStore(file).hold()).toEqual({ ...DEFAULT_HOLD, awayAfterSeconds: 120 });
   });
 });

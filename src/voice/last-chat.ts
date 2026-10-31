@@ -18,6 +18,11 @@ export class LastChatStore {
     return this.current?.target ?? null;
   }
 
+  /** The chat used last, only if that was within `maxAgeMs`: one used this morning is not "the last one" tonight. */
+  recent(maxAgeMs: number, now = Date.now()): string | null {
+    return this.current && now - this.current.at <= maxAgeMs ? this.current.target : null;
+  }
+
   set(target: string, at = Date.now()): void {
     if (!target || target.length > 300) return;
     this.current = { target, at };

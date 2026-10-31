@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.36
+
+- Settings › Phone calls › When to call: choose how long Squeak waits before ringing, when it counts you as away from the Mac, how long it holds a call while you're at the Mac, or turn holding off. New: if you were at the Mac when the question came, Squeak waits until you've been away 3 minutes (your choice) before ringing, since you likely saw it.
+- Calling in: spoken answers start after their first sentence instead of after the whole answer, Squeak stops listening sooner after you finish talking, and it offers "the last one you used" only for a chat from the last two hours (else the one waiting on you). Needs the phone-call add-on 0.17.0.
+
 ## 2.12.35
 
 - Settings › Voice says when a new voice is ready for calls. After you change the engine, voice or emotion, Squeak loads the voice, re-records the call prompts and sends them to the phone add-on; the line shows each step ("recording call prompts, 12 of 34…") and then "ready for calls". Until then a call may still use the old voice.

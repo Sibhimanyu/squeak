@@ -28,6 +28,8 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public var lastTest: LastTest?
     /// How the call's assistant speaks; nil from a daemon that predates it (hide the section).
     public var persona: VoicePersona?
+    /// When a call rings; nil from a daemon that predates it (hide the group).
+    public var hold: CallHold?
 
     public struct LastTest: Sendable, Equatable, Decodable {
         public var at: Double
@@ -68,7 +70,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         self.pause = pause; self.pauseKnown = pauseKnown ?? (pause != nil)
     }
 
-    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces, lastTest, persona }
+    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces, lastTest, persona, hold }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -84,6 +86,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         workspaces = try? c.decode([WorkspaceChoice].self, forKey: .workspaces)
         lastTest = try? c.decode(LastTest.self, forKey: .lastTest)
         persona = try? c.decode(VoicePersona.self, forKey: .persona)
+        hold = try? c.decode(CallHold.self, forKey: .hold)
     }
 
     public var isOn: Bool { mode != "off" }

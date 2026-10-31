@@ -52,11 +52,11 @@ async function hear(ms: number, loud: boolean): Promise<void> {
 }
 
 describe("recording ends on end-of-speech", () => {
-  it("stops 2.5 s after the speaking stops, and says why", async () => {
+  it("stops 1.6 s after the speaking stops, and says why", async () => {
     const pending = call.record({ maxMs: 60_000, beep: true, endOnSilence: true });
     await vi.advanceTimersByTimeAsync(10);
     await hear(1500, true);
-    await hear(2400, false);
+    await hear(1500, false);
     expect(traces.some((l) => l.startsWith("step: Recording ended"))).toBe(false);
     await hear(300, false);
     const got = await vi.advanceTimersByTimeAsync(500).then(() => pending);

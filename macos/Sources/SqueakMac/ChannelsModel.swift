@@ -206,6 +206,23 @@ final class ChannelsModel {
         }
     }
 
+    /// Saves when a call rings and takes the daemon's answer as the truth.
+    func setHold(_ hold: CallHold) async {
+        voiceError = nil
+        if demo { voice?.hold = hold.clamped; return }
+        pauseBusy = true
+        defer { pauseBusy = false }
+        do {
+            if let answered = try await client.setVoiceHold(hold) {
+                voice = answered
+            } else {
+                voiceError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            voiceError = "Could not save: Squeak on this Mac did not answer."
+        }
+    }
+
     /// Turns the realistic call voice on or off, or picks its voice; takes the daemon's answer as the truth.
     func setNatural(enabled: Bool? = nil, voice: String? = nil, engine: String? = nil, emotion: NaturalEmotion? = nil) async {
         voiceError = nil

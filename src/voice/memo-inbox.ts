@@ -7,11 +7,16 @@ import { chunkClips, type Clip } from "./clips.js";
 import { spokenAnswer } from "./chat-brief.js";
 import { ASK_FAILED, inboundPrompts } from "./inbound-flow.js";
 import { clipOption } from "./script.js";
+import { splitSentences } from "./natural-cache.js";
 import { judgeTranscript } from "./transcript-quality.js";
 import type { ChoiceOption } from "../fleet/choices.js";
 import {
   audioDocId,
   audioPath,
+  MAX_ANSWER_PARTS,
+  REPLY_AUDIO_PREFIX,
+  replyAudioId,
+  type AudioFollows,
   DIR_KIND,
   MAX_AUDIO_DOCS,
   sealAudio,
@@ -69,7 +74,7 @@ export interface MemoInboxDependencies {
    * directory names that chat first (`last`); without it, or when it cannot take a message now, the newest chat waiting
    * on the person stands in.
    */
-  lastChat?: { get: () => string | null; set: (target: string) => void };
+  lastChat?: { get: () => string | null; recent?: (maxAgeMs: number) => string | null; set: (target: string) => void };
   /** Favourite workspaces for calling in, in any order. None: a flat list of chats, as before. */
   favorites?: () => Array<{ n: number; workspace: string; label: string }>;
   /** The Mac's own recordings of these call-in prompts (voice/natural-voice.ts); absent or empty: the add-on speaks. */
@@ -87,6 +92,13 @@ export interface MemoInboxDependencies {
   answer?: (target: string, label: string, question: string) => Promise<string>;
   /** The Mac's recording of an answer's words; undefined (or a failure) leaves it to the add-on. */
   speech?: (text: string) => Promise<Clip | undefined>;
+  /**
+   * The same words one sentence at a time (`NaturalVoice.sentenceClips`: each clip handed over in order as it is made,
+   * its text exactly the sentence of `splitSentences`). With `streamsAnswers()` true (an add-on that plays them as they
+   * arrive) an answer goes out after its first sentence and the rest follow as `replyaudio-` documents.
+   */
+  speechStream?: (text: string, onPart: (part: { index: number; total: number; clip: Clip }) => void) => Promise<void>;
+  streamsAnswers?: () => boolean;
   /**
    * Voice-first calls out: works out what a spoken reply was (a question to answer, an instruction to propose, the
    * end of the call). Read-only like `answer`; its output only ever chooses the words of a proposal the person must
@@ -155,6 +167,8 @@ interface Pending {
 
 const PENDING_TTL_MS = 10 * 60_000;
 const MAX_PENDING = 20;
+/** How long the chat used by phone stays "the last one you used". */
+export const LAST_CHAT_FRESH_MS = 2 * 60 * 60_000;
 /** Most recording passes for one list's prompts (each up to a minute of speech). */
 const MAX_AUDIO_PASSES = 8;
 const KEEP_VERSIONS = 8;
@@ -169,6 +183,9 @@ const READ_BACK_BUDGET_MS = 8_000;
  * status. The add-on waits for it (uplink.ts), and says "Still working on it" meanwhile.
  */
 const ANSWER_AUDIO_BUDGET_MS = 20_000;
+/** How long the later sentences of an answer stay in the database: the add-on deletes them, this is the backstop. */
+const REPLY_AUDIO_TTL_MS = 10 * 60_000;
+const REPLY_AUDIO_WRITE_MS = 90_000;
 /** A phone is not a keyboard: this many sends an hour is a stuck loop, not a person. */
 const MAX_SENDS_PER_HOUR = 20;
 const MAX_SPOKEN_LABEL = 60;
@@ -355,8 +372,14 @@ export class MemoInbox {
     }
     // The chat offered first: the last one used by phone, else the newest waiting on the person. It is always one of
     // `targets` (put at the end, off every menu, when no menu lists it), so a memo or a status can name it.
-    const lastTarget = this.deps.lastChat?.get();
-    const lastPick = all.find((t) => t.target === lastTarget) ?? all.find((t) => t.waiting);
+    // Used by phone only counts for a while: a chat from this morning offered as "the last one you used" tonight
+    // read as a stale list. Else the newest waiting on the person (`all` is newest first); else no offer, the menus.
+    const lastChat = this.deps.lastChat;
+    const lastTarget = lastChat ? (lastChat.recent ? lastChat.recent(LAST_CHAT_FRESH_MS) : lastChat.get()) : null;
+    const used = all.find((t) => t.target === lastTarget);
+    const waiting = all.find((t) => t.waiting);
+    const lastPick = used ?? waiting;
+    const why = used ? "used" : "waiting";
     let last: DirectoryDoc["last"];
     if (lastPick) {
       let index = targets.findIndex((t) => t.target === lastPick.target);
@@ -364,7 +387,7 @@ export class MemoInbox {
         targets.push(lastPick);
         index = targets.length - 1;
       }
-      if (index >= 0) last = { choice: index + 1, label: lastPick.label };
+      if (index >= 0) last = { choice: index + 1, label: lastPick.label, why };
     }
     const version = crypto
       .createHash("sha256")
@@ -464,7 +487,9 @@ export class MemoInbox {
     if (this.swept) return;
     this.swept = true;
     for (const { id } of await store.list(`channels/${channel}/${DIR_KIND}`)) {
-      if (id.startsWith("audio-") && !keep.has(id)) await store.delete(audioPath(channel, id)).catch(() => undefined);
+      if (id.startsWith(REPLY_AUDIO_PREFIX)) await store.delete(audioPath(channel, id)).catch(() => undefined);
+      else if (id.startsWith("audio-") && !keep.has(id))
+        await store.delete(audioPath(channel, id)).catch(() => undefined);
     }
   }
 
@@ -591,6 +616,57 @@ export class MemoInbox {
   }
 
   /**
+   * The spoken part of an answer or talk reply. With an add-on that follows (`streamsAnswers`) and a text of two or
+   * more sentences: waits only for the first sentence's clip (within the same budget), returns it with `audioFollows`,
+   * and writes each later sentence's clip, in order, as it is made. Otherwise the whole text as one clip, as before.
+   */
+  private async spokenFields(id: string, text: string): Promise<{ audio?: Clip; audioFollows?: AudioFollows }> {
+    const { speechStream, streamsAnswers, store, channel, key } = this.deps;
+    const parts = splitSentences(text);
+    if (!speechStream || !streamsAnswers?.() || parts.length < 2 || parts.length > MAX_ANSWER_PARTS) {
+      const audio = await this.answerAudio(text);
+      return audio ? { audio } : {};
+    }
+    let release: (clip: Clip | undefined) => void = () => undefined;
+    const first = new Promise<Clip | undefined>((resolve) => (release = resolve));
+    let abandoned = false;
+    let chain: Promise<void> = Promise.resolve();
+    const written: string[] = [];
+    void speechStream(text, ({ index, clip }) => {
+      if (index === 0) return release(clip.text === parts[0] ? clip : undefined);
+      if (clip.text !== parts[index]) return;
+      chain = chain.then(async () => {
+        if (abandoned) return;
+        const docId = replyAudioId(id, index);
+        try {
+          await store.set(audioPath(channel, docId), sealAudio(key, docId, id, [clip], this.now()), {
+            timeoutMs: REPLY_AUDIO_WRITE_MS,
+          });
+          written.push(docId);
+        } catch {
+          // The add-on speaks what does not arrive.
+        }
+      });
+    })
+      .catch(() => undefined)
+      .finally(() => release(undefined));
+    const audio = await Promise.race([
+      first,
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ANSWER_AUDIO_BUDGET_MS).unref()),
+    ]);
+    // The backstop: the add-on deletes these when the answer is spoken; a call that dropped leaves them to this.
+    setTimeout(() => {
+      abandoned = true;
+      void chain.then(() => Promise.allSettled(written.map((docId) => store.delete(audioPath(channel, docId)))));
+    }, REPLY_AUDIO_TTL_MS).unref();
+    if (!audio) {
+      abandoned = true;
+      return {};
+    }
+    return { audio, audioFollows: { parts } };
+  }
+
+  /**
    * A question about a chat, or where it stands, answered aloud. Read-only by construction: nothing here reaches
    * `send`, `canSend` or any writer, so a question can never become a message to an agent or change a chat.
    */
@@ -648,8 +724,8 @@ export class MemoInbox {
       { label, ms: Date.now() - began },
     );
     trace?.("said", text, { label });
-    const spoken = await this.answerAudio(text);
-    return { v: 1, id: message.id, at: this.now(), status: "answer", text, ...(spoken ? { audio: spoken } : {}) };
+    const spoken = await this.spokenFields(message.id, text);
+    return { v: 1, id: message.id, at: this.now(), status: "answer", text, ...spoken };
   }
 
   private async handle(message: UpMessage): Promise<DownMessage> {
@@ -760,8 +836,8 @@ export class MemoInbox {
     // A hold check-in with nothing to say is a silent "keep waiting".
     if (!text) return { v: 1, id, at: this.now(), status: "talk", text: "", next };
     this.deps.trace?.("said", text, { label });
-    const spoken = await this.answerAudio(text);
-    return { v: 1, id, at: this.now(), status: "talk", text, next, ...(spoken ? { audio: spoken } : {}) };
+    const spoken = await this.spokenFields(id, text);
+    return { v: 1, id, at: this.now(), status: "talk", text, next, ...spoken };
   }
 
   /** One check-in (`hold`) or key press (`peek`) of a call that is holding while a chat works. */

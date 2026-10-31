@@ -1704,6 +1704,8 @@ public struct VoiceView: Codable, Equatable, Sendable {
     public var workspaces: [WorkspaceChoice]?
     /// The newest calls with their steps. Only sent to a phone whose presence caps name "calls".
     public var calls: [CallEntry]?
+    /// When to ring: nil from a Mac that does not send it (the group is hidden).
+    public var hold: VoiceHold?
 
     /// An unknown word reads as "ask", the safe side.
     public struct PinPolicy: Codable, Equatable, Sendable {
@@ -1744,7 +1746,7 @@ public struct VoiceView: Codable, Equatable, Sendable {
         enum CodingKeys: String, CodingKey { case until }
     }
 
-    enum CodingKeys: String, CodingKey { case mode, callee, defaultCallee, lastTest, pin, policy, pause, natural, favorites, workspaces, calls }
+    enum CodingKeys: String, CodingKey { case mode, callee, defaultCallee, lastTest, pin, policy, pause, natural, favorites, workspaces, calls, hold }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1758,6 +1760,7 @@ public struct VoiceView: Codable, Equatable, Sendable {
         favorites = try? c.decodeIfPresent([FavoriteWorkspace].self, forKey: .favorites)
         workspaces = try? c.decodeIfPresent([WorkspaceChoice].self, forKey: .workspaces)
         calls = try? c.decodeIfPresent([CallEntry].self, forKey: .calls)
+        hold = try? c.decodeIfPresent(VoiceHold.self, forKey: .hold)
         if c.contains(.pause) {
             pause = (try? c.decodeIfPresent(Pause.self, forKey: .pause)) ?? Pause(active: false)
         } else {
@@ -1777,6 +1780,7 @@ public struct VoiceView: Codable, Equatable, Sendable {
         try c.encodeIfPresent(favorites, forKey: .favorites)
         try c.encodeIfPresent(workspaces, forKey: .workspaces)
         try c.encodeIfPresent(calls, forKey: .calls)
+        try c.encodeIfPresent(hold, forKey: .hold)
         if let pause {
             if pause.active { try c.encode(pause, forKey: .pause) } else { try c.encodeNil(forKey: .pause) }
         }
@@ -1809,10 +1813,11 @@ public struct VoiceView: Codable, Equatable, Sendable {
 
     public init(mode: String, callee: String? = nil, defaultCallee: String? = nil, lastTest: LastTest? = nil, pin: String? = nil,
                 policy: PinPolicy? = nil, pause: Pause? = nil, natural: NaturalVoiceView? = nil,
-                favorites: [FavoriteWorkspace]? = nil, workspaces: [WorkspaceChoice]? = nil, calls: [CallEntry]? = nil) {
+                favorites: [FavoriteWorkspace]? = nil, workspaces: [WorkspaceChoice]? = nil, calls: [CallEntry]? = nil,
+                hold: VoiceHold? = nil) {
         self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.lastTest = lastTest; self.pin = pin
         self.policy = policy; self.pause = pause
-        self.natural = natural; self.favorites = favorites; self.workspaces = workspaces; self.calls = calls
+        self.natural = natural; self.favorites = favorites; self.workspaces = workspaces; self.calls = calls; self.hold = hold
     }
 
     public var isOn: Bool { mode != "off" }
@@ -1890,6 +1895,8 @@ public enum VoiceChange: Equatable, Sendable {
     case natural(enabled: Bool?, voice: String?, engine: String? = nil, emotion: String? = nil)
     /// Quick workspaces, replacing the whole list: `{ "favorites": [{ "n", "workspace" }] }` (no label).
     case favorites([FavoriteWorkspace])
+    /// When to ring, as `{ "hold": { ...only the keys changed } }`. Only to a Mac that sends `hold`.
+    case hold(VoiceHoldChange)
 }
 
 extension VoiceChange: Encodable {
@@ -1923,6 +1930,13 @@ extension VoiceChange: Encodable {
             try inner.encodeIfPresent(voice, forKey: Key("voice"))
             try inner.encodeIfPresent(engine, forKey: Key("engine"))
             try inner.encodeIfPresent(emotion, forKey: Key("emotion"))
+        case .hold(let change):
+            var inner = c.nestedContainer(keyedBy: Key.self, forKey: Key("hold"))
+            try inner.encodeIfPresent(change.holdAtMac, forKey: Key("holdAtMac"))
+            try inner.encodeIfPresent(change.graceSeconds, forKey: Key("graceSeconds"))
+            try inner.encodeIfPresent(change.awayAfterSeconds, forKey: Key("awayAfterSeconds"))
+            try inner.encodeIfPresent(change.sawItAwayAfterSeconds, forKey: Key("sawItAwayAfterSeconds"))
+            try inner.encodeIfPresent(change.maxHoldMinutes, forKey: Key("maxHoldMinutes"))
         case .favorites(let list):
             var inner = c.nestedUnkeyedContainer(forKey: Key("favorites"))
             for f in list {

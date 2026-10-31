@@ -110,6 +110,15 @@ SIP extension works.
 - **Answering needs `SQUEAK_VOICE_PIN`.** A call goes to whoever picks up, and an answer can start an agent that may run
   with permissions off. Without a PIN a call can tell you but never takes an answer, unless you turned the PIN off on purpose (see "Changing the pin"). Two wrong PINs hang up.
 
+**When to call (`hold`).** `voice-settings.json` carries an optional `hold` (also in `GET /control/voice` and the phone view, always with
+every key; `POST /control/voice` and the phone's signed `voice` command take `{ hold: { ...some keys } }`, merged onto what is saved,
+whole integers only, unknown keys and out-of-range numbers refused): `holdAtMac` (true), `graceSeconds` (45, 15 to 600),
+`awayAfterSeconds` (90, 30 to 900), `sawItAwayAfterSeconds` (180, 30 to 1800) and `maxHoldMinutes` (15, 1 to 120). A question is held
+while the Mac's keyboard and mouse have been idle less than the away line, looking every 30 s, and rings anyway after the longest
+hold. If the person was at the Mac when the question was first looked at (idle under `awayAfterSeconds`) they probably saw it, so
+for that question the away line is `sawItAwayAfterSeconds`; the call trace says so ("At the Mac when it came: calling after 3 min
+away"). `VoiceChannel` reads the rules at each call (`hold`), so a change applies to the next question.
+
 1. `brew install baresip`.
 2. In 3CX, add an extension for Squeak (say 900). Note its extension number, Authentication ID and password.
 3. Add to Squeak's `.env`:
@@ -269,6 +278,22 @@ instead of waiting up to 25 s before dialling. The ring itself is 40 s (`RING_TI
 about 12 s is the phone or the PBX ending the call, not Squeak giving up. The call trace says when dialling started,
 when each clip was sent, and what played first.
 
+### Spoken answers play as they are made (add-on 0.17.0)
+
+An answer or a conversation turn used to wait for the Mac to render the whole text before replying, 7-9 s on a real
+call. For an add-on from 0.17.0 (`ANSWER_STREAM_ADDON`, read from the add-on's status like the others) and a text of two
+or more sentences, the Mac replies as soon as the first sentence's clip is ready (or the usual 20 s budget ends, then
+text only as before). The `answer` / `talk` message carries the full `text`, `audio` (the clip of the first sentence
+only) and `audioFollows: { parts }`: every sentence in order, each exactly the words its clip says
+(`splitSentences`, at most 30). Sentence n (n >= 1) then follows as the `voicedir` document
+`replyaudio-<message id>-<n>`, sealed and signed like `callaudio-` (`sealAudio`, version = the message id) and written in
+order as `NaturalVoice.sentenceClips` makes it. The add-on (`answer-audio.ts`, `RelayUplink.followAnswer`) plays the first
+clip at once and each later one as it arrives. If the next is not there when the previous ends it waits 1.5 s (the line
+rests on silence), then speaks the whole remainder in its quick plain voice: nothing slow is ever made mid-call. The
+add-on deletes the documents when the answer is done; the Mac deletes any left after 10 min and at start. Keys and
+recording behave as before, after the whole answer. An older add-on never gets `audioFollows` and keeps the single full
+clip; an older Mac never sends it, so a newer add-on speaks the whole answer as before.
+
 ### The chat you used last, and recordings it will not send blind
 
 - **Jump straight in** (`DirectoryDoc.last`, optional: `{ choice, label }`). The Mac names the chat you last used by
@@ -400,7 +425,7 @@ Phone calls > How it talks).
 
 ## How a recording ends, keys, busy lines, and the line itself (add-on 0.11.2)
 
-- A message recording ends on the first of: `#` (hash), 2.5 s of quiet after speech was heard (energy-based, read from
+- A message recording ends on the first of: `#` (hash), 1.6 s of quiet after speech was heard (2.5 s before add-on 0.17.0) (energy-based, read from
   the WAV as baresip writes it, `SpeechWatcher` in `sip-phone.ts`), the 60 s cap (the line says "I have to stop there"
   and carries on with what it has), or no speech 8 s after the beep ("I didn't hear anything. Press 1 to try again, or
   hash to hang up."). The call log says: `Recording started`, `Speech detected X s in`, and `Recording ended because:

@@ -1,4 +1,5 @@
 import type { Clip } from "./clips.js";
+import { speakReply } from "./answer-audio.js";
 import { reassure } from "./inbound-flow.js";
 import type { PhoneCall } from "./phone.js";
 import type { TalkPhase } from "./memo-protocol.js";
@@ -12,7 +13,7 @@ import type { Uplink } from "./uplink.js";
  */
 
 export interface TalkDependencies {
-  uplink: Pick<Uplink, "talk">;
+  uplink: Pick<Uplink, "talk" | "followAnswer">;
   /** Turns a recorded WAV into the small Opus clip that travels. */
   encode: (wavFile: string) => Promise<Buffer>;
   trace?: (line: string) => void;
@@ -67,8 +68,7 @@ async function holdLine(
       await speak(reply.status === "refused" ? reply.reason : SAYS.wrong);
       return "keys";
     }
-    if (reply.audio) deps.seed?.([reply.audio]);
-    if (reply.text) await speak(reply.text);
+    if (reply.text) await speakReply(call, reply, deps);
     if (reply.next === "hold") continue;
     return reply.next === "end" ? "ended" : "listen";
   }
@@ -119,8 +119,7 @@ export async function talkFlow(
       return "keys";
     }
     silences = 0;
-    if (reply.audio) deps.seed?.([reply.audio]);
-    await speak(reply.text);
+    await speakReply(call, reply, deps);
     if (reply.next === "end") return "ended";
     if (reply.next === "hold") {
       const held = await holdLine(call, deps, info, speak);
