@@ -418,7 +418,27 @@ final class ChannelsModel {
                 await self.refreshGateway()
                 let phase = watch.observe(self.gateway?.status ?? GatewayStatus(), now: Date())
                 self.gatewayUpdatePhase = phase
-                if phase != .updating { return }
+                if phase != .updating {
+                    if phase == .timedOut { self.watchLateUpdate(to: target) }
+                    return
+                }
+            }
+        }
+    }
+
+    /// After "didn't update": the install may just be slow (a small Home Assistant machine pulls the image and starts
+    /// the add-on in its own time), so keep looking for half an hour and turn the message into "Updated" if it arrives.
+    private func watchLateUpdate(to target: String) {
+        gatewayUpdateWatch = Task { [weak self] in
+            for _ in 0..<120 {
+                try? await Task.sleep(for: .seconds(15))
+                guard let self, !Task.isCancelled, self.gatewayUpdatePhase == .timedOut else { return }
+                await self.refreshGateway()
+                if let status = self.gateway?.status, status.state != .none, status.state != .stale,
+                   let v = status.version, GatewayUpdateWatch.version(v, atLeast: target) {
+                    self.gatewayUpdatePhase = .updated(v)
+                    return
+                }
             }
         }
     }

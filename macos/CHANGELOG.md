@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.29
+
+- Phone calls: Update add-on now waits up to 15 minutes for Home Assistant to install and restart the add-on (a small Home Assistant machine takes several), and if it still says it did not update, keeps watching and changes to "Updated" when the new version reports in.
+
 ## 2.12.28
 
 - Phone calls: pressing Update add-on shows "Updating the add-on…" at once and keeps the page responsive while Home Assistant is asked, instead of leaving a dimmed button.

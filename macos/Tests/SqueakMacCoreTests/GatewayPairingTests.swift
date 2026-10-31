@@ -202,9 +202,9 @@ import Testing
     @Test func givesAnAddonThatWentDownThreeMinutesToComeBack() {
         var w = watch()
         #expect(w.observe(status(.stale, "0.11.1"), now: t0.addingTimeInterval(60)) == .updating)
-        #expect(w.deadline == t0.addingTimeInterval(180))
+        #expect(w.deadline == t0.addingTimeInterval(900))
         #expect(w.observe(status(.stale, "0.11.1"), now: t0.addingTimeInterval(150)) == .updating)
-        #expect(w.observe(status(.stale, "0.11.1"), now: t0.addingTimeInterval(180)) == .timedOut)
+        #expect(w.observe(status(.stale, "0.11.1"), now: t0.addingTimeInterval(900)) == .timedOut)
         var back = watch()
         _ = back.observe(status(.stale, "0.11.1"), now: t0.addingTimeInterval(60))
         #expect(back.observe(status(.ok, "0.11.2"), now: t0.addingTimeInterval(170)) == .updated("0.11.2"))

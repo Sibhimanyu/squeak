@@ -142,7 +142,7 @@ public enum GatewayText {
 
     public static let checkedJustNow = "Checked just now"
 
-    public static let updating = "Updating the add-on… it restarts in a minute"
+    public static let updating = "Updating the add-on… Home Assistant installs it and restarts it, which can take a few minutes"
 
     /// Shown instead of a spinner once the add-on neither restarted nor changed version in time.
     public static let updateTimedOut =
@@ -283,7 +283,7 @@ public struct GatewayUpdateWatch: Sendable, Equatable {
     /// Seconds from the request until "didn't update", when the add-on never went quiet.
     public static let timeout: TimeInterval = 120
     /// The same, once the add-on has gone down for the update: it gets this long to come back with the new version.
-    public static let comeBackTimeout: TimeInterval = 180
+    public static let comeBackTimeout: TimeInterval = 900
 
     public let target: String
     public let from: String?
@@ -312,7 +312,7 @@ public struct GatewayUpdateWatch: Sendable, Equatable {
     }
 
     /// `x.y.z` compared per part; false when either side is not that shape.
-    static func version(_ v: String, atLeast target: String) -> Bool {
+    public static func version(_ v: String, atLeast target: String) -> Bool {
         let a = v.split(separator: ".").compactMap { Int($0) }, b = target.split(separator: ".").compactMap { Int($0) }
         guard a.count == 3, b.count == 3 else { return v == target }
         for i in 0..<3 where a[i] != b[i] { return a[i] > b[i] }
