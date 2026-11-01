@@ -170,10 +170,10 @@ import Testing
 
 @Suite struct NaturalEnginesTests {
     private static let payload = #"""
-    {"mode":"gateway","natural":{"installed":true,"enabled":true,"voice":"Ryan","voices":[{"id":"Ryan","label":"Ryan (male)"},{"id":"Aiden","label":"Aiden (male)"}],
+    {"mode":"gateway","natural":{"installed":true,"enabled":true,"voice":"Ryan","voices":[{"id":"Ryan","label":"Ryan"},{"id":"Aiden","label":"Aiden"}],
      "engine":"qwen3","emotion":"strong",
-     "engines":[{"id":"kokoro","label":"Kokoro (fast, plain)","summary":"Fast","size":"about 350 MB","installed":true,"emotion":false,"voices":[{"id":"af_heart","label":"Heart (female)"}],"voice":"af_heart","licence":"Apache-2.0"},
-                {"id":"qwen3","label":"Qwen3-TTS (expressive)","summary":"Expressive","size":"about 3 GB","installed":true,"emotion":true,"voices":[{"id":"Ryan","label":"Ryan (male)"}],"voice":"Ryan","licence":"Apache-2.0"},
+     "engines":[{"id":"kokoro","label":"Kokoro (fast, plain)","summary":"Fast","size":"about 350 MB","installed":true,"emotion":false,"voices":[{"id":"af_heart","label":"Heart"}],"voice":"af_heart","licence":"Apache-2.0"},
+                {"id":"qwen3","label":"Qwen3-TTS (expressive)","summary":"Expressive","size":"about 3 GB","installed":true,"emotion":true,"voices":[{"id":"Ryan","label":"Ryan"}],"voice":"Ryan","licence":"Apache-2.0"},
                 {"id":"ming","label":"Ming","installed":false,"emotion":true,"voices":[]}]}}
     """#
 
@@ -190,7 +190,7 @@ import Testing
         let n = try #require(try JSONDecoder().decode(VoiceSettings.self, from: Data(Self.payload.utf8)).natural)
         #expect(n.hasEngines && n.engines.count == 3 && n.currentEngineID == "qwen3")
         #expect(n.currentEngine?.label == "Qwen3-TTS (expressive)" && n.currentEngine?.size == "about 3 GB")
-        #expect(n.voiceOptions(for: "qwen3").first == NaturalVoiceOption(id: "Ryan", label: "Ryan (male)"))
+        #expect(n.voiceOptions(for: "qwen3").first == NaturalVoiceOption(id: "Ryan", label: "Ryan"))
         #expect(n.voice(for: "qwen3") == "Ryan" && n.voice(for: "kokoro") == "af_heart")
         #expect(n.emotionLevel == .strong && n.hasEmotion("qwen3") && !n.hasEmotion("kokoro"))
         #expect(n.engine("ming")?.installed == false && n.engine("ming")?.licence == nil)

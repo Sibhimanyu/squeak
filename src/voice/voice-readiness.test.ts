@@ -119,9 +119,10 @@ describe("VoiceReadinessTracker", () => {
 });
 
 describe("readinessVoiceLabel", () => {
-  it("drops the picker's detail but keeps (designed)", () => {
-    expect(readinessVoiceLabel("Sohee (female, Korean-native, clear English)")).toBe("Sohee");
-    expect(readinessVoiceLabel("Warm American woman (designed)")).toBe("Warm American woman (designed)");
+  it("drops any detail in parentheses", () => {
+    expect(readinessVoiceLabel("Sohee")).toBe("Sohee");
+    expect(readinessVoiceLabel("Grace")).toBe("Grace");
     expect(readinessVoiceLabel("sohee")).toBe("sohee");
+    expect(readinessVoiceLabel("Heart (female)")).toBe("Heart");
   });
 });

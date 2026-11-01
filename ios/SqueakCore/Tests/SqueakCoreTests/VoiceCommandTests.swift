@@ -185,7 +185,7 @@ final class VoiceParityTests: XCTestCase {
 
     func testDecodesTheDocumentedView() throws {
         let v = try view("""
-        {"mode":"gateway","natural":{"installed":true,"enabled":true,"voice":"af_heart","voices":[{"id":"af_heart","label":"Heart (female)"},{"id":"am_adam","label":"Adam (male)"}]},
+        {"mode":"gateway","natural":{"installed":true,"enabled":true,"voice":"af_heart","voices":[{"id":"af_heart","label":"Heart"},{"id":"am_adam","label":"Adam"}]},
          "favorites":[{"n":1,"workspace":"ws1","label":"squeak · main"}],
          "workspaces":[{"key":"ws1","label":"squeak · main"},{"key":"ws2","label":"blume"}],
          "calls":[{"id":"a","at":1761800000000,"kind":"agent","reason":"blocked_question","label":"squeak · main","outcome":"answered","letter":"B","sent":true,"durationMs":42000,
@@ -365,11 +365,11 @@ final class VoiceSampleCommandTests: XCTestCase {
 /// Engines on the phone: tolerant decoding, what can be picked, and the sample request's `engine`.
 final class VoiceEnginesTests: XCTestCase {
     let json = #"""
-    {"installed":true,"enabled":true,"voice":"Ryan","voices":[{"id":"Ryan","label":"Ryan (male)"}],"sample":true,
+    {"installed":true,"enabled":true,"voice":"Ryan","voices":[{"id":"Ryan","label":"Ryan"}],"sample":true,
      "engine":"qwen3","emotion":"strong",
      "engines":[
       {"id":"kokoro","label":"Kokoro","summary":"fast","size":"350 MB","installed":true,"emotion":false,"voices":[{"id":"af_heart","label":"Heart"}],"voice":"af_heart","licence":"Apache-2.0"},
-      {"id":"qwen3","label":"Qwen3-TTS","installed":true,"emotion":true,"voices":[{"id":"Ryan","label":"Ryan (male)"}],"voice":"Ryan"},
+      {"id":"qwen3","label":"Qwen3-TTS","installed":true,"emotion":true,"voices":[{"id":"Ryan","label":"Ryan"}],"voice":"Ryan"},
       {"id":"ming","label":"Ming","installed":false,"emotion":true}]}
     """#
 

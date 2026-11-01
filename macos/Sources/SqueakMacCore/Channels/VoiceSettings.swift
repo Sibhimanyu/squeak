@@ -395,9 +395,9 @@ public struct NaturalVoice: Sendable, Equatable, Decodable {
 
     /// A few of Kokoro's English voices; the daemon accepts any Kokoro name. Used only without a daemon list.
     public static let voices: [(id: String, title: String)] = [
-        ("af_heart", "Heart (female)"), ("af_bella", "Bella (female)"), ("af_nicole", "Nicole (female)"),
-        ("bf_emma", "Emma (British female)"), ("am_michael", "Michael (male)"), ("am_adam", "Adam (male)"),
-        ("bm_george", "George (British male)"),
+        ("af_heart", "Heart"), ("af_bella", "Bella"), ("af_nicole", "Nicole"),
+        ("bf_emma", "Emma"), ("am_michael", "Michael"), ("am_adam", "Adam"),
+        ("bm_george", "George"),
     ]
 
     public static let kokoroID = "kokoro"

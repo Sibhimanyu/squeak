@@ -16,7 +16,7 @@ export interface DesignedVoice {
 export const QWEN3_DESIGNED_VOICES: readonly DesignedVoice[] = [
   {
     id: "designed_warm_woman",
-    label: "Warm American woman (designed)",
+    label: "Grace",
     description:
       "A warm, friendly American woman in her early thirties with a natural, mid-pitched, smooth voice. Clear diction, relaxed and approachable.",
     embedding:
@@ -24,7 +24,7 @@ export const QWEN3_DESIGNED_VOICES: readonly DesignedVoice[] = [
   },
   {
     id: "designed_calm_man",
-    label: "Calm British man, deep (designed)",
+    label: "Arthur",
     description:
       "A calm, deep British man in his forties with a low-pitched, steady, resonant voice and a refined southern English accent. Clear diction, unhurried.",
     embedding:
@@ -32,7 +32,7 @@ export const QWEN3_DESIGNED_VOICES: readonly DesignedVoice[] = [
   },
   {
     id: "designed_indian_woman",
-    label: "Friendly Indian-English woman (designed)",
+    label: "Priya",
     description:
       "A friendly Indian-English woman in her late twenties with a bright, mid-pitched voice and a clear, natural Indian English accent. Warm and articulate.",
     embedding:

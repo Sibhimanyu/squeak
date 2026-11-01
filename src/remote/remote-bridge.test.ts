@@ -4576,8 +4576,8 @@ describe("RemoteBridge phone-call settings from the phone", () => {
       enabled: true,
       voice: "af_heart",
       voices: [
-        { id: "af_heart", label: "Heart (female)" },
-        { id: "am_adam", label: "Adam (male)" },
+        { id: "af_heart", label: "Heart" },
+        { id: "am_adam", label: "Adam" },
       ],
     };
     const sample = (voice: unknown = "am_adam", extra: Record<string, unknown> = {}) => ({
@@ -4630,8 +4630,8 @@ describe("RemoteBridge phone-call settings from the phone", () => {
         engine: "kokoro",
         engines: [
           { id: "kokoro", installed: true, voices: natural.voices },
-          { id: "ming", installed: true, voices: [{ id: "US_Emma", label: "Emma (female)" }] },
-          { id: "qwen3", installed: false, voices: [{ id: "ryan", label: "Ryan (male)" }] },
+          { id: "ming", installed: true, voices: [{ id: "US_Emma", label: "Emma" }] },
+          { id: "qwen3", installed: false, voices: [{ id: "ryan", label: "Ryan" }] },
         ],
       };
       const preview = vi.fn<(voice: string, engine?: string) => Promise<Buffer>>(async () => Buffer.from("x"));
