@@ -431,7 +431,8 @@ still join to the same words. The add-on's trace says `Sent 3 pieces (2 while re
 
 ### The chat you used last, and recordings it will not send blind
 
-- **Jump straight in** (`DirectoryDoc.last`, optional: `{ choice, label }`). The Mac names the chat you last used by
+- **Jump straight in** (off since 2026-11-01: the owner wants a call in to go straight to "Which workspace?", so the daemon
+  passes no `lastChat` and the directory carries no `last`; the add-on and `MemoInbox` still support it) (`DirectoryDoc.last`, optional: `{ choice, label }`). The Mac names the chat you last used by
   phone (a message sent, or a question or status asked; saved in `voice-last-chat.json`, `last-chat.ts`), else the newest
   chat that waits on you, provided it can take a message now. After the PIN (or first, when it is skipped) the call says
   "Hello, this is Squeak. Press 1 for <chat>, the last one you used. Press 2 for another chat." Key 1 goes on as if

@@ -87,6 +87,7 @@ import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { TelegramAvatar } from "../telegram/avatar.js";
 import { BaresipLine } from "../voice/baresip-line.js";
+import { REFUSED_SAYS, nothingRunning } from "../voice/mac-says.js";
 import { DirectLine } from "../voice/direct-line.js";
 import { PinKeeper, type PinPolicy, type PinState } from "../voice/pin-keeper.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
@@ -146,7 +147,6 @@ import {
   type ChatBriefInputs,
 } from "../voice/chat-brief.js";
 import { VoiceFavoritesStore, workspaceKeyOf } from "../voice/favorites.js";
-import { LastChatStore } from "../voice/last-chat.js";
 import { cutAtWord, speakable, spokenChat, spokenChats, spokenWorkspace } from "../voice/spoken-labels.js";
 import { applyPhoneVoiceChange, phoneCalls } from "../voice/phone-voice.js";
 import { DEFAULT_PERSONA, isTerse, personaInstruction, VoiceSettingsStore } from "../voice/settings.js";
@@ -284,7 +284,6 @@ export class SqueakApp {
   /** The extension to ring, edited from the Mac app (voice-settings.json). */
   private readonly voiceSettings: VoiceSettingsStore;
   private readonly voiceFavorites: VoiceFavoritesStore;
-  private readonly lastVoiceChat: LastChatStore;
   private readonly voiceCallbacks: CallbackRequests;
   /** The Cliq webhook the channel posts through, for one-off notes (an awake session's end). */
   private cliqWebhook: CliqWebhook | null = null;
@@ -452,7 +451,6 @@ export class SqueakApp {
     this.voiceFavorites = new VoiceFavoritesStore(path.join(config.supportDir, "voice-favorites.json"), (key) =>
       this.workspaceLabel(key),
     );
-    this.lastVoiceChat = new LastChatStore(path.join(config.supportDir, "voice-last-chat.json"));
     this.voiceCallbacks = new CallbackRequests(path.join(config.supportDir, "voice-callbacks.json"));
     this.naturalSettings = new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json"), (engine) =>
       naturalInstalled(naturalPaths(config.supportDir, engine)),
@@ -1196,7 +1194,7 @@ export class SqueakApp {
       send: (target, text, onFailed) => this.router.send(target, text, onFailed),
       caller: () => this.voiceSettings.settings.callee,
       favorites: () => this.voiceFavorites.list().map((fav) => ({ ...fav, label: this.spokenFavoriteLabel(fav) })),
-      lastChat: this.lastVoiceChat,
+      // No "the last one you used" offer: a call in goes straight to the workspaces (owner's call, 2026-11-01).
       stateFile: path.join(this.config.supportDir, "voice-call-state.json"),
       // The call-in dialog in the Mac's own voice: every prompt, and the read-back of each message.
       audioClips: async (texts) => {
@@ -1335,12 +1333,12 @@ export class SqueakApp {
     afterSend: boolean,
   ): { ok: true } | { ok: false; reason: string } {
     const session = this.runtime.monitor.snapshot.sessions.find((s) => replyTargetFor(s) === target);
-    if (!session) return { ok: false, reason: "I can't find that chat any more." };
+    if (!session) return { ok: false, reason: REFUSED_SAYS.noCallbackChat };
     if (!afterSend && session.state !== "working") {
-      return { ok: false, reason: `Nothing is running in ${label} right now, so there is nothing to wait for.` };
+      return { ok: false, reason: nothingRunning(label) };
     }
     const request = this.voiceCallbacks.add(target, label, note, session.state === "working");
-    return request ? { ok: true } : { ok: false, reason: "There are too many call backs waiting already." };
+    return request ? { ok: true } : { ok: false, reason: REFUSED_SAYS.tooManyCallbacks };
   }
 
   /** What a call may read about one chat: its state, steps, last message, changes and background work. */
