@@ -287,6 +287,76 @@ describe("engines in one NaturalVoice", () => {
     }
   });
 
+  it("starts a waiting urgent render before any waiting background one on a shared worker, FIFO within each", async () => {
+    const { dir, pathsFor, requests } = fakeEngines();
+    const settings: NaturalSettings = { enabled: true, voice: "ryan", engine: "qwen3", emotion: "off" };
+    const natural = new NaturalVoice(pathsFor, () => settings, { cacheDir: path.join(dir, "cache") });
+    try {
+      const all = [
+        natural.render("bg one", undefined, "background"),
+        natural.render("bg two", undefined, "background"),
+        natural.render("bg three", undefined, "background"),
+        natural.render("bg four", undefined, "background"),
+        natural.render("urgent one", undefined, "urgent"),
+        natural.render("urgent two", undefined, "urgent"),
+      ];
+      expect((await Promise.all(all)).every((pcm) => pcm !== null)).toBe(true);
+      // The first was already running; then both urgent ones, then the background ones in the order asked.
+      expect(requests().map((r) => r.text)).toEqual([
+        "bg one",
+        "urgent one",
+        "urgent two",
+        "bg two",
+        "bg three",
+        "bg four",
+      ]);
+    } finally {
+      natural.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("renders an urgent sentence that is also queued as background without waiting for the background queue", async () => {
+    const { dir, pathsFor, requests } = fakeEngines();
+    const settings: NaturalSettings = { enabled: true, voice: "ryan", engine: "qwen3", emotion: "off" };
+    const natural = new NaturalVoice(pathsFor, () => settings, { cacheDir: path.join(dir, "cache") });
+    try {
+      const background = ["Alpha here.", "Bravo here.", "Charlie here.", "Delta here."].map((text) =>
+        natural.line(text, { priority: "background" }),
+      );
+      const urgent = natural.line("Delta here.", { priority: "urgent" });
+      expect(await urgent).not.toBeNull();
+      const order = requests().map((r) => r.text);
+      expect(order.indexOf("Delta here.")).toBeLessThanOrEqual(1);
+      expect((await Promise.all(background)).every((line) => line !== null)).toBe(true);
+    } finally {
+      natural.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("settles every waiting render when the worker is stopped under a stuck one", async () => {
+    const { dir, pathsFor } = fakeEngines();
+    const settings: NaturalSettings = { enabled: true, voice: "ryan", engine: "qwen3", emotion: "off" };
+    const natural = new NaturalVoice(pathsFor, () => settings, { cacheDir: path.join(dir, "cache") });
+    try {
+      const stuck = natural.render("This one never answers.", undefined, "background");
+      const waiting = [
+        natural.render("later background", undefined, "background"),
+        natural.render("later urgent", undefined, "urgent"),
+      ];
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      settings.engine = "ming";
+      settings.voice = "US_Emma";
+      expect(await natural.line("Squeak needs an answer.")).not.toBeNull();
+      expect(await stuck).toBeNull();
+      await Promise.all(waiting);
+    } finally {
+      natural.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keys the cache by engine, voice, mood and level, so switching never plays the wrong clip", async () => {
     const { dir, pathsFor, requests } = fakeEngines();
     const settings: NaturalSettings = { enabled: true, voice: "ryan", engine: "qwen3", emotion: "subtle" };

@@ -258,7 +258,9 @@ class WorkerProc {
   private ready: Promise<void> | null = null;
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
-  private chain: Promise<unknown> = Promise.resolve();
+  /** Renders waiting for their turn: an urgent one always starts before any background one; FIFO within each. */
+  private readonly queue: Record<RenderPriority, Array<() => Promise<void>>> = { urgent: [], background: [] };
+  private busy = false;
   /** Whether a start was ever requested (a death before that is not an unexpected one). */
   starts = 0;
 
@@ -339,6 +341,7 @@ class WorkerProc {
     speed: number,
     mood: Mood = "neutral",
     level: EmotionLevel = "off",
+    priority: RenderPriority = "urgent",
   ): Promise<Int16Array | null> {
     const run = async (): Promise<Int16Array | null> => {
       this.stopping = false;
@@ -387,9 +390,22 @@ class WorkerProc {
         fs.rmSync(out, { force: true });
       }
     };
-    const result = this.chain.then(run, run);
-    this.chain = result.catch(() => undefined);
-    return result;
+    return new Promise<Int16Array | null>((resolve, reject) => {
+      this.queue[priority].push(() => run().then(resolve, reject));
+      this.pump();
+    });
+  }
+
+  /** Starts the next waiting render if none runs: one at a time per worker, urgent first. */
+  private pump(): void {
+    if (this.busy) return;
+    const next = this.queue.urgent.shift() ?? this.queue.background.shift();
+    if (!next) return;
+    this.busy = true;
+    void next().finally(() => {
+      this.busy = false;
+      this.pump();
+    });
   }
 
   stop(signal: NodeJS.Signals = "SIGTERM"): void {
@@ -607,7 +623,7 @@ export class NaturalVoice {
     const runtime = engine === undefined || engine === this.engine ? this.current() : this.runtime(id);
     const delivery = this.delivery(text, id);
     const proc = this.procFor(runtime, priority);
-    return proc.render(text, voice ?? this.settings().voice, SPEED, delivery.mood, delivery.level);
+    return proc.render(text, voice ?? this.settings().voice, SPEED, delivery.mood, delivery.level, priority);
   }
 
   /** The background worker where an engine has one, else the only worker. */
@@ -649,7 +665,7 @@ export class NaturalVoice {
       made = (async () => {
         try {
           const proc = this.procFor(runtime, priority);
-          const pcm = await proc.render(text, voice, SPEED, delivery.mood, delivery.level);
+          const pcm = await proc.render(text, voice, SPEED, delivery.mood, delivery.level, priority);
           if (!pcm || pcm.length === 0) return null;
           const line = downsampleToLine(pcm);
           runtime.cache.put(key, line);
@@ -920,8 +936,15 @@ export class PromptClipCache {
     private readonly maxSeconds = PROMPT_RENDER_SECONDS,
   ) {}
 
-  /** `onProgress(done, total)` runs after each prompt that has a clip, cached or made. */
-  async clips(texts: readonly string[], onProgress?: (done: number, total: number) => void): Promise<Clip[]> {
+  /**
+   * `onProgress(done, total)` runs after each prompt that has a clip, cached or made. `priority` "background" is for
+   * preparing ahead: a call's own speech or a sample must not wait behind it on a shared worker.
+   */
+  async clips(
+    texts: readonly string[],
+    onProgress?: (done: number, total: number) => void,
+    priority: RenderPriority = "urgent",
+  ): Promise<Clip[]> {
     if (!this.natural.usable) return [];
     const voice = this.voice();
     const wanted = new Map<string, string>(texts.map((text) => [`${voice}\n${text}`, text]));
@@ -930,7 +953,7 @@ export class PromptClipCache {
     for (const [id, text] of wanted) {
       let clip = this.made.get(id);
       if (!clip && renderedBytes < this.maxSeconds * LINE_RATE) {
-        clip = (await this.natural.clip(text)) ?? undefined;
+        clip = (await this.natural.clip(text, { priority })) ?? undefined;
         if (clip) {
           this.made.set(id, clip);
           renderedBytes += Math.floor((clip.mulaw.length * 3) / 4);
@@ -966,37 +989,45 @@ export function joinClips(first: Clip, second: Clip, text: string, gapMs = JOIN_
  * rendered once per voice and kept; a call renders only what was heard and joins the two into one clip.
  */
 export class ReadBackClips {
-  private readonly tails = new Map<string, Promise<Clip | null>>();
+  private readonly tails = new Map<
+    string,
+    { made: Promise<Clip | null>; priority: RenderPriority; pending: boolean }
+  >();
 
   constructor(
     private readonly natural: Pick<NaturalVoice, "clip" | "usable">,
     private readonly voice: () => string,
   ) {}
 
-  private tailClip(tail: string): Promise<Clip | null> {
+  private tailClip(tail: string, priority: RenderPriority = "urgent"): Promise<Clip | null> {
     const id = `${this.voice()}\n${tail}`;
-    let made = this.tails.get(id);
-    if (!made) {
-      made = this.natural.clip(tail).catch(() => null);
-      this.tails.set(id, made);
+    let entry = this.tails.get(id);
+    // A call wanting a tail that is only queued as background work must not wait behind that queue: it asks again as
+    // urgent (the cache and in-flight renders make a repeat cheap) and its answer replaces the entry.
+    if (!entry || (priority === "urgent" && entry.priority === "background" && entry.pending)) {
+      const made = this.natural.clip(tail, { priority }).catch(() => null);
+      const mine = { made, priority, pending: true };
+      entry = mine;
+      this.tails.set(id, entry);
       void made.then((clip) => {
-        if (!clip && this.tails.get(id) === made) this.tails.delete(id);
+        mine.pending = false;
+        if (!clip && this.tails.get(id)?.made === made) this.tails.delete(id);
       });
       while (this.tails.size > 60) this.tails.delete(this.tails.keys().next().value as string);
     }
-    return made;
+    return entry.made;
   }
 
   /** Renders the suffix for each of these chats ahead of any call. */
   async prepare(labels: readonly string[], ask = false): Promise<void> {
     if (!this.natural.usable) return;
-    for (const label of new Set(labels)) await this.tailClip(readBackParts("", label, ask).tail);
+    for (const label of new Set(labels)) await this.tailClip(readBackParts("", label, ask).tail, "background");
   }
 
   /** Renders these fixed words ahead (the streamed read-back's head and tail), so a call finds them in the cache. */
   async prepareTexts(texts: readonly string[]): Promise<void> {
     if (!this.natural.usable) return;
-    for (const text of new Set(texts)) await this.tailClip(text);
+    for (const text of new Set(texts)) await this.tailClip(text, "background");
   }
 
   /** One clip saying exactly `readBackSentence(text, label)`; undefined when it should be left to the add-on. */

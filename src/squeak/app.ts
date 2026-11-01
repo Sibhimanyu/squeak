@@ -1195,8 +1195,10 @@ export class SqueakApp {
       // The call-in dialog in the Mac's own voice: every prompt, and the read-back of each message.
       audioClips: async (texts) => {
         const key = this.promptVoiceKey();
-        const clips = await this.promptClips.clips(texts, (done, total) =>
-          this.voiceReadiness.progress(key, done, total),
+        const clips = await this.promptClips.clips(
+          texts,
+          (done, total) => this.voiceReadiness.progress(key, done, total),
+          "background",
         );
         this.voiceReadiness.sending(key, clips.length, new Set(texts).size);
         return clips;

@@ -70,7 +70,7 @@ detection, retries; progress in bytes), but first looks for each file in the Hug
 `$HF_HOME/hub`, `~/.cache/huggingface/hub`) or a folder named by `SQUEAK_VOICE_WEIGHTS_DIR` (`<repo name>/<file>`) and
 hard-links a file of exactly the right size instead ("Using files already on this Mac"); a half download is a `.part`
 file, never taken as installed. Chatterbox's reference clips are made with Kokoro at setup (Kokoro is installed first
-when missing). The MLX engines run **one** worker (urgent and background share it); Kokoro keeps two.
+when missing). The MLX engines run **one** worker (urgent and background share it; its queue starts any waiting urgent render before any background one, so a sample or a live call never waits behind call prompts being prepared, though a render already running finishes first); Kokoro keeps two.
 
 - Settings `voice-natural.json`: `{ enabled, engine, voices: { <engine>: <voice> }, emotion: off | subtle | strong,
 voice }` (`voice` is Kokoro's, still written for a rolled-back daemon; the old `{ enabled, voice }` reads as Kokoro).
