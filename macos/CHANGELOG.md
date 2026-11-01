@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.41
+
+- Clicking a notification for a question shows its options as buttons (one tap sends the letter), with the full message behind Show context. Notifications now lead with the chat's state (Finished, Asking you something, Needs your approval, Plan to review, Hit an error) and carry the chat's name as the subtitle.
+
 ## 2.12.40
 
 - Settings › Phone calls has two new switches: Answer menus by voice (say a workspace or chat instead of pressing a number; keys still work) and Offer the chat that's waiting on you first (a call starts with the chat that needs you). A custom character now says that Squeak asks Claude once, on your Mac, to write the waiting lines when you save it.
