@@ -287,6 +287,15 @@ public enum NaturalEmotion: String, Sendable, CaseIterable, Identifiable {
     }
 }
 
+/// How fast the call voice speaks, as a multiplier of the engine's own pace. The daemon accepts exactly these.
+public enum NaturalSpeed {
+    public static let steps: [Double] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
+    /// "0.8×", "1×", "1.3×".
+    public static func title(_ speed: Double) -> String {
+        speed == speed.rounded() ? "\(Int(speed))×" : "\(speed)×"
+    }
+}
+
 /// One speech engine in `natural.engines`. Everything here is the daemon's word; nothing is computed in the app.
 public struct NaturalEngine: Sendable, Equatable, Decodable, Identifiable, Hashable {
     public var id: String
@@ -337,6 +346,8 @@ public struct NaturalVoice: Sendable, Equatable, Decodable {
     public var engine: String?
     /// "off", "subtle" or "strong"; nil from a daemon without engines.
     public var emotion: String?
+    /// Speaking speed multiplier; nil from a daemon that predates it (the control is hidden).
+    public var speed: Double?
     /// Every engine the daemon knows; empty from a daemon without engines.
     public var engines: [NaturalEngine]
     /// The current engine's voices; empty from an older daemon (Kokoro's list below stands in).
@@ -345,13 +356,13 @@ public struct NaturalVoice: Sendable, Equatable, Decodable {
     public var readiness: VoiceReadiness?
 
     public init(installed: Bool, enabled: Bool, voice: String, engine: String? = nil, emotion: String? = nil,
-                engines: [NaturalEngine] = [], voices: [NaturalVoiceOption] = [], readiness: VoiceReadiness? = nil) {
+                speed: Double? = nil, engines: [NaturalEngine] = [], voices: [NaturalVoiceOption] = [], readiness: VoiceReadiness? = nil) {
         self.installed = installed; self.enabled = enabled; self.voice = voice
-        self.engine = engine; self.emotion = emotion; self.engines = engines; self.voices = voices
+        self.engine = engine; self.emotion = emotion; self.speed = speed; self.engines = engines; self.voices = voices
         self.readiness = readiness
     }
 
-    private enum Keys: String, CodingKey { case installed, enabled, voice, engine, emotion, engines, voices, readiness }
+    private enum Keys: String, CodingKey { case installed, enabled, voice, engine, emotion, speed, engines, voices, readiness }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -360,6 +371,7 @@ public struct NaturalVoice: Sendable, Equatable, Decodable {
         voice = try c.decode(String.self, forKey: .voice)
         engine = try? c.decode(String.self, forKey: .engine)
         emotion = try? c.decode(String.self, forKey: .emotion)
+        speed = try? c.decode(Double.self, forKey: .speed)
         engines = (try? c.decode([NaturalEngine].self, forKey: .engines)) ?? []
         voices = (try? c.decode([NaturalVoiceOption].self, forKey: .voices)) ?? []
         readiness = try? c.decode(VoiceReadiness.self, forKey: .readiness)
@@ -402,17 +414,24 @@ public struct NaturalVoice: Sendable, Equatable, Decodable {
     /// The emotion level in force; "subtle" when the daemon said nothing or something unknown.
     public var emotionLevel: NaturalEmotion { emotion.flatMap(NaturalEmotion.init(rawValue:)) ?? .subtle }
 
+    /// The speed in force, snapped to a step; nil (hide the control) when the daemon sent none.
+    public var speedStep: Double? {
+        guard let speed else { return nil }
+        return NaturalSpeed.steps.first { abs($0 - speed) < 0.001 } ?? 1.0
+    }
+
     /// Sentence under the engine list for Kokoro-like engines with no emotion control.
     public static let noEmotionSentence = "This engine has no emotion control."
 
-    /// `{ "natural": { enabled?, voice?, engine?, emotion? } }`: only what changed.
+    /// `{ "natural": { enabled?, voice?, engine?, emotion?, speed? } }`: only what changed.
     public static func requestBody(enabled: Bool? = nil, voice: String? = nil, engine: String? = nil,
-                                   emotion: NaturalEmotion? = nil) -> Data {
+                                   emotion: NaturalEmotion? = nil, speed: Double? = nil) -> Data {
         var inner: [String: Any] = [:]
         if let enabled { inner["enabled"] = enabled }
         if let voice { inner["voice"] = voice }
         if let engine { inner["engine"] = engine }
         if let emotion { inner["emotion"] = emotion.rawValue }
+        if let speed { inner["speed"] = speed }
         return (try? JSONSerialization.data(withJSONObject: ["natural": inner], options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 }

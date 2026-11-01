@@ -749,7 +749,7 @@ export interface RemoteBridgeDependencies {
      * The sample the Mac app's "Play sample" plays (an 8 kHz mono WAV made with the call voice); null when it could
      * not be made or one is being made. Absent: the phone is not offered a sample.
      */
-    preview?(voice: string, engine?: string): Promise<Buffer | null>;
+    preview?(voice: string, engine?: string, speed?: number): Promise<Buffer | null>;
   } | null;
   hotspot?: {
     state(): HotspotState;

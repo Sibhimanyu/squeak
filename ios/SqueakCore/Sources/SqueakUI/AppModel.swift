@@ -1574,7 +1574,7 @@ final class AppModel {
             case .pause(let choice):
                 snapshot?.voice?.pause = choice == .resume ? .init(active: false)
                     : .init(active: true, until: choice == .forever ? nil : Date().addingTimeInterval(choice == .hour ? 3600 : 14400).timeIntervalSince1970 * 1000)
-            case .natural(let enabled, let voice, let engine, let emotion):
+            case .natural(let enabled, let voice, let engine, let emotion, let speed):
                 if let enabled { snapshot?.voice?.natural?.enabled = enabled }
                 if let engine {
                     snapshot?.voice?.natural?.engine = engine
@@ -1584,6 +1584,7 @@ final class AppModel {
                     }
                 }
                 if let emotion { snapshot?.voice?.natural?.emotion = emotion }
+                if let speed { snapshot?.voice?.natural?.speed = speed }
                 if let voice {
                     snapshot?.voice?.natural?.voice = voice
                     if let i = snapshot?.voice?.natural?.engines?.firstIndex(where: { $0.id == (engine ?? snapshot?.voice?.natural?.engine) }) {

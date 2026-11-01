@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.39
+
+- Settings › Phone calls › Voice has a Speed control under Emotion: 0.8× to 1.3×, for every voice engine. Squeak makes the voice at its natural pace and then speeds it up or slows it down without changing the pitch; the call prompts are recorded again at the new speed, and Play sample uses it.
+
 ## 2.12.38
 
 - Call history has a clearer list and timeline: choose a call to see its outcome, conversation and warnings, with technical events available when needed.

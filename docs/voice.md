@@ -82,6 +82,14 @@ voice }` (`voice` is Kokoro's, still written for a rolled-back daemon; the old `
   line) and each worker maps `(mood, level)` to its own controls; `off` is neutral for every line. Worker requests
   carry `mood` and `level`; every worker writes 24 kHz mono PCM16. The sentence cache key holds engine, model identity,
   voice, mood and level (Kokoro's keys are unchanged).
+- **Speaking speed.** `speed` in `voice-natural.json` and in `natural` (apply, the phone's `natural` command and the
+  view), exactly one of 0.8, 0.9, 1.0, 1.1, 1.2, 1.3 ("Choose a speed from 0.8 to 1.3." otherwise; absent = 1). One
+  method for every engine so they sound alike: the worker always renders at its own pace (Ming's mood speed captions
+  stay relative to that), then `time-stretch.ts` (WSOLA in pure TypeScript, pitch kept, no ffmpeg) changes the 24 kHz
+  PCM before the phone-line downsampling. Speed is part of the sentence-cache key (speed 1 keeps the old keys) and of
+  the in-flight key, and a change re-prepares the call prompts like a voice change. `POST /control/voice/preview` takes
+  an optional `speed` override beside `engine`; Kokoro's own `speed` parameter is not used, since it re-times the model
+  differently from the stretch on the other engines.
 - `GET /control/voice` `natural`: the current engine's `installed`, `enabled`, `voice`, `voices` as before, plus
   `engine`, `emotion` and `engines: [{ id, label, summary, size, installed, emotion, voices, voice, licence }]`.
 - Routes (token-gated, no CORS): `POST /control/voice/natural/setup` takes an optional `{ engine }` (absent = Kokoro;

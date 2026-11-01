@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { logger } from "../utils/logger.js";
 import { isEngineId, type EngineId } from "../voice/voice-engines.js";
+import { isSpeechSpeed } from "../voice/time-stretch.js";
 import { normalizeHookPayload } from "./hook-protocol.js";
 import { parseCursor } from "./transcript.js";
 import type { AgentKind, HookEvent } from "./types.js";
@@ -151,7 +152,7 @@ export interface IngressControl {
    */
   voice?: {
     read(): unknown;
-    preview?(voice: string, engine?: string): Promise<Buffer | null>;
+    preview?(voice: string, engine?: string, speed?: number): Promise<Buffer | null>;
     apply(
       request: unknown,
     ):
@@ -1078,19 +1079,20 @@ export class HookIngressServer {
           return;
         }
         const keys = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? Object.keys(parsed) : [];
-        const asked = parsed as { voice?: unknown; engine?: unknown };
-        // `{ voice }` or `{ voice, engine }`: the engine's own list decides whether the voice is one it has.
+        const asked = parsed as { voice?: unknown; engine?: unknown; speed?: unknown };
+        // `{ voice }`, `{ voice, engine }` or with a `speed`: the engine's own list decides whether the voice is one it has.
         if (
           !keys.includes("voice") ||
-          keys.some((key) => key !== "voice" && key !== "engine") ||
+          keys.some((key) => key !== "voice" && key !== "engine" && key !== "speed") ||
           typeof asked.voice !== "string" ||
           !/^[A-Za-z0-9_]{1,40}$/.test(asked.voice) ||
-          (asked.engine !== undefined && !isEngineId(asked.engine))
+          (asked.engine !== undefined && !isEngineId(asked.engine)) ||
+          (asked.speed !== undefined && !isSpeechSpeed(asked.speed))
         ) {
           respond(response, 400, "invalid voice");
           return;
         }
-        void preview(asked.voice, asked.engine as EngineId | undefined)
+        void preview(asked.voice, asked.engine as EngineId | undefined, asked.speed as number | undefined)
           .then((wav) => {
             if (response.destroyed) return;
             if (!wav) {

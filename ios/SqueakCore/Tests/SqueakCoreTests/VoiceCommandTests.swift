@@ -212,6 +212,8 @@ final class VoiceParityTests: XCTestCase {
         XCTAssertEqual(try change(.natural(enabled: nil, voice: "am_adam")), #"{"natural":{"voice":"am_adam"}}"#)
         XCTAssertEqual(try change(.natural(enabled: true, voice: "bf_emma")), #"{"natural":{"enabled":true,"voice":"bf_emma"}}"#)
         XCTAssertEqual(try change(.natural(enabled: nil, voice: nil, engine: "qwen3", emotion: "strong")), #"{"natural":{"emotion":"strong","engine":"qwen3"}}"#)
+        XCTAssertEqual(try change(.natural(enabled: nil, voice: nil, speed: 1.2)), #"{"natural":{"speed":1.2}}"#)
+        XCTAssertEqual(try change(.natural(enabled: nil, voice: nil, emotion: "off")), #"{"natural":{"emotion":"off"}}"#)
         // Favourites carry n and workspace only: never the label.
         XCTAssertEqual(
             try change(.favorites([FavoriteWorkspace(n: 1, workspace: "ws1", label: "squeak"), FavoriteWorkspace(n: 3, workspace: "ws3", label: "x")])),
@@ -370,6 +372,14 @@ final class VoiceEnginesTests: XCTestCase {
         XCTAssertEqual(n.emotionLevel, "strong")
         XCTAssertEqual(n.sampleEngine, "qwen3")
         XCTAssertEqual(n.engines?[2].voices, [])
+    }
+
+    func testSpeedIsReadFromTheView() throws {
+        let with = try JSONDecoder().decode(NaturalVoiceView.self, from: Data(#"{"installed":true,"enabled":true,"voice":"x","speed":0.9}"#.utf8))
+        XCTAssertEqual(with.speedStep, 0.9)
+        let without = try JSONDecoder().decode(NaturalVoiceView.self, from: Data(#"{"installed":true,"enabled":true,"voice":"x"}"#.utf8))
+        XCTAssertNil(without.speedStep)
+        XCTAssertEqual(SpeechSpeed.steps.map(SpeechSpeed.label), ["0.8×", "0.9×", "1×", "1.1×", "1.2×", "1.3×"])
     }
 
     func testOlderMacHasNoEnginesNoEmotionAndTodaysSampleBytes() throws {

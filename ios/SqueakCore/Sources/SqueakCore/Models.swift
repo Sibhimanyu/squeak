@@ -1900,8 +1900,8 @@ public enum VoiceChange: Equatable, Sendable {
     /// Pause or resume calls, as `{ "pause": "1h" }`.
     case pause(PauseChoice)
     /// The realistic voice, as `{ "natural": { "enabled"?, "voice"? } }`. Only to a Mac that sends `natural.voices`.
-    /// `engine` and `emotion` go only to a Mac that sends `natural.engines`.
-    case natural(enabled: Bool?, voice: String?, engine: String? = nil, emotion: String? = nil)
+    /// `engine` and `emotion` go only to a Mac that sends `natural.engines`, `speed` only to one that sends `natural.speed`.
+    case natural(enabled: Bool?, voice: String?, engine: String? = nil, emotion: String? = nil, speed: Double? = nil)
     /// Quick workspaces, replacing the whole list: `{ "favorites": [{ "n", "workspace" }] }` (no label).
     case favorites([FavoriteWorkspace])
     /// When to ring, as `{ "hold": { ...only the keys changed } }`. Only to a Mac that sends `hold`.
@@ -1936,12 +1936,13 @@ extension VoiceChange: Encodable {
             try c.encode(action, forKey: Key("pinAction"))
         case .pause(let choice):
             try c.encode(choice.rawValue, forKey: Key("pause"))
-        case .natural(let enabled, let voice, let engine, let emotion):
+        case .natural(let enabled, let voice, let engine, let emotion, let speed):
             var inner = c.nestedContainer(keyedBy: Key.self, forKey: Key("natural"))
             try inner.encodeIfPresent(enabled, forKey: Key("enabled"))
             try inner.encodeIfPresent(voice, forKey: Key("voice"))
             try inner.encodeIfPresent(engine, forKey: Key("engine"))
             try inner.encodeIfPresent(emotion, forKey: Key("emotion"))
+            try inner.encodeIfPresent(speed, forKey: Key("speed"))
         case .hold(let change):
             var inner = c.nestedContainer(keyedBy: Key.self, forKey: Key("hold"))
             try inner.encodeIfPresent(change.holdAtMac, forKey: Key("holdAtMac"))

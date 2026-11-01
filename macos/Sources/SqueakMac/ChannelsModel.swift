@@ -241,13 +241,13 @@ final class ChannelsModel {
     }
 
     /// Turns the realistic call voice on or off, or picks its voice; takes the daemon's answer as the truth.
-    func setNatural(enabled: Bool? = nil, voice: String? = nil, engine: String? = nil, emotion: NaturalEmotion? = nil) async {
+    func setNatural(enabled: Bool? = nil, voice: String? = nil, engine: String? = nil, emotion: NaturalEmotion? = nil, speed: Double? = nil) async {
         voiceError = nil
         if demo { return }
         pauseBusy = true
         defer { pauseBusy = false }
         do {
-            if let answered = try await client.setNaturalVoice(enabled: enabled, voice: voice, engine: engine, emotion: emotion) {
+            if let answered = try await client.setNaturalVoice(enabled: enabled, voice: voice, engine: engine, emotion: emotion, speed: speed) {
                 self.voice = answered
             } else {
                 voiceError = "Squeak on this Mac is older than this setting. Update it and try again."

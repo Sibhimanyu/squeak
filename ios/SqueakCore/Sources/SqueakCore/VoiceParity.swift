@@ -20,6 +20,8 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
     /// controls.
     public var engine: String?
     public var emotion: String?
+    /// Speaking speed multiplier (0.8 to 1.3). Absent from a Mac that predates it: no Speed row.
+    public var speed: Double?
     public var engines: [EngineChoice]?
     /// Whether a changed voice is ready for calls yet. Absent from a Mac that predates it: no line is shown.
     public var readiness: VoiceReadiness?
@@ -64,12 +66,12 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
     }
 
     public init(installed: Bool, enabled: Bool, voice: String, voices: [VoiceChoice]? = nil, sample: Bool? = nil,
-                engine: String? = nil, emotion: String? = nil, engines: [EngineChoice]? = nil, readiness: VoiceReadiness? = nil) {
+                engine: String? = nil, emotion: String? = nil, speed: Double? = nil, engines: [EngineChoice]? = nil, readiness: VoiceReadiness? = nil) {
         self.installed = installed; self.enabled = enabled; self.voice = voice; self.voices = voices; self.sample = sample
-        self.engine = engine; self.emotion = emotion; self.engines = engines; self.readiness = readiness
+        self.engine = engine; self.emotion = emotion; self.speed = speed; self.engines = engines; self.readiness = readiness
     }
 
-    enum CodingKeys: String, CodingKey { case installed, enabled, voice, voices, sample, engine, emotion, engines, readiness }
+    enum CodingKeys: String, CodingKey { case installed, enabled, voice, voices, sample, engine, emotion, speed, engines, readiness }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -80,6 +82,7 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
         sample = try? c.decode(Bool.self, forKey: .sample)
         engine = try? c.decode(String.self, forKey: .engine)
         emotion = try? c.decode(String.self, forKey: .emotion)
+        speed = try? c.decode(Double.self, forKey: .speed)
         engines = try? c.decode([EngineChoice].self, forKey: .engines)
         readiness = try? c.decode(VoiceReadiness.self, forKey: .readiness)
     }
@@ -105,6 +108,12 @@ public struct NaturalVoiceView: Codable, Equatable, Sendable {
 
     /// Emotion shows only for an engine that has it; Kokoro and an older Mac have none.
     public var showsEmotion: Bool { currentEngine?.emotion == true }
+
+    /// The speed in force snapped to a step; nil (no Speed row) for a Mac that sends none.
+    public var speedStep: Double? {
+        guard let speed else { return nil }
+        return SpeechSpeed.steps.first { abs($0 - speed) < 0.001 } ?? 1.0
+    }
 
     /// `off`, `subtle` or `strong`; anything else (or absent) reads as the default, subtle.
     public var emotionLevel: String { EmotionLevel.all.contains(emotion ?? "") ? emotion! : EmotionLevel.subtle }
@@ -200,6 +209,12 @@ public struct VoiceReadinessLine: Equatable, Sendable {
             return VoiceReadinessLine(style: .warning, text: reason, progress: nil)
         }
     }
+}
+
+/// The speaking speeds the Mac accepts, as multipliers of the engine's own pace.
+public enum SpeechSpeed {
+    public static let steps: [Double] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3]
+    public static func label(_ speed: Double) -> String { speed == speed.rounded() ? "\(Int(speed))×" : "\(speed)×" }
 }
 
 public enum EmotionLevel {
@@ -516,6 +531,7 @@ public enum VoiceParityText {
     public static let noWorkspaces = "No workspaces yet \u{2014} open a chat in Conductor."
     public static let engineTitle = "Engine"
     public static let engineGreyed = "Set up on your Mac"
+    public static let speedTitle = "Speed"
     public static let emotionTitle = "Emotion"
     public static let emotionFooter = "How much feeling the voice puts into each line, chosen from the words."
     public static let samplePlay = "Play sample"

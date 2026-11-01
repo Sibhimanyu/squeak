@@ -131,6 +131,7 @@ describe("NaturalSettingsStore", () => {
       enabled: true,
       engine: "kokoro",
       emotion: "subtle",
+      speed: 1,
       voices: {},
       voice: "af_heart",
     });
@@ -138,6 +139,18 @@ describe("NaturalSettingsStore", () => {
     expect(store.apply({ other: 1 }).ok).toBe(false);
     expect(store.apply({ enabled: false, voice: "am_michael" }).ok).toBe(true);
     expect(new NaturalSettingsStore(file).settings).toMatchObject({ enabled: false, voice: "am_michael" });
+  });
+
+  it("takes only the allowed speeds, saves one, and reads an old file as 1", () => {
+    const file = fileIn();
+    fs.writeFileSync(file, JSON.stringify({ enabled: true, voice: "af_heart" }));
+    const store = new NaturalSettingsStore(file);
+    expect(store.settings.speed).toBe(1);
+    for (const bad of [0.7, 1.05, 1.4, "1.1", null, 0, -1, Number.NaN]) {
+      expect(store.apply({ speed: bad })).toEqual({ ok: false, reason: "Choose a speed from 0.8 to 1.3." });
+    }
+    for (const good of [0.8, 0.9, 1.0, 1.1, 1.2, 1.3]) expect(store.apply({ speed: good })).toEqual({ ok: true });
+    expect(new NaturalSettingsStore(file).settings.speed).toBe(1.3);
   });
 
   it("reads the first form of the file as Kokoro, and keeps writing Kokoro's voice for an older daemon", () => {
@@ -239,6 +252,47 @@ describe("engines in one NaturalVoice", () => {
         ["neutral", "off"],
         ["neutral", "off"],
       ]);
+    } finally {
+      natural.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("renders at the engine's pace, stretches by the speed, and keeps each speed's sentences apart", async () => {
+    const { dir, pathsFor, requests } = fakeEngines();
+    const settings: NaturalSettings = { enabled: true, voice: "ryan", engine: "qwen3", emotion: "off", speed: 1 };
+    const natural = new NaturalVoice(pathsFor, () => settings, { cacheDir: path.join(dir, "cache") });
+    try {
+      const normal = (await natural.line("Squeak needs an answer."))!;
+      settings.speed = 1.25;
+      const fast = (await natural.line("Squeak needs an answer."))!;
+      settings.speed = 1;
+      const again = (await natural.line("Squeak needs an answer."))!;
+      expect(requests().map((r) => r.speed)).toEqual([1, 1]); // the engine always runs at its own pace
+      expect(again.length).toBe(normal.length); // speed 1 was a cache hit, not the stretched one
+      expect(requests()).toHaveLength(2); // and 1.25 was its own render
+      // 4800 samples at 24 kHz are 1600 on the line; the pads are the same either way.
+      const pads = normal.length - 1600;
+      expect(fast.length - pads).toBeGreaterThan(1600 * 0.8 * 0.95);
+      expect(fast.length - pads).toBeLessThan(1600 * 0.8 * 1.05);
+    } finally {
+      natural.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("previews at the current speed, or at the one passed with it", async () => {
+    const { dir, pathsFor } = fakeEngines();
+    const settings: NaturalSettings = { enabled: true, voice: "ryan", engine: "qwen3", emotion: "off", speed: 1 };
+    const natural = new NaturalVoice(pathsFor, () => settings, { cacheDir: path.join(dir, "cache") });
+    try {
+      const base = (await natural.preview("ryan"))!.length;
+      const faster = (await natural.preview("ryan", undefined, 1.3))!.length;
+      expect(faster).toBeLessThan(base);
+      settings.speed = 0.8;
+      const slower = (await natural.preview("ryan"))!.length;
+      expect(slower).toBeGreaterThan(base);
+      expect(slower).toBe((await natural.preview("ryan", undefined, 0.8))!.length);
     } finally {
       natural.stop();
       fs.rmSync(dir, { recursive: true, force: true });

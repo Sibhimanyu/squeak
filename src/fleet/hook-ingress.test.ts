@@ -775,15 +775,23 @@ describe("HookIngressServer control routes", () => {
         apply: () => {
           throw new Error("must not save settings");
         },
-        preview: async (voice) => {
-          seen.push(voice);
+        preview: async (voice, _engine, speed) => {
+          seen.push(speed === undefined ? voice : `${voice}@${speed}`);
           return voice === "af_heart" ? Buffer.from("RIFFsample") : null;
         },
       },
     });
     expect((await fetch(url, { method: "POST", body: '{"voice":"af_heart"}' })).status).toBe(403);
     expect((await fetch(url, { headers })).status).toBe(405);
-    for (const body of ["bad", "{}", "[]", '{"voice":"../../private"}', '{"voice":"af_heart","text":"secret"}']) {
+    for (const body of [
+      "bad",
+      "{}",
+      "[]",
+      '{"voice":"../../private"}',
+      '{"voice":"af_heart","text":"secret"}',
+      '{"voice":"af_heart","speed":1.05}',
+      '{"voice":"af_heart","speed":"1.1"}',
+    ]) {
       expect((await fetch(url, { method: "POST", headers, body })).status).toBe(400);
     }
     expect(seen).toEqual([]);
@@ -794,7 +802,8 @@ describe("HookIngressServer control routes", () => {
     expect(sample.headers.get("access-control-allow-origin")).toBeNull();
     expect(await sample.text()).toBe("RIFFsample");
     expect((await fetch(url, { method: "POST", headers, body: '{"voice":"af_missing"}' })).status).toBe(503);
-    expect(seen).toEqual(["af_heart", "af_missing"]);
+    expect((await fetch(url, { method: "POST", headers, body: '{"voice":"af_heart","speed":1.2}' })).status).toBe(200);
+    expect(seen).toEqual(["af_heart", "af_missing", "af_heart@1.2"]);
   });
 
   it("gates the realistic voice install, starts it once, and carries no CORS header", async () => {

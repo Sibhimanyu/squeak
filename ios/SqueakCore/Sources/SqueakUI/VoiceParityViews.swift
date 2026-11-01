@@ -72,6 +72,7 @@ struct NaturalVoiceSection: View {
                     }
                     .frame(minHeight: 44)
                     if natural.showsEmotion { emotionRow }
+                    if let speed = natural.speedStep { speedRow(speed) }
                     VoiceReadinessRow(readiness: natural.readiness)
                     if natural.sample == true { sampleRow }
                 }
@@ -200,6 +201,21 @@ struct NaturalVoiceSection: View {
         }
     }
 
+    private func speedRow(_ speed: Double) -> some View {
+        HStack {
+            Text(VoiceParityText.speedTitle)
+            Spacer()
+            Picker(VoiceParityText.speedTitle, selection: Binding(get: { speed }, set: { pick in
+                if pick != speed { send(.natural(enabled: nil, voice: nil, speed: pick)) }
+            })) {
+                ForEach(SpeechSpeed.steps, id: \.self) { Text(SpeechSpeed.label($0)).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .disabled(busy)
+        }
+        .frame(minHeight: 44)
+    }
+
     private var sampleRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
@@ -226,6 +242,7 @@ struct NaturalVoiceSection: View {
         .onChange(of: natural.voice) { _, _ in sample.stop() }
         .onChange(of: natural.engine) { _, _ in sample.stop() }
         .onChange(of: natural.emotion) { _, _ in sample.stop() }
+        .onChange(of: natural.speed) { _, _ in sample.stop() }
         .onDisappear { sample.stop() }
     }
 

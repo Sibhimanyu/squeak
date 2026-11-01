@@ -360,6 +360,16 @@ struct VoiceSettingsPage: View {
                 } else {
                     Footnote(NaturalVoice.noEmotionSentence)
                 }
+                if let speed = n.speedStep {
+                    Picker("Speed", selection: Binding(get: { speed }, set: { pick in
+                        preview.stop(); Task { await m.setNatural(speed: pick) }
+                    })) {
+                        ForEach(NaturalSpeed.steps, id: \.self) { Text(NaturalSpeed.title($0)).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(m.pauseBusy)
+                    .accessibilityLabel("Speaking speed")
+                }
                 HStack(spacing: 8) {
                     Button {
                         if preview.active { preview.stop() }

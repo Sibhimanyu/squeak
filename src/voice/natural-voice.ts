@@ -33,6 +33,7 @@ import {
   VOICE_ENGINES,
   type EngineId,
 } from "./voice-engines.js";
+import { DEFAULT_SPEED, isSpeechSpeed, timeStretch } from "./time-stretch.js";
 import { DEFAULT_EMOTION, EMOTION_LEVELS, moodFor, type EmotionLevel, type Mood } from "./voice-mood.js";
 
 /**
@@ -137,6 +138,8 @@ export interface NaturalSettings {
   engine?: EngineId;
   /** Absent: subtle. Engines without emotion ignore it. */
   emotion?: EmotionLevel;
+  /** Speaking speed, a multiplier of the engine's pace (`SPEED_STEPS`). Absent: 1. */
+  speed?: number;
   /** Each engine's own pick. */
   voices?: Partial<Record<EngineId, string>>;
 }
@@ -151,6 +154,7 @@ export class NaturalSettingsStore {
     enabled: true,
     engine: DEFAULT_ENGINE,
     emotion: DEFAULT_EMOTION,
+    speed: DEFAULT_SPEED as number,
     voices: {},
   };
 
@@ -164,6 +168,7 @@ export class NaturalSettingsStore {
       if (typeof raw.enabled === "boolean") this.current.enabled = raw.enabled;
       if (isEngineId(raw.engine)) this.current.engine = raw.engine;
       if (EMOTION_LEVELS.includes(raw.emotion as EmotionLevel)) this.current.emotion = raw.emotion as EmotionLevel;
+      if (isSpeechSpeed(raw.speed)) this.current.speed = raw.speed;
       if (typeof raw.voices === "object" && raw.voices !== null) {
         for (const id of ENGINE_IDS) {
           const voice = (raw.voices as Record<string, unknown>)[id];
@@ -184,19 +189,20 @@ export class NaturalSettingsStore {
       enabled: this.current.enabled,
       engine,
       emotion: this.current.emotion,
+      speed: this.current.speed,
       voices: { ...this.current.voices },
       voice: this.current.voices[engine] ?? VOICE_ENGINES[engine].defaultVoice,
     };
   }
 
-  /** `{ enabled?, voice?, engine?, emotion? }`, at least one, nothing else; a voice is for the engine set with it. */
+  /** `{ enabled?, voice?, engine?, emotion?, speed? }`, at least one, nothing else; a voice is for the engine set with it. */
   apply(request: unknown): { ok: true } | { ok: false; reason: string } {
     if (typeof request !== "object" || request === null || Array.isArray(request)) {
       return { ok: false, reason: "That is not a voice setting." };
     }
     const record = request as Record<string, unknown>;
     const keys = Object.keys(record);
-    const known = ["enabled", "voice", "engine", "emotion"];
+    const known = ["enabled", "voice", "engine", "emotion", "speed"];
     if (keys.length === 0 || keys.some((key) => !known.includes(key))) {
       return { ok: false, reason: "That is not a voice setting." };
     }
@@ -219,8 +225,12 @@ export class NaturalSettingsStore {
     if (record.emotion !== undefined && !EMOTION_LEVELS.includes(record.emotion as EmotionLevel)) {
       return { ok: false, reason: "Choose Off, Subtle or Strong." };
     }
+    if (record.speed !== undefined && !isSpeechSpeed(record.speed)) {
+      return { ok: false, reason: "Choose a speed from 0.8 to 1.3." };
+    }
     const next = {
       enabled: (record.enabled as boolean | undefined) ?? this.current.enabled,
+      speed: (record.speed as number | undefined) ?? this.current.speed,
       engine,
       emotion: (record.emotion as EmotionLevel | undefined) ?? this.current.emotion,
       voices: {
@@ -467,6 +477,7 @@ interface EngineRuntime {
   cache: SentenceCache;
 }
 
+/** What the engine renders at: always its own pace. The person's speed is applied after, by `timeStretch`. */
 const SPEED = 1.0;
 const WARM_TEXT = "Hello.";
 
@@ -511,6 +522,11 @@ export class NaturalVoice {
 
   private get level(): EmotionLevel {
     return this.settings().emotion ?? DEFAULT_EMOTION;
+  }
+
+  /** The speaking speed in force (1 when the settings say nothing). */
+  private get speed(): number {
+    return this.settings().speed ?? DEFAULT_SPEED;
   }
 
   private runtime(id: EngineId): EngineRuntime {
@@ -618,6 +634,7 @@ export class NaturalVoice {
     voice?: string,
     priority: RenderPriority = "urgent",
     engine?: EngineId,
+    speed: number = this.speed,
   ): Promise<Int16Array | null> {
     const id = engine ?? this.engine;
     if (voice ? !engineHasVoice(id, voice) || !naturalInstalled(this.pathsFor(id)) : !this.usable) {
@@ -626,7 +643,9 @@ export class NaturalVoice {
     const runtime = engine === undefined || engine === this.engine ? this.current() : this.runtime(id);
     const delivery = this.delivery(text, id);
     const proc = this.procFor(runtime, priority);
-    return proc.render(text, voice ?? this.settings().voice, SPEED, delivery.mood, delivery.level, priority);
+    return proc
+      .render(text, voice ?? this.settings().voice, SPEED, delivery.mood, delivery.level, priority)
+      .then((pcm) => (pcm ? timeStretch(pcm, speed) : pcm));
   }
 
   /** The background worker where an engine has one, else the only worker. */
@@ -658,7 +677,8 @@ export class NaturalVoice {
     delivery: Delivery,
   ): Promise<{ pcm: Int16Array; cached: boolean; ms: number } | null> {
     const runtime = this.current();
-    const key = runtime.cache.key(this.voiceKey(voice, delivery), SPEED, text);
+    const speed = this.speed;
+    const key = runtime.cache.key(this.voiceKey(voice, delivery), speed, text);
     const hit = runtime.cache.get(key);
     if (hit) return { pcm: hit, cached: true, ms: 0 };
     const began = this.now();
@@ -670,7 +690,7 @@ export class NaturalVoice {
           const proc = this.procFor(runtime, priority);
           const pcm = await proc.render(text, voice, SPEED, delivery.mood, delivery.level, priority);
           if (!pcm || pcm.length === 0) return null;
-          const line = downsampleToLine(pcm);
+          const line = downsampleToLine(timeStretch(pcm, speed));
           runtime.cache.put(key, line);
           return line;
         } finally {
@@ -742,7 +762,7 @@ export class NaturalVoice {
       for (const text of texts) {
         const delivery = this.delivery(text);
         for (const part of splitSentences(text)) {
-          const key = this.current().cache.key(this.voiceKey(useVoice, delivery), SPEED, part);
+          const key = this.current().cache.key(this.voiceKey(useVoice, delivery), this.speed, part);
           if (seen.has(key)) continue;
           seen.add(key);
           if (this.current().cache.has(key)) {
@@ -767,8 +787,8 @@ export class NaturalVoice {
    * A fixed sample through the same engine and telephone filter, without changing call settings. `engine` names one
    * other than the current, so the picker can audition before switching; its worker stops again afterwards.
    */
-  async preview(voice: string, engine?: EngineId): Promise<Buffer | null> {
-    const pcm = await this.render(VOICE_PREVIEW_TEXT, voice, "urgent", engine);
+  async preview(voice: string, engine?: EngineId, speed?: number): Promise<Buffer | null> {
+    const pcm = await this.render(VOICE_PREVIEW_TEXT, voice, "urgent", engine, speed);
     if (engine !== undefined && engine !== this.engine) this.stopRuntime(engine);
     return pcm?.length ? wavOfPcm(padLine(downsampleToLine(pcm))) : null;
   }

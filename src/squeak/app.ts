@@ -633,7 +633,7 @@ export class SqueakApp {
               },
               test: () => this.testVoiceCall(),
               // The same function the Mac app's `POST /control/voice/preview` ends in.
-              preview: (voice, engine) => this.previewVoice(voice, engine),
+              preview: (voice, engine, speed) => this.previewVoice(voice, engine, speed),
               changePin: (current, next) => this.changeVoicePin(current, next),
               gatewayUpdate: async () => {
                 const outcome = await this.updateGatewayAddon();
@@ -772,7 +772,7 @@ export class SqueakApp {
       voice: {
         read: () => this.voiceView(),
         apply: (request) => this.applyVoice(request),
-        preview: (voice, engine) => this.previewVoice(voice, engine),
+        preview: (voice, engine, speed) => this.previewVoice(voice, engine, speed),
       },
       // The Mac app's "Set up realistic voice": the install runs here, in the background, one at a time.
       voiceNatural: {
@@ -1590,12 +1590,12 @@ export class SqueakApp {
 
   private previewingVoice = false;
 
-  private async previewVoice(voice: string, engine?: string): Promise<Buffer | null> {
+  private async previewVoice(voice: string, engine?: string, speed?: number): Promise<Buffer | null> {
     if (engine !== undefined && !isEngineId(engine)) return null;
     if (this.previewingVoice) return null;
     this.previewingVoice = true;
     try {
-      return await this.naturalVoice.preview(voice, engine);
+      return await this.naturalVoice.preview(voice, engine, speed);
     } finally {
       this.previewingVoice = false;
     }
@@ -1606,7 +1606,7 @@ export class SqueakApp {
    * client that knows only Kokoro reads), `engines` lists every engine with its own voices and pick.
    */
   private naturalView() {
-    const { enabled, engine, emotion, voices, voice } = this.naturalSettings.settings;
+    const { enabled, engine, emotion, speed, voices, voice } = this.naturalSettings.settings;
     const installed = (id: EngineId) => naturalInstalled(naturalPaths(this.config.supportDir, id));
     return {
       installed: installed(engine),
@@ -1615,6 +1615,7 @@ export class SqueakApp {
       voices: VOICE_ENGINES[engine].voices,
       engine,
       emotion,
+      speed,
       engines: ENGINE_IDS.map((id) => {
         const spec = VOICE_ENGINES[id];
         return {
@@ -1632,15 +1633,17 @@ export class SqueakApp {
     };
   }
 
-  /** What the prompt and read-back caches key a voice by: another engine, voice or emotion level never reuses a clip. */
+  /** What the prompt and read-back caches key a voice by: another engine, voice, emotion level or speed never reuses a clip. */
   /** The voice call-in prompts are recorded in: the Mac's when it can speak, else the add-on's own. */
   private promptVoiceKey(): string {
     return this.naturalVoice.usable ? this.naturalVoiceKey() : "add-on";
   }
 
   private naturalVoiceKey(): string {
-    const { engine, voice, emotion } = this.naturalSettings.settings;
-    return `${engine}:${voice}:${VOICE_ENGINES[engine].emotion ? emotion : "none"}`;
+    const { engine, voice, emotion, speed } = this.naturalSettings.settings;
+    // Speed 1 keeps the key it always had, so nothing already recorded is thrown away.
+    const pace = speed === 1 ? "" : `:x${speed}`;
+    return `${engine}:${voice}:${VOICE_ENGINES[engine].emotion ? emotion : "none"}${pace}`;
   }
 
   /**
