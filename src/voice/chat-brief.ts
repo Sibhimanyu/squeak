@@ -16,7 +16,7 @@ import { cutAtWord, speakable } from "./spoken-labels.js";
 
 export interface ChatBriefInputs {
   session: FleetSession;
-  /** The chat as it is spoken ("squeak, ushuaia" style label). */
+  /** The chat as it is spoken ("squeak, fix parser" style label). */
   label: string;
   /** The agent's newest finished message, or null. */
   lastTurnText: string | null;

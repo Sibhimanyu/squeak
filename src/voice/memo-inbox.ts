@@ -7,6 +7,7 @@ import { chunkClips, type Clip } from "./clips.js";
 import { spokenAnswer } from "./chat-brief.js";
 import { ASK_FAILED, inboundPrompts } from "./inbound-flow.js";
 import { clipOption } from "./script.js";
+import { numberRepeats } from "./spoken-labels.js";
 import { splitSentences } from "./natural-cache.js";
 import { judgeTranscript } from "./transcript-quality.js";
 import type { ChoiceOption } from "../fleet/choices.js";
@@ -47,7 +48,7 @@ export interface MemoTarget {
   label: string;
   /** The workspace it belongs to (`workspaceKeyOf`), for favourites. */
   workspace: string | null;
-  /** The workspace as spoken ("squeak, ushuaia", `spokenWorkspace`); absent: the label stands in. */
+  /** The workspace as spoken ("squeak, fix parser", `spokenWorkspace`); absent: the label stands in. */
   workspaceLabel?: string;
   /** It waits on the person (an approval or a question): the fallback "last chat" when none was used by phone. */
   waiting?: boolean;
@@ -363,6 +364,8 @@ export class MemoInbox {
         const first = rest.find((x) => x.workspace === key)!;
         workspaces.push({ n, label: spokenLabel(first.workspaceLabel ?? first.label), chats: chatsOf(key, rest) });
       }
+      const numbered = numberRepeats(workspaces.map((w) => w.label));
+      workspaces = workspaces.map((w, i) => ({ ...w, label: numbered[i]! }));
       items = [];
       for (const t of rest.filter((x) => !x.workspace || !grouped.has(x.workspace)).slice(0, MENU_CHOICES)) {
         if (!room()) break;

@@ -26,7 +26,7 @@ describe("shouldCall", () => {
 describe("composeScript", () => {
   it("reads the question and one key per lettered option", () => {
     const script = composeScript(item(), QUESTION, true);
-    expect(script.greeting).toContain("squeak has a question");
+    expect(script.greeting).toContain("squeak, voice has a question");
     expect(script.question).toContain("Which one?");
     expect(script.question).toContain("Options. 1, Merge now, recommended. 2, Open a PR first.");
     expect(script.question).not.toContain(FULL_TEXT_NOTE);

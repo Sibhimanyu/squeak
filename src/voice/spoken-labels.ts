@@ -37,16 +37,50 @@ export function cutAtWord(text: string, max: number): string {
   return cut.replace(/[\s,;:.!?-]+$/, "");
 }
 
-/** "squeak, ushuaia": the repository, then the workspace folder. */
-export function spokenWorkspace(session: Named): string {
+const PLAIN_BRANCHES = new Set(["head", "main", "master"]);
+
+/**
+ * "squeak, fix parser": the repository, then the branch's last segment. Conductor's folder is a random city
+ * ("ushuaia") that means nothing aloud, so it is never spoken. The branch is left out when it says nothing: missing,
+ * HEAD, main, master, the repo's default branch (`baseRef`, "origin/<branch>"), or the folder's own name (Conductor
+ * names a fresh branch after the city). No repo: the branch alone; nothing: "a workspace". Two workspaces of one repo
+ * can speak alike; `numberRepeats` tells them apart in a menu.
+ */
+export function spokenWorkspace(session: Named & { baseRef?: string | null }): string {
   const repo = speakable(session.repoName ?? "");
-  const folder = session.cwd ? speakable(path.basename(session.cwd.replace(/\/+$/, ""))) : "";
-  if (repo && folder && repo.toLowerCase() !== folder.toLowerCase()) {
-    return cutAtWord(`${repo}, ${folder}`, MAX_SPOKEN_WORKSPACE);
-  }
-  if (repo || folder) return cutAtWord(repo || folder, MAX_SPOKEN_WORKSPACE);
-  const branch = session.branch && session.branch !== "HEAD" ? speakable(session.branch) : "";
-  return branch ? cutAtWord(branch, MAX_SPOKEN_CHAT) : "a workspace";
+  const folder = session.cwd ? speakable(path.basename(session.cwd.replace(/\/+$/, ""))).toLowerCase() : "";
+  const raw = (session.branch ?? "").trim();
+  const base = (session.baseRef ?? "")
+    .replace(/^origin\//, "")
+    .trim()
+    .toLowerCase();
+  const tail = raw.slice(raw.lastIndexOf("/") + 1);
+  let branch = speakable(tail);
+  const plain =
+    !raw ||
+    PLAIN_BRANCHES.has(raw.toLowerCase()) ||
+    PLAIN_BRANCHES.has(tail.toLowerCase()) ||
+    (base !== "" && (raw.toLowerCase() === base || tail.toLowerCase() === base)) ||
+    branch.toLowerCase() === folder;
+  if (plain) branch = "";
+  if (repo && branch) return cutAtWord(`${repo}, ${branch}`, MAX_SPOKEN_WORKSPACE);
+  if (repo) return cutAtWord(repo, MAX_SPOKEN_WORKSPACE);
+  return branch ? cutAtWord(branch, MAX_SPOKEN_WORKSPACE) : "a workspace";
+}
+
+/** Labels in menu order with repeats numbered ("squeak", "squeak two", "squeak three"), case-insensitively. */
+export function numberRepeats(labels: string[]): string[] {
+  const seen = new Map<string, number>();
+  const used = new Set(labels.map((l) => l.toLowerCase()));
+  return labels.map((label) => {
+    const count = (seen.get(label.toLowerCase()) ?? 0) + 1;
+    seen.set(label.toLowerCase(), count);
+    if (count === 1) return label;
+    let n = count;
+    let next = `${label} ${NUMBER_WORDS[n] ?? String(n)}`;
+    while (used.has(next.toLowerCase())) next = `${label} ${NUMBER_WORDS[++n] ?? String(n)}`;
+    return next;
+  });
 }
 
 /** The chat's own title, else "<agent> chat". `taken` (see `spokenChats`) numbers a repeat: "two", "three". */

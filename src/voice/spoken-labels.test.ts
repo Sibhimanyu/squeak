@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cutAtWord, spokenChat, spokenChats, spokenWorkspace, speakable } from "./spoken-labels.js";
+import { cutAtWord, spokenChat, numberRepeats, spokenChats, spokenWorkspace, speakable } from "./spoken-labels.js";
 
 const s = (over: Record<string, unknown> = {}) => ({
   key: "k",
@@ -13,23 +13,41 @@ const s = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("spoken labels", () => {
-  it("names a workspace by repository and folder, never the branch tail", () => {
+  it("names a workspace by repository and branch, never the folder", () => {
     const label = spokenWorkspace(s());
-    expect(label).toBe("squeak, ushuaia");
+    expect(label).toBe("squeak, telegram formatting and claude fixes");
+    expect(label).not.toContain("ushuaia");
     expect(label).not.toContain("…");
   });
 
-  it("falls back to repo, folder, then a branch cut at a word", () => {
-    expect(spokenWorkspace(s({ cwd: null }))).toBe("squeak");
-    expect(spokenWorkspace(s({ repoName: null }))).toBe("ushuaia");
-    expect(spokenWorkspace(s({ cwd: null, repoName: null }))).toBe("telegram formatting and claude fixes");
+  it("drops everything up to the last slash of the branch", () => {
+    expect(spokenWorkspace(s({ branch: "sibhimanyu/fix-parser" }))).toBe("squeak, fix parser");
+  });
+
+  it("speaks just the repo when the branch says nothing", () => {
+    for (const branch of [null, "HEAD", "main", "master", "ushuaia", "me/Ushuaia"]) {
+      expect(spokenWorkspace(s({ branch }))).toBe("squeak");
+    }
+    expect(spokenWorkspace(s({ branch: "develop", baseRef: "origin/develop" }))).toBe("squeak");
+    expect(spokenWorkspace(s({ branch: "develop", baseRef: "origin/main" }))).toBe("squeak, develop");
+  });
+
+  it("falls back to the branch alone, then a workspace", () => {
+    expect(spokenWorkspace(s({ repoName: null }))).toBe("telegram formatting and claude fixes");
+    expect(spokenWorkspace(s({ repoName: null, branch: "main" }))).toBe("a workspace");
+    expect(spokenWorkspace(s({ cwd: null, repoName: null, branch: null }))).toBe("a workspace");
     const long = spokenWorkspace(s({ cwd: null, repoName: null, branch: "word-".repeat(30) }));
-    expect(long.length).toBeLessThanOrEqual(40);
+    expect(long.length).toBeLessThanOrEqual(50);
     expect(long).not.toContain("…");
   });
 
-  it("does not repeat a repo that is also the folder", () => {
-    expect(spokenWorkspace(s({ cwd: "/x/Squeak" }))).toBe("squeak");
+  it("numbers workspaces that speak alike", () => {
+    expect(numberRepeats(["squeak", "blume", "Squeak", "squeak"])).toEqual([
+      "squeak",
+      "blume",
+      "Squeak two",
+      "squeak three",
+    ]);
   });
 
   it("speaks a chat's title cut at a word, with no ellipsis, emoji, markdown or links", () => {
