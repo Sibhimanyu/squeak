@@ -23,18 +23,33 @@ public struct NotificationEvent: Sendable, Hashable {
     /// do not care; a notification without one carries no event context.
     public var id: String?
     public var at: Date?
+    /// The chat's name, for the notification's subtitle. Session content: shown only by opt-in.
+    public var label: String?
 
     public init(
         key: SessionKey, kind: NotificationKind, title: String, body: String, detail: String? = nil,
-        id: String? = nil, at: Date? = nil
+        id: String? = nil, at: Date? = nil, label: String? = nil
     ) {
         self.key = key; self.kind = kind; self.title = title; self.body = body; self.detail = detail
-        self.id = id; self.at = at
+        self.id = id; self.at = at; self.label = label
     }
 
     /// `<session>|<kind>|<epoch ms>`: no session text, only opaque ids and the time.
     public static func eventId(key: SessionKey, kind: NotificationKind, at: Date) -> String {
         "\(key.stringValue)|\(kind.rawValue)|\(Int((at.timeIntervalSince1970 * 1000).rounded()))"
+    }
+}
+
+public extension NotificationKind {
+    /// The chat's state in one or two words: the notification's title, so it reads at a glance.
+    var stateTitle: String {
+        switch self {
+        case .blocked: "Needs your approval"
+        case .question: "Asking you something"
+        case .plan: "Plan to review"
+        case .finished: "Finished"
+        case .error: "Hit an error"
+        }
     }
 }
 
@@ -88,6 +103,6 @@ public enum NotificationPolicy {
     private static func event(
         _ s: HostSession, _ kind: NotificationKind, _ phrase: String, detail: String? = nil
     ) -> NotificationEvent {
-        NotificationEvent(key: s.key, kind: kind, title: "Squeak", body: "\(s.label) \(phrase)", detail: detail)
+        NotificationEvent(key: s.key, kind: kind, title: "Squeak", body: "\(s.label) \(phrase)", detail: detail, label: s.label)
     }
 }
