@@ -181,6 +181,33 @@ describe("call-in conversation (a Mac that talks)", () => {
   });
 });
 
+describe("waiting lines in the owner's character", () => {
+  const fillers = {
+    wait: ["Hold on.", "One second.", "Checking now.", "Right away."],
+    still: ["Still going.", "Nearly there.", "A little longer.", "Almost done."],
+  };
+
+  it("says one of the Mac's lines for the wait, and the old line without them", async () => {
+    const call = new FakeCall([...keys("4821#"), "2", "1"]);
+    const t = setup(call, { directory: async () => ({ ...directory, fillers }) });
+    await handleIncoming(t.incoming, t.deps);
+    expect(call.said.some((text) => fillers.wait.includes(text))).toBe(true);
+    expect(call.said).not.toContain("One moment.");
+
+    const old = new FakeCall([...keys("4821#"), "2", "1"]);
+    const u = setup(old);
+    await handleIncoming(u.incoming, u.deps);
+    expect(old.said).toContain("One moment.");
+  });
+
+  it("records the lines instead of the two fixed ones", () => {
+    const prompts = inboundPrompts({ ...directory, fillers }, true);
+    for (const line of [...fillers.wait, ...fillers.still]) expect(prompts).toContain(line);
+    expect(prompts).not.toContain("One moment.");
+    expect(inboundPrompts(directory, true)).toEqual(expect.arrayContaining(["One moment.", "Still working on it."]));
+  });
+});
+
 describe("call-in flow", () => {
   it("skips the PIN when the gateway is set to, and goes straight to the chats", async () => {
     const call = new FakeCall(["2", "1"]);

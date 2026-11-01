@@ -88,6 +88,7 @@ import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-inst
 import { TelegramAvatar } from "../telegram/avatar.js";
 import { BaresipLine } from "../voice/baresip-line.js";
 import { REFUSED_SAYS, nothingRunning } from "../voice/mac-says.js";
+import { VoiceFillers } from "../voice/fillers.js";
 import { DirectLine } from "../voice/direct-line.js";
 import { PinKeeper, type PinPolicy, type PinState } from "../voice/pin-keeper.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
@@ -296,6 +297,8 @@ export class SqueakApp {
   /** Answers a spoken question about one chat: `claude` with no tools, a short leash (voice/chat-brief.ts). */
   private readonly chatQuestioner: ChatQuestioner;
   private readonly chatConverser: ChatConverser;
+  /** The waiting lines of a call in, in the owner's character; a custom one is made once by the headless model. */
+  private voiceFillers!: VoiceFillers;
   private readonly subagents = new SubagentActivityReader(this.backgroundWork);
   private readonly claudeRefresher: ClaudeLimitsRefresher;
   /** What Squeak Hands holds, for the Mac app's permission explainer (GET /control/hands/grants). */
@@ -920,6 +923,12 @@ export class SqueakApp {
     // Only a Refresh press reaches this: no timer, no model call, and the
     // Keychain is read only then.
     this.claudeRefresher = new ClaudeLimitsRefresher(this.claudeLimits, () => fetchClaudeUsage());
+    this.voiceFillers = new VoiceFillers(
+      path.join(config.supportDir, "voice-fillers.json"),
+      claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), null, 30_000),
+      () => void this.memoInbox?.publish().catch(() => undefined),
+    );
+    this.voiceFillers.refresh(this.voiceSettings.settings.persona);
     this.cliq = this.createCliq();
     this.voice = this.createVoice();
     this.memoInbox = this.createMemoInbox();
@@ -1247,6 +1256,11 @@ export class SqueakApp {
       },
       endCall: (callId) => this.chatConverser.end(callId),
       terse: () => isTerse(this.voiceSettings.settings.persona),
+      // Waiting lines in the owner's character, for an add-on from 0.20.0 (it ignores them before).
+      fillers: () =>
+        addonSupports(this.gatewayStatusReader().peek().version, VOICE_MENU_ADDON)
+          ? this.voiceFillers.current(this.voiceSettings.settings.persona)
+          : null,
       // A new chat from a call in: the same `startChat` as the phone app, with the owner's model pick for calls.
       newChat: {
         supported: () => addonSupports(this.gatewayStatusReader().peek().version, NEW_CHAT_ADDON),
@@ -1937,8 +1951,12 @@ export class SqueakApp {
       return phone.ok ? { ok: true as const, state: this.voiceView() } : phone;
     }
     const outcome = this.voiceSettings.apply(request);
-    // A persona change decides what the next call in says first: publish the list again so the add-on sees it.
-    if (outcome.ok) void this.memoInbox?.publish().catch(() => undefined);
+    // A persona change decides what the next call in says first: publish the list again so the add-on sees it. A custom
+    // one's waiting lines are made in the background (the friendly set stands in until they are), then published again.
+    if (outcome.ok) {
+      this.voiceFillers.refresh(this.voiceSettings.settings.persona);
+      void this.memoInbox?.publish().catch(() => undefined);
+    }
     return outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome;
   }
 
@@ -1976,7 +1994,10 @@ export class SqueakApp {
     }
     const outcome = this.voiceSettings.apply(request);
     // Who may call in is the same setting: tell the gateway now.
-    if (outcome.ok) void this.memoInbox?.publish().catch(() => undefined);
+    if (outcome.ok) {
+      this.voiceFillers.refresh(this.voiceSettings.settings.persona);
+      void this.memoInbox?.publish().catch(() => undefined);
+    }
     return outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome;
   }
 

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import { readAudioClips, readClip, type Clip } from "./clips.js";
 import { CLOCK_SKEW_MS, isRecord, openBody, sealBody } from "./relay-protocol.js";
+import { readFillers, type Fillers } from "./fillers.js";
 
 /**
  * Calling in: you phone Squeak, pick a chat, speak a message and confirm it. The Home Assistant gateway
@@ -102,6 +103,12 @@ export interface DirectoryDoc {
    * chats as a memo's does, whether or not a menu lists it. No `last` at all: the call goes straight to the menus.
    */
   last?: { choice: number; label: string; why?: "used" | "waiting" };
+  /**
+   * The waiting lines in the owner's character (add-on 0.20.0 and newer): the add-on says a random one of `wait` when it
+   * hands something to the Mac and one of `still` when that is slow, never the same twice in a row. Absent: "One moment."
+   * and "Still working on it." as before. Each line is also one of the recorded prompts.
+   */
+  fillers?: Fillers;
   /** Ids of the audio documents (`voicedir/audio-<version>-<i>`) holding the Mac's recordings of this list's prompts. */
   audio?: string[];
 }
@@ -401,7 +408,9 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
     if (!body.audio.every((id) => typeof id === "string" && AUDIO_ID.test(id))) return null;
     audio = body.audio as string[];
   }
+  const fillers = body.fillers === undefined ? undefined : (readFillers(body.fillers) ?? undefined);
   return {
+    ...(fillers ? { fillers } : {}),
     ...(body.ask === true ? { ask: true as const } : {}),
     ...(body.talk === true ? { talk: true as const } : {}),
     ...(body.upParts === true ? { upParts: true as const } : {}),

@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  estimateSpeechSeconds,
-  inboundPromptTiers,
-  PROMPT_AUDIO_SECONDS,
-  SAYS,
-  uploadPrompts,
-} from "./inbound-flow.js";
+import { estimateSpeechSeconds, inboundPromptTiers, PROMPT_AUDIO_SECONDS, uploadPrompts } from "./inbound-flow.js";
 import { MAX_AUDIO_DOC_BYTES } from "./clips.js";
+import { FRIENDLY_FILLERS } from "./fillers.js";
 import { MAX_AUDIO_DOCS, type DirectoryDoc } from "./memo-protocol.js";
 
 const chats = (from: number, labels: string[]) => labels.map((label, i) => ({ n: i + 1, label, choice: from + i }));
@@ -22,6 +17,7 @@ const eight: DirectoryDoc = {
   ask: true,
   talk: true,
   upParts: true,
+  fillers: FRIENDLY_FILLERS,
   workspaces: [
     {
       n: 1,
@@ -82,7 +78,7 @@ describe("the prompts the Mac uploads fit the audio documents", () => {
     const list = uploadPrompts(eight);
     const menu = list.findIndex((text) => text.includes("Which workspace?"));
     const opening = list.findIndex((text) => text.includes("Go ahead: ask me about it"));
-    const wait = list.indexOf(SAYS.wait);
+    const wait = list.indexOf(FRIENDLY_FILLERS.wait[0]!);
     const keypad = list.findIndex(
       (text) => text.startsWith("UI planning.") && text.includes("Press 9 to say a message"),
     );

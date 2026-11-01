@@ -608,6 +608,24 @@ padding) now, with the menus first. That is the same count as before that commit
 The Mac does not rewrite an audio document whose clips are unchanged: a new list (a chat came or went) names the documents an
 earlier pass or a still-kept version already holds, by a digest of their clips, and only writes the ones that differ.
 
+## Waiting lines in the character you picked (add-on 0.20.0)
+
+"One moment." and "Still working on it." were said the same every time. The directory now carries `fillers: { wait: string[], still: string[] }`
+(`voice/fillers.ts`), chosen by the persona in Settings › Phone calls › How it talks:
+
+- **Terse** and **friendly** have built-in sets (8 `wait`, 8 `still` each, at most 50 characters, plain words).
+- **Custom**: when the text is saved (the `persona` change that `VoiceSettingsStore.apply` takes, from the Mac app or the phone), the Mac asks the
+  headless runner the Cliq assistant uses (`claudeCliRunner`: `claude -p`, no tools, no MCP, no settings or hooks, 30 s) for the two sets, once.
+  The answer is checked strictly (`readFillers`: exactly `wait` and `still`, 4 to 10 distinct lines each, each at most 60 characters, letters and
+  plain punctuation only, so no digits, markdown, links or emoji, and nothing that looks like a key, token or password) and kept in
+  `voice-fillers.json` (0600) under a hash of the custom text, so it is not made again (also not after a restart). Saving never waits for the
+  model. Until the set exists, or if the model fails or breaks a rule (it is not asked again for the same text for 5 minutes), the friendly
+  set is sent. Another description is another hash.
+- The sets are part of the directory's version, sent only to an add-on that reports 0.20.0 or newer, and recorded among the prompts (in the
+  second tier, instead of the two fixed lines), so they are always the Mac's voice. An older add-on ignores `fillers` and says the two fixed lines.
+- The add-on keeps one `FillerPicker` per call: a random line of the set, never the line it said last from the same set. It is used by every
+  place the call waits on the Mac (status, a recording, a question, a new chat, the talk flow's slow-answer reassurance).
+
 ## Later
 
 ## Pairing a gateway (daemon side)

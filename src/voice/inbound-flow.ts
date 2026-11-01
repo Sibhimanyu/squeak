@@ -1,5 +1,6 @@
 import { recordForUpload, type RecordedUpload } from "./recording-upload.js";
 import { MAX_AUDIO_DOC_BYTES } from "./clips.js";
+import { FillerPicker, fillerLines } from "./fillers.js";
 import crypto from "node:crypto";
 
 import { logger } from "../utils/logger.js";
@@ -247,8 +248,8 @@ export function inboundPromptTiers(directory: DirectoryDoc | null, askPin: boole
   ];
   // What any call can hit, shortest and commonest first.
   const common = [
-    SAYS.wait,
-    SAYS.still,
+    // The waiting lines: the owner's character when the Mac sends one, else the two fixed lines.
+    ...(directory?.fillers ? fillerLines(directory.fillers) : [SAYS.wait, SAYS.still]),
     SAYS.bye,
     SAYS.noMac,
     SAYS.noChat,
@@ -319,6 +320,14 @@ const CONFIRM_WAIT_MS = 30_000;
 const MAX_TAKES = 3;
 const MAX_REPEATS = 5;
 const STILL_WORKING_MS = 6_000;
+/**
+ * The waiting lines of each call: with the Mac's `fillers` a random one, never the previous from the same set; without,
+ * the two fixed lines. Kept per call so every flow (and the talk flow's `reassure`) draws from one place.
+ */
+const pickers = new WeakMap<PhoneCall, FillerPicker>();
+const waitLine = (call: PhoneCall): string => pickers.get(call)?.wait() ?? SAYS.wait;
+const stillLine = (call: PhoneCall): string => pickers.get(call)?.still() ?? SAYS.still;
+
 /** "Still working on it" is never said twice within this: a long wait is not a stream of reassurance. */
 const STILL_WORKING_GAP_MS = 10_000;
 
@@ -334,7 +343,7 @@ export function reassure(call: PhoneCall, deps: Pick<InboundDependencies, "trace
     if (stopped || saying || !call.open || Date.now() - lastAt < STILL_WORKING_GAP_MS) return;
     saying = true;
     lastAt = Date.now();
-    void speak(call, deps, SAYS.still)
+    void speak(call, deps, stillLine(call))
       .catch(() => undefined)
       .finally(() => {
         saying = false;
@@ -429,6 +438,7 @@ async function conversation(call: PhoneCall, deps: InboundDependencies, terse: b
 
   // 2. Which workspace, then which chat. Re-read now: the list moves while the phone rings.
   const directory = await deps.directory().catch(() => null);
+  if (directory?.fillers) pickers.set(call, new FillerPicker(directory.fillers));
   if (!directory || (directory.items.length === 0 && !directory.workspaces?.some((w) => w.chats.length > 0))) {
     return bye(call, deps, SAYS.noChat);
   }
@@ -568,7 +578,7 @@ async function statusFlow(
   counter: { answers: number },
 ): Promise<Done> {
   counter.answers += 1;
-  await speak(call, deps, SAYS.wait);
+  await speak(call, deps, waitLine(call));
   const stopReassuring = reassure(call, deps);
   let heard: DownMessage | null;
   try {
@@ -626,7 +636,7 @@ async function messageFlow(
       await speak(call, deps, SAYS.nothing);
       continue;
     }
-    await speak(call, deps, SAYS.wait);
+    await speak(call, deps, waitLine(call));
     const stopReassuring = reassure(call, deps);
     let heard: DownMessage | null;
     try {
@@ -673,7 +683,7 @@ async function messageFlow(
       deps.trace?.("key: 2 (ask it as a question)");
       if (counter.answers >= MAX_ANSWERS_PER_CALL) return done(SAYS.limit);
       counter.answers += 1;
-      await speak(call, deps, SAYS.wait);
+      await speak(call, deps, waitLine(call));
       const stopReassuring = reassure(call, deps);
       let reply: DownMessage | null;
       try {
@@ -752,7 +762,7 @@ async function newChatFlow(
       await speak(call, deps, SAYS.nothing);
       continue;
     }
-    await speak(call, deps, SAYS.wait);
+    await speak(call, deps, waitLine(call));
     const stopReassuring = reassure(call, deps);
     let heard: DownMessage | null;
     try {

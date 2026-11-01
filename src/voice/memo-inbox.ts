@@ -19,6 +19,7 @@ import {
 import { spokenAnswer } from "./chat-brief.js";
 import { ASK_FAILED, newChatReadBack, uploadPrompts } from "./inbound-flow.js";
 import type { StartChatOutcome } from "../fleet/new-chat.js";
+import type { Fillers } from "./fillers.js";
 import { clipOption } from "./script.js";
 import { numberRepeats } from "./spoken-labels.js";
 import { speechParts } from "./natural-cache.js";
@@ -204,6 +205,11 @@ export interface MemoInboxDependencies {
       model?: { id: string; level?: string; agent: "claude" | "codex" };
     }) => Promise<StartChatOutcome>;
   };
+  /**
+   * The waiting lines in the owner's character (voice/fillers.ts), for an add-on that says them (0.20.0); null: none are
+   * sent and the add-on says its two fixed lines. Read at each publish, and part of the list's version.
+   */
+  fillers?: () => Fillers | null;
   /** The owner's persona is terse (voice/settings.ts): calls in drop the pleasantries. Read at each publish. */
   terse?: () => boolean;
   /**
@@ -616,6 +622,7 @@ export class MemoInbox {
       }
       if (index >= 0) last = { choice: index + 1, label: lastPick.label, why };
     }
+    const fillers = this.deps.fillers?.() ?? null;
     const version = crypto
       .createHash("sha256")
       .update(
@@ -626,6 +633,7 @@ export class MemoInbox {
           last,
           talk: Boolean(this.canAsk && this.deps.converse),
           terse: Boolean(this.deps.terse?.()),
+          fillers,
           newChat: newChatSpaces.map((space) => space.workspaceId),
           voice: this.deps.voiceKey?.() ?? null,
           targets: targets.map((t) => t.target),
@@ -659,6 +667,7 @@ export class MemoInbox {
       ...(this.canAsk ? { ask: true as const } : {}),
       ...(this.canAsk && this.deps.converse ? { talk: true as const } : {}),
       ...(this.deps.terse?.() ? { terse: true as const } : {}),
+      ...(fillers ? { fillers } : {}),
       ...(this.canParts ? { upParts: true as const } : {}),
     };
     const audio = this.audioDocs.get(version);
