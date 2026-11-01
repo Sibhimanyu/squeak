@@ -64,6 +64,16 @@ export function renameLegacyVoice(engine: EngineId, voice: unknown): unknown {
   return LEGACY_MING_VOICES[voice];
 }
 
+/** A voice named in a request as this version names it: a former Ming id is migrated, anything else is left to be checked. */
+export function resolveVoiceRequest(engine: EngineId, voice: unknown): unknown {
+  return renameLegacyVoice(engine, voice) !== voice ? migrateVoice(engine, voice) : voice;
+}
+
+/** Whether an engine speaks by cloning reference clips (made with Kokoro), so a voice exists only once its clip does. */
+export function usesReferenceClips(engine: EngineId): boolean {
+  return engine === "ming" || engine === "chatterbox";
+}
+
 /** A saved voice as this version names it: Ming's old voices map to the shared list, an unknown Ming voice to Heart. */
 export function migrateVoice(engine: EngineId, voice: unknown): unknown {
   const named = renameLegacyVoice(engine, voice);

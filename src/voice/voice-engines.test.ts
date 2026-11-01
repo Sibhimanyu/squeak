@@ -1,9 +1,17 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { engineTag, naturalPaths } from "./natural-voice.js";
+import { ensureReferenceClips, type NaturalSetupDeps } from "./natural-setup.js";
+import {
+  availableVoices,
+  engineTag,
+  naturalInstalled,
+  naturalPaths,
+  NaturalSettingsStore,
+  NaturalVoice,
+} from "./natural-voice.js";
 import {
   engineHasVoice,
   migrateVoice,
@@ -60,19 +68,154 @@ describe("Ming's former voices", () => {
 });
 
 describe("clone engines on disk", () => {
-  it("need a reference clip per offered voice, and key Ming's cache apart from its old one", () => {
+  const withEngine = async (run: (dir: string, ming: ReturnType<typeof naturalPaths>) => void | Promise<void>) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-engines-"));
     try {
       const ming = naturalPaths(dir, "ming");
-      for (const voice of ids("ming")) expect(ming.required).toContain(referenceClip(ming.dir, voice));
-      expect(naturalPaths(dir, "qwen3").required?.some((file) => file.includes("refs"))).toBe(false);
-      fs.mkdirSync(path.dirname(ming.required![0]!), { recursive: true });
-      fs.writeFileSync(ming.required![0]!, "x");
-      const tag = engineTag({ ...ming, required: [ming.required![0]!] }, "ming");
-      expect(tag).toContain("ming-Ming-3.0-tts-0.5B-bf16-clone-");
-      expect(engineTag({ ...ming, required: [ming.required![0]!] }, "chatterbox")).not.toContain("clone");
+      for (const file of [ming.python, ming.worker, ...(ming.required ?? [])]) {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, "x");
+      }
+      await run(dir, ming);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  };
+  const clip = (ming: { dir: string }, voice: string) => {
+    fs.mkdirSync(path.join(ming.dir, "refs"), { recursive: true });
+    fs.writeFileSync(referenceClip(ming.dir, voice), "x");
+  };
+
+  it("counts as installed without reference clips, but lists only the voices whose clip exists", async () => {
+    await withEngine((_dir, ming) => {
+      expect(naturalInstalled(ming)).toBe(true);
+      expect(availableVoices(ming, "ming")).toEqual([]);
+      clip(ming, "am_michael");
+      clip(ming, "af_nicole"); // not a Ming voice at all
+      expect(availableVoices(ming, "ming").map((voice) => voice.id)).toEqual(["am_michael"]);
+      expect(availableVoices(ming, "qwen3").length).toBe(VOICE_ENGINES.qwen3.voices.length);
+      expect(availableVoices(ming, "kokoro").length).toBe(7);
+    });
+  });
+
+  it("falls back to Heart for a voice with no clip, without touching the saved pick", async () => {
+    await withEngine((_dir, ming) => {
+      const file = path.join(path.dirname(ming.dir), "natural.json");
+      const store = new NaturalSettingsStore(
+        file,
+        () => true,
+        (engine, voice) => availableVoices(ming, engine).some((entry) => entry.id === voice),
+      );
+      expect(store.apply({ engine: "ming", voice: "bm_george" })).toEqual({ ok: true });
+      clip(ming, "af_heart");
+      expect(store.settings).toMatchObject({ voice: "af_heart", voices: { ming: "bm_george" } });
+      expect(store.spoken("ming")).toBe("af_heart");
+      expect(JSON.parse(fs.readFileSync(file, "utf8")).voices.ming).toBe("bm_george");
+      clip(ming, "bm_george");
+      expect(store.settings.voice).toBe("bm_george");
+    });
+  });
+
+  it("cannot speak, so calls use the add-on, until some clip exists; a voice without one is not rendered", async () => {
+    await withEngine(async (_dir, ming) => {
+      const settings = { enabled: true, voice: "af_heart", engine: "ming" as const };
+      const natural = new NaturalVoice(ming, () => settings);
+      expect(natural.usable).toBe(false);
+      expect(await natural.preview("af_heart", "ming")).toBeNull();
+      clip(ming, "af_heart");
+      expect(natural.usable).toBe(true);
+      expect(await natural.preview("bm_george", "ming")).toBeNull(); // no clip for George yet
+    });
+  });
+
+  it("keys Ming's cache apart from its old one", async () => {
+    await withEngine((_dir, ming) => {
+      const tag = engineTag(ming, "ming");
+      expect(tag).toContain("ming-Ming-3.0-tts-0.5B-bf16-clone-");
+      expect(engineTag(ming, "chatterbox")).not.toContain("clone");
+    });
+  });
+});
+
+describe("ensureReferenceClips", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-refs-"));
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const touch = (file: string) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "x");
+  };
+  const install = (engine: "kokoro" | "ming" | "chatterbox") => {
+    const paths = naturalPaths(dir, engine);
+    for (const file of [paths.python, paths.worker, ...(paths.required ?? [paths.model, paths.voices])]) touch(file);
+    return paths;
+  };
+  const deps = (made: Array<[string, string[]]>, extra: Partial<NaturalSetupDeps> = {}): NaturalSetupDeps => ({
+    findPython: async () => "/fake/python3",
+    makeVenv: async (_python, to) => touch(path.join(to, "venv", "bin", "python3")),
+    pipInstall: async () => undefined,
+    download: async (_url, file) => touch(file),
+    listRepo: async () => [],
+    findCached: () => null,
+    makeReferenceClips: async (_kokoro, folder, voices) => {
+      made.push([path.basename(folder), [...voices]]);
+      for (const voice of voices) touch(referenceClip(folder, voice));
+    },
+    freeBytes: () => 50_000_000_000,
+    ...extra,
+  });
+
+  it("makes only the missing clips of installed cloning engines, with Kokoro already there", async () => {
+    install("kokoro");
+    const ming = install("ming");
+    const chatterbox = install("chatterbox");
+    for (const voice of VOICE_ENGINES.chatterbox.voices) touch(referenceClip(chatterbox.dir, voice.id));
+    touch(referenceClip(ming.dir, "af_heart"));
+    const made: Array<[string, string[]]> = [];
+    expect(await ensureReferenceClips(dir, { deps: deps(made) })).toEqual(["ming"]);
+    expect(made).toEqual([["voice-tts-ming", ids("ming").filter((id) => id !== "af_heart")]]);
+    expect(availableVoices(ming, "ming").map((voice) => voice.id)).toEqual(ids("ming"));
+    expect(await ensureReferenceClips(dir, { deps: deps(made) })).toEqual([]); // nothing left: nothing made
+    expect(made).toHaveLength(1);
+  });
+
+  it("does nothing, and installs nothing, when no cloning engine is installed", async () => {
+    const made: Array<[string, string[]]> = [];
+    expect(await ensureReferenceClips(dir, { deps: deps(made) })).toEqual([]);
+    expect(naturalInstalled(naturalPaths(dir))).toBe(false);
+    expect(made).toEqual([]);
+  });
+
+  it("installs Kokoro first when it is missing, then makes the clips", async () => {
+    install("ming");
+    const made: Array<[string, string[]]> = [];
+    expect(await ensureReferenceClips(dir, { deps: deps(made) })).toEqual(["ming"]);
+    expect(naturalInstalled(naturalPaths(dir))).toBe(true);
+    expect(made[0]?.[1]).toEqual(ids("ming"));
+  });
+
+  it("logs and gives up, never throwing, when Kokoro cannot be installed or a clip fails", async () => {
+    install("ming");
+    const logged: string[] = [];
+    const none = await ensureReferenceClips(dir, {
+      deps: deps([], { findPython: async () => null }),
+      log: (detail) => logged.push(detail),
+    });
+    expect(none).toEqual([]);
+    expect(logged[0]).toContain("Kokoro could not be installed");
+    install("kokoro");
+    const failed = await ensureReferenceClips(dir, {
+      deps: deps([], {
+        makeReferenceClips: async () => {
+          throw new Error("kokoro crashed");
+        },
+      }),
+      log: (detail) => logged.push(detail),
+    });
+    expect(failed).toEqual([]);
+    expect(logged.at(-1)).toContain("kokoro crashed");
   });
 });

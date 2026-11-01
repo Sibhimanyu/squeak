@@ -31,7 +31,9 @@ import {
   NATURAL_VOICE,
   NATURAL_VOICES,
   referenceClip,
-  renameLegacyVoice,
+  resolveVoiceRequest,
+  usesReferenceClips,
+  type EngineVoice,
   VOICE_ENGINES,
   type EngineId,
 } from "./voice-engines.js";
@@ -93,14 +95,18 @@ export function naturalPaths(supportDir: string, engine: EngineId = DEFAULT_ENGI
     voices: dir,
     worker,
     engine,
-    required: [
-      ...VOICE_ENGINES[engine].repos.flatMap((repo) => repo.proof.map((file) => path.join(dir, repo.dir, file))),
-      // The clone engines also need a reference clip for each voice, made from Kokoro at setup.
-      ...(engine === "ming" || engine === "chatterbox"
-        ? VOICE_ENGINES[engine].voices.map((voice) => referenceClip(dir, voice.id))
-        : []),
-    ],
+    required: VOICE_ENGINES[engine].repos.flatMap((repo) => repo.proof.map((file) => path.join(dir, repo.dir, file))),
   };
+}
+
+/**
+ * The voices an engine can speak right now: all of them, except that Ming and Chatterbox clone a reference clip made
+ * with Kokoro (`ensureReferenceClips`), so a voice whose clip is not there yet is left out.
+ */
+export function availableVoices(paths: NaturalPaths, engine: EngineId): EngineVoice[] {
+  const voices = VOICE_ENGINES[engine].voices;
+  if (!usesReferenceClips(engine)) return [...voices];
+  return voices.filter((voice) => fs.existsSync(referenceClip(paths.dir, voice.id)));
 }
 
 /**
@@ -170,6 +176,11 @@ export class NaturalSettingsStore {
     private readonly file: string,
     /** Whether an engine is on disk; a switch to one that is not is refused. Absent: every engine counts. */
     private readonly installed: (engine: EngineId) => boolean = () => true,
+    /**
+     * Whether an engine can speak a voice now (a cloning engine needs its reference clip). A saved voice that cannot
+     * is not changed: `settings.voice` falls back to Heart while the saved pick stays for when its clip is made.
+     */
+    private readonly speakable: (engine: EngineId, voice: string) => boolean = () => true,
   ) {
     try {
       const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
@@ -199,8 +210,15 @@ export class NaturalSettingsStore {
       emotion: this.current.emotion,
       speed: this.current.speed,
       voices: { ...this.current.voices },
-      voice: this.current.voices[engine] ?? VOICE_ENGINES[engine].defaultVoice,
+      voice: this.spoken(engine),
     };
+  }
+
+  /** The voice an engine speaks now: its pick, else Heart when the pick's clip is missing, else the pick as it is. */
+  spoken(engine: EngineId): string {
+    const pick = this.current.voices[engine] ?? VOICE_ENGINES[engine].defaultVoice;
+    if (this.speakable(engine, pick)) return pick;
+    return this.speakable(engine, DEFAULT_NATURAL_VOICE) ? DEFAULT_NATURAL_VOICE : pick;
   }
 
   /** `{ enabled?, voice?, engine?, emotion?, speed? }`, at least one, nothing else; a voice is for the engine set with it. */
@@ -225,8 +243,7 @@ export class NaturalSettingsStore {
       return { ok: false, reason: `Set up ${VOICE_ENGINES[engine].label} on the Mac first.` };
     }
     // An older phone may still name one of Ming's former voices.
-    const voice =
-      renameLegacyVoice(engine, record.voice) !== record.voice ? migrateVoice(engine, record.voice) : record.voice;
+    const voice = resolveVoiceRequest(engine, record.voice);
     if (voice !== undefined && !engineHasVoice(engine, voice)) {
       return {
         ok: false,
@@ -600,7 +617,12 @@ export class NaturalVoice {
 
   /** Installed and switched on. */
   get usable(): boolean {
-    return this.settings().enabled && naturalInstalled(this.pathsFor(this.engine));
+    // A cloning engine with no reference clip yet cannot speak: calls use the add-on's voice until its clips are made.
+    return (
+      this.settings().enabled &&
+      naturalInstalled(this.pathsFor(this.engine)) &&
+      availableVoices(this.pathsFor(this.engine), this.engine).length > 0
+    );
   }
 
   /** Cache hit rate since this daemon started (0..1; null before any look). */
@@ -665,7 +687,12 @@ export class NaturalVoice {
     speed: number = this.speed,
   ): Promise<Int16Array | null> {
     const id = engine ?? this.engine;
-    if (voice ? !engineHasVoice(id, voice) || !naturalInstalled(this.pathsFor(id)) : !this.usable) {
+    const known =
+      voice !== undefined &&
+      voice !== "" &&
+      engineHasVoice(id, voice) &&
+      (!usesReferenceClips(id) || fs.existsSync(referenceClip(this.pathsFor(id).dir, voice)));
+    if (voice ? !known || !naturalInstalled(this.pathsFor(id)) : !this.usable) {
       return Promise.resolve(null);
     }
     const runtime = engine === undefined || engine === this.engine ? this.current() : this.runtime(id);
@@ -832,7 +859,13 @@ export class NaturalVoice {
    * other than the current, so the picker can audition before switching; its worker stops again afterwards.
    */
   async preview(voice: string, engine?: EngineId, speed?: number): Promise<Buffer | null> {
-    const pcm = await this.render(VOICE_PREVIEW_TEXT, voice, "urgent", engine, speed);
+    const pcm = await this.render(
+      VOICE_PREVIEW_TEXT,
+      resolveVoiceRequest(engine ?? this.engine, voice) as string,
+      "urgent",
+      engine,
+      speed,
+    );
     if (engine !== undefined && engine !== this.engine) this.stopRuntime(engine);
     return pcm?.length ? wavOfPcm(padLine(downsampleToLine(pcm))) : null;
   }

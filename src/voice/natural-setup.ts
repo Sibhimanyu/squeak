@@ -6,7 +6,14 @@ import { promisify } from "node:util";
 
 import { naturalInstalled, naturalPaths, writeEngineFiles, type NaturalPaths } from "./natural-voice.js";
 import { REFERENCE_CLIPS_PY, REFERENCE_TEXT } from "./natural-worker-mlx.js";
-import { DEFAULT_ENGINE, ENGINE_IDS, VOICE_ENGINES, referenceClip, type EngineId } from "./voice-engines.js";
+import {
+  DEFAULT_ENGINE,
+  ENGINE_IDS,
+  VOICE_ENGINES,
+  referenceClip,
+  usesReferenceClips,
+  type EngineId,
+} from "./voice-engines.js";
 
 const run = promisify(execFile);
 
@@ -448,7 +455,7 @@ async function installMlxEngine(
   const signal = options.signal ?? new AbortController().signal;
   const engine = VOICE_ENGINES[engineId];
   const paths = naturalPaths(supportDir, engineId);
-  const needsKokoro = engineId === "chatterbox" || engineId === "ming";
+  const needsKokoro = usesReferenceClips(engineId);
   try {
     // Ming's and Chatterbox's reference clips come from Kokoro; the first tenth of the bar is that install, when it is missing.
     const lift = needsKokoro && !naturalInstalled(naturalPaths(supportDir)) ? 10 : 0;
@@ -573,6 +580,55 @@ function dirBytes(dir: string): number {
  * `squeak voice-tts-setup [--engine <id>]`: the same install in a terminal. Returns the exit code. Progress prints at
  * each step and every 10% of a download; the detail of a failure is printed here (it is the person's own terminal).
  */
+/**
+ * Makes the reference clips an installed Ming or Chatterbox is missing (an install from before the shared voice list
+ * has none, or only some), at daemon start. Kokoro makes them: with Kokoro already installed that is a few seconds;
+ * without it the clips cannot be made, so Kokoro is installed first through the same path setup uses (about 350 MB),
+ * and only when some cloning engine is installed and missing a clip. Until a clip exists its voice is not offered
+ * (`availableVoices`), so nothing here blocks a call. Returns the engines it made clips for; failures are logged only.
+ */
+export async function ensureReferenceClips(
+  supportDir: string,
+  options: { deps?: NaturalSetupDeps; signal?: AbortSignal; log?: (detail: string) => void } = {},
+): Promise<EngineId[]> {
+  const deps = options.deps ?? realNaturalSetupDeps;
+  const todo = ENGINE_IDS.filter(usesReferenceClips).flatMap((id) => {
+    const paths = naturalPaths(supportDir, id);
+    if (!naturalInstalled(paths)) return [];
+    const missing = VOICE_ENGINES[id].voices
+      .map((voice) => voice.id)
+      .filter((voice) => !fs.existsSync(referenceClip(paths.dir, voice)));
+    return missing.length > 0 ? [{ id, paths, missing }] : [];
+  });
+  if (todo.length === 0) return [];
+  const made: EngineId[] = [];
+  try {
+    const kokoro = naturalPaths(supportDir);
+    if (!naturalInstalled(kokoro)) {
+      const result = await installNatural(supportDir, () => undefined, {
+        deps,
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.log ? { log: options.log } : {}),
+      });
+      if (!result.ok) {
+        options.log?.(`reference clips: Kokoro could not be installed (${result.code})`);
+        return [];
+      }
+    }
+    for (const { id, paths, missing } of todo) {
+      try {
+        await deps.makeReferenceClips(kokoro, paths.dir, missing);
+        made.push(id);
+      } catch (error) {
+        options.log?.(`reference clips for ${id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  } catch (error) {
+    options.log?.(error instanceof Error ? error.message : String(error));
+  }
+  return made;
+}
+
 export async function runNaturalSetup(
   supportDir: string,
   say: (text: string) => void = console.log,

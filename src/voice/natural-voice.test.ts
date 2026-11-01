@@ -18,7 +18,7 @@ import {
 import { speechParts } from "./natural-cache.js";
 import { WORKER_MARKER } from "./natural-worker-mlx.js";
 import { DESIGNED_VOICES_FILE, designedVoicesJson, QWEN3_DESIGNED_VOICES } from "./qwen3-designed-voices.js";
-import { VOICE_ENGINES, type EngineId } from "./voice-engines.js";
+import { NATURAL_VOICES, VOICE_ENGINES, type EngineId } from "./voice-engines.js";
 import { openBody, readRequest, sealRequest } from "./relay-protocol.js";
 import { randomBytes } from "node:crypto";
 
@@ -245,6 +245,10 @@ describe("engines in one NaturalVoice", () => {
     );
     const weights = path.join(dir, "weights.bin");
     fs.writeFileSync(weights, "x");
+    for (const engine of ["ming", "chatterbox"]) {
+      fs.mkdirSync(path.join(dir, engine, "refs"), { recursive: true });
+      for (const voice of NATURAL_VOICES) fs.writeFileSync(path.join(dir, engine, "refs", `${voice.id}.wav`), "x");
+    }
     const pathsFor = (engine: EngineId) => ({
       dir: path.join(dir, engine),
       python: process.execPath,
@@ -495,7 +499,8 @@ describe("engines in one NaturalVoice", () => {
     const settings: NaturalSettings = { enabled: true, voice: "af_heart", engine: "kokoro" };
     const natural = new NaturalVoice(pathsFor, () => settings);
     try {
-      expect(await natural.preview("am_michael", "ming")).not.toBeNull();
+      expect(await natural.preview("US_James", "ming")).not.toBeNull(); // an older phone's name for Michael
+
       expect(requests()[0]).toMatchObject({ voice: "am_michael", mood: "urgent", level: "subtle" });
       expect(await natural.preview("ryan", "ming")).toBeNull(); // not one of Ming's voices
       expect(await natural.preview("ryan", "kokoro")).toBeNull();
