@@ -1263,7 +1263,10 @@ export class SqueakApp {
           : null,
       // Menus answered by voice: an add-on from 0.20.0 listens and sends the recording up; Whisper is this Mac's (calling in
       // is off without it), and the match is deterministic.
-      pickByVoice: () => addonSupports(this.gatewayStatusReader().peek().version, VOICE_MENU_ADDON),
+      pickByVoice: () =>
+        this.voiceSettings.menusByVoice() && addonSupports(this.gatewayStatusReader().peek().version, VOICE_MENU_ADDON),
+      // The newest chat waiting on the person offered first on a call in (an owner's setting, off by default).
+      offerWaitingChat: () => this.voiceSettings.offerWaitingChat(),
       // A new chat from a call in: the same `startChat` as the phone app, with the owner's model pick for calls.
       newChat: {
         supported: () => addonSupports(this.gatewayStatusReader().peek().version, NEW_CHAT_ADDON),
@@ -1737,7 +1740,13 @@ export class SqueakApp {
       pin: this.voicePinState(),
       ...this.voicePolicyView(),
       pause: this.voiceSettings.pause(),
-      persona: this.voiceSettings.settings.persona ?? DEFAULT_PERSONA,
+      persona: {
+        ...(this.voiceSettings.settings.persona ?? DEFAULT_PERSONA),
+        // A custom character's waiting lines are written by `claude -p` (voice/fillers.ts), so a UI can say so.
+        customLinesByClaude: true,
+      },
+      offerWaitingChat: this.voiceSettings.offerWaitingChat(),
+      menusByVoice: this.voiceSettings.menusByVoice(),
       // When a question rings the phone: every key present, the defaults where the owner changed nothing.
       hold: this.voiceSettings.hold(),
       // The model a chat started from a call uses (null: the workspace's usual one) and the presets to pick from.

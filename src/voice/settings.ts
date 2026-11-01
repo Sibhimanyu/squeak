@@ -129,6 +129,27 @@ export interface VoiceSettings {
   pause?: VoicePause;
   /** Absent until the owner picks one: the terse default. */
   persona?: VoicePersona;
+  /** Absent: false. A call in is first offered the newest chat waiting on the person. */
+  offerWaitingChat?: boolean;
+  /** Absent: true. Call-in menus are answered by voice (an add-on that listens); false: the keypad menus. */
+  menusByVoice?: boolean;
+}
+
+export const DEFAULT_OFFER_WAITING_CHAT = false;
+export const DEFAULT_MENUS_BY_VOICE = true;
+export const CALL_FLAG_REFUSAL = "Send exactly one of offerWaitingChat or menusByVoice, true or false.";
+
+/** `{ offerWaitingChat: boolean }` or `{ menusByVoice: boolean }`: exactly one key, a strict boolean. Null otherwise. */
+export function readCallFlagChange(
+  value: unknown,
+): { key: "offerWaitingChat" | "menusByVoice"; value: boolean } | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length !== 1) return null;
+  const key = keys[0];
+  if (key !== "offerWaitingChat" && key !== "menusByVoice") return null;
+  const flag = (value as Record<string, unknown>)[key];
+  return typeof flag === "boolean" ? { key, value: flag } : null;
 }
 
 /** A custom persona as text for the model: control characters out, whitespace collapsed, clipped. */
@@ -233,17 +254,29 @@ export class VoiceSettingsStore {
     return { ...DEFAULT_HOLD, ...this.current.hold };
   }
 
+  /** Whether a call in first offers the newest chat waiting on the person (default false). */
+  offerWaitingChat(): boolean {
+    return this.current.offerWaitingChat ?? DEFAULT_OFFER_WAITING_CHAT;
+  }
+
+  /** Whether call-in menus are answered by voice (default true). */
+  menusByVoice(): boolean {
+    return this.current.menusByVoice ?? DEFAULT_MENUS_BY_VOICE;
+  }
+
   /** The pause in force now, or null; an elapsed one is cleared here, in memory and in the file. */
   pause(): VoicePause | null {
     const pause = this.current.pause;
     if (!pause) return null;
     if (pause.until !== null && pause.until <= this.now()) {
-      const { callee, persona, hold, newChatModel } = this.current;
+      const { callee, persona, hold, newChatModel, offerWaitingChat, menusByVoice } = this.current;
       this.save({
         callee,
         ...(persona ? { persona } : {}),
         ...(hold ? { hold } : {}),
         ...(newChatModel ? { newChatModel } : {}),
+        ...(offerWaitingChat !== undefined ? { offerWaitingChat } : {}),
+        ...(menusByVoice !== undefined ? { menusByVoice } : {}),
       });
       return null;
     }
@@ -264,6 +297,8 @@ export class VoiceSettingsStore {
       // Checked against Conductor's presets when it is set and again when a chat starts, not here: Conductor may be quiet.
       const model = readNewChatModelChange({ newChatModel: raw.newChatModel });
       if (model?.model) settings.newChatModel = model.model;
+      if (typeof raw.offerWaitingChat === "boolean") settings.offerWaitingChat = raw.offerWaitingChat;
+      if (typeof raw.menusByVoice === "boolean") settings.menusByVoice = raw.menusByVoice;
       const pause = raw.pause;
       if (typeof pause === "object" && pause !== null && !Array.isArray(pause)) {
         const until = (pause as Record<string, unknown>).until;
@@ -301,6 +336,8 @@ export class VoiceSettingsStore {
       ...(this.current.persona ? { persona: this.current.persona } : {}),
       ...(this.current.hold ? { hold: this.current.hold } : {}),
       ...(this.current.newChatModel ? { newChatModel: this.current.newChatModel } : {}),
+      ...(this.current.offerWaitingChat !== undefined ? { offerWaitingChat: this.current.offerWaitingChat } : {}),
+      ...(this.current.menusByVoice !== undefined ? { menusByVoice: this.current.menusByVoice } : {}),
     };
     const keepPause = this.current.pause ? { pause: this.current.pause } : {};
     let next: VoiceSettings;
@@ -330,6 +367,10 @@ export class VoiceSettingsStore {
       } else {
         next = { callee: this.current.callee, ...rest, ...keepPause };
       }
+    } else if (isKey("offerWaitingChat") || isKey("menusByVoice")) {
+      const change = readCallFlagChange(request);
+      if (!change) return { ok: false, reason: CALL_FLAG_REFUSAL };
+      next = { callee: this.current.callee, ...keep, ...keepPause, [change.key]: change.value };
     } else if (isKey("persona")) {
       const persona = readPersonaChange(request);
       if (!persona)

@@ -228,6 +228,8 @@ export interface MemoInboxDependencies {
    * says `pickByVoice` and answers `pick` messages. Absent or false: the keypad menus, as before.
    */
   pickByVoice?: () => boolean;
+  /** Read at each publish: true offers the newest chat waiting on the person first (`DirectoryDoc.last`). Absent: no. */
+  offerWaitingChat?: () => boolean;
   /** The owner's persona is terse (voice/settings.ts): calls in drop the pleasantries. Read at each publish. */
   terse?: () => boolean;
   /**
@@ -627,9 +629,21 @@ export class MemoInbox {
         items.push({ n: items.length + 1, label: t.label, choice: targets.length });
       }
     }
-    // No chat is offered first (the owner wants every call in to go straight to "Which workspace?"): `last` stays
-    // unset. The add-on and `DirectoryDoc.last` still support it for older code paths.
-    const last: DirectoryDoc["last"] = undefined;
+    // The newest chat waiting on the person, offered first, only when the owner turned it on (default: straight to
+    // "Which workspace?"). "The last one you used" is gone for good (`lastChat` stays unwired). The pick is always one
+    // of `targets` (put at the end, off every menu, when no menu lists it), so a memo or a status can name it.
+    let last: DirectoryDoc["last"];
+    if (this.deps.offerWaitingChat?.()) {
+      const waiting = all.find((t) => t.waiting);
+      if (waiting) {
+        let index = targets.findIndex((t) => t.target === waiting.target);
+        if (index < 0 && targets.length < MAX_CHOICES) {
+          targets.push(waiting);
+          index = targets.length - 1;
+        }
+        if (index >= 0) last = { choice: index + 1, label: waiting.label, why: "waiting" };
+      }
+    }
     const fillers = this.deps.fillers?.() ?? null;
     const version = crypto
       .createHash("sha256")

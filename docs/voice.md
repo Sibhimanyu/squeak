@@ -697,3 +697,16 @@ If the grant made a new channel and key they are saved to `.env` and the daemon 
 restarts it with the relay; an unchanged pair restarts nothing. Status comes from the add-on's `gwstatus` document
 (`gateway-status.ts`, fresh within 90 s), also in `GET /control/voice` as `gateway`. The `voicepair` rules kind
 carries the request and grant.
+
+## Two call-in settings
+
+`voice-settings.json` carries two optional booleans, also in `GET /control/voice` and the phone view's voice block (always
+resolved: `offerWaitingChat` false and `menusByVoice` true when unset, so a client knows the daemon supports them by their
+presence). `POST /control/voice` and the phone's signed `voice` command take exactly one key, a strict boolean, and end in
+`VoiceSettingsStore.apply`; a change republishes the directory.
+
+- `offerWaitingChat` (default false): the call-in directory again offers the newest chat waiting on the person first
+  (`DirectoryDoc.last`, why `waiting`). "The last one you used" is gone for good (`lastChat` stays unwired).
+- `menusByVoice` (default true): false leaves `pickByVoice` out of the directory, so the add-on uses the keypad menus.
+
+The persona block also carries `customLinesByClaude: true`: a custom character's waiting lines are written by `claude -p`.
