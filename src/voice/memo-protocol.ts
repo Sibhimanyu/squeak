@@ -192,7 +192,21 @@ export interface AudioFollows {
 }
 
 export type DownMessage =
-  | { v: 1; id: string; at: number; status: "transcript"; text: string; label: string; audio?: Clip; model?: string }
+  /**
+   * What was heard. `audio` is the Mac's clip of the read-back; with `audioFollows` (add-on 0.19.0 and newer) it is the
+   * clip of `parts[0]` only, and `parts` joined with spaces are exactly the words of the add-on's own read-back.
+   */
+  | {
+      v: 1;
+      id: string;
+      at: number;
+      status: "transcript";
+      text: string;
+      label: string;
+      audio?: Clip;
+      audioFollows?: AudioFollows;
+      model?: string;
+    }
   /**
    * The outcome of a `start`: "started" (`hold`: the Mac offered to stay on the line, so the call goes on as a talk
    * turn in `confirm`), "declined" (a spoken no, or two answers that were no yes or no) or "again" (say yes or no).
@@ -436,6 +450,7 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
     case "transcript": {
       if (typeof body.text !== "string" || typeof body.label !== "string") return null;
       const spoken = readClip(body.audio);
+      const follows = readFollows(body.audioFollows, spoken);
       return {
         ...base,
         status: "transcript",
@@ -443,6 +458,7 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
         label: body.label.slice(0, 80),
         // Speech that does not check out is dropped, never a reason to lose the transcript.
         ...(spoken ? { audio: spoken } : {}),
+        ...(follows ? { audioFollows: follows } : {}),
         ...(typeof body.model === "string" && body.model.trim() ? { model: body.model.slice(0, 80) } : {}),
       };
     }

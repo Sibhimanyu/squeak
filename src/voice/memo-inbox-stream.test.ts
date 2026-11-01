@@ -5,7 +5,7 @@ import { generateChannel } from "../remote/remote-crypto.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import type { Clip } from "./clips.js";
 import { MemoInbox, type MemoInboxDependencies } from "./memo-inbox.js";
-import { splitSentences } from "./natural-cache.js";
+import { speechParts } from "./natural-cache.js";
 import {
   audioPath,
   dirPath,
@@ -22,7 +22,8 @@ import {
 } from "./memo-protocol.js";
 
 const { channelId: channel, key } = generateChannel();
-const ANSWER = "It is working on the tests. Nothing needs you right now. The build is passing.";
+const ANSWER =
+  "It is working on the tests. Nothing needs you right now because the review passed earlier this morning and every check is green. The build is passing on the main branch and the deploy is waiting for your approval.";
 const clipOf = (text: string): Clip => ({ text, mulaw: Buffer.alloc(40, 0xff).toString("base64") });
 
 describe("MemoInbox: an answer goes out after its first sentence", () => {
@@ -52,7 +53,7 @@ describe("MemoInbox: an answer goes out after its first sentence", () => {
       speech: async (text) => clipOf(text),
       // The first sentence is ready at once; the others wait for the gate and are made in order.
       speechStream: async (text, onPart) => {
-        const parts = splitSentences(text);
+        const parts = speechParts(text);
         for (const [index, part] of parts.entries()) {
           if (index > 0) await gate;
           order.push(`made:${index}`);
@@ -92,7 +93,7 @@ describe("MemoInbox: an answer goes out after its first sentence", () => {
   }
 
   it("replies once the first sentence is ready, then writes the others in order and sealed", async () => {
-    const parts = splitSentences(ANSWER);
+    const parts = speechParts(ANSWER);
     expect(parts.length).toBe(3);
     const { id, down } = await status();
     // The later sentences are still held back, yet the reply is out.

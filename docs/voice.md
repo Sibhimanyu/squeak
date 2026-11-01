@@ -351,6 +351,28 @@ add-on deletes the documents when the answer is done; the Mac deletes any left a
 recording behave as before, after the whole answer. An older add-on never gets `audioFollows` and keeps the single full
 clip; an older Mac never sends it, so a newer add-on speaks the whole answer as before.
 
+**Add-on 0.19.0 (`READBACK_STREAM_ADDON`).** Two changes on the same machinery.
+
+- _The read-back plays as it is made._ The `transcript` message (a memo's read-back and a new chat's) gains `audio` (the
+  clip of the first part) and `audioFollows: { parts }`, later parts as `replyaudio-<memo id>-<n>` documents, written by
+  the same code as an answer's (`MemoInbox.streamedSpeech`, rendered by `NaturalVoice.partClips`). The parts are cut in
+  `read-back-parts.ts`: a fixed head ("I heard:" / "I'll start a new chat in X with Y:"), the person's words in parts of
+  at least 80 characters, and a fixed tail ("Press 1 to send it to ..." / "Say yes to start it, or no."). Head and tail
+  are made ahead after the prompts are published (`prepareSpeech`), so the first clip is a cache hit and the call waits
+  for no recording. The parts joined are exactly the add-on's own read-back; the add-on checks that (whitespace folded)
+  and otherwise says the whole text. If the head is not ready within the 8 s budget the transcript goes without audio
+  and the add-on speaks it, with no second wait. A transcript text over 1500 characters, or more than 30 parts, is not
+  streamed. Star repeats: the add-on keeps the clips it was given seeded and says the parts again one by one. An older
+  add-on gets the single clip as before; an older Mac never sends `audioFollows` on a transcript.
+- _A late sentence no longer hands the answer to the plain voice._ The Mac cuts an answer's parts so a short sentence
+  is never alone ahead of a long one: the first sentence is its own part (the first audio starts fast), the rest are
+  merged until each part is at least 80 characters (`speechParts`, `NaturalVoice.sentenceClips` makes the clips in the
+  same groups; a short remainder joins the part before it). The add-on (`speakFollowed` in `answer-audio.ts`) waits for
+  the next part with the line resting on silence: a part that arrives more than 1.5 s after the previous ended is traced
+  `step: Sentence 3 was late (2.4 s)`; one still missing after 8 s (`ANSWER_LATE_MS`) is spoken by the add-on, that
+  part only (`step: Sentence 3 spoken by the add-on`), and the next part is followed from the Mac again. A pressed key
+  ends the wait at once (`PhoneCall.keyPending`).
+
 ### The chat you used last, and recordings it will not send blind
 
 - **Jump straight in** (`DirectoryDoc.last`, optional: `{ choice, label }`). The Mac names the chat you last used by

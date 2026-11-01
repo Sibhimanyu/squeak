@@ -63,6 +63,42 @@ export function splitSentences(text: string): string[] {
   return merged;
 }
 
+/** A later part of a streamed answer is at least this long, so a short sentence is never alone ahead of a long one. */
+export const LATER_PART_MIN_CHARS = 80;
+
+/**
+ * Sentences grouped for streaming: consecutive ones merged until a group is at least `min` characters; a short
+ * remainder at the end joins the group before it. Joined with spaces the groups say the same words.
+ */
+export function groupLaterSentences(sentences: readonly string[], min = LATER_PART_MIN_CHARS): string[][] {
+  const groups: string[][] = [];
+  let current: string[] = [];
+  for (const sentence of sentences) {
+    current.push(sentence);
+    if (current.join(" ").length >= min) {
+      groups.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) {
+    if (groups.length > 0) groups[groups.length - 1]!.push(...current);
+    else groups.push(current);
+  }
+  return groups;
+}
+
+/** The sentences of a spoken answer in the groups it is sent in: the first sentence alone, the rest merged. */
+export function speechGroups(text: string): string[][] {
+  const sentences = splitSentences(text);
+  if (sentences.length < 2) return sentences.map((sentence) => [sentence]);
+  return [[sentences[0]!], ...groupLaterSentences(sentences.slice(1))];
+}
+
+/** The parts a streamed answer is sent in (`audioFollows.parts`): what each clip says. */
+export function speechParts(text: string): string[] {
+  return speechGroups(text).map((group) => group.join(" "));
+}
+
 /** A plain 16-bit mono WAV. */
 export function wavOfPcm(pcm: Int16Array, rate = LINE_RATE): Buffer {
   const data = Buffer.alloc(pcm.length * 2);

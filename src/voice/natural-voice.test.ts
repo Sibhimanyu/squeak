@@ -15,6 +15,7 @@ import {
   refreshWorker,
   renderCallClips,
 } from "./natural-voice.js";
+import { speechParts } from "./natural-cache.js";
 import { WORKER_MARKER } from "./natural-worker-mlx.js";
 import { DESIGNED_VOICES_FILE, designedVoicesJson, QWEN3_DESIGNED_VOICES } from "./qwen3-designed-voices.js";
 import { VOICE_ENGINES, type EngineId } from "./voice-engines.js";
@@ -238,6 +239,29 @@ describe("engines in one NaturalVoice", () => {
         ["neutral", "off"],
         ["neutral", "off"],
       ]);
+    } finally {
+      natural.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("makes a streamed answer's clips in the merged parts, and a read-back's parts one by one", async () => {
+    const { dir, pathsFor } = fakeEngines();
+    const settings: NaturalSettings = { enabled: true, voice: "ryan", engine: "qwen3", emotion: "off" };
+    const natural = new NaturalVoice(pathsFor, () => settings, { cacheDir: path.join(dir, "cache") });
+    try {
+      const text =
+        "Right now: it runs. Short one. And this later sentence is long enough to stand on its own for a while. Last bit here.";
+      const got: Array<{ index: number; total: number; text: string }> = [];
+      await natural.sentenceClips(text, ({ index, total, clip }) => got.push({ index, total, text: clip.text }));
+      expect(got.map((part) => part.text)).toEqual(speechParts(text));
+      expect(got.map((part) => part.index)).toEqual([0, 1]);
+      expect(got.every((part) => part.total === 2)).toBe(true);
+
+      const fixed = ["I heard:", "Something the person said, quite long.", "Press 1 to send it."];
+      const clips: string[] = [];
+      await natural.partClips(fixed, ({ index, clip }) => (clips[index] = clip.text));
+      expect(clips).toEqual(fixed);
     } finally {
       natural.stop();
       fs.rmSync(dir, { recursive: true, force: true });

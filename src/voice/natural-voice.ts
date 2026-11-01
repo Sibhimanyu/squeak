@@ -12,6 +12,7 @@ import {
   LINE_RATE,
   pcmOfWav,
   SentenceCache,
+  speechGroups,
   splitSentences,
   wavOfPcm,
   type LineStats,
@@ -761,27 +762,71 @@ export class NaturalVoice {
   }
 
   /**
-   * The words one sentence at a time, each as its own telephone clip, handed over in order the moment it is made, so
-   * the first can be sent while the rest are still rendering (`onSentence` order as `line`). The sentences are those
-   * of `splitSentences`; a sentence that could not be made is skipped (its index is missing). The clip text is the
-   * sentence's own words. Only the first clip carries lead silence and only the last tail silence: the line adds a
-   * pad of its own between clips. Resolves when every sentence has been tried.
+   * The words in the parts of `speechGroups` (the first sentence alone, later short ones merged to at least 80
+   * characters), each as its own telephone clip, handed over in order the moment it is made, so the first can be sent
+   * while the rest are still rendering. A part that could not be made is skipped (its index is missing). The clip text
+   * is the part's own words (`speechParts`). Only the first clip carries lead silence and only the last tail silence:
+   * the line adds a pad of its own between clips. Resolves when every sentence has been tried.
    */
   async sentenceClips(
     text: string,
     onClip: (part: { index: number; total: number; clip: Clip }) => void,
     options: Omit<LineOptions, "onSentence"> = {},
   ): Promise<void> {
-    const parts = splitSentences(text);
+    const groups = speechGroups(text);
+    const starts: number[] = [];
+    const groupOf: number[] = [];
+    let seen = 0;
+    for (const [at, group] of groups.entries()) {
+      starts.push(seen);
+      for (let i = 0; i < group.length; i += 1) groupOf.push(at);
+      seen += group.length;
+    }
+    const pieces = new Map<number, Int16Array>();
     await this.line(text, {
       ...options,
-      onSentence: ({ index, total, pcm }) => {
-        const words = parts[index];
-        if (!words) return;
-        const line = assembleLine([pcm], index === 0 ? LEAD_SILENCE_MS : 0, index === total - 1 ? TAIL_SILENCE_MS : 0);
-        onClip({ index, total, clip: { text: words, mulaw: encodeMulaw(line).toString("base64") } });
+      onSentence: ({ index, pcm }) => {
+        pieces.set(index, pcm);
+        const at = groupOf[index] ?? -1;
+        const group = groups[at];
+        if (!group || starts[at]! + group.length - 1 !== index) return;
+        const sentences = group.map((_, offset) => pieces.get(starts[at]! + offset));
+        if (sentences.some((pcmOf) => !pcmOf)) return;
+        const lead = at === 0 ? LEAD_SILENCE_MS : 0;
+        const tail = at === groups.length - 1 ? TAIL_SILENCE_MS : 0;
+        const line = assembleLine(sentences as Int16Array[], lead, tail);
+        onClip({
+          index: at,
+          total: groups.length,
+          clip: { text: group.join(" "), mulaw: encodeMulaw(line).toString("base64") },
+        });
       },
     });
+  }
+
+  /**
+   * Each of these texts as its own clip (a fixed head, the person's words, a fixed tail), handed over in order as it is
+   * made. Every text is queued at once, so a fixed one in the sentence cache is ready the moment it is asked. Lead
+   * silence only on the first, tail silence only on the last; a text that could not be made is skipped.
+   */
+  async partClips(
+    parts: readonly string[],
+    onClip: (part: { index: number; total: number; clip: Clip }) => void,
+    options: Omit<LineOptions, "onSentence"> = {},
+  ): Promise<void> {
+    const made = parts.map(async (text) => {
+      const pieces: Int16Array[] = [];
+      const line = await this.line(text, { ...options, onSentence: ({ pcm }) => void pieces.push(pcm) });
+      return line ? pieces : null;
+    });
+    for (const [index, text] of parts.entries()) {
+      const pieces = await made[index]!;
+      if (!pieces) continue;
+      const lead = index === 0 ? LEAD_SILENCE_MS : 0;
+      const tail = index === parts.length - 1 ? TAIL_SILENCE_MS : 0;
+      const line = assembleLine(pieces, lead, tail);
+      onClip({ index, total: parts.length, clip: { text, mulaw: encodeMulaw(line).toString("base64") } });
+    }
   }
 
   /** The words as an 8 kHz WAV file, for a call this Mac places itself. Null if they could not be made. */
@@ -946,6 +991,12 @@ export class ReadBackClips {
   async prepare(labels: readonly string[], ask = false): Promise<void> {
     if (!this.natural.usable) return;
     for (const label of new Set(labels)) await this.tailClip(readBackParts("", label, ask).tail);
+  }
+
+  /** Renders these fixed words ahead (the streamed read-back's head and tail), so a call finds them in the cache. */
+  async prepareTexts(texts: readonly string[]): Promise<void> {
+    if (!this.natural.usable) return;
+    for (const text of new Set(texts)) await this.tailClip(text);
   }
 
   /** One clip saying exactly `readBackSentence(text, label)`; undefined when it should be left to the add-on. */

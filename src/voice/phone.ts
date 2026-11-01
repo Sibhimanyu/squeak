@@ -13,6 +13,8 @@ export interface PhoneCall {
   readonly open: boolean;
   /** Settles when the call ends, whoever ends it. */
   readonly closed: Promise<void>;
+  /** True while a key the call has not read yet is queued (it interrupts speech, and what follows waits for it). */
+  readonly keyPending?: boolean;
   /** Speaks; resolves when done, or at once when a key is pressed (the key stays queued) or the call ends. */
   say(text: string): Promise<void>;
   /** The next key, queued ones first; null on timeout or when the call ends. */
