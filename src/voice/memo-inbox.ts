@@ -23,7 +23,7 @@ import type { Fillers } from "./fillers.js";
 import { matchPick, pickMenuSpec, type PickDirectory } from "./voice-pick.js";
 import { clipOption } from "./script.js";
 import { numberRepeats } from "./spoken-labels.js";
-import { speechParts } from "./natural-cache.js";
+import { canStartAnswer, laterPartMinChars, speechParts } from "./natural-cache.js";
 import { loadCallState, saveCallState } from "./call-state.js";
 import {
   fixedMemoReadBackSpeech,
@@ -125,7 +125,18 @@ export interface MemoInboxDependencies {
    * its text exactly the sentence of `splitSentences`). With `streamsAnswers()` true (an add-on that plays them as they
    * arrive) an answer goes out after its first sentence and the rest follow as `replyaudio-` documents.
    */
-  speechStream?: (text: string, onPart: (part: { index: number; total: number; clip: Clip }) => void) => Promise<void>;
+  speechStream?: (
+    text: string,
+    onPart: (part: { index: number; total: number; clip: Clip }) => void,
+    /** The smallest later part (`laterPartMinChars`); the parts must be those `speechParts(text, laterMin)` names. */
+    laterMin?: number,
+  ) => Promise<void>;
+  /**
+   * The voice's real-time factor (render time / audio time) and speaking speed. With it a streamed answer is held until
+   * the audio rendered covers the estimated render time of the rest (`canStartAnswer`), so playback cannot starve;
+   * without it the reply goes with the first part.
+   */
+  speechPace?: () => { rtf: number; speed: number };
   streamsAnswers?: () => boolean;
   /**
    * The read-back as separate clips (`NaturalVoice.partClips`: a fixed head, the words, a fixed tail, each handed over in
@@ -615,25 +626,9 @@ export class MemoInbox {
         items.push({ n: items.length + 1, label: t.label, choice: targets.length });
       }
     }
-    // The chat offered first: the last one used by phone, else the newest waiting on the person. It is always one of
-    // `targets` (put at the end, off every menu, when no menu lists it), so a memo or a status can name it.
-    // Used by phone only counts for a while: a chat from this morning offered as "the last one you used" tonight
-    // read as a stale list. Else the newest waiting on the person (`all` is newest first); else no offer, the menus.
-    const lastChat = this.deps.lastChat;
-    const lastTarget = lastChat ? (lastChat.recent ? lastChat.recent(LAST_CHAT_FRESH_MS) : lastChat.get()) : null;
-    const used = all.find((t) => t.target === lastTarget);
-    const waiting = all.find((t) => t.waiting);
-    const lastPick = used ?? waiting;
-    const why = used ? "used" : "waiting";
-    let last: DirectoryDoc["last"];
-    if (lastPick) {
-      let index = targets.findIndex((t) => t.target === lastPick.target);
-      if (index < 0 && targets.length < MAX_CHOICES) {
-        targets.push(lastPick);
-        index = targets.length - 1;
-      }
-      if (index >= 0) last = { choice: index + 1, label: lastPick.label, why };
-    }
+    // No chat is offered first (the owner wants every call in to go straight to "Which workspace?"): `last` stays
+    // unset. The add-on and `DirectoryDoc.last` still support it for older code paths.
+    const last: DirectoryDoc["last"] = undefined;
     const fillers = this.deps.fillers?.() ?? null;
     const version = crypto
       .createHash("sha256")
@@ -1065,12 +1060,14 @@ export class MemoInbox {
    */
   private async spokenFields(id: string, text: string): Promise<{ audio?: Clip; audioFollows?: AudioFollows }> {
     const { speechStream, streamsAnswers } = this.deps;
-    const parts = speechParts(text);
+    const pace = this.deps.speechPace?.();
+    const laterMin = pace ? laterPartMinChars(pace.rtf) : undefined;
+    const parts = speechParts(text, laterMin);
     if (!speechStream || !streamsAnswers?.() || parts.length < 2 || parts.length > MAX_ANSWER_PARTS) {
       const audio = await this.answerAudio(text);
       return audio ? { audio } : {};
     }
-    return this.streamedSpeech(id, parts, (onPart) => speechStream(text, onPart), ANSWER_AUDIO_BUDGET_MS);
+    return this.streamedSpeech(id, parts, (onPart) => speechStream(text, onPart, laterMin), ANSWER_AUDIO_BUDGET_MS);
   }
 
   /**
@@ -1100,31 +1097,52 @@ export class MemoInbox {
   ): Promise<{ audio?: Clip; audioFollows?: AudioFollows }> {
     const { store, channel, key } = this.deps;
     let release: (clip: Clip | undefined) => void = () => undefined;
-    const first = new Promise<Clip | undefined>((resolve) => (release = resolve));
+    const go = new Promise<Clip | undefined>((resolve) => (release = resolve));
     let abandoned = false;
     let chain: Promise<void> = Promise.resolve();
     const written: string[] = [];
+    // The first clip is held back until the rest cannot fall behind it (`canStartAnswer`): audio rendered so far
+    // against the estimated render time of the parts still to come. No pace known: it goes at once, as before.
+    const pace = this.deps.speechPace?.();
+    let firstClip: Clip | undefined;
+    let renderedMs = 0;
+    let remainingChars = parts.reduce((sum, part) => sum + part.length, 0);
+    const clipMs = (clip: Clip) => Buffer.byteLength(clip.mulaw, "base64") / 8;
+    const maybeGo = () => {
+      if (!firstClip) return;
+      if (!pace || canStartAnswer({ renderedMs, remainingChars, ...pace })) release(firstClip);
+    };
     void render(({ index, clip }) => {
-      if (index === 0) return release(clip.text === parts[0] ? clip : undefined);
-      if (clip.text !== parts[index]) return;
-      chain = chain.then(async () => {
-        if (abandoned) return;
-        const docId = replyAudioId(id, index);
-        try {
-          await store.set(audioPath(channel, docId), sealAudio(key, docId, id, [clip], this.now()), {
-            timeoutMs: REPLY_AUDIO_WRITE_MS,
-          });
-          written.push(docId);
-        } catch {
-          // The add-on speaks what does not arrive.
-        }
-      });
+      if (clip.text !== parts[index]) {
+        if (index === 0) release(undefined);
+        return;
+      }
+      renderedMs += clipMs(clip);
+      remainingChars -= clip.text.length;
+      if (index === 0) firstClip = clip;
+      if (index > 0) {
+        chain = chain.then(async () => {
+          if (abandoned) return;
+          const docId = replyAudioId(id, index);
+          try {
+            await store.set(audioPath(channel, docId), sealAudio(key, docId, id, [clip], this.now()), {
+              timeoutMs: REPLY_AUDIO_WRITE_MS,
+            });
+            written.push(docId);
+          } catch {
+            // The add-on speaks what does not arrive.
+          }
+        });
+      }
+      maybeGo();
     })
       .catch(() => undefined)
-      .finally(() => release(undefined));
+      // Everything rendered (or given up): whatever first clip there is goes.
+      .finally(() => release(firstClip));
+    // Out of budget: what is ready goes, as before.
     const audio = await Promise.race([
-      first,
-      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), budgetMs).unref()),
+      go,
+      new Promise<Clip | undefined>((resolve) => setTimeout(() => resolve(firstClip), budgetMs).unref()),
     ]);
     // The backstop: the add-on deletes these when the answer is spoken; a call that dropped leaves them to this.
     setTimeout(() => {

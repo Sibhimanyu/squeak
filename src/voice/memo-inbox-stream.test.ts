@@ -25,6 +25,11 @@ const { channelId: channel, key } = generateChannel();
 const ANSWER =
   "It is working on the tests. Nothing needs you right now because the review passed earlier this morning and every check is green. The build is passing on the main branch and the deploy is waiting for your approval.";
 const clipOf = (text: string): Clip => ({ text, mulaw: Buffer.alloc(40, 0xff).toString("base64") });
+/** A clip as long as the text takes to say at 14 characters a second (8 bytes of mu-law per millisecond). */
+const timedClipOf = (text: string): Clip => ({
+  text,
+  mulaw: Buffer.alloc(Math.round((text.length / 14) * 1000 * 8), 0xff).toString("base64"),
+});
 
 describe("MemoInbox: an answer goes out after its first sentence", () => {
   let db: FakeRtdb;
@@ -113,6 +118,48 @@ describe("MemoInbox: an answer goes out after its first sentence", () => {
     // Sealed for its own id: a document moved to another id does not open.
     const moved = (await store.get(audioPath(channel, replyAudioId(id, 1))))!;
     expect(readAudio(key, replyAudioId(id, 2), moved)).toBeNull();
+  });
+
+  it("holds the reply for a slow engine until enough is rendered, and sends it at once for a fast one", async () => {
+    const stream = async (text: string, onPart: Parameters<NonNullable<MemoInboxDependencies["speechStream"]>>[1]) => {
+      const parts = speechParts(text);
+      for (const [index, part] of parts.entries()) {
+        if (index > 0) await gate;
+        order.push(`made:${index}`);
+        onPart({ index, total: parts.length, clip: timedClipOf(part) });
+      }
+    };
+    // Fast: the first part is more than the rest takes to make.
+    inbox.stop();
+    inbox = make({ speechStream: (text, onPart) => stream(text, onPart), speechPace: () => ({ rtf: 0.05, speed: 1 }) });
+    await inbox.publish();
+    const fast = await status();
+    expect(order).toEqual(["made:0"]);
+    expect(fast.down).toMatchObject({ status: "answer", audioFollows: { parts: speechParts(ANSWER) } });
+
+    // Slow: real-time rendering of the rest is more than the first part covers, so the reply waits for the others.
+    open();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    gate = new Promise<void>((resolve) => (open = resolve));
+    order.length = 0;
+    inbox.stop();
+    inbox = make({ speechStream: (text, onPart) => stream(text, onPart), speechPace: () => ({ rtf: 1, speed: 1 }) });
+    await inbox.publish();
+    const version = readDirectory(key, (await store.get(dirPath(channel)))!, clock)!.version;
+    const id = newMessageId();
+    await store.set(
+      upPath(channel, id),
+      sealUp(key, { v: 1, id, at: clock, expiresAt: clock + 60_000, kind: "status", dirVersion: version, choice: 1 }),
+    );
+    const pass = inbox.pass();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(order).toEqual(["made:0"]);
+    expect(await store.get(downPath(channel, id))).toBeNull();
+    open();
+    await pass;
+    expect(order).toEqual(["made:0", "made:1", "made:2"]);
+    const down = readDown(key, id, (await store.get(downPath(channel, id)))!);
+    expect(down).toMatchObject({ status: "answer", audioFollows: { parts: speechParts(ANSWER, 160) } });
   });
 
   it("sends one whole clip, with no audioFollows, to an add-on that cannot follow", async () => {

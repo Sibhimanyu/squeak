@@ -102,24 +102,19 @@ describe("MemoInbox last chat", () => {
     expect((await directory())!.last).toBeUndefined();
   });
 
-  it("falls back to the newest chat that waits on the person", async () => {
+  it("offers no chat first, however many wait on the person: a call goes straight to the menus", async () => {
     targets[1]!.waiting = true;
-    await inbox.publish();
-    expect((await directory())!.last).toEqual({ choice: 2, label: "blume · hub", why: "waiting" });
-  });
-
-  it("prefers the last chat used by phone, and ignores one that can no longer take a message", async () => {
-    targets[1]!.waiting = true;
-    last = "c1";
-    await inbox.publish();
-    expect((await directory())!.last).toEqual({ choice: 1, label: "squeak · voice", why: "used" });
-    last = "gone";
-    targets[1]!.waiting = false;
     await inbox.publish();
     expect((await directory())!.last).toBeUndefined();
   });
 
-  it("records a send, a question's status and republishes with it first", async () => {
+  it("offers no chat first even when one was used by phone just now", async () => {
+    last = "c1";
+    await inbox.publish();
+    expect((await directory())!.last).toBeUndefined();
+  });
+
+  it("records a send but never offers it in the directory", async () => {
     await inbox.publish();
     const dir = (await directory())!;
     const memoId = newMessageId();
@@ -138,23 +133,15 @@ describe("MemoInbox last chat", () => {
     expect(sent).toEqual(["c2"]);
     expect(last).toBe("c2");
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect((await directory())!.last).toEqual({ choice: 2, label: "blume · hub", why: "used" });
+    expect((await directory())!.last).toBeUndefined();
   });
 
-  it("lists a last chat that no menu holds, off every menu, so a memo can name it", async () => {
+  it("offers no last chat when the used one sits off every menu", async () => {
     targets = Array.from({ length: 8 }, (_, i) => ({ target: `c${i}`, label: `chat ${i}`, workspace: null }));
     last = "c7";
     await inbox.publish();
     const dir = (await directory())!;
     expect(dir.items).toHaveLength(6);
-    expect(dir.last).toEqual({ choice: 7, label: "chat 7", why: "used" });
-    const memo = await upload({
-      v: 1,
-      kind: "memo",
-      dirVersion: dir.version,
-      choice: 7,
-      audio: Buffer.from("opus").toString("base64"),
-    });
-    expect(memo.down).toMatchObject({ status: "transcript", label: "chat 7" });
+    expect(dir.last).toBeUndefined();
   });
 });

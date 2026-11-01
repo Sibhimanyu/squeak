@@ -1307,7 +1307,9 @@ export class SqueakApp {
       requestCallback: (target, label, note, afterSend) => this.requestCallback(target, label, note, afterSend),
       speech: async (text) => (await this.promptClips.clips([text]))[0],
       // An add-on from 0.17.0 plays an answer sentence by sentence as it is made; an older one gets one whole clip.
-      speechStream: (text, onPart) => this.naturalVoice.sentenceClips(text, onPart),
+      speechStream: (text, onPart, laterMin) =>
+        this.naturalVoice.sentenceClips(text, onPart, laterMin === undefined ? {} : { laterMin }),
+      speechPace: () => this.naturalVoice.pace(),
       streamsAnswers: () =>
         this.naturalVoice.usable && addonSupports(this.gatewayStatusReader().peek().version, ANSWER_STREAM_ADDON),
       note: (text) => this.announceCallNote(text),

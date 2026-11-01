@@ -8,7 +8,8 @@ import {
   normalizeText,
   SentenceCache,
   speechParts,
-  splitForSpeech,
+  canStartAnswer,
+  laterPartMinChars,
   splitSentences,
 } from "./natural-cache.js";
 import { fixedPhrases, NaturalVoice, type NaturalSettings } from "./natural-voice.js";
@@ -330,29 +331,42 @@ describe("priority and warm-up", () => {
   });
 });
 
-describe("a short first part", () => {
+describe("speech parts", () => {
   const long =
     "Yes, I fixed the import order, then the build passed on the second try. Then I ran the whole suite again.";
 
-  it("cuts a long first sentence at the first natural break between 20 and 60 characters", () => {
+  it("never cuts a sentence at a comma", () => {
     const parts = speechParts(long);
-    expect(parts[0]).toBe("Yes, I fixed the import order,");
+    expect(parts[0]).toBe("Yes, I fixed the import order, then the build passed on the second try.");
     expect(parts.join(" ")).toBe(long);
   });
 
-  it("leaves a short first sentence, and one with no break, alone", () => {
-    const short = "Short one here. And a second one follows it.";
-    expect(splitForSpeech(short)).toEqual(splitSentences(short));
-    const flat = "This sentence runs on and on without any break at all for a long long stretch of words indeed.";
-    expect(splitForSpeech(flat)).toEqual(splitSentences(flat));
+  it("merges later sentences into larger parts for a slow engine", () => {
+    const text = `First one here. ${Array.from({ length: 8 }, (_, i) => `Sentence number ${i} is of middling length.`).join(" ")}`;
+    const fast = speechParts(text, laterPartMinChars(0.2));
+    const slow = speechParts(text, laterPartMinChars(0.9));
+    expect(fast[0]).toBe("First one here.");
+    expect(slow[0]).toBe("First one here.");
+    expect(slow.length).toBeLessThan(fast.length);
+    expect(slow.join(" ")).toBe(text);
+  });
+});
+
+describe("canStartAnswer", () => {
+  it("is ready when nothing remains", () => {
+    expect(canStartAnswer({ renderedMs: 0, remainingChars: 0, rtf: 5, speed: 1 })).toBe(true);
   });
 
-  it("ignores a comma too early, and keeps a dash with the first part", () => {
-    const early = "Well, this first sentence has no later break but it is quite a bit longer than sixty characters.";
-    expect(splitForSpeech(early)).toEqual(splitSentences(early));
-    const dashed = "The migration finished cleanly on the staging box - now it waits for your go ahead on production.";
-    const parts = splitForSpeech(dashed);
-    expect(parts[0]!.endsWith("-")).toBe(true);
-    expect(parts.join(" ")).toBe(dashed);
+  it("waits until rendered audio covers the rest's render time plus the margin", () => {
+    // 280 chars at 14 chars/s = 20 s of audio; at rtf 0.5 that takes 10 s to render, plus 0.5 s margin.
+    const base = { remainingChars: 280, rtf: 0.5, speed: 1 };
+    expect(canStartAnswer({ ...base, renderedMs: 10_000 })).toBe(false);
+    expect(canStartAnswer({ ...base, renderedMs: 10_500 })).toBe(true);
+  });
+
+  it("goes at once for a fast engine, and a faster pace shortens what remains", () => {
+    expect(canStartAnswer({ renderedMs: 3_000, remainingChars: 280, rtf: 0.1, speed: 1 })).toBe(true);
+    expect(canStartAnswer({ renderedMs: 8_000, remainingChars: 280, rtf: 0.5, speed: 1 })).toBe(false);
+    expect(canStartAnswer({ renderedMs: 8_300, remainingChars: 280, rtf: 0.5, speed: 1.3 })).toBe(true);
   });
 });

@@ -86,6 +86,15 @@ describe("recording ends on end-of-speech", () => {
     expect(traces).toContain("step: Recording ended because: cap");
   });
 
+  it("names the key that ended a voice-pick listen", async () => {
+    const pick = call.record({ maxMs: 60_000, beep: false, endOnAnyKey: true });
+    await vi.advanceTimersByTimeAsync(10);
+    call.pushKey("1");
+    await vi.advanceTimersByTimeAsync(600);
+    expect((await pick)?.ended).toBe("key");
+    expect(traces).toContain("step: Recording ended because: key 1");
+  });
+
   it("still ends on hash, and a recording without endOnSilence ignores silence", async () => {
     const hashed = call.record({ maxMs: 60_000, beep: false, endOnSilence: true });
     await vi.advanceTimersByTimeAsync(10);

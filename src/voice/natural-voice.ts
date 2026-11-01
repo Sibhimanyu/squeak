@@ -13,7 +13,6 @@ import {
   pcmOfWav,
   SentenceCache,
   speechGroups,
-  splitForSpeech,
   splitSentences,
   wavOfPcm,
   type LineStats,
@@ -456,8 +455,6 @@ export interface LineOptions {
   priority?: RenderPriority;
   /** Called in order as each sentence is ready, so a line can start before the rest is made. */
   onSentence?: (sentence: SentenceReady) => void;
-  /** Cut a long first sentence at a natural break (`splitForSpeech`), for a streamed answer's quick first clip. */
-  shortFirst?: boolean;
 }
 
 /** How a piece of speech is made: the engine, its mood (from the words, unless the person turned emotion off). */
@@ -487,7 +484,13 @@ const WARM_TEXT = "Hello.";
  * nice does nothing for the GPU. Renders for one worker are serial, so the CPU is never hammered by two at once.
  * Switching engine stops the old engine's workers and starts the new one's.
  */
+/** Real-time factors assumed until an engine has rendered something here (a high guess waits rather than starves). */
+const SEED_RTF: Record<EngineId, number> = { kokoro: 0.15, ming: 0.5, qwen3: 0.8, chatterbox: 1 };
+const RTF_WEIGHT = 0.3;
+
 export class NaturalVoice {
+  private readonly rtfs = new Map<EngineId, number>();
+  private readonly renderedAt = new Map<EngineId, number>();
   private readonly runtimes = new Map<EngineId, EngineRuntime>();
   private active: EngineId | null = null;
   private readonly tmp = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-natural-"));
@@ -522,6 +525,19 @@ export class NaturalVoice {
 
   private get level(): EmotionLevel {
     return this.settings().emotion ?? DEFAULT_EMOTION;
+  }
+
+  /**
+   * The current engine's real-time factor (render time / audio time as played): a running average over the sentences
+   * it rendered, a conservative seed until one has been measured. Speed is in it, since a faster pace is shorter audio.
+   */
+  rtf(engine: EngineId = this.engine): number {
+    return this.rtfs.get(engine) ?? SEED_RTF[engine];
+  }
+
+  /** What a streamed answer needs to know to start safely: the engine's real-time factor and the speed in force. */
+  pace(): { rtf: number; speed: number } {
+    return { rtf: this.rtf(), speed: this.speed };
   }
 
   /** The speaking speed in force (1 when the settings say nothing). */
@@ -648,6 +664,21 @@ export class NaturalVoice {
       .then((pcm) => (pcm ? timeStretch(pcm, speed) : pcm));
   }
 
+  /**
+   * Folds one render into the engine's real-time factor. Renders queue on a serial worker, so the time counts from the
+   * later of this render's start and the previous one's end, never from when it was queued.
+   */
+  private noteRender(engine: EngineId, queuedAt: number, samples: number): void {
+    const end = this.now();
+    const start = Math.max(queuedAt, this.renderedAt.get(engine) ?? 0);
+    this.renderedAt.set(engine, end);
+    const audioMs = (samples / LINE_RATE) * 1000;
+    if (audioMs < 300 || end <= start) return;
+    const sample = (end - start) / audioMs;
+    const before = this.rtfs.get(engine);
+    this.rtfs.set(engine, before === undefined ? sample : before + RTF_WEIGHT * (sample - before));
+  }
+
   /** The background worker where an engine has one, else the only worker. */
   private procFor(runtime: EngineRuntime, priority: RenderPriority): WorkerProc {
     if (priority === "urgent" || !runtime.background) return runtime.urgent;
@@ -691,6 +722,7 @@ export class NaturalVoice {
           const pcm = await proc.render(text, voice, SPEED, delivery.mood, delivery.level, priority);
           if (!pcm || pcm.length === 0) return null;
           const line = downsampleToLine(timeStretch(pcm, speed));
+          this.noteRender(runtime.id, began, line.length);
           runtime.cache.put(key, line);
           return line;
         } finally {
@@ -712,7 +744,7 @@ export class NaturalVoice {
   async line(text: string, options: LineOptions = {}): Promise<Int16Array | null> {
     const voice = options.voice ?? this.settings().voice;
     const priority = options.priority ?? "urgent";
-    const parts = options.shortFirst ? splitForSpeech(text) : splitSentences(text);
+    const parts = splitSentences(text);
     if (parts.length === 0) return null;
     const delivery = this.delivery(text);
     const began = this.now();
@@ -810,9 +842,10 @@ export class NaturalVoice {
   async sentenceClips(
     text: string,
     onClip: (part: { index: number; total: number; clip: Clip }) => void,
-    options: Omit<LineOptions, "onSentence"> = {},
+    options: Omit<LineOptions, "onSentence"> & { laterMin?: number } = {},
   ): Promise<void> {
-    const groups = speechGroups(text);
+    const { laterMin, ...lineOptions } = options;
+    const groups = speechGroups(text, laterMin);
     const starts: number[] = [];
     const groupOf: number[] = [];
     let seen = 0;
@@ -823,8 +856,7 @@ export class NaturalVoice {
     }
     const pieces = new Map<number, Int16Array>();
     await this.line(text, {
-      ...options,
-      shortFirst: true,
+      ...lineOptions,
       onSentence: ({ index, pcm }) => {
         pieces.set(index, pcm);
         const at = groupOf[index] ?? -1;

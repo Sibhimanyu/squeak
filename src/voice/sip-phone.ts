@@ -344,6 +344,7 @@ export class LiveCall implements PhoneCall {
     const began = Date.now();
     this.trace?.("step: Recording started");
     let ended: RecordEnd | "closed";
+    let endKey = "#";
     try {
       this.ctx.send("auplay", `aufile,${file}`);
       // The beep plays while the recording is already running: starting after it lost the first syllable of what
@@ -368,6 +369,7 @@ export class LiveCall implements PhoneCall {
         if (why === "key") {
           // A menu answer ends on any key, which stays queued for the flow to read.
           if (options.endOnAnyKey) {
+            endKey = this.keys[0] ?? "#";
             ended = "key";
             break;
           }
@@ -404,7 +406,7 @@ export class LiveCall implements PhoneCall {
     }
     if (ended === "closed") return null;
     this.trace?.(
-      `step: Recording ended because: ${{ key: "hash", silence: "silence", limit: "cap", "no-speech": "no speech" }[ended]}`,
+      `step: Recording ended because: ${{ key: endKey === "#" ? "hash" : `key ${endKey}`, silence: "silence", limit: "cap", "no-speech": "no speech" }[ended]}`,
     );
     // Moving the player to another file is what finishes this one's header.
     this.ctx.send("auplay", `aufile,${this.ctx.discard}`);

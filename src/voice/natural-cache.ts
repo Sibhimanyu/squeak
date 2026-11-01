@@ -87,44 +87,47 @@ export function groupLaterSentences(sentences: readonly string[], min = LATER_PA
   return groups;
 }
 
-/** A first sentence longer than this is cut at a natural break so the first clip is quick to make. */
-export const FIRST_PART_MAX_CHARS = 60;
-const FIRST_PART_MIN_CHARS = 20;
-/** The remainder of a cut sentence must be worth a clip of its own. */
-const FIRST_REST_MIN_CHARS = 12;
-
-/**
- * `splitSentences` with the first sentence cut in two when it is long (over 60 characters): at the first comma,
- * semicolon, colon or dash that falls between 20 and 60 characters in, the punctuation staying with the first part.
- * Cut only where whitespace follows, so joined with a space the parts say exactly the same words. No break: unchanged.
- */
-export function splitForSpeech(text: string): string[] {
-  const sentences = splitSentences(text);
-  const first = sentences[0];
-  if (!first || first.length <= FIRST_PART_MAX_CHARS) return sentences;
-  const window = first.slice(0, FIRST_PART_MAX_CHARS + 1);
-  const breaks = /[,;:](?=\s)|\s[—–-]+(?=\s)/g;
-  for (let m = breaks.exec(window); m; m = breaks.exec(window)) {
-    const end = m.index + m[0].length;
-    const head = first.slice(0, end).trim();
-    const rest = first.slice(end).trim();
-    if (head.length < FIRST_PART_MIN_CHARS || head.length > FIRST_PART_MAX_CHARS) continue;
-    if (rest.length < FIRST_REST_MIN_CHARS) return sentences;
-    return [head, rest, ...sentences.slice(1)];
-  }
-  return sentences;
-}
-
 /** The sentences of a spoken answer in the groups it is sent in: the first sentence alone, the rest merged. */
-export function speechGroups(text: string): string[][] {
-  const sentences = splitForSpeech(text);
+export function speechGroups(text: string, laterMin = LATER_PART_MIN_CHARS): string[][] {
+  const sentences = splitSentences(text);
   if (sentences.length < 2) return sentences.map((sentence) => [sentence]);
-  return [[sentences[0]!], ...groupLaterSentences(sentences.slice(1))];
+  return [[sentences[0]!], ...groupLaterSentences(sentences.slice(1), laterMin)];
 }
 
 /** The parts a streamed answer is sent in (`audioFollows.parts`): what each clip says. */
-export function speechParts(text: string): string[] {
-  return speechGroups(text).map((group) => group.join(" "));
+export function speechParts(text: string, laterMin = LATER_PART_MIN_CHARS): string[] {
+  return speechGroups(text, laterMin).map((group) => group.join(" "));
+}
+
+/** Above this real-time factor (render time / audio time) later parts are merged to `SLOW_PART_MIN_CHARS`. */
+export const SLOW_RTF = 0.6;
+export const SLOW_PART_MIN_CHARS = 160;
+
+/** The smallest later part for an engine that renders at this real-time factor: fewer boundaries when it is slow. */
+export function laterPartMinChars(rtf: number): number {
+  return rtf > SLOW_RTF ? SLOW_PART_MIN_CHARS : LATER_PART_MIN_CHARS;
+}
+
+/** How fast speech is read, in characters per second at speed 1 (used to estimate audio not yet rendered). */
+export const SPEECH_CHARS_PER_SEC = 14;
+/** Audio that must be spare, beyond the estimated render time of the rest, before a streamed answer is sent. */
+export const START_MARGIN_MS = 500;
+
+/**
+ * Whether a streamed answer can be sent now without playback starving: the audio already rendered (ms) must cover the
+ * estimated render time of the rest (remaining characters as audio at `SPEECH_CHARS_PER_SEC * speed`, times `rtf`)
+ * plus a margin. Nothing remaining is always ready. `rtf` is measured against the audio as played (speed included).
+ */
+export function canStartAnswer(input: {
+  renderedMs: number;
+  remainingChars: number;
+  rtf: number;
+  speed: number;
+  marginMs?: number;
+}): boolean {
+  if (input.remainingChars <= 0) return true;
+  const remainingAudioMs = (input.remainingChars / (SPEECH_CHARS_PER_SEC * input.speed)) * 1000;
+  return input.renderedMs >= remainingAudioMs * input.rtf + (input.marginMs ?? START_MARGIN_MS);
 }
 
 /** A plain 16-bit mono WAV. */

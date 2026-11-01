@@ -431,16 +431,25 @@ something in the last 3 minutes (10 while a call is on hold). `scripts/ship.sh` 
 waits up to 15 minutes (`CALL_WAIT` seconds) and then goes on with a warning. A daemon that does not answer, or has no
 such route, counts as not busy.
 
-### The first clip is short
+### The reply waits until the rest cannot fall behind
 
-A streamed answer's first sentence, when it is over 60 characters, is cut at its first comma, semicolon, colon or
-dash that falls between 20 and 60 characters in (`splitForSpeech`), so the first clip is quick to make; the parts
-still join to the same words. The add-on's trace says `Sent 3 pieces (2 while recording)` (or `Sent 1 piece`).
+A sentence is never cut at a comma (2026-11-01: each part was rendered alone, so the prosody ended at the comma and
+restarted, "The chat, ... has finished" with a pause between). Parts are the first sentence alone, then whole sentences
+merged to at least 80 characters, or 160 when the engine's real-time factor is over 0.6 (`laterPartMinChars`).
+
+`NaturalVoice.rtf()` is a running average (weight 0.3) of render time / audio as played per engine, counted from the later
+of a render's start and the previous one's end (the worker is serial); seeds until measured: Kokoro 0.15, Ming 0.5,
+Qwen3 0.8, Chatterbox 1.0. `MemoInbox.streamedSpeech` holds the reply (first clip plus `audioFollows`) until
+`canStartAnswer`: audio rendered so far (ms) >= remaining characters / (14 x speed) x 1000 x rtf + 500 ms, or until
+everything is rendered, or until the budget (20 s answers, 8 s read-back) runs out, when what is ready goes. The
+add-on's waiting lines cover the wait. Kokoro/Ming usually go right after the first part; Chatterbox waits longer.
+The add-on's trace says `Sent 3 pieces (2 while recording)` (or `Sent 1 piece`). A voice-pick listen ended by a key
+traces `Recording ended because: key 1` (`hash` only for `#`).
 
 ### The chat you used last, and recordings it will not send blind
 
 - **Jump straight in** (off since 2026-11-01: the owner wants a call in to go straight to "Which workspace?", so the daemon
-  passes no `lastChat` and the directory carries no `last`; the add-on and `MemoInbox` still support it) (`DirectoryDoc.last`, optional: `{ choice, label }`). The Mac names the chat you last used by
+  passes no `lastChat` and `MemoInbox` never publishes `last`, even for a chat used or waiting; the add-on and the protocol still support it) (`DirectoryDoc.last`, optional: `{ choice, label }`). The Mac names the chat you last used by
   phone (a message sent, or a question or status asked; saved in `voice-last-chat.json`, `last-chat.ts`), else the newest
   chat that waits on you, provided it can take a message now. After the PIN (or first, when it is skipped) the call says
   "Hello, this is Squeak. Press 1 for <chat>, the last one you used. Press 2 for another chat." Key 1 goes on as if
