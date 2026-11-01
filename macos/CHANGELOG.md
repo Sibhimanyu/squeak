@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.38
+
+- Call history has a clearer list and timeline: choose a call to see its outcome, conversation and warnings, with technical events available when needed.
+- Phone calls keep their state if the daemon restarts. With the Squeak Voice add-on 0.19.0, recordings upload while you speak and read-back starts sooner.
+
 ## 2.12.37
 
 - Start a new chat from a phone call: pick a workspace, press 0, say what it should do, and say yes to the read-back. Settings › Phone calls › New chats picks which of your Conductor model presets (and thinking level) those chats use. Needs the phone-call add-on 0.18.0.
