@@ -3,6 +3,7 @@
 ## 2.12.39
 
 - Settings › Phone calls › Voice has a Speed control under Emotion: 0.8× to 1.3×, for every voice engine. Squeak makes the voice at its natural pace and then speeds it up or slows it down without changing the pitch; the call prompts are recorded again at the new speed, and Play sample uses it.
+- Calls (with the Squeak Voice add-on 0.20.0): you answer the menus by saying a workspace or chat, the waiting lines follow the character you set, spoken answers no longer stop mid-sentence (the Mac starts one only once the rest can keep up), and a call in goes straight to "Which workspace?". Play sample works while the call prompts are being recorded.
 
 ## 2.12.38
 
