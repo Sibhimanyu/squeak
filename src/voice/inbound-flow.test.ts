@@ -82,7 +82,7 @@ function setup(call: FakeCall, overrides: Partial<InboundDependencies> = {}, pee
     encode: async () => Buffer.from("opus"),
     uplink: {
       memo: async (memoId, choice, dirVersion, audio): Promise<DownMessage | null> => {
-        memos.push({ memoId, choice, dirVersion, bytes: audio.length });
+        memos.push({ memoId, choice, dirVersion, bytes: Buffer.isBuffer(audio) ? audio.length : 0 });
         return { v: 1, id: memoId, at: 0, status: "transcript", text: "go with option B", label: "blume · hub" };
       },
       send: async (memoId): Promise<DownMessage | null> => {

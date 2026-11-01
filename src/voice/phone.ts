@@ -27,6 +27,8 @@ export interface PhoneCall {
     maxMs: number;
     beep?: boolean;
     endOnSilence?: boolean;
+    /** Told the call's audio (16-bit mono 8 kHz PCM) as the recording grows, whether or not it ends on silence. */
+    onAudio?: (pcm: Buffer) => void;
   }): Promise<{ file: string; durationMs: number; ended: RecordEnd } | null>;
   /** Where the call writes a line for the call log (set by the flow that owns the call); absent: nothing is logged. */
   trace?: ((line: string) => void) | null;

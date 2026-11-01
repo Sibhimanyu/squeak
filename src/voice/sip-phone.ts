@@ -325,6 +325,7 @@ export class LiveCall implements PhoneCall {
     maxMs: number;
     beep?: boolean;
     endOnSilence?: boolean;
+    onAudio?: (pcm: Buffer) => void;
   }): Promise<{ file: string; durationMs: number; ended: RecordEnd } | null> {
     if (!this.open) return null;
     const file = path.join(this.ctx.dir, `memo-${this.recordings++}.wav`);
@@ -362,10 +363,14 @@ export class LiveCall implements PhoneCall {
           ended = "limit";
           break;
         }
-        if (!watcher) continue;
+        if (!watcher && !options.onAudio) continue;
         const grown = readNewAudio(file, readAt);
         readAt = grown.next;
-        if (grown.data.length) watcher.feed(grown.data, Date.now());
+        if (grown.data.length) {
+          options.onAudio?.(grown.data);
+          watcher?.feed(grown.data, Date.now());
+        }
+        if (!watcher) continue;
         if (!announced && watcher.speechAt !== null) {
           announced = true;
           this.trace?.(`step: Speech detected ${((watcher.speechAt - began) / 1000).toFixed(1)} s in`);

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 
+import type { ChannelDoc } from "../remote/firestore-rest.js";
 import type { RtdbRest } from "../remote/rtdb-rest.js";
 import type { ReplyFailureHandler, ReplyOutcome } from "../fleet/session-reply.js";
 import { logger } from "../utils/logger.js";
@@ -29,6 +30,10 @@ import {
   MAX_WORKSPACES,
   MENU_CHOICES,
   readUp,
+  readUpPart,
+  UP_AUDIO_PREFIX,
+  upAudioId,
+  upPartHash,
   sealDirectory,
   sealDown,
   UP_KIND,
@@ -41,7 +46,7 @@ import {
 } from "./memo-protocol.js";
 import type { Transcriber } from "./transcribe.js";
 
-export type MemoStore = Pick<RtdbRest, "list" | "set" | "delete" | "watch">;
+export type MemoStore = Pick<RtdbRest, "get" | "list" | "set" | "delete" | "watch">;
 
 /** A chat that can take a message right now. */
 export interface MemoTarget {
@@ -175,6 +180,9 @@ export interface MemoInboxDependencies {
   /** A line for the call trace. */
   trace?: (kind: TraceKind, text: string, extra?: { ms?: number; label?: string }) => void;
   now?: () => number;
+  /** Tests: how long to wait for a piece that has not arrived, and how often to look. */
+  partsWaitMs?: number;
+  partsPollMs?: number;
 }
 
 interface Pending {
@@ -233,6 +241,31 @@ const ANSWER_AUDIO_BUDGET_MS = 20_000;
 /** How long the later sentences of an answer stay in the database: the add-on deletes them, this is the backstop. */
 const REPLY_AUDIO_TTL_MS = 10 * 60_000;
 const REPLY_AUDIO_WRITE_MS = 90_000;
+/** Pieces of a recording (`upaudio-` documents): how long the Mac keeps what it decoded, and how long a document may sit. */
+const PART_CACHE_TTL_MS = 3 * 60_000;
+const PART_DOC_TTL_MS = 10 * 60_000;
+const MAX_CACHED_STREAMS = 8;
+/** How long a message naming pieces waits for one that has not arrived yet. */
+const PARTS_WAIT_MS = 10_000;
+const PARTS_POLL_MS = 250;
+const PARTS_SAYS = {
+  unsupported: "I could not make that out.",
+  missing: "The recording did not arrive whole. Try again.",
+};
+
+/** A recording as it reaches the transcriber: the whole Opus file, or the decoded pieces joined (with a note for the trace). */
+type UpSpeech =
+  | { kind: "opus"; audio: Buffer; note: string }
+  | { kind: "pcm"; pcm: Buffer; note: string }
+  | { kind: "refused"; reason: string };
+
+interface PartEntry {
+  hash: string;
+  bytes: number;
+  at: number;
+  pcm: Promise<Buffer>;
+}
+
 /** A phone is not a keyboard: this many sends an hour is a stuck loop, not a person. */
 const MAX_SENDS_PER_HOUR = 20;
 const MAX_SPOKEN_LABEL = 60;
@@ -362,6 +395,9 @@ export class MemoInbox {
   /** Audio document ids written for each directory version, so they go when the version does. */
   private readonly audioDocs = new Map<string, string[]>();
   private swept = false;
+  /** Pieces of recordings still going up, by the stream (the up message's id) and the piece's number, decoded as they arrive. */
+  private readonly partCache = new Map<string, Map<number, PartEntry>>();
+  private partsSwept = false;
   private readonly sends: number[] = [];
   private readonly answers: number[] = [];
 
@@ -377,9 +413,11 @@ export class MemoInbox {
     this.timer = setInterval(() => {
       this.wake();
       void this.publish().catch(() => undefined);
+      void this.sweepParts(false).catch(() => undefined);
     }, 60_000);
     this.timer.unref?.();
     void this.publish().catch(() => undefined);
+    void this.sweepParts(true).catch(() => undefined);
   }
 
   stop(): void {
@@ -513,6 +551,7 @@ export class MemoInbox {
       ...(this.canAsk ? { ask: true as const } : {}),
       ...(this.canAsk && this.deps.converse ? { talk: true as const } : {}),
       ...(this.deps.terse?.() ? { terse: true as const } : {}),
+      ...(this.canParts ? { upParts: true as const } : {}),
     };
     const audio = this.audioDocs.get(version);
     await this.deps.store.set(
@@ -606,8 +645,12 @@ export class MemoInbox {
   /** One pass over what the gateway sent; exposed for tests. */
   async pass(): Promise<void> {
     const { store, channel, key } = this.deps;
-    for (const { id, doc } of await store.list(`channels/${channel}/${UP_KIND}`)) {
+    const docs = await store.list(`channels/${channel}/${UP_KIND}`);
+    // Pieces of a recording are never messages: take them in (decoding starts now) before any message is looked at.
+    for (const { id, doc } of docs) if (id.startsWith(UP_AUDIO_PREFIX)) this.takePart(id, doc);
+    for (const { id, doc } of docs) {
       if (this.stopped) return;
+      if (id.startsWith(UP_AUDIO_PREFIX)) continue;
       if (this.handled.includes(id)) {
         await store.delete(upPath(channel, id)).catch(() => undefined);
         continue;
@@ -632,6 +675,114 @@ export class MemoInbox {
       });
       await store.set(downPath(channel, id), sealDown(key, answer));
     }
+  }
+
+  /** Whether this Mac can take a recording in pieces: it needs a transcriber that decodes them and reads the joined audio. */
+  private get canParts(): boolean {
+    const { transcriber } = this.deps;
+    return Boolean(transcriber.decode && transcriber.transcribePcm);
+  }
+
+  /** Reads one `upaudio-` document and starts decoding it. A stale one is deleted; one that does not check out is ignored. */
+  private takePart(id: string, doc: ChannelDoc): void {
+    const { store, channel, key } = this.deps;
+    const now = this.now();
+    if (typeof doc.at === "number" && now - doc.at > PART_DOC_TTL_MS) {
+      void Promise.resolve(store.delete(upPath(channel, id))).catch(() => undefined);
+      return;
+    }
+    const read = readUpPart(key, id, doc);
+    if (!read || !this.canParts) return;
+    for (const [stream, entries] of [...this.partCache]) {
+      const newest = Math.max(...[...entries.values()].map((entry) => entry.at));
+      if (now - newest > PART_CACHE_TTL_MS) this.partCache.delete(stream);
+    }
+    const hash = upPartHash(read.opus);
+    let entries = this.partCache.get(read.stream);
+    if (!entries) {
+      entries = new Map();
+      this.partCache.set(read.stream, entries);
+      while (this.partCache.size > MAX_CACHED_STREAMS)
+        this.partCache.delete(this.partCache.keys().next().value as string);
+    }
+    if (entries.get(read.index)?.hash === hash) return;
+    const pcm = this.deps.transcriber.decode!(read.opus);
+    pcm.catch(() => undefined);
+    entries.set(read.index, { hash, bytes: read.opus.length, at: now, pcm });
+  }
+
+  /** Deletes every `upaudio-` document older than ten minutes, or (at start) all of them: a call cannot outlive the daemon. */
+  private async sweepParts(all: boolean): Promise<void> {
+    if (all && this.partsSwept) return;
+    if (all) this.partsSwept = true;
+    const { store, channel } = this.deps;
+    const now = this.now();
+    for (const { id, doc } of await store.list(`channels/${channel}/${UP_KIND}`)) {
+      if (!id.startsWith(UP_AUDIO_PREFIX)) continue;
+      if (all || typeof doc.at !== "number" || now - doc.at > PART_DOC_TTL_MS) {
+        await store.delete(upPath(channel, id)).catch(() => undefined);
+      }
+    }
+  }
+
+  /**
+   * The audio an up message carries: its whole recording, or the pieces it names, gathered (from what was decoded ahead,
+   * else fetched; one that has not arrived is waited for) and checked against their hashes. Anything short of exact is
+   * refused, never a partial recording. The pieces' documents are deleted once used.
+   */
+  private async audioOf(message: { id: string; audio?: string; audioParts?: string[] }): Promise<UpSpeech> {
+    const { parts } = { parts: message.audioParts };
+    if (!parts) {
+      const audio = Buffer.from(message.audio ?? "", "base64");
+      return { kind: "opus", audio, note: `${Math.max(1, Math.round(audio.length / 1024))} KB` };
+    }
+    if (!this.canParts) return { kind: "refused", reason: PARTS_SAYS.unsupported };
+    const { store, channel } = this.deps;
+    try {
+      const deadline = Date.now() + (this.deps.partsWaitMs ?? PARTS_WAIT_MS);
+      for (;;) {
+        const entries = this.partCache.get(message.id);
+        const missing = parts.map((_, index) => index).filter((index) => !entries?.has(index));
+        if (missing.length === 0) break;
+        for (const index of missing) {
+          const id = upAudioId(message.id, index);
+          try {
+            const doc = await store.get(upPath(channel, id));
+            if (doc) this.takePart(id, doc);
+          } catch {
+            // The next look tries again; the deadline ends it.
+          }
+        }
+        if (parts.every((_, index) => this.partCache.get(message.id)?.has(index))) break;
+        if (Date.now() >= deadline) return { kind: "refused", reason: PARTS_SAYS.missing };
+        await new Promise((resolve) => setTimeout(resolve, this.deps.partsPollMs ?? PARTS_POLL_MS));
+      }
+      const have = this.partCache.get(message.id)!;
+      for (const [index, hash] of parts.entries()) {
+        if (have.get(index)?.hash !== hash) return { kind: "refused", reason: PARTS_SAYS.missing };
+      }
+      let pcm: Buffer[];
+      try {
+        pcm = await Promise.all(parts.map((_, index) => have.get(index)!.pcm));
+      } catch {
+        return { kind: "refused", reason: PARTS_SAYS.missing };
+      }
+      const bytes = parts.reduce((sum, _, index) => sum + have.get(index)!.bytes, 0);
+      return {
+        kind: "pcm",
+        pcm: Buffer.concat(pcm),
+        note: `${Math.max(1, Math.round(bytes / 1024))} KB in ${parts.length} pieces`,
+      };
+    } finally {
+      this.partCache.delete(message.id);
+      await Promise.allSettled(parts.map((_, index) => store.delete(upPath(channel, upAudioId(message.id, index)))));
+    }
+  }
+
+  private transcribeUp(speech: Exclude<UpSpeech, { kind: "refused" }>): Promise<string> {
+    return speech.kind === "opus"
+      ? this.deps.transcriber.transcribe(speech.audio)
+      : this.deps.transcriber.transcribePcm!(speech.pcm);
   }
 
   /** The read-back in the Mac's voice, within a short budget: a slow render must not hold up the phone line. */
@@ -828,12 +979,16 @@ export class MemoInbox {
       if (!target) return this.refuse(message.id, "That list is out of date. Call again.");
       const label = this.labelOf(message.dirVersion, target, message.choice);
       const { trace } = this.deps;
-      const audio = Buffer.from(message.audio, "base64");
-      trace?.("step", `Recording received (${Math.max(1, Math.round(audio.length / 1024))} KB)`, { label });
+      const speech = await this.audioOf(message);
+      if (speech.kind === "refused") {
+        trace?.("warn", "The recording did not arrive whole", { label });
+        return this.refuse(message.id, speech.reason);
+      }
+      trace?.("step", `Recording received (${speech.note})`, { label });
       let text: string;
       const began = Date.now();
       try {
-        text = await this.deps.transcriber.transcribe(audio);
+        text = await this.transcribeUp(speech);
       } catch (error) {
         logger.warn("voice memo could not be transcribed", {
           error: error instanceof Error ? error.message : String(error),
@@ -919,12 +1074,16 @@ export class MemoInbox {
     const space = this.newChatSpaces.get(message.dirVersion)?.[message.workspace - 1];
     if (!space) return this.refuse(message.id, NEW_CHAT_SAYS.stale);
     const { label } = space;
-    const audio = Buffer.from(message.audio, "base64");
-    trace?.("step", `Recording received (${Math.max(1, Math.round(audio.length / 1024))} KB)`, { label });
+    const speech = await this.audioOf(message);
+    if (speech.kind === "refused") {
+      trace?.("warn", "The recording did not arrive whole", { label });
+      return this.refuse(message.id, speech.reason);
+    }
+    trace?.("step", `Recording received (${speech.note})`, { label });
     let text: string;
     const began = Date.now();
     try {
-      text = cleanNewChatText(await this.deps.transcriber.transcribe(audio));
+      text = cleanNewChatText(await this.transcribeUp(speech));
     } catch (error) {
       logger.warn("voice new chat could not be transcribed", {
         error: error instanceof Error ? error.message : String(error),
@@ -987,11 +1146,13 @@ export class MemoInbox {
     const pending = this.pendingNew.get(message.memoId);
     if (!pending || pending.busy) return this.refuse(message.id, NEW_CHAT_SAYS.gone);
     const { label } = pending;
-    if (message.audio !== undefined) {
+    if (message.audio !== undefined || message.audioParts !== undefined) {
       pending.busy = true;
       let heard = "";
       try {
-        heard = await this.deps.transcriber.transcribe(Buffer.from(message.audio, "base64"));
+        const speech = await this.audioOf(message);
+        if (speech.kind === "refused") throw new Error(speech.reason);
+        heard = await this.transcribeUp(speech);
       } catch (error) {
         logger.warn("voice new chat answer could not be transcribed", {
           error: error instanceof Error ? error.message : String(error),
@@ -1203,11 +1364,12 @@ export class MemoInbox {
       return this.handleHold(message.phase, call, target, label, now, reply);
     }
 
-    const audio = Buffer.from(message.audio, "base64");
     let heard: string;
     const began = Date.now();
     try {
-      heard = await this.deps.transcriber.transcribe(audio);
+      const speech = await this.audioOf(message);
+      if (speech.kind === "refused") throw new Error(speech.reason);
+      heard = await this.transcribeUp(speech);
     } catch (error) {
       logger.warn("voice talk could not be transcribed", {
         error: error instanceof Error ? error.message : String(error),

@@ -9,6 +9,31 @@ const run = promisify(execFile);
 /** Speech to text for a recorded memo. Injected in tests. */
 export interface Transcriber {
   transcribe(audio: Buffer): Promise<string>;
+  /**
+   * A recording that came up in pieces: each piece (an Ogg Opus clip) is decoded to 16 kHz mono 16-bit PCM as it
+   * arrives (`decode`), and the pieces together are transcribed as one recording (`transcribePcm`). Absent: the Mac
+   * does not take pieces.
+   */
+  decode?(opus: Buffer): Promise<Buffer>;
+  transcribePcm?(pcm: Buffer): Promise<string>;
+}
+
+/** A 16 kHz mono 16-bit WAV of `pcm`. */
+export function wav16k(pcm: Buffer): Buffer {
+  const head = Buffer.alloc(44);
+  head.write("RIFF", 0, "ascii");
+  head.writeUInt32LE(36 + pcm.length, 4);
+  head.write("WAVEfmt ", 8, "ascii");
+  head.writeUInt32LE(16, 16);
+  head.writeUInt16LE(1, 20);
+  head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(16000, 24);
+  head.writeUInt32LE(32000, 28);
+  head.writeUInt16LE(2, 32);
+  head.writeUInt16LE(16, 34);
+  head.write("data", 36, "ascii");
+  head.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([head, pcm]);
 }
 
 export interface WhisperPaths {
@@ -52,30 +77,62 @@ export class WhisperTranscriber implements Transcriber {
           timeout: 30_000,
         },
       );
-      const { stdout } = await run(
-        this.paths.whisper,
-        [
-          "-m",
-          this.paths.model,
-          "-f",
-          wav,
-          "-nt",
-          "-np",
-          "-l",
-          "en",
-          // Words people say to their agents that a general model mishears.
-          "--prompt",
-          WHISPER_VOCABULARY,
-        ],
-        {
-          timeout: 90_000,
-          maxBuffer: 1_000_000,
-        },
-      );
-      return cleanTranscript(stdout);
+      return await this.whisper(wav);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  }
+
+  /** One Opus clip as 16 kHz mono PCM; the clips of a recording decode apart and are joined end to end. */
+  async decode(opus: Buffer): Promise<Buffer> {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-part-"));
+    try {
+      const input = path.join(dir, "part.ogg");
+      fs.writeFileSync(input, opus);
+      const { stdout } = await run(
+        this.paths.ffmpeg,
+        ["-loglevel", "error", "-i", input, "-ar", "16000", "-ac", "1", "-f", "s16le", "pipe:1"],
+        { timeout: 30_000, encoding: "buffer", maxBuffer: 64_000_000 },
+      );
+      return stdout;
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  async transcribePcm(pcm: Buffer): Promise<string> {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-memo-"));
+    try {
+      const wav = path.join(dir, "memo.wav");
+      fs.writeFileSync(wav, wav16k(pcm));
+      return await this.whisper(wav);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  private async whisper(wav: string): Promise<string> {
+    const { stdout } = await run(
+      this.paths.whisper,
+      [
+        "-m",
+        this.paths.model,
+        "-f",
+        wav,
+        "-nt",
+        "-np",
+        "-l",
+        "en",
+        // Words people say to their agents that a general model mishears.
+        "--prompt",
+        WHISPER_VOCABULARY,
+      ],
+      {
+        timeout: 90_000,
+        maxBuffer: 1_000_000,
+      },
+    );
+    return cleanTranscript(stdout);
   }
 }
 

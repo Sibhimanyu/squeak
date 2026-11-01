@@ -86,6 +86,12 @@ export interface DirectoryDoc {
    */
   talk?: true;
   /**
+   * The Mac takes a recording in pieces while it is still being made (`audioParts` on a memo, newchat, talk or start,
+   * the pieces as `upaudio-` documents): an add-on 0.19.0 or newer sends them only when the list it has says so.
+   * Absent from an older Mac, and a recording goes up whole as `audio`, as it always has.
+   */
+  upParts?: true;
+  /**
    * The owner's persona is terse: a call in drops "Hello, this is Squeak." from its prompts. Absent: as before.
    */
   terse?: true;
@@ -116,6 +122,66 @@ export const REPLY_AUDIO_PREFIX = "replyaudio-";
 export const MAX_ANSWER_PARTS = 30;
 export const audioPath = (channel: string, id: string): string => `channels/${channel}/${DIR_KIND}/${id}`;
 
+/**
+ * One piece of a recording going up while the person still speaks: a document in `voiceup` named by the up message's own
+ * id (the stream) and the piece's number from 0. The ids stay under the database rule's 80 characters.
+ */
+export const UP_AUDIO_PREFIX = "upaudio-";
+export const upAudioId = (streamId: string, index: number): string => `${UP_AUDIO_PREFIX}${streamId}-${index}`;
+/** Most pieces one recording may be sent in (three seconds each, so more than a recording can be). */
+export const MAX_UP_PARTS = 40;
+/** The most bytes of Opus one piece may hold: a few seconds of speech is a few KB; far under the 900000-character box. */
+export const MAX_UP_PART_BYTES = 150_000;
+const STREAM_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const PART_HASH = /^[0-9a-f]{64}$/;
+/** The hash a message names a piece by: SHA-256 of the piece's Opus bytes, lowercase hex. */
+export const upPartHash = (opus: Buffer): string => crypto.createHash("sha256").update(opus).digest("hex");
+
+/** One piece, sealed and signed like the other documents; `stream` and `n` are inside, so a copy under another id fails. */
+export function sealUpPart(key: string, streamId: string, index: number, opus: Buffer, at: number): ChannelDoc {
+  return sealBody(
+    key,
+    "up",
+    upAudioId(streamId, index),
+    { v: 1, stream: streamId, n: index, opus: opus.toString("base64") },
+    at,
+  );
+}
+
+/** A piece from an untrusted (but sealed and signed) document: its stream, number and Opus bytes, or null. */
+export function readUpPart(
+  key: string,
+  id: string,
+  doc: ChannelDoc,
+): { stream: string; index: number; opus: Buffer } | null {
+  if (!AUDIO_ID.test(id) || !id.startsWith(UP_AUDIO_PREFIX)) return null;
+  const body = openBody(key, "up", id, doc);
+  if (!isRecord(body) || body.v !== 1 || typeof body.stream !== "string" || !STREAM_ID.test(body.stream)) return null;
+  if (typeof body.n !== "number" || !Number.isInteger(body.n) || body.n < 0 || body.n >= MAX_UP_PARTS) return null;
+  if (id !== upAudioId(body.stream, body.n)) return null;
+  if (typeof body.opus !== "string" || body.opus.length === 0 || body.opus.length > MAX_UP_PART_BYTES * 2) return null;
+  const opus = Buffer.from(body.opus, "base64");
+  if (opus.length === 0 || opus.length > MAX_UP_PART_BYTES) return null;
+  return { stream: body.stream, index: body.n, opus };
+}
+
+/** The audio an up message carries: the whole recording (`audio`, base64 Opus) or the hashes of its pieces, never both. */
+export function readUpAudio(
+  body: Record<string, unknown>,
+  { required }: { required: boolean },
+): { ok: true; audio?: string; audioParts?: string[] } | { ok: false } {
+  const { audio, audioParts } = body;
+  if (audio !== undefined && audioParts !== undefined) return { ok: false };
+  if (audioParts !== undefined) {
+    if (!Array.isArray(audioParts) || audioParts.length < 1 || audioParts.length > MAX_UP_PARTS) return { ok: false };
+    if (!audioParts.every((hash) => typeof hash === "string" && PART_HASH.test(hash))) return { ok: false };
+    return { ok: true, audioParts: audioParts as string[] };
+  }
+  if (audio === undefined) return required ? { ok: false } : { ok: true };
+  if (typeof audio !== "string" || audio.length === 0 || audio.length > MAX_AUDIO_CHARS) return { ok: false };
+  return { ok: true, audio };
+}
+
 /** One audio document: the Mac's clips for call-in prompts, sealed apart from the list so the list stays small. */
 export function sealAudio(key: string, id: string, version: string, clips: Clip[], at: number): ChannelDoc {
   return sealBody(key, "dir", id, { v: 1, version, clips }, at);
@@ -130,7 +196,17 @@ export function readAudio(key: string, id: string, doc: ChannelDoc): { version: 
 }
 
 export type UpMessage =
-  | { v: 1; id: string; at: number; expiresAt: number; kind: "memo"; dirVersion: string; choice: number; audio: string }
+  | {
+      v: 1;
+      id: string;
+      at: number;
+      expiresAt: number;
+      kind: "memo";
+      dirVersion: string;
+      choice: number;
+      audio?: string;
+      audioParts?: string[];
+    }
   | { v: 1; id: string; at: number; expiresAt: number; kind: "send"; memoId: string }
   /**
    * What the person wants a NEW chat to do, recorded: `workspace` indexes the version's `newChat` list (a directory
@@ -144,14 +220,25 @@ export type UpMessage =
       kind: "newchat";
       dirVersion: string;
       workspace: number;
-      audio: string;
+      audio?: string;
+      audioParts?: string[];
     }
   /**
    * Start the new chat the Mac read back (`memoId` is the `newchat` message's id). Without `audio` it is the keypad's
    * explicit 1; with `audio` it is the person's spoken answer, which the Mac transcribes and only a plain yes accepts.
    * `callId` names the call, so the Mac can offer to hold the line for the chat it started.
    */
-  | { v: 1; id: string; at: number; expiresAt: number; kind: "start"; memoId: string; callId?: string; audio?: string }
+  | {
+      v: 1;
+      id: string;
+      at: number;
+      expiresAt: number;
+      kind: "start";
+      memoId: string;
+      callId?: string;
+      audio?: string;
+      audioParts?: string[];
+    }
   /** The recording is a question about its chat: answer it aloud; send nothing to the chat. */
   | { v: 1; id: string; at: number; expiresAt: number; kind: "ask"; memoId: string }
   /** Read out where a chat stands: no recording. Names the chat as a memo does. */
@@ -169,7 +256,9 @@ export type UpMessage =
       dirVersion: string;
       choice: number;
       phase: TalkPhase;
-      audio: string;
+      /** Exactly one of `audio` (the whole recording) and `audioParts` (hashes of its `upaudio-` pieces, in order). */
+      audio?: string;
+      audioParts?: string[];
       /** A call in: names the call (its conversation), and `dirVersion` and `choice` name the chat in the list. */
       callId?: string;
     };
@@ -297,6 +386,7 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
   return {
     ...(body.ask === true ? { ask: true as const } : {}),
     ...(body.talk === true ? { talk: true as const } : {}),
+    ...(body.upParts === true ? { upParts: true as const } : {}),
     ...(body.terse === true ? { terse: true as const } : {}),
     v: 1,
     at: body.at,
@@ -329,43 +419,46 @@ export function readUp(
   }
   const base = { v: 1 as const, id, at: body.at, expiresAt: body.expiresAt };
   if (body.kind === "memo") {
-    const { dirVersion, choice, audio } = body;
+    const { dirVersion, choice } = body;
     if (typeof dirVersion !== "string" || dirVersion.length > 64) return { ok: false, reason: "not a voice message" };
     if (typeof choice !== "number" || !Number.isInteger(choice) || choice < 1 || choice > MAX_CHOICES) {
       return { ok: false, reason: "not a voice message" };
     }
-    if (typeof audio !== "string" || audio.length === 0 || audio.length > MAX_AUDIO_CHARS) {
-      return { ok: false, reason: "no audio" };
-    }
-    return { ok: true, message: { ...base, kind: "memo", dirVersion, choice, audio } };
+    const heard = readUpAudio(body, { required: true });
+    if (!heard.ok) return { ok: false, reason: "no audio" };
+    const { ok: _ok, ...spoken } = heard;
+    void _ok;
+    return { ok: true, message: { ...base, kind: "memo", dirVersion, choice, ...spoken } };
   }
   if (body.kind === "send" && typeof body.memoId === "string" && body.memoId.length <= 64) {
     return { ok: true, message: { ...base, kind: "send", memoId: body.memoId } };
   }
   if (body.kind === "newchat") {
-    const { dirVersion, workspace, audio } = body;
+    const { dirVersion, workspace } = body;
     if (typeof dirVersion !== "string" || dirVersion.length === 0 || dirVersion.length > 64) {
       return { ok: false, reason: "not a voice message" };
     }
     if (typeof workspace !== "number" || !Number.isInteger(workspace) || workspace < 1 || workspace > MAX_WORKSPACES) {
       return { ok: false, reason: "not a voice message" };
     }
-    if (typeof audio !== "string" || audio.length === 0 || audio.length > MAX_AUDIO_CHARS) {
-      return { ok: false, reason: "no audio" };
-    }
-    return { ok: true, message: { ...base, kind: "newchat", dirVersion, workspace, audio } };
+    const heard = readUpAudio(body, { required: true });
+    if (!heard.ok) return { ok: false, reason: "no audio" };
+    const { ok: _ok, ...spoken } = heard;
+    void _ok;
+    return { ok: true, message: { ...base, kind: "newchat", dirVersion, workspace, ...spoken } };
   }
   if (body.kind === "start") {
-    const { memoId, callId, audio } = body;
+    const { memoId, callId } = body;
     if (typeof memoId !== "string" || memoId.length === 0 || memoId.length > 64) {
       return { ok: false, reason: "not a voice message" };
     }
     if (callId !== undefined && (typeof callId !== "string" || !/^[A-Za-z0-9_-]{4,64}$/.test(callId))) {
       return { ok: false, reason: "not a voice message" };
     }
-    if (audio !== undefined && (typeof audio !== "string" || audio.length === 0 || audio.length > MAX_AUDIO_CHARS)) {
-      return { ok: false, reason: "no audio" };
-    }
+    const heard = readUpAudio(body, { required: false });
+    if (!heard.ok) return { ok: false, reason: "no audio" };
+    const { ok: _ok, ...spoken } = heard;
+    void _ok;
     return {
       ok: true,
       message: {
@@ -373,7 +466,7 @@ export function readUp(
         kind: "start",
         memoId,
         ...(callId !== undefined ? { callId: callId as string } : {}),
-        ...(audio !== undefined ? { audio: audio as string } : {}),
+        ...spoken,
       },
     };
   }
@@ -389,7 +482,7 @@ export function readUp(
     return { ok: true, message: { ...base, kind: "status", dirVersion, choice } };
   }
   if (body.kind === "talk") {
-    const { dirVersion, choice, phase, audio, callId } = body;
+    const { dirVersion, choice, phase, callId } = body;
     if (typeof dirVersion !== "string" || dirVersion.length === 0 || dirVersion.length > 64) {
       return { ok: false, reason: "not a voice message" };
     }
@@ -404,10 +497,16 @@ export function readUp(
     if (!choiceOk || !["say", "confirm", "hold", "peek"].includes(phase as string))
       return { ok: false, reason: "not a voice message" };
     // A hold check-in or a peek is a key press, not speech: no recording goes with it.
-    const spoken = phase === "say" || phase === "confirm";
-    if (typeof audio !== "string" || (spoken && audio.length === 0) || audio.length > MAX_AUDIO_CHARS) {
-      return { ok: false, reason: "no audio" };
-    }
+    const isSpeech = phase === "say" || phase === "confirm";
+    // A key press (hold, peek) carries an empty whole audio; speech is the whole recording or its pieces.
+    const heard: ReturnType<typeof readUpAudio> = isSpeech
+      ? readUpAudio(body, { required: true })
+      : body.audioParts === undefined && typeof body.audio === "string" && body.audio.length <= MAX_AUDIO_CHARS
+        ? { ok: true, audio: body.audio }
+        : { ok: false };
+    if (!heard.ok) return { ok: false, reason: "no audio" };
+    const { ok: _ok, ...spoken } = heard;
+    void _ok;
     return {
       ok: true,
       message: {
@@ -416,7 +515,7 @@ export function readUp(
         dirVersion,
         choice: choice as number,
         phase: phase as TalkPhase,
-        audio,
+        ...spoken,
         ...(callId !== undefined ? { callId: callId as string } : {}),
       },
     };

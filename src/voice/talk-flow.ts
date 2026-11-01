@@ -2,7 +2,8 @@ import type { Clip } from "./clips.js";
 import { speakReply } from "./answer-audio.js";
 import { reassure } from "./inbound-flow.js";
 import type { PhoneCall } from "./phone.js";
-import type { TalkPhase } from "./memo-protocol.js";
+import { newMessageId, type TalkPhase } from "./memo-protocol.js";
+import { recordForUpload } from "./recording-upload.js";
 import type { Uplink } from "./uplink.js";
 
 /**
@@ -13,7 +14,7 @@ import type { Uplink } from "./uplink.js";
  */
 
 export interface TalkDependencies {
-  uplink: Pick<Uplink, "talk" | "followAnswer">;
+  uplink: Pick<Uplink, "talk" | "followAnswer" | "openStream">;
   /** Turns a recorded WAV into the small Opus clip that travels. */
   encode: (wavFile: string) => Promise<Buffer>;
   trace?: (line: string) => void;
@@ -97,10 +98,13 @@ export async function talkFlow(
   let phase: TalkPhase = info.phase ?? "say";
   let silences = 0;
   for (let turn = 0; turn < MAX_TURNS && call.open; turn++) {
-    const recording = await call.record({ maxMs: TURN_MS, beep: true, endOnSilence: true });
-    if (!recording) return "ended";
+    const messageId = newMessageId();
+    const upload = await recordForUpload(call, deps, { maxMs: TURN_MS, beep: true, endOnSilence: true }, messageId);
+    if (!upload) return "ended";
+    const { recording } = upload;
     deps.trace?.(`step: Recorded ${(recording.durationMs / 1000).toFixed(1)} s`);
     if (recording.ended === "no-speech" || recording.durationMs < MIN_TALK_MS) {
+      upload.discard();
       silences += 1;
       if (silences >= 2) {
         await speak(SAYS.leave);
@@ -112,7 +116,7 @@ export async function talkFlow(
     const stop = reassure(call, deps);
     let reply;
     try {
-      reply = await deps.uplink.talk(info.callId, phase, await deps.encode(recording.file), info.from);
+      reply = await deps.uplink.talk(info.callId, phase, await upload.audio(), info.from, messageId);
     } finally {
       stop();
     }

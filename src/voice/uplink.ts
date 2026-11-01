@@ -1,6 +1,7 @@
 import type { RtdbRest } from "../remote/rtdb-rest.js";
 import type { Clip } from "./clips.js";
 import type { AnswerFollower } from "./answer-audio.js";
+import { UpStream } from "./up-stream.js";
 import {
   audioPath,
   downPath,
@@ -10,27 +11,34 @@ import {
   readDown,
   sealUp,
   UP_TTL_MS,
+  upAudioId,
   upPath,
   type DownMessage,
   type TalkPhase,
   type UpMessage,
 } from "./memo-protocol.js";
 
+/** A recording as it goes up: the whole Opus file, or the hashes of the pieces already sent (`audioParts`). */
+export type UpAudio = Buffer | { parts: string[] };
+
+const audioFields = (audio: UpAudio): { audio: string } | { audioParts: string[] } =>
+  Buffer.isBuffer(audio) ? { audio: audio.toString("base64") } : { audioParts: audio.parts };
+
 /** The gateway's line to the Mac during a call: a memo up, what the Mac heard back; "send it" up, the outcome back. */
 export interface Uplink {
   /** Null when the Mac did not answer in time. */
-  memo(memoId: string, choice: number, dirVersion: string, audio: Buffer): Promise<DownMessage | null>;
+  memo(memoId: string, choice: number, dirVersion: string, audio: UpAudio): Promise<DownMessage | null>;
   send(memoId: string): Promise<DownMessage | null>;
   /**
    * What the person wants a new chat to do (a recording), for the workspace the directory names by `workspace` (its
    * `newChat`): the Mac answers with a transcript to read back, and starts nothing.
    */
-  newChat?(memoId: string, workspace: number, dirVersion: string, audio: Buffer): Promise<DownMessage | null>;
+  newChat?(memoId: string, workspace: number, dirVersion: string, audio: UpAudio): Promise<DownMessage | null>;
   /**
    * Starts the new chat read back as `memoId`. Without `audio`: the keypad's explicit 1. With `audio`: the spoken answer,
    * which only a plain yes accepts. `callId` lets the Mac offer to hold the line for the chat it started.
    */
-  start?(memoId: string, options: { callId?: string; audio?: Buffer }): Promise<DownMessage | null>;
+  start?(memoId: string, options: { callId?: string; audio?: UpAudio; id?: string }): Promise<DownMessage | null>;
   /** Treat the recording as a question about its chat: the answer to read aloud. Sends nothing to the chat. */
   ask(memoId: string): Promise<DownMessage | null>;
   /** Where a chat stands, to read aloud. */
@@ -39,10 +47,17 @@ export interface Uplink {
   talk(
     callId: string,
     phase: TalkPhase,
-    audio: Buffer,
+    audio: UpAudio,
     /** A call in: the chat of the published list this call talks about. Absent: a call out, whose id names its chat. */
     from?: { dirVersion: string; choice: number },
+    /** The id of the message, when pieces of the recording already went up under it (`openStream`). */
+    messageId?: string,
   ): Promise<DownMessage | null>;
+  /**
+   * Starts sending a recording in pieces while it is made, named by the id of the message that will carry it. Null when
+   * the Mac's list does not say it takes pieces (or in a test double): the recording then goes up whole.
+   */
+  openStream?(streamId: string): UpStream | null;
   /**
    * Follows the later sentences of an answer the Mac is still making (`audioFollows` on its reply): the documents
    * `replyaudio-<messageId>-<n>`, n from 1. Absent in a test double: the answer is spoken whole.
@@ -62,6 +77,11 @@ export interface RelayUplinkOptions {
   sendWaitMs?: number;
   /** A model answers a question: longer than a transcript, and the Mac gives up on its own sooner. */
   askWaitMs?: number;
+  /** Whether the Mac's latest list says it takes a recording in pieces (`upParts`); absent: never. */
+  partsEnabled?: () => boolean;
+  /** 8 kHz PCM to a standalone Opus clip, for the pieces; absent: never. */
+  encodePcm?: (pcm: Buffer) => Promise<Buffer>;
+  trace?: (line: string) => void;
 }
 
 const POLL_MS = 5000;
@@ -73,7 +93,16 @@ export class RelayUplink implements Uplink {
     this.now = options.now ?? Date.now;
   }
 
-  memo(memoId: string, choice: number, dirVersion: string, audio: Buffer): Promise<DownMessage | null> {
+  openStream(streamId: string): UpStream | null {
+    const { store, channel, key, encodePcm, partsEnabled, trace } = this.options;
+    if (!encodePcm || !partsEnabled?.()) return null;
+    return new UpStream(
+      { store, channel, key, encode: encodePcm, now: this.now, ...(trace ? { trace } : {}) },
+      streamId,
+    );
+  }
+
+  memo(memoId: string, choice: number, dirVersion: string, audio: UpAudio): Promise<DownMessage | null> {
     const at = this.now();
     return this.exchange(
       {
@@ -84,7 +113,7 @@ export class RelayUplink implements Uplink {
         kind: "memo",
         dirVersion,
         choice,
-        audio: audio.toString("base64"),
+        ...audioFields(audio),
       },
       this.options.memoWaitMs ?? 45_000,
     );
@@ -98,7 +127,7 @@ export class RelayUplink implements Uplink {
     );
   }
 
-  newChat(memoId: string, workspace: number, dirVersion: string, audio: Buffer): Promise<DownMessage | null> {
+  newChat(memoId: string, workspace: number, dirVersion: string, audio: UpAudio): Promise<DownMessage | null> {
     const at = this.now();
     return this.exchange(
       {
@@ -109,24 +138,24 @@ export class RelayUplink implements Uplink {
         kind: "newchat",
         dirVersion,
         workspace,
-        audio: audio.toString("base64"),
+        ...audioFields(audio),
       },
       this.options.memoWaitMs ?? 45_000,
     );
   }
 
-  start(memoId: string, options: { callId?: string; audio?: Buffer }): Promise<DownMessage | null> {
+  start(memoId: string, options: { callId?: string; audio?: UpAudio; id?: string }): Promise<DownMessage | null> {
     const at = this.now();
     return this.exchange(
       {
         v: 1,
-        id: newMessageId(),
+        id: options.id ?? newMessageId(),
         at,
         expiresAt: at + UP_TTL_MS,
         kind: "start",
         memoId,
         ...(options.callId ? { callId: options.callId } : {}),
-        ...(options.audio ? { audio: options.audio.toString("base64") } : {}),
+        ...(options.audio ? audioFields(options.audio) : {}),
       },
       // Transcribing a spoken yes, starting the chat through Conductor, and the Mac's voice for the answer.
       this.options.sendWaitMs ?? 60_000,
@@ -153,14 +182,15 @@ export class RelayUplink implements Uplink {
   talk(
     callId: string,
     phase: TalkPhase,
-    audio: Buffer,
+    audio: UpAudio,
     from?: { dirVersion: string; choice: number },
+    messageId?: string,
   ): Promise<DownMessage | null> {
     const at = this.now();
     return this.exchange(
       {
         v: 1,
-        id: newMessageId(),
+        id: messageId ?? newMessageId(),
         at,
         expiresAt: at + UP_TTL_MS,
         kind: "talk",
@@ -168,7 +198,7 @@ export class RelayUplink implements Uplink {
         choice: from ? from.choice : 1,
         ...(from ? { callId } : {}),
         phase,
-        audio: audio.toString("base64"),
+        ...audioFields(audio),
       },
       // Transcribing, a model working out the answer and the Mac's voice: as long as an ask, and a little more.
       90_000,
@@ -249,9 +279,15 @@ export class RelayUplink implements Uplink {
 
   private async exchange(message: UpMessage, waitMs: number): Promise<DownMessage | null> {
     const { store, channel, key } = this.options;
+    // The pieces that went up ahead of the message go with it, whichever way this ends.
+    const pieces =
+      "audioParts" in message && message.audioParts
+        ? message.audioParts.map((_, index) => upAudioId(message.id, index))
+        : [];
     try {
       await store.set(upPath(channel, message.id), sealUp(key, message));
     } catch {
+      await Promise.allSettled(pieces.map((id) => store.delete(upPath(channel, id))));
       return null;
     }
     const deadline = this.now() + waitMs;
@@ -299,6 +335,7 @@ export class RelayUplink implements Uplink {
       await Promise.allSettled([
         store.delete(upPath(channel, message.id)),
         store.delete(downPath(channel, message.id)),
+        ...pieces.map((id) => store.delete(upPath(channel, id))),
       ]);
     }
   }

@@ -304,7 +304,7 @@ have no new chat.
   and the add-on can only say "workspace number 2". A workspace gets one only if Conductor knows it (`findNewChatWorkspace`)
   and the add-on is 0.18.0 or newer (`NEW_CHAT_ADDON`, `addonSupports` as for `audioFollows`): an older add-on never
   sees `newChat`, and the list's version changes with the ids, so it is published again when the add-on updates.
-- `voiceup` `newchat`: `{ dirVersion, workspace, audio }` (`audio` non-empty base64 Opus, at most `MAX_AUDIO_CHARS`).
+- `voiceup` `newchat`: `{ dirVersion, workspace, audio }` (`audio` non-empty base64 Opus, at most `MAX_AUDIO_CHARS`; from add-on 0.19.0 `audioParts` instead, see "The recording goes up while you speak").
   Answered by `voicedown` `transcript` (+ optional `model`).
 - `voiceup` `start`: `{ memoId, callId?, audio? }`. `memoId` is the `newchat` message's id. No `audio`: the keypad's
   explicit 1. `audio`: the spoken answer. Answered by `voicedown` `newchat`: `{ outcome: "started" | "declined" | "again",
@@ -350,6 +350,41 @@ rests on silence), then speaks the whole remainder in its quick plain voice: not
 add-on deletes the documents when the answer is done; the Mac deletes any left after 10 min and at start. Keys and
 recording behave as before, after the whole answer. An older add-on never gets `audioFollows` and keeps the single full
 clip; an older Mac never sends it, so a newer add-on speaks the whole answer as before.
+
+### The recording goes up while you speak (add-on 0.19.0)
+
+A 41 s recording used to be encoded and sent only after it ended: 6.5 s from "Recorded" on the add-on to "Recording
+received" on the Mac, then 1.3 s of Whisper. Now the add-on sends it in pieces while the person is still talking, so
+when they stop only the last piece is in flight. It applies to every recording that goes up: `memo`, `newchat`, a `talk`
+turn and a `start` with a spoken answer.
+
+- **Gating.** The Mac sets `upParts: true` in the `voicedir` list when its transcriber can decode pieces and transcribe
+  them joined (Whisper with ffmpeg: always, here). The add-on sends pieces only when the latest list it has
+  (`DirectoryCache.current()`, for calls in and out alike) says so; otherwise it sends the one `audio` as before. An
+  older Mac never sets the flag, an older add-on never sends pieces, and the Mac accepts the single `audio` forever.
+- **Pieces.** `PhoneCall.record` takes `onAudio`, told the call's PCM as the WAV grows (also without `endOnSilence`).
+  `UpStream` (`up-stream.ts`) cuts every 3 s of new audio, encodes that span to its own Ogg Opus clip (the same ffmpeg
+  libopus 16k as the whole recording) and writes it as the `voiceup` document `upaudio-<streamId>-<n>` (n from 0, at most
+  40), sealed and signed with the channel key (`sealUpPart`: kind `up`, the stream and number inside the box, so a copy
+  under another id does not open). Writes are one at a time, in order, and never block the recording loop. The stream id
+  is the up message's own id (`recordForUpload` makes it before recording). The database rules are unchanged: `voiceup`
+  already accepts ids matching `^[A-Za-z0-9_-]{1,80}$`, and these are at most 33 characters.
+- **The message.** When the recording ends the rest (everything after the bytes already cut, read from the finished WAV)
+  goes as the last piece, then the up message carries no `audio` but `audioParts`: the SHA-256 (lowercase hex) of each
+  piece's Opus bytes, in order. `readUp` accepts exactly one of `audio` and `audioParts` (1 to 40 well-formed hashes; a
+  talk turn that is a key press, `hold` or `peek`, takes no pieces). If any piece failed to encode or write, the pieces
+  are deleted and the whole recording goes as `audio`: a message is never lost to this.
+- **The Mac** (`memo-inbox.ts`) never reads an `upaudio-` document as a message. Each pass takes them in first (seal, id,
+  stream, number) and decodes each to 16 kHz PCM in the background (`Transcriber.decode`), cached per stream for 3 min.
+  A message with `audioParts` gathers each piece from that cache or fetches it, waits up to 10 s for one that has not
+  arrived, requires every hash and the count to match exactly, joins the PCM and transcribes it as one recording
+  (`Transcriber.transcribePcm`). Anything short of that is refused with a fixed sentence ("The recording did not arrive
+  whole. Try again."), never a partial transcript. Every other check on the message (seal, signature, expiry, replay,
+  deleted before it runs) is unchanged. The trace says `Recording received (76 KB in 14 pieces)`; the add-on's says
+  `Sent 7 pieces while recording`.
+- **Cleanup.** The add-on deletes its pieces with the up and down documents when the exchange ends, and at once when the
+  recording is discarded or the caller hangs up mid-recording. The Mac deletes the pieces it used, any older than 10 min
+  (each pass and every minute), and all of them at start.
 
 ### The chat you used last, and recordings it will not send blind
 

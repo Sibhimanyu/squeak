@@ -1,3 +1,4 @@
+import { recordForUpload, type RecordedUpload } from "./recording-upload.js";
 import crypto from "node:crypto";
 
 import { logger } from "../utils/logger.js";
@@ -545,10 +546,13 @@ async function messageFlow(
   let askFails = 0;
   for (let take = 0; take < MAX_TAKES && call.open; take++) {
     await speak(call, deps, ask ? SAYS.recordAsk : recordPrompt(target.label));
-    const recording = await call.record({ maxMs: MAX_MEMO_MS, beep: true, endOnSilence: true });
-    if (!recording) return "done";
+    const memoId = newMessageId();
+    const upload = await recordForUpload(call, deps, { maxMs: MAX_MEMO_MS, beep: true, endOnSilence: true }, memoId);
+    if (!upload) return "done";
+    const { recording } = upload;
     deps.trace?.(`step: Recorded ${(recording.durationMs / 1000).toFixed(1)} s`);
     if (recording.ended === "no-speech") {
+      upload.discard();
       // Nothing was said: do not process two minutes of silence. One key tries again; anything else hangs up.
       await speak(call, deps, SAYS.noSpeech);
       const again = await call.key(MENU_WAIT_MS);
@@ -558,15 +562,15 @@ async function messageFlow(
     }
     if (recording.ended === "limit") await speak(call, deps, SAYS.cap);
     if (recording.durationMs < MIN_MEMO_MS) {
+      upload.discard();
       await speak(call, deps, SAYS.nothing);
       continue;
     }
     await speak(call, deps, SAYS.wait);
-    const memoId = newMessageId();
     const stopReassuring = reassure(call, deps);
     let heard: DownMessage | null;
     try {
-      heard = await deps.uplink.memo(memoId, choice, directory.version, await deps.encode(recording.file));
+      heard = await deps.uplink.memo(memoId, choice, directory.version, await upload.audio());
     } finally {
       stopReassuring();
     }
@@ -669,10 +673,13 @@ async function newChatFlow(
   const callId = crypto.randomBytes(9).toString("base64url");
   for (let take = 0; take < MAX_TAKES && call.open; take++) {
     await speak(call, deps, newChatPrompt(workspace.label));
-    const recording = await call.record({ maxMs: MAX_MEMO_MS, beep: true, endOnSilence: true });
-    if (!recording) return;
+    const memoId = newMessageId();
+    const upload = await recordForUpload(call, deps, { maxMs: MAX_MEMO_MS, beep: true, endOnSilence: true }, memoId);
+    if (!upload) return;
+    const { recording } = upload;
     deps.trace?.(`step: Recorded ${(recording.durationMs / 1000).toFixed(1)} s`);
     if (recording.ended === "no-speech") {
+      upload.discard();
       await speak(call, deps, SAYS.noSpeech);
       const again = await call.key(MENU_WAIT_MS);
       deps.trace?.(`key: ${again === "1" ? "1 (try again)" : "hang up"}`);
@@ -681,15 +688,15 @@ async function newChatFlow(
     }
     if (recording.ended === "limit") await speak(call, deps, SAYS.cap);
     if (recording.durationMs < MIN_MEMO_MS) {
+      upload.discard();
       await speak(call, deps, SAYS.nothing);
       continue;
     }
     await speak(call, deps, SAYS.wait);
-    const memoId = newMessageId();
     const stopReassuring = reassure(call, deps);
     let heard: DownMessage | null;
     try {
-      heard = await uplink.newChat(memoId, index, directory.version, await deps.encode(recording.file));
+      heard = await uplink.newChat(memoId, index, directory.version, await upload.audio());
     } finally {
       stopReassuring();
     }
@@ -722,9 +729,17 @@ async function newChatFlow(
       deps,
       readBack,
       { callId, label: heard.label, dirVersion: directory.version },
-      async (spoken) => {
+      async (spoken, answer) => {
         deps.trace?.(spoken ? "step: Spoken answer sent" : "key: 1 (start)");
-        return uplink.start!(memoId, { callId, ...(spoken ? { audio: await deps.encode(spoken) } : {}) });
+        return uplink.start!(memoId, {
+          callId,
+          ...(spoken
+            ? {
+                audio: answer ? await answer.upload.audio() : await deps.encode(spoken),
+                ...(answer ? { id: answer.id } : {}),
+              }
+            : {}),
+        });
       },
     );
   }
@@ -741,7 +756,7 @@ async function confirmNewChat(
   deps: InboundDependencies,
   readBack: string,
   info: { callId: string; label: string; dirVersion: string },
-  start: (spoken: string | null) => Promise<DownMessage | null>,
+  start: (spoken: string | null, answer?: { id: string; upload: RecordedUpload }) => Promise<DownMessage | null>,
 ): Promise<void> {
   const finish = async (reply: DownMessage | null): Promise<void> => {
     if (!reply) return bye(call, deps, SAYS.newChatNotSure);
@@ -769,9 +784,17 @@ async function confirmNewChat(
     // A key pressed while it was being read (it interrupts speech and stays queued) is the answer.
     let key = await call.key(250);
     if (key === null && spokenTries < MAX_ANSWER_TRIES) {
-      const answer = await call.record({ maxMs: NEW_CHAT_ANSWER_MS, beep: true, endOnSilence: true });
-      if (!answer) return;
+      const startId = newMessageId();
+      const upload = await recordForUpload(
+        call,
+        deps,
+        { maxMs: NEW_CHAT_ANSWER_MS, beep: true, endOnSilence: true },
+        startId,
+      );
+      if (!upload) return;
+      const answer = upload.recording;
       if (answer.ended === "key") {
+        upload.discard();
         deps.trace?.("key: cancel");
         return bye(call, deps, SAYS.cancelled);
       }
@@ -780,7 +803,7 @@ async function confirmNewChat(
         const stop = reassure(call, deps);
         let reply: DownMessage | null;
         try {
-          reply = await start(answer.file);
+          reply = await start(answer.file, { id: startId, upload });
         } finally {
           stop();
         }
@@ -791,6 +814,7 @@ async function confirmNewChat(
         return finish(reply);
       }
       // Nothing said: the keypad.
+      upload.discard();
       await speak(call, deps, newChatKeys);
       key = await call.key(CONFIRM_WAIT_MS);
     } else if (key === null) {

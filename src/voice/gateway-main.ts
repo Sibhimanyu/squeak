@@ -26,7 +26,7 @@ import { followUpFlow, handleIncoming, inboundPrompts } from "./inbound-flow.js"
 import { DirectoryCache } from "./directory-cache.js";
 import { incomingGate, PinKeeper } from "./pin-keeper.js";
 import { runDialog, type Phone, type PhoneCall } from "./phone.js";
-import { SipPhone } from "./sip-phone.js";
+import { SipPhone, wavOf } from "./sip-phone.js";
 import { RelayUplink } from "./uplink.js";
 import type { CallQuality } from "./line-quality.js";
 import { EspeakSpeaker, PiperSpeaker, setSpeechSlowHook, type Speaker } from "./tts.js";
@@ -305,8 +305,9 @@ function seconds(ms: number): string {
 const run = promisify(execFile);
 
 /** A recorded call as a small Opus memo: about 2 KB a second, which is what keeps it inside one database document. */
+let encodes = 0;
 async function encodeOpus(wavFile: string): Promise<Buffer> {
-  const out = path.join(os.tmpdir(), `squeak-memo-${process.pid}-${Date.now()}.ogg`);
+  const out = path.join(os.tmpdir(), `squeak-memo-${process.pid}-${Date.now()}-${encodes++}.ogg`);
   try {
     await run("ffmpeg", ["-y", "-loglevel", "error", "-i", wavFile, "-c:a", "libopus", "-b:a", "16k", out], {
       timeout: 30_000,
@@ -314,6 +315,20 @@ async function encodeOpus(wavFile: string): Promise<Buffer> {
     return fs.readFileSync(out);
   } finally {
     fs.rmSync(out, { force: true });
+  }
+}
+
+/** One span of a recording (8 kHz mono 16-bit PCM) as its own Opus clip: a piece that goes up while the person speaks. */
+async function encodePcmOpus(pcm: Buffer): Promise<Buffer> {
+  const wav = path.join(os.tmpdir(), `squeak-piece-${process.pid}-${Date.now()}-${encodes++}.wav`);
+  try {
+    fs.writeFileSync(
+      wav,
+      wavOf(new Int16Array(pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.length - (pcm.length % 2)))),
+    );
+    return await encodeOpus(wav);
+  } finally {
+    fs.rmSync(wav, { force: true });
   }
 }
 
@@ -487,8 +502,16 @@ export async function runGateway(): Promise<number> {
       }
       let publishStatus: () => void = () => undefined;
       // One uplink for the calls in and for the follow-ups of a call out (a message for the chat, its status).
-      const uplink = new RelayUplink({ store, channel: relay.channel, key: relay.key });
       let directoryCache: DirectoryCache | null = null;
+      const uplink = new RelayUplink({
+        store,
+        channel: relay.channel,
+        key: relay.key,
+        // Pieces only for a Mac whose latest list says it takes them (an older one gets the whole recording, as before).
+        partsEnabled: () => directoryCache?.current()?.upParts === true,
+        encodePcm: encodePcmOpus,
+        trace: (line) => note("info", line),
+      });
       const gateway = new VoiceGateway({
         store,
         channel: relay.channel,
