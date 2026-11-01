@@ -121,6 +121,7 @@ import { resolveSqueakEnvPath } from "./paths.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker, type Speaker } from "../voice/tts.js";
 import {
+  availableVoices,
   naturalInstalled,
   naturalPaths,
   NaturalSettingsStore,
@@ -134,8 +135,8 @@ import {
   OLD_ADDON_CLIPS_BUDGET_MS,
 } from "../voice/natural-voice.js";
 import type { VoiceLine } from "../voice/relay-line.js";
-import { NaturalInstaller } from "../voice/natural-setup.js";
-import { ENGINE_IDS, isEngineId, VOICE_ENGINES, type EngineId } from "../voice/voice-engines.js";
+import { ensureReferenceClips, NaturalInstaller } from "../voice/natural-setup.js";
+import { engineHasVoice, ENGINE_IDS, isEngineId, VOICE_ENGINES, type EngineId } from "../voice/voice-engines.js";
 import { TEST_SCRIPT } from "../voice/test-script.js";
 import { readIdleSeconds } from "../fleet/user-idle.js";
 import { MemoInbox, type MemoTarget } from "../voice/memo-inbox.js";
@@ -456,8 +457,12 @@ export class SqueakApp {
       this.workspaceLabel(key),
     );
     this.voiceCallbacks = new CallbackRequests(path.join(config.supportDir, "voice-callbacks.json"));
-    this.naturalSettings = new NaturalSettingsStore(path.join(config.supportDir, "voice-natural.json"), (engine) =>
-      naturalInstalled(naturalPaths(config.supportDir, engine)),
+    this.naturalSettings = new NaturalSettingsStore(
+      path.join(config.supportDir, "voice-natural.json"),
+      (engine) => naturalInstalled(naturalPaths(config.supportDir, engine)),
+      (engine, voice) =>
+        availableVoices(naturalPaths(config.supportDir, engine), engine).some((entry) => entry.id === voice) ||
+        (engine === "kokoro" && engineHasVoice(engine, voice)),
     );
     this.naturalVoice = new NaturalVoice(
       (engine) => naturalPaths(config.supportDir, engine),
@@ -935,6 +940,7 @@ export class SqueakApp {
     // Start the realistic voice's worker now and render the fixed call phrases while no call waits on them. Readiness
     // starts as preparing: it is ready once the first publish to the add-on is out.
     this.prepareVoice();
+    this.makeMissingReferenceClips();
 
     this.controller = new FleetController({
       telegram: this.telegram,
@@ -1087,6 +1093,7 @@ export class SqueakApp {
     this.voiceSpeaker?.dispose();
     this.naturalVoice.stop();
     this.naturalInstaller.stop();
+    this.stopReferenceClips();
     await this.conductorRelay.stop().catch(() => undefined);
     await this.replier.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);
@@ -1619,13 +1626,15 @@ export class SqueakApp {
    * client that knows only Kokoro reads), `engines` lists every engine with its own voices and pick.
    */
   private naturalView() {
-    const { enabled, engine, emotion, speed, voices, voice } = this.naturalSettings.settings;
+    const { enabled, engine, emotion, speed, voice } = this.naturalSettings.settings;
     const installed = (id: EngineId) => naturalInstalled(naturalPaths(this.config.supportDir, id));
+    // A cloning engine lists only the voices whose reference clip exists; its pick shows what it speaks now.
+    const offered = (id: EngineId) => availableVoices(naturalPaths(this.config.supportDir, id), id);
     return {
       installed: installed(engine),
       enabled,
       voice,
-      voices: VOICE_ENGINES[engine].voices,
+      voices: offered(engine),
       engine,
       emotion,
       speed,
@@ -1638,8 +1647,8 @@ export class SqueakApp {
           size: spec.size,
           installed: installed(id),
           emotion: spec.emotion,
-          voices: spec.voices,
-          voice: voices[id] ?? spec.defaultVoice,
+          voices: offered(id),
+          voice: this.naturalSettings.spoken(id),
           licence: spec.licence,
         };
       }),
@@ -1704,6 +1713,25 @@ export class SqueakApp {
       })
       .catch(() => this.voiceReadiness.fail(key));
   }
+
+  /**
+   * Ming and Chatterbox installed before the shared voice list have no reference clips for it: Kokoro makes them in the
+   * background (installing Kokoro first if it is missing). Their voices appear as each clip does, and a call meanwhile
+   * uses Heart or the add-on's voice; once they exist the call phrases are made again for the new voice.
+   */
+  private makeMissingReferenceClips(): void {
+    const stop = new AbortController();
+    this.stopReferenceClips = () => stop.abort();
+    void ensureReferenceClips(this.config.supportDir, {
+      signal: stop.signal,
+      log: (detail) => logger.warn("voice reference clips", { detail }),
+    })
+      .then((engines) => {
+        if (engines.length > 0 && !stop.signal.aborted) this.prepareVoice();
+      })
+      .catch(() => undefined);
+  }
+  private stopReferenceClips: () => void = () => undefined;
 
   /** The current voice's name as a sentence says it ("Sohee"). */
   private naturalVoiceLabel(): string {

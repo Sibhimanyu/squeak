@@ -46,30 +46,30 @@ a line) and **CSM-1B** (2.7%, 2.6 s, no emotion control).
 
 Sorted by WER (lower is clearer over the phone). Peak memory is MLX's own peak where the runner recorded it.
 
-| variant | WER | s/line | RTF | load s | peak GB | emotion control |
-|---|---|---|---|---|---|---|
-| kokoro-af_heart | 1.2% | 1.6 | 0.30 | 0.4 | | none |
-| voxcpm2-clone-plain | 1.2% | 9.0 | 1.49 | 1.9 | | none |
-| ming3-clone-emotion | 1.8% | 1.7 | 0.29 | 2.3 | | Chinese emotion key + speed/pitch/volume caption |
-| voxcpm2-clone-styled | 1.8% | 10.9 | 1.72 | 1.9 | | style prefix |
-| voxcpm2-design-emotion | 1.8% | 7.2 | 1.16 | 1.9 | | `(A young woman, <delivery>)` voice design |
-| chatterbox-turbo-clone-tags | 2.3% | 5.4 | 0.82 | 4.3 | | `[sigh]` / `[chuckle]` tags |
-| csm-clone | 2.7% | 2.6 | 0.46 | 5.3 | 3.8 | none (context audio only) |
-| kyutai-expresso-emotion | 2.9% | 13.7 | 2.18 | 1.6 | | emotional reference voices (Expresso set) |
-| qwen3-voicedesign-instruct | 3.0% | 1.8 | 0.32 | 19.8 | 6.8 | instruct sentence (voice + emotion) |
-| ming3-usemma-emotion | 3.0% | 1.7 | 0.29 | 2.3 | | built-in US_Emma + emotion caption |
-| ming3-freeform | 3.6% | 1.6 | 0.30 | 2.3 | | English free-form instruction |
-| chatterbox-clone-ex0.5 | 3.6% | 2.9 | 0.50 | 1.5 | | exaggeration 0.5 (default) |
-| spark-clone | 3.7% | 1.8 | 0.30 | 2.2 | | none |
-| chatterbox-clone-emotion | 3.7% | 2.6 | 0.47 | 1.1 | | exaggeration 0.4–0.9, cfg 0.25–0.5 per line |
-| ming3-clone-plain | 4.6% | 1.6 | 0.30 | 2.3 | | none |
-| spark-female-pitchspeed | 5.1% | 1.7 | 0.31 | 2.2 | | gender/pitch/speed only |
-| dia-clone | 6.2% | 9.0 | 2.21 | 1.9 | 8.5 | none |
-| kyutai-defaultvoice-plain | 6.3% | 13.5 | 2.21 | 1.6 | | none |
-| qwen3-customvoice-serena-instruct | 9.5% | 10.9 | 1.52 | 6.6 | 7.2 | instruct sentence, preset speaker |
-| orpheus-tara-plain | 9.9% | 6.5 | 0.74 | 3.9 | 6.2 | none |
-| dia-clone-nonverbal | 10.0% | 10.5 | 2.17 | 1.7 | 10.3 | `(laughs)` / `(sighs)`, 4 lines only |
-| orpheus-tara-tags | 10.4% | 7.7 | 0.82 | 3.6 | 6.2 | `<chuckle>` / `<sigh>` tags |
+| variant                           | WER   | s/line | RTF  | load s | peak GB | emotion control                                  |
+| --------------------------------- | ----- | ------ | ---- | ------ | ------- | ------------------------------------------------ |
+| kokoro-af_heart                   | 1.2%  | 1.6    | 0.30 | 0.4    |         | none                                             |
+| voxcpm2-clone-plain               | 1.2%  | 9.0    | 1.49 | 1.9    |         | none                                             |
+| ming3-clone-emotion               | 1.8%  | 1.7    | 0.29 | 2.3    |         | Chinese emotion key + speed/pitch/volume caption |
+| voxcpm2-clone-styled              | 1.8%  | 10.9   | 1.72 | 1.9    |         | style prefix                                     |
+| voxcpm2-design-emotion            | 1.8%  | 7.2    | 1.16 | 1.9    |         | `(A young woman, <delivery>)` voice design       |
+| chatterbox-turbo-clone-tags       | 2.3%  | 5.4    | 0.82 | 4.3    |         | `[sigh]` / `[chuckle]` tags                      |
+| csm-clone                         | 2.7%  | 2.6    | 0.46 | 5.3    | 3.8     | none (context audio only)                        |
+| kyutai-expresso-emotion           | 2.9%  | 13.7   | 2.18 | 1.6    |         | emotional reference voices (Expresso set)        |
+| qwen3-voicedesign-instruct        | 3.0%  | 1.8    | 0.32 | 19.8   | 6.8     | instruct sentence (voice + emotion)              |
+| ming3-usemma-emotion              | 3.0%  | 1.7    | 0.29 | 2.3    |         | built-in US_Emma + emotion caption               |
+| ming3-freeform                    | 3.6%  | 1.6    | 0.30 | 2.3    |         | English free-form instruction                    |
+| chatterbox-clone-ex0.5            | 3.6%  | 2.9    | 0.50 | 1.5    |         | exaggeration 0.5 (default)                       |
+| spark-clone                       | 3.7%  | 1.8    | 0.30 | 2.2    |         | none                                             |
+| chatterbox-clone-emotion          | 3.7%  | 2.6    | 0.47 | 1.1    |         | exaggeration 0.4–0.9, cfg 0.25–0.5 per line      |
+| ming3-clone-plain                 | 4.6%  | 1.6    | 0.30 | 2.3    |         | none                                             |
+| spark-female-pitchspeed           | 5.1%  | 1.7    | 0.31 | 2.2    |         | gender/pitch/speed only                          |
+| dia-clone                         | 6.2%  | 9.0    | 2.21 | 1.9    | 8.5     | none                                             |
+| kyutai-defaultvoice-plain         | 6.3%  | 13.5   | 2.21 | 1.6    |         | none                                             |
+| qwen3-customvoice-serena-instruct | 9.5%  | 10.9   | 1.52 | 6.6    | 7.2     | instruct sentence, preset speaker                |
+| orpheus-tara-plain                | 9.9%  | 6.5    | 0.74 | 3.9    | 6.2     | none                                             |
+| dia-clone-nonverbal               | 10.0% | 10.5   | 2.17 | 1.7    | 10.3    | `(laughs)` / `(sighs)`, 4 lines only             |
+| orpheus-tara-tags                 | 10.4% | 7.7    | 0.82 | 3.6    | 6.2     | `<chuckle>` / `<sigh>` tags                      |
 
 Per-line transcripts and timings: `scripts/tts-bakeoff/results.json`.
 
@@ -128,14 +128,14 @@ Squeak also offers Qwen3 voices made from a description (`src/voice/qwen3-design
 include few native English speakers. VoiceDesign alone changes speaker between renders, so five ways to keep one
 voice were measured on the same 8 lines (scripts in `scripts/tts-bakeoff/designed/`):
 
-| approach | same-speaker consistency off / strong | WER | emotion moves | s/line |
-|---|---|---|---|---|
-| presets (Aiden, Ryan): the bar | 0.61–0.75 / 0.63–0.71 | 1.8–5.5% | yes | 3.7 |
-| VoiceDesign with a fixed seed | 0.40–0.59 / 0.32–0.50 | 1.8–4.7% | yes | 2.1 |
-| Base: clone a neutral designed clip | 0.58–0.85 / n/a | 1.2–4.9% | no | 2.7 |
-| Base: speaker embedding plus `instruct` | 0.54–0.84 / 0.50–0.56 | 1.2–2.3% | yes, but it drifts | 1.95 |
-| one designed clip per mood, cloned | 0.58–0.85 / 0.37–0.60 | 1.2–6.0% | yes | 2.0 |
-| **CustomVoice with the designed embedding in a spare speaker row** | 0.46–0.77 / 0.48–0.70 | 1.2–3.6% | yes, as for the presets | 1.9 |
+| approach                                                           | same-speaker consistency off / strong | WER      | emotion moves           | s/line |
+| ------------------------------------------------------------------ | ------------------------------------- | -------- | ----------------------- | ------ |
+| presets (Aiden, Ryan): the bar                                     | 0.61–0.75 / 0.63–0.71                 | 1.8–5.5% | yes                     | 3.7    |
+| VoiceDesign with a fixed seed                                      | 0.40–0.59 / 0.32–0.50                 | 1.8–4.7% | yes                     | 2.1    |
+| Base: clone a neutral designed clip                                | 0.58–0.85 / n/a                       | 1.2–4.9% | no                      | 2.7    |
+| Base: speaker embedding plus `instruct`                            | 0.54–0.84 / 0.50–0.56                 | 1.2–2.3% | yes, but it drifts      | 1.95   |
+| one designed clip per mood, cloned                                 | 0.58–0.85 / 0.37–0.60                 | 1.2–6.0% | yes                     | 2.0    |
+| **CustomVoice with the designed embedding in a spare speaker row** | 0.46–0.77 / 0.48–0.70                 | 1.2–3.6% | yes, as for the presets | 1.9    |
 
 The winner is the last row. Each voice is one neutral VoiceDesign clip (seed 1234), turned into a 2048-float speaker
 embedding by the Base model's speaker encoder. The CustomVoice worker writes that embedding into the last row of its
@@ -145,3 +145,38 @@ saturated (0.955–0.98 even for two different presets). Kept: warm American wom
 man (1.9% / 3.1%) and friendly Indian-English woman (3.1% / 2.9%). Left out: an energetic young American man, who
 stayed borderline (consistency 0.59 / 0.52) after two descriptions. Ono Anna (4.4%) was added to the presets on
 request. Making a new voice needs VoiceDesign (about 2.2 GB) and the Base model's 24 MB speaker encoder, once.
+
+## One voice list across engines (2026-11-01)
+
+Kokoro's seven voices are the shared list for Kokoro, Ming and Chatterbox. Ming and Chatterbox clone a Kokoro-made
+reference clip per voice (the same clips, about 8 s of plain speech, `refs/<voice>.wav` in each engine's folder); Ming
+keeps its emotion caption (`ming3-clone-emotion` above). Each clone was checked before being offered: the 8 standard
+lines plus a 55-word line and a line of product names ("Squeak, Conductor and Claude Code..."), rendered through
+Squeak's own worker script (moods as the daemon picks them, level subtle), the phone-line copy, Whisper `base.en`.
+Pass: WER <= 5% over the voice's 10 lines and no line with a dropped or garbled half.
+
+| voice                | Ming WER      | worst line                                                     | Chatterbox WER | worst line          |
+| -------------------- | ------------- | -------------------------------------------------------------- | -------------- | ------------------- |
+| af_heart (Heart)     | 3.3%          | done 14%                                                       | 3.3%           | callback 15%        |
+| af_bella (Bella)     | 2.9%          | names 16%                                                      | 3.3%           | done 19%            |
+| af_nicole (Nicole)   | **6.7% fail** | blocked 28%: "It wants to run the database migration," dropped | 3.3%           | done 10%            |
+| bf_emma (Emma)       | 2.4%          | done 14%                                                       | **5.2% fail**  | done 19% ("passer") |
+| am_michael (Michael) | 2.9%          | names 21%                                                      | 3.8%           | names 21%           |
+| am_adam (Adam)       | 2.4%          | names 16%                                                      | 3.3%           | names 11%           |
+| bm_george (George)   | 2.9%          | names 16%                                                      | 2.9%           | names 21%           |
+
+The worst lines that passed are product names Whisper mishears for any voice ("clod code", "clique"), not dropped
+words; the long line was clean everywhere (0-3%). Offered: Ming without Nicole, Chatterbox without Emma (hard-coded
+in `CLONE_PASSED`, `src/voice/voice-engines.ts`). Ming's old ids map as US_Emma to af_bella, US_Stella to af_nicole
+(not offered on Ming, so Heart), US_James to am_michael, UK_Charlotte to bf_emma, UK_George to bm_george.
+WER says the words survive the line, not that the clone sounds like the Kokoro voice.
+
+Rerun (writes `out/clone-check/`, about 25 minutes; the engines must be installed and the daemon may use the GPU):
+
+```bash
+npx tsx -e 'import {MING_WORKER_PY,CHATTERBOX_WORKER_PY} from "./src/voice/natural-worker-mlx.ts"; import fs from "node:fs";
+  fs.mkdirSync("scripts/tts-bakeoff/out/clone-check",{recursive:true});
+  fs.writeFileSync("scripts/tts-bakeoff/out/clone-check/worker-ming.py",MING_WORKER_PY);
+  fs.writeFileSync("scripts/tts-bakeoff/out/clone-check/worker-chatterbox.py",CHATTERBOX_WORKER_PY)'
+python3 scripts/tts-bakeoff/clone-voices-check.py ming chatterbox
+```

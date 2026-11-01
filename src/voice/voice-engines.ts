@@ -6,7 +6,7 @@ import { DESIGNED_VOICES_FILE, designedVoicesJson, QWEN3_DESIGNED_VOICES } from 
 
 /**
  * The engines that can make the call voice (docs/voice.md, "Voice engines"): Kokoro (small, plain) and three
- * expressive ones on mlx-audio. Each lives in its own folder of the support directory, so removing one is deleting a
+ * expressive ones on mlx-audio. Kokoro, Ming and Chatterbox share one voice list. Each lives in its own folder of the support directory, so removing one is deleting a
  * folder, and its weights are fetched there, never into the global Hugging Face cache.
  */
 
@@ -31,6 +31,54 @@ export const NATURAL_VOICES: ReadonlyArray<{ id: string; label: string }> = [
 export interface EngineVoice {
   id: string;
   label: string;
+}
+
+/**
+ * Which of the shared voices (`NATURAL_VOICES`) a cloning engine offers: those whose clone passed the clarity check
+ * (Whisper on the 8 kHz phone copy, WER <= 5% and no garbled line). Measured 2026-11-01, docs/voice-tts-bakeoff.md,
+ * "One voice list across engines"; a voice that failed is simply not listed. Rerun the check before adding one.
+ */
+const CLONE_PASSED: Readonly<Record<"ming" | "chatterbox", readonly string[]>> = {
+  // 2026-11-01, Whisper on the phone copy over 10 lines: af_heart 3.3%, af_bella 2.9%, bf_emma 2.4%, am_michael 2.9%,
+  // am_adam 2.4%, bm_george 2.9%. Left out: af_nicole, 6.7% and a dropped half of the "blocked" line.
+  ming: ["af_heart", "af_bella", "bf_emma", "am_michael", "am_adam", "bm_george"],
+  // Same day: af_heart 3.3%, af_bella 3.3%, af_nicole 3.3%, am_michael 3.8%, am_adam 3.3%, bm_george 2.9%. Left out:
+  // bf_emma, 5.2% (over the 5% bar, by mishearing "parser" and "done", nothing dropped).
+  chatterbox: ["af_heart", "af_bella", "af_nicole", "am_michael", "am_adam", "bm_george"],
+};
+const cloneVoices = (engine: "ming" | "chatterbox"): EngineVoice[] =>
+  NATURAL_VOICES.filter((voice) => CLONE_PASSED[engine].includes(voice.id));
+
+/** Ming's built-in voices of earlier versions, and the shared voice each one became. */
+const LEGACY_MING_VOICES: Readonly<Record<string, string>> = {
+  US_Emma: "af_bella",
+  US_Stella: "af_nicole",
+  US_James: "am_michael",
+  UK_Charlotte: "bf_emma",
+  UK_George: "bm_george",
+};
+
+/** One of Ming's former voice ids as the shared voice it became; anything else comes back as it was. */
+export function renameLegacyVoice(engine: EngineId, voice: unknown): unknown {
+  if (engine !== "ming" || typeof voice !== "string" || !Object.hasOwn(LEGACY_MING_VOICES, voice)) return voice;
+  return LEGACY_MING_VOICES[voice];
+}
+
+/** A voice named in a request as this version names it: a former Ming id is migrated, anything else is left to be checked. */
+export function resolveVoiceRequest(engine: EngineId, voice: unknown): unknown {
+  return renameLegacyVoice(engine, voice) !== voice ? migrateVoice(engine, voice) : voice;
+}
+
+/** Whether an engine speaks by cloning reference clips (made with Kokoro), so a voice exists only once its clip does. */
+export function usesReferenceClips(engine: EngineId): boolean {
+  return engine === "ming" || engine === "chatterbox";
+}
+
+/** A saved voice as this version names it: Ming's old voices map to the shared list, an unknown Ming voice to Heart. */
+export function migrateVoice(engine: EngineId, voice: unknown): unknown {
+  const named = renameLegacyVoice(engine, voice);
+  if (engine !== "ming" || typeof named !== "string") return named;
+  return engineHasVoice("ming", named) ? named : DEFAULT_NATURAL_VOICE;
 }
 
 /** One Hugging Face repo an engine needs, fetched file by file into `<engine folder>/<dir>`. */
@@ -121,19 +169,13 @@ export const VOICE_ENGINES: Readonly<Record<EngineId, VoiceEngine>> = {
   ming: {
     id: "ming",
     label: "Ming (fast, expressive)",
-    summary: "Quick and expressive; built-in voices with emotion, pace and pitch.",
+    summary: "Quick and expressive; speaks in the shared voices, with emotion, pace and pitch.",
     size: "about 4 GB",
     approxBytes: 4_000_000_000,
     emotion: true,
     licence: "MIT",
-    voices: [
-      { id: "US_Emma", label: "Emma" },
-      { id: "US_Stella", label: "Stella" },
-      { id: "US_James", label: "James" },
-      { id: "UK_Charlotte", label: "Charlotte" },
-      { id: "UK_George", label: "George" },
-    ],
-    defaultVoice: "US_Emma",
+    voices: cloneVoices("ming"),
+    defaultVoice: DEFAULT_NATURAL_VOICE,
     folder: "voice-tts-ming",
     workers: 1,
     model: "Ming-3.0-tts-0.5B-bf16",
@@ -155,13 +197,8 @@ export const VOICE_ENGINES: Readonly<Record<EngineId, VoiceEngine>> = {
     approxBytes: 4_000_000_000,
     emotion: true,
     licence: "MIT",
-    voices: [
-      { id: "af_heart", label: "Heart" },
-      { id: "bf_emma", label: "Emma" },
-      { id: "am_michael", label: "Michael" },
-      { id: "bm_george", label: "George" },
-    ],
-    defaultVoice: "af_heart",
+    voices: cloneVoices("chatterbox"),
+    defaultVoice: DEFAULT_NATURAL_VOICE,
     folder: "voice-tts-chatterbox",
     workers: 1,
     model: "Chatterbox-TTS-fp16",
@@ -194,7 +231,7 @@ export function engineDir(supportDir: string, engine: EngineId): string {
   return path.join(supportDir, VOICE_ENGINES[engine].folder);
 }
 
-/** The Chatterbox reference clip of a voice, made with Kokoro at setup. */
+/** The reference clip Ming and Chatterbox clone for a voice, made with Kokoro at setup. */
 export function referenceClip(dir: string, voice: string): string {
   return path.join(dir, "refs", `${voice}.wav`);
 }
