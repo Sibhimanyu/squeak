@@ -19,7 +19,7 @@ export interface RecordedUpload {
 export async function recordForUpload(
   call: PhoneCall,
   deps: { uplink: { openStream?: Uplink["openStream"] }; encode: (wavFile: string) => Promise<Buffer> },
-  options: { maxMs: number; beep?: boolean; endOnSilence?: boolean },
+  options: Omit<Parameters<PhoneCall["record"]>[0], "onAudio">,
   streamId: string,
 ): Promise<RecordedUpload | null> {
   const stream = deps.uplink.openStream?.(streamId) ?? null;

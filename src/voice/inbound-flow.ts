@@ -1,6 +1,7 @@
 import { recordForUpload, type RecordedUpload } from "./recording-upload.js";
 import { MAX_AUDIO_DOC_BYTES } from "./clips.js";
 import { FillerPicker, fillerLines } from "./fillers.js";
+import { PICK_HINT, pickMenuSpec, pickMiss, pickQuestion, type PickAction } from "./voice-pick.js";
 import crypto from "node:crypto";
 
 import { logger } from "../utils/logger.js";
@@ -233,11 +234,24 @@ export function inboundPromptTiers(directory: DirectoryDoc | null, askPin: boole
   const labels = directory ? allLabels(directory) : [];
   const pin = askPin ? [`${hello(terse)}${SAYS.pin}`, SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
 
-  // Said on every call: the PIN, the menus, and the line that opens the chosen chat.
+  // The menus as the keypad says them. Answered by voice they are the rare path (two misses, or a Mac that cannot be
+  // reached), so they move to the last tier and the questions take their place.
+  const keypadMenus = directory ? menuPrompts(directory, greetMenus) : [];
+  const voice = directory?.pickByVoice === true;
+  const empty = (directory?.workspaces ?? []).filter((w) => w.chats.length === 0).map(noneIn);
+  const names = directory && voice ? voiceMenuNames(directory) : [];
+  const [first] = names;
+  // Said on every call: the PIN, the menus, and the line that opens the chosen chat. The first menu of a call carries the
+  // hint ("You can also press a number.") and, when no PIN prompt came first, the greeting.
   const opening = [
     ...pin,
     ...last,
-    ...(directory ? menuPrompts(directory, greetMenus) : []),
+    ...(voice
+      ? [
+          ...names.map((name) => voiceMenuPrompt(directory!, name, name === first && greetMenus, name === first)),
+          ...empty,
+        ]
+      : keypadMenus),
     ...labels.flatMap((label) =>
       talks
         ? [talkPrompt(label, terse)]
@@ -264,13 +278,21 @@ export function inboundPromptTiers(directory: DirectoryDoc | null, askPin: boole
     ...fresh.flatMap((workspace) => [newChatPrompt(workspace.label)]),
     ...(fresh.length > 0 ? [SAYS.newChatNoMac, SAYS.newChatNotSure, SAYS.newChatFailed] : []),
   ];
+  // The spoken menus again without the hint (a repeat, or a way back), and what is said after a miss.
+  const retry = directory
+    ? names.flatMap((name) => [
+        ...(name === first ? [voiceMenuPrompt(directory, name, false, false)] : []),
+        pickMiss(pickMenuSpec(directory, name)?.names ?? []),
+      ])
+    : [];
   // The keypad's wording when the conversation falls back to keys, and its rarer follow-ups.
   const keypad = [
+    ...(voice ? keypadMenus.filter((text) => !empty.includes(text)) : []),
     ...(talks ? labels.flatMap((label) => [actionPrompt(label), sentLine(label)]) : []),
     ...(fresh.length > 0 ? [newChatKeys] : []),
     heardNothingPrompt(ask ? "3" : "2"),
   ];
-  return [opening, common, keypad];
+  return [opening, [...common, ...retry], keypad];
 }
 
 /** Every line of the tiers, in order, for one PIN setting. */
@@ -930,6 +952,185 @@ async function menuKey(call: PhoneCall, deps: InboundDependencies, prompt: strin
   return null;
 }
 
+/** What one asking of a menu came to: a key (null: silence or hang-up), a spoken pick of an option, or a spoken extra. */
+type MenuAnswer =
+  | { type: "key"; key: string | null }
+  | { type: "pick"; n: number }
+  | { type: "action"; action: PickAction };
+
+/** A menu answer is a few words: recorded for at most this long, and ended by this much quiet after speech (a message waits 1.6 s). */
+const PICK_MAX_MS = 6_000;
+const PICK_END_SILENCE_MS = 1_000;
+/** Nothing said at all for this long is a miss, not a wait. */
+const PICK_NO_SPEECH_MS = 5_000;
+/** Under this a recording is a click or a breath. */
+const MIN_PICK_MS = 400;
+/** Spoken tries at one menu before the keypad's wording is used. */
+const PICK_TRIES = 2;
+/** A Mac that has not answered a pick by this long is covered with a waiting line. */
+const PICK_LATE_MS = 3_000;
+
+/** Whether this call's first spoken menu has said its hint ("You can also press a number.") yet. */
+const hinted = new WeakSet<PhoneCall>();
+
+/** A menu of the published list as a question the person answers aloud (the keypad's version is `menuPrompt` and its kin). */
+export function voiceMenuPrompt(directory: DirectoryDoc, menu: string, greet: boolean, hint: boolean): string {
+  const spec = pickMenuSpec(directory, menu);
+  if (!spec) return "";
+  const question = pickQuestion(spec.question, spec.names);
+  const opening = greet ? hello(directory.terse === true) : "";
+  return `${opening}${question}${hint ? ` ${PICK_HINT}` : ""}`;
+}
+
+/** The menus the call can ask by voice, as `pickMenuSpec` names them, for the recorded prompts. */
+function voiceMenuNames(directory: DirectoryDoc): string[] {
+  const names: string[] = [];
+  if (directory.workspaces?.length) {
+    names.push("workspaces");
+    for (const workspace of directory.workspaces)
+      if (workspace.chats.length > 0) names.push(`workspace:${workspace.n}`);
+    if (directory.items.length > 0) names.push("chats");
+  } else if (directory.items.length > 0) {
+    names.push("chats");
+  }
+  return names;
+}
+
+/** Whether menus are answered by voice on this call: the Mac says so, and the uplink can carry a recording up. */
+const byVoice = (directory: DirectoryDoc, deps: InboundDependencies): boolean =>
+  directory.pickByVoice === true && typeof deps.uplink.pick === "function";
+
+/**
+ * Asks one menu by voice: the question, then listens (no tone: the question is the cue) until a pause of a second, at most
+ * six seconds. Any key pressed meanwhile ends the listening and is the answer at once. The recording goes to the Mac, which
+ * matches it against exactly what the menu offered; a pick comes back as the digit the keypad would have pressed. Not
+ * understood (or a tie) says "Sorry, which one?" with the options and listens again; after two misses, or when the Mac
+ * cannot be reached, "keypad": the caller asks with the keys, as it always has. This only selects; nothing here sends.
+ */
+async function voiceMenu(
+  call: PhoneCall,
+  deps: InboundDependencies,
+  directory: DirectoryDoc,
+  menu: string,
+  greet: boolean,
+): Promise<MenuAnswer | "keypad"> {
+  const spec = pickMenuSpec(directory, menu);
+  if (!spec || !deps.uplink.pick) return "keypad";
+  let prompt = voiceMenuPrompt(directory, menu, greet, !hinted.has(call));
+  hinted.add(call);
+  let misses = 0;
+  let repeats = 0;
+  while (call.open) {
+    await speak(call, deps, prompt);
+    // A key pressed while it was being said (it interrupts speech and stays queued) is the answer.
+    let key = await call.key(50);
+    if (key === null) {
+      const id = newMessageId();
+      const upload = await recordForUpload(
+        call,
+        deps,
+        {
+          maxMs: PICK_MAX_MS,
+          beep: false,
+          endOnSilence: true,
+          endSilenceMs: PICK_END_SILENCE_MS,
+          noSpeechMs: PICK_NO_SPEECH_MS,
+          endOnAnyKey: true,
+        },
+        id,
+      );
+      if (!upload) return { type: "key", key: null };
+      const { recording } = upload;
+      if (recording.ended === "key") {
+        upload.discard();
+        key = await call.key(250);
+      } else if (recording.ended === "no-speech" || recording.durationMs < MIN_PICK_MS) {
+        upload.discard();
+      } else {
+        let late: Promise<void> | null = null;
+        const timer = setTimeout(() => {
+          late = speak(call, deps, waitLine(call)).catch(() => undefined);
+        }, PICK_LATE_MS);
+        let heard: DownMessage | null;
+        try {
+          heard = await deps.uplink.pick(id, directory.version, menu, await upload.audio());
+        } finally {
+          clearTimeout(timer);
+        }
+        if (late) await late;
+        if (heard?.status !== "pick") {
+          deps.trace?.("step: Menu answers by voice are not available, using the keypad");
+          return "keypad";
+        }
+        if (heard.choice !== undefined) return { type: "pick", n: heard.choice };
+        if (heard.action === "repeat") {
+          deps.trace?.("step: Asked to hear the menu again");
+          if (repeats++ >= MAX_REPEATS) return "keypad";
+          prompt = voiceMenuPrompt(directory, menu, false, false);
+          continue;
+        }
+        if (heard.action) return { type: "action", action: heard.action };
+      }
+    }
+    if (key !== null) {
+      if (key === "*") {
+        deps.trace?.("key: * (hear it again)");
+        if (repeats++ >= MAX_REPEATS) return "keypad";
+        prompt = voiceMenuPrompt(directory, menu, false, false);
+        continue;
+      }
+      return { type: "key", key };
+    }
+    deps.trace?.("step: Pick not understood");
+    if (++misses >= PICK_TRIES) return "keypad";
+    prompt = pickMiss(spec.names);
+  }
+  return { type: "key", key: null };
+}
+
+/** One menu asked by voice while that works, then by the keys (and by the keys from the start for a Mac that cannot). */
+class MenuAsker {
+  private voice: boolean;
+
+  constructor(
+    private readonly call: PhoneCall,
+    private readonly deps: InboundDependencies,
+    private readonly directory: DirectoryDoc,
+    private readonly menu: string,
+    private readonly keypad: (greet: boolean) => string,
+  ) {
+    this.voice = byVoice(directory, deps);
+  }
+
+  async ask(greet: boolean): Promise<MenuAnswer> {
+    if (this.voice) {
+      const answer = await voiceMenu(this.call, this.deps, this.directory, this.menu, greet);
+      if (answer !== "keypad") return answer;
+      // Back to the keys for good on this menu; the greeting (if any) has been said.
+      this.voice = false;
+      greet = false;
+    }
+    return { type: "key", key: await menuKey(this.call, this.deps, this.keypad(greet)) };
+  }
+}
+
+/** Writes down a choice: the key pressed, or that it was picked by voice. */
+function traceChoice(deps: InboundDependencies, answer: MenuAnswer, keyLine: string, label: string): void {
+  deps.trace?.(answer.type === "key" ? `key: ${keyLine}` : `step: Picked ${label} by voice`);
+}
+
+/** The digit a menu answer stands for (a spoken extra "other chats" is the 0 key), or null when it is not one. */
+function digitOfAnswer(answer: MenuAnswer): number | null {
+  if (answer.type === "pick") return answer.n;
+  if (answer.type === "key") return digitOf(answer.key);
+  return answer.action === "other" ? 0 : null;
+}
+
+/** Silence, hash and a spoken "hang up" all end the call from a menu. */
+const endsCall = (answer: MenuAnswer): boolean =>
+  (answer.type === "key" && (answer.key === null || answer.key === "#")) ||
+  (answer.type === "action" && answer.action === "hangup");
+
 /**
  * The chat to send to, or null. With favourite workspaces the first question is the
  * workspace; pressing a number before it has been read out is enough (a key interrupts speech).
@@ -941,20 +1142,33 @@ async function pickTarget(
   greet: boolean,
 ): Promise<DirectoryItem | NewChatPick | null> {
   const workspaces = directory.workspaces ?? [];
-  if (workspaces.length === 0) return pickChat(call, deps, directory.items, menuPrompt(directory, greet));
+  if (workspaces.length === 0) {
+    const picked = await pickChat(call, deps, directory.items, (g) => menuPrompt(directory, g), {
+      directory,
+      menu: "chats",
+      greet,
+    });
+    return picked === "hangup" ? null : picked;
+  }
+  const asker = new MenuAsker(call, deps, directory, "workspaces", (g) => workspaceMenuPrompt(directory, g));
   for (let attempt = 0; attempt < 3 && call.open; attempt++) {
-    const key = await menuKey(call, deps, workspaceMenuPrompt(directory, greet && attempt === 0));
-    if (key === null || key === "#") return null;
-    const digit = digitOf(key);
+    const answer = await asker.ask(greet && attempt === 0);
+    if (endsCall(answer)) return null;
+    const digit = digitOfAnswer(answer);
     if (digit === 0 && directory.items.length > 0) {
-      deps.trace?.("key: 0 (other chats)");
-      const other = await pickChat(call, deps, directory.items, menuPrompt(directory, false));
+      traceChoice(deps, answer, "0 (other chats)", "other chats");
+      const other = await pickChat(call, deps, directory.items, (g) => menuPrompt(directory, g), {
+        directory,
+        menu: "chats",
+        greet: false,
+      });
+      if (other === "hangup") return null;
       if (other !== null) return other;
       continue;
     }
     const workspace = workspaces.find((w) => w.n === digit);
     if (!workspace) continue;
-    deps.trace?.(`key: ${digit} (workspace ${workspace.label})`);
+    traceChoice(deps, answer, `${digit} (workspace ${workspace.label})`, workspace.label);
     if (workspace.chats.length === 0) {
       // Nothing to message, but a new chat can still be started there (the prompt then offers it).
       if (!workspace.newChat) {
@@ -972,32 +1186,50 @@ async function pickTarget(
     // One chat in it: nothing to choose, and the line before the beep names it. With a new chat on offer the menu is
     // the way to it, so it is read.
     if (workspace.chats.length === 1 && !workspace.newChat) return workspace.chats[0]!;
-    const picked = await pickChat(call, deps, workspace.chats, chatMenuPrompt(workspace), workspace);
+    const picked = await pickChat(call, deps, workspace.chats, () => chatMenuPrompt(workspace), {
+      directory,
+      menu: `workspace:${workspace.n}`,
+      greet: false,
+      fresh: workspace,
+    });
+    if (picked === "hangup") return null;
     if (picked !== null) return picked;
   }
   return null;
 }
 
-/** A chat from a menu, or null when none was chosen (or `#` was pressed). */
+/** A chat from a menu; null when it was left (`#`, or a spoken "go back"); "hangup" when the person said to end the call. */
 async function pickChat(
   call: PhoneCall,
   deps: InboundDependencies,
   items: DirectoryItem[],
-  prompt: string,
-  /** The workspace whose menu this is, when it can start a new chat (key 0). */
-  fresh?: DirectoryWorkspace,
-): Promise<DirectoryItem | NewChatPick | null> {
+  keypad: (greet: boolean) => string,
+  menu: {
+    directory: DirectoryDoc;
+    /** Which menu it is, as `pickMenuSpec` names it. */
+    menu: string;
+    greet: boolean;
+    /** The workspace whose menu this is, when it can start a new chat (key 0). */
+    fresh?: DirectoryWorkspace;
+  },
+): Promise<DirectoryItem | NewChatPick | "hangup" | null> {
+  const { fresh } = menu;
+  const asker = new MenuAsker(call, deps, menu.directory, menu.menu, keypad);
   for (let attempt = 0; attempt < 2 && call.open; attempt++) {
-    const key = await menuKey(call, deps, prompt);
-    if (key === null || key === "#") return null;
-    if (key === NEW_CHAT_KEY && fresh?.newChat) {
-      deps.trace?.(`key: ${NEW_CHAT_KEY} (a new chat in ${fresh.label})`);
+    const answer = await asker.ask(menu.greet && attempt === 0);
+    if (answer.type === "action" && answer.action === "hangup") return "hangup";
+    if (answer.type === "action" && answer.action === "back") return null;
+    if (answer.type === "key" && (answer.key === null || answer.key === "#")) return null;
+    const isNew =
+      (answer.type === "key" && answer.key === NEW_CHAT_KEY) || (answer.type === "action" && answer.action === "new");
+    if (isNew && fresh?.newChat) {
+      traceChoice(deps, answer, `${NEW_CHAT_KEY} (a new chat in ${fresh.label})`, `a new chat in ${fresh.label}`);
       return { newChatIn: fresh };
     }
-    const digit = digitOf(key);
+    const digit = digitOfAnswer(answer);
     const item = items.find((candidate) => candidate.n === digit);
     if (item) {
-      deps.trace?.(`key: ${digit} (${item.label})`);
+      traceChoice(deps, answer, `${digit} (${item.label})`, item.label);
       return item;
     }
   }

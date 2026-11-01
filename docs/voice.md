@@ -626,6 +626,42 @@ earlier pass or a still-kept version already holds, by a digest of their clips, 
 - The add-on keeps one `FillerPicker` per call: a random line of the set, never the line it said last from the same set. It is used by every
   place the call waits on the Mac (status, a recording, a question, a new chat, the talk flow's slow-answer reassurance).
 
+## Menus answered by voice instead of keys (add-on 0.20.0)
+
+With `pickByVoice: true` in the directory (the Mac sets it only when the add-on reports 0.20.0 or newer, and calling in is on, which needs
+Whisper) the call-in menus are questions, not "Press 1 for...":
+
+- **Phrasing** (`voiceMenuPrompt`, from `pickMenuSpec` in `voice-pick.ts`): "Which workspace? squeak, motion graphics skill, or other
+  chats?", "Which chat in squeak? Telegram Cliq content difference, UI planning, or a new chat?", "Which chat? ...". The persona's terse
+  setting still decides the greeting. The first menu of a call ends with one hint, "You can also press a number."; nothing else says
+  "press" in the main line (no "say star to hear again").
+- **Listening**: after the question the add-on records with no tone (the question is the cue), ends after 1.0 s of quiet once speech was
+  heard (a message waits 1.6 s), 5 s with nothing said counts as a miss, 6 s at most. Any key pressed while it listens ends it at once and
+  counts as that key (the keypad still works everywhere: `*` repeats, `#` hangs up, or goes back from a chat menu). A key pressed while the
+  question is still being said counts too. New `PhoneCall.record` options: `endSilenceMs`, `noSpeechMs`, `endOnAnyKey`.
+- **Up**: a new sealed `voiceup` kind `pick` `{ dirVersion, menu, audio | audioParts }`, `menu` being `workspaces`, `chats` (the chats outside
+  the workspaces) or `workspace:<n>`. The recording goes up in pieces like any other (`recordForUpload`). Every check of the other kinds
+  applies: sealed and signed for its own id, expiry (5 min), clock skew, replay (an id is run once), deleted before it runs. Up to 120 an hour.
+- **Matching** (`matchPick`, on the Mac, deterministic, no model): numbers and ordinals ("two", "the second one", "number three"), names
+  (the words of a label, any of them: "telegram", "the cliq one"; near misses of a longer word; the best label must be unique and no other
+  label may have heard words it lacks, so "squeak or motion graphics" is no choice), and the extras the menu offers: "new chat" (a workspace
+  that can start one), "go back" (a chat menu), "another chat" / "something else" (the workspaces' other-chats entry), and always
+  "repeat" / "say that again" and "hang up" / "bye" / "nothing". Garbage, a tie, a name from another menu, a long ramble or two different
+  signals are no choice. It is matched against the menu as it was spoken for that list version.
+- **Down**: a new status `pick` `{ choice?: 1-9, action?: "new" | "back" | "repeat" | "hangup" | "other", heard }`. `choice` is the digit the
+  keypad would have pressed; neither is "not understood". (The `other` action was added beyond the first four for the workspaces' "other
+  chats".) A list the Mac no longer holds, a recording that did not arrive, or a failed transcription answers `pick` with no choice, never a
+  refusal line.
+- **A pick only selects.** Nothing in `handlePick` reaches `send`, `canSend`, `newChat` or a writer. Sending and starting keep their own
+  spoken yes. A new chat picked by voice goes to the same recording step as key 0. The PIN stays keypad-only and is never spoken.
+- **Not understood**: the add-on says "Sorry, which one? <options>?" and listens again; after two misses, or at once when the Mac does not
+  answer, the old keypad wording for that menu ("Which workspace? Press 1 for ...") takes over for that menu.
+- **Prompts**: the questions (with the hint, and the first menu without it for a repeat) and each menu's "Sorry, which one?" are recorded in
+  the first two tiers; the keypad's menus move to the last, since they are the rare path.
+- **Trace**: the Mac writes `heard: <words>` (as for a message); the add-on writes `step: Picked <label> by voice` (also for "a new chat in
+  X" and "other chats") or `step: Pick not understood`, and `key: ...` when a key answered.
+- Old add-on with a new Mac: no flag, no questions, the keypad exactly as before. New add-on with an old Mac: no flag, the same.
+
 ## Later
 
 ## Pairing a gateway (daemon side)

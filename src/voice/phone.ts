@@ -31,6 +31,12 @@ export interface PhoneCall {
     endOnSilence?: boolean;
     /** Told the call's audio (16-bit mono 8 kHz PCM) as the recording grows, whether or not it ends on silence. */
     onAudio?: (pcm: Buffer) => void;
+    /** With `endOnSilence`: how long a quiet spell after speech ends it (default 1.6 s). A menu answer uses 1 s. */
+    endSilenceMs?: number;
+    /** With `endOnSilence`: how long to wait for any speech at all (default 8 s). */
+    noSpeechMs?: number;
+    /** Any key ends the recording at once and stays queued to be read, not only `#` (which is then also left queued). */
+    endOnAnyKey?: boolean;
   }): Promise<{ file: string; durationMs: number; ended: RecordEnd } | null>;
   /** Where the call writes a line for the call log (set by the flow that owns the call); absent: nothing is logged. */
   trace?: ((line: string) => void) | null;

@@ -20,6 +20,7 @@ import { spokenAnswer } from "./chat-brief.js";
 import { ASK_FAILED, newChatReadBack, uploadPrompts } from "./inbound-flow.js";
 import type { StartChatOutcome } from "../fleet/new-chat.js";
 import type { Fillers } from "./fillers.js";
+import { matchPick, pickMenuSpec, type PickDirectory } from "./voice-pick.js";
 import { clipOption } from "./script.js";
 import { numberRepeats } from "./spoken-labels.js";
 import { speechParts } from "./natural-cache.js";
@@ -210,6 +211,11 @@ export interface MemoInboxDependencies {
    * sent and the add-on says its two fixed lines. Read at each publish, and part of the list's version.
    */
   fillers?: () => Fillers | null;
+  /**
+   * Whether the add-on takes a menu answer by voice (0.20.0 and newer) and this Mac can transcribe one: the directory then
+   * says `pickByVoice` and answers `pick` messages. Absent or false: the keypad menus, as before.
+   */
+  pickByVoice?: () => boolean;
   /** The owner's persona is terse (voice/settings.ts): calls in drop the pleasantries. Read at each publish. */
   terse?: () => boolean;
   /**
@@ -254,6 +260,8 @@ interface PendingNewChat {
 }
 
 const PENDING_TTL_MS = 10 * 60_000;
+/** Menu answers by voice a Mac transcribes in an hour: a person talking, not a loop. */
+const MAX_PICKS_PER_HOUR = 120;
 /** A chat started by phone is a deliberate act: a few an hour is a person, more is a stuck loop. */
 const MAX_NEW_CHATS_PER_HOUR = 6;
 const MAX_PENDING_NEW_CHATS = 10;
@@ -425,6 +433,9 @@ export class MemoInbox {
   private published: { version: string; at: number } | null = null;
   /** Audio document ids written for each directory version, so they go when the version does. */
   private readonly audioDocs = new Map<string, string[]>();
+  /** The menus of each kept version as they were spoken, so a `pick` is matched against exactly what was offered. */
+  private readonly pickMenus = new Map<string, PickDirectory>();
+  private readonly picks: number[] = [];
   /** What each audio document written holds (a digest of its clips), so an unchanged one is reused, not rewritten. */
   private readonly audioDigests = new Map<string, string>();
   private swept = false;
@@ -489,6 +500,7 @@ export class MemoInbox {
 
   private dropVersion(version: string): void {
     this.versions.delete(version);
+    this.pickMenus.delete(version);
     this.newChatSpaces.delete(version);
     this.versionUsed.delete(version);
   }
@@ -634,6 +646,7 @@ export class MemoInbox {
           talk: Boolean(this.canAsk && this.deps.converse),
           terse: Boolean(this.deps.terse?.()),
           fillers,
+          pickByVoice: Boolean(this.deps.pickByVoice?.()),
           newChat: newChatSpaces.map((space) => space.workspaceId),
           voice: this.deps.voiceKey?.() ?? null,
           targets: targets.map((t) => t.target),
@@ -648,6 +661,10 @@ export class MemoInbox {
       targets.map((t) => t.target),
     );
     this.newChatSpaces.set(version, newChatSpaces);
+    this.pickMenus.set(version, {
+      items: items.map((i) => ({ ...i })),
+      workspaces: (workspaces ?? []).map((w) => ({ ...w })),
+    });
     this.versionUsed.set(version, this.versionUsed.get(version) ?? at);
     // A version no message has named for a while goes too (the newest is kept whatever its age).
     for (const known of [...this.versions.keys()]) {
@@ -668,6 +685,7 @@ export class MemoInbox {
       ...(this.canAsk && this.deps.converse ? { talk: true as const } : {}),
       ...(this.deps.terse?.() ? { terse: true as const } : {}),
       ...(fillers ? { fillers } : {}),
+      ...(this.deps.pickByVoice?.() ? { pickByVoice: true as const } : {}),
       ...(this.canParts ? { upParts: true as const } : {}),
     };
     const audio = this.audioDocs.get(version);
@@ -1243,6 +1261,7 @@ export class MemoInbox {
     }
 
     if (message.kind === "status" || message.kind === "ask") return this.handleAnswer(message);
+    if (message.kind === "pick") return this.handlePick(message);
     if (message.kind === "talk") return this.handleTalk(message);
     if (message.kind === "newchat") return this.handleNewChat(message);
     if (message.kind === "start") return this.handleStart(message);
@@ -1253,6 +1272,55 @@ export class MemoInbox {
     const delivered = await this.deliver(pending.target, pending.label, pending.text);
     if (!delivered.sent) return this.refuse(message.id, delivered.reason);
     return { v: 1, id: message.id, at: this.now(), status: "sent" };
+  }
+
+  /**
+   * A menu answered by voice. The words are transcribed and matched, deterministically and with no model, against exactly
+   * the options that menu offered; the answer is the digit the keypad would have pressed, or one of the menu's spoken
+   * extras. It only ever SELECTS: nothing here reaches `send`, `canSend`, `newChat` or any writer, so a pick can never send,
+   * start or confirm anything. Anything it cannot use (a list it no longer holds, a recording that did not arrive, a
+   * transcription that failed, a tie) is an answer with no choice, and the add-on asks again.
+   */
+  private async handlePick(message: Extract<UpMessage, { kind: "pick" }>): Promise<DownMessage> {
+    const { trace } = this.deps;
+    const none = (heard = ""): DownMessage => ({ v: 1, id: message.id, at: this.now(), status: "pick", heard });
+    const now = this.now();
+    while (this.picks.length > 0 && now - this.picks[0]! > 60 * 60_000) this.picks.shift();
+    if (this.picks.length >= MAX_PICKS_PER_HOUR) return none();
+    const known = this.pickMenus.get(message.dirVersion);
+    const menu = known ? pickMenuSpec(known, message.menu) : null;
+    if (!menu) {
+      trace?.("warn", "A menu answer named a list this Mac no longer holds");
+      return none();
+    }
+    this.picks.push(now);
+    const speech = await this.audioOf(message);
+    if (speech.kind === "refused") {
+      trace?.("warn", "The recording of a menu answer did not arrive whole");
+      return none();
+    }
+    const began = Date.now();
+    let text: string;
+    try {
+      text = (await this.transcribeUp(speech)).trim();
+    } catch (error) {
+      logger.warn("voice menu answer could not be transcribed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      trace?.("warn", "Could not transcribe a menu answer");
+      return none();
+    }
+    trace?.("heard", text, { ms: Date.now() - began });
+    const result = matchPick(text, menu);
+    return {
+      v: 1,
+      id: message.id,
+      at: this.now(),
+      status: "pick",
+      heard: text.slice(0, 200),
+      ...(result.choice !== undefined ? { choice: result.choice } : {}),
+      ...(result.action !== undefined ? { action: result.action } : {}),
+    };
   }
 
   /** One reply for a new chat's turn: the words, the Mac's voice for them, and what the call does with it. */

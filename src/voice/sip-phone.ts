@@ -85,7 +85,10 @@ export class SpeechWatcher {
   speechAt: number | null = null;
   private lastLoudAt = 0;
 
-  constructor(private readonly startedAt: number) {}
+  constructor(
+    private readonly startedAt: number,
+    private readonly endSilenceMs = END_SILENCE_MS,
+  ) {}
 
   feed(pcm: Buffer, now: number): void {
     const data = this.carry.length ? Buffer.concat([this.carry, pcm]) : pcm;
@@ -114,7 +117,7 @@ export class SpeechWatcher {
 
   /** Whether the recording should stop now, and why: speech then quiet, or never any speech. */
   verdict(now: number, noSpeechAfterMs = NO_SPEECH_MS): "silence" | "no-speech" | null {
-    if (this.speechAt !== null) return now - this.lastLoudAt >= END_SILENCE_MS ? "silence" : null;
+    if (this.speechAt !== null) return now - this.lastLoudAt >= this.endSilenceMs ? "silence" : null;
     return now - this.startedAt >= noSpeechAfterMs ? "no-speech" : null;
   }
 }
@@ -330,6 +333,9 @@ export class LiveCall implements PhoneCall {
     beep?: boolean;
     endOnSilence?: boolean;
     onAudio?: (pcm: Buffer) => void;
+    endSilenceMs?: number;
+    noSpeechMs?: number;
+    endOnAnyKey?: boolean;
   }): Promise<{ file: string; durationMs: number; ended: RecordEnd } | null> {
     if (!this.open) return null;
     const file = path.join(this.ctx.dir, `memo-${this.recordings++}.wav`);
@@ -346,7 +352,10 @@ export class LiveCall implements PhoneCall {
         this.play(this.ctx.beepFile, BEEP_MS);
         await this.pause(150);
       }
-      const watcher = options.endOnSilence ? new SpeechWatcher(began + BEEP_MS) : null;
+      // Without a beep the quiet that counts as "nothing said" starts at once, not after the beep's time.
+      const watcher = options.endOnSilence
+        ? new SpeechWatcher(began + (options.beep === false ? 0 : BEEP_MS), options.endSilenceMs)
+        : null;
       let readAt = 44; // the WAV header is written first; what follows is the call's audio
       const deadline = began + options.maxMs;
       let announced = false;
@@ -357,6 +366,11 @@ export class LiveCall implements PhoneCall {
           break;
         }
         if (why === "key") {
+          // A menu answer ends on any key, which stays queued for the flow to read.
+          if (options.endOnAnyKey) {
+            ended = "key";
+            break;
+          }
           // Only `#` ends it; any other key is not part of the message.
           if (this.keys.shift() === "#") {
             ended = "key";
@@ -379,7 +393,7 @@ export class LiveCall implements PhoneCall {
           announced = true;
           this.trace?.(`step: Speech detected ${((watcher.speechAt - began) / 1000).toFixed(1)} s in`);
         }
-        const verdict = watcher.verdict(Date.now());
+        const verdict = watcher.verdict(Date.now(), options.noSpeechMs);
         if (verdict) {
           ended = verdict;
           break;

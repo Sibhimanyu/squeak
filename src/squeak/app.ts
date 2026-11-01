@@ -1261,6 +1261,9 @@ export class SqueakApp {
         addonSupports(this.gatewayStatusReader().peek().version, VOICE_MENU_ADDON)
           ? this.voiceFillers.current(this.voiceSettings.settings.persona)
           : null,
+      // Menus answered by voice: an add-on from 0.20.0 listens and sends the recording up; Whisper is this Mac's (calling in
+      // is off without it), and the match is deterministic.
+      pickByVoice: () => addonSupports(this.gatewayStatusReader().peek().version, VOICE_MENU_ADDON),
       // A new chat from a call in: the same `startChat` as the phone app, with the owner's model pick for calls.
       newChat: {
         supported: () => addonSupports(this.gatewayStatusReader().peek().version, NEW_CHAT_ADDON),

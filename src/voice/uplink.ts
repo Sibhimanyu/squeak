@@ -39,6 +39,12 @@ export interface Uplink {
    * which only a plain yes accepts. `callId` lets the Mac offer to hold the line for the chat it started.
    */
   start?(memoId: string, options: { callId?: string; audio?: UpAudio; id?: string }): Promise<DownMessage | null>;
+  /**
+   * A menu answered by voice (add-on 0.20.0): the recording of what the person said, and which menu of the published list
+   * it answers (`menu`: "workspaces", "chats" or "workspace:<n>"). The Mac matches it against exactly what the menu offered
+   * and answers with a `pick`: a digit, one of the menu's spoken extras, or neither. It selects; it never sends or starts.
+   */
+  pick?(pickId: string, dirVersion: string, menu: string, audio: UpAudio): Promise<DownMessage | null>;
   /** Treat the recording as a question about its chat: the answer to read aloud. Sends nothing to the chat. */
   ask(memoId: string): Promise<DownMessage | null>;
   /** Where a chat stands, to read aloud. */
@@ -77,6 +83,8 @@ export interface RelayUplinkOptions {
   sendWaitMs?: number;
   /** A model answers a question: longer than a transcript, and the Mac gives up on its own sooner. */
   askWaitMs?: number;
+  /** A menu answer by voice: a few words to transcribe. */
+  pickWaitMs?: number;
   /** Whether the Mac's latest list says it takes a recording in pieces (`upParts`); absent: never. */
   partsEnabled?: () => boolean;
   /** 8 kHz PCM to a standalone Opus clip, for the pieces; absent: never. */
@@ -159,6 +167,24 @@ export class RelayUplink implements Uplink {
       },
       // Transcribing a spoken yes, starting the chat through Conductor, and the Mac's voice for the answer.
       this.options.sendWaitMs ?? 60_000,
+    );
+  }
+
+  pick(pickId: string, dirVersion: string, menu: string, audio: UpAudio): Promise<DownMessage | null> {
+    const at = this.now();
+    return this.exchange(
+      {
+        v: 1,
+        id: pickId,
+        at,
+        expiresAt: at + UP_TTL_MS,
+        kind: "pick",
+        dirVersion,
+        menu,
+        ...audioFields(audio),
+      },
+      // Transcribing a few words: a short wait, and the add-on goes to the keypad if the Mac is slower than this.
+      this.options.pickWaitMs ?? 20_000,
     );
   }
 

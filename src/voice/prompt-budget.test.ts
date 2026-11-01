@@ -51,6 +51,15 @@ describe("the prompts the Mac uploads fit the audio documents", () => {
     expect(estimateSpeechSeconds(set, true)).toBeLessThanOrEqual(PROMPT_AUDIO_SECONDS);
   });
 
+  it("keeps the same promise with menus answered by voice and a friendly persona's waiting lines", () => {
+    const voiced: DirectoryDoc = { ...eight, pickByVoice: true };
+    const set = uploadPrompts(voiced);
+    const [opening, common] = inboundPromptTiers(voiced, true);
+    for (const text of [...opening!, ...common!]) expect(set, text).toContain(text);
+    expect(estimateSpeechSeconds(set, true)).toBeLessThanOrEqual(PROMPT_AUDIO_SECONDS);
+    expect(set).toContain("Which workspace? squeak or motion graphics skill? You can also press a number.");
+  });
+
   it("never lets a menu be the part that is cut, however long the list", () => {
     const wide: DirectoryDoc = {
       ...eight,

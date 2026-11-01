@@ -4,6 +4,7 @@ import type { ChannelDoc } from "../remote/firestore-rest.js";
 import { readAudioClips, readClip, type Clip } from "./clips.js";
 import { CLOCK_SKEW_MS, isRecord, openBody, sealBody } from "./relay-protocol.js";
 import { readFillers, type Fillers } from "./fillers.js";
+import { PICK_MENU, type PickAction } from "./voice-pick.js";
 
 /**
  * Calling in: you phone Squeak, pick a chat, speak a message and confirm it. The Home Assistant gateway
@@ -104,6 +105,12 @@ export interface DirectoryDoc {
    */
   last?: { choice: number; label: string; why?: "used" | "waiting" };
   /**
+   * The menus are answered by voice (add-on 0.20.0 and newer, and a Mac that can transcribe): the add-on asks "Which
+   * workspace? ..." as a question and listens (`pick` messages), the keypad working throughout and after two misses.
+   * Absent: "Press 1 for ..." as before.
+   */
+  pickByVoice?: true;
+  /**
    * The waiting lines in the owner's character (add-on 0.20.0 and newer): the add-on says a random one of `wait` when it
    * hands something to the Mac and one of `still` when that is slow, never the same twice in a row. Absent: "One moment."
    * and "Still working on it." as before. Each line is also one of the recorded prompts.
@@ -114,6 +121,7 @@ export interface DirectoryDoc {
 }
 
 export const MAX_AUDIO_DOCS = 8;
+const PICK_ACTIONS: readonly PickAction[] = ["new", "back", "repeat", "hangup", "other"];
 const AUDIO_ID = /^[A-Za-z0-9_-]{1,80}$/;
 
 export const audioDocId = (version: string, index: number): string => `audio-${version}-${index}`;
@@ -246,6 +254,22 @@ export type UpMessage =
       audio?: string;
       audioParts?: string[];
     }
+  /**
+   * A menu answered by voice: `menu` names which one ("workspaces", "chats" for the chats outside the workspaces, or
+   * "workspace:<n>" for that workspace's chats) of the list `dirVersion`. The Mac matches the words against exactly what
+   * that menu offered and answers with a `pick`; it selects, never sends or starts.
+   */
+  | {
+      v: 1;
+      id: string;
+      at: number;
+      expiresAt: number;
+      kind: "pick";
+      dirVersion: string;
+      menu: string;
+      audio?: string;
+      audioParts?: string[];
+    }
   /** The recording is a question about its chat: answer it aloud; send nothing to the chat. */
   | { v: 1; id: string; at: number; expiresAt: number; kind: "ask"; memoId: string }
   /** Read out where a chat stands: no recording. Names the chat as a memo does. */
@@ -319,6 +343,11 @@ export type DownMessage =
       hold?: true;
     }
   | { v: 1; id: string; at: number; status: "sent" }
+  /**
+   * What a `pick` heard. `choice` is the digit the keypad would have pressed in that menu; `action` one of the menu's
+   * spoken extras; neither: not understood (or a tie), and the add-on asks again. `heard` is the transcript, for the call log.
+   */
+  | { v: 1; id: string; at: number; status: "pick"; choice?: number; action?: PickAction; heard: string }
   /** What to read aloud for an `ask` or `status`: plain sentences, at most `MAX_ANSWER_CHARS`. */
   | { v: 1; id: string; at: number; status: "answer"; text: string; audio?: Clip; audioFollows?: AudioFollows }
   /**
@@ -411,6 +440,7 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
   const fillers = body.fillers === undefined ? undefined : (readFillers(body.fillers) ?? undefined);
   return {
     ...(fillers ? { fillers } : {}),
+    ...(body.pickByVoice === true ? { pickByVoice: true as const } : {}),
     ...(body.ask === true ? { ask: true as const } : {}),
     ...(body.talk === true ? { talk: true as const } : {}),
     ...(body.upParts === true ? { upParts: true as const } : {}),
@@ -497,6 +527,18 @@ export function readUp(
       },
     };
   }
+  if (body.kind === "pick") {
+    const { dirVersion, menu } = body;
+    if (typeof dirVersion !== "string" || dirVersion.length === 0 || dirVersion.length > 64) {
+      return { ok: false, reason: "not a voice message" };
+    }
+    if (typeof menu !== "string" || !PICK_MENU.test(menu)) return { ok: false, reason: "not a voice message" };
+    const heard = readUpAudio(body, { required: true });
+    if (!heard.ok) return { ok: false, reason: "no audio" };
+    const { ok: _ok, ...spoken } = heard;
+    void _ok;
+    return { ok: true, message: { ...base, kind: "pick", dirVersion, menu, ...spoken } };
+  }
   if (body.kind === "ask" && typeof body.memoId === "string" && body.memoId.length <= 64) {
     return { ok: true, message: { ...base, kind: "ask", memoId: body.memoId } };
   }
@@ -576,6 +618,27 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
     }
     case "sent":
       return { ...base, status: "sent" };
+    case "pick": {
+      if (typeof body.heard !== "string") return null;
+      const choice = body.choice;
+      const action = body.action;
+      if (
+        choice !== undefined &&
+        !(typeof choice === "number" && Number.isInteger(choice) && choice >= 1 && choice <= 9)
+      ) {
+        return null;
+      }
+      if (action !== undefined && !PICK_ACTIONS.includes(action as PickAction)) return null;
+      // One answer or none: a choice and an action together never come from the Mac.
+      if (choice !== undefined && action !== undefined) return null;
+      return {
+        ...base,
+        status: "pick",
+        heard: body.heard.slice(0, 200),
+        ...(choice !== undefined ? { choice: choice as number } : {}),
+        ...(action !== undefined ? { action: action as PickAction } : {}),
+      };
+    }
     case "answer": {
       if (typeof body.text !== "string" || body.text.trim() === "") return null;
       const spoken = readClip(body.audio);
