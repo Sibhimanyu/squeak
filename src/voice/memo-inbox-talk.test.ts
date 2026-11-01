@@ -136,6 +136,36 @@ describe("MemoInbox: a voice-first call", () => {
       expect(ended).toEqual(["call-1"]);
     });
 
+    it("goes straight into the hold when they already asked to stay on the line", async () => {
+      holdSupported = true;
+      converse = async () => ({ intent: "send", spoken: "ok", message: "Release it.", hold: true });
+      expect(await talk("say", "release it and let me wait")).toMatchObject({
+        text: expect.stringContaining("and stay on the line. Say yes"),
+        next: "confirm",
+      });
+      expect(await talk("confirm", "yes")).toMatchObject({
+        text: "Sent. I'll stay on the line while it works. Press 1 any time to hear what it's thinking, or hash to hang up.",
+        next: "hold",
+      });
+      expect(sent).toEqual(["c1:Release it."]);
+      expect(await holdTurn("hold")).toMatchObject({ next: "hold" });
+    });
+
+    it("sends and ends when a hold was asked for but the add-on cannot hold", async () => {
+      converse = async () => ({ intent: "send", spoken: "ok", message: "Release it.", hold: true });
+      expect(await talk("say", "release it and wait")).toMatchObject({
+        text: expect.not.stringContaining("stay on the line"),
+      });
+      expect(await talk("confirm", "yes")).toMatchObject({ text: "Sent. Goodbye.", next: "end" });
+    });
+
+    it("lets a call back win when both hold and callback are set", async () => {
+      holdSupported = true;
+      converse = async () => ({ intent: "send", spoken: "ok", message: "Release it.", hold: true, callback: true });
+      expect(await talk("say", "release it")).toMatchObject({ text: expect.not.stringContaining("stay on the line") });
+      expect(await talk("confirm", "yes")).toMatchObject({ next: "end" });
+    });
+
     it("does not offer when the add-on cannot hold, or when a call back was asked for instead", async () => {
       converse = async () => ({ intent: "send", spoken: "ok", message: "Release it." });
       await talk("say", "release it");

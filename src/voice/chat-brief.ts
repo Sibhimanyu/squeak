@@ -294,6 +294,11 @@ export interface Converse {
    * waiting for, in their words. Only ever a request the Mac checks and carries out itself.
    */
   callback?: boolean;
+  /**
+   * For `send`: they also asked to stay on the line while it works. Never both: when the model sets `callback` too,
+   * the call back wins and the hold is dropped.
+   */
+  hold?: boolean;
 }
 
 export interface ConverseInput {
@@ -308,7 +313,7 @@ export interface ConverseInput {
 
 const CONVERSE_PROMPT = `You are Squeak's phone assistant, talking with the person on a live call. This is a conversation: remember what was said earlier on the call, so follow-ups like "and the second one?" or "why?" work. The coding agent in this chat asked the person a question (QUESTION, with its lettered OPTIONS) and rang them. The person replied by voice; it may be mis-heard. Decide which one it is:
 - answer: they asked about the chat or what is going on. Reply in "spoken" in at most three short spoken sentences using only the CHAT block (a later CHAT block replaces an earlier one; it includes earlier messages in the chat, so you can say what was asked and done before); never invent anything, and say you do not know if the CHAT block does not say.
-- send: they decided or gave an instruction for the agent. "message" is the instruction in the person's own words, concise and complete; if they simply chose an option, "message" is only that option's letter. "spoken" is a one-line restatement. If they also ask to be called back when it is done, set "callback" true.
+- send: they decided or gave an instruction for the agent. "message" is the instruction in the person's own words, concise and complete; if they simply chose an option, "message" is only that option's letter. "spoken" is a one-line restatement. If they also ask to be called back when it is done, set "callback" true. If instead they ask to stay on the line, wait on the call, or hold while it works, set "hold" true; never set both "hold" and "callback" (a call back wins).
 - callback: they want to hang up now and be rung back when the work in this chat is done ("call me back when you're done with the tests"). "spoken" is a short confirmation. "message" is what they are waiting for, in a few of their own words (empty if they did not say).
 - end: they are done and want to hang up, with no call back.
 - unclear: you cannot tell what they want.
@@ -321,6 +326,7 @@ const CONVERSE_SCHEMA = {
     spoken: { type: "string" },
     message: { type: "string" },
     callback: { type: "boolean" },
+    hold: { type: "boolean" },
   },
   required: ["intent", "spoken"],
 };
@@ -330,11 +336,12 @@ const INTENTS: ReadonlySet<string> = new Set(["answer", "send", "end", "callback
 /** The model's JSON as a `Converse`, or null when it is not one. Text is left raw here: the Mac clips and cleans it. */
 export function readConverse(output: unknown): Converse | null {
   if (!output || typeof output !== "object") return null;
-  const { intent, spoken, message, callback } = output as {
+  const { intent, spoken, message, callback, hold } = output as {
     intent?: unknown;
     spoken?: unknown;
     message?: unknown;
     callback?: unknown;
+    hold?: unknown;
   };
   if (typeof intent !== "string" || !INTENTS.has(intent)) return null;
   return {
@@ -342,6 +349,7 @@ export function readConverse(output: unknown): Converse | null {
     spoken: typeof spoken === "string" ? spoken : "",
     ...(typeof message === "string" ? { message } : {}),
     ...(callback === true ? { callback: true } : {}),
+    ...(hold === true && callback !== true ? { hold: true } : {}),
   };
 }
 
