@@ -116,6 +116,13 @@ describe("call in, terse persona", () => {
   });
 
   it("keeps the hello for a friendly persona, and makes the same prompts ahead of time", () => {
+    expect(inboundPrompts({ ...directory, ask: true, talk: true }, true)).toEqual(
+      expect.arrayContaining([
+        "I didn't hear anything. Tell me what to do, or ask me anything.",
+        "I'll leave it with you. Goodbye.",
+      ]),
+    );
+    expect(inboundPrompts({ ...directory, ask: true }, true)).not.toContain("I'll leave it with you. Goodbye.");
     expect(inboundPrompts({ ...directory, ask: true, talk: true }, true)).toContain(
       "Hello, this is Squeak. Please enter your PIN, then press hash. Press star to start over.",
     );

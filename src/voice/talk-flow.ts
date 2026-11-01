@@ -32,13 +32,15 @@ const TURN_MS = 30_000;
 /** Under this a recording is a click or a breath, not speech. */
 const MIN_TALK_MS = 600;
 
-const SAYS = {
+/** The talk flow's fixed lines: the Mac records them with the call-in prompts, so none is made here mid-call. */
+export const TALK_SAYS = {
   quiet: "I didn't hear anything. Tell me what to do, or ask me anything.",
   leave: "I'll leave it with you. Goodbye.",
   noMac: "I could not reach your Mac. You can use the keypad.",
   wrong: "Something went wrong. You can use the keypad.",
   turns: "That is as much as I can do by voice on one call. Goodbye.",
 };
+const SAYS = TALK_SAYS;
 
 /**
  * Waits on the line while a chat works: every few seconds it asks the Mac how it is going, and the peek key asks what

@@ -17,6 +17,7 @@ import {
 import { judgeTranscript } from "./transcript-quality.js";
 import { readBackSpeech, speakReply } from "./answer-audio.js";
 import type { TalkPhase } from "./memo-protocol.js";
+import { TALK_SAYS } from "./talk-flow.js";
 import type { Uplink } from "./uplink.js";
 
 export interface InboundDependencies {
@@ -244,6 +245,7 @@ export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean):
       )
     : [];
   if (ask) fixed.push(SAYS.recordAsk, SAYS.askFail, SAYS.followUp, SAYS.limit);
+  if (talks) fixed.push(...Object.values(TALK_SAYS));
   const fresh = (directory?.workspaces ?? []).filter((w) => w.newChat);
   if (fresh.length > 0) {
     fixed.push(newChatKeys, SAYS.newChatNoMac, SAYS.newChatNotSure, SAYS.newChatFailed);
