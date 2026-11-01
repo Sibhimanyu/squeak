@@ -40,6 +40,8 @@ export const TALK_REPLY_SAYS = {
   noCallback: "I can't arrange a call back from here yet.",
   offerHold: "Sent. Want me to stay on the line while it works? Say yes to hold, or no to hang up.",
   holding: "Okay, I'll stay on the line. Press 1 any time to hear what it's thinking, or hash to hang up.",
+  sentHolding:
+    "Sent. I'll stay on the line while it works. Press 1 any time to hear what it's thinking, or hash to hang up.",
   noHold: "Okay. Goodbye.",
   stillWorking: "Still working. Press 1 to hear what it's thinking.",
   noStart: "I don't see it working yet.",

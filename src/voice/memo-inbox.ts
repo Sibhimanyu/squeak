@@ -174,6 +174,7 @@ export interface MemoInboxDependencies {
     spoken: string;
     message?: string;
     callback?: boolean;
+    hold?: boolean;
   }>;
   /**
    * "Call me back when you're done": remembers the request and has Squeak ring once the chat's work has ended. It
@@ -431,7 +432,7 @@ export class MemoInbox {
       /** What the call asked, for the model's context (voice first only). */
       script?: { question: string; options: ChoiceOption[] };
       /** The one message read back and awaiting the person's yes; never set by anything but their own `say` turn. */
-      proposal?: { message: string; at: number; tries: number; callback?: boolean } | undefined;
+      proposal?: { message: string; at: number; tries: number; callback?: boolean; hold?: boolean } | undefined;
       /** A sent message was followed by "stay on the line?": waiting for the person's yes or no. */
       offer?: { at: number; tries: number } | undefined;
       /** The person is on hold while the chat works. */
@@ -1728,6 +1729,11 @@ export class MemoInbox {
         : undefined;
       if (calling?.ok) trace?.("step", `Call back requested for ${label}`, { label });
       if (calling?.ok) return reply(TALK_REPLY_SAYS.sentCallback, "end");
+      // They already said they would wait on the line: no second question.
+      if (proposal.hold && this.deps.hold?.supported()) {
+        call.hold = { since: now, seenWorking: false, lastSaid: now };
+        return reply(TALK_REPLY_SAYS.sentHolding, "hold");
+      }
       // Asking the person, not assuming: a quick job may be worth waiting for, a long one is not.
       if (this.deps.hold?.supported()) {
         call.offer = { at: now, tries: 0 };
@@ -1793,9 +1799,18 @@ export class MemoInbox {
         }
         if (!phrase) return reply(TALK_REPLY_SAYS.unclear, "listen");
         const callBack = decided.callback === true && Boolean(this.deps.requestCallback);
-        call.proposal = { message: letter ?? proposed, at: now, tries: 0, ...(callBack ? { callback: true } : {}) };
+        // A call back wins over a hold; a hold is only taken when the add-on can carry it out.
+        const holdOn =
+          !callBack && decided.callback !== true && decided.hold === true && Boolean(this.deps.hold?.supported());
+        call.proposal = {
+          message: letter ?? proposed,
+          at: now,
+          tries: 0,
+          ...(callBack ? { callback: true } : {}),
+          ...(holdOn ? { hold: true } : {}),
+        };
         return reply(
-          `I'll tell it${letter ? " " : ": "}${phrase.replace(/[.!?]+$/, "")}${callBack ? ", then call you back when it's done" : ""}. Say yes to send.`,
+          `I'll tell it${letter ? " " : ": "}${phrase.replace(/[.!?]+$/, "")}${callBack ? ", then call you back when it's done" : ""}${holdOn ? ", and stay on the line" : ""}. Say yes to send.`,
           "confirm",
         );
       }

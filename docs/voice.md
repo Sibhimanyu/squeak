@@ -540,7 +540,7 @@ instruction and ask for the same ("go with B, then call me back"). The model's r
 
 After a message the person approved (the yes at the read-back), a voice-first call no longer just says "Sent. Goodbye."
 It asks: "Sent. Want me to stay on the line while it works? Say yes to hold, or no to hang up." A no (or two unclear
-answers) hangs up; a call back asked for with the send hangs up too, since that was the choice already made.
+answers) hangs up; a call back asked for with the send hangs up too, since that was the choice already made. If the person already asked to wait on the line ("and let me wait while it works"), the conversation sets `hold`, the read-back says "and stay on the line", and the yes goes straight into the hold ("Sent. I'll stay on the line while it works...") without the offer; a call back wins if both are set, and without hold support the send just ends the call.
 
 - **Hold**: "Okay, I'll stay on the line. Press 1 any time to hear what it's thinking, or hash to hang up." The add-on
   waits on the keypad and checks in with the Mac every 10 s (`talk` turns with phase `hold`, no recording, answered

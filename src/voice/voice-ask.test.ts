@@ -427,6 +427,14 @@ describe("ChatConverser", () => {
     );
   });
 
+  it("reads hold strictly, and a call back wins over it", () => {
+    expect(readConverse({ intent: "send", spoken: "ok", message: "B", hold: true })).toMatchObject({ hold: true });
+    expect(readConverse({ intent: "send", spoken: "ok", message: "B", hold: "yes" })).not.toHaveProperty("hold");
+    expect(readConverse({ intent: "send", spoken: "ok", message: "B", hold: true, callback: true })).not.toHaveProperty(
+      "hold",
+    );
+  });
+
   it("reads only the five intents", () => {
     expect(readConverse({ intent: "answer", spoken: "Yes." })).toEqual({ intent: "answer", spoken: "Yes." });
     expect(readConverse({ intent: "end" })).toEqual({ intent: "end", spoken: "" });
