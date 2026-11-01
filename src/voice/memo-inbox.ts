@@ -5,6 +5,15 @@ import type { RtdbRest } from "../remote/rtdb-rest.js";
 import type { ReplyFailureHandler, ReplyOutcome } from "../fleet/session-reply.js";
 import { logger } from "../utils/logger.js";
 import { chunkClips, type Clip } from "./clips.js";
+import {
+  NEW_CHAT_SAYS,
+  PARTS_SAYS,
+  REFUSED_SAYS,
+  TALK_REPLY_SAYS,
+  callBackLine,
+  chatBusy,
+  couldNotFind,
+} from "./mac-says.js";
 import { spokenAnswer } from "./chat-brief.js";
 import { ASK_FAILED, inboundPrompts, newChatReadBack } from "./inbound-flow.js";
 import type { StartChatOutcome } from "../fleet/new-chat.js";
@@ -230,19 +239,7 @@ const PENDING_TTL_MS = 10 * 60_000;
 /** A chat started by phone is a deliberate act: a few an hour is a person, more is a stuck loop. */
 const MAX_NEW_CHATS_PER_HOUR = 6;
 const MAX_PENDING_NEW_CHATS = 10;
-/** The fixed sentences a new chat says; failures never carry a reason from Conductor or the model. */
-export const NEW_CHAT_SAYS = {
-  failed: "Your Mac could not start the chat.",
-  limit: "Too many new chats by phone this hour.",
-  gone: "That new chat is no longer waiting. Call again.",
-  stale: "That list is out of date. Call again.",
-  unavailable: "Your Mac cannot start chats from a call yet.",
-  again: "Say yes to start it, or no to cancel.",
-  declined: "Okay, I won't start it. Goodbye.",
-  started: "Started. It's working on it.",
-  offerHold: "Want me to stay on the line while it works? Say yes to hold, or no to hang up.",
-  bye: "Goodbye.",
-};
+export { NEW_CHAT_SAYS };
 const MAX_PENDING = 20;
 /** How long the chat used by phone stays "the last one you used". */
 export const LAST_CHAT_FRESH_MS = 2 * 60 * 60_000;
@@ -277,10 +274,6 @@ const MAX_CACHED_STREAMS = 8;
 /** How long a message naming pieces waits for one that has not arrived yet. */
 const PARTS_WAIT_MS = 10_000;
 const PARTS_POLL_MS = 250;
-const PARTS_SAYS = {
-  unsupported: "I could not make that out.",
-  missing: "The recording did not arrive whole. Try again.",
-};
 
 /** A recording as it reaches the transcriber: the whole Opus file, or the decoded pieces joined (with a note for the trace). */
 type UpSpeech =
@@ -316,29 +309,6 @@ const MAX_CONFIRM_WORDS = 8;
 const YES = /\b(?:yes|yeah|yep|yup|sure|send(?: it)?|do it|go ahead|correct|confirm|okay|ok|please do)\b/i;
 const NO = /\b(?:no|nope|cancel|don'?t|do not|wait|stop|never ?mind|not yet)\b/i;
 const GOODBYE = /^\W*(?:good ?bye|bye(?: bye)?|that'?s all|that is all|hang up)\W*$/i;
-const TALK_SAYS = {
-  closed: "That call is no longer open.",
-  sorry: "Sorry, I didn't catch that. Tell me what to do, or ask me anything about it.",
-  unclear: "Sorry, I didn't get that. Tell me what to do, or ask me anything about it.",
-  failed: "I could not work that out. You can try again.",
-  again: "Say yes to send it, or no to cancel.",
-  giveUp: "I won't send it. Goodbye.",
-  declined: "Okay, I won't send it. What would you like to do?",
-  gone: "That message is no longer waiting. Tell me what to do again.",
-  sent: "Sent. Goodbye.",
-  sentCallback: "Sent. I'll call you back when it's done. Goodbye.",
-  noCallback: "I can't arrange a call back from here yet.",
-  offerHold: "Sent. Want me to stay on the line while it works? Say yes to hold, or no to hang up.",
-  holding: "Okay, I'll stay on the line. Press 1 any time to hear what it's thinking, or hash to hang up.",
-  noHold: "Okay. Goodbye.",
-  stillWorking: "Still working. Press 1 to hear what it's thinking.",
-  noStart: "I don't see it working yet.",
-  longHold: "It's taking a while, so I'll let you go. You'll get a card when it's done. Goodbye.",
-  lostChat: "I lost track of that chat. Goodbye.",
-  cannotSee: "I can't see what it's doing.",
-  bye: "Goodbye.",
-  turns: "That is as much as I can do by voice on one call. Goodbye.",
-};
 
 /** A model's proposed message: control characters out, whitespace collapsed, at most 600 characters. */
 export function cleanMessage(raw: unknown): string {
@@ -801,7 +771,7 @@ export class MemoInbox {
       }
       const answer = await this.handle(read.message).catch((error: unknown): DownMessage => {
         logger.warn("voice memo failed", { error: error instanceof Error ? error.message : String(error) });
-        return { v: 1, id, at: this.now(), status: "refused", reason: "Something went wrong on the Mac." };
+        return { v: 1, id, at: this.now(), status: "refused", reason: REFUSED_SAYS.wentWrong };
       });
       this.persist();
       await store.set(downPath(channel, id), sealDown(key, answer));
@@ -1083,23 +1053,22 @@ export class MemoInbox {
    */
   private async handleAnswer(message: Extract<UpMessage, { kind: "ask" | "status" }>): Promise<DownMessage> {
     const { describe, answer, trace } = this.deps;
-    if (!describe || !answer) return this.refuse(message.id, "Your Mac cannot answer questions yet.");
+    if (!describe || !answer) return this.refuse(message.id, REFUSED_SAYS.noAnswering);
     const now = this.now();
     while (this.answers.length > 0 && now - this.answers[0]! > 60 * 60_000) this.answers.shift();
-    if (this.answers.length >= MAX_ANSWERS_PER_HOUR)
-      return this.refuse(message.id, "Too many questions by phone this hour.");
+    if (this.answers.length >= MAX_ANSWERS_PER_HOUR) return this.refuse(message.id, REFUSED_SAYS.tooManyQuestions);
     let target: string;
     let label: string;
     let question = "";
     if (message.kind === "status") {
       const found = this.targetsOf(message.dirVersion)?.[message.choice - 1];
-      if (!found) return this.refuse(message.id, "That list is out of date. Call again.");
+      if (!found) return this.refuse(message.id, REFUSED_SAYS.staleList);
       target = found;
       label = this.labelOf(message.dirVersion, found, message.choice);
     } else {
       // Not deleted: the same recording may be sent after it was asked about, or asked again.
       const pending = this.pending.get(message.memoId);
-      if (!pending) return this.refuse(message.id, "That recording is no longer waiting. Record it again.");
+      if (!pending) return this.refuse(message.id, REFUSED_SAYS.recordingGone);
       target = pending.target;
       label = pending.label;
       question = pending.text;
@@ -1111,7 +1080,7 @@ export class MemoInbox {
     try {
       if (message.kind === "status") {
         const read = describe(target, label);
-        if (!read) return this.refuse(message.id, `I could not find ${label} any more.`);
+        if (!read) return this.refuse(message.id, couldNotFind(label));
         text = read;
       } else {
         text = await Promise.race([
@@ -1146,7 +1115,7 @@ export class MemoInbox {
     if (message.kind === "memo") {
       const targets = this.targetsOf(message.dirVersion);
       const target = targets?.[message.choice - 1];
-      if (!target) return this.refuse(message.id, "That list is out of date. Call again.");
+      if (!target) return this.refuse(message.id, REFUSED_SAYS.staleList);
       const label = this.labelOf(message.dirVersion, target, message.choice);
       const { trace } = this.deps;
       const speech = await this.audioOf(message);
@@ -1164,11 +1133,11 @@ export class MemoInbox {
           error: error instanceof Error ? error.message : String(error),
         });
         trace?.("warn", "Could not transcribe the recording", { label });
-        return this.refuse(message.id, "I could not make that out.");
+        return this.refuse(message.id, REFUSED_SAYS.notMadeOut);
       }
       if (!text) {
         trace?.("warn", "Nothing was heard in the recording", { label });
-        return this.refuse(message.id, "I did not hear anything.");
+        return this.refuse(message.id, REFUSED_SAYS.heardNothing);
       }
       const transcribedMs = Date.now() - began;
       // The Mac's voice starts on the words as soon as they are known; the trace lines are written meanwhile.
@@ -1206,7 +1175,7 @@ export class MemoInbox {
     if (message.kind === "start") return this.handleStart(message);
 
     const pending = this.pending.get(message.memoId);
-    if (!pending) return this.refuse(message.id, "That message is no longer waiting.");
+    if (!pending) return this.refuse(message.id, REFUSED_SAYS.messageGone);
     this.pending.delete(message.memoId);
     const delivered = await this.deliver(pending.target, pending.label, pending.text);
     if (!delivered.sent) return this.refuse(message.id, delivered.reason);
@@ -1260,11 +1229,11 @@ export class MemoInbox {
         error: error instanceof Error ? error.message : String(error),
       });
       trace?.("warn", "Could not transcribe the recording", { label });
-      return this.refuse(message.id, "I could not make that out.");
+      return this.refuse(message.id, REFUSED_SAYS.notMadeOut);
     }
     if (!text) {
       trace?.("warn", "Nothing was heard in the recording", { label });
-      return this.refuse(message.id, "I did not hear anything.");
+      return this.refuse(message.id, REFUSED_SAYS.heardNothing);
     }
     const transcribedMs = Date.now() - began;
     trace?.("heard", text, { ms: transcribedMs, label });
@@ -1422,11 +1391,10 @@ export class MemoInbox {
   ): Promise<{ sent: true } | { sent: false; reason: string }> {
     const now = this.now();
     while (this.sends.length > 0 && now - this.sends[0]! > 60 * 60_000) this.sends.shift();
-    if (this.sends.length >= MAX_SENDS_PER_HOUR)
-      return { sent: false, reason: "Too many messages by phone this hour." };
+    if (this.sends.length >= MAX_SENDS_PER_HOUR) return { sent: false, reason: REFUSED_SAYS.tooManyMessages };
     if (!this.deps.canSend(target)) {
       this.deps.trace?.("warn", `${label} is busy, nothing sent`, { label });
-      return { sent: false, reason: `${label} is busy right now. Send it from the app.` };
+      return { sent: false, reason: chatBusy(label) };
     }
     this.sends.push(now);
     this.rememberLast(target);
@@ -1467,31 +1435,31 @@ export class MemoInbox {
   ): Promise<DownMessage> {
     const hold = this.deps.hold;
     const state = call.hold;
-    if (!hold || !state) return reply(TALK_SAYS.closed, "end");
+    if (!hold || !state) return reply(TALK_REPLY_SAYS.closed, "end");
     if (phase === "peek") {
       state.lastSaid = now;
-      return reply(hold.peek(target, label) || TALK_SAYS.cannotSee, "hold");
+      return reply(hold.peek(target, label) || TALK_REPLY_SAYS.cannotSee, "hold");
     }
     const seen = hold.state(target, label);
     // A chat started on this call can take a moment to show up: wait for it as long as one that never starts.
     if (seen === null && call.fresh && now - state.since <= HOLD_START_MS) return reply("", "hold");
     if (seen === null) {
       call.hold = undefined;
-      return reply(TALK_SAYS.lostChat, "end");
+      return reply(TALK_REPLY_SAYS.lostChat, "end");
     }
     if (seen === "working") state.seenWorking = true;
     if (seen === "stopped" && (state.seenWorking || now - state.since > HOLD_START_MS)) {
       call.hold = undefined;
       const ended = hold.ended(target, label);
-      return reply(state.seenWorking ? ended : `${TALK_SAYS.noStart} ${ended}`, "listen");
+      return reply(state.seenWorking ? ended : `${TALK_REPLY_SAYS.noStart} ${ended}`, "listen");
     }
     if (now - state.since > HOLD_MAX_MS) {
       call.hold = undefined;
-      return reply(TALK_SAYS.longHold, "end");
+      return reply(TALK_REPLY_SAYS.longHold, "end");
     }
     if (now - state.lastSaid > HOLD_REASSURE_MS) {
       state.lastSaid = now;
-      return reply(TALK_SAYS.stillWorking, "hold");
+      return reply(TALK_REPLY_SAYS.stillWorking, "hold");
     }
     return reply("", "hold");
   }
@@ -1522,9 +1490,9 @@ export class MemoInbox {
       }
     }
     if ((!message.callId && message.choice !== 1) || !call || now - call.at > CALL_TARGET_TTL_MS) {
-      return this.refuse(message.id, TALK_SAYS.closed);
+      return this.refuse(message.id, TALK_REPLY_SAYS.closed);
     }
-    if (!converse) return this.refuse(message.id, "Your Mac cannot talk through a call yet.");
+    if (!converse) return this.refuse(message.id, REFUSED_SAYS.noTalking);
     const { label, target } = call;
     const reply = (text: string, next: "listen" | "confirm" | "end" | "hold"): Promise<DownMessage> => {
       if (next === "end") this.deps.endCall?.(callKey);
@@ -1556,7 +1524,7 @@ export class MemoInbox {
       const offer = call.offer;
       if (now - offer.at > PROPOSAL_TTL_MS) {
         call.offer = undefined;
-        return reply(TALK_SAYS.bye, "end");
+        return reply(TALK_REPLY_SAYS.bye, "end");
       }
       const yes = YES.test(heard);
       const no = NO.test(heard);
@@ -1564,21 +1532,21 @@ export class MemoInbox {
         offer.tries += 1;
         if (offer.tries >= 2) {
           call.offer = undefined;
-          return reply(TALK_SAYS.noHold, "end");
+          return reply(TALK_REPLY_SAYS.noHold, "end");
         }
-        return reply(TALK_SAYS.offerHold, "confirm");
+        return reply(TALK_REPLY_SAYS.offerHold, "confirm");
       }
       call.offer = undefined;
-      if (no) return reply(TALK_SAYS.noHold, "end");
+      if (no) return reply(TALK_REPLY_SAYS.noHold, "end");
       call.hold = { since: now, seenWorking: false, lastSaid: now };
-      return reply(TALK_SAYS.holding, "hold");
+      return reply(TALK_REPLY_SAYS.holding, "hold");
     }
 
     if (message.phase === "confirm") {
       const proposal = call.proposal;
       if (!proposal || now - proposal.at > PROPOSAL_TTL_MS) {
         call.proposal = undefined;
-        return reply(TALK_SAYS.gone, "listen");
+        return reply(TALK_REPLY_SAYS.gone, "listen");
       }
       const yes = YES.test(heard);
       const no = NO.test(heard);
@@ -1586,13 +1554,13 @@ export class MemoInbox {
         proposal.tries += 1;
         if (proposal.tries >= 2) {
           call.proposal = undefined;
-          return reply(TALK_SAYS.giveUp, "end");
+          return reply(TALK_REPLY_SAYS.giveUp, "end");
         }
-        return reply(TALK_SAYS.again, "confirm");
+        return reply(TALK_REPLY_SAYS.again, "confirm");
       }
       // Taken first, so a repeated or replayed confirm can never send the same words twice.
       call.proposal = undefined;
-      if (no) return reply(TALK_SAYS.declined, "listen");
+      if (no) return reply(TALK_REPLY_SAYS.declined, "listen");
       const delivered = await this.deliver(target, label, proposal.message);
       if (!delivered.sent) return reply(delivered.reason, "end");
       // The call back is asked for only after the send went, and only for what the person said yes to.
@@ -1600,23 +1568,22 @@ export class MemoInbox {
         ? this.deps.requestCallback?.(target, label, proposal.message.length > 1 ? proposal.message : "", true)
         : undefined;
       if (calling?.ok) trace?.("step", `Call back requested for ${label}`, { label });
-      if (calling?.ok) return reply(TALK_SAYS.sentCallback, "end");
+      if (calling?.ok) return reply(TALK_REPLY_SAYS.sentCallback, "end");
       // Asking the person, not assuming: a quick job may be worth waiting for, a long one is not.
       if (this.deps.hold?.supported()) {
         call.offer = { at: now, tries: 0 };
-        return reply(TALK_SAYS.offerHold, "confirm");
+        return reply(TALK_REPLY_SAYS.offerHold, "confirm");
       }
-      return reply(TALK_SAYS.sent, "end");
+      return reply(TALK_REPLY_SAYS.sent, "end");
     }
 
     // A new thing said: whatever was read back before is no longer on offer.
     call.proposal = undefined;
-    if (GOODBYE.test(heard)) return reply(TALK_SAYS.bye, "end");
-    if (judgeTranscript(heard, 5_000) === "silence") return reply(TALK_SAYS.sorry, "listen");
-    if (call.turns >= MAX_TALK_TURNS) return reply(TALK_SAYS.turns, "end");
+    if (GOODBYE.test(heard)) return reply(TALK_REPLY_SAYS.bye, "end");
+    if (judgeTranscript(heard, 5_000) === "silence") return reply(TALK_REPLY_SAYS.sorry, "listen");
+    if (call.turns >= MAX_TALK_TURNS) return reply(TALK_REPLY_SAYS.turns, "end");
     while (this.answers.length > 0 && now - this.answers[0]! > 60 * 60_000) this.answers.shift();
-    if (this.answers.length >= MAX_ANSWERS_PER_HOUR)
-      return this.refuse(message.id, "Too many questions by phone this hour.");
+    if (this.answers.length >= MAX_ANSWERS_PER_HOUR) return this.refuse(message.id, REFUSED_SAYS.tooManyQuestions);
     call.turns += 1;
     this.answers.push(now);
     this.rememberLast(target);
@@ -1636,36 +1603,36 @@ export class MemoInbox {
     } catch (error) {
       logger.warn("voice talk failed", { error: error instanceof Error ? error.message : String(error) });
       trace?.("warn", "Could not work out what was said", { label });
-      return reply(TALK_SAYS.failed, "listen");
+      return reply(TALK_REPLY_SAYS.failed, "listen");
     }
     switch (decided.intent) {
       case "answer": {
         const text = spokenAnswer(String(decided.spoken ?? ""), MAX_ANSWER_CHARS);
-        return reply(text || TALK_SAYS.unclear, "listen");
+        return reply(text || TALK_REPLY_SAYS.unclear, "listen");
       }
       case "end":
-        return reply(TALK_SAYS.bye, "end");
+        return reply(TALK_REPLY_SAYS.bye, "end");
       case "callback": {
         const request = this.deps.requestCallback;
-        if (!request) return reply(TALK_SAYS.noCallback, "listen");
+        if (!request) return reply(TALK_REPLY_SAYS.noCallback, "listen");
         const calling = request(target, label, cleanMessage(decided.message), false);
         if (!calling.ok) return reply(calling.reason, "listen");
         trace?.("step", `Call back requested for ${label}`, { label });
-        return reply(`Okay, I'll call you back when ${label} is done. Goodbye.`, "end");
+        return reply(callBackLine(label), "end");
       }
       case "send": {
         const proposed = cleanMessage(decided.message);
-        if (!proposed) return reply(TALK_SAYS.unclear, "listen");
+        if (!proposed) return reply(TALK_REPLY_SAYS.unclear, "listen");
         let phrase: string;
         const letter = /^[A-Ha-h]$/.test(proposed) ? proposed.toUpperCase() : null;
         if (letter) {
           const option = call.script?.options.find((o) => o.letter === letter);
-          if (!option) return reply(TALK_SAYS.unclear, "listen");
+          if (!option) return reply(TALK_REPLY_SAYS.unclear, "listen");
           phrase = `option ${letter}: ${clipOption(option.title)}`;
         } else {
           phrase = spokenAnswer(proposed, 400) || spokenAnswer(String(decided.spoken ?? ""), 200);
         }
-        if (!phrase) return reply(TALK_SAYS.unclear, "listen");
+        if (!phrase) return reply(TALK_REPLY_SAYS.unclear, "listen");
         const callBack = decided.callback === true && Boolean(this.deps.requestCallback);
         call.proposal = { message: letter ?? proposed, at: now, tries: 0, ...(callBack ? { callback: true } : {}) };
         return reply(
@@ -1674,7 +1641,7 @@ export class MemoInbox {
         );
       }
       default:
-        return reply(TALK_SAYS.unclear, "listen");
+        return reply(TALK_REPLY_SAYS.unclear, "listen");
     }
   }
 }

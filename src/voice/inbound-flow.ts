@@ -18,6 +18,16 @@ import { judgeTranscript } from "./transcript-quality.js";
 import { readBackSpeech, speakReply } from "./answer-audio.js";
 import type { TalkPhase } from "./memo-protocol.js";
 import { TALK_SAYS } from "./talk-flow.js";
+import {
+  NEW_CHAT_SAYS,
+  PARTS_SAYS,
+  REFUSED_SAYS,
+  TALK_REPLY_SAYS,
+  chatBusy,
+  callBackLine,
+  couldNotFind,
+  nothingRunning,
+} from "./mac-says.js";
 import type { Uplink } from "./uplink.js";
 
 export interface InboundDependencies {
@@ -87,7 +97,7 @@ const hello = (terse: boolean): string => (terse ? "" : `${GREETING} `);
 const AGAIN = "Press star to hear this again";
 
 /** Every fixed sentence the flow says: also what is made ahead of time, so it is ready the moment a call connects. */
-const SAYS = {
+export const SAYS = {
   pin: "Please enter your PIN, then press hash. Press star to start over.",
   pinAgain: "That PIN is not right. Try again, then press hash.",
   pinFail: "That PIN is not right. Goodbye.",
@@ -245,18 +255,47 @@ export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean):
       )
     : [];
   if (ask) fixed.push(SAYS.recordAsk, SAYS.askFail, SAYS.followUp, SAYS.limit);
-  if (talks) fixed.push(...Object.values(TALK_SAYS));
+  if (talks) fixed.push(...Object.values(TALK_SAYS), ...Object.values(TALK_REPLY_SAYS));
+  // What the Mac says when it refuses (a stale list, a recording that never arrived, a limit): said as it arrives, so
+  // it must be recorded too or the add-on makes it with Piper. With a new-chat menu a refusal is also followed by
+  // "Goodbye." in one sentence.
+  if (ask) fixed.push(...Object.values(REFUSED_SAYS), ...Object.values(PARTS_SAYS));
+  else fixed.push(REFUSED_SAYS.staleList, REFUSED_SAYS.wentWrong, REFUSED_SAYS.tooManyMessages);
   const fresh = (directory?.workspaces ?? []).filter((w) => w.newChat);
   if (fresh.length > 0) {
     fixed.push(newChatKeys, SAYS.newChatNoMac, SAYS.newChatNotSure, SAYS.newChatFailed);
+    fixed.push(...Object.values(NEW_CHAT_SAYS), ...Object.values(PARTS_SAYS), REFUSED_SAYS.notMadeOut);
+    for (const reason of [
+      ...Object.values(NEW_CHAT_SAYS),
+      ...Object.values(REFUSED_SAYS),
+      ...Object.values(PARTS_SAYS),
+    ]) {
+      fixed.push(`${reason} Goodbye.`);
+    }
     for (const workspace of fresh) fixed.push(newChatPrompt(workspace.label));
   }
   fixed.push(heardNothingPrompt(ask ? "3" : "2"));
   const last = directory?.last ? [lastChatPrompt(directory.last.label, !askPin, terse, directory.last.why)] : [];
   // With a last chat the offer carries the greeting, so the menus behind "another chat" do not.
   const greetMenus = !askPin && last.length === 0;
+  // A chat's own lines the Mac says by name: last, since a list too long for the audio documents loses its tail.
+  const named = directory
+    ? allLabels(directory).flatMap((label) => [
+        ...(ask ? [couldNotFind(label), chatBusy(label)] : [chatBusy(label)]),
+        ...(talks ? [nothingRunning(label), callBackLine(label)] : []),
+      ])
+    : [];
+  // The fixed lines come before the per-chat ones: they are what any call can hit, and the audio documents (8, each
+  // about 41 s) and the render passes work through this list in order.
   return [
-    ...new Set([...pin, ...last, ...(directory ? menuPrompts(directory, greetMenus) : []), ...perChat, ...fixed]),
+    ...new Set([
+      ...pin,
+      ...last,
+      ...(directory ? menuPrompts(directory, greetMenus) : []),
+      ...fixed,
+      ...perChat,
+      ...named,
+    ]),
   ];
 }
 

@@ -583,6 +583,10 @@ hash | silence | cap | no speech`.
   stats block the add-on logs its first 200 characters once (`voice call stats reply not recognised`) so "no data" can
   be diagnosed. See docs/remote-channel.md for `lastTest.quality`.
 
+## Every fixed line is the Mac's voice
+
+Every fixed sentence a call can say, from the add-on or sent down by the Mac (refusals, talk replies, a new chat's outcomes, and the ones that name a chat), is in `inboundPrompts` (`mac-says.ts` holds the Mac's), so the Mac records it with the call-in prompts and the add-on finds it by its exact words; `mac-says.test.ts` fails when one is missing. The fixed lines come before the per-chat ones in that list because the audio documents are capped (8, each about 41 s) and it is worked through in order. What still has Piper's voice is text that varies per call: a send's own failure reason, and the add-on's pre-0.11 requests.
+
 ## Later
 
 ## Pairing a gateway (daemon side)

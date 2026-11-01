@@ -1053,13 +1053,15 @@ export function callPrompts(script: CallScript, pin: "ask" | "none" | "both"): s
   const [ask, question, again, goodbye, ...sent] = withPin;
   const combined = withoutPin[0]!;
   // Nothing to press: the call only tells, in one piece.
-  if (script.options.length === 0) return [combined];
+  if (script.options.length === 0) return [combined, ...(script.keypad ? [script.keypad] : [])];
   const order =
     pin === "ask"
       ? [ask, question, again, goodbye, ...sent]
       : pin === "none"
         ? [combined, question, ...sent]
         : [ask, question, combined, again, goodbye, ...sent];
+  // A voice call that falls back to keys says the keypad's own wording: last, since it is the rarest.
+  if (script.keypad) order.push(script.keypad);
   return [...new Set(order.filter((text): text is string => typeof text === "string" && text.length > 0))];
 }
 
