@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Adds (or replaces) one <item> in a Sparkle appcast, keeping every other item.
+"""Adds (or replaces) one <item> in a Sparkle appcast and keeps the newest APPCAST_KEEP items (default 3): the Pages
+site keeps only that many DMGs (KEEP_DMGS in publish-pages.sh), and an item whose DMG is gone would point at a 404.
 
 usage: update-appcast.py <existing-or-missing appcast> <out> <version> <build> <dmg-url>
                          <release-notes-url> <length> <ed-signature>
 """
+import os
 import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -48,6 +50,7 @@ items = channel.findall("item") + [item]
 for i in channel.findall("item"):
     channel.remove(i)
 items.sort(key=lambda i: int(i.find(S + "version").text), reverse=True)
+items = items[: max(1, int(os.environ.get("APPCAST_KEEP", "3")))]
 for i in items:
     channel.append(i)
 

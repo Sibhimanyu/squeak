@@ -72,7 +72,9 @@ gh release create "v$VERSION" "$BUILD/$DMG.sha256" --repo Sibhimanyu/squeak --ta
   --title "Squeak $VERSION" --notes-file "$BUILD/RELEASE_NOTES.md" >/dev/null
 
 step "Pages: appcast and DMG"
-(cd "$REL/macos" && ./scripts/publish-pages.sh "$VERSION")
+# The newest 3 DMGs stay on the site (the appcast keeps the same 3): 113 old ones made a 3.7 GB Pages deploy that
+# GitHub warns may fail over 1 GB, took 5-8 minutes, and refused a second release while one was still deploying.
+(cd "$REL/macos" && KEEP_DMGS=3 ./scripts/publish-pages.sh "$VERSION")
 
 step "Waiting for the live appcast and DMG"
 WANT="$(stat -f %z "$BUILD/$DMG")"
