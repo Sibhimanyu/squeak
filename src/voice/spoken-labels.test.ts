@@ -22,6 +22,7 @@ describe("spoken labels", () => {
 
   it("drops everything up to the last slash of the branch", () => {
     expect(spokenWorkspace(s({ branch: "sibhimanyu/fix-parser" }))).toBe("squeak, fix parser");
+    expect(spokenWorkspace(s({ branch: "sibhimanyu/fix-parser" }), false)).toBe("squeak");
   });
 
   it("speaks just the repo when the branch says nothing", () => {

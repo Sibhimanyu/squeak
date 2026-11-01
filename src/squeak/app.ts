@@ -1404,11 +1404,19 @@ export class SqueakApp {
           Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt),
       );
     const spoken = spokenChats(ordered, workspaceKeyOf);
+    // A workspace is said as its repo; the branch is added only where two workspaces in the list share that repo.
+    const keysByRepo = new Map<string, Set<string | null>>();
+    for (const session of ordered) {
+      const repo = spokenWorkspace(session, false).toLowerCase();
+      keysByRepo.set(repo, (keysByRepo.get(repo) ?? new Set<string | null>()).add(workspaceKeyOf(session)));
+    }
+    const sharesRepo = (session: (typeof ordered)[number]): boolean =>
+      (keysByRepo.get(spokenWorkspace(session, false).toLowerCase())?.size ?? 0) > 1;
     return ordered.map((session) => ({
       target: replyTargetFor(session),
       label: spoken.get(session.key) ?? spokenChat(session),
       workspace: workspaceKeyOf(session),
-      workspaceLabel: spokenWorkspace(session),
+      workspaceLabel: spokenWorkspace(session, sharesRepo(session)),
       waiting: needing.has(session.key),
     }));
   }

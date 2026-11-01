@@ -46,7 +46,12 @@ const PLAIN_BRANCHES = new Set(["head", "main", "master"]);
  * names a fresh branch after the city). No repo: the branch alone; nothing: "a workspace". Two workspaces of one repo
  * can speak alike; `numberRepeats` tells them apart in a menu.
  */
-export function spokenWorkspace(session: Named & { baseRef?: string | null }): string {
+/**
+ * A workspace as said on a call: its repo, plus the branch when `withBranch` (the caller passes it only when two
+ * workspaces in the same list share a repo: a branch said for no reason, "motion graphics skill, release notes", was
+ * heard as the agent reading release notes).
+ */
+export function spokenWorkspace(session: Named & { baseRef?: string | null }, withBranch = true): string {
   const repo = speakable(session.repoName ?? "");
   const folder = session.cwd ? speakable(path.basename(session.cwd.replace(/\/+$/, ""))).toLowerCase() : "";
   const raw = (session.branch ?? "").trim();
@@ -62,7 +67,7 @@ export function spokenWorkspace(session: Named & { baseRef?: string | null }): s
     PLAIN_BRANCHES.has(tail.toLowerCase()) ||
     (base !== "" && (raw.toLowerCase() === base || tail.toLowerCase() === base)) ||
     branch.toLowerCase() === folder;
-  if (plain) branch = "";
+  if (plain || (!withBranch && repo)) branch = "";
   if (repo && branch) return cutAtWord(`${repo}, ${branch}`, MAX_SPOKEN_WORKSPACE);
   if (repo) return cutAtWord(repo, MAX_SPOKEN_WORKSPACE);
   return branch ? cutAtWord(branch, MAX_SPOKEN_WORKSPACE) : "a workspace";
