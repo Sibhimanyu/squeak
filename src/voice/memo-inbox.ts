@@ -10,7 +10,13 @@ import { ASK_FAILED, inboundPrompts, newChatReadBack } from "./inbound-flow.js";
 import type { StartChatOutcome } from "../fleet/new-chat.js";
 import { clipOption } from "./script.js";
 import { numberRepeats } from "./spoken-labels.js";
-import { splitSentences } from "./natural-cache.js";
+import { speechParts } from "./natural-cache.js";
+import {
+  fixedMemoReadBackSpeech,
+  fixedNewChatReadBackSpeech,
+  memoReadBackSpeech,
+  newChatReadBackSpeech,
+} from "./read-back-parts.js";
 import { judgeTranscript } from "./transcript-quality.js";
 import type { ChoiceOption } from "../fleet/choices.js";
 import {
@@ -106,6 +112,18 @@ export interface MemoInboxDependencies {
    */
   speechStream?: (text: string, onPart: (part: { index: number; total: number; clip: Clip }) => void) => Promise<void>;
   streamsAnswers?: () => boolean;
+  /**
+   * The read-back as separate clips (`NaturalVoice.partClips`: a fixed head, the words, a fixed tail, each handed over in
+   * order as it is made, its text exactly the part). With `streamsReadBack()` true (add-on 0.19.0) the transcript goes
+   * out after the head's clip and the rest follow as `replyaudio-` documents, like an answer's sentences.
+   */
+  speechParts?: (
+    parts: string[],
+    onPart: (part: { index: number; total: number; clip: Clip }) => void,
+  ) => Promise<void>;
+  streamsReadBack?: () => boolean;
+  /** Makes these fixed read-back words ahead of any call, so the head and tail are in the cache when a call needs them. */
+  prepareSpeech?: (texts: string[]) => Promise<void>;
   /**
    * Voice-first calls out: works out what a spoken reply was (a question to answer, an instruction to propose, the
    * end of the call). Read-only like `answer`; its output only ever chooses the words of a proposal the person must
@@ -232,6 +250,9 @@ const REMEMBER = 200;
 /** A call out names its chat for this long: longer than any call lasts. */
 const CALL_TARGET_TTL_MS = 30 * 60_000;
 const READ_BACK_BUDGET_MS = 8_000;
+/** The longest transcript a `transcript` carries (`readDown`'s cap); a longer one is never streamed. */
+const MAX_TRANSCRIPT_CHARS = 1500;
+type AudioFollowsFields = { audio?: Clip; audioFollows?: AudioFollows };
 /**
  * An answer or status read out in the Mac's voice: several sentences, about a second each and more when the voice is
  * busy. A budget shorter than that leaves the add-on to say it in its plain voice, the "different voice" heard on a
@@ -601,6 +622,14 @@ export class MemoInbox {
       const labels = [...doc.items, ...(doc.workspaces ?? []).flatMap((w) => w.chats)].map((i) => i.label);
       await this.deps.prepareReadBack(labels, this.canAsk).catch(() => undefined);
     }
+    if (this.deps.prepareSpeech && this.deps.streamsReadBack?.() && !this.stopped) {
+      const labels = [...doc.items, ...(doc.workspaces ?? []).flatMap((w) => w.chats)].map((i) => i.label);
+      const model = this.deps.newChat?.model();
+      const names = (doc.workspaces ?? []).map((w) => w.label);
+      const spoken = model ? spokenModelLabel(model.label) : undefined;
+      const texts = [...fixedMemoReadBackSpeech(labels, this.canAsk), ...fixedNewChatReadBackSpeech(names, spoken)];
+      await this.deps.prepareSpeech(texts).catch(() => undefined);
+    }
   }
 
   /** Deletes audio documents of directory versions no longer kept (and, once, ones a restart left behind). */
@@ -790,6 +819,14 @@ export class MemoInbox {
     return Boolean(this.deps.describe && this.deps.answer);
   }
 
+  /** The memo read-back's clip: in parts as they are made for an add-on that follows, else the one clip. */
+  private async memoReadBackFields(id: string, text: string, label: string): Promise<AudioFollowsFields> {
+    const streamed = await this.readBackParts(id, text, memoReadBackSpeech(text, label, this.canAsk));
+    if (streamed) return streamed;
+    const audio = await this.readBackAudio(text, label);
+    return audio ? { audio } : {};
+  }
+
   private async readBackAudio(text: string, label: string): Promise<Clip | undefined> {
     if (!this.deps.readBack) return undefined;
     try {
@@ -862,18 +899,47 @@ export class MemoInbox {
    * and writes each later sentence's clip, in order, as it is made. Otherwise the whole text as one clip, as before.
    */
   private async spokenFields(id: string, text: string): Promise<{ audio?: Clip; audioFollows?: AudioFollows }> {
-    const { speechStream, streamsAnswers, store, channel, key } = this.deps;
-    const parts = splitSentences(text);
+    const { speechStream, streamsAnswers } = this.deps;
+    const parts = speechParts(text);
     if (!speechStream || !streamsAnswers?.() || parts.length < 2 || parts.length > MAX_ANSWER_PARTS) {
       const audio = await this.answerAudio(text);
       return audio ? { audio } : {};
     }
+    return this.streamedSpeech(id, parts, (onPart) => speechStream(text, onPart), ANSWER_AUDIO_BUDGET_MS);
+  }
+
+  /**
+   * The read-back as parts when the add-on plays them as they are made: the head first (made ahead, so it is ready at
+   * once), the words, the tail. `parts` is what `memoReadBackSpeech` / `newChatReadBackSpeech` cut. Anything else
+   * (an older add-on, no streaming voice, a text too long for the transcript) is `undefined`: the caller sends the one
+   * clip as before.
+   */
+  private async readBackParts(id: string, text: string, parts: string[]): Promise<AudioFollowsFields | undefined> {
+    const { speechParts: render, streamsReadBack } = this.deps;
+    if (!render || !streamsReadBack?.() || parts.length < 2 || parts.length > MAX_ANSWER_PARTS) return undefined;
+    if (text.length > MAX_TRANSCRIPT_CHARS || parts.some((part) => part.length > MAX_ANSWER_CHARS)) return undefined;
+    // Tried once: a head that is not ready in time leaves the whole read-back to the add-on, never a second wait.
+    return this.streamedSpeech(id, parts, (onPart) => render(parts, onPart), READ_BACK_BUDGET_MS);
+  }
+
+  /**
+   * Waits only for the first part's clip (within `budgetMs`), returns it with `audioFollows`, and writes each later
+   * part's clip as the document `replyaudio-<id>-<n>`, in order, as it is made. No first clip in time: `{}` and the
+   * rest is dropped.
+   */
+  private async streamedSpeech(
+    id: string,
+    parts: string[],
+    render: (onPart: (part: { index: number; total: number; clip: Clip }) => void) => Promise<void>,
+    budgetMs: number,
+  ): Promise<{ audio?: Clip; audioFollows?: AudioFollows }> {
+    const { store, channel, key } = this.deps;
     let release: (clip: Clip | undefined) => void = () => undefined;
     const first = new Promise<Clip | undefined>((resolve) => (release = resolve));
     let abandoned = false;
     let chain: Promise<void> = Promise.resolve();
     const written: string[] = [];
-    void speechStream(text, ({ index, clip }) => {
+    void render(({ index, clip }) => {
       if (index === 0) return release(clip.text === parts[0] ? clip : undefined);
       if (clip.text !== parts[index]) return;
       chain = chain.then(async () => {
@@ -893,7 +959,7 @@ export class MemoInbox {
       .finally(() => release(undefined));
     const audio = await Promise.race([
       first,
-      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ANSWER_AUDIO_BUDGET_MS).unref()),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), budgetMs).unref()),
     ]);
     // The backstop: the add-on deletes these when the answer is spoken; a call that dropped leaves them to this.
     setTimeout(() => {
@@ -1002,19 +1068,19 @@ export class MemoInbox {
       }
       const transcribedMs = Date.now() - began;
       // The Mac's voice starts on the words as soon as they are known; the trace lines are written meanwhile.
-      const spokenPromise = this.readBackAudio(text, label);
+      const spokenPromise = this.memoReadBackFields(message.id, text, label);
       trace?.("heard", text, { ms: transcribedMs, label });
       trace?.("step", `Transcribed in ${(transcribedMs / 1000).toFixed(1)} s`, { ms: transcribedMs, label });
       trace?.("said", text, { label });
       this.pending.set(message.id, { target, label, text, at: this.now() });
       while (this.pending.size > MAX_PENDING) this.pending.delete(this.pending.keys().next().value as string);
-      const spoken = await spokenPromise;
+      const { audio: spoken, audioFollows } = await spokenPromise;
       const renderMs = Date.now() - began - transcribedMs;
-      if (this.deps.readBack)
+      if (this.deps.readBack || audioFollows)
         trace?.(
           spoken ? "step" : "warn",
           spoken
-            ? `Read-back voice rendered in ${(renderMs / 1000).toFixed(1)} s`
+            ? `Read-back voice ${audioFollows ? "started" : "rendered"} in ${(renderMs / 1000).toFixed(1)} s`
             : `Read-back voice not ready after ${(renderMs / 1000).toFixed(1)} s; the add-on will speak it`,
           { ms: renderMs, label },
         );
@@ -1026,6 +1092,7 @@ export class MemoInbox {
         text,
         label,
         ...(spoken ? { audio: spoken } : {}),
+        ...(audioFollows ? { audioFollows } : {}),
       };
     }
 
@@ -1114,7 +1181,8 @@ export class MemoInbox {
     // The read-back in the Mac's voice (the add-on says exactly these words), within a short budget.
     const sentence = newChatReadBack(text, label, modelLabel);
     let spoken: Clip | undefined;
-    if (this.deps.speech) {
+    const streamed = await this.readBackParts(message.id, text, newChatReadBackSpeech(text, label, modelLabel));
+    if (!streamed && this.deps.speech) {
       spoken = await Promise.race([
         this.answerAudio(sentence),
         new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), READ_BACK_BUDGET_MS).unref()),
@@ -1129,7 +1197,7 @@ export class MemoInbox {
       text,
       label,
       ...(modelLabel ? { model: modelLabel } : {}),
-      ...(spoken ? { audio: spoken } : {}),
+      ...(streamed ? streamed : spoken ? { audio: spoken } : {}),
     };
   }
 

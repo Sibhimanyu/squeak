@@ -52,13 +52,17 @@ describe("speakReply", () => {
     expect(stops).toEqual(["stop"]);
   });
 
-  it("speaks the remainder in one go when the next sentence is late", async () => {
+  it("speaks each late sentence itself, one part at a time, never the whole remainder", async () => {
     const said: string[] = [];
+    const trace: string[] = [];
     await speakReply(fakeCall(said), reply(), {
       uplink: { followAnswer: () => follower({}, []) },
       seed: () => undefined,
+      trace: (line) => trace.push(line),
     });
-    expect(said).toEqual([PARTS[0], `${PARTS[1]} ${PARTS[2]}`]);
+    expect(said).toEqual(PARTS);
+    expect(trace).toContain("step: Sentence 2 spoken by the add-on");
+    expect(trace).toContain("step: Sentence 3 spoken by the add-on");
   });
 
   it("speaks the rest plain when a later sentence is the late one", async () => {
@@ -106,7 +110,7 @@ describe("speakReply", () => {
           }
         },
       });
-      expect(made).toEqual([`plain:${PARTS[1]} ${PARTS[2]}`]);
+      expect(made).toEqual([`plain:${PARTS[1]}`, `plain:${PARTS[2]}`]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

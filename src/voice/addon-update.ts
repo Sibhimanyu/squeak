@@ -73,6 +73,9 @@ export const ANSWER_STREAM_ADDON = "0.17.0";
 /** The add-on whose call-in menu offers "a new chat" (key 0 in a workspace's chat menu: `newchat` and `start` messages). */
 export const NEW_CHAT_ADDON = "0.18.0";
 
+/** The add-on that plays a read-back sentence by sentence as the Mac makes it (`audioFollows` on a `transcript`), and waits for a late sentence. */
+export const READBACK_STREAM_ADDON = "0.19.0";
+
 /** Whether an add-on reporting `version` is at least `minimum`; false when its version is unknown. */
 export function addonSupports(version: string | null | undefined, minimum: string): boolean {
   return cleanVersion(version) !== null && !isNewer(minimum, version);

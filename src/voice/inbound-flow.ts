@@ -15,7 +15,7 @@ import {
   type DirectoryWorkspace,
 } from "./memo-protocol.js";
 import { judgeTranscript } from "./transcript-quality.js";
-import { speakReply } from "./answer-audio.js";
+import { readBackSpeech, speakReply } from "./answer-audio.js";
 import type { TalkPhase } from "./memo-protocol.js";
 import type { Uplink } from "./uplink.js";
 
@@ -176,8 +176,16 @@ export const newChatPrompt = (label: string): string => `New chat in ${label}. G
  * The read-back of a new chat: said by the add-on, and made ahead of the call by the Mac (it sends the clip with the
  * transcript). `model` is the model's name, or absent for "its usual model".
  */
-export const newChatReadBack = (text: string, label: string, model: string | undefined): string =>
-  `I'll start a new chat in ${label} with ${model ?? "its usual model"}: ${text.replace(/[.!?\s]+$/, "")}. Say yes to start it, or no.`;
+export const newChatReadBack = (text: string, label: string, model: string | undefined): string => {
+  const { head, tail } = newChatReadBackParts(label, model);
+  return `${head} ${text.replace(/[.!?\s]+$/, "")}. ${tail}`;
+};
+
+/** The fixed words either side of what was heard in a new chat's read-back (made ahead and cached by the Mac). */
+export const newChatReadBackParts = (label: string, model: string | undefined): { head: string; tail: string } => ({
+  head: `I'll start a new chat in ${label} with ${model ?? "its usual model"}:`,
+  tail: "Say yes to start it, or no.",
+});
 const newChatKeys = "Press 1 to start it, star to hear it again, or hash to cancel.";
 const newChatUnclear = (text: string): string =>
   `I only heard: ${text.replace(/[.!?\s]+$/, "")}. Press 2 to record again, or hash to cancel.`;
@@ -594,10 +602,12 @@ async function messageFlow(
     if (!unclear && heard.audio) deps.seed?.([heard.audio]);
     const readBack = unclear ? unclearPrompt(heard.text, recordAgain) : readBackSentence(heard.text, heard.label, ask);
     let answer: string | null = null;
+    // Said as the Mac makes it (its parts, add-on 0.19.0) the first time, then from the clips already held.
+    const sayReadBack = unclear ? () => speak(call, deps, readBack) : readBackSpeech(call, heard, readBack, deps);
     // Said until a key that means something: star hears it again, 2 (with a Mac that answers) asks it as a question,
     // and a question that fails is offered again here, never by recording again.
     for (let repeats = 0; call.open; ) {
-      await speak(call, deps, readBack);
+      await sayReadBack();
       answer = await call.key(CONFIRM_WAIT_MS);
       if (answer === "*") {
         deps.trace?.("key: * (hear it again)");
@@ -727,7 +737,7 @@ async function newChatFlow(
     return confirmNewChat(
       call,
       deps,
-      readBack,
+      readBackSpeech(call, heard, readBack, deps),
       { callId, label: heard.label, dirVersion: directory.version },
       async (spoken, answer) => {
         deps.trace?.(spoken ? "step: Spoken answer sent" : "key: 1 (start)");
@@ -754,7 +764,7 @@ async function newChatFlow(
 async function confirmNewChat(
   call: PhoneCall,
   deps: InboundDependencies,
-  readBack: string,
+  sayReadBack: () => Promise<void>,
   info: { callId: string; label: string; dirVersion: string },
   start: (spoken: string | null, answer?: { id: string; upload: RecordedUpload }) => Promise<DownMessage | null>,
 ): Promise<void> {
@@ -780,7 +790,7 @@ async function confirmNewChat(
   let spokenTries = 0;
   let repeats = 0;
   while (call.open) {
-    await speak(call, deps, readBack);
+    await sayReadBack();
     // A key pressed while it was being read (it interrupts speech and stays queued) is the answer.
     let key = await call.key(250);
     if (key === null && spokenTries < MAX_ANSWER_TRIES) {

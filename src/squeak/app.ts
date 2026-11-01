@@ -97,6 +97,7 @@ import {
   FOLLOW_UP_ADDON,
   HOLD_ADDON,
   ANSWER_STREAM_ADDON,
+  READBACK_STREAM_ADDON,
   NEW_CHAT_ADDON,
   LATE_CLIPS_ADDON,
   VOICE_FIRST_ADDON,
@@ -1207,6 +1208,11 @@ export class SqueakApp {
       // Only what was heard is rendered per call; the fixed suffix per chat is kept, and the two are joined.
       readBack: (text, label, ask) => this.readBackClips.clip(text, label, ask),
       prepareReadBack: (labels, ask) => this.readBackClips.prepare(labels, ask),
+      // An add-on from 0.19.0 plays the read-back part by part as it is made: head and tail are made ahead.
+      speechParts: (parts, onPart) => this.naturalVoice.partClips(parts, onPart),
+      streamsReadBack: () =>
+        this.naturalVoice.usable && addonSupports(this.gatewayStatusReader().peek().version, READBACK_STREAM_ADDON),
+      prepareSpeech: (texts) => this.readBackClips.prepareTexts(texts),
       // Questions and status by phone: read-only, from the chat's own transcript; nothing reaches the replier.
       describe: (target, label) => {
         const input = this.chatBriefInputs(target, label);

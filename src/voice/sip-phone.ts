@@ -268,6 +268,10 @@ export class LiveCall implements PhoneCall {
     });
   }
 
+  get keyPending(): boolean {
+    return this.keys.length > 0;
+  }
+
   async say(text: string): Promise<void> {
     if (!this.open || this.keys.length > 0) return;
     const { file, durationMs, source, makeMs } = await this.ctx.speaker.speakDetailed(text);
