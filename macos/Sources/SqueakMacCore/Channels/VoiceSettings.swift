@@ -35,6 +35,10 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     /// The presets it can be picked from (the same list as `GET /control/models`); nil from a daemon that predates
     /// the setting (hide the row).
     public var chatModels: [DaemonChatModel]?
+    /// Start a call with the chat that is waiting on you; nil from a daemon that predates it (hide the toggle).
+    public var offerWaitingChat: Bool?
+    /// Answer a call's menus by saying a workspace or chat; nil from a daemon that predates it (hide the toggle).
+    public var menusByVoice: Bool?
 
     public struct LastTest: Sendable, Equatable, Decodable {
         public var at: Double
@@ -75,7 +79,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         self.pause = pause; self.pauseKnown = pauseKnown ?? (pause != nil)
     }
 
-    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces, lastTest, persona, hold, newChatModel, chatModels }
+    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces, lastTest, persona, hold, newChatModel, chatModels, offerWaitingChat, menusByVoice }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -94,6 +98,8 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         hold = try? c.decode(CallHold.self, forKey: .hold)
         newChatModel = try? c.decode(CallNewChatModel.self, forKey: .newChatModel)
         chatModels = (try? c.decode([Failable<DaemonChatModel>].self, forKey: .chatModels))?.compactMap(\.value)
+        offerWaitingChat = try? c.decode(Bool.self, forKey: .offerWaitingChat)
+        menusByVoice = try? c.decode(Bool.self, forKey: .menusByVoice)
     }
 
     public var isOn: Bool { mode != "off" }
@@ -136,6 +142,16 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     /// `{ "test": true }`: a test call, ringing with a made-up question and touching no chat.
     public static func testRequestBody() -> Data {
         (try? JSONSerialization.data(withJSONObject: ["test": true], options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+
+    /// `{ "offerWaitingChat": Bool }`: exactly one key.
+    public static func offerWaitingChatBody(_ on: Bool) -> Data {
+        (try? JSONSerialization.data(withJSONObject: ["offerWaitingChat": on], options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
+
+    /// `{ "menusByVoice": Bool }`: exactly one key.
+    public static func menusByVoiceBody(_ on: Bool) -> Data {
+        (try? JSONSerialization.data(withJSONObject: ["menusByVoice": on], options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 
     public static func requestBody(callee: String?) -> Data {

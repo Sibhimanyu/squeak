@@ -51,6 +51,7 @@ struct VoiceSettingsPage: View {
                 if v.pauseKnown { pauseSection(v) }
                 if let hold = v.hold { holdSection(hold) }
                 if let models = v.chatModels, !models.isEmpty { newChatSection(v.newChatModel, models: models) }
+                if v.menusByVoice != nil || v.offerWaitingChat != nil { callFlowSection(v) }
                 if let persona = v.persona { personaSection(persona) }
                 if let natural = v.natural { naturalSection(natural) }
                 if let favorites = v.favorites { quickSection(favorites, candidates: v.workspaces ?? []) }
@@ -252,6 +253,25 @@ struct VoiceSettingsPage: View {
         .disabled(m.pauseBusy)
     }
 
+    private func callFlowSection(_ v: VoiceSettings) -> some View {
+        Section {
+            if let on = v.menusByVoice {
+                Toggle(isOn: Binding(get: { on }, set: { n in Task { await m.setCallFlow(menusByVoice: n) } })) {
+                    Text("Answer menus by voice")
+                    Text("Say a workspace or chat instead of pressing a number. Keys still work.")
+                }
+            }
+            if let on = v.offerWaitingChat {
+                Toggle(isOn: Binding(get: { on }, set: { n in Task { await m.setCallFlow(offerWaitingChat: n) } })) {
+                    Text("Offer the chat that's waiting on you first")
+                    Text("A call starts with the chat that needs you, instead of the workspaces.")
+                }
+            }
+            if let e = m.voiceError { Footnote(e) }
+        } header: { Text("Calling in") }
+        .disabled(m.pauseBusy)
+    }
+
     private func newChatSection(_ saved: CallNewChatModel?, models: [DaemonChatModel]) -> some View {
         let pick = saved?.resolved(in: models)
         let model = pick.flatMap { p in models.first { $0.id == p.id } }
@@ -296,6 +316,7 @@ struct VoiceSettingsPage: View {
                     .onChange(of: personaCustom) { _, text in
                         if text.count > VoicePersona.maxCustomLength { personaCustom = String(text.prefix(VoicePersona.maxCustomLength)) }
                     }
+                Footnote("Squeak asks Claude once, on your Mac, to write waiting lines in this character when you save it.")
                 HStack {
                     Text("\(personaCustom.count)/\(VoicePersona.maxCustomLength)").font(.caption).foregroundStyle(.secondary)
                     Spacer()

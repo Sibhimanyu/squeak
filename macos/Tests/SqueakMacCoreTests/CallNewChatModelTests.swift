@@ -55,4 +55,18 @@ import Testing
         #expect(CallNewChatModel.summary(.init(id: "opus", level: "xhigh"), in: models) == "Opus 5.5 · Extra high")
         #expect(CallNewChatModel.summary(.init(id: "haiku"), in: models) == "Haiku")
     }
+
+    @Test func callFlowTogglesDecodeAndHideWhenAbsent() throws {
+        let old = try view("{}")
+        #expect(old.offerWaitingChat == nil && old.menusByVoice == nil)
+        let v = try view(#"{"offerWaitingChat":false,"menusByVoice":true}"#)
+        #expect(v.offerWaitingChat == false && v.menusByVoice == true)
+    }
+
+    @Test func callFlowRequestBodiesCarryExactlyOneKey() throws {
+        let a = try #require(try JSONSerialization.jsonObject(with: VoiceSettings.offerWaitingChatBody(true)) as? [String: Bool])
+        #expect(a == ["offerWaitingChat": true])
+        let b = try #require(try JSONSerialization.jsonObject(with: VoiceSettings.menusByVoiceBody(false)) as? [String: Bool])
+        #expect(b == ["menusByVoice": false])
+    }
 }
