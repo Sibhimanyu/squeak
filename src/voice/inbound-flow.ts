@@ -15,6 +15,7 @@ import {
 } from "./memo-protocol.js";
 import { judgeTranscript } from "./transcript-quality.js";
 import { speakReply } from "./answer-audio.js";
+import type { TalkPhase } from "./memo-protocol.js";
 import type { Uplink } from "./uplink.js";
 
 export interface InboundDependencies {
@@ -47,7 +48,13 @@ export interface InboundDependencies {
    */
   talk?: (
     call: PhoneCall,
-    info: { callId: string; label: string; from: { dirVersion: string; choice: number } },
+    info: {
+      callId: string;
+      label: string;
+      from: { dirVersion: string; choice: number };
+      /** The first turn's phase; absent: "say". "confirm" continues a hold offer the Mac has already made. */
+      phase?: TalkPhase;
+    },
   ) => Promise<"ended" | "keys">;
 }
 
@@ -98,6 +105,10 @@ const SAYS = {
   limit: "That is as many answers as I can give on one call. Goodbye.",
   noSpeech: "I didn't hear anything. Press 1 to try again, or hash to hang up.",
   cap: "I have to stop there.",
+  // A new chat from a call: what the add-on says when the Mac cannot be reached, or fails without a sentence of its own.
+  newChatNoMac: "I could not reach your Mac, so no chat was started. Goodbye.",
+  newChatNotSure: "I could not reach your Mac, so I am not sure the chat was started. Check the app. Goodbye.",
+  newChatFailed: "Your Mac could not start the chat. Goodbye.",
 };
 
 /** Said once a chat is chosen, before the beep. */
@@ -143,12 +154,32 @@ function workspaceMenuPrompt(directory: DirectoryDoc, greet: boolean): string {
   return `${greet ? hello(directory.terse === true) : ""}Which workspace? ${menu}${other} ${MENU_END}`;
 }
 
+/** The key for "a new chat" in a workspace's chat menu: chats take 1 to 9, so 0 is the one that never clashes. */
+export const NEW_CHAT_KEY = "0";
+
 function chatMenuPrompt(workspace: DirectoryWorkspace): string {
   const menu = workspace.chats.map((chat) => `Press ${chat.n} for ${chat.label}.`).join(" ");
-  return `${workspace.label}. Which chat? ${menu} ${AGAIN}, or hash to go back.`;
+  const fresh = workspace.newChat ? ` Press ${NEW_CHAT_KEY} for a new chat.` : "";
+  return `${workspace.label}. Which chat? ${menu}${fresh} ${AGAIN}, or hash to go back.`;
 }
 
-const noneIn = (workspace: DirectoryWorkspace): string => `Nothing in ${workspace.label} can take a message right now.`;
+const noneIn = (workspace: DirectoryWorkspace): string =>
+  workspace.newChat
+    ? `Nothing in ${workspace.label} can take a message right now. Press ${NEW_CHAT_KEY} for a new chat. ${AGAIN}, or hash to go back.`
+    : `Nothing in ${workspace.label} can take a message right now.`;
+
+/** Said once a new chat is chosen, before the beep. */
+export const newChatPrompt = (label: string): string => `New chat in ${label}. Go ahead: say what you want it to do.`;
+
+/**
+ * The read-back of a new chat: said by the add-on, and made ahead of the call by the Mac (it sends the clip with the
+ * transcript). `model` is the model's name, or absent for "its usual model".
+ */
+export const newChatReadBack = (text: string, label: string, model: string | undefined): string =>
+  `I'll start a new chat in ${label} with ${model ?? "its usual model"}: ${text.replace(/[.!?\s]+$/, "")}. Say yes to start it, or no.`;
+const newChatKeys = "Press 1 to start it, star to hear it again, or hash to cancel.";
+const newChatUnclear = (text: string): string =>
+  `I only heard: ${text.replace(/[.!?\s]+$/, "")}. Press 2 to record again, or hash to cancel.`;
 
 /** The words the menus will say for this list; the first menu carries the greeting only when no PIN prompt came first. */
 function menuPrompts(directory: DirectoryDoc, greet: boolean): string[] {
@@ -204,6 +235,11 @@ export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean):
       )
     : [];
   if (ask) fixed.push(SAYS.recordAsk, SAYS.askFail, SAYS.followUp, SAYS.limit);
+  const fresh = (directory?.workspaces ?? []).filter((w) => w.newChat);
+  if (fresh.length > 0) {
+    fixed.push(newChatKeys, SAYS.newChatNoMac, SAYS.newChatNotSure, SAYS.newChatFailed);
+    for (const workspace of fresh) fixed.push(newChatPrompt(workspace.label));
+  }
   fixed.push(heardNothingPrompt(ask ? "3" : "2"));
   const last = directory?.last ? [lastChatPrompt(directory.last.label, !askPin, terse, directory.last.why)] : [];
   // With a last chat the offer carries the greeting, so the menus behind "another chat" do not.
@@ -360,8 +396,11 @@ async function conversation(call: PhoneCall, deps: InboundDependencies, terse: b
     if (target === null && !another) return bye(call, deps, SAYS.bye);
     greet = false;
   }
-  target ??= await pickTarget(call, deps, directory, greet);
-  if (target === null) return bye(call, deps, SAYS.bye);
+  const picked = target ?? (await pickTarget(call, deps, directory, greet));
+  if (picked === null) return bye(call, deps, SAYS.bye);
+  // 0 in a workspace's chat menu: not a chat of the list but a new one in that workspace.
+  if ("newChatIn" in picked) return newChatFlow(call, deps, directory, picked.newChatIn);
+  target = picked;
 
   // 3a. With a Mac that talks: the rest of the call is a conversation about this chat. Only if the Mac cannot be
   // reached does it fall back to the keys below.
@@ -604,6 +643,180 @@ async function messageFlow(
   return done(SAYS.bye);
 }
 
+/** A spoken yes or no to the read-back is a word or two. */
+const NEW_CHAT_ANSWER_MS = 8_000;
+/** Tries at the spoken answer before the keypad is offered, and read-backs heard again with star. */
+const MAX_ANSWER_TRIES = 2;
+/** Under this a spoken answer is a click or a breath: the keypad is offered instead. */
+const MIN_ANSWER_MS = 500;
+
+/**
+ * Starts a NEW chat in a workspace (key 0 in its chat menu; a directory workspace's `newChat`): record what it should
+ * do, have the Mac read it back with the workspace and the model, and only a yes starts it. The yes is spoken first
+ * (the Mac transcribes it and accepts only a plain yes) with the keypad as the fallback: 1 starts it, star hears it
+ * again, hash cancels. This side never decides: it sends the recording up, speaks what the Mac says, and a start is a
+ * message the Mac checks against the read-back it kept. Always ends the call.
+ */
+async function newChatFlow(
+  call: PhoneCall,
+  deps: InboundDependencies,
+  directory: DirectoryDoc,
+  workspace: DirectoryWorkspace,
+): Promise<void> {
+  const { uplink } = deps;
+  const index = workspace.newChat;
+  if (!index || !uplink.newChat || !uplink.start) return bye(call, deps, SAYS.wrong);
+  const callId = crypto.randomBytes(9).toString("base64url");
+  for (let take = 0; take < MAX_TAKES && call.open; take++) {
+    await speak(call, deps, newChatPrompt(workspace.label));
+    const recording = await call.record({ maxMs: MAX_MEMO_MS, beep: true, endOnSilence: true });
+    if (!recording) return;
+    deps.trace?.(`step: Recorded ${(recording.durationMs / 1000).toFixed(1)} s`);
+    if (recording.ended === "no-speech") {
+      await speak(call, deps, SAYS.noSpeech);
+      const again = await call.key(MENU_WAIT_MS);
+      deps.trace?.(`key: ${again === "1" ? "1 (try again)" : "hang up"}`);
+      if (again === "1") continue;
+      return bye(call, deps, SAYS.bye);
+    }
+    if (recording.ended === "limit") await speak(call, deps, SAYS.cap);
+    if (recording.durationMs < MIN_MEMO_MS) {
+      await speak(call, deps, SAYS.nothing);
+      continue;
+    }
+    await speak(call, deps, SAYS.wait);
+    const memoId = newMessageId();
+    const stopReassuring = reassure(call, deps);
+    let heard: DownMessage | null;
+    try {
+      heard = await uplink.newChat(memoId, index, directory.version, await deps.encode(recording.file));
+    } finally {
+      stopReassuring();
+    }
+    if (!heard) return bye(call, deps, SAYS.newChatNoMac);
+    if (heard.status !== "transcript") {
+      // A refusal (an out-of-date list, too many today) will not change by recording again.
+      return bye(call, deps, `${heard.status === "refused" ? heard.reason : SAYS.wrong} Goodbye.`);
+    }
+    const quality = judgeTranscript(heard.text, recording.durationMs);
+    deps.trace?.(`step: Transcript judged ${quality}`);
+    if (quality === "silence") {
+      await speak(call, deps, heardNothingPrompt("2"));
+      const retry = await call.key(MENU_WAIT_MS);
+      deps.trace?.(`key: ${retry === "2" ? "2 (record again)" : "cancel"}`);
+      if (retry === "2") continue;
+      return bye(call, deps, SAYS.cancelled);
+    }
+    // A few brief words are never offered for a start: they are read back, and the only ways on are to record again or stop.
+    if (quality === "unclear") {
+      await speak(call, deps, newChatUnclear(heard.text));
+      const retry = await call.key(CONFIRM_WAIT_MS);
+      deps.trace?.(`key: ${retry === "2" ? "2 (record again)" : "cancel"}`);
+      if (retry === "2") continue;
+      return bye(call, deps, SAYS.cancelled);
+    }
+    if (heard.audio) deps.seed?.([heard.audio]);
+    const readBack = newChatReadBack(heard.text, heard.label, heard.model);
+    return confirmNewChat(
+      call,
+      deps,
+      readBack,
+      { callId, label: heard.label, dirVersion: directory.version },
+      async (spoken) => {
+        deps.trace?.(spoken ? "step: Spoken answer sent" : "key: 1 (start)");
+        return uplink.start!(memoId, { callId, ...(spoken ? { audio: await deps.encode(spoken) } : {}) });
+      },
+    );
+  }
+  return bye(call, deps, SAYS.bye);
+}
+
+/**
+ * The yes or no after a new chat's read-back. Said, then (a key pressed meanwhile counts first) a short spoken answer
+ * the Mac judges; if nothing was said, the keypad: 1 starts it, star hears it again, hash cancels. "ended": the call
+ * said its goodbye.
+ */
+async function confirmNewChat(
+  call: PhoneCall,
+  deps: InboundDependencies,
+  readBack: string,
+  info: { callId: string; label: string; dirVersion: string },
+  start: (spoken: string | null) => Promise<DownMessage | null>,
+): Promise<void> {
+  const finish = async (reply: DownMessage | null): Promise<void> => {
+    if (!reply) return bye(call, deps, SAYS.newChatNotSure);
+    if (reply.status === "refused") return bye(call, deps, `${reply.reason} Goodbye.`);
+    if (reply.status !== "newchat") return bye(call, deps, SAYS.newChatFailed);
+    deps.trace?.(`step: New chat ${reply.outcome}`);
+    await speakReply(call, reply, deps);
+    // The Mac offered to stay on the line: the call goes on as a talk turn answering that offer.
+    if (reply.outcome === "started" && reply.hold && deps.talk && call.open) {
+      const outcome = await deps.talk(call, {
+        callId: info.callId,
+        label: info.label,
+        from: { dirVersion: info.dirVersion, choice: 1 },
+        phase: "confirm",
+      });
+      if (outcome === "keys") await speak(call, deps, SAYS.bye);
+    } else if (reply.outcome === "started" && reply.hold && call.open) {
+      await speak(call, deps, SAYS.bye);
+    }
+  };
+  let spokenTries = 0;
+  let repeats = 0;
+  while (call.open) {
+    await speak(call, deps, readBack);
+    // A key pressed while it was being read (it interrupts speech and stays queued) is the answer.
+    let key = await call.key(250);
+    if (key === null && spokenTries < MAX_ANSWER_TRIES) {
+      const answer = await call.record({ maxMs: NEW_CHAT_ANSWER_MS, beep: true, endOnSilence: true });
+      if (!answer) return;
+      if (answer.ended === "key") {
+        deps.trace?.("key: cancel");
+        return bye(call, deps, SAYS.cancelled);
+      }
+      if (answer.ended !== "no-speech" && answer.durationMs >= MIN_ANSWER_MS) {
+        spokenTries += 1;
+        const stop = reassure(call, deps);
+        let reply: DownMessage | null;
+        try {
+          reply = await start(answer.file);
+        } finally {
+          stop();
+        }
+        if (reply?.status === "newchat" && reply.outcome === "again") {
+          await speakReply(call, reply, deps);
+          continue;
+        }
+        return finish(reply);
+      }
+      // Nothing said: the keypad.
+      await speak(call, deps, newChatKeys);
+      key = await call.key(CONFIRM_WAIT_MS);
+    } else if (key === null) {
+      await speak(call, deps, newChatKeys);
+      key = await call.key(CONFIRM_WAIT_MS);
+    }
+    if (key === "*") {
+      deps.trace?.("key: * (hear it again)");
+      if (repeats++ >= MAX_REPEATS) break;
+      continue;
+    }
+    if (key === "1") return finish(await start(null));
+    if (key !== null && key !== "#") {
+      // Any other digit is not an answer: the read-back is said again, a few times at most.
+      if (repeats++ >= MAX_REPEATS) break;
+      continue;
+    }
+    deps.trace?.("key: cancel");
+    return bye(call, deps, SAYS.cancelled);
+  }
+  if (call.open) await bye(call, deps, SAYS.bye);
+}
+
+/** A menu's answer that is not a chat: a new one, in this workspace. */
+type NewChatPick = { newChatIn: DirectoryWorkspace };
+
 const digitOf = (key: string | null): number | null => (key !== null && /^\d$/.test(key) ? Number(key) : null);
 const chosen = (item: DirectoryItem): number => item.choice ?? item.n;
 
@@ -628,7 +841,7 @@ async function pickTarget(
   deps: InboundDependencies,
   directory: DirectoryDoc,
   greet: boolean,
-): Promise<DirectoryItem | null> {
+): Promise<DirectoryItem | NewChatPick | null> {
   const workspaces = directory.workspaces ?? [];
   if (workspaces.length === 0) return pickChat(call, deps, directory.items, menuPrompt(directory, greet));
   for (let attempt = 0; attempt < 3 && call.open; attempt++) {
@@ -645,12 +858,23 @@ async function pickTarget(
     if (!workspace) continue;
     deps.trace?.(`key: ${digit} (workspace ${workspace.label})`);
     if (workspace.chats.length === 0) {
-      await speak(call, deps, noneIn(workspace));
+      // Nothing to message, but a new chat can still be started there (the prompt then offers it).
+      if (!workspace.newChat) {
+        await speak(call, deps, noneIn(workspace));
+        continue;
+      }
+      const again = await menuKey(call, deps, noneIn(workspace));
+      if (again === null || again === "#") return null;
+      if (again === NEW_CHAT_KEY) {
+        deps.trace?.(`key: ${NEW_CHAT_KEY} (a new chat in ${workspace.label})`);
+        return { newChatIn: workspace };
+      }
       continue;
     }
-    // One chat in it: nothing to choose, and the line before the beep names it.
-    if (workspace.chats.length === 1) return workspace.chats[0]!;
-    const picked = await pickChat(call, deps, workspace.chats, chatMenuPrompt(workspace));
+    // One chat in it: nothing to choose, and the line before the beep names it. With a new chat on offer the menu is
+    // the way to it, so it is read.
+    if (workspace.chats.length === 1 && !workspace.newChat) return workspace.chats[0]!;
+    const picked = await pickChat(call, deps, workspace.chats, chatMenuPrompt(workspace), workspace);
     if (picked !== null) return picked;
   }
   return null;
@@ -662,10 +886,16 @@ async function pickChat(
   deps: InboundDependencies,
   items: DirectoryItem[],
   prompt: string,
-): Promise<DirectoryItem | null> {
+  /** The workspace whose menu this is, when it can start a new chat (key 0). */
+  fresh?: DirectoryWorkspace,
+): Promise<DirectoryItem | NewChatPick | null> {
   for (let attempt = 0; attempt < 2 && call.open; attempt++) {
     const key = await menuKey(call, deps, prompt);
     if (key === null || key === "#") return null;
+    if (key === NEW_CHAT_KEY && fresh?.newChat) {
+      deps.trace?.(`key: ${NEW_CHAT_KEY} (a new chat in ${fresh.label})`);
+      return { newChatIn: fresh };
+    }
     const digit = digitOf(key);
     const item = items.find((candidate) => candidate.n === digit);
     if (item) {

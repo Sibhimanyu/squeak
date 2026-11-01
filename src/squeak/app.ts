@@ -60,7 +60,7 @@ import { parseChoices } from "../fleet/choices.js";
 import { cardLabel, renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
-import { listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
+import { findNewChatWorkspace, listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
 import {
   archiveWorkspace,
   createPrPrompt,
@@ -97,6 +97,7 @@ import {
   FOLLOW_UP_ADDON,
   HOLD_ADDON,
   ANSWER_STREAM_ADDON,
+  NEW_CHAT_ADDON,
   LATE_CLIPS_ADDON,
   VOICE_FIRST_ADDON,
 } from "../voice/addon-update.js";
@@ -444,7 +445,9 @@ export class SqueakApp {
         return [];
       }
     });
-    this.voiceSettings = new VoiceSettingsStore(path.join(config.supportDir, "voice-settings.json"));
+    this.voiceSettings = new VoiceSettingsStore(path.join(config.supportDir, "voice-settings.json"), Date.now, () =>
+      listChatModels(config.conductorDbPath),
+    );
     this.voiceFavorites = new VoiceFavoritesStore(path.join(config.supportDir, "voice-favorites.json"), (key) =>
       this.workspaceLabel(key),
     );
@@ -1227,6 +1230,30 @@ export class SqueakApp {
       },
       endCall: (callId) => this.chatConverser.end(callId),
       terse: () => isTerse(this.voiceSettings.settings.persona),
+      // A new chat from a call in: the same `startChat` as the phone app, with the owner's model pick for calls.
+      newChat: {
+        supported: () => addonSupports(this.gatewayStatusReader().peek().version, NEW_CHAT_ADDON),
+        workspaceId: (key) => {
+          try {
+            return findNewChatWorkspace(this.config.conductorDbPath, key)?.id ?? null;
+          } catch {
+            return null;
+          }
+        },
+        model: () => this.newChatCallModel(),
+        start: (args) =>
+          newChatControl({ conductorDbPath: this.config.conductorDbPath, relay: this.conductorRelay }).startChat({
+            workspaceId: args.workspaceId,
+            text: args.text,
+            ...(args.model
+              ? {
+                  agent: args.model.agent,
+                  model: args.model.id,
+                  ...(args.model.level ? { thinking: args.model.level } : {}),
+                }
+              : {}),
+          }),
+      },
       // Offered after a message the person approved: stay on the line while it works, a key for its thinking.
       hold: {
         supported: () => addonSupports(this.gatewayStatusReader().peek().version, HOLD_ADDON),
@@ -1252,6 +1279,35 @@ export class SqueakApp {
       note: (text) => this.announceCallNote(text),
       trace: (kind, text, extra) => this.traceMac(kind, text, extra),
     });
+  }
+
+  /** The "New chats from calls use" pick as a preset Conductor still offers; null (the workspace's usual model) when unset or gone. */
+  private newChatCallModel(): { id: string; level?: string; agent: "claude" | "codex"; label: string } | null {
+    const pick = this.voiceSettings.settings.newChatModel;
+    if (!pick) return null;
+    try {
+      const preset = listChatModels(this.config.conductorDbPath).find((model) => model.id === pick.id);
+      if (!preset) return null;
+      const level = pick.level && preset.levels.includes(pick.level) ? pick.level : undefined;
+      return { id: preset.id, agent: preset.agent, label: preset.label, ...(level ? { level } : {}) };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The model presets for the picker in both apps (`voiceView().chatModels`); empty when Conductor cannot be read. */
+  private callChatModels() {
+    try {
+      return listChatModels(this.config.conductorDbPath).map((model) => ({
+        id: model.id,
+        label: model.label,
+        agent: model.agent,
+        levels: model.levels,
+        ...(model.defaultLevel ? { defaultLevel: model.defaultLevel } : {}),
+      }));
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -1637,6 +1693,9 @@ export class SqueakApp {
       persona: this.voiceSettings.settings.persona ?? DEFAULT_PERSONA,
       // When a question rings the phone: every key present, the defaults where the owner changed nothing.
       hold: this.voiceSettings.hold(),
+      // The model a chat started from a call uses (null: the workspace's usual one) and the presets to pick from.
+      newChatModel: this.voiceSettings.settings.newChatModel ?? null,
+      chatModels: this.callChatModels(),
       favorites: this.voiceFavorites.list(),
       workspaces: this.voiceWorkspaces(),
       // The realistic voice this Mac makes for calls (`squeak voice-tts-setup` installs it).

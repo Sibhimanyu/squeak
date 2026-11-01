@@ -87,8 +87,42 @@ export function readHoldChange(value: unknown): Partial<HoldSettings> | null {
   return out;
 }
 
+/** The model a chat started from a call uses: one of Conductor's presets (`listChatModels` ids) and a level it takes. */
+export interface NewChatModel {
+  id: string;
+  level?: string;
+}
+
+const MODEL_ID = /^[A-Za-z0-9._-]{1,60}$/;
+const LEVEL = /^[a-z]{1,20}$/;
+export const NEW_CHAT_MODEL_SHAPE_REFUSAL = "Pick one of the models your Mac offers, and a thinking level it takes.";
+export const NEW_CHAT_MODEL_GONE_REFUSAL = "That model isn't one this Mac offers any more. Pick another.";
+export const NEW_CHAT_LEVEL_REFUSAL = "That thinking level isn't available for that model.";
+export const NEW_CHAT_MODELS_UNREAD_REFUSAL = "This Mac could not read its models. Try again in a moment.";
+
+/** `{ newChatModel: { id, level? } | null }`, exactly that key and those fields. `null` inside: the workspace's usual model. */
+export function readNewChatModelChange(value: unknown): { model: NewChatModel | null } | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length !== 1 || keys[0] !== "newChatModel") return null;
+  const raw = (value as Record<string, unknown>).newChatModel;
+  if (raw === null) return { model: null };
+  if (typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (Object.keys(record).some((key) => key !== "id" && key !== "level")) return null;
+  if (typeof record.id !== "string" || !MODEL_ID.test(record.id)) return null;
+  if (record.level === undefined) return { model: { id: record.id } };
+  if (typeof record.level !== "string" || !LEVEL.test(record.level)) return null;
+  return { model: { id: record.id, level: record.level } };
+}
+
+/** The models a new chat may use, as `listChatModels` lists them (only what the check needs). */
+export type ChatModelSource = () => Array<{ id: string; levels: string[] }>;
+
 export interface VoiceSettings {
   callee: string | null;
+  /** Absent: a chat started from a call uses the workspace's usual model. */
+  newChatModel?: NewChatModel;
   /** Absent until the owner changes one: the defaults (`DEFAULT_HOLD`). */
   hold?: Partial<HoldSettings>;
   /** Present only while calls are paused. */
@@ -183,6 +217,8 @@ export class VoiceSettingsStore {
   constructor(
     private readonly file: string,
     now: () => number = Date.now,
+    /** Where the presets come from; absent: a model cannot be set (only cleared). */
+    private readonly chatModels?: ChatModelSource,
   ) {
     this.now = now;
     this.current = this.load();
@@ -202,8 +238,13 @@ export class VoiceSettingsStore {
     const pause = this.current.pause;
     if (!pause) return null;
     if (pause.until !== null && pause.until <= this.now()) {
-      const { callee, persona, hold } = this.current;
-      this.save({ callee, ...(persona ? { persona } : {}), ...(hold ? { hold } : {}) });
+      const { callee, persona, hold, newChatModel } = this.current;
+      this.save({
+        callee,
+        ...(persona ? { persona } : {}),
+        ...(hold ? { hold } : {}),
+        ...(newChatModel ? { newChatModel } : {}),
+      });
       return null;
     }
     return { ...pause };
@@ -220,6 +261,9 @@ export class VoiceSettingsStore {
       // A damaged key reads as its default; the rest of the saved rules stay.
       const hold = readSavedHold(raw.hold);
       if (hold) settings.hold = hold;
+      // Checked against Conductor's presets when it is set and again when a chat starts, not here: Conductor may be quiet.
+      const model = readNewChatModelChange({ newChatModel: raw.newChatModel });
+      if (model?.model) settings.newChatModel = model.model;
       const pause = raw.pause;
       if (typeof pause === "object" && pause !== null && !Array.isArray(pause)) {
         const until = (pause as Record<string, unknown>).until;
@@ -256,6 +300,7 @@ export class VoiceSettingsStore {
     const keep = {
       ...(this.current.persona ? { persona: this.current.persona } : {}),
       ...(this.current.hold ? { hold: this.current.hold } : {}),
+      ...(this.current.newChatModel ? { newChatModel: this.current.newChatModel } : {}),
     };
     const keepPause = this.current.pause ? { pause: this.current.pause } : {};
     let next: VoiceSettings;
@@ -263,6 +308,28 @@ export class VoiceSettingsStore {
       const change = readHoldChange(request);
       if (!change) return { ok: false, reason: HOLD_REFUSAL };
       next = { callee: this.current.callee, ...keep, ...keepPause, hold: { ...this.current.hold, ...change } };
+    } else if (isKey("newChatModel")) {
+      const change = readNewChatModelChange(request);
+      if (!change) return { ok: false, reason: NEW_CHAT_MODEL_SHAPE_REFUSAL };
+      const { newChatModel: _dropped, ...rest } = keep;
+      void _dropped;
+      if (change.model) {
+        let models: ReturnType<ChatModelSource>;
+        try {
+          if (!this.chatModels) return { ok: false, reason: NEW_CHAT_MODELS_UNREAD_REFUSAL };
+          models = this.chatModels();
+        } catch {
+          return { ok: false, reason: NEW_CHAT_MODELS_UNREAD_REFUSAL };
+        }
+        const offered = models.find((model) => model.id === change.model!.id);
+        if (!offered) return { ok: false, reason: NEW_CHAT_MODEL_GONE_REFUSAL };
+        if (change.model.level !== undefined && !offered.levels.includes(change.model.level)) {
+          return { ok: false, reason: NEW_CHAT_LEVEL_REFUSAL };
+        }
+        next = { callee: this.current.callee, ...rest, ...keepPause, newChatModel: change.model };
+      } else {
+        next = { callee: this.current.callee, ...rest, ...keepPause };
+      }
     } else if (isKey("persona")) {
       const persona = readPersonaChange(request);
       if (!persona)

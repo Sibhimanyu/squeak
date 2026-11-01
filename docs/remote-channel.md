@@ -865,6 +865,15 @@ A third `change` shape changes the pin the gateway asks for (never logged, never
 Home Assistant add-on, which checks the current pin (five wrong guesses lock changes for ten minutes) and answers; the
 command's answer is that outcome. A Mac whose calls are placed directly refuses: its pin is in its own config.
 
+### New chats from calls: the model pick (2026-11-01)
+
+The view's `voice` also carries `newChatModel` (`{ id, level? }` or `null`: the workspace's usual model) and `chatModels`
+(`[{ id, label, agent, levels, defaultLevel? }]`, Conductor's model presets; both absent on an older Mac, so a phone hides
+the picker). The signed `voice` command takes `{ "newChatModel": { "id": "...", "level"?: "..." } | null }`, exactly that
+one key and those fields; it ends in `VoiceSettingsStore.apply` like the Mac app's `POST /control/voice`, which refuses an
+`id` not in `listChatModels` and a `level` not in that model's `levels` with a fixed sentence. The phone call flow that uses
+it (key 0 in a workspace's chat menu, `newchat` and `start` messages) is in docs/voice.md, "A new chat from a call".
+
 ### Voice parity with the Mac app (2026-10-30)
 
 The phone can do what the Mac app's Voice settings do, including hearing a sample (below). Wire details for the apps:

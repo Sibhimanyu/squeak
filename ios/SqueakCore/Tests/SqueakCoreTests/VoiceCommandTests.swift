@@ -219,6 +219,31 @@ final class VoiceParityTests: XCTestCase {
         XCTAssertEqual(try change(.favorites([])), #"{"favorites":[]}"#)
     }
 
+    func testNewChatModelViewAndCommands() throws {
+        XCTAssertNil(try view(#"{"mode":"direct"}"#).chatModels)
+        let v = try view(#"{"mode":"direct","newChatModel":{"id":"opus","level":"high"},"chatModels":[{"id":"opus","label":"Opus 5.5","agent":"claude","levels":["low","high"],"defaultLevel":"low"},{"id":"gpt","label":"GPT"}]}"#)
+        XCTAssertEqual(v.newChatModel, NewChatModelPick(id: "opus", level: "high"))
+        let models = try XCTUnwrap(v.chatModels)
+        XCTAssertEqual(try view(#"{"mode":"direct","newChatModel":null,"chatModels":[]}"#).newChatModel, nil)
+        XCTAssertEqual(try change(.newChatModel(nil)), #"{"newChatModel":null}"#)
+        XCTAssertEqual(try change(.newChatModel(NewChatModelPick(id: "opus", level: "low"))), #"{"newChatModel":{"id":"opus","level":"low"}}"#)
+        XCTAssertEqual(try change(.newChatModel(NewChatModelPick(id: "gpt"))), #"{"newChatModel":{"id":"gpt"}}"#)
+        let ms = [VoiceChatModel(id: "opus", label: "Opus", levels: ["low", "high"], defaultLevel: "low"), VoiceChatModel(id: "gpt", label: "GPT")]
+        XCTAssertEqual(models.map(\.id), ["opus", "gpt"])
+        XCTAssertEqual(NewChatModelText.change(choosing: "opus", current: nil, in: ms), .newChatModel(NewChatModelPick(id: "opus", level: "low")))
+        XCTAssertEqual(NewChatModelText.change(choosing: "gpt", current: nil, in: ms), .newChatModel(NewChatModelPick(id: "gpt")))
+        XCTAssertNil(NewChatModelText.change(choosing: "opus", current: NewChatModelPick(id: "opus", level: "high"), in: ms))
+        XCTAssertNil(NewChatModelText.change(choosing: nil, current: nil, in: ms))
+        XCTAssertEqual(NewChatModelText.change(choosing: nil, current: NewChatModelPick(id: "gpt"), in: ms), .newChatModel(nil))
+        XCTAssertNil(NewChatModelText.change(choosing: "gone", current: nil, in: ms))
+        XCTAssertEqual(NewChatModelText.change(level: "high", current: NewChatModelPick(id: "opus", level: "low"), in: ms), .newChatModel(NewChatModelPick(id: "opus", level: "high")))
+        XCTAssertNil(NewChatModelText.change(level: "max", current: NewChatModelPick(id: "opus"), in: ms))
+        XCTAssertNil(NewChatModelText.change(level: "high", current: nil, in: ms))
+        // A model no longer listed reads as no pick.
+        XCTAssertNil(NewChatModelText.effective(NewChatModelPick(id: "old"), in: ms))
+        XCTAssertEqual(NewChatModelText.effective(NewChatModelPick(id: "opus", level: "zz"), in: ms), NewChatModelPick(id: "opus"))
+    }
+
     func testHoldViewDecodesOptionalAndClamps() throws {
         XCTAssertNil(try view(#"{"mode":"direct"}"#).hold)
         // Missing keys are the defaults; wrong types and out-of-range numbers never fail the view.

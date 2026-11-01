@@ -659,3 +659,78 @@ public enum HoldText {
     public static let toggle = "Hold the call while I\u{2019}m at the Mac"
     public static let footer = "While you are at the Mac, Squeak waits instead of ringing, and drops the call if you answer there. If you saw the question and then stepped away, it waits longer before ringing."
 }
+
+/// A model preset for new chats from a call (`voice.chatModels`). `favorite` is not sent here.
+public struct VoiceChatModel: Codable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let label: String
+    public let agent: String?
+    /// Lowest first; empty for a model with no thinking level.
+    public let levels: [String]
+    public let defaultLevel: String?
+    public init(id: String, label: String, agent: String? = nil, levels: [String] = [], defaultLevel: String? = nil) {
+        self.id = id; self.label = label; self.agent = agent; self.levels = levels; self.defaultLevel = defaultLevel
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? id
+        agent = try? c.decodeIfPresent(String.self, forKey: .agent)
+        levels = (try? c.decodeIfPresent([String].self, forKey: .levels)) ?? []
+        defaultLevel = try? c.decodeIfPresent(String.self, forKey: .defaultLevel)
+    }
+    enum CodingKeys: String, CodingKey { case id, label, agent, levels, defaultLevel }
+}
+
+/// The pick: a preset id and, for a model with levels, one of them.
+public struct NewChatModelPick: Codable, Equatable, Sendable {
+    public var id: String
+    public var level: String?
+    public init(id: String, level: String? = nil) { self.id = id; self.level = level }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        level = try? c.decodeIfPresent(String.self, forKey: .level)
+    }
+    enum CodingKeys: String, CodingKey { case id, level }
+}
+
+/// Logic of Settings › Phone calls › "New chats from calls use".
+public enum NewChatModelText {
+    public static let title = "New chats from calls use"
+    public static let usual = "Workspace\u{2019}s usual model"
+    public static let footer = "A chat you start by phone call uses this model. Squeak reads it back before starting."
+
+    /// The preset a pick names, if the Mac still lists it.
+    public static func model(_ pick: NewChatModelPick?, in models: [VoiceChatModel]) -> VoiceChatModel? {
+        guard let pick else { return nil }
+        return models.first { $0.id == pick.id }
+    }
+
+    /// The pick as it is in force: a level the model does not take, or a model no longer listed, reads as no pick.
+    public static func effective(_ pick: NewChatModelPick?, in models: [VoiceChatModel]) -> NewChatModelPick? {
+        guard let pick, let m = model(pick, in: models) else { return nil }
+        guard let level = pick.level else { return pick }
+        return m.levels.contains(level) ? pick : NewChatModelPick(id: m.id)
+    }
+
+    /// Choosing a model (nil = usual); nil when nothing would change. A model with levels starts at its default.
+    public static func change(choosing id: String?, current: NewChatModelPick?, in models: [VoiceChatModel]) -> VoiceChange? {
+        let now = effective(current, in: models)
+        guard let id else { return now == nil && current == nil ? nil : .newChatModel(nil) }
+        guard let m = models.first(where: { $0.id == id }) else { return nil }
+        if now?.id == id { return nil }
+        let level = m.defaultLevel.flatMap { m.levels.contains($0) ? $0 : nil }
+        return .newChatModel(NewChatModelPick(id: id, level: level))
+    }
+
+    /// Choosing a level of the picked model; nil when no model is picked, the level is unknown or unchanged.
+    public static func change(level: String, current: NewChatModelPick?, in models: [VoiceChatModel]) -> VoiceChange? {
+        guard let now = effective(current, in: models), let m = model(now, in: models),
+              m.levels.contains(level), now.level != level else { return nil }
+        return .newChatModel(NewChatModelPick(id: now.id, level: level))
+    }
+
+    /// Applies a change to a view, for the demo.
+    public static func apply(_ pick: NewChatModelPick?, to voice: inout VoiceView) { voice.newChatModel = pick }
+}

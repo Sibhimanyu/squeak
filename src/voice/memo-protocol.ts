@@ -56,6 +56,12 @@ export interface DirectoryWorkspace {
   n: number;
   label: string;
   chats: DirectoryItem[];
+  /**
+   * Squeak may start a NEW chat here (add-on 0.18.0 and newer; the key is 0 in the workspace's chat menu): a 1-based
+   * index into this version's list of workspaces a chat can be started in, which a `newchat` message names. The
+   * Conductor workspace id behind it stays on the Mac, as a chat target does.
+   */
+  newChat?: number;
 }
 
 export interface DirectoryDoc {
@@ -126,6 +132,26 @@ export function readAudio(key: string, id: string, doc: ChannelDoc): { version: 
 export type UpMessage =
   | { v: 1; id: string; at: number; expiresAt: number; kind: "memo"; dirVersion: string; choice: number; audio: string }
   | { v: 1; id: string; at: number; expiresAt: number; kind: "send"; memoId: string }
+  /**
+   * What the person wants a NEW chat to do, recorded: `workspace` indexes the version's `newChat` list (a directory
+   * workspace's `newChat`). The Mac answers with a `transcript` naming the workspace and the model, and starts nothing.
+   */
+  | {
+      v: 1;
+      id: string;
+      at: number;
+      expiresAt: number;
+      kind: "newchat";
+      dirVersion: string;
+      workspace: number;
+      audio: string;
+    }
+  /**
+   * Start the new chat the Mac read back (`memoId` is the `newchat` message's id). Without `audio` it is the keypad's
+   * explicit 1; with `audio` it is the person's spoken answer, which the Mac transcribes and only a plain yes accepts.
+   * `callId` names the call, so the Mac can offer to hold the line for the chat it started.
+   */
+  | { v: 1; id: string; at: number; expiresAt: number; kind: "start"; memoId: string; callId?: string; audio?: string }
   /** The recording is a question about its chat: answer it aloud; send nothing to the chat. */
   | { v: 1; id: string; at: number; expiresAt: number; kind: "ask"; memoId: string }
   /** Read out where a chat stands: no recording. Names the chat as a memo does. */
@@ -166,7 +192,22 @@ export interface AudioFollows {
 }
 
 export type DownMessage =
-  | { v: 1; id: string; at: number; status: "transcript"; text: string; label: string; audio?: Clip }
+  | { v: 1; id: string; at: number; status: "transcript"; text: string; label: string; audio?: Clip; model?: string }
+  /**
+   * The outcome of a `start`: "started" (`hold`: the Mac offered to stay on the line, so the call goes on as a talk
+   * turn in `confirm`), "declined" (a spoken no, or two answers that were no yes or no) or "again" (say yes or no).
+   */
+  | {
+      v: 1;
+      id: string;
+      at: number;
+      status: "newchat";
+      outcome: "started" | "declined" | "again";
+      text: string;
+      audio?: Clip;
+      audioFollows?: AudioFollows;
+      hold?: true;
+    }
   | { v: 1; id: string; at: number; status: "sent" }
   /** What to read aloud for an `ask` or `status`: plain sentences, at most `MAX_ANSWER_CHARS`. */
   | { v: 1; id: string; at: number; status: "answer"; text: string; audio?: Clip; audioFollows?: AudioFollows }
@@ -229,7 +270,14 @@ export function readDirectory(key: string, doc: ChannelDoc, now: number): Direct
       if (!isRecord(raw) || typeof raw.n !== "number" || typeof raw.label !== "string") return null;
       const chats = readItems(raw.chats, MAX_WORKSPACES);
       if (!chats) return null;
-      workspaces.push({ n: raw.n, label: raw.label.slice(0, 80), chats });
+      let newChat: number | undefined;
+      if (raw.newChat !== undefined) {
+        if (!Number.isInteger(raw.newChat) || (raw.newChat as number) < 1 || (raw.newChat as number) > MAX_WORKSPACES) {
+          return null;
+        }
+        newChat = raw.newChat as number;
+      }
+      workspaces.push({ n: raw.n, label: raw.label.slice(0, 80), chats, ...(newChat ? { newChat } : {}) });
     }
   }
   let last: DirectoryDoc["last"];
@@ -293,6 +341,41 @@ export function readUp(
   }
   if (body.kind === "send" && typeof body.memoId === "string" && body.memoId.length <= 64) {
     return { ok: true, message: { ...base, kind: "send", memoId: body.memoId } };
+  }
+  if (body.kind === "newchat") {
+    const { dirVersion, workspace, audio } = body;
+    if (typeof dirVersion !== "string" || dirVersion.length === 0 || dirVersion.length > 64) {
+      return { ok: false, reason: "not a voice message" };
+    }
+    if (typeof workspace !== "number" || !Number.isInteger(workspace) || workspace < 1 || workspace > MAX_WORKSPACES) {
+      return { ok: false, reason: "not a voice message" };
+    }
+    if (typeof audio !== "string" || audio.length === 0 || audio.length > MAX_AUDIO_CHARS) {
+      return { ok: false, reason: "no audio" };
+    }
+    return { ok: true, message: { ...base, kind: "newchat", dirVersion, workspace, audio } };
+  }
+  if (body.kind === "start") {
+    const { memoId, callId, audio } = body;
+    if (typeof memoId !== "string" || memoId.length === 0 || memoId.length > 64) {
+      return { ok: false, reason: "not a voice message" };
+    }
+    if (callId !== undefined && (typeof callId !== "string" || !/^[A-Za-z0-9_-]{4,64}$/.test(callId))) {
+      return { ok: false, reason: "not a voice message" };
+    }
+    if (audio !== undefined && (typeof audio !== "string" || audio.length === 0 || audio.length > MAX_AUDIO_CHARS)) {
+      return { ok: false, reason: "no audio" };
+    }
+    return {
+      ok: true,
+      message: {
+        ...base,
+        kind: "start",
+        memoId,
+        ...(callId !== undefined ? { callId: callId as string } : {}),
+        ...(audio !== undefined ? { audio: audio as string } : {}),
+      },
+    };
   }
   if (body.kind === "ask" && typeof body.memoId === "string" && body.memoId.length <= 64) {
     return { ok: true, message: { ...base, kind: "ask", memoId: body.memoId } };
@@ -360,6 +443,7 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
         label: body.label.slice(0, 80),
         // Speech that does not check out is dropped, never a reason to lose the transcript.
         ...(spoken ? { audio: spoken } : {}),
+        ...(typeof body.model === "string" && body.model.trim() ? { model: body.model.slice(0, 80) } : {}),
       };
     }
     case "sent":
@@ -389,6 +473,21 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
         next: body.next,
         ...(spoken ? { audio: spoken } : {}),
         ...(follows ? { audioFollows: follows } : {}),
+      };
+    }
+    case "newchat": {
+      if (typeof body.text !== "string" || body.text.trim() === "") return null;
+      if (body.outcome !== "started" && body.outcome !== "declined" && body.outcome !== "again") return null;
+      const spoken = readClip(body.audio);
+      const follows = readFollows(body.audioFollows, spoken);
+      return {
+        ...base,
+        status: "newchat",
+        outcome: body.outcome,
+        text: body.text.slice(0, MAX_ANSWER_CHARS),
+        ...(spoken ? { audio: spoken } : {}),
+        ...(follows ? { audioFollows: follows } : {}),
+        ...(body.hold === true && body.outcome === "started" ? { hold: true as const } : {}),
       };
     }
     case "refused":

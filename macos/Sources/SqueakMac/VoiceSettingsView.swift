@@ -50,6 +50,7 @@ struct VoiceSettingsPage: View {
                 testSection(v)
                 if v.pauseKnown { pauseSection(v) }
                 if let hold = v.hold { holdSection(hold) }
+                if let models = v.chatModels, !models.isEmpty { newChatSection(v.newChatModel, models: models) }
                 if let persona = v.persona { personaSection(persona) }
                 if let natural = v.natural { naturalSection(natural) }
                 if let favorites = v.favorites { quickSection(favorites, candidates: v.workspaces ?? []) }
@@ -247,6 +248,30 @@ struct VoiceSettingsPage: View {
             if let e = m.voiceError { Footnote(e) }
         } header: { Text("When to call") } footer: {
             Footnote("If you were at the Mac when the question came, you probably saw it, so Squeak waits the longer idle time before counting you as away. Questions you answer meanwhile never ring.")
+        }
+        .disabled(m.pauseBusy)
+    }
+
+    private func newChatSection(_ saved: CallNewChatModel?, models: [DaemonChatModel]) -> some View {
+        let pick = saved?.resolved(in: models)
+        let model = pick.flatMap { p in models.first { $0.id == p.id } }
+        return Section {
+            Picker("New chats from calls use", selection: Binding(
+                get: { pick?.id ?? "" },
+                set: { id in Task { await m.setNewChatModel(CallNewChatModel.choosing(id.isEmpty ? nil : id, in: models)) } })) {
+                Text("Workspace's usual model").tag("")
+                ForEach(models) { Text($0.label).tag($0.id) }
+            }
+            if let pick, let model, !model.levels.isEmpty {
+                Picker("Level", selection: Binding(
+                    get: { pick.level ?? model.levels[0] },
+                    set: { level in Task { await m.setNewChatModel(pick.with(level: level, in: models)) } })) {
+                    ForEach(model.levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag($0) }
+                }
+            }
+            if let e = m.voiceError { Footnote(e) }
+        } header: { Text("New chats") } footer: {
+            Footnote("Say \"new chat\" on a call and Squeak starts one in the workspace you picked, with this model. It reads it back first and waits for your yes.")
         }
         .disabled(m.pauseBusy)
     }

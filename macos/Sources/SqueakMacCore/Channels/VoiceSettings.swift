@@ -30,6 +30,11 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public var persona: VoicePersona?
     /// When a call rings; nil from a daemon that predates it (hide the group).
     public var hold: CallHold?
+    /// The preset a chat started from a call uses; nil = the workspace's usual model (also an older daemon).
+    public var newChatModel: CallNewChatModel?
+    /// The presets it can be picked from (the same list as `GET /control/models`); nil from a daemon that predates
+    /// the setting (hide the row).
+    public var chatModels: [DaemonChatModel]?
 
     public struct LastTest: Sendable, Equatable, Decodable {
         public var at: Double
@@ -70,7 +75,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         self.pause = pause; self.pauseKnown = pauseKnown ?? (pause != nil)
     }
 
-    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces, lastTest, persona, hold }
+    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces, lastTest, persona, hold, newChatModel, chatModels }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -87,6 +92,8 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         lastTest = try? c.decode(LastTest.self, forKey: .lastTest)
         persona = try? c.decode(VoicePersona.self, forKey: .persona)
         hold = try? c.decode(CallHold.self, forKey: .hold)
+        newChatModel = try? c.decode(CallNewChatModel.self, forKey: .newChatModel)
+        chatModels = (try? c.decode([Failable<DaemonChatModel>].self, forKey: .chatModels))?.compactMap(\.value)
     }
 
     public var isOn: Bool { mode != "off" }

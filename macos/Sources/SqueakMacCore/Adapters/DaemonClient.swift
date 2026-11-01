@@ -264,6 +264,14 @@ public struct DaemonClient: Sendable {
         return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
     }
 
+    /// Sets the model preset chats started from a call use (nil = the workspace's usual). nil answer = a daemon without it (404).
+    public func setVoiceNewChatModel(_ pick: CallNewChatModel?) async throws -> VoiceSettings? {
+        let r = try await post("/control/voice", body: CallNewChatModel.requestBody(pick))
+        if r.status == 404 { return nil }
+        try Self.check(r.status)
+        return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
+    }
+
     /// Turns the Mac's realistic call voice on or off, or picks its voice. nil = a daemon without the route (404).
     public func setNaturalVoice(enabled: Bool? = nil, voice: String? = nil, engine: String? = nil,
                                 emotion: NaturalEmotion? = nil) async throws -> VoiceSettings? {

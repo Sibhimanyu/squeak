@@ -60,6 +60,7 @@ struct VoiceSettingsView: View {
                 }
                 if voice.pause != nil { PauseSection(voice: voice) }
                 if let hold = voice.hold { HoldSection(hold: hold) }
+                if let models = voice.chatModels, !models.isEmpty { NewChatModelSection(models: models, pick: voice.newChatModel) }
                 // Only a Mac that sends its voice list takes these commands.
                 if let natural = voice.natural, natural.offered {
                     if let list = voice.favorites {
@@ -507,6 +508,50 @@ private struct PinSection: View {
         case .enable?: return "The PIN is on. It applies from the next call."
         case .reset(let next)?: return next == nil ? "The PIN is off." : "Your new PIN is set. It applies from the next call."
         default: return "Your pin is changed. It applies from the next call."
+        }
+    }
+}
+
+/// New chats from calls use a model preset. Shown only for a Mac that sends `voice.chatModels`.
+private struct NewChatModelSection: View {
+    @Environment(AppModel.self) private var model
+    let models: [VoiceChatModel]
+    let pick: NewChatModelPick?
+    @State private var busy = false
+    @State private var problem: String?
+
+    var body: some View {
+        let current = NewChatModelText.effective(pick, in: models)
+        let picked = NewChatModelText.model(current, in: models)
+        Section {
+            Picker(NewChatModelText.title, selection: Binding(
+                get: { current?.id ?? "" },
+                set: { if let c = NewChatModelText.change(choosing: $0.isEmpty ? nil : $0, current: pick, in: models) { send(c) } })) {
+                Text(NewChatModelText.usual).tag("")
+                ForEach(models) { Text($0.label).tag($0.id) }
+            }
+            .frame(minHeight: 44)
+            .disabled(busy)
+            if let picked, !picked.levels.isEmpty {
+                Picker("Thinking level", selection: Binding(
+                    get: { current?.level ?? "" },
+                    set: { if let c = NewChatModelText.change(level: $0, current: pick, in: models) { send(c) } })) {
+                    if current?.level == nil { Text("Default").tag("") }
+                    ForEach(picked.levels, id: \.self) { Text($0.capitalized).tag($0) }
+                }
+                .frame(minHeight: 44)
+                .disabled(busy)
+            }
+            if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+        } footer: { Text(NewChatModelText.footer) }
+    }
+
+    private func send(_ change: VoiceChange) {
+        problem = nil
+        busy = true
+        Task {
+            problem = await model.changeVoice(change)
+            busy = false
         }
     }
 }

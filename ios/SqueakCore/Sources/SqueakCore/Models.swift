@@ -1706,6 +1706,10 @@ public struct VoiceView: Codable, Equatable, Sendable {
     public var calls: [CallEntry]?
     /// When to ring: nil from a Mac that does not send it (the group is hidden).
     public var hold: VoiceHold?
+    /// The model new chats from a call start with; nil = the workspace's usual model. Decoded only with `chatModels`.
+    public var newChatModel: NewChatModelPick?
+    /// The presets the picker draws; nil from a Mac that does not send them (the picker is hidden).
+    public var chatModels: [VoiceChatModel]?
 
     /// An unknown word reads as "ask", the safe side.
     public struct PinPolicy: Codable, Equatable, Sendable {
@@ -1746,7 +1750,7 @@ public struct VoiceView: Codable, Equatable, Sendable {
         enum CodingKeys: String, CodingKey { case until }
     }
 
-    enum CodingKeys: String, CodingKey { case mode, callee, defaultCallee, lastTest, pin, policy, pause, natural, favorites, workspaces, calls, hold }
+    enum CodingKeys: String, CodingKey { case mode, callee, defaultCallee, lastTest, pin, policy, pause, natural, favorites, workspaces, calls, hold, newChatModel, chatModels }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1761,6 +1765,8 @@ public struct VoiceView: Codable, Equatable, Sendable {
         workspaces = try? c.decodeIfPresent([WorkspaceChoice].self, forKey: .workspaces)
         calls = try? c.decodeIfPresent([CallEntry].self, forKey: .calls)
         hold = try? c.decodeIfPresent(VoiceHold.self, forKey: .hold)
+        chatModels = try? c.decodeIfPresent([VoiceChatModel].self, forKey: .chatModels)
+        newChatModel = try? c.decodeIfPresent(NewChatModelPick.self, forKey: .newChatModel)
         if c.contains(.pause) {
             pause = (try? c.decodeIfPresent(Pause.self, forKey: .pause)) ?? Pause(active: false)
         } else {
@@ -1781,6 +1787,8 @@ public struct VoiceView: Codable, Equatable, Sendable {
         try c.encodeIfPresent(workspaces, forKey: .workspaces)
         try c.encodeIfPresent(calls, forKey: .calls)
         try c.encodeIfPresent(hold, forKey: .hold)
+        try c.encodeIfPresent(chatModels, forKey: .chatModels)
+        try c.encodeIfPresent(newChatModel, forKey: .newChatModel)
         if let pause {
             if pause.active { try c.encode(pause, forKey: .pause) } else { try c.encodeNil(forKey: .pause) }
         }
@@ -1814,10 +1822,11 @@ public struct VoiceView: Codable, Equatable, Sendable {
     public init(mode: String, callee: String? = nil, defaultCallee: String? = nil, lastTest: LastTest? = nil, pin: String? = nil,
                 policy: PinPolicy? = nil, pause: Pause? = nil, natural: NaturalVoiceView? = nil,
                 favorites: [FavoriteWorkspace]? = nil, workspaces: [WorkspaceChoice]? = nil, calls: [CallEntry]? = nil,
-                hold: VoiceHold? = nil) {
+                hold: VoiceHold? = nil, newChatModel: NewChatModelPick? = nil, chatModels: [VoiceChatModel]? = nil) {
         self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.lastTest = lastTest; self.pin = pin
         self.policy = policy; self.pause = pause
         self.natural = natural; self.favorites = favorites; self.workspaces = workspaces; self.calls = calls; self.hold = hold
+        self.newChatModel = newChatModel; self.chatModels = chatModels
     }
 
     public var isOn: Bool { mode != "off" }
@@ -1897,6 +1906,9 @@ public enum VoiceChange: Equatable, Sendable {
     case favorites([FavoriteWorkspace])
     /// When to ring, as `{ "hold": { ...only the keys changed } }`. Only to a Mac that sends `hold`.
     case hold(VoiceHoldChange)
+    /// The model for new chats from a call, as `{ "newChatModel": { "id", "level"? } }` or `{ "newChatModel": null }`.
+    /// Only to a Mac that sends `chatModels`.
+    case newChatModel(NewChatModelPick?)
 }
 
 extension VoiceChange: Encodable {
@@ -1937,6 +1949,14 @@ extension VoiceChange: Encodable {
             try inner.encodeIfPresent(change.awayAfterSeconds, forKey: Key("awayAfterSeconds"))
             try inner.encodeIfPresent(change.sawItAwayAfterSeconds, forKey: Key("sawItAwayAfterSeconds"))
             try inner.encodeIfPresent(change.maxHoldMinutes, forKey: Key("maxHoldMinutes"))
+        case .newChatModel(let pick):
+            if let pick {
+                var inner = c.nestedContainer(keyedBy: Key.self, forKey: Key("newChatModel"))
+                try inner.encode(pick.id, forKey: Key("id"))
+                try inner.encodeIfPresent(pick.level, forKey: Key("level"))
+            } else {
+                try c.encodeNil(forKey: Key("newChatModel"))
+            }
         case .favorites(let list):
             var inner = c.nestedUnkeyedContainer(forKey: Key("favorites"))
             for f in list {

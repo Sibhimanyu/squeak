@@ -21,6 +21,16 @@ export interface Uplink {
   /** Null when the Mac did not answer in time. */
   memo(memoId: string, choice: number, dirVersion: string, audio: Buffer): Promise<DownMessage | null>;
   send(memoId: string): Promise<DownMessage | null>;
+  /**
+   * What the person wants a new chat to do (a recording), for the workspace the directory names by `workspace` (its
+   * `newChat`): the Mac answers with a transcript to read back, and starts nothing.
+   */
+  newChat?(memoId: string, workspace: number, dirVersion: string, audio: Buffer): Promise<DownMessage | null>;
+  /**
+   * Starts the new chat read back as `memoId`. Without `audio`: the keypad's explicit 1. With `audio`: the spoken answer,
+   * which only a plain yes accepts. `callId` lets the Mac offer to hold the line for the chat it started.
+   */
+  start?(memoId: string, options: { callId?: string; audio?: Buffer }): Promise<DownMessage | null>;
   /** Treat the recording as a question about its chat: the answer to read aloud. Sends nothing to the chat. */
   ask(memoId: string): Promise<DownMessage | null>;
   /** Where a chat stands, to read aloud. */
@@ -85,6 +95,41 @@ export class RelayUplink implements Uplink {
     return this.exchange(
       { v: 1, id: newMessageId(), at, expiresAt: at + UP_TTL_MS, kind: "send", memoId },
       this.options.sendWaitMs ?? 30_000,
+    );
+  }
+
+  newChat(memoId: string, workspace: number, dirVersion: string, audio: Buffer): Promise<DownMessage | null> {
+    const at = this.now();
+    return this.exchange(
+      {
+        v: 1,
+        id: memoId,
+        at,
+        expiresAt: at + UP_TTL_MS,
+        kind: "newchat",
+        dirVersion,
+        workspace,
+        audio: audio.toString("base64"),
+      },
+      this.options.memoWaitMs ?? 45_000,
+    );
+  }
+
+  start(memoId: string, options: { callId?: string; audio?: Buffer }): Promise<DownMessage | null> {
+    const at = this.now();
+    return this.exchange(
+      {
+        v: 1,
+        id: newMessageId(),
+        at,
+        expiresAt: at + UP_TTL_MS,
+        kind: "start",
+        memoId,
+        ...(options.callId ? { callId: options.callId } : {}),
+        ...(options.audio ? { audio: options.audio.toString("base64") } : {}),
+      },
+      // Transcribing a spoken yes, starting the chat through Conductor, and the Mac's voice for the answer.
+      this.options.sendWaitMs ?? 60_000,
     );
   }
 

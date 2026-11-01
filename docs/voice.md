@@ -265,6 +265,63 @@ types the PIN and speaks a message, and Whisper transcribes it.
 Trust: whoever holds the channel key and passes the PIN can message a chat, as with the phone app's pairing but
 without a device key. The key lives only on the Mac and in the add-on's options.
 
+## A new chat from a call (add-on 0.18.0)
+
+In a workspace's chat menu the last option is **0, a new chat there** ("Press 0 for a new chat."). Chats take 1 to 9, so
+0 never clashes; it also works in a workspace with no chat able to take a message ("Nothing in X can take a message
+right now. Press 0 for a new chat."), and a workspace with one chat reads its menu (instead of going straight to the
+chat) so 0 can be reached. The chat used last (key 1 at the first question) is unchanged; flat lists (no workspaces)
+have no new chat.
+
+1. "New chat in X. Go ahead: say what you want it to do." A recording, the same recorder and end of speech as a message.
+2. `voiceup` `newchat` goes to the Mac, which transcribes it (Whisper) and answers a `transcript` carrying the workspace's
+   spoken label, the words and `model` (the model's name, "Opus 5.5, 1M"; absent for "its usual model"). Nothing starts.
+3. Read-back: "I'll start a new chat in X with Opus 5.5: <words>. Say yes to start it, or no." (`newChatReadBack`, also
+   recorded by the Mac in its own voice and sent as the transcript's `audio`). Silence, a stock hallucination or a few
+   brief words are never read back for a start (record again with 2, or hash).
+4. The answer is spoken first: a short recording goes up as `start` (with `audio`) and the Mac transcribes it and accepts
+   only a plain yes (at most 8 words, yes xor no, as a message's confirm); no ends the call ("Okay, I won't start it.
+   Goodbye."); two answers that are neither end it too. The keypad is the fallback when nothing is said, and a key
+   pressed during the read-back counts first: **1** starts it, star hears it again, hash cancels; another digit is not an
+   answer (the read-back repeats, a few times at most).
+5. Yes: the Mac starts the chat through the same `newChatControl().startChat` as the phone app (same validation, 20,000
+   character cap, the workspace must be one Conductor offers and not archived) with the words it kept at read-back and the
+   model pick below. "Started. It's working on it." If the call can carry it (add-on holds, a Mac that talks, the call id)
+   it adds the hold offer ("Want me to stay on the line while it works?") and the add-on goes on as a `talk` turn with phase
+   `confirm` (`TalkDependencies`/`talkFlow` `phase`), the Mac having registered the call `in:<callId>` with the new chat as
+   target and `fresh` (a chat not yet on the radar is waited for 60 s, not "lost"). Else "Goodbye."
+6. Failures are fixed sentences, never Conductor's or a model's words: "Your Mac could not start the chat." (the real
+   reason is in the call trace as a warning), "Too many new chats by phone this hour." (6 an hour), "That new chat is no
+   longer waiting. Call again." (aged out after 10 min, used, or being answered), "That list is out of date. Call again."
+   The add-on's own: "I could not reach your Mac, so no chat was started" (before the start) and "...so I am not sure
+   the chat was started. Check the app." (a start with no answer: never sent twice).
+
+**Protocol** (`memo-protocol.ts`; sealed, signed, expiring and replay-checked exactly as `memo`/`send`: `readUp`, the
+`handled` list, deleted before it runs; each refusal has a test):
+
+- `voicedir`: a directory workspace gains `newChat`, a 1-based index (1 to 9) into that version's list of workspaces a chat
+  may be started in. The Mac keeps the Conductor workspace ids behind the indices (`newChatSpaces`, per kept version)
+  and the add-on can only say "workspace number 2". A workspace gets one only if Conductor knows it (`findNewChatWorkspace`)
+  and the add-on is 0.18.0 or newer (`NEW_CHAT_ADDON`, `addonSupports` as for `audioFollows`): an older add-on never
+  sees `newChat`, and the list's version changes with the ids, so it is published again when the add-on updates.
+- `voiceup` `newchat`: `{ dirVersion, workspace, audio }` (`audio` non-empty base64 Opus, at most `MAX_AUDIO_CHARS`).
+  Answered by `voicedown` `transcript` (+ optional `model`).
+- `voiceup` `start`: `{ memoId, callId?, audio? }`. `memoId` is the `newchat` message's id. No `audio`: the keypad's
+  explicit 1. `audio`: the spoken answer. Answered by `voicedown` `newchat`: `{ outcome: "started" | "declined" | "again",
+text, audio?, audioFollows?, hold? }`, or `refused` with one of the sentences above.
+- A transcript alone never starts anything: only a `start` for a pending read-back does, the pending entry is taken
+  before the start (so a replay cannot start twice), and the workspace, words and model are the ones kept at read-back,
+  never anything the gateway sends with the `start`.
+
+**Setting: "New chats from calls use"** (`voice-settings.json` `newChatModel: { id, level? }`, absent: the workspace's
+usual model, as the phone's default). `POST /control/voice` `{ "newChatModel": { "id": "opus-5-5-1m", "level": "high" } }`
+or `{ "newChatModel": null }`, and the phone's signed `voice` command with the same `change`, end in one
+`VoiceSettingsStore.apply`: exactly that key and those fields; `id` must be one of `listChatModels` and `level` one of
+its `levels`, else a fixed sentence ("That model isn't one this Mac offers any more. Pick another.", "That thinking level
+isn't available for that model."). The view carries `newChatModel` (the pick or null) and `chatModels` (`id`, `label`,
+`agent`, `levels`, `defaultLevel?`) for the pickers. At call time the pick is looked up again; a preset Conductor no
+longer offers reads back as "its usual model", truthfully.
+
 ## Ringing out: the phone rings first, the voice follows
 
 From add-on 0.11.0 the Mac writes the call request at once (`audioFollows: true`, no clips in it) and makes its natural

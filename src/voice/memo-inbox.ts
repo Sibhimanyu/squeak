@@ -5,7 +5,8 @@ import type { ReplyFailureHandler, ReplyOutcome } from "../fleet/session-reply.j
 import { logger } from "../utils/logger.js";
 import { chunkClips, type Clip } from "./clips.js";
 import { spokenAnswer } from "./chat-brief.js";
-import { ASK_FAILED, inboundPrompts } from "./inbound-flow.js";
+import { ASK_FAILED, inboundPrompts, newChatReadBack } from "./inbound-flow.js";
+import type { StartChatOutcome } from "../fleet/new-chat.js";
 import { clipOption } from "./script.js";
 import { numberRepeats } from "./spoken-labels.js";
 import { splitSentences } from "./natural-cache.js";
@@ -140,6 +141,23 @@ export interface MemoInboxDependencies {
     /** The agent's thinking so far, spoken; null when it cannot be read. */
     peek: (target: string, label: string) => string | null;
   };
+  /**
+   * Starting a NEW chat from a call in (add-on 0.18.0 and newer). `supported` is that gate (an older add-on never sees
+   * `newChat` in the directory). `workspaceId` says whether Squeak may start a chat in a directory workspace (its key
+   * is `workspaceKeyOf`) and which Conductor workspace that is; `model` is the owner's "New chats from calls use" pick
+   * as it stands now (null: the workspace's usual model); `start` is the SAME `newChatControl().startChat` the phone
+   * uses, so its validation and size caps hold. Absent: the Mac takes no `newchat` or `start`.
+   */
+  newChat?: {
+    supported: () => boolean;
+    workspaceId: (workspaceKey: string) => string | null;
+    model: () => { id: string; level?: string; agent: "claude" | "codex"; label: string } | null;
+    start: (args: {
+      workspaceId: string;
+      text: string;
+      model?: { id: string; level?: string; agent: "claude" | "codex" };
+    }) => Promise<StartChatOutcome>;
+  };
   /** The owner's persona is terse (voice/settings.ts): calls in drop the pleasantries. Read at each publish. */
   terse?: () => boolean;
   /**
@@ -166,7 +184,35 @@ interface Pending {
   at: number;
 }
 
+/** A new chat read back and awaiting the person's yes. */
+interface PendingNewChat {
+  workspaceId: string;
+  label: string;
+  text: string;
+  model: { id: string; level?: string; agent: "claude" | "codex"; label: string } | null;
+  at: number;
+  tries: number;
+  /** A spoken answer is being transcribed: a second `start` for the same memo must not run beside it. */
+  busy: boolean;
+}
+
 const PENDING_TTL_MS = 10 * 60_000;
+/** A chat started by phone is a deliberate act: a few an hour is a person, more is a stuck loop. */
+const MAX_NEW_CHATS_PER_HOUR = 6;
+const MAX_PENDING_NEW_CHATS = 10;
+/** The fixed sentences a new chat says; failures never carry a reason from Conductor or the model. */
+export const NEW_CHAT_SAYS = {
+  failed: "Your Mac could not start the chat.",
+  limit: "Too many new chats by phone this hour.",
+  gone: "That new chat is no longer waiting. Call again.",
+  stale: "That list is out of date. Call again.",
+  unavailable: "Your Mac cannot start chats from a call yet.",
+  again: "Say yes to start it, or no to cancel.",
+  declined: "Okay, I won't start it. Goodbye.",
+  started: "Started. It's working on it.",
+  offerHold: "Want me to stay on the line while it works? Say yes to hold, or no to hang up.",
+  bye: "Goodbye.",
+};
 const MAX_PENDING = 20;
 /** How long the chat used by phone stays "the last one you used". */
 export const LAST_CHAT_FRESH_MS = 2 * 60 * 60_000;
@@ -245,6 +291,23 @@ export function cleanMessage(raw: unknown): string {
   );
 }
 
+/** What was said for a new chat: control characters out, whitespace collapsed. The sender caps its length again. */
+export function cleanNewChatText(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return (
+    raw
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+/** A model's name as said on a phone line: "Opus 5.5 · 1M" is "Opus 5.5, 1M". */
+export function spokenModelLabel(label: string): string {
+  return label.replace(/\s*·\s*/g, ", ").trim();
+}
+
 /** A workspace name read aloud: no longer than 60 characters, cut at a word. */
 function spokenLabel(label: string): string {
   if (label.length <= MAX_SPOKEN_LABEL) return label;
@@ -268,6 +331,11 @@ export class MemoInbox {
   private dirty = false;
   private readonly handled: string[] = [];
   private readonly pending = new Map<string, Pending>();
+  /** New chats read back and awaiting a yes, by the `newchat` message's id. */
+  private readonly pendingNew = new Map<string, PendingNewChat>();
+  /** Per directory version: the workspaces a chat may be started in, by a workspace's `newChat` index. */
+  private readonly newChatSpaces = new Map<string, Array<{ workspaceId: string; label: string }>>();
+  private readonly newChatStarts: number[] = [];
   /** Directory versions the gateway may still be reading from, each as the targets by number. */
   private readonly versions = new Map<string, string[]>();
   /** Calls out that may take a message for, or read the status of, the chat that asked: the call's id is their "version". */
@@ -285,6 +353,8 @@ export class MemoInbox {
       offer?: { at: number; tries: number } | undefined;
       /** The person is on hold while the chat works. */
       hold?: { since: number; seenWorking: boolean; lastSaid: number } | undefined;
+      /** A chat started on this call: it may not be on the radar yet, so a missing one is not "lost" for a minute. */
+      fresh?: true;
       turns: number;
     }
   >();
@@ -328,6 +398,9 @@ export class MemoInbox {
     let targets: MemoTarget[];
     let items: DirectoryItem[];
     let workspaces: DirectoryWorkspace[] | undefined;
+    const newChatSpaces: Array<{ workspaceId: string; label: string }> = [];
+    /** The workspace key behind each of `workspaces`, in order. */
+    const workspaceKeys: string[] = [];
     // Automatic workspaces: the distinct workspaces of the chats no favourite holds, newest chat first.
     const favoriteKeys = new Set(favorites.map((f) => f.workspace));
     const rest = all.filter((x) => !x.workspace || !favoriteKeys.has(x.workspace));
@@ -348,11 +421,10 @@ export class MemoInbox {
         }
         return chats;
       };
-      workspaces = favorites.map((fav) => ({
-        n: fav.n,
-        label: spokenLabel(fav.label),
-        chats: chatsOf(fav.workspace, all),
-      }));
+      workspaces = favorites.map((fav) => {
+        workspaceKeys.push(fav.workspace);
+        return { n: fav.n, label: spokenLabel(fav.label), chats: chatsOf(fav.workspace, all) };
+      });
       const used = new Set(favorites.map((f) => f.n));
       const grouped = new Set<string>();
       for (const key of autoKeys) {
@@ -361,11 +433,23 @@ export class MemoInbox {
         if (n > MAX_WORKSPACES || workspaces.length >= MAX_WORKSPACES) break;
         used.add(n);
         grouped.add(key);
+        workspaceKeys.push(key);
         const first = rest.find((x) => x.workspace === key)!;
         workspaces.push({ n, label: spokenLabel(first.workspaceLabel ?? first.label), chats: chatsOf(key, rest) });
       }
       const numbered = numberRepeats(workspaces.map((w) => w.label));
       workspaces = workspaces.map((w, i) => ({ ...w, label: numbered[i]! }));
+      // Where a new chat may be started (an add-on that offers it): only workspaces Conductor knows, at most nine.
+      const newChat = this.deps.newChat;
+      if (newChat?.supported()) {
+        workspaces = workspaces.map((w, i) => {
+          if (newChatSpaces.length >= MAX_WORKSPACES) return w;
+          const workspaceId = newChat.workspaceId(workspaceKeys[i]!);
+          if (!workspaceId) return w;
+          newChatSpaces.push({ workspaceId, label: w.label });
+          return { ...w, newChat: newChatSpaces.length };
+        });
+      }
       items = [];
       for (const t of rest.filter((x) => !x.workspace || !grouped.has(x.workspace)).slice(0, MENU_CHOICES)) {
         if (!room()) break;
@@ -402,6 +486,7 @@ export class MemoInbox {
           last,
           talk: Boolean(this.canAsk && this.deps.converse),
           terse: Boolean(this.deps.terse?.()),
+          newChat: newChatSpaces.map((space) => space.workspaceId),
           voice: this.deps.voiceKey?.() ?? null,
           targets: targets.map((t) => t.target),
         }),
@@ -414,7 +499,9 @@ export class MemoInbox {
       version,
       targets.map((t) => t.target),
     );
+    this.newChatSpaces.set(version, newChatSpaces);
     while (this.versions.size > KEEP_VERSIONS) this.versions.delete(this.versions.keys().next().value as string);
+    for (const known of [...this.newChatSpaces.keys()]) if (!this.versions.has(known)) this.newChatSpaces.delete(known);
     const doc: DirectoryDoc = {
       v: 1,
       at,
@@ -789,6 +876,8 @@ export class MemoInbox {
 
     if (message.kind === "status" || message.kind === "ask") return this.handleAnswer(message);
     if (message.kind === "talk") return this.handleTalk(message);
+    if (message.kind === "newchat") return this.handleNewChat(message);
+    if (message.kind === "start") return this.handleStart(message);
 
     const pending = this.pending.get(message.memoId);
     if (!pending) return this.refuse(message.id, "That message is no longer waiting.");
@@ -796,6 +885,197 @@ export class MemoInbox {
     const delivered = await this.deliver(pending.target, pending.label, pending.text);
     if (!delivered.sent) return this.refuse(message.id, delivered.reason);
     return { v: 1, id: message.id, at: this.now(), status: "sent" };
+  }
+
+  /** One reply for a new chat's turn: the words, the Mac's voice for them, and what the call does with it. */
+  private async newChatReply(
+    id: string,
+    outcome: "started" | "declined" | "again",
+    text: string,
+    label: string,
+    hold = false,
+  ): Promise<DownMessage> {
+    this.deps.trace?.("said", text, { label });
+    const spoken = await this.spokenFields(id, text);
+    return {
+      v: 1,
+      id,
+      at: this.now(),
+      status: "newchat",
+      outcome,
+      text,
+      ...spoken,
+      ...(hold ? { hold: true as const } : {}),
+    };
+  }
+
+  /**
+   * What the person wants a new chat to do, recorded. Nothing starts here: the words are transcribed, kept, and read
+   * back with the workspace and the model; only a later `start` (the keypad's 1, or a spoken yes) runs them.
+   */
+  private async handleNewChat(message: Extract<UpMessage, { kind: "newchat" }>): Promise<DownMessage> {
+    const { newChat, trace } = this.deps;
+    if (!newChat) return this.refuse(message.id, NEW_CHAT_SAYS.unavailable);
+    const space = this.newChatSpaces.get(message.dirVersion)?.[message.workspace - 1];
+    if (!space) return this.refuse(message.id, NEW_CHAT_SAYS.stale);
+    const { label } = space;
+    const audio = Buffer.from(message.audio, "base64");
+    trace?.("step", `Recording received (${Math.max(1, Math.round(audio.length / 1024))} KB)`, { label });
+    let text: string;
+    const began = Date.now();
+    try {
+      text = cleanNewChatText(await this.deps.transcriber.transcribe(audio));
+    } catch (error) {
+      logger.warn("voice new chat could not be transcribed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      trace?.("warn", "Could not transcribe the recording", { label });
+      return this.refuse(message.id, "I could not make that out.");
+    }
+    if (!text) {
+      trace?.("warn", "Nothing was heard in the recording", { label });
+      return this.refuse(message.id, "I did not hear anything.");
+    }
+    const transcribedMs = Date.now() - began;
+    trace?.("heard", text, { ms: transcribedMs, label });
+    const model = newChat.model();
+    this.pendingNew.set(message.id, {
+      workspaceId: space.workspaceId,
+      label,
+      text,
+      model,
+      at: this.now(),
+      tries: 0,
+      busy: false,
+    });
+    while (this.pendingNew.size > MAX_PENDING_NEW_CHATS) {
+      this.pendingNew.delete(this.pendingNew.keys().next().value as string);
+    }
+    const modelLabel = model ? spokenModelLabel(model.label) : undefined;
+    // The read-back in the Mac's voice (the add-on says exactly these words), within a short budget.
+    const sentence = newChatReadBack(text, label, modelLabel);
+    let spoken: Clip | undefined;
+    if (this.deps.speech) {
+      spoken = await Promise.race([
+        this.answerAudio(sentence),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), READ_BACK_BUDGET_MS).unref()),
+      ]);
+    }
+    trace?.("said", sentence, { label });
+    return {
+      v: 1,
+      id: message.id,
+      at: this.now(),
+      status: "transcript",
+      text,
+      label,
+      ...(modelLabel ? { model: modelLabel } : {}),
+      ...(spoken ? { audio: spoken } : {}),
+    };
+  }
+
+  /**
+   * Starts the new chat read back as `memoId`, through the same `startChat` as the phone app. Only an explicit yes gets
+   * here: the keypad's 1 (a `start` with no recording) or a spoken answer this Mac transcribed itself that is a plain
+   * yes. The words are the ones kept at read-back; nothing the gateway sends can change them, or the workspace or model.
+   */
+  private async handleStart(message: Extract<UpMessage, { kind: "start" }>): Promise<DownMessage> {
+    const { newChat, trace } = this.deps;
+    if (!newChat) return this.refuse(message.id, NEW_CHAT_SAYS.unavailable);
+    const now = this.now();
+    for (const [id, waiting] of this.pendingNew) if (now - waiting.at > PENDING_TTL_MS) this.pendingNew.delete(id);
+    const pending = this.pendingNew.get(message.memoId);
+    if (!pending || pending.busy) return this.refuse(message.id, NEW_CHAT_SAYS.gone);
+    const { label } = pending;
+    if (message.audio !== undefined) {
+      pending.busy = true;
+      let heard = "";
+      try {
+        heard = await this.deps.transcriber.transcribe(Buffer.from(message.audio, "base64"));
+      } catch (error) {
+        logger.warn("voice new chat answer could not be transcribed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        trace?.("warn", "Could not transcribe the answer", { label });
+      } finally {
+        pending.busy = false;
+      }
+      trace?.("heard", heard || "(nothing)", { label });
+      const words = heard.trim().split(/\s+/).filter(Boolean);
+      const yes = YES.test(heard);
+      const no = NO.test(heard);
+      if (words.length > MAX_CONFIRM_WORDS || yes === no) {
+        pending.tries += 1;
+        if (pending.tries >= 2) {
+          this.pendingNew.delete(message.memoId);
+          return this.newChatReply(message.id, "declined", NEW_CHAT_SAYS.declined, label);
+        }
+        return this.newChatReply(message.id, "again", NEW_CHAT_SAYS.again, label);
+      }
+      if (no) {
+        this.pendingNew.delete(message.memoId);
+        return this.newChatReply(message.id, "declined", NEW_CHAT_SAYS.declined, label);
+      }
+    }
+    // Taken first, so a repeated or replayed start can never start the same chat twice.
+    this.pendingNew.delete(message.memoId);
+    while (this.newChatStarts.length > 0 && now - this.newChatStarts[0]! > 60 * 60_000) this.newChatStarts.shift();
+    if (this.newChatStarts.length >= MAX_NEW_CHATS_PER_HOUR) {
+      trace?.("warn", "Too many new chats by phone this hour", { label });
+      return this.refuse(message.id, NEW_CHAT_SAYS.limit);
+    }
+    this.newChatStarts.push(now);
+    let outcome: StartChatOutcome;
+    try {
+      outcome = await newChat.start({
+        workspaceId: pending.workspaceId,
+        text: pending.text,
+        ...(pending.model
+          ? {
+              model: {
+                id: pending.model.id,
+                agent: pending.model.agent,
+                ...(pending.model.level ? { level: pending.model.level } : {}),
+              },
+            }
+          : {}),
+      });
+    } catch (error) {
+      logger.warn("voice new chat failed", { error: error instanceof Error ? error.message : String(error) });
+      outcome = { ok: false, reason: "threw" };
+    }
+    if (!outcome.ok) {
+      trace?.("warn", `Could not start a new chat: ${outcome.reason.slice(0, 160)}`, { label });
+      return this.refuse(message.id, NEW_CHAT_SAYS.failed);
+    }
+    trace?.("step", `Started a new chat in ${label}`, { label });
+    const shown = pending.text.length > 200 ? `${pending.text.slice(0, 200)}…` : pending.text;
+    this.deps.note(`Started by phone in ${label}: \u201c${shown}\u201d`);
+    this.rememberLast(outcome.sessionId);
+    // Offered only when the call can carry it: an add-on that holds, a Mac that talks, and the call's own id.
+    if (message.callId && this.deps.hold?.supported() && this.deps.converse) {
+      for (const [id, old] of this.calls) {
+        if (now - old.at <= CALL_TARGET_TTL_MS) continue;
+        this.calls.delete(id);
+        this.deps.endCall?.(id);
+      }
+      this.calls.set(`in:${message.callId}`, {
+        target: outcome.sessionId,
+        label,
+        at: now,
+        turns: 0,
+        offer: { at: now, tries: 0 },
+        fresh: true,
+      });
+      return this.newChatReply(
+        message.id,
+        "started",
+        `${NEW_CHAT_SAYS.started} ${NEW_CHAT_SAYS.offerHold}`,
+        label,
+        true,
+      );
+    }
+    return this.newChatReply(message.id, "started", `${NEW_CHAT_SAYS.started} ${NEW_CHAT_SAYS.bye}`, label);
   }
 
   /**
@@ -860,6 +1140,8 @@ export class MemoInbox {
       return reply(hold.peek(target, label) || TALK_SAYS.cannotSee, "hold");
     }
     const seen = hold.state(target, label);
+    // A chat started on this call can take a moment to show up: wait for it as long as one that never starts.
+    if (seen === null && call.fresh && now - state.since <= HOLD_START_MS) return reply("", "hold");
     if (seen === null) {
       call.hold = undefined;
       return reply(TALK_SAYS.lostChat, "end");

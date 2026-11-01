@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.37
+
+- Start a new chat from a phone call: pick a workspace, press 0, say what it should do, and say yes to the read-back. Settings › Phone calls › New chats picks which of your Conductor model presets (and thinking level) those chats use. Needs the phone-call add-on 0.18.0.
+- Calls name a workspace by its repo and branch ("squeak, fix parser") instead of Conductor's city folder name.
+
 ## 2.12.36
 
 - Settings › Phone calls › When to call: choose how long Squeak waits before ringing, when it counts you as away from the Mac, how long it holds a call while you're at the Mac, or turn holding off. New: if you were at the Mac when the question came, Squeak waits until you've been away 3 minutes (your choice) before ringing, since you likely saw it.

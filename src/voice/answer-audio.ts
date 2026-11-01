@@ -31,7 +31,7 @@ export interface SpeakReplyDependencies {
 }
 
 /** What `say` needs of a reply: an answer or talk with its first clip and, perhaps, the sentences that follow. */
-export type SpokenReply = Extract<DownMessage, { status: "answer" | "talk" }>;
+export type SpokenReply = Extract<DownMessage, { status: "answer" | "talk" | "newchat" }>;
 
 export async function speakReply(call: PhoneCall, reply: SpokenReply, deps: SpeakReplyDependencies): Promise<void> {
   const parts = reply.audioFollows?.parts;

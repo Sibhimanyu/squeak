@@ -82,13 +82,19 @@ async function holdLine(
 export async function talkFlow(
   call: PhoneCall,
   deps: TalkDependencies,
-  info: { callId: string; label: string; from?: { dirVersion: string; choice: number } },
+  info: {
+    callId: string;
+    label: string;
+    from?: { dirVersion: string; choice: number };
+    /** What the first recording is: absent, "say"; "confirm" answers a hold offer the Mac made just before (a new chat). */
+    phase?: TalkPhase;
+  },
 ): Promise<"ended" | "keys"> {
   const speak = async (text: string): Promise<void> => {
     deps.trace?.(`said: ${text}`);
     await call.say(text);
   };
-  let phase: TalkPhase = "say";
+  let phase: TalkPhase = info.phase ?? "say";
   let silences = 0;
   for (let turn = 0; turn < MAX_TURNS && call.open; turn++) {
     const recording = await call.record({ maxMs: TURN_MS, beep: true, endOnSilence: true });
