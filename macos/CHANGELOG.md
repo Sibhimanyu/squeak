@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.42
+
+- Call voices are named, not described (Heart, Emma, Grace…), and Kokoro, Ming and Chatterbox share one list of voices; each copy was checked for clarity over a phone line, and Squeak makes the short reference clips it needs by itself. A Ming voice picked before moves to the nearest one.
+
 ## 2.12.41
 
 - Clicking a notification for a question shows its options as buttons (one tap sends the letter), with the full message behind Show context. Notifications now lead with the chat's state (Finished, Asking you something, Needs your approval, Plan to review, Hit an error) and carry the chat's name as the subtitle.
