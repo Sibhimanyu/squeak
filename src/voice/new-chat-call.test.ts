@@ -840,7 +840,7 @@ describe("call in: a new chat", () => {
       startReply: { v: 1, id: "s", at: 0, status: "refused", reason: "Your Mac could not start the chat." },
     });
     await handleIncoming(t.incoming, t.deps);
-    expect(call.said.at(-1)).toBe("Your Mac could not start the chat. Goodbye.");
+    expect(call.said.slice(-2)).toEqual(["Your Mac could not start the chat.", "Goodbye."]);
   });
 
   it("says it is not sure when the start got no answer, and never sends it again", async () => {
@@ -865,7 +865,7 @@ describe("call in: a new chat", () => {
       transcript: { v: 1, id: "x", at: 0, status: "refused", reason: "That list is out of date. Call again." },
     });
     await handleIncoming(t.incoming, t.deps);
-    expect(call.said.at(-1)).toBe("That list is out of date. Call again. Goodbye.");
+    expect(call.said.slice(-2)).toEqual(["That list is out of date. Call again.", "Goodbye."]);
     expect(t.log.starts).toEqual([]);
   });
 

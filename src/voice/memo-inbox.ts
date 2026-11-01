@@ -13,9 +13,11 @@ import {
   callBackLine,
   chatBusy,
   couldNotFind,
+  macFixedSays,
+  macLabelSays,
 } from "./mac-says.js";
 import { spokenAnswer } from "./chat-brief.js";
-import { ASK_FAILED, inboundPrompts, newChatReadBack } from "./inbound-flow.js";
+import { ASK_FAILED, newChatReadBack, uploadPrompts } from "./inbound-flow.js";
 import type { StartChatOutcome } from "../fleet/new-chat.js";
 import { clipOption } from "./script.js";
 import { numberRepeats } from "./spoken-labels.js";
@@ -133,6 +135,16 @@ export interface MemoInboxDependencies {
     onPart: (part: { index: number; total: number; clip: Clip }) => void,
   ) => Promise<void>;
   streamsReadBack?: () => boolean;
+  /**
+   * With an add-on that plays the Mac's clip on a refusal (0.20.0): a refusal then carries its own clip, made within a
+   * short budget. Absent or false: a refusal is text only, as before.
+   */
+  refusalAudio?: () => boolean;
+  /**
+   * Makes the lines the Mac itself says (refusals, talk replies, a new chat's outcomes, the ones naming a chat) ahead of
+   * any call, local only and at background priority, so attaching a clip to a message at call time is a cache hit.
+   */
+  prepareMacSays?: (texts: string[]) => Promise<void>;
   /** Makes these fixed read-back words ahead of any call, so the head and tail are in the cache when a call needs them. */
   prepareSpeech?: (texts: string[]) => Promise<void>;
   /**
@@ -245,6 +257,13 @@ const MAX_PENDING = 20;
 export const LAST_CHAT_FRESH_MS = 2 * 60 * 60_000;
 /** Most recording passes for one list's prompts (each up to a minute of speech). */
 const MAX_AUDIO_PASSES = 8;
+
+/** A digest of what an audio document holds: the clips' words and audio, in order. */
+const clipsDigest = (clips: readonly Clip[]): string => {
+  const hash = crypto.createHash("sha256");
+  for (const clip of clips) hash.update(clip.text).update("\0").update(clip.mulaw).update("\0");
+  return hash.digest("hex");
+};
 const KEEP_VERSIONS = 8;
 const REPUBLISH_MS = 30 * 60_000;
 const REMEMBER = 200;
@@ -264,6 +283,8 @@ type AudioFollowsFields = { audio?: Clip; audioFollows?: AudioFollows };
  * status. The add-on waits for it (uplink.ts), and says "Still working on it" meanwhile.
  */
 const ANSWER_AUDIO_BUDGET_MS = 20_000;
+/** A refusal is short and made ahead; if its clip is not ready this fast it goes without. */
+const REFUSAL_AUDIO_BUDGET_MS = 1_500;
 /** How long the later sentences of an answer stay in the database: the add-on deletes them, this is the backstop. */
 const REPLY_AUDIO_TTL_MS = 10 * 60_000;
 const REPLY_AUDIO_WRITE_MS = 90_000;
@@ -398,6 +419,8 @@ export class MemoInbox {
   private published: { version: string; at: number } | null = null;
   /** Audio document ids written for each directory version, so they go when the version does. */
   private readonly audioDocs = new Map<string, string[]>();
+  /** What each audio document written holds (a digest of its clips), so an unchanged one is reused, not rewritten. */
+  private readonly audioDigests = new Map<string, string>();
   private swept = false;
   /** Pieces of recordings still going up, by the stream (the up message's id) and the piece's number, decoded as they arrive. */
   private readonly partCache = new Map<string, Map<number, PartEntry>>();
@@ -652,7 +675,9 @@ export class MemoInbox {
   /** Renders the call-in prompts, writes them as audio documents, then names them in the list (same version). */
   private async publishAudio(doc: DirectoryDoc): Promise<void> {
     const { store, channel, key } = this.deps;
-    const texts = [...new Set([...inboundPrompts(doc, true), ...inboundPrompts(doc, false)])];
+    // Only what the add-on says itself, menus first and cut to what the audio documents hold: the Mac's own lines ride
+    // in the messages that carry them.
+    const texts = uploadPrompts(doc);
     const voiceKey = this.deps.voiceKey?.() ?? null;
     // One pass records at most a minute of speech (PromptClipCache), so a slow voice leaves most prompts to the
     // add-on's own (Piper). Each pass is published as soon as it is made, then the next records what is still missing
@@ -668,8 +693,17 @@ export class MemoInbox {
         const groups = chunkClips(clips).slice(0, MAX_AUDIO_DOCS);
         const ids: string[] = [];
         for (const [index, group] of groups.entries()) {
+          // A document whose clips are unchanged is not written again (the database's bandwidth is the owner's): one an
+          // earlier pass or a still-kept version already holds is named as it is.
+          const digest = clipsDigest(group);
+          const held = [...this.audioDigests].find(([docId, held]) => held === digest && this.audioHeld(docId));
+          if (held) {
+            ids.push(held[0]);
+            continue;
+          }
           const id = audioDocId(doc.version, index);
           await store.set(audioPath(channel, id), sealAudio(key, id, doc.version, group, this.now()));
+          this.audioDigests.set(id, digest);
           ids.push(id);
         }
         // A newer list came out while this rendered: its own audio follows; this one's documents are cleaned with it.
@@ -682,6 +716,12 @@ export class MemoInbox {
     }
     this.deps.audioPublished?.(doc.version, voiceKey);
     await this.dropStaleAudio();
+    if (this.deps.prepareMacSays && !this.stopped) {
+      const labels = [...doc.items, ...(doc.workspaces ?? []).flatMap((w) => w.chats)].map((i) => i.label);
+      await this.deps
+        .prepareMacSays([...new Set([...macFixedSays(), ...[...new Set(labels)].flatMap((l) => macLabelSays(l))])])
+        .catch(() => undefined);
+    }
     if (this.deps.prepareReadBack && !this.stopped) {
       const labels = [...doc.items, ...(doc.workspaces ?? []).flatMap((w) => w.chats)].map((i) => i.label);
       await this.deps.prepareReadBack(labels, this.canAsk).catch(() => undefined);
@@ -696,6 +736,12 @@ export class MemoInbox {
     }
   }
 
+  /** Whether an audio document written earlier is still named by a kept version (or by the pass being made). */
+  private audioHeld(id: string): boolean {
+    for (const [version, ids] of this.audioDocs) if (this.versions.has(version) && ids.includes(id)) return true;
+    return false;
+  }
+
   /** Deletes audio documents of directory versions no longer kept (and, once, ones a restart left behind). */
   private async dropStaleAudio(): Promise<void> {
     const { store, channel } = this.deps;
@@ -704,7 +750,14 @@ export class MemoInbox {
     for (const [version, ids] of [...this.audioDocs]) {
       if (this.versions.has(version)) continue;
       this.audioDocs.delete(version);
-      await Promise.all(ids.map((id) => store.delete(audioPath(channel, id)).catch(() => undefined)));
+      await Promise.all(
+        ids
+          .filter((id) => !keep.has(id))
+          .map((id) => {
+            this.audioDigests.delete(id);
+            return store.delete(audioPath(channel, id)).catch(() => undefined);
+          }),
+      );
     }
     if (this.swept) return;
     this.swept = true;
@@ -774,7 +827,7 @@ export class MemoInbox {
         return { v: 1, id, at: this.now(), status: "refused", reason: REFUSED_SAYS.wentWrong };
       });
       this.persist();
-      await store.set(downPath(channel, id), sealDown(key, answer));
+      await store.set(downPath(channel, id), sealDown(key, await this.withRefusalAudio(answer)));
     }
   }
 
@@ -955,16 +1008,27 @@ export class MemoInbox {
   }
 
   /** The recording's words in the Mac's voice, within a short budget; undefined leaves it to the add-on. */
-  private async answerAudio(text: string): Promise<Clip | undefined> {
+  private async answerAudio(text: string, budgetMs = ANSWER_AUDIO_BUDGET_MS): Promise<Clip | undefined> {
     if (!this.deps.speech) return undefined;
     try {
       return await Promise.race([
         this.deps.speech(text),
-        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ANSWER_AUDIO_BUDGET_MS).unref()),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), budgetMs).unref()),
       ]);
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * A refusal in the Mac's voice: its clip rides in the message (add-on 0.20.0), so none of these lines has to be held
+   * by the add-on. Made ahead (`prepareMacSays`), so this is normally a cache hit; not ready within the short budget,
+   * it goes as text and the add-on speaks it.
+   */
+  private async withRefusalAudio(answer: DownMessage): Promise<DownMessage> {
+    if (answer.status !== "refused" || answer.audio || !this.deps.refusalAudio?.()) return answer;
+    const clip = await this.answerAudio(answer.reason, REFUSAL_AUDIO_BUDGET_MS);
+    return clip && clip.text === answer.reason ? { ...answer, audio: clip } : answer;
   }
 
   /**

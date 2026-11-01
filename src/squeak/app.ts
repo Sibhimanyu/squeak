@@ -98,6 +98,7 @@ import {
   FOLLOW_UP_ADDON,
   HOLD_ADDON,
   ANSWER_STREAM_ADDON,
+  VOICE_MENU_ADDON,
   READBACK_STREAM_ADDON,
   NEW_CHAT_ADDON,
   LATE_CLIPS_ADDON,
@@ -1219,6 +1220,10 @@ export class SqueakApp {
       streamsReadBack: () =>
         this.naturalVoice.usable && addonSupports(this.gatewayStatusReader().peek().version, READBACK_STREAM_ADDON),
       prepareSpeech: (texts) => this.readBackClips.prepareTexts(texts),
+      // An add-on from 0.20.0 plays the Mac's clip on a refusal: the lines the Mac says are made ahead, locally.
+      refusalAudio: () =>
+        this.naturalVoice.usable && addonSupports(this.gatewayStatusReader().peek().version, VOICE_MENU_ADDON),
+      prepareMacSays: (texts) => this.naturalVoice.prewarm(texts).then(() => undefined),
       // Questions and status by phone: read-only, from the chat's own transcript; nothing reaches the replier.
       describe: (target, label) => {
         const input = this.chatBriefInputs(target, label);

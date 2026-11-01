@@ -1,4 +1,5 @@
 import { recordForUpload, type RecordedUpload } from "./recording-upload.js";
+import { MAX_AUDIO_DOC_BYTES } from "./clips.js";
 import crypto from "node:crypto";
 
 import { logger } from "../utils/logger.js";
@@ -6,6 +7,7 @@ import type { Clip } from "./clips.js";
 import { readDigits, type IncomingCall, type PhoneCall } from "./phone.js";
 import {
   MAX_ANSWERS_PER_CALL,
+  MAX_AUDIO_DOCS,
   MAX_MEMO_MS,
   MENU_CHOICES,
   newMessageId,
@@ -15,19 +17,9 @@ import {
   type DirectoryWorkspace,
 } from "./memo-protocol.js";
 import { judgeTranscript } from "./transcript-quality.js";
-import { readBackSpeech, speakReply } from "./answer-audio.js";
+import { readBackSpeech, refusalWords, speakReply } from "./answer-audio.js";
 import type { TalkPhase } from "./memo-protocol.js";
 import { TALK_SAYS } from "./talk-flow.js";
-import {
-  NEW_CHAT_SAYS,
-  PARTS_SAYS,
-  REFUSED_SAYS,
-  TALK_REPLY_SAYS,
-  chatBusy,
-  callBackLine,
-  couldNotFind,
-  nothingRunning,
-} from "./mac-says.js";
 import type { Uplink } from "./uplink.js";
 
 export interface InboundDependencies {
@@ -224,79 +216,98 @@ function allLabels(directory: DirectoryDoc): string[] {
 }
 
 /**
- * What to have ready for this chat list (the read-back of a message is the one thing made on the spot). Also what
- * the Mac records in its own voice and sends along (voice/natural-voice.ts), so the whole call sounds the same.
+ * What the add-on says on its own for this chat list, most used first, in tiers (the audio documents hold only so much,
+ * so a list that is too long loses its tail, never its menus). Lines that come FROM the Mac (a refusal, a talk reply, a
+ * new chat's outcome: `mac-says.ts`) are not here: the Mac attaches its own clip to the message that carries them.
+ * Also what the Mac records in its own voice and sends along (voice/natural-voice.ts).
  */
-export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean): string[] {
-  const fixed = [
-    SAYS.wait,
-    SAYS.still,
-    SAYS.nothing,
-    SAYS.cancelled,
-    SAYS.bye,
-    SAYS.noMac,
-    SAYS.notSure,
-    SAYS.wrong,
-    SAYS.noChat,
-    SAYS.noSpeech,
-    SAYS.cap,
-  ];
+export function inboundPromptTiers(directory: DirectoryDoc | null, askPin: boolean): string[][] {
   const terse = directory?.terse === true;
-  const pin = askPin ? [`${hello(terse)}${SAYS.pin}`, SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
   const ask = directory?.ask === true;
   const talks = directory?.talk === true && directory.ask === true;
-  const perChat = directory
-    ? allLabels(directory).flatMap((label) =>
-        talks
-          ? [talkPrompt(label, terse), actionPrompt(label), sentLine(label)]
-          : ask
-            ? [actionPrompt(label), sentLine(label)]
-            : [recordPrompt(label), sentLine(label)],
-      )
-    : [];
-  if (ask) fixed.push(SAYS.recordAsk, SAYS.askFail, SAYS.followUp, SAYS.limit);
-  if (talks) fixed.push(...Object.values(TALK_SAYS), ...Object.values(TALK_REPLY_SAYS));
-  // What the Mac says when it refuses (a stale list, a recording that never arrived, a limit): said as it arrives, so
-  // it must be recorded too or the add-on makes it with Piper. With a new-chat menu a refusal is also followed by
-  // "Goodbye." in one sentence.
-  if (ask) fixed.push(...Object.values(REFUSED_SAYS), ...Object.values(PARTS_SAYS));
-  else fixed.push(REFUSED_SAYS.staleList, REFUSED_SAYS.wentWrong, REFUSED_SAYS.tooManyMessages);
   const fresh = (directory?.workspaces ?? []).filter((w) => w.newChat);
-  if (fresh.length > 0) {
-    fixed.push(newChatKeys, SAYS.newChatNoMac, SAYS.newChatNotSure, SAYS.newChatFailed);
-    fixed.push(...Object.values(NEW_CHAT_SAYS), ...Object.values(PARTS_SAYS), REFUSED_SAYS.notMadeOut);
-    for (const reason of [
-      ...Object.values(NEW_CHAT_SAYS),
-      ...Object.values(REFUSED_SAYS),
-      ...Object.values(PARTS_SAYS),
-    ]) {
-      fixed.push(`${reason} Goodbye.`);
-    }
-    for (const workspace of fresh) fixed.push(newChatPrompt(workspace.label));
-  }
-  fixed.push(heardNothingPrompt(ask ? "3" : "2"));
   const last = directory?.last ? [lastChatPrompt(directory.last.label, !askPin, terse, directory.last.why)] : [];
   // With a last chat the offer carries the greeting, so the menus behind "another chat" do not.
   const greetMenus = !askPin && last.length === 0;
-  // A chat's own lines the Mac says by name: last, since a list too long for the audio documents loses its tail.
-  const named = directory
-    ? allLabels(directory).flatMap((label) => [
-        ...(ask ? [couldNotFind(label), chatBusy(label)] : [chatBusy(label)]),
-        ...(talks ? [nothingRunning(label), callBackLine(label)] : []),
-      ])
-    : [];
-  // The fixed lines come before the per-chat ones: they are what any call can hit, and the audio documents (8, each
-  // about 41 s) and the render passes work through this list in order.
-  return [
-    ...new Set([
-      ...pin,
-      ...last,
-      ...(directory ? menuPrompts(directory, greetMenus) : []),
-      ...fixed,
-      ...perChat,
-      ...named,
-    ]),
+  const labels = directory ? allLabels(directory) : [];
+  const pin = askPin ? [`${hello(terse)}${SAYS.pin}`, SAYS.pin, SAYS.pinAgain, SAYS.pinFail] : [];
+
+  // Said on every call: the PIN, the menus, and the line that opens the chosen chat.
+  const opening = [
+    ...pin,
+    ...last,
+    ...(directory ? menuPrompts(directory, greetMenus) : []),
+    ...labels.flatMap((label) =>
+      talks
+        ? [talkPrompt(label, terse)]
+        : ask
+          ? [actionPrompt(label), sentLine(label)]
+          : [recordPrompt(label), sentLine(label)],
+    ),
   ];
+  // What any call can hit, shortest and commonest first.
+  const common = [
+    SAYS.wait,
+    SAYS.still,
+    SAYS.bye,
+    SAYS.noMac,
+    SAYS.noChat,
+    SAYS.wrong,
+    SAYS.nothing,
+    SAYS.cancelled,
+    SAYS.notSure,
+    SAYS.noSpeech,
+    SAYS.cap,
+    ...(ask ? [SAYS.recordAsk, SAYS.askFail, SAYS.followUp, SAYS.limit] : []),
+    ...(talks ? Object.values(TALK_SAYS) : []),
+    ...fresh.flatMap((workspace) => [newChatPrompt(workspace.label)]),
+    ...(fresh.length > 0 ? [SAYS.newChatNoMac, SAYS.newChatNotSure, SAYS.newChatFailed] : []),
+  ];
+  // The keypad's wording when the conversation falls back to keys, and its rarer follow-ups.
+  const keypad = [
+    ...(talks ? labels.flatMap((label) => [actionPrompt(label), sentLine(label)]) : []),
+    ...(fresh.length > 0 ? [newChatKeys] : []),
+    heardNothingPrompt(ask ? "3" : "2"),
+  ];
+  return [opening, common, keypad];
+}
+
+/** Every line of the tiers, in order, for one PIN setting. */
+export function inboundPrompts(directory: DirectoryDoc | null, askPin: boolean): string[] {
+  return [...new Set(inboundPromptTiers(directory, askPin).flat())];
+}
+
+/** What a speaker says in a second, by the same rule the call-in notes use; a clip also carries ~0.55 s of padding. */
+export const SPEECH_CHARS_PER_SECOND = 14;
+const CLIP_PADDING_SECONDS = 0.55;
+/** The speech the audio documents can hold: `MAX_AUDIO_DOCS` of `MAX_AUDIO_DOC_BYTES` of 8 kHz mu-law. */
+export const PROMPT_AUDIO_SECONDS = (MAX_AUDIO_DOCS * MAX_AUDIO_DOC_BYTES) / 8000;
+
+export const estimateSpeechSeconds = (texts: readonly string[], padded = false): number =>
+  texts.reduce((sum, text) => sum + text.length / SPEECH_CHARS_PER_SECOND + (padded ? CLIP_PADDING_SECONDS : 0), 0);
+
+/**
+ * The prompts the Mac records and uploads for this list: both PIN settings, tier by tier (so a menu with the greeting and
+ * one without come before any fixed line), cut where the estimated speech would pass `share` of what the audio documents
+ * hold. Nothing past the cut is rendered or sent; the add-on makes it itself.
+ */
+export function uploadPrompts(directory: DirectoryDoc | null, share = 0.9): string[] {
+  const withPin = inboundPromptTiers(directory, true);
+  const withoutPin = inboundPromptTiers(directory, false);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let seconds = 0;
+  for (let tier = 0; tier < withPin.length; tier += 1) {
+    for (const text of [...(withPin[tier] ?? []), ...(withoutPin[tier] ?? [])]) {
+      if (seen.has(text) || text.trim().length === 0) continue;
+      const cost = estimateSpeechSeconds([text], true);
+      if (seconds + cost > PROMPT_AUDIO_SECONDS * share) return out;
+      seen.add(text);
+      seconds += cost;
+      out.push(text);
+    }
+  }
+  return out;
 }
 
 /** The shortest recording that is a message, not a hiss. */
@@ -567,7 +578,7 @@ async function statusFlow(
   }
   if (!heard) return bye(call, deps, SAYS.noMac).then(() => "done" as const);
   if (heard.status !== "answer") {
-    await speak(call, deps, heard.status === "refused" ? heard.reason : SAYS.wrong);
+    await speak(call, deps, heard.status === "refused" ? refusalWords(heard, deps) : SAYS.wrong);
     // Not a status: back to the question of what to do, unless the cap is spent.
     return counter.answers >= MAX_ANSWERS_PER_CALL
       ? bye(call, deps, SAYS.limit).then(() => "done" as const)
@@ -625,7 +636,7 @@ async function messageFlow(
     }
     if (!heard) return done(SAYS.noMac);
     if (heard.status !== "transcript") {
-      await speak(call, deps, heard.status === "refused" ? heard.reason : SAYS.wrong);
+      await speak(call, deps, heard.status === "refused" ? refusalWords(heard, deps) : SAYS.wrong);
       continue;
     }
     const recordAgain = ask ? "3" : "2";
@@ -676,7 +687,7 @@ async function messageFlow(
         return { text: reply.text };
       }
       askFails += 1;
-      await speak(call, deps, reply?.status === "refused" ? reply.reason : SAYS.askFail);
+      await speak(call, deps, reply?.status === "refused" ? refusalWords(reply, deps) : SAYS.askFail);
       if (askFails >= 2 || counter.answers >= MAX_ANSWERS_PER_CALL) return done(SAYS.bye);
     }
     deps.trace?.(
@@ -687,13 +698,11 @@ async function messageFlow(
     const outcome = await deps.uplink.send(memoId);
     if (!outcome) return done(SAYS.notSure);
     deps.trace?.(outcome.status === "sent" ? "step: Message sent" : "step: Message not sent");
-    return done(
-      outcome.status === "sent"
-        ? sentLine(target.label)
-        : outcome.status === "refused"
-          ? `${outcome.reason} Goodbye.`
-          : SAYS.bye,
-    );
+    if (outcome.status === "refused") {
+      await speak(call, deps, refusalWords(outcome, deps));
+      return done(SAYS.bye);
+    }
+    return done(outcome.status === "sent" ? sentLine(target.label) : SAYS.bye);
   }
   return done(SAYS.bye);
 }
@@ -754,7 +763,8 @@ async function newChatFlow(
     if (!heard) return bye(call, deps, SAYS.newChatNoMac);
     if (heard.status !== "transcript") {
       // A refusal (an out-of-date list, too many today) will not change by recording again.
-      return bye(call, deps, `${heard.status === "refused" ? heard.reason : SAYS.wrong} Goodbye.`);
+      await speak(call, deps, heard.status === "refused" ? refusalWords(heard, deps) : SAYS.wrong);
+      return bye(call, deps, SAYS.bye);
     }
     const quality = judgeTranscript(heard.text, recording.durationMs);
     deps.trace?.(`step: Transcript judged ${quality}`);
@@ -811,7 +821,10 @@ async function confirmNewChat(
 ): Promise<void> {
   const finish = async (reply: DownMessage | null): Promise<void> => {
     if (!reply) return bye(call, deps, SAYS.newChatNotSure);
-    if (reply.status === "refused") return bye(call, deps, `${reply.reason} Goodbye.`);
+    if (reply.status === "refused") {
+      await speak(call, deps, refusalWords(reply, deps));
+      return bye(call, deps, SAYS.bye);
+    }
     if (reply.status !== "newchat") return bye(call, deps, SAYS.newChatFailed);
     deps.trace?.(`step: New chat ${reply.outcome}`);
     await speakReply(call, reply, deps);

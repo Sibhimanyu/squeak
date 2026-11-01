@@ -321,7 +321,40 @@ describe("call-in flow", () => {
       reason: "blume · hub is busy right now. Send it from the app.",
     });
     await handleIncoming(t.incoming, t.deps);
-    expect(call.said.at(-1)).toContain("is busy right now");
+    expect(call.said.at(-2)).toContain("is busy right now");
+    expect(call.said.at(-1)).toBe("Goodbye.");
+  });
+
+  it("gives the phone the Mac's clip of a refusal before saying it, and only for the exact words", async () => {
+    const call = new FakeCall([...keys("4821#"), "1", "1"]);
+    const seeded: string[] = [];
+    const t = setup(call, { seed: (clips) => seeded.push(...clips.map((clip) => clip.text)) });
+    const reason = "blume · hub is busy right now. Send it from the app.";
+    t.deps.uplink.send = async () => ({
+      v: 1,
+      id: "x",
+      at: 0,
+      status: "refused",
+      reason,
+      audio: { text: reason, mulaw: "AAAA" },
+    });
+    await handleIncoming(t.incoming, t.deps);
+    expect(seeded).toEqual([reason]);
+    expect(call.said.at(-2)).toBe(reason);
+
+    const other = new FakeCall([...keys("4821#"), "1", "1"]);
+    const again: string[] = [];
+    const u = setup(other, { seed: (clips) => again.push(...clips.map((clip) => clip.text)) });
+    u.deps.uplink.send = async () => ({
+      v: 1,
+      id: "x",
+      at: 0,
+      status: "refused",
+      reason,
+      audio: { text: "something else", mulaw: "AAAA" },
+    });
+    await handleIncoming(u.incoming, u.deps);
+    expect(again).toEqual([]);
   });
 
   it("has every fixed thing it says made ahead of time: only the read-back is made on the spot", async () => {

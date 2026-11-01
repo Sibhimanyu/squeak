@@ -96,6 +96,18 @@ async function speakFollowed(
 /** How often a wait for a late part looks for a pressed key. */
 const KEY_LOOK_MS = 400;
 
+/**
+ * The words of a refusal, ready to say. The Mac's clip of exactly these words (add-on 0.20.0) is given to the phone first,
+ * so the refusal is in the Mac's voice; without one the add-on's own voice says it.
+ */
+export function refusalWords(
+  heard: Extract<DownMessage, { status: "refused" }>,
+  deps: Pick<SpeakReplyDependencies, "seed">,
+): string {
+  if (heard.audio && heard.audio.text === heard.reason) deps.seed?.([heard.audio]);
+  return heard.reason;
+}
+
 /** The words with every run of whitespace folded to one space, as the Mac's parts are cut. */
 export const foldWords = (text: string): string => text.replace(/\s+/g, " ").trim();
 

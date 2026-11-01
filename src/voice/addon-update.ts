@@ -76,6 +76,13 @@ export const NEW_CHAT_ADDON = "0.18.0";
 /** The add-on that plays a read-back sentence by sentence as the Mac makes it (`audioFollows` on a `transcript`), and waits for a late sentence. */
 export const READBACK_STREAM_ADDON = "0.19.0";
 
+/**
+ * The add-on that plays the Mac's clip on a refusal (`audio` on `refused`), says varied waiting lines in the owner's
+ * persona (`fillers` in the directory), and takes a menu answer by voice (`pickByVoice`, `pick` up and down). The Mac
+ * sends each only to an add-on at least this new; an older one ignores the fields and works as before.
+ */
+export const VOICE_MENU_ADDON = "0.20.0";
+
 /** Whether an add-on reporting `version` is at least `minimum`; false when its version is unknown. */
 export function addonSupports(version: string | null | undefined, minimum: string): boolean {
   return cleanVersion(version) !== null && !isNewer(minimum, version);

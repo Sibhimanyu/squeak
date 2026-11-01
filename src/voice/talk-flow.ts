@@ -1,5 +1,5 @@
 import type { Clip } from "./clips.js";
-import { speakReply } from "./answer-audio.js";
+import { refusalWords, speakReply } from "./answer-audio.js";
 import { reassure } from "./inbound-flow.js";
 import type { PhoneCall } from "./phone.js";
 import { newMessageId, type TalkPhase } from "./memo-protocol.js";
@@ -68,7 +68,7 @@ async function holdLine(
       return "keys";
     }
     if (reply.status !== "talk") {
-      await speak(reply.status === "refused" ? reply.reason : SAYS.wrong);
+      await speak(reply.status === "refused" ? refusalWords(reply, deps) : SAYS.wrong);
       return "keys";
     }
     if (reply.text) await speakReply(call, reply, deps);
@@ -127,7 +127,7 @@ export async function talkFlow(
       return "keys";
     }
     if (reply.status !== "talk") {
-      await speak(reply.status === "refused" ? reply.reason : SAYS.wrong);
+      await speak(reply.status === "refused" ? refusalWords(reply, deps) : SAYS.wrong);
       return "keys";
     }
     silences = 0;

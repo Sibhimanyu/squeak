@@ -240,7 +240,7 @@ describe("MemoInbox audio", () => {
       note: () => undefined,
       audioClips: async (texts) => {
         seen.push(texts);
-        return [clipOf(texts[0]!, 800)];
+        return [clipOf(`${texts[0]!} ${seen.length}`, 800)];
       },
       voiceKey: () => "kokoro:af_heart:none",
       audioPublished: (version, voiceKey) => published.push([version, voiceKey]),

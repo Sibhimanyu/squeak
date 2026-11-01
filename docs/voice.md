@@ -585,7 +585,28 @@ hash | silence | cap | no speech`.
 
 ## Every fixed line is the Mac's voice
 
-Every fixed sentence a call can say, from the add-on or sent down by the Mac (refusals, talk replies, a new chat's outcomes, and the ones that name a chat), is in `inboundPrompts` (`mac-says.ts` holds the Mac's), so the Mac records it with the call-in prompts and the add-on finds it by its exact words; `mac-says.test.ts` fails when one is missing. The fixed lines come before the per-chat ones in that list because the audio documents are capped (8, each about 41 s) and it is worked through in order. What still has Piper's voice is text that varies per call: a send's own failure reason, and the add-on's pre-0.11 requests.
+Two kinds of fixed line, two routes (add-on 0.20.0 for the second):
+
+- **What the add-on says on its own** (the PIN lines, the menus, each chat's opening, `SAYS`, `TALK_SAYS`, the waiting lines) is
+  uploaded as the audio documents: `uploadPrompts` in `inbound-flow.ts`, in tiers (`inboundPromptTiers`): 1 the PIN, the menus and
+  each chat's opening line (said on every call); 2 the fixed lines any call can hit; 3 the keypad's wording when the conversation
+  falls back to keys. The documents hold 8 of 330 KB of 8 kHz mu-law (about 41 s each, ~330 s), so the list is cut where the
+  estimated speech (characters / 14 per second, plus 0.55 s of padding per clip) passes 90% of that: a long list loses its keypad
+  tail, never a menu. Nothing past the cut is rendered either. `prompt-budget.test.ts` fails if the 8-chat example grows past it.
+- **What comes from the Mac** (a refusal, a talk reply, a new chat's outcome, the lines that name a chat: `mac-says.ts`) is not
+  uploaded. Each rides in the message that carries it: answers, talk replies and new-chat outcomes already had `audio`; `refused`
+  now has an optional `audio` (the clip of exactly `reason`, dropped on read if it says anything else), attached by the Mac within
+  1.5 s (`REFUSAL_AUDIO_BUDGET_MS`) and only to an add-on that reports 0.20.0 or newer (`VOICE_MENU_ADDON`). The add-on hands it
+  to the phone (`refusalWords`) and then says the reason. The Mac makes all of these sentences ahead of any call
+  (`prepareMacSays`: `NaturalVoice.prewarm`, background priority, local only), so attaching is a cache hit. The add-on says a
+  refusal and "Goodbye." as two lines (it used to join them).
+
+Measured for 8 chats in 2 workspaces (ask, talk, new chat; `prompt-budget.test.ts`): 150 prompts, ~609 s of estimated speech
+after the commit that put every Mac line in the set (menus after the fixed lines, so cut); 57 prompts, ~272 s (~303 s with
+padding) now, with the menus first. That is the same count as before that commit: the Mac's lines left the set again.
+
+The Mac does not rewrite an audio document whose clips are unchanged: a new list (a chat came or went) names the documents an
+earlier pass or a still-kept version already holds, by a digest of their clips, and only writes the ones that differ.
 
 ## Later
 

@@ -314,7 +314,11 @@ export type DownMessage =
   | { v: 1; id: string; at: number; status: "sent" }
   /** What to read aloud for an `ask` or `status`: plain sentences, at most `MAX_ANSWER_CHARS`. */
   | { v: 1; id: string; at: number; status: "answer"; text: string; audio?: Clip; audioFollows?: AudioFollows }
-  | { v: 1; id: string; at: number; status: "refused"; reason: string }
+  /**
+   * A refusal. `audio` (add-on 0.20.0 and newer) is the Mac's clip of exactly `reason`, so a line the Mac chose at call
+   * time is in the Mac's voice without the add-on holding a recording of it ahead of the call.
+   */
+  | { v: 1; id: string; at: number; status: "refused"; reason: string; audio?: Clip }
   /** What to say for a `talk` turn, and what the call does next: listen again, listen for yes or no, or end. */
   | {
       v: 1;
@@ -605,8 +609,13 @@ export function readDown(key: string, id: string, doc: ChannelDoc): DownMessage 
         ...(body.hold === true && body.outcome === "started" ? { hold: true as const } : {}),
       };
     }
-    case "refused":
-      return typeof body.reason === "string" ? { ...base, status: "refused", reason: body.reason.slice(0, 200) } : null;
+    case "refused": {
+      if (typeof body.reason !== "string") return null;
+      const reason = body.reason.slice(0, 200);
+      const spoken = readClip(body.audio);
+      // A clip that says anything but the reason is dropped: the add-on seeds it under its own words.
+      return { ...base, status: "refused", reason, ...(spoken && spoken.text === reason ? { audio: spoken } : {}) };
+    }
     default:
       return null;
   }
