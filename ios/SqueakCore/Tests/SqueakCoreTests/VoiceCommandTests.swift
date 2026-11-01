@@ -246,6 +246,18 @@ final class VoiceParityTests: XCTestCase {
         XCTAssertEqual(NewChatModelText.effective(NewChatModelPick(id: "opus", level: "zz"), in: ms), NewChatModelPick(id: "opus"))
     }
 
+    func testCallMenuTogglesDecodeAndEncode() throws {
+        let absent = try view(#"{"mode":"direct"}"#)
+        XCTAssertNil(absent.menusByVoice)
+        XCTAssertNil(absent.offerWaitingChat)
+        let v = try view(#"{"mode":"direct","menusByVoice":true,"offerWaitingChat":false}"#)
+        XCTAssertEqual(v.menusByVoice, true)
+        XCTAssertEqual(v.offerWaitingChat, false)
+        XCTAssertNil(try view(#"{"mode":"direct","menusByVoice":"x"}"#).menusByVoice)
+        XCTAssertEqual(try change(.menusByVoice(false)), #"{"menusByVoice":false}"#)
+        XCTAssertEqual(try change(.offerWaitingChat(true)), #"{"offerWaitingChat":true}"#)
+    }
+
     func testHoldViewDecodesOptionalAndClamps() throws {
         XCTAssertNil(try view(#"{"mode":"direct"}"#).hold)
         // Missing keys are the defaults; wrong types and out-of-range numbers never fail the view.

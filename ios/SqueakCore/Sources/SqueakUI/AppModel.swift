@@ -1599,6 +1599,8 @@ final class AppModel {
             case .test: snapshot?.voice?.lastTest = .init(at: Date().timeIntervalSince1970 * 1000, status: "answered", letter: "A")
             case .hold: break
             case .newChatModel(let pick): snapshot?.voice?.newChatModel = pick
+            case .menusByVoice(let on): snapshot?.voice?.menusByVoice = on
+            case .offerWaitingChat(let on): snapshot?.voice?.offerWaitingChat = on
             }
             return nil
         }

@@ -60,6 +60,7 @@ struct VoiceSettingsView: View {
                 }
                 if voice.pause != nil { PauseSection(voice: voice) }
                 if let hold = voice.hold { HoldSection(hold: hold) }
+                if voice.menusByVoice != nil || voice.offerWaitingChat != nil { CallMenusSection(voice: voice) }
                 if let models = voice.chatModels, !models.isEmpty { NewChatModelSection(models: models, pick: voice.newChatModel) }
                 // Only a Mac that sends its voice list takes these commands.
                 if let natural = voice.natural, natural.offered {
@@ -544,6 +545,46 @@ private struct NewChatModelSection: View {
             }
             if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
         } footer: { Text(NewChatModelText.footer) }
+    }
+
+    private func send(_ change: VoiceChange) {
+        problem = nil
+        busy = true
+        Task {
+            problem = await model.changeVoice(change)
+            busy = false
+        }
+    }
+}
+
+/// How a call's menus work: two switches, each shown only for a Mac that sends it.
+private struct CallMenusSection: View {
+    @Environment(AppModel.self) private var model
+    let voice: VoiceView
+    @State private var busy = false
+    @State private var problem: String?
+
+    var body: some View {
+        Section {
+            if let on = voice.menusByVoice {
+                row("Answer menus by voice", "Say a workspace or chat instead of pressing a number. Keys still work.", on) { .menusByVoice($0) }
+            }
+            if let on = voice.offerWaitingChat {
+                row("Offer the chat that's waiting on you first", "A call starts with the chat that needs you, instead of the workspaces.", on) { .offerWaitingChat($0) }
+            }
+            if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+        } header: { Text("Call menus") }
+    }
+
+    private func row(_ title: String, _ detail: String, _ on: Bool, _ make: @escaping (Bool) -> VoiceChange) -> some View {
+        Toggle(isOn: Binding(get: { on }, set: { new in if new != on { send(make(new)) } })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.footnote).foregroundStyle(Theme.muted)
+            }
+        }
+        .frame(minHeight: 44)
+        .disabled(busy)
     }
 
     private func send(_ change: VoiceChange) {
