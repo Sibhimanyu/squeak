@@ -14,6 +14,7 @@ import {
   type NaturalSetupDeps,
   type NaturalSetupProgress,
 } from "./natural-setup.js";
+import { VOICE_ENGINES } from "./voice-engines.js";
 import { naturalInstalled, naturalPaths } from "./natural-voice.js";
 
 let dir: string;
@@ -148,7 +149,7 @@ describe("MLX engines", () => {
   ];
 
   /** Fakes the engine's effects: the listing, a download that writes the right number of bytes, the venv. */
-  function mlxDeps(overrides: Partial<NaturalSetupDeps> = {}, engine: "qwen3" | "chatterbox" = "qwen3") {
+  function mlxDeps(overrides: Partial<NaturalSetupDeps> = {}, engine: "qwen3" | "chatterbox" | "ming" = "qwen3") {
     const paths = naturalPaths(dir, engine);
     const downloaded: string[] = [];
     const deps = fakeDeps({
@@ -278,42 +279,45 @@ describe("MLX engines", () => {
     ).not.toBeNull();
   });
 
-  it("installs Kokoro first for Chatterbox and makes its reference clips with it", async () => {
-    const { deps } = mlxDeps({}, "chatterbox");
-    const made: string[][] = [];
-    const kokoroPaths = naturalPaths(dir);
-    const result = await installNatural(dir, () => undefined, {
-      engine: "chatterbox",
-      deps: {
-        ...deps,
-        listRepo: async (repo) =>
-          repo.endsWith("S3TokenizerV2")
-            ? [
-                { path: "config.json", size: 4 },
-                { path: "model.safetensors", size: 50 },
-              ]
-            : [
-                { path: "config.json", size: 10 },
-                { path: "tokenizer.json", size: 10 },
-                { path: "model.safetensors", size: 100 },
-              ],
-        makeVenv: async (_python, to) => {
-          fs.mkdirSync(path.join(to, "venv", "bin"), { recursive: true });
-          fs.writeFileSync(path.join(to, "venv", "bin", "python3"), "");
+  it.each(["chatterbox", "ming"] as const)(
+    "installs Kokoro first for %s and makes its reference clips with it",
+    async (engine) => {
+      const { deps } = mlxDeps({}, engine);
+      const made: string[][] = [];
+      const kokoroPaths = naturalPaths(dir);
+      const result = await installNatural(dir, () => undefined, {
+        engine,
+        deps: {
+          ...deps,
+          listRepo: async (repo) =>
+            repo.endsWith("S3TokenizerV2")
+              ? [
+                  { path: "config.json", size: 4 },
+                  { path: "model.safetensors", size: 50 },
+                ]
+              : [
+                  { path: "config.json", size: 10 },
+                  { path: "tokenizer.json", size: 10 },
+                  { path: "model.safetensors", size: 100 },
+                ],
+          makeVenv: async (_python, to) => {
+            fs.mkdirSync(path.join(to, "venv", "bin"), { recursive: true });
+            fs.writeFileSync(path.join(to, "venv", "bin", "python3"), "");
+          },
+          makeReferenceClips: async (kokoro, folder, voices) => {
+            expect(kokoro).toEqual(kokoroPaths);
+            made.push([...voices]);
+            fs.mkdirSync(path.join(folder, "refs"), { recursive: true });
+            for (const voice of voices) fs.writeFileSync(path.join(folder, "refs", `${voice}.wav`), "x");
+          },
         },
-        makeReferenceClips: async (kokoro, folder, voices) => {
-          expect(kokoro).toEqual(kokoroPaths);
-          made.push([...voices]);
-          fs.mkdirSync(path.join(folder, "refs"), { recursive: true });
-          for (const voice of voices) fs.writeFileSync(path.join(folder, "refs", `${voice}.wav`), "x");
-        },
-      },
-    });
-    expect(result).toEqual({ ok: true });
-    expect(naturalInstalled(kokoroPaths)).toBe(true);
-    expect(naturalInstalled(naturalPaths(dir, "chatterbox"))).toBe(true);
-    expect(made).toEqual([["af_heart", "bf_emma", "am_michael", "bm_george"]]);
-  });
+      });
+      expect(result).toEqual({ ok: true });
+      expect(naturalInstalled(kokoroPaths)).toBe(true);
+      expect(naturalInstalled(naturalPaths(dir, engine))).toBe(true);
+      expect(made).toEqual([VOICE_ENGINES[engine].voices.map((voice) => voice.id)]);
+    },
+  );
 });
 
 describe("one install at a time, and removing an engine", () => {

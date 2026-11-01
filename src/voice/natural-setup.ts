@@ -448,9 +448,9 @@ async function installMlxEngine(
   const signal = options.signal ?? new AbortController().signal;
   const engine = VOICE_ENGINES[engineId];
   const paths = naturalPaths(supportDir, engineId);
-  const needsKokoro = engineId === "chatterbox";
+  const needsKokoro = engineId === "chatterbox" || engineId === "ming";
   try {
-    // Chatterbox's reference clips come from Kokoro; the first tenth of the bar is that install, when it is missing.
+    // Ming's and Chatterbox's reference clips come from Kokoro; the first tenth of the bar is that install, when it is missing.
     const lift = needsKokoro && !naturalInstalled(naturalPaths(supportDir)) ? 10 : 0;
     const say = (progress: NaturalSetupProgress) =>
       report(

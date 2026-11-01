@@ -27,8 +27,11 @@ import {
   engineHasVoice,
   ENGINE_IDS,
   isEngineId,
+  migrateVoice,
   NATURAL_VOICE,
   NATURAL_VOICES,
+  referenceClip,
+  renameLegacyVoice,
   VOICE_ENGINES,
   type EngineId,
 } from "./voice-engines.js";
@@ -90,7 +93,13 @@ export function naturalPaths(supportDir: string, engine: EngineId = DEFAULT_ENGI
     voices: dir,
     worker,
     engine,
-    required: VOICE_ENGINES[engine].repos.flatMap((repo) => repo.proof.map((file) => path.join(dir, repo.dir, file))),
+    required: [
+      ...VOICE_ENGINES[engine].repos.flatMap((repo) => repo.proof.map((file) => path.join(dir, repo.dir, file))),
+      // The clone engines also need a reference clip for each voice, made from Kokoro at setup.
+      ...(engine === "ming" || engine === "chatterbox"
+        ? VOICE_ENGINES[engine].voices.map((voice) => referenceClip(dir, voice.id))
+        : []),
+    ],
   };
 }
 
@@ -170,7 +179,7 @@ export class NaturalSettingsStore {
       if (isSpeechSpeed(raw.speed)) this.current.speed = raw.speed;
       if (typeof raw.voices === "object" && raw.voices !== null) {
         for (const id of ENGINE_IDS) {
-          const voice = (raw.voices as Record<string, unknown>)[id];
+          const voice = migrateVoice(id, (raw.voices as Record<string, unknown>)[id]);
           if (engineHasVoice(id, voice)) this.current.voices[id] = voice;
         }
       }
@@ -215,7 +224,10 @@ export class NaturalSettingsStore {
     if (engine !== this.current.engine && !this.installed(engine)) {
       return { ok: false, reason: `Set up ${VOICE_ENGINES[engine].label} on the Mac first.` };
     }
-    if (record.voice !== undefined && !engineHasVoice(engine, record.voice)) {
+    // An older phone may still name one of Ming's former voices.
+    const voice =
+      renameLegacyVoice(engine, record.voice) !== record.voice ? migrateVoice(engine, record.voice) : record.voice;
+    if (voice !== undefined && !engineHasVoice(engine, voice)) {
       return {
         ok: false,
         reason: engine === "kokoro" ? "That is not a Kokoro voice name." : "That is not a voice this engine has.",
@@ -234,7 +246,7 @@ export class NaturalSettingsStore {
       emotion: (record.emotion as EmotionLevel | undefined) ?? this.current.emotion,
       voices: {
         ...this.current.voices,
-        ...(record.voice !== undefined ? { [engine]: record.voice as string } : {}),
+        ...(voice !== undefined ? { [engine]: voice as string } : {}),
       },
     };
     try {
@@ -924,12 +936,14 @@ export class NaturalVoice {
 }
 
 /** The engine's identity for the cache: a replaced model file (or another engine) changes every key. */
-function engineTag(paths: NaturalPaths, engine: EngineId): string {
+export function engineTag(paths: NaturalPaths, engine: EngineId): string {
   try {
     const stat = fs.statSync(paths.required?.[0] ?? paths.model);
     const own = `${stat.size}-${Math.round(stat.mtimeMs)}`;
     // Kokoro's tag stays as it was, so its saved sentences remain good.
-    return engine === "kokoro" ? own : `${engine}-${VOICE_ENGINES[engine].model}-${own}`;
+    if (engine === "kokoro") return own;
+    // Ming's voices became clones of the shared reference clips: its old sentences (other voice ids) never come back.
+    return `${engine}-${VOICE_ENGINES[engine].model}${engine === "ming" ? "-clone" : ""}-${own}`;
   } catch {
     return "none";
   }

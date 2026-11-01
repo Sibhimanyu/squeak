@@ -63,14 +63,18 @@ and the toggle and Voice picker appear when the daemon reports `installed`.
 **Voice engines.** The realistic voice has four engines (`voice-engines.ts`), each in its own folder of the support
 directory so removing one is deleting a folder: `kokoro` (`voice-tts/`, small, plain, no emotion), and three expressive
 ones on mlx-audio that run on the Mac's GPU: `qwen3` (Qwen3-TTS CustomVoice, preset speakers, Apache-2.0), `ming` (Ming
-3.0 TTS, built-in voices, MIT) and `chatterbox` (clones a reference clip, MIT). Each has `voice-tts-<id>/` with
+3.0 TTS, MIT) and `chatterbox` (MIT), which both clone a reference clip. Each has `voice-tts-<id>/` with
 `venv/` (Python 3.10 to 3.12 for Apple silicon, found among Homebrew's and `~/.local/bin`'s), `worker.py` and its
 weights in `model/` (not the global Hugging Face cache). Setup fetches the repo's files with curl (resume, stall
 detection, retries; progress in bytes), but first looks for each file in the Hugging Face cache (`$HF_HUB_CACHE`,
 `$HF_HOME/hub`, `~/.cache/huggingface/hub`) or a folder named by `SQUEAK_VOICE_WEIGHTS_DIR` (`<repo name>/<file>`) and
 hard-links a file of exactly the right size instead ("Using files already on this Mac"); a half download is a `.part`
-file, never taken as installed. Chatterbox's reference clips are made with Kokoro at setup (Kokoro is installed first
-when missing). The MLX engines run **one** worker (urgent and background share it; its queue starts any waiting urgent render before any background one, so a sample or a live call never waits behind call prompts being prepared, though a render already running finishes first); Kokoro keeps two.
+file, never taken as installed. **Kokoro, Ming and Chatterbox share one voice list** (`NATURAL_VOICES`: Heart, Bella, Nicole, Emma, Michael, Adam,
+George; Qwen3 keeps its own). Ming's and Chatterbox's reference clips (`<engine folder>/refs/<voice>.wav`, one
+fixed sentence, the same Kokoro voices) are made with Kokoro at setup (Kokoro is installed first when missing), and
+an engine counts as installed only with a clip for every voice it offers. Each cloning engine lists only the voices
+that passed the clarity check (`CLONE_PASSED`, docs/voice-tts-bakeoff.md, "One voice list across engines"). Ming's old
+built-in ids (`US_Emma`...) are renamed on read (`migrateVoice`) and its sentence cache key carries `-clone`. The MLX engines run **one** worker (urgent and background share it; its queue starts any waiting urgent render before any background one, so a sample or a live call never waits behind call prompts being prepared, though a render already running finishes first); Kokoro keeps two.
 
 - Settings `voice-natural.json`: `{ enabled, engine, voices: { <engine>: <voice> }, emotion: off | subtle | strong,
 voice }` (`voice` is Kokoro's, still written for a rolled-back daemon; the old `{ enabled, voice }` reads as Kokoro).

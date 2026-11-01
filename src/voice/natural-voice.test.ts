@@ -168,13 +168,42 @@ describe("NaturalSettingsStore", () => {
   it("takes a voice for the engine set with it, else the current one, and each engine keeps its own", () => {
     const store = new NaturalSettingsStore(fileIn());
     expect(store.apply({ engine: "ming" })).toEqual({ ok: true });
-    expect(store.settings.voice).toBe("US_Emma");
-    expect(store.apply({ voice: "af_heart" }).ok).toBe(false); // a Kokoro name is not a Ming voice
-    expect(store.apply({ voice: "UK_George" })).toEqual({ ok: true });
+    expect(store.settings.voice).toBe("af_heart");
+    expect(store.apply({ voice: "aiden" }).ok).toBe(false); // a Qwen3 name is not a Ming voice
+    expect(store.apply({ voice: "bm_george" })).toEqual({ ok: true });
     expect(store.apply({ engine: "kokoro", voice: "am_adam" })).toEqual({ ok: true });
     expect(store.apply({ engine: "ming" })).toEqual({ ok: true });
-    expect(store.settings.voice).toBe("UK_George");
+    expect(store.settings.voice).toBe("bm_george");
     expect(store.apply({ engine: "ming", voice: "nobody" }).ok).toBe(false);
+  });
+
+  it("maps Ming's former voices to the shared list, in saved settings and in a request from an older phone", () => {
+    const file = fileIn();
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ engine: "ming", voices: { kokoro: "am_adam", ming: "US_Stella", qwen3: "ryan" } }),
+    );
+    expect(new NaturalSettingsStore(file).settings).toMatchObject({
+      engine: "ming",
+      voice: "af_heart", // Stella became Nicole, who did not pass on Ming
+      voices: { kokoro: "am_adam", ming: "af_heart", qwen3: "ryan" },
+    });
+    for (const [old, now] of [
+      ["US_Emma", "af_bella"],
+      ["US_Stella", "af_heart"], // af_nicole is not offered on Ming (clarity check)
+      ["US_James", "am_michael"],
+      ["UK_Charlotte", "bf_emma"],
+      ["UK_George", "bm_george"],
+      ["Nobody_Known", "af_heart"],
+    ] as const) {
+      fs.writeFileSync(file, JSON.stringify({ engine: "ming", voices: { ming: old } }));
+      expect(new NaturalSettingsStore(file).settings.voice).toBe(now);
+    }
+    const store = new NaturalSettingsStore(fileIn());
+    expect(store.apply({ engine: "ming", voice: "UK_Charlotte" })).toEqual({ ok: true });
+    expect(store.settings.voice).toBe("bf_emma");
+    expect(store.apply({ engine: "ming", voice: "US_Stella" })).toEqual({ ok: true }); // Nicole is not on Ming
+    expect(store.settings.voice).toBe("af_heart");
   });
 
   it("refuses an unknown engine or emotion, and a switch to an engine that is not installed", () => {
@@ -330,7 +359,7 @@ describe("engines in one NaturalVoice", () => {
       const stuck = natural.render("This one never answers.");
       await new Promise((resolve) => setTimeout(resolve, 300));
       settings.engine = "ming";
-      settings.voice = "US_Emma";
+      settings.voice = "af_heart";
       expect(await natural.line("Squeak needs an answer.")).not.toBeNull();
       expect(await stuck).toBeNull();
       // The stopped engine works again for a sample.
@@ -401,7 +430,7 @@ describe("engines in one NaturalVoice", () => {
       ];
       await new Promise((resolve) => setTimeout(resolve, 300));
       settings.engine = "ming";
-      settings.voice = "US_Emma";
+      settings.voice = "af_heart";
       expect(await natural.line("Squeak needs an answer.")).not.toBeNull();
       expect(await stuck).toBeNull();
       await Promise.all(waiting);
@@ -425,7 +454,7 @@ describe("engines in one NaturalVoice", () => {
       settings.voice = "aiden";
       await natural.line(say);
       settings.engine = "ming";
-      settings.voice = "US_Emma";
+      settings.voice = "af_heart";
       await natural.line(say);
       expect(requests()).toHaveLength(4);
       settings.engine = "qwen3";
@@ -466,9 +495,9 @@ describe("engines in one NaturalVoice", () => {
     const settings: NaturalSettings = { enabled: true, voice: "af_heart", engine: "kokoro" };
     const natural = new NaturalVoice(pathsFor, () => settings);
     try {
-      expect(await natural.preview("US_James", "ming")).not.toBeNull();
-      expect(requests()[0]).toMatchObject({ voice: "US_James", mood: "urgent", level: "subtle" });
-      expect(await natural.preview("af_heart", "ming")).toBeNull(); // not one of Ming's voices
+      expect(await natural.preview("am_michael", "ming")).not.toBeNull();
+      expect(requests()[0]).toMatchObject({ voice: "am_michael", mood: "urgent", level: "subtle" });
+      expect(await natural.preview("ryan", "ming")).toBeNull(); // not one of Ming's voices
       expect(await natural.preview("ryan", "kokoro")).toBeNull();
       await new Promise((resolve) => setTimeout(resolve, 150));
       expect(() => process.kill(requests()[0]!.pid as number, 0)).toThrow();

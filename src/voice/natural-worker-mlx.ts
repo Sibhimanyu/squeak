@@ -13,6 +13,10 @@
 /** First line of every MLX worker: a script that starts with it is Squeak's own, and is replaced when Squeak's changes. */
 export const WORKER_MARKER = "# Squeak voice worker: written by Squeak and replaced when it updates.";
 
+/** What the reference clips say: about eight seconds of plain, even speech. */
+export const REFERENCE_TEXT =
+  "I checked the logs this morning, and everything looks fine. The new build is faster, the tests are green, and I think we can ship it after lunch.";
+
 const PRELUDE = `${WORKER_MARKER}
 import json
 import os
@@ -170,9 +174,14 @@ def main():
 main()
 `;
 
-/** Ming-3.0 TTS (MIT): a built-in voice named by an IP caption, the mood as Ming's emotion keys and speed/pitch levels. */
+/**
+ * Ming-3.0 TTS (MIT): a clone of a short reference clip (the same Kokoro-made clips as Chatterbox's, in
+ * \`<engine folder>/refs\`), the mood as Ming's emotion keys and speed/pitch levels in its caption.
+ */
 export const MING_WORKER_PY = `${PRELUDE}from mlx_audio.tts.models.bailingmm.bailingmm import ming3_instruction
 from mlx_audio.tts.utils import load_model
+
+REFERENCE_TEXT = ${JSON.stringify(REFERENCE_TEXT)}
 
 # Ming's caption keys are Chinese: emotion 高兴 happy, 悲伤 sad, 恐惧 fear, 中性 neutral; speed 慢速 slow, 中速 medium,
 # 快速 fast; pitch and volume 低 low, 中 medium, 高 high.
@@ -205,14 +214,26 @@ CONTROLS = {
 
 
 def main():
+    folder = sys.argv[2]
     model = load_model(sys.argv[1])
 
     def make(request):
+        voice = request.get("voice", "af_heart")
         mood = request.get("mood", "neutral")
         level = request.get("level", "off")
         controls = CONTROLS.get(mood, CONTROLS["neutral"]).get(level, {}) if level in ("subtle", "strong") else {}
-        caption = ming3_instruction(ip=request.get("voice", "US_Emma"), **controls)
-        return collect(model.generate(text=request["text"], instruct=caption, use_zero_spk_emb=True, verbose=False))
+        clip = os.path.join(folder, "refs", voice + ".wav")
+        if not os.path.exists(clip):
+            raise RuntimeError("no reference clip for " + voice)
+        return collect(
+            model.generate(
+                text=request["text"],
+                instruct=ming3_instruction(**controls),
+                ref_audio=clip,
+                ref_text=REFERENCE_TEXT,
+                verbose=False,
+            )
+        )
 
     serve(make)
 
@@ -280,7 +301,7 @@ def main():
 main()
 `;
 
-/** Makes Chatterbox's reference clips with Kokoro (run by Kokoro's own Python): argv model, voices, folder, text, ids... */
+/** Makes the Ming and Chatterbox reference clips with Kokoro (run by Kokoro's own Python): argv model, voices, folder, text, ids... */
 export const REFERENCE_CLIPS_PY = `import os
 import sys
 import wave
@@ -300,7 +321,3 @@ for voice in sys.argv[5:]:
         out.setframerate(rate)
         out.writeframes(pcm.tobytes())
 `;
-
-/** What the reference clips say: about eight seconds of plain, even speech. */
-export const REFERENCE_TEXT =
-  "I checked the logs this morning, and everything looks fine. The new build is faster, the tests are green, and I think we can ship it after lunch.";
