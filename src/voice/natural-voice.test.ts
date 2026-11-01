@@ -492,7 +492,7 @@ describe("engines in one NaturalVoice", () => {
       natural.stop();
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 20_000); // starts real worker processes: slow when the whole suite runs at once
 
   it("previews another engine's voice without changing the current one, then stops its worker", async () => {
     const { dir, pathsFor, requests } = fakeEngines();
