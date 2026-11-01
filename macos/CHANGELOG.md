@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.40
+
+- Settings › Phone calls has two new switches: Answer menus by voice (say a workspace or chat instead of pressing a number; keys still work) and Offer the chat that's waiting on you first (a call starts with the chat that needs you). A custom character now says that Squeak asks Claude once, on your Mac, to write the waiting lines when you save it.
+
 ## 2.12.39
 
 - Settings › Phone calls › Voice has a Speed control under Emotion: 0.8× to 1.3×, for every voice engine. Squeak makes the voice at its natural pace and then speeds it up or slows it down without changing the pitch; the call prompts are recorded again at the new speed, and Play sample uses it.

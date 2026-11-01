@@ -240,6 +240,31 @@ final class ChannelsModel {
         }
     }
 
+    /// Saves one of the two call-flow toggles and takes the daemon's answer as the truth.
+    func setCallFlow(offerWaitingChat: Bool? = nil, menusByVoice: Bool? = nil) async {
+        voiceError = nil
+        if demo {
+            if let offerWaitingChat { voice?.offerWaitingChat = offerWaitingChat }
+            if let menusByVoice { voice?.menusByVoice = menusByVoice }
+            return
+        }
+        pauseBusy = true
+        defer { pauseBusy = false }
+        do {
+            let answered: VoiceSettings?
+            if let offerWaitingChat { answered = try await client.setVoiceOfferWaitingChat(offerWaitingChat) }
+            else if let menusByVoice { answered = try await client.setVoiceMenusByVoice(menusByVoice) }
+            else { return }
+            if let answered {
+                voice = answered
+            } else {
+                voiceError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            voiceError = "Could not save: Squeak on this Mac did not answer."
+        }
+    }
+
     /// Turns the realistic call voice on or off, or picks its voice; takes the daemon's answer as the truth.
     func setNatural(enabled: Bool? = nil, voice: String? = nil, engine: String? = nil, emotion: NaturalEmotion? = nil, speed: Double? = nil) async {
         voiceError = nil
