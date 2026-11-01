@@ -24,6 +24,8 @@ final class QuickContextModel {
     private(set) var fromNotification = false
     var showEarlier = false
     var expanded = false
+    /// With lettered options shown as buttons, whether the full message behind them is open.
+    var showContext = false
     /// Why "Open in Conductor" did nothing, shown under the status row. Cleared with the context.
     var openNotice: String?
     /// Changes whenever the context is cleared, reloaded or retargeted, so an action that finishes
@@ -64,6 +66,7 @@ final class QuickContextModel {
         fromNotification = false
         showEarlier = false
         expanded = false
+        showContext = false
     }
 
     func load(key: SessionKey, anchor: NotificationAnchor?, fromNotification: Bool, model: AppModel) {
@@ -161,6 +164,8 @@ struct QuickContextView: View {
     var close: () -> Void
     @Environment(AppModel.self) private var model
     @State private var responseNatural: CGFloat = 0
+    @State private var answering: String?
+    @State private var answerFailure: String?
 
     /// Collapsed height of the reply: readable, never most of the screen.
     private static let collapsedLimit: CGFloat = 170
@@ -296,6 +301,64 @@ struct QuickContextView: View {
     // MARK: Content
 
     @ViewBuilder private func ready(_ content: NotificationContextContent, extra: String?) -> some View {
+        if let response = content.response, let s = session, model.canSend(s),
+           let layout = ChoiceLayout.make(response.text), !layout.cards.isEmpty {
+            options(layout, content: content, extra: extra)
+        } else {
+            reading(content, extra: extra)
+        }
+    }
+
+    /// A question with lettered options: the options as buttons, the message behind a disclosure.
+    private func options(_ layout: ChoiceLayout, content: NotificationContextContent, extra: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let q = layout.question {
+                Text(verbatim: q).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(layout.cards, id: \.letter) { card in
+                AnswerCard(card: card, isEnabled: answering == nil && model.isConnected) { answer(card) }
+            }
+            if let failure = answerFailure {
+                Text(verbatim: failure).font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+            } else if let letter = answering {
+                Text("Sending \(letter)…").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            }
+            HStack {
+                disclosure(context.showContext ? "Hide context" : "Show context", expanded: context.showContext) {
+                    context.showContext.toggle()
+                }
+                Spacer(minLength: 0)
+            }
+            if context.showContext {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let response = content.response {
+                        MessageText(markdown: response.text, style: .squeak).textSelection(.enabled)
+                    }
+                    if let note = [content.note, extra].compactMap({ $0 }).joined(separator: " ").nilIfEmpty {
+                        Text(verbatim: note).font(.system(size: 11)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if content.hasEarlier { earlier(content) }
+                }
+            }
+        }
+    }
+
+    /// Sends just the letter, as a tap on the chat's own option does; closes only once it is accepted.
+    private func answer(_ card: ChoiceCard) {
+        guard answering == nil else { return }
+        answering = card.letter
+        answerFailure = nil
+        let serial = context.serial
+        Task {
+            let r = await model.send(card.letter, to: key, answering: true)
+            guard context.serial == serial else { return }
+            answering = nil
+            if let r, let f = SendFeedback(r), !f.succeeded { answerFailure = f.text } else { close() }
+        }
+    }
+
+    @ViewBuilder private func reading(_ content: NotificationContextContent, extra: String?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if let response = content.response {
                 // Collapsed it is cut (and fades) at a readable height; expanded it takes its full

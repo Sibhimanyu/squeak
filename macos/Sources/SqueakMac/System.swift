@@ -80,7 +80,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         guard let center else { return }
         configure()
         let content = UNMutableNotificationContent()
-        content.title = "Squeak"
+        // State first (Finished, Asking you something...), then the chat, then what it said.
+        content.title = event.kind == .blocked && event.body.hasSuffix("is waiting for you") ? "Waiting for you" : event.kind.stateTitle
+        if showName, let label = event.label, !label.isEmpty { content.subtitle = label }
         content.body = Self.body(event, showName: showName)
         content.sound = .default
         content.threadIdentifier = event.key.stringValue
@@ -103,8 +105,19 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     static func body(_ event: NotificationEvent, showName: Bool) -> String {
         guard showName else { return genericBody(event.kind) }
-        guard let detail = event.detail, !detail.isEmpty else { return event.body }
-        return "\(event.body)\n\(detail)"
+        if let detail = event.detail, !detail.isEmpty { return detail }
+        return event.label == nil ? event.body : kindLine(event.kind)
+    }
+
+    /// What the title leaves unsaid when there is no detail to show.
+    private static func kindLine(_ kind: NotificationKind) -> String {
+        switch kind {
+        case .blocked: "Open it to allow or decline."
+        case .question: "Open it to answer."
+        case .plan: "Open it to review."
+        case .finished: "Open it to read the reply."
+        case .error: "Open it to see what happened."
+        }
     }
 
     static func genericBody(_ kind: NotificationKind) -> String {
