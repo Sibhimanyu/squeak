@@ -955,33 +955,52 @@ struct GatewayPairSheet: View {
     }
 }
 
-/// Call history and the gateway's log: Calls | Gateway log, refreshed every 10 s while open.
+/// Call history and the gateway log, refreshed while the sheet is open.
 struct CallsSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var tab = Tab.calls
+    @State private var selectedID: String?
     @State private var copied = false
     private var m: ChannelsModel { app.channels }
 
     private enum Tab: String, CaseIterable { case calls = "Calls", log = "Gateway log" }
+    private var selectedCall: CallEntry? {
+        guard let calls = m.calls?.calls else { return nil }
+        return calls.first { $0.id == selectedID } ?? calls.first
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Call history & log").font(Typo.title)
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden()
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Call history").font(Typo.title).foregroundStyle(Theme.ink)
+                    Text("Review calls and what happened on each one.")
+                        .font(Typo.body).foregroundStyle(Theme.muted)
+                }
+                Spacer()
+                Picker("View", selection: $tab) {
+                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 210)
+            }
+            .padding(20)
+            Divider().overlay(Theme.line)
             content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            Divider().overlay(Theme.line)
             HStack {
-                Button(copied ? "Copied" : "Copy") { copy() }
+                Button(copied ? "Copied" : (tab == .calls ? "Copy call list" : "Copy gateway log")) { copy() }
                     .buttonStyle(SecondaryButtonStyle()).disabled(exportText.isEmpty)
                 Spacer()
-                Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle())
+                Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.cancelAction)
             }
+            .padding(.horizontal, 20).padding(.vertical, 14)
         }
-        .padding(24).frame(width: 560, height: 480)
+        .frame(width: 780, height: 580)
+        .background(Theme.bg)
         .onAppear { m.startCallsRefresh() }
         .onDisappear { m.stopCallsRefresh() }
+        .onChange(of: tab) { _, _ in copied = false }
     }
 
     private var exportText: String {
@@ -1001,135 +1020,223 @@ struct CallsSheet: View {
 
     @ViewBuilder private var content: some View {
         if !m.callsAvailable {
-            Footnote(CallText.unavailable)
+            emptyState("Call history unavailable", CallText.unavailable, icon: "phone.badge.exclamationmark")
         } else if let v = m.calls {
             switch tab {
-            case .calls: callsList(v.calls)
+            case .calls:
+                if v.calls.isEmpty {
+                    emptyState("No calls yet", "Calls and test calls will appear here.", icon: "phone.arrow.up.right")
+                } else {
+                    HStack(spacing: 0) {
+                        callList(v.calls).frame(width: 280)
+                        Rectangle().fill(Theme.line).frame(width: 1)
+                        if let selectedCall { CallDetail(entry: selectedCall).id(selectedCall.id) }
+                    }
+                }
             case .log: logList(v.gatewayLog)
             }
         } else {
-            Text("Loading…").font(Typo.body).foregroundStyle(Theme.muted)
+            HStack(spacing: 10) { ProgressView().controlSize(.small); Text("Loading call history…").foregroundStyle(Theme.muted) }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    @ViewBuilder private func callsList(_ calls: [CallEntry]) -> some View {
-        if calls.isEmpty {
-            Footnote("No calls yet. When an agent is waiting on you, or you place a test call, it shows here.")
-        } else {
+    private func callList(_ calls: [CallEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("RECENT CALLS").font(.system(size: 10, weight: .semibold)).tracking(0.8).foregroundStyle(Theme.muted)
+                Spacer()
+                Text("\(calls.count)").font(Typo.meta).foregroundStyle(Theme.muted)
+            }
+            .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(calls) { e in
-                        CallRow(entry: e)
-                        Divider().overlay(Theme.line)
+                LazyVStack(spacing: 3) {
+                    ForEach(calls) { entry in
+                        Button { selectedID = entry.id } label: {
+                            CallSummaryRow(entry: entry, selected: selectedCall?.id == entry.id)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(CallText.callRow(entry))
+                        .accessibilityAddTraits(selectedCall?.id == entry.id ? .isSelected : [])
                     }
-                }
+                }.padding(.horizontal, 8).padding(.bottom, 8)
             }
         }
+        .background(Theme.surface.opacity(0.55))
     }
 
     @ViewBuilder private func logList(_ log: GatewayLog?) -> some View {
         if let log, !log.lines.isEmpty {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    ForEach(log.lines.reversed()) { l in
-                        Text(CallText.logLine(l))
-                            .font(.system(.caption, design: .monospaced))
-                            .fontWeight(l.level == .warn ? .bold : .regular)
-                            .foregroundStyle(l.level == .warn ? Theme.error : Theme.ink)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(log.lines.reversed()) { line in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: line.level == .warn ? "exclamationmark.triangle.fill" : "circle.fill")
+                                .font(.system(size: line.level == .warn ? 12 : 6))
+                                .foregroundStyle(line.level == .warn ? Theme.needsYou : Theme.subtle)
+                                .frame(width: 14).padding(.top, 4)
+                            Text(CallText.logLine(line)).font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(line.level == .warn ? Theme.needsYou : Theme.ink)
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 8)
+                        Divider().overlay(Theme.line)
                     }
-                }
+                }.padding(20)
             }
         } else {
-            Footnote("Nothing from the gateway yet. Once the Home Assistant add-on is paired and running, what it does shows here.")
+            emptyState("No gateway activity yet", "Activity appears here after the Home Assistant add-on is paired and running.", icon: "text.alignleft")
         }
+    }
+
+    private func emptyState(_ title: String, _ message: String, icon: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon).font(.system(size: 26)).foregroundStyle(Theme.muted).padding(.bottom, 4)
+            Text(title).font(.headline).foregroundStyle(Theme.ink)
+            Text(message).font(Typo.body).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                .frame(maxWidth: 310)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-
-/// One call: its summary row, and when opened the timeline of what happened, with a Copy of it as plain text.
-struct CallRow: View {
+private struct CallSummaryRow: View {
     let entry: CallEntry
-    @State private var open = false
-    @State private var copied = false
+    let selected: Bool
+
+    private var color: Color {
+        switch entry.outcome {
+        case .answered: Theme.working
+        case .failed: Theme.needsYou
+        case .unanswered, .movedOn: Theme.muted
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button { withAnimation(.snappy(duration: 0.15)) { open.toggle() } } label: {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
-                        .rotationEffect(.degrees(open ? 90 : 0)).frame(width: 10).padding(.top, 4)
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(CallText.what(entry)).font(Typo.body).lineLimit(1)
-                            Spacer()
-                            Text(CallText.when(ms: entry.at)).font(.caption.monospacedDigit()).foregroundStyle(Theme.muted)
-                        }
-                        Text("\(CallText.outcomeSentence(entry)) \u{00B7} \(CallText.duration(ms: entry.durationMs))")
-                            .font(Typo.meta).foregroundStyle(entry.outcome == .failed ? Theme.error : Theme.muted)
-                            .fontWeight(entry.outcome == .failed ? .semibold : .regular)
-                            .fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: entry.kind == .incoming ? "phone.arrow.down.left" : (entry.kind == .test ? "phone.badge.checkmark" : "phone.arrow.up.right"))
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(color)
+                .frame(width: 30, height: 30).background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(CallText.what(entry)).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.ink).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                Text(CallText.outcomeSentence(entry)).font(.caption).foregroundStyle(color).lineLimit(2)
+                Text(CallText.when(ms: entry.at)).font(.caption).foregroundStyle(Theme.muted)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .background(selected ? Theme.selected : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
+    }
+}
+
+private struct CallDetail: View {
+    let entry: CallEntry
+    @State private var showTechnical = false
+    @State private var copied = false
+
+    private var conversationEvents: [CallEvent] { entry.events.filter { $0.kind != .step } }
+    private var visibleEvents: [CallEvent] { showTechnical || conversationEvents.isEmpty ? entry.events : conversationEvents }
+    private var technicalCount: Int { entry.events.count - conversationEvents.count }
+    private var outcomeColor: Color {
+        switch entry.outcome {
+        case .answered: Theme.working
+        case .failed: Theme.needsYou
+        case .unanswered, .movedOn: Theme.muted
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(entry.kind == .incoming ? "INCOMING CALL" : (entry.kind == .test ? "TEST CALL" : "OUTGOING CALL"))
+                        .font(.system(size: 10, weight: .semibold)).tracking(1).foregroundStyle(Theme.muted)
+                    Text(CallText.what(entry)).font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 12) {
+                        Label(CallText.when(ms: entry.at), systemImage: "calendar")
+                        Label(CallText.duration(ms: entry.durationMs), systemImage: "clock")
+                    }.font(.caption).foregroundStyle(Theme.muted)
+                    Text(CallText.outcomeSentence(entry)).font(.callout.weight(.medium))
+                        .foregroundStyle(outcomeColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Divider().overlay(Theme.line)
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Call timeline").font(.headline).foregroundStyle(Theme.ink)
+                        Text("What happened during this call").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                    Spacer()
+                    Button(copied ? "Copied" : "Copy timeline") { copy() }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+                if entry.events.isEmpty {
+                    Text("No detail was recorded for this call.").font(Typo.body).foregroundStyle(Theme.muted)
+                } else {
+                    if technicalCount > 0, !conversationEvents.isEmpty {
+                        Toggle("Show technical events (\(technicalCount))", isOn: $showTechnical)
+                            .toggleStyle(.checkbox).font(.caption).foregroundStyle(Theme.muted)
+                    }
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        ForEach(visibleEvents) { event in CallTimelineEvent(event: event) }
                     }
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(CallText.callRow(entry))
-            .accessibilityValue(open ? "Expanded" : "Collapsed")
-            if open { detail.padding(.leading, 18) }
-        }
-        .padding(.vertical, 8)
-    }
-
-    private var detail: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(CallText.summary(entry)).font(Typo.meta).foregroundStyle(Theme.muted).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-            if entry.events.isEmpty {
-                Text("No detail was recorded for this call.").font(Typo.meta).foregroundStyle(Theme.muted)
-            } else {
-                ForEach(entry.events) { ev in eventLine(ev) }
-            }
-            Button(copied ? "Copied" : "Copy") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(CallText.timelineExport(entry), forType: .string)
-                copied = true
-                Task { try? await Task.sleep(for: .seconds(2)); copied = false }
-            }
-            .buttonStyle(SecondaryButtonStyle())
+            .padding(20).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private func eventLine(_ ev: CallEvent) -> some View {
-        let warn = ev.kind == .warn
-        return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(CallText.eventTime(ev.at)).font(.system(.caption, design: .monospaced)).foregroundStyle(Theme.muted)
-            Text(CallText.sourceTag(ev.source)).font(.caption2.weight(.semibold)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 5).padding(.vertical, 1).background(Theme.surface, in: Capsule())
-            Image(systemName: icon(ev.kind)).font(.caption).foregroundStyle(warn ? Theme.error : Theme.muted)
-                .help(CallText.kindLabel(ev.kind)).accessibilityLabel(CallText.kindLabel(ev.kind))
-            Text(CallText.eventBody(ev))
-                .font(ev.kind == .step ? .system(.caption, design: .monospaced) : .caption)
-                .fontWeight(warn ? .semibold : .regular)
-                .foregroundStyle(warn ? Theme.error : Theme.ink)
-                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
-            if let ms = ev.ms {
-                Text(CallText.eventDuration(ms: ms)).font(.system(.caption2, design: .monospaced)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, 5).padding(.vertical, 1).background(Theme.surface, in: Capsule())
-            }
-        }
+    private func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(CallText.timelineExport(entry), forType: .string)
+        copied = true
+        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
     }
+}
 
-    private func icon(_ k: CallEventKind) -> String {
-        switch k {
+private struct CallTimelineEvent: View {
+    let event: CallEvent
+
+    private var icon: String {
+        switch event.kind {
         case .step: "gearshape"
-        case .said: "speaker.wave.2"
-        case .heard: "mic"
-        case .key: "number.square"
-        case .warn: "exclamationmark.triangle"
+        case .said: "speaker.wave.2.fill"
+        case .heard: "mic.fill"
+        case .key: "number"
+        case .warn: "exclamationmark.triangle.fill"
         }
+    }
+    private var color: Color {
+        switch event.kind {
+        case .said: Theme.done
+        case .heard: Theme.working
+        case .warn: Theme.needsYou
+        case .step, .key: Theme.muted
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(color)
+                .frame(width: 28, height: 28).background(color.opacity(0.12), in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(CallText.kindLabel(event.kind)).font(.caption.weight(.semibold)).foregroundStyle(color)
+                    Text("·").foregroundStyle(Theme.subtle)
+                    Text(Date(timeIntervalSince1970: event.at / 1000), style: .time).font(.caption.monospacedDigit()).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 0)
+                    Text(CallText.sourceTag(event.source)).font(.caption2).foregroundStyle(Theme.muted)
+                    if let ms = event.ms { Text(CallText.eventDuration(ms: ms)).font(.caption2).foregroundStyle(Theme.muted) }
+                }
+                Text(CallText.eventBody(event)).font(event.kind == .step ? .system(.caption, design: .monospaced) : .callout)
+                    .foregroundStyle(event.kind == .warn ? Theme.needsYou : Theme.ink)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }.accessibilityElement(children: .contain)
     }
 }

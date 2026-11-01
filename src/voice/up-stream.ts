@@ -124,7 +124,11 @@ export class UpStream {
       return null;
     }
     this.done = true;
-    this.options.trace?.(`step: Sent ${before} pieces while recording`);
+    const total = this.hashes.length;
+    const noun = (n: number) => `${n} piece${n === 1 ? "" : "s"}`;
+    this.options.trace?.(
+      before > 0 ? `step: Sent ${noun(total)} (${before} while recording)` : `step: Sent ${noun(total)}`,
+    );
     return [...this.hashes];
   }
 

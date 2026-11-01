@@ -87,9 +87,37 @@ export function groupLaterSentences(sentences: readonly string[], min = LATER_PA
   return groups;
 }
 
+/** A first sentence longer than this is cut at a natural break so the first clip is quick to make. */
+export const FIRST_PART_MAX_CHARS = 60;
+const FIRST_PART_MIN_CHARS = 20;
+/** The remainder of a cut sentence must be worth a clip of its own. */
+const FIRST_REST_MIN_CHARS = 12;
+
+/**
+ * `splitSentences` with the first sentence cut in two when it is long (over 60 characters): at the first comma,
+ * semicolon, colon or dash that falls between 20 and 60 characters in, the punctuation staying with the first part.
+ * Cut only where whitespace follows, so joined with a space the parts say exactly the same words. No break: unchanged.
+ */
+export function splitForSpeech(text: string): string[] {
+  const sentences = splitSentences(text);
+  const first = sentences[0];
+  if (!first || first.length <= FIRST_PART_MAX_CHARS) return sentences;
+  const window = first.slice(0, FIRST_PART_MAX_CHARS + 1);
+  const breaks = /[,;:](?=\s)|\s[—–-]+(?=\s)/g;
+  for (let m = breaks.exec(window); m; m = breaks.exec(window)) {
+    const end = m.index + m[0].length;
+    const head = first.slice(0, end).trim();
+    const rest = first.slice(end).trim();
+    if (head.length < FIRST_PART_MIN_CHARS || head.length > FIRST_PART_MAX_CHARS) continue;
+    if (rest.length < FIRST_REST_MIN_CHARS) return sentences;
+    return [head, rest, ...sentences.slice(1)];
+  }
+  return sentences;
+}
+
 /** The sentences of a spoken answer in the groups it is sent in: the first sentence alone, the rest merged. */
 export function speechGroups(text: string): string[][] {
-  const sentences = splitSentences(text);
+  const sentences = splitForSpeech(text);
   if (sentences.length < 2) return sentences.map((sentence) => [sentence]);
   return [[sentences[0]!], ...groupLaterSentences(sentences.slice(1))];
 }

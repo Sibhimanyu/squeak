@@ -66,6 +66,31 @@ say "smoke-testing the new build..."
     .catch((error) => { console.error(error.message); process.exit(1); });
 " ) || { rm -rf "$REPO_ROOT/dist.new"; die "new build does not import -- live dist untouched"; }
 
+# 4b. A restart cuts a phone call off, so wait for one to end (15 minutes at most). The running daemon says
+#     whether a call is up; one that cannot be reached, or is too old to have the route, counts as not busy.
+call_busy() {
+  local token_file="$HOME/Library/Application Support/squeak/hook-token" token body
+  [ -r "$token_file" ] || return 1
+  token="$(tr -d '[:space:]' < "$token_file")"
+  body="$(curl -fsS --max-time 3 -H "x-squeak-token: $token" "http://127.0.0.1:$PORT/control/voice/busy" 2>/dev/null)" || return 1
+  case "$body" in *'"busy":true'*) return 0 ;; esac
+  return 1
+}
+
+if call_busy; then
+  say ""
+  say "a call is in progress, waiting for it to end..."
+  waited=0
+  while call_busy; do
+    if [ "$waited" -ge "${CALL_WAIT:-900}" ]; then
+      say "warning: the call is still up after $((waited / 60)) minutes; restarting anyway"
+      break
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+fi
+
 # 5. Swap, keeping the outgoing build for rollback.
 rm -rf "$REPO_ROOT/dist.prev"
 [ -d "$REPO_ROOT/dist" ] && mv "$REPO_ROOT/dist" "$REPO_ROOT/dist.prev"

@@ -13,6 +13,7 @@ import {
   pcmOfWav,
   SentenceCache,
   speechGroups,
+  splitForSpeech,
   splitSentences,
   wavOfPcm,
   type LineStats,
@@ -445,6 +446,8 @@ export interface LineOptions {
   priority?: RenderPriority;
   /** Called in order as each sentence is ready, so a line can start before the rest is made. */
   onSentence?: (sentence: SentenceReady) => void;
+  /** Cut a long first sentence at a natural break (`splitForSpeech`), for a streamed answer's quick first clip. */
+  shortFirst?: boolean;
 }
 
 /** How a piece of speech is made: the engine, its mood (from the words, unless the person turned emotion off). */
@@ -689,7 +692,7 @@ export class NaturalVoice {
   async line(text: string, options: LineOptions = {}): Promise<Int16Array | null> {
     const voice = options.voice ?? this.settings().voice;
     const priority = options.priority ?? "urgent";
-    const parts = splitSentences(text);
+    const parts = options.shortFirst ? splitForSpeech(text) : splitSentences(text);
     if (parts.length === 0) return null;
     const delivery = this.delivery(text);
     const began = this.now();
@@ -801,6 +804,7 @@ export class NaturalVoice {
     const pieces = new Map<number, Int16Array>();
     await this.line(text, {
       ...options,
+      shortFirst: true,
       onSentence: ({ index, pcm }) => {
         pieces.set(index, pcm);
         const at = groupOf[index] ?? -1;

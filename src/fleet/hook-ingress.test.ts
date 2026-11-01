@@ -1422,3 +1422,25 @@ describe("HookIngressServer call history route", () => {
     expect(await read.json()).toEqual(body);
   });
 });
+
+describe("HookIngressServer call busy route", () => {
+  it("gates and answers /control/voice/busy", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/voice/busy`;
+    const auth = { "x-squeak-token": harness.token };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(url, { headers: auth })).status).toBe(503);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      voiceBusy: () => ({ busy: true, since: 5 }),
+    });
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", headers: auth, body: "{}" })).status).toBe(405);
+    const read = await fetch(url, { headers: auth });
+    expect(read.status).toBe(200);
+    expect(read.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await read.json()).toEqual({ busy: true, since: 5 });
+  });
+});

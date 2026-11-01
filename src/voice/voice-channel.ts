@@ -107,6 +107,11 @@ export class VoiceChannel {
   private readonly callbackRetryAt = new Map<string, number>();
   private readonly callbacksRinging = new Set<string>();
 
+  /** A call out is being placed or is up. */
+  isCalling(): boolean {
+    return this.calling;
+  }
+
   private readonly followUp: MissedCallFollowUp;
 
   constructor(private readonly deps: VoiceChannelDependencies) {

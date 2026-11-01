@@ -58,7 +58,7 @@ describe("UpStream: a recording goes up while it is made", () => {
     expect(hashes![0]).toBe(upPartHash(first.opus));
     expect(hashes![2]).toBe(upPartHash(Buffer.from(`opus:${1.5 * SECOND}:13`)));
     expect(await stored()).toHaveLength(3);
-    expect(traces).toEqual(["step: Sent 2 pieces while recording"]);
+    expect(traces).toEqual(["step: Sent 3 pieces (2 while recording)"]);
   });
 
   it("sends a short recording as its one last piece", async () => {
@@ -66,6 +66,7 @@ describe("UpStream: a recording goes up while it is made", () => {
     stream.feed(pcmOf(1));
     const hashes = await stream.finish(pcmOf(1.2));
     expect(hashes).toEqual([upPartHash(Buffer.from(`opus:${1.2 * SECOND}:1`))]);
+    expect(traces).toEqual(["step: Sent 1 piece"]);
   });
 
   it("returns null and deletes what it wrote when a write fails", async () => {

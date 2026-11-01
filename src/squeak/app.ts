@@ -823,6 +823,11 @@ export class SqueakApp {
               ? this.gatewayPairing.approve(approve)
               : Promise.resolve({ ok: false as const, reason: "No gateway is waiting to pair." }),
       },
+      voiceBusy: () => {
+        const inbox = this.memoInbox?.busy() ?? { busy: false };
+        if (this.voice?.isCalling()) return { busy: true, since: inbox.since ?? Date.now() };
+        return inbox;
+      },
       voiceCalls: async () => {
         const gatewayLog = await this.ingestGatewayLog();
         const trace = this.callTraceStore();
@@ -1192,6 +1197,7 @@ export class SqueakApp {
       caller: () => this.voiceSettings.settings.callee,
       favorites: () => this.voiceFavorites.list().map((fav) => ({ ...fav, label: this.spokenFavoriteLabel(fav) })),
       lastChat: this.lastVoiceChat,
+      stateFile: path.join(this.config.supportDir, "voice-call-state.json"),
       // The call-in dialog in the Mac's own voice: every prompt, and the read-back of each message.
       audioClips: async (texts) => {
         const key = this.promptVoiceKey();

@@ -219,6 +219,11 @@ export interface IngressControl {
    */
   voiceCalls?(): Promise<unknown> | unknown;
   /**
+   * `GET /control/voice/busy` (token-gated, no CORS header, 405 for other methods, 503 when voice is unavailable):
+   * `{ busy: boolean, since?: number }`, true while a phone call is up. `scripts/ship.sh` waits on it before a restart.
+   */
+  voiceBusy?(): { busy: boolean; since?: number };
+  /**
    * `POST /control/telegram/avatar`: set the Telegram bot's profile photo to Squeak's logo (telegram/avatar.ts).
    * Body `{}` or `{ which: "logo" }`; answers `{ message }` or `{ error }` (429 when tried within 30 s).
    */
@@ -1165,6 +1170,21 @@ export class HookIngressServer {
         }
         respondJson(response, 200, { ok: true });
       });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/voice/busy") {
+      request.resume();
+      if (request.method !== "GET") {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      const busy = control.voiceBusy;
+      if (!busy) {
+        respond(response, 503, "call state unavailable");
+        return;
+      }
+      respondJson(response, 200, busy.call(control));
       return;
     }
 

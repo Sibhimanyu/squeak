@@ -408,6 +408,27 @@ turn and a `start` with a spoken answer.
   recording is discarded or the caller hangs up mid-recording. The Mac deletes the pieces it used, any older than 10 min
   (each pass and every minute), and all of them at start.
 
+### A restart in the middle of a call
+
+The daemon keeps what a call in progress needs in `voice-call-state.json` (support dir, 0600, written atomically):
+the last few list versions with their chats and new-chat workspaces (kept 30 minutes after a message last named
+them), the calls registered or started by talk (30 minutes), a message or new chat read back and waiting for its
+yes, a proposed message (10 and 5 minutes), and the ids of messages already handled (10 minutes, so a signed message
+written again after the restart is still refused). It is loaded when `MemoInbox` is made, before the first pass, and
+expired entries are dropped then. Audio is never saved. Everything waiting for a yes still needs the person's own
+yes after the restart; nothing is sent from the file alone.
+
+`GET /control/voice/busy` (token-gated) answers `{ busy, since? }`: true while a call out is up or the gateway sent
+something in the last 3 minutes (10 while a call is on hold). `scripts/ship.sh` asks before it swaps and restarts,
+waits up to 15 minutes (`CALL_WAIT` seconds) and then goes on with a warning. A daemon that does not answer, or has no
+such route, counts as not busy.
+
+### The first clip is short
+
+A streamed answer's first sentence, when it is over 60 characters, is cut at its first comma, semicolon, colon or
+dash that falls between 20 and 60 characters in (`splitForSpeech`), so the first clip is quick to make; the parts
+still join to the same words. The add-on's trace says `Sent 3 pieces (2 while recording)` (or `Sent 1 piece`).
+
 ### The chat you used last, and recordings it will not send blind
 
 - **Jump straight in** (`DirectoryDoc.last`, optional: `{ choice, label }`). The Mac names the chat you last used by

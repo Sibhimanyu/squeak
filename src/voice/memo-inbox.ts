@@ -11,6 +11,7 @@ import type { StartChatOutcome } from "../fleet/new-chat.js";
 import { clipOption } from "./script.js";
 import { numberRepeats } from "./spoken-labels.js";
 import { speechParts } from "./natural-cache.js";
+import { loadCallState, saveCallState } from "./call-state.js";
 import {
   fixedMemoReadBackSpeech,
   fixedNewChatReadBackSpeech,
@@ -49,6 +50,7 @@ import {
   type DirectoryWorkspace,
   type DownMessage,
   type UpMessage,
+  UP_TTL_MS,
 } from "./memo-protocol.js";
 import type { Transcriber } from "./transcribe.js";
 
@@ -201,6 +203,8 @@ export interface MemoInboxDependencies {
   /** Tests: how long to wait for a piece that has not arrived, and how often to look. */
   partsWaitMs?: number;
   partsPollMs?: number;
+  /** Where a call in progress is kept across a restart (`voice-call-state.json`); absent = in memory only. */
+  stateFile?: string;
 }
 
 interface Pending {
@@ -249,6 +253,10 @@ const REPUBLISH_MS = 30 * 60_000;
 const REMEMBER = 200;
 /** A call out names its chat for this long: longer than any call lasts. */
 const CALL_TARGET_TTL_MS = 30 * 60_000;
+/** A list version is kept this long after a message last named it. */
+const VERSION_TTL_MS = 30 * 60_000;
+/** A call counts as up while the gateway sent something in the last 3 minutes (10 while on hold). */
+const CALL_BUSY_MS = 3 * 60_000;
 const READ_BACK_BUDGET_MS = 8_000;
 /** The longest transcript a `transcript` carries (`readDown`'s cap); a longer one is never streamed. */
 const MAX_TRANSCRIPT_CHARS = 1500;
@@ -384,6 +392,11 @@ export class MemoInbox {
   private running = false;
   private dirty = false;
   private readonly handled: string[] = [];
+  /** When each handled id was taken, so a restart keeps it only as long as the message could still be replayed. */
+  private readonly handledAt = new Map<string, number>();
+  /** When a message last named each directory version. */
+  private readonly versionUsed = new Map<string, number>();
+  private activity: { since: number; last: number } | null = null;
   private readonly pending = new Map<string, Pending>();
   /** New chats read back and awaiting a yes, by the `newchat` message's id. */
   private readonly pendingNew = new Map<string, PendingNewChat>();
@@ -424,6 +437,81 @@ export class MemoInbox {
 
   constructor(private readonly deps: MemoInboxDependencies) {
     this.now = deps.now ?? Date.now;
+    this.restore();
+  }
+
+  /** Whether a phone call looks to be up: the gateway sent something lately (a hold keeps it up longer). */
+  busy(): { busy: boolean; since?: number } {
+    const now = this.now();
+    const a = this.activity;
+    if (!a) return { busy: false };
+    const onHold = [...this.calls.values()].some((c) => c.hold && now - c.hold.since < HOLD_MAX_MS);
+    return now - a.last <= (onHold ? HOLD_MAX_MS : CALL_BUSY_MS) ? { busy: true, since: a.since } : { busy: false };
+  }
+
+  private touchActivity(): void {
+    const now = this.now();
+    const a = this.activity;
+    this.activity = a && now - a.last <= HOLD_MAX_MS ? { since: a.since, last: now } : { since: now, last: now };
+  }
+
+  /** Loads a call in progress saved by an earlier run, dropping what has expired. */
+  private restore(): void {
+    const { stateFile } = this.deps;
+    if (!stateFile) return;
+    const saved = loadCallState(stateFile);
+    if (!saved) return;
+    const now = this.now();
+    for (const v of saved.versions) {
+      if (now - v.usedAt > VERSION_TTL_MS) continue;
+      this.versions.set(v.version, v.targets);
+      this.newChatSpaces.set(v.version, v.spaces);
+      this.versionUsed.set(v.version, v.usedAt);
+    }
+    while (this.versions.size > KEEP_VERSIONS) this.dropVersion(this.versions.keys().next().value as string);
+    for (const { key, ...call } of saved.calls) {
+      if (now - (call.at as number) > CALL_TARGET_TTL_MS) continue;
+      this.calls.set(key, call as unknown as typeof this.calls extends Map<string, infer C> ? C : never);
+    }
+    for (const { id, ...p } of saved.pending) {
+      if (now - (p.at as number) > PENDING_TTL_MS) continue;
+      this.pending.set(id, p as unknown as Pending);
+    }
+    for (const { id, ...p } of saved.pendingNew) {
+      if (now - (p.at as number) > PENDING_TTL_MS) continue;
+      this.pendingNew.set(id, { ...(p as unknown as PendingNewChat), busy: false });
+    }
+    for (const h of saved.handled) {
+      if (now - h.at > UP_TTL_MS * 2) continue;
+      this.handled.push(h.id);
+      this.handledAt.set(h.id, h.at);
+    }
+  }
+
+  private dropVersion(version: string): void {
+    this.versions.delete(version);
+    this.newChatSpaces.delete(version);
+    this.versionUsed.delete(version);
+  }
+
+  private persist(): void {
+    const { stateFile } = this.deps;
+    if (!stateFile) return;
+    const now = this.now();
+    saveCallState(stateFile, {
+      v: 1,
+      savedAt: now,
+      versions: [...this.versions].map(([version, targets]) => ({
+        version,
+        targets,
+        spaces: this.newChatSpaces.get(version) ?? [],
+        usedAt: this.versionUsed.get(version) ?? now,
+      })),
+      calls: [...this.calls].map(([key, call]) => ({ key, ...call })),
+      pending: [...this.pending].map(([id, p]) => ({ id, ...p })),
+      pendingNew: [...this.pendingNew].map(([id, p]) => ({ id, ...p, busy: false })),
+      handled: this.handled.map((id) => ({ id, at: this.handledAt.get(id) ?? now })),
+    });
   }
 
   start(): void {
@@ -559,8 +647,14 @@ export class MemoInbox {
       targets.map((t) => t.target),
     );
     this.newChatSpaces.set(version, newChatSpaces);
-    while (this.versions.size > KEEP_VERSIONS) this.versions.delete(this.versions.keys().next().value as string);
+    this.versionUsed.set(version, this.versionUsed.get(version) ?? at);
+    // A version no message has named for a while goes too (the newest is kept whatever its age).
+    for (const known of [...this.versions.keys()]) {
+      if (known !== version && at - (this.versionUsed.get(known) ?? at) > VERSION_TTL_MS) this.dropVersion(known);
+    }
+    while (this.versions.size > KEEP_VERSIONS) this.dropVersion(this.versions.keys().next().value as string);
     for (const known of [...this.newChatSpaces.keys()]) if (!this.versions.has(known)) this.newChatSpaces.delete(known);
+    this.persist();
     const doc: DirectoryDoc = {
       v: 1,
       at,
@@ -687,21 +781,29 @@ export class MemoInbox {
       const read = readUp(key, id, doc, this.now());
       // Remember first, then claim: a second pass must see it as taken, and an undeletable one is not run twice.
       this.handled.push(id);
-      if (this.handled.length > REMEMBER) this.handled.shift();
+      this.handledAt.set(id, this.now());
+      if (this.handled.length > REMEMBER) this.handledAt.delete(this.handled.shift() as string);
       try {
         await store.delete(upPath(channel, id));
       } catch {
         this.handled.splice(this.handled.indexOf(id), 1);
+        this.handledAt.delete(id);
         continue;
       }
+      this.persist();
       if (!read.ok) {
         logger.info("voice memo dropped", { reason: read.reason });
         continue;
+      }
+      this.touchActivity();
+      if ("dirVersion" in read.message && this.versions.has(read.message.dirVersion)) {
+        this.versionUsed.set(read.message.dirVersion, this.now());
       }
       const answer = await this.handle(read.message).catch((error: unknown): DownMessage => {
         logger.warn("voice memo failed", { error: error instanceof Error ? error.message : String(error) });
         return { v: 1, id, at: this.now(), status: "refused", reason: "Something went wrong on the Mac." };
       });
+      this.persist();
       await store.set(downPath(channel, id), sealDown(key, answer));
     }
   }
@@ -853,6 +955,8 @@ export class MemoInbox {
       this.deps.endCall?.(id);
     }
     this.calls.set(callId, { target, label, at: now, turns: 0, ...(script ? { script } : {}) });
+    this.touchActivity();
+    this.persist();
   }
 
   /** The chats a list version names by number: a published list, or the one chat a call out is about. */

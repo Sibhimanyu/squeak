@@ -3,7 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { assembleLine, normalizeText, SentenceCache, splitSentences } from "./natural-cache.js";
+import {
+  assembleLine,
+  normalizeText,
+  SentenceCache,
+  speechParts,
+  splitForSpeech,
+  splitSentences,
+} from "./natural-cache.js";
 import { fixedPhrases, NaturalVoice, type NaturalSettings } from "./natural-voice.js";
 
 const dirs: string[] = [];
@@ -320,5 +327,32 @@ describe("priority and warm-up", () => {
     expect(phrases).toContain("Hello, this is Squeak.");
     expect(phrases).toContain("Goodbye.");
     expect(new Set(phrases).size).toBe(phrases.length);
+  });
+});
+
+describe("a short first part", () => {
+  const long =
+    "Yes, I fixed the import order, then the build passed on the second try. Then I ran the whole suite again.";
+
+  it("cuts a long first sentence at the first natural break between 20 and 60 characters", () => {
+    const parts = speechParts(long);
+    expect(parts[0]).toBe("Yes, I fixed the import order,");
+    expect(parts.join(" ")).toBe(long);
+  });
+
+  it("leaves a short first sentence, and one with no break, alone", () => {
+    const short = "Short one here. And a second one follows it.";
+    expect(splitForSpeech(short)).toEqual(splitSentences(short));
+    const flat = "This sentence runs on and on without any break at all for a long long stretch of words indeed.";
+    expect(splitForSpeech(flat)).toEqual(splitSentences(flat));
+  });
+
+  it("ignores a comma too early, and keeps a dash with the first part", () => {
+    const early = "Well, this first sentence has no later break but it is quite a bit longer than sixty characters.";
+    expect(splitForSpeech(early)).toEqual(splitSentences(early));
+    const dashed = "The migration finished cleanly on the staging box - now it waits for your go ahead on production.";
+    const parts = splitForSpeech(dashed);
+    expect(parts[0]!.endsWith("-")).toBe(true);
+    expect(parts.join(" ")).toBe(dashed);
   });
 });
