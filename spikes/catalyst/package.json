@@ -1,0 +1,13 @@
+{
+  "name": "squeak-catalyst-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node relay/squeak_relay/paths.test.mjs",
+    "firebase": "node measure/firebase.mjs",
+    "catalyst": "node measure/catalyst.mjs"
+  },
+  "dependencies": {
+    "@zcatalyst/datastreams": "^1.0.1"
+  }
+}

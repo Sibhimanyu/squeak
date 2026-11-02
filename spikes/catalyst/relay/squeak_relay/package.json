@@ -1,0 +1,10 @@
+{
+  "name": "squeak_relay",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@zcatalyst/auth": "^1.0.0",
+    "@zcatalyst/datastreams": "^1.0.1",
+    "@zcatalyst/nosql": "^1.0.0"
+  }
+}

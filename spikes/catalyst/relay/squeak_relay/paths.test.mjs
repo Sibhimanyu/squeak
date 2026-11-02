@@ -1,0 +1,13 @@
+import { createRequire } from "node:module";
+import assert from "node:assert/strict";
+const { parseDocPath, parseKindPath } = createRequire(import.meta.url)("./paths.js");
+const id = "A".repeat(32);
+assert.deepEqual(parseDocPath(`channels/${id}/state/abc`)?.pk, `channels/${id}/state`);
+assert.equal(parseDocPath(`channels/short/state/abc`), null);
+assert.equal(parseDocPath(`channels/${id}/spike/abc`), null);
+assert.equal(parseDocPath(`channels/${id}/state/a.b`), null);
+assert.equal(parseDocPath(`channels/${id}/state`), null);
+assert.equal(parseDocPath(`cliq/${id}/state/x`), null);
+assert.equal(parseKindPath(`channels/${id}/state`)?.kind, "state");
+assert.equal(parseKindPath(`channels/${id}`), null);
+console.log("paths ok");
