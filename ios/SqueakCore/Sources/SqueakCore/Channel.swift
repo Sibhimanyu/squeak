@@ -34,11 +34,32 @@ public struct Channel: Sendable {
         return URLSession(configuration: configuration)
     }()
 
-    public init(pairing: PairingPayload, deviceId: String, transport: HTTPTransport = URLSession.shared, streams: LineStreamTransport, local: LocalSupport? = nil) {
+    public init(pairing: PairingPayload, deviceId: String, transport: HTTPTransport = URLSession.shared, streams: LineStreamTransport,
+                sockets: WebSocketTransport = URLSessionWebSockets(), local: LocalSupport? = nil) {
         self.pairing = pairing
         self.deviceId = deviceId
         firestore = FirestoreClient(projectId: pairing.p, transport: transport)
-        router = BackendRouter(pairing: pairing, firestore: firestore, transport: transport, streams: streams, local: local)
+        router = BackendRouter(pairing: pairing, firestore: firestore, transport: transport, streams: streams, sockets: sockets, local: local)
+    }
+
+    /// The Mac's `state/move`, opened and checked (it must be a sealed, valid document naming a host this phone accepts).
+    static func openMove(_ document: ChannelDocument?, key: String) -> CloudMove? {
+        guard let document, let move = try? ChannelCrypto.open(CloudMove.self, box: document.box, key: key), move.isValid else { return nil }
+        return move
+    }
+
+    /// Reads `state/move` from the store in use.
+    public func move() async throws -> CloudMove? {
+        Self.openMove(try await store.get(path("state", "move")), key: pairing.k)
+    }
+
+    /// A Catalyst relay's base URL, and nothing else: an https host under Catalyst's own domains, no query.
+    public static func isRelayURL(_ text: String) -> Bool {
+        guard let url = URL(string: text), url.scheme == "https", url.query == nil, url.fragment == nil, url.user == nil,
+              let host = url.host?.lowercased() else { return false }
+        let tld = #"(com|in|eu|com\.au|jp|ca|sa)"#
+        return host.range(of: #"^([a-z0-9-]+\.)+catalystserverless\."# + tld + "$", options: .regularExpression) != nil
+            || host.range(of: #"^([a-z0-9-]+\.)+catalystappsail\."# + tld + "$", options: .regularExpression) != nil
     }
 
     func path(_ kind: String, _ id: String) -> String { "channels/\(pairing.c)/\(kind)/\(id)" }
@@ -61,8 +82,9 @@ public struct Channel: Sendable {
     /// ignored), with the stream's health. Nil when the channel can only be
     /// polled (Firestore).
     public func stateEvents() async -> AsyncStream<StateEvent>? {
-        guard let events = await store.events(in: "channels/\(pairing.c)/state", documents: ["snapshot", "alive", "recent"]) else { return nil }
+        guard let events = await store.events(in: "channels/\(pairing.c)/state", documents: ["snapshot", "alive", "recent", "move"]) else { return nil }
         let key = pairing.k
+        let channel = self
         return AsyncStream { continuation in
             let task = Task {
                 for await event in events {
@@ -85,6 +107,10 @@ public struct Channel: Sendable {
                         }
                     case .document("alive", .value(let document)):
                         continuation.yield(.alive(document.flatMap { try? ChannelCrypto.open(MacAlive.self, box: $0.box, key: key) }))
+                    case .document("move", .value(let document)):
+                        if let move = Self.openMove(document, key: key) { continuation.yield(.move(move)) }
+                    case .document("move", .refetch):
+                        if let move = try? await channel.move() { continuation.yield(.move(move)) }
                     case .document(_, .refetch):
                         continuation.yield(.needsRead)
                     case .document:
@@ -921,6 +947,8 @@ public enum StateEvent: Equatable, Sendable {
     /// The recent list and workspaces a split view leaves out.
     case recent(PhoneRecent?)
     case alive(MacAlive?)
+    /// The Mac moved the channel to another store (checked: sealed by the Mac, a host this phone accepts).
+    case move(CloudMove)
     /// A change the event did not carry whole, or could not be opened: read it.
     case needsRead
 }
@@ -947,7 +975,11 @@ actor BackendRouter {
 
     static let recheck: TimeInterval = 5 * 60
 
-    init(pairing: PairingPayload, firestore: FirestoreClient, transport: HTTPTransport, streams: LineStreamTransport, local: LocalSupport? = nil) {
+    private let sockets: WebSocketTransport
+
+    init(pairing: PairingPayload, firestore: FirestoreClient, transport: HTTPTransport, streams: LineStreamTransport,
+         sockets: WebSocketTransport = URLSessionWebSockets(), local: LocalSupport? = nil) {
+        self.sockets = sockets
         self.pairing = pairing
         self.firestore = firestore
         self.transport = transport
@@ -957,17 +989,17 @@ actor BackendRouter {
 
     func backend(now: Date = Date()) async -> ChannelBackend {
         let cloud = await cloudBackend(now: now)
-        guard let local, cloud is RealtimeDatabaseClient else { return cloud }
+        guard let local, cloud is CloudStore else { return cloud }
         if let routed { return routed }
         let backend = RoutedBackend(cloud: cloud, router: local)
         routed = backend
         return backend
     }
 
-    func isStreamed() async -> Bool { await cloudBackend() is RealtimeDatabaseClient }
+    func isStreamed() async -> Bool { await cloudBackend() is CloudStore }
 
     func startLocal() async {
-        guard let local, await cloudBackend() is RealtimeDatabaseClient else { return }
+        guard let local, await cloudBackend() is CloudStore else { return }
         localStarted = true
         await local.start()
     }
@@ -1002,7 +1034,12 @@ actor BackendRouter {
     }
 
     private func cloudBackend(now: Date = Date()) async -> ChannelBackend {
-        if let chosen, chosen is RealtimeDatabaseClient { return chosen }
+        if let chosen, chosen is CloudStore { return chosen }
+        if let relay = pairing.cu, let key = pairing.ck {
+            let client = CatalystClient(relayURL: relay, relayKey: key, transport: transport, sockets: sockets)
+            chosen = client
+            return client
+        }
         if let url = pairing.r { return use(url) }
         if let checkedAt, now.timeIntervalSince(checkedAt) < Self.recheck, let chosen { return chosen }
         struct Transport: Codable { let r: String }
