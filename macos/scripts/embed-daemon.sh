@@ -76,6 +76,11 @@ AVATAR="squeak-bot-avatar-640.jpg"
 [ -f "$REPO/brand/logo/png/$AVATAR" ] || { echo "embed-daemon: brand/logo/png/$AVATAR is missing" >&2; exit 1; }
 mkdir -p "$DEST/brand/logo/png"
 cp "$REPO/brand/logo/png/$AVATAR" "$DEST/brand/logo/png/$AVATAR"
+# The Catalyst relay function (src/cloud/catalyst-setup.ts finds ../../cloud/catalyst-relay from dist/cloud): its
+# source only; deploy() copies it to Application Support and installs its own node_modules there.
+[ -d "$REPO/cloud/catalyst-relay" ] || { echo "embed-daemon: cloud/catalyst-relay is missing" >&2; exit 1; }
+mkdir -p "$DEST/cloud"
+rsync -a --exclude node_modules --exclude .catalystrc "$REPO/cloud/catalyst-relay/" "$DEST/cloud/catalyst-relay/"
 printf '%s\n' "$DAEMON_VERSION" > "$DEST/VERSION"
 
 # Signing: node needs JIT entitlements (V8); library validation is off so it can load the .node addon,
