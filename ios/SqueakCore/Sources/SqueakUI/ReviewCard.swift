@@ -31,6 +31,7 @@ struct ReviewCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             surface
+            if let loadProblem { ReportProblemButton(problem: loadProblem, place: "Review", title: "Report") }
             transport
             if !review.scenes.isEmpty { sceneStrip }
             if composing { composer } else if !closed { noteButton }
@@ -268,6 +269,7 @@ struct ReviewCard: View {
             }
             if let line {
                 Text(line.text).font(.footnote).foregroundStyle(line.delivered ? Theme.muted : Theme.needsYou)
+                if !line.delivered { ReportProblemButton(problem: line.text, place: "Review", title: "Report") }
             } else {
                 Text("Notes go to RasanAI as you leave them; nothing changes until you apply them.")
                     .font(.footnote).foregroundStyle(Theme.muted)

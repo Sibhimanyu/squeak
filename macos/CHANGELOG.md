@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.46
+
+- The install disk image no longer puts Uninstall Squeak on top of the install steps: it has its own row below them, with a line saying what it does.
+
 ## 2.12.45
 
 - Wherever Squeak shows an error (setup, sending a message, new chats, updates, Settings for Cloud, Channels, Conductor, Voice, Keep awake and Notifications, the menu-bar controls), a Report button opens a report with the problem already written in, ready for you to read and send to the Squeak team. A setup that can't start the background service attaches its technical details too. Report a Problem (⌥⌘R) and Settings' Report a problem now open in front of whichever window you're in, including setup, instead of only the main window.

@@ -31,7 +31,12 @@ struct ChannelsSetupView: View {
                     CliqSetupSections(cliq: cliq, note: $note)
                 }
                 if let note {
-                    Section { Text(note).font(.footnote).foregroundStyle(Theme.muted) }
+                    Section {
+                        Text(note).font(.footnote).foregroundStyle(Theme.muted)
+                        if note != ChannelsSetupFormat.restartNote {
+                            ReportProblemButton(problem: note, place: "Settings › Channels", title: "Report")
+                        }
+                    }
                 }
             } else {
                 Section { Text("Channel setup needs a newer Squeak on your Mac.").font(.footnote).foregroundStyle(Theme.muted) }
@@ -231,6 +236,7 @@ private struct TelegramSetupSections: View {
             .frame(minHeight: 44)
             if let test = telegram.lastTest {
                 Text(ChannelsSetupFormat.testLine(test)).font(.footnote).foregroundStyle(test.ok ? Theme.muted : Theme.needsYou)
+                if !test.ok { ReportProblemButton(problem: ChannelsSetupFormat.testLine(test), place: "Settings › Channels › Telegram", title: "Report") }
             }
             Button("Turn off…", role: .destructive) { confirmOff = true }
                 .disabled(busy || restarting)

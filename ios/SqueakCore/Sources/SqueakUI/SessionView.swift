@@ -615,11 +615,14 @@ private struct EarlierRowView: View {
             Text("Start of chat").font(.footnote).foregroundStyle(Theme.subtle)
                 .frame(maxWidth: .infinity, minHeight: 28)
         case .failed:
-            Button { Task { await model.loadEarlier(session, manual: true) } } label: {
-                Text("Couldn't load earlier messages. Try again.").font(.subheadline).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+            VStack(spacing: 0) {
+                Button { Task { await model.loadEarlier(session, manual: true) } } label: {
+                    Text("Couldn't load earlier messages. Try again.").font(.subheadline).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                ReportProblemButton(problem: "Couldn't load earlier messages.", place: "Session › Earlier messages")
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -673,7 +676,7 @@ private struct ChatRows: View {
                 switch row {
                 case .sent(let message):
                     SentBubble(text: message.text, date: message.date, line: message.status.line, failed: message.status.failed)
-                    if message.status.failed { FailedSendActions(sendId: message.id, session: session) }
+                    if message.status.failed { FailedSendActions(sendId: message.id, session: session, problem: message.status.line) }
                 case .steer(_, let text, let line):
                     SentBubble(text: text, date: nil, line: line)
                 case .agent(_, _, _) where session.workflow != nil && session.message == nil:
@@ -1431,9 +1434,11 @@ struct FailedSendActions: View {
     @Environment(AppModel.self) private var model
     let sendId: UUID
     let session: PhoneSnapshot.Session
+    var problem: String? = nil
 
     var body: some View {
         HStack(spacing: 8) {
+            if let problem { ReportProblemButton(problem: problem, place: "Session › Reply", title: "Report") }
             Spacer(minLength: 0)
             Button("Edit") { model.edit(sendId, in: session) }
                 .buttonStyle(.bordered)
@@ -1719,9 +1724,15 @@ struct Composer: View {
         } else if let uploading {
             HStack(spacing: 8) { ProgressView().controlSize(.small); Text(uploading).font(.footnote).foregroundStyle(Theme.muted) }
         } else if let uploadProblem {
-            Text(uploadProblem).font(.footnote).foregroundStyle(Theme.error)
+            HStack(spacing: 8) {
+                Text(uploadProblem).font(.footnote).foregroundStyle(Theme.error)
+                ReportProblemButton(problem: uploadProblem, place: "Session › Photos", title: "Report")
+            }
         } else if let problem = model.problemFor[key] {
-            Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+            HStack(spacing: 8) {
+                Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+                ReportProblemButton(problem: problem, place: "Session › Reply", title: "Report")
+            }
         } else if working, !explained {
             Text("Send queues it · hold to steer · empty, it stops \(agentName)")
                 .font(.footnote).foregroundStyle(Theme.muted)

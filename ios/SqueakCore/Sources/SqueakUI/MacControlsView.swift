@@ -98,7 +98,11 @@ struct MacControlsView: View {
                     if let power = controls.power, !power.available.isEmpty { powerCard(power) }
                 }
                 if let problem {
-                    Text(problem).font(.footnote).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+                        ReportProblemButton(problem: problem, place: "Mac controls")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(16)
@@ -369,6 +373,7 @@ struct AppPickerView: View {
                 HStack(spacing: 8) { ProgressView(); Text("Asking your Mac…").foregroundStyle(Theme.muted) }
             } else if let problem {
                 Text(problem).foregroundStyle(Theme.muted)
+                ReportProblemButton(problem: problem, place: "Mac controls › Open an app")
             }
             ForEach(shown) { app in
                 Button(app.name) {

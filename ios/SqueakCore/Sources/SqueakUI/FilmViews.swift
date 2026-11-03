@@ -360,6 +360,7 @@ private struct FilmScreen: View {
             }
             if let line {
                 Text(line.text).font(.footnote).foregroundStyle(line.delivered ? Theme.muted : Theme.needsYou)
+                if !line.delivered { ReportProblemButton(problem: line.text, place: "Films", title: "Report") }
             }
             if let note = film.engineNote, !note.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -454,6 +455,7 @@ private func resultLine(_ result: (delivered: Bool, line: String)?) -> some View
     Group {
         if let result {
             Text(result.line).font(.footnote).foregroundStyle(result.delivered ? Theme.muted : Theme.needsYou)
+            if !result.delivered { ReportProblemButton(problem: result.line, place: "Films › Answer", title: "Report") }
         } else {
             Text("Goes to RasanAI on your Mac, the same as answering in RasanAI Studio.").font(.footnote).foregroundStyle(Theme.muted)
         }

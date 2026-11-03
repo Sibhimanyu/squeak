@@ -81,7 +81,10 @@ struct VoiceSettingsView: View {
                 }
             }
             if let problem {
-                Section { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+                Section {
+                    Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+                    ReportProblemButton(problem: problem, place: "Settings › Voice", title: "Report")
+                }
             }
         }
         .scrollContentBackground(.hidden)
@@ -150,7 +153,10 @@ private struct PauseSection: View {
                 .accessibilityLabel("Pause calls options")
             }
             .frame(minHeight: 44)
-            if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+            if let problem {
+                Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+                ReportProblemButton(problem: problem, place: "Settings › Voice", title: "Report")
+            }
         } footer: {
             Text("Cards still reach Telegram and your apps. “Call me now” still rings.")
         }
@@ -543,7 +549,10 @@ private struct NewChatModelSection: View {
                 .frame(minHeight: 44)
                 .disabled(busy)
             }
-            if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+            if let problem {
+                Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+                ReportProblemButton(problem: problem, place: "Settings › Voice", title: "Report")
+            }
         } footer: { Text(NewChatModelText.footer) }
     }
 
@@ -572,7 +581,10 @@ private struct CallMenusSection: View {
             if let on = voice.offerWaitingChat {
                 row("Offer the chat that's waiting on you first", "A call starts with the chat that needs you, instead of the workspaces.", on) { .offerWaitingChat($0) }
             }
-            if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+            if let problem {
+                Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+                ReportProblemButton(problem: problem, place: "Settings › Voice", title: "Report")
+            }
         } header: { Text("Call menus") }
     }
 
@@ -624,7 +636,10 @@ private struct HoldSection: View {
                 .frame(minHeight: 44)
                 .disabled(busy)
             }
-            if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
+            if let problem {
+                Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+                ReportProblemButton(problem: problem, place: "Settings › Voice", title: "Report")
+            }
         } header: { Text(HoldText.title) } footer: { Text(HoldText.footer) }
     }
 

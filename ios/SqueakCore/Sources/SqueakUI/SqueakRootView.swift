@@ -20,6 +20,7 @@ public struct SqueakRootView: View {
     private let onMainScreen: (() -> Void)?
     private let onScreen: ((String) -> Void)?
     private let onReport: (() -> Void)?
+    private let onReportProblem: ((String, String?) -> Void)?
     private let navigation: Navigation
 
     /// How the paired app is laid out. `embedded`, the default, is one screen with no bar of its own,
@@ -30,10 +31,13 @@ public struct SqueakRootView: View {
     /// `onMainScreen` runs when the session list appears (paired, past onboarding).
     /// `onScreen` names the screen in front ("Pairing", "Sessions", "Session"), for the host's
     /// feedback tool. `onReport` opens that tool; Settings shows "Report a problem" when it is set.
+    /// `onReportProblem` opens it filled in with an error's sentence and where it showed; errors carry a
+    /// Report button when it is set.
     public init(
         onMainScreen: (() -> Void)? = nil, onScreen: ((String) -> Void)? = nil, onReport: (() -> Void)? = nil,
-        navigation: Navigation = .embedded
+        onReportProblem: ((String, String?) -> Void)? = nil, navigation: Navigation = .embedded
     ) {
+        self.onReportProblem = onReportProblem
         self.navigation = navigation
         self.onMainScreen = onMainScreen
         self.onScreen = onScreen
@@ -51,7 +55,7 @@ public struct SqueakRootView: View {
             if splashSince != nil { SplashView().transition(.opacity).zIndex(1) }
         }
             .environment(model)
-            .environment(\.squeakScreen, ScreenReporter(report: onScreen, openReport: onReport))
+            .environment(\.squeakScreen, ScreenReporter(report: onScreen, openReport: onReport, reportProblem: onReportProblem))
             .tint(Theme.done)
             .onAppear { visible = true; update() }
             .onDisappear { visible = false; update() }
@@ -149,6 +153,25 @@ struct SplashView: View {
 struct ScreenReporter: @unchecked Sendable {
     var report: ((String) -> Void)?
     var openReport: (() -> Void)?
+    var reportProblem: ((String, String?) -> Void)?
+}
+
+/// "Report" beside an error: the host's feedback tool opens as Broken with the error's own sentence and where
+/// it showed already written in; the person reads it before sending. Nothing when the host has no tool.
+struct ReportProblemButton: View {
+    let problem: String
+    var place: String?
+    var title = "Report this problem"
+    @Environment(\.squeakScreen) private var screen
+
+    var body: some View {
+        if let report = screen.reportProblem {
+            Button(title) { report(problem, place) }
+                .font(.footnote)
+                .frame(minHeight: 44)
+                .accessibilityHint("Opens a report with this problem filled in. You read it before it is sent.")
+        }
+    }
 }
 
 extension EnvironmentValues {

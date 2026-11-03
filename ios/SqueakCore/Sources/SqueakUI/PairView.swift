@@ -27,6 +27,7 @@ struct PairView: View {
                 if case .failed = screen {
                     Button(PairingScreen.tryAgain) { model.clearPairingFailure() }
                         .buttonStyle(PrimaryButtonStyle())
+                    ReportProblemButton(problem: screen.detail, place: "Pairing")
                 } else {
                     scanSection
                 }
@@ -120,7 +121,10 @@ struct AwaitingApprovalView: View {
                     }
                     if case .waiting = screen {
                         MacPromptPreview(mac: mac, code: code)
-                        if let problem = model.problem { Text(problem).font(.footnote) }
+                        if let problem = model.problem {
+                            Text(problem).font(.footnote)
+                            ReportProblemButton(problem: problem, place: "Pairing")
+                        }
                         Button("Cancel") { model.unpair() }.foregroundStyle(Theme.muted).frame(minHeight: 44)
                     } else {
                         Button(PairingScreen.tryAgain) { model.unpair() }.buttonStyle(PrimaryButtonStyle())

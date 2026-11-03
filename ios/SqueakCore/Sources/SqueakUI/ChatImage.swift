@@ -56,11 +56,14 @@ struct ChatImage: View {
                 .accessibilityHint("Opens the image full screen")
                 .fullScreenCover(isPresented: $viewing) { ImageViewer(images: [image], title: name) }
             default:
-                Button { load() } label: { placeholder }
-                    .buttonStyle(.plain)
-                    .disabled(isLoading)
-                    .accessibilityLabel("Image: \(name)")
-                    .accessibilityHint("Loads it from your Mac")
+                VStack(alignment: .leading, spacing: 0) {
+                    Button { load() } label: { placeholder }
+                        .buttonStyle(.plain)
+                        .disabled(isLoading)
+                        .accessibilityLabel("Image: \(name)")
+                        .accessibilityHint("Loads it from your Mac")
+                    if case let .failed(reason) = phase { ReportProblemButton(problem: reason, place: "Session › Image", title: "Report") }
+                }
             }
         }
         .padding(.vertical, 4)

@@ -204,7 +204,7 @@ struct ReceiptLine: View {
                 Text(receipt.display).font(.footnote).lineLimit(receipt.phase == .failed ? nil : 1)
                     .foregroundStyle(receipt.phase == .failed ? Theme.error : Theme.muted)
             }
-            if receipt.phase == .failed, let id = receipt.sendId { FailedSendActions(sendId: id, session: session) }
+            if receipt.phase == .failed, let id = receipt.sendId { FailedSendActions(sendId: id, session: session, problem: receipt.display) }
         }
         .accessibilityElement(children: .combine)
     }

@@ -43,7 +43,10 @@ struct UsageDetailsView: View {
                 } else if loading {
                     HStack(spacing: 8) { ProgressView(); Text("Asking your Mac…").foregroundStyle(Theme.muted) }
                 }
-                if let problem { Text(problem).foregroundStyle(Theme.muted) }
+                if let problem {
+                    Text(problem).foregroundStyle(Theme.muted)
+                    ReportProblemButton(problem: problem, place: "Usage")
+                }
                 Color.clear.frame(height: 1).id("end")
             }
             .padding(20)

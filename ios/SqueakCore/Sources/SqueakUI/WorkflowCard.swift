@@ -261,6 +261,7 @@ struct WorkflowCard: View {
     private var resultLine: some View {
         if let result {
             Text(result.line).font(.footnote).foregroundStyle(result.delivered ? Theme.muted : Theme.needsYou)
+            if !result.delivered { ReportProblemButton(problem: result.line, place: "Workflow › Answer", title: "Report") }
         } else {
             Text("Goes to RasanAI on your Mac, the same as answering in RasanAI Studio.")
                 .font(.footnote).foregroundStyle(Theme.muted)

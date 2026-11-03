@@ -539,6 +539,7 @@ private struct AwakeSection: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("Sleep is still turned off").font(.subheadline.weight(.medium))
                                 Text(problem).font(.footnote).foregroundStyle(Theme.muted)
+                                ReportProblemButton(problem: problem, place: "Settings › Keep awake", title: "Report")
                             }
                         }
                     }

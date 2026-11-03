@@ -181,7 +181,10 @@ struct NewChatView: View {
         card {
             HStack(alignment: .top, spacing: 10) {
                 StatusDot(color: Theme.error).padding(.top, 6)
-                Text(message).foregroundStyle(Theme.ink)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(message).foregroundStyle(Theme.ink)
+                    ReportProblemButton(problem: message, place: "New chat")
+                }
             }
             .padding(14).accessibilityElement(children: .combine)
         }
@@ -469,8 +472,11 @@ private struct WorkspacePicker: View {
                     Text("New workspace").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                         .textCase(nil).accessibilityAddTraits(.isHeader)
                 } footer: {
-                    Text(createProblem ?? "A fresh branch from the repository's default branch, made by Conductor on your Mac.")
-                        .font(.footnote).foregroundStyle(createProblem == nil ? Theme.muted : Theme.error)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(createProblem ?? "A fresh branch from the repository's default branch, made by Conductor on your Mac.")
+                            .font(.footnote).foregroundStyle(createProblem == nil ? Theme.muted : Theme.error)
+                        if let createProblem { ReportProblemButton(problem: createProblem, place: "New chat", title: "Report") }
+                    }
                 }
             }
             ForEach(groups) { group in
