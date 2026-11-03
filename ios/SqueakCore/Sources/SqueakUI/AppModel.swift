@@ -392,9 +392,27 @@ final class AppModel {
             rebuild()
         case .alive(let alive):
             if let alive { heard(alive) }
+        case .move(let move):
+            await follow(move)
         case .needsRead:
             await tick()
         }
+    }
+
+    /// The Mac moved the channel to another cloud store: keep the new pairing (relay key included, in the Keychain with
+    /// the channel secret), rebuild the channel on the new store and start again, which writes presence there.
+    private func follow(_ move: CloudMove) async {
+        guard !demo, let current = channel, let moved = current.pairing.applying(move),
+              let data = try? JSONEncoder().encode(moved),
+              let deviceId = KeyStore.load(account: "device-id").flatMap({ String(data: $0, encoding: .utf8) }) else { return }
+        KeyStore.save(data, account: "pairing")
+        loop?.cancel()
+        loop = nil
+        routeTask?.cancel()
+        routeTask = nil
+        await current.stopLocal()
+        channel = Channel(pairing: moved, deviceId: deviceId, local: LocalSupport.standard)
+        startLoop()
     }
 
     /// Settings › Connection details: each open stream, as the phone sees it.
