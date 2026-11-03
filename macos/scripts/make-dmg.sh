@@ -11,10 +11,10 @@ APP="$HERE/build/Squeak.app"
 NAME="Squeak"
 VOLNAME="Squeak $VERSION"
 OUT="$HERE/build/Squeak-$VERSION.dmg"
-WIN_W=680; WIN_H=460
+WIN_W=680; WIN_H=580
 APP_X=170; APP_Y=224
 DEST_X=510; DEST_Y=224
-UNINST_X=340; UNINST_Y=372
+UNINST_X=150; UNINST_Y=482
 UNINST="Uninstall Squeak.app"
 
 [ -d "$APP" ] || { echo "build the app first: scripts/build-app.sh" >&2; exit 1; }

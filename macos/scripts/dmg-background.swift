@@ -1,8 +1,9 @@
 // Draw the Squeak DMG window at 1x and 2x: swift dmg-background.swift <out-dir>
-// Icon centres are fixed by make-dmg.sh (app at 170,224; Applications at 510,224).
+// Icon centres are fixed by make-dmg.sh (app at 170,224; Applications at 510,224; Uninstall Squeak at 150,482,
+// in its own band below the install steps so its icon and name never sit on the text).
 import AppKit
 
-let width: CGFloat = 680, height: CGFloat = 460
+let width: CGFloat = 680, height: CGFloat = 580
 let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "."
 
 func color(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
@@ -51,10 +52,23 @@ func render(scale: CGFloat, to path: String) {
     arrow.stroke()
 
     // Practical first-open guidance. Gatekeeper only needs an override if it blocks launch.
-    centered("1  Drag Squeak to Applications     ·     2  Open it from Applications", y: 102,
+    centered("1  Drag Squeak to Applications     ·     2  Open it from Applications", y: height - 350,
              size: 13, weight: .semibold, tint: color(0x20201E))
     centered("If macOS blocks Squeak, try opening it once; then choose Open Anyway in System Settings → Privacy & Security.",
-             y: 73, size: 11, weight: .regular, tint: color(0x686762))
+             y: height - 374, size: 11, weight: .regular, tint: color(0x686762))
+
+    // The uninstaller's own band: a hairline, then its icon (placed by make-dmg.sh) with a caption beside it.
+    color(0x20201E, 0.12).setFill()
+    NSRect(x: 40, y: height - 404, width: width - 80, height: 1).fill()
+    let heading = NSAttributedString(string: "Removing Squeak later?", attributes: [
+        .font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: color(0x20201E),
+    ])
+    heading.draw(at: NSPoint(x: 250, y: height - 470))
+    let detail = NSAttributedString(
+        string: "Open Uninstall Squeak. It shows everything it will remove from this Mac before it removes anything.",
+        attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .regular), .foregroundColor: color(0x686762)])
+    detail.draw(with: NSRect(x: 250, y: height - 506, width: width - 250 - 48, height: 32),
+                options: [.usesLineFragmentOrigin])
 
     NSGraphicsContext.restoreGraphicsState()
     try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
