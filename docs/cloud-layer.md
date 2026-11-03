@@ -73,7 +73,8 @@ bridge, the voice relay and pairing use. The Cliq relay stays on Firestore (out 
 ## Pairing and devices
 
 The sealed pairing grant (and the add-on's pairing grant) gains the provider: Firebase as today (`r` = database URL);
-Catalyst `c` = relay base URL and `ck` = relay key. Both sides accept a relay URL only for an https host under
+Catalyst `cu` = relay base URL and `ck` = relay key (`cu`, not `c`: in a pairing code `c` is already the channel id;
+`p` and `r` are absent when the Mac has no Firebase; the `move` document below keeps `c` = relay URL). Both sides accept a relay URL only for an https host under
 `.catalystserverless.com/.in/.eu/.com.au/.jp/.ca/.sa` or `.catalystappsail.*` (mirror of the RTDB host check). A device
 paired before keeps Firebase until told to move.
 

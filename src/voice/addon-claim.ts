@@ -1,4 +1,4 @@
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudStore } from "../cloud/store.js";
 import {
   CLAIM_GRANT_ID,
   CLAIM_REQUEST_ID,
@@ -15,7 +15,7 @@ import {
 /** The code is replaced this long after it was made, two minutes before the Mac would refuse it. */
 export const CLAIM_ROTATE_MS = 13 * 60_000;
 
-export type ClaimStore = Pick<RtdbRest, "get" | "set" | "delete">;
+export type ClaimStore = Pick<CloudStore, "get" | "set" | "delete">;
 
 export interface ClaimDeps {
   store: ClaimStore;

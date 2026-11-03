@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudLocation } from "../cloud/location.js";
+import type { CloudStore } from "../cloud/store.js";
 import {
   CLAIM_GRANT_ID,
   CLAIM_REQUEST_ID,
@@ -14,13 +15,15 @@ import {
 } from "./claim-protocol.js";
 import type { PairingState, PairingView } from "./pairing-window.js";
 
-export type ClaimStore = Pick<RtdbRest, "get" | "set" | "delete">;
+export type ClaimStore = Pick<CloudStore, "get" | "set" | "delete">;
 
 export interface GatewayClaimOptions {
   /** The rendezvous database (`RENDEZVOUS_DATABASE`), where the add-on posts its request. */
   store: ClaimStore;
   /** The Mac's own phone-channel database (`SQUEAK_REMOTE_DATABASE_URL`) the grant points the add-on at. */
   databaseUrl: string;
+  /** Where the channel lives now; Catalyst puts `cu` and `ck` in the grant instead of `databaseUrl`. Absent: `databaseUrl`. */
+  location?: () => CloudLocation | null;
   /** The channel and key the Mac already has for the gateway, or null before the first pairing. */
   current(): { channel: string; key: string } | null;
   /** Saves a newly made channel and key (to `.env`). */
@@ -102,6 +105,13 @@ export class GatewayClaim {
     return { ok: true, name: request.name, version: request.version, expiresAt: claim.expiresAt };
   }
 
+  private grantWhere(): { databaseUrl: string; relayUrl?: string; relayKey?: string } {
+    const location = this.options.location?.() ?? null;
+    return location?.provider === "catalyst"
+      ? { databaseUrl: "", relayUrl: location.relayUrl, relayKey: location.relayKey }
+      : { databaseUrl: location?.provider === "firebase" ? location.databaseUrl : this.options.databaseUrl };
+  }
+
   /** The same shape as the legacy pairing window's view, without `verify`. */
   view(): PairingView | null {
     const claim = this.claim;
@@ -140,7 +150,7 @@ export class GatewayClaim {
     try {
       await store.set(
         grantPath,
-        sealClaimGrant(claim.code, claim.request, { databaseUrl: this.options.databaseUrl, channel, key }, this.now()),
+        sealClaimGrant(claim.code, claim.request, { ...this.grantWhere(), channel, key }, this.now()),
       );
     } catch {
       return { ok: false, reason: "Could not reach the pairing service. Try again." };

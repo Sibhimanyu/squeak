@@ -1,4 +1,4 @@
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudStore } from "../cloud/store.js";
 import { readGatewayStatus } from "./gateway-status-protocol.js";
 import { resultPath } from "./relay-protocol.js";
 
@@ -16,7 +16,7 @@ export interface GatewayStatusView {
 }
 
 export interface GatewayStatusReaderOptions {
-  store: Pick<RtdbRest, "get">;
+  store: Pick<CloudStore, "get">;
   /** Read at each look, since pairing can change them while the daemon runs. */
   relay(): { channel: string; key: string } | null;
   now?: () => number;

@@ -1,9 +1,9 @@
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudStore } from "../cloud/store.js";
 import { logger } from "../utils/logger.js";
 import type { Clip } from "./clips.js";
 import { audioPath, dirPath, readAudio, readDirectory, type DirectoryDoc } from "./memo-protocol.js";
 
-export type DirectoryStore = Pick<RtdbRest, "get" | "watch">;
+export type DirectoryStore = Pick<CloudStore, "get" | "watch">;
 
 /**
  * The Mac's list of who can take a message, kept in memory so an incoming call is answered at once: reading it

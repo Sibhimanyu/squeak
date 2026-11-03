@@ -1,4 +1,4 @@
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudStore } from "../cloud/store.js";
 import type { Clip } from "./clips.js";
 import type { AnswerFollower } from "./answer-audio.js";
 import { UpStream } from "./up-stream.js";
@@ -71,7 +71,7 @@ export interface Uplink {
   followAnswer?(messageId: string, count: number): AnswerFollower;
 }
 
-export type UplinkStore = Pick<RtdbRest, "get" | "set" | "delete" | "watch">;
+export type UplinkStore = Pick<CloudStore, "get" | "set" | "delete" | "watch">;
 
 export interface RelayUplinkOptions {
   store: UplinkStore;

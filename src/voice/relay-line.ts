@@ -1,4 +1,4 @@
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudStore } from "../cloud/store.js";
 import type { CallResult } from "./baresip-line.js";
 import type { Clip } from "./clips.js";
 import type { ChoiceOption } from "../fleet/choices.js";
@@ -48,7 +48,7 @@ const PIN_WAIT_MS = 25_000;
 /** What a pin control says when nothing answers: an add-on from before `pinctl` ignores it. */
 export const OLD_ADDON = "The Home Assistant add-on is too old to do that: update it.";
 
-export type RelayStore = Pick<RtdbRest, "get" | "set" | "delete" | "watch">;
+export type RelayStore = Pick<CloudStore, "get" | "set" | "delete" | "watch">;
 
 export interface RelayLineOptions {
   store: RelayStore;

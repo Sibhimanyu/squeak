@@ -77,6 +77,11 @@ import { realEffects, relayStatus, resetRelay, setupRelay } from "../fleet/condu
 import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
+import { CloudControl } from "../cloud/control.js";
+import { CatalystSetup } from "../cloud/catalyst-setup.js";
+import { activeLocation, createCloudStore, readCloudConfig } from "../cloud/config.js";
+import { movePath, sealAddonMove } from "../cloud/move.js";
+import { SwitchableStore } from "../cloud/switchable-store.js";
 import { RemoteBridge } from "../remote/remote-bridge.js";
 import { LocalAdvertiser, LocalChannelServer } from "../remote/local-channel.js";
 import { MirrorStore } from "../remote/mirror-store.js";
@@ -243,6 +248,9 @@ export class SqueakApp {
   private readonly router: FleetReplyRouter;
   private readonly remote: RemoteBridge | null;
   private readonly sharedBudget: CloudBudget | null;
+  /** The phone channel's store, behind a switch so a move to Catalyst (or back) needs no restart; null when none is set up. */
+  private readonly cloud: SwitchableStore | null;
+  private readonly cloudControl: CloudControl;
   /** The direct same-Wi-Fi path to a paired phone (remote/local-channel.ts); null when off. */
   private readonly localChannel: LocalChannelServer | null;
   private readonly cliq: CliqChannel | null;
@@ -561,25 +569,46 @@ export class SqueakApp {
       ? new CloudBudget(undefined, undefined, path.join(config.supportDir, "shared-budget.json"))
       : null;
     this.sharedBudget = sharedBudget;
-    const rawCloudStore = config.remoteProjectId
-      ? config.remoteDatabaseUrl
-        ? new RtdbRest(config.remoteDatabaseUrl)
-        : new FirestoreRest(config.remoteProjectId)
-      : null;
+    // cloud.json decides Firebase or Catalyst; absent, Firebase from SQUEAK_REMOTE_DATABASE_URL as always.
+    const cloudFile = readCloudConfig(config.supportDir);
+    const cloudLocation = activeLocation(cloudFile, config.remoteDatabaseUrl);
+    this.cloud = cloudLocation ? new SwitchableStore(createCloudStore(cloudLocation), cloudLocation) : null;
+    const bridgeProjectId =
+      config.remoteProjectId ??
+      (cloudLocation?.provider === "catalyst" ? (cloudFile?.catalyst?.projectId ?? "catalyst") : null);
+    this.cloudControl = new CloudControl({
+      supportDir: config.supportDir,
+      setup: new CatalystSetup({ supportDir: config.supportDir }),
+      // Never used when no store is set up: the routes then answer that Firebase is not set up.
+      store: this.cloud ?? new SwitchableStore(new RtdbRest("https://unset.firebaseio.com"), null),
+      firebase: () => ({ databaseUrl: config.remoteDatabaseUrl, projectId: config.remoteProjectId }),
+      announceMove: async (target) => {
+        // Both channels, on the store they are on now: the phones' and the add-on's.
+        await this.remote?.announceMove(target);
+        const relay = this.config.voiceRelay;
+        if (relay && this.cloud)
+          await this.cloud.set(movePath(relay.channel), sealAddonMove(relay.key, target, Date.now()));
+      },
+    });
+    const rawCloudStore = bridgeProjectId ? (this.cloud ?? new FirestoreRest(bridgeProjectId)) : null;
     const cloudStore = rawCloudStore && sharedBudget ? new BudgetedStore(rawCloudStore, sharedBudget) : rawCloudStore;
     // The direct path mirrors every document the bridge writes, so both transports show the same sealed ones.
     const localMirror = cloudStore && config.remoteLocal ? new MirrorStore(cloudStore) : null;
     this.remote =
-      config.remoteProjectId && cloudStore
+      bridgeProjectId && cloudStore
         ? new RemoteBridge({
             configPath: path.join(config.supportDir, "remote.json"),
-            projectId: config.remoteProjectId,
+            projectId: bridgeProjectId,
             // The Realtime Database when configured: streamed, billed by bytes not reads.
             store: localMirror ?? cloudStore,
             localEndpoint: () => this.localChannel?.endpoint() ?? null,
             onDevicesChanged: () => void this.localChannel?.refresh(),
-            databaseUrl: config.remoteDatabaseUrl,
-            announce: config.remoteDatabaseUrl && !sharedBudget ? new FirestoreRest(config.remoteProjectId) : null,
+            databaseUrl: cloudLocation?.provider === "catalyst" ? null : config.remoteDatabaseUrl,
+            location: () => this.cloud?.location ?? null,
+            announce:
+              config.remoteDatabaseUrl && !sharedBudget && cloudLocation?.provider !== "catalyst"
+                ? new FirestoreRest(bridgeProjectId)
+                : null,
             shared: sharedBudget ? { budget: sharedBudget } : null,
             replier: this.replier,
             snapshot: () => this.runtime.monitor.snapshot,
@@ -729,6 +758,7 @@ export class SqueakApp {
     // the loopback ingress, gated by the hook token.
     this.runtime.ingress.setControl({
       ...answerControl(answers),
+      cloud: { handle: (method, route, body) => this.cloudControl.handle(method, route, body) },
       remote: async (action, deviceId) => {
         const remote = this.remote;
         if (!remote) {
@@ -1191,15 +1221,15 @@ export class SqueakApp {
    * Off without the relay, or without whisper-cli, ffmpeg and the model (a warning says which).
    */
   private createMemoInbox(): MemoInbox | null {
-    const { voiceRelay, remoteDatabaseUrl, voiceWhisperModel } = this.config;
-    if (!voiceRelay || !remoteDatabaseUrl) return null;
+    const { voiceRelay, voiceWhisperModel } = this.config;
+    if (!voiceRelay || !this.cloud) return null;
     const whisper = findWhisper(voiceWhisperModel);
     if (!whisper) {
       logger.warn("calling in is off: needs whisper-cli, ffmpeg and a speech model", { model: voiceWhisperModel });
       return null;
     }
     return new MemoInbox({
-      store: new RtdbRest(remoteDatabaseUrl),
+      store: this.cloud,
       channel: voiceRelay.channel,
       key: voiceRelay.key,
       transcriber: new WhisperTranscriber(whisper),
@@ -1546,13 +1576,13 @@ export class SqueakApp {
 
   /** The add-on's log reader, or null without a relay (the call list is still served). */
   private gatewayLogReader(): GatewayLogReader | null {
-    const { voiceRelay, remoteDatabaseUrl } = this.config;
-    if (!voiceRelay || !remoteDatabaseUrl) return null;
+    const { voiceRelay } = this.config;
+    if (!voiceRelay || !this.cloud) return null;
     this.gatewayLog ??= new GatewayLogReader({
-      store: new RtdbRest(remoteDatabaseUrl),
+      store: this.cloud,
       relay: () => {
-        const { voiceRelay: relay, remoteDatabaseUrl: url } = this.config;
-        return relay && url ? { channel: relay.channel, key: relay.key } : null;
+        const { voiceRelay: relay } = this.config;
+        return relay && this.cloud ? { channel: relay.channel, key: relay.key } : null;
       },
     });
     return this.gatewayLog;
@@ -1561,10 +1591,11 @@ export class SqueakApp {
   /** The pairing window's owner, made on first use; null unless the phone channel's own database is set up. */
   private gatewayPairingFor(): GatewayPairing | null {
     const { remoteDatabaseUrl, remoteShared } = this.config;
-    if (!remoteDatabaseUrl || remoteShared) return null;
+    if (!this.cloud || remoteShared) return null;
     this.gatewayPairing ??= new GatewayPairing({
-      store: new RtdbRest(remoteDatabaseUrl),
-      databaseUrl: remoteDatabaseUrl,
+      store: this.cloud,
+      databaseUrl: remoteDatabaseUrl ?? "",
+      location: () => this.cloud?.location ?? null,
       current: () =>
         this.config.voiceRelay ? { channel: this.config.voiceRelay.channel, key: this.config.voiceRelay.key } : null,
       save: (channel, key) =>
@@ -1581,10 +1612,11 @@ export class SqueakApp {
   /** The short-code claim's owner; null unless the phone channel's own database is set up (never in shared mode). */
   private gatewayClaimFor(): GatewayClaim | null {
     const { remoteDatabaseUrl, remoteShared } = this.config;
-    if (!remoteDatabaseUrl || remoteShared) return null;
+    if (!this.cloud || remoteShared) return null;
     this.gatewayClaim ??= new GatewayClaim({
       store: new RtdbRest(RENDEZVOUS_DATABASE),
-      databaseUrl: remoteDatabaseUrl,
+      databaseUrl: remoteDatabaseUrl ?? "",
+      location: () => this.cloud?.location ?? null,
       current: () =>
         this.config.voiceRelay ? { channel: this.config.voiceRelay.channel, key: this.config.voiceRelay.key } : null,
       save: (channel, key) =>
@@ -1599,10 +1631,10 @@ export class SqueakApp {
 
   private gatewayStatusReader(): GatewayStatusReader {
     this.gatewayStatus ??= new GatewayStatusReader({
-      store: new RtdbRest(this.config.remoteDatabaseUrl ?? "https://unset.firebaseio.com"),
+      store: this.cloud ?? new RtdbRest("https://unset.firebaseio.com"),
       relay: () => {
-        const { voiceRelay, remoteDatabaseUrl } = this.config;
-        return voiceRelay && remoteDatabaseUrl ? { channel: voiceRelay.channel, key: voiceRelay.key } : null;
+        const { voiceRelay } = this.config;
+        return voiceRelay && this.cloud ? { channel: voiceRelay.channel, key: voiceRelay.key } : null;
       },
     });
     return this.gatewayStatus;
@@ -1759,8 +1791,8 @@ export class SqueakApp {
 
   /** Whether voice is set up and who it rings: what `GET /control/voice` carries. */
   private voiceView() {
-    const { voice, voiceRelay, remoteDatabaseUrl } = this.config;
-    const mode = voiceRelay && remoteDatabaseUrl ? "gateway" : voice ? "direct" : "off";
+    const { voice, voiceRelay } = this.config;
+    const mode = voiceRelay && this.cloud ? "gateway" : voice ? "direct" : "off";
     return {
       mode,
       callee: this.voiceSettings.settings.callee,
@@ -2407,7 +2439,7 @@ export class SqueakApp {
    * places the call itself (needs a route to the PBX). A bad setting was already turned into "off" by the config.
    */
   private createVoice(): VoiceChannel | null {
-    const { voice, voiceRelay, remoteDatabaseUrl } = this.config;
+    const { voice, voiceRelay } = this.config;
     const base = {
       monitor: this.runtime.monitor,
       replier: this.router,
@@ -2422,12 +2454,12 @@ export class SqueakApp {
         push: (channel: NotifyChannel, text: string) => this.pushToChannel(channel, text),
       },
     };
-    if (voiceRelay && remoteDatabaseUrl) {
+    if (voiceRelay && this.cloud) {
       // An add-on from 0.11.0 takes the Mac's voice while the phone rings; an older one needs it in the request, so
       // that render is kept short (the ring is silent for as long as it takes).
       const lateClips = (): boolean => addonSupports(this.gatewayStatusReader().peek().version, LATE_CLIPS_ADDON);
       const line = relayLineFor(
-        new RtdbRest(remoteDatabaseUrl),
+        this.cloud,
         voiceRelay,
         this.voiceSettings,
         async (script, _answerable, onClip) => {
