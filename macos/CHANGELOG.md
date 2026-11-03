@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.43
+
+- Settings has a Cloud tab: choose where your phone and this Mac meet, Firebase or Zoho Catalyst. Each has a card with its status (In use, Ready, Not set up), a Test that shows write, read and change-notice times (side by side once both have been tested), and Use this, which moves paired devices over after you confirm. Firebase setup moved here from the iPhone page, with Rename. Catalyst has a step-by-step checklist (command line tool, project, table, deploy, change notices, test), with every command and value to type in the console one tap to copy. The tab appears once the Squeak service on this Mac supports it.
+
 ## 2.12.42
 
 - Call voices are named, not described (Heart, Emma, Grace…), and Kokoro, Ming and Chatterbox share one list of voices; each copy was checked for clarity over a phone line, and Squeak makes the short reference clips it needs by itself. A Ming voice picked before moves to the nearest one.

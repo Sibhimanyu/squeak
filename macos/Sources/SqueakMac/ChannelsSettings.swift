@@ -452,9 +452,18 @@ struct IPhoneSettings: View {
             } else if !m.phoneEnabled {
                 SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") {
                     StatusLine(dot: nil, text: "The iPhone channel is off")
-                    HStack { Button("Set up…") { settingUp = true }.buttonStyle(PrimaryButtonStyle()); Spacer() }
+                    HStack {
+                        if app.cloud.available {
+                            Button("Set up in Cloud") { app.openSettingsInPlace(.cloud) }.buttonStyle(PrimaryButtonStyle())
+                        } else {
+                            Button("Set up…") { settingUp = true }.buttonStyle(PrimaryButtonStyle())
+                        }
+                        Spacer()
+                    }
 
-                    Footnote("Squeak for iPhone talks to this Mac through Firebase. Squeak can set up your own, or use its shared server.")
+                    Footnote(app.cloud.available
+                             ? "Setting up Firebase (or Catalyst) now lives in Settings › Cloud."
+                             : "Squeak for iPhone talks to this Mac through Firebase. Squeak can set up your own, or use its shared server.")
                 }
             } else {
                 enabledSections
@@ -497,7 +506,14 @@ struct IPhoneSettings: View {
                 StatusLine(dot: m.remote?.pausedUntil == nil ? nil : Theme.needsYou,
                            text: "On Squeak's shared server (limited)",
                            detail: sharedDetail)
-                HStack { Button("Move to your own Firebase…") { settingUp = true }.buttonStyle(SecondaryButtonStyle()); Spacer() }
+                HStack {
+                    if app.cloud.available {
+                        Button("Move to your own Firebase in Cloud") { app.openSettingsInPlace(.cloud) }.buttonStyle(SecondaryButtonStyle())
+                    } else {
+                        Button("Move to your own Firebase…") { settingUp = true }.buttonStyle(SecondaryButtonStyle())
+                    }
+                    Spacer()
+                }
 
                 Footnote("Moving means pairing your iPhone again.")
             }
