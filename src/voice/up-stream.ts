@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudStore } from "../cloud/store.js";
 import { MAX_UP_PARTS, sealUpPart, upAudioId, upPartHash, upPath } from "./memo-protocol.js";
 
 /**
@@ -17,7 +17,7 @@ const BYTES_PER_SECOND = SAMPLE_RATE * 2;
 export const PIECE_MS = 3000;
 const PIECE_BYTES = (PIECE_MS / 1000) * BYTES_PER_SECOND;
 
-export type UpStreamStore = Pick<RtdbRest, "set" | "delete">;
+export type UpStreamStore = Pick<CloudStore, "set" | "delete">;
 
 export interface UpStreamOptions {
   store: UpStreamStore;

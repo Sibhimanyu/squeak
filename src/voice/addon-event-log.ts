@@ -1,4 +1,4 @@
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudStore } from "../cloud/store.js";
 import {
   GATEWAY_LOG_ID,
   MAX_LOG_LINES,
@@ -41,7 +41,7 @@ export class GatewayEventLog {
  * change sends the whole log again, and a call must never wait on this.
  */
 export function startLogPublisher(deps: {
-  store: Pick<RtdbRest, "set">;
+  store: Pick<CloudStore, "set">;
   channel: string;
   key: string;
   log: GatewayEventLog;

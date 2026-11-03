@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import { realtimeDatabaseOrigin, relayBaseUrl, validRelayKey, type CloudLocation } from "../cloud/location.js";
+import type { CloudStore } from "../cloud/store.js";
 import {
   PAIR_GRANT_ID,
   PAIR_REQUEST_ID,
@@ -19,16 +20,48 @@ import { cleanVersion } from "./addon-update.js";
 
 /** What pairing leaves behind in the add-on's own storage: the three things the old options used to hold. */
 export interface SavedPairing {
+  /** The Firebase database; "" when the channel lives on a Catalyst relay (`relayUrl`, `relayKey`). */
   databaseUrl: string;
   channel: string;
   key: string;
+  relayUrl?: string;
+  relayKey?: string;
+  /** The `at` of the last `move` taken, so an older one is never replayed (cloud/move.ts). */
+  movedAt?: number;
+}
+
+/** Where a saved pairing says the channel lives, or null. */
+export function savedLocation(saved: SavedPairing): CloudLocation | null {
+  if (saved.relayUrl) {
+    const relayUrl = relayBaseUrl(saved.relayUrl);
+    return relayUrl && validRelayKey(saved.relayKey)
+      ? { provider: "catalyst", relayUrl, relayKey: saved.relayKey }
+      : null;
+  }
+  const databaseUrl = realtimeDatabaseOrigin(saved.databaseUrl);
+  return databaseUrl ? { provider: "firebase", databaseUrl } : null;
+}
+
+/** A saved pairing for a location (what a `move` leaves behind). */
+export function pairingFor(saved: SavedPairing, location: CloudLocation, movedAt: number): SavedPairing {
+  const base = { channel: saved.channel, key: saved.key, movedAt };
+  return location.provider === "catalyst"
+    ? { databaseUrl: "", ...base, relayUrl: location.relayUrl, relayKey: location.relayKey }
+    : { databaseUrl: location.databaseUrl, ...base };
 }
 
 export function readSavedPairing(file: string): SavedPairing | null {
   try {
     const r = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
     if (typeof r.databaseUrl === "string" && typeof r.channel === "string" && typeof r.key === "string") {
-      return { databaseUrl: r.databaseUrl, channel: r.channel, key: r.key };
+      return {
+        databaseUrl: r.databaseUrl,
+        channel: r.channel,
+        key: r.key,
+        ...(typeof r.relayUrl === "string" ? { relayUrl: r.relayUrl } : {}),
+        ...(typeof r.relayKey === "string" ? { relayKey: r.relayKey } : {}),
+        ...(typeof r.movedAt === "number" ? { movedAt: r.movedAt } : {}),
+      };
     }
   } catch {
     // Missing or unreadable: not paired.
@@ -49,7 +82,7 @@ export function codeFingerprint(code: string): string {
   return crypto.createHash("sha256").update(code.trim()).digest("hex").slice(0, 16);
 }
 
-export type PairingStore = Pick<RtdbRest, "get" | "set" | "delete">;
+export type PairingStore = Pick<CloudStore, "get" | "set" | "delete">;
 
 export interface PairDeps {
   store: PairingStore;
@@ -62,7 +95,9 @@ export interface PairDeps {
   pollMs?: number;
 }
 
-export type PairOutcome = { ok: true; channel: string; key: string } | { ok: false; reason: string };
+export type PairOutcome =
+  | { ok: true; channel: string; key: string; relayUrl?: string; relayKey?: string }
+  | { ok: false; reason: string };
 
 /**
  * Asks the Mac to pair and waits for its answer for the code's life. The 4 digits are printed here and shown on the
@@ -91,7 +126,12 @@ export async function pairWithMac(deps: PairDeps): Promise<PairOutcome> {
     if (grant) {
       await store.delete(grantPath).catch(() => undefined);
       await store.delete(pairPath(code.rendezvous, PAIR_REQUEST_ID)).catch(() => undefined);
-      return { ok: true, channel: grant.channel, key: grant.key };
+      return {
+        ok: true,
+        channel: grant.channel,
+        key: grant.key,
+        ...(grant.cu && grant.ck ? { relayUrl: grant.cu, relayKey: grant.ck } : {}),
+      };
     }
   }
   await store.delete(pairPath(code.rendezvous, PAIR_REQUEST_ID)).catch(() => undefined);
@@ -127,14 +167,14 @@ export function gatewayStatusNow(sources: StatusSources, now: number): GatewaySt
  * write is dropped: the next one carries the same news.
  */
 export function startStatusReporter(deps: {
-  store: Pick<RtdbRest, "set">;
+  store: Pick<CloudStore, "set">;
   channel: string;
   key: string;
   sources: StatusSources;
   now?: () => number;
   intervalMs?: number;
   checkMs?: number;
-}): { poke(): void; stop(): void } {
+}): { poke(): void; resend(): void; stop(): void } {
   const now = deps.now ?? Date.now;
   let last = "";
   const send = (): void => {
@@ -156,6 +196,8 @@ export function startStatusReporter(deps: {
   watcher.unref?.();
   return {
     poke,
+    /** Writes the status now, whether or not it changed (after a move, so the Mac sees this add-on on the new store). */
+    resend: send,
     stop: () => {
       clearInterval(timer);
       clearInterval(watcher);

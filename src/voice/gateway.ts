@@ -1,5 +1,5 @@
 import { logger } from "../utils/logger.js";
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudStore } from "../cloud/store.js";
 import type { CallResult } from "./baresip-line.js";
 import type { Clip } from "./clips.js";
 import { CallDialog } from "./dialog.js";
@@ -18,7 +18,7 @@ import { audioPath, callAudioId, readAudio } from "./memo-protocol.js";
 import type { PinKeeper } from "./pin-keeper.js";
 import type { AddonUpdater } from "./addon-update.js";
 
-export type GatewayStore = Pick<RtdbRest, "get" | "list" | "set" | "delete" | "watch">;
+export type GatewayStore = Pick<CloudStore, "get" | "list" | "set" | "delete" | "watch">;
 
 export interface GatewayDependencies {
   store: GatewayStore;

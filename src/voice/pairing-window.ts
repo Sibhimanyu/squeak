@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudLocation } from "../cloud/location.js";
+import type { CloudStore } from "../cloud/store.js";
 import {
   makePairingCode,
   pairPath,
@@ -11,7 +12,7 @@ import {
   type PairingCode,
 } from "./pair-protocol.js";
 
-export type PairStore = Pick<RtdbRest, "get" | "set" | "delete" | "watch">;
+export type PairStore = Pick<CloudStore, "get" | "set" | "delete" | "watch">;
 
 export type PairingState = "waiting" | "request" | "done" | "expired";
 
@@ -28,6 +29,8 @@ export interface GatewayPairingOptions {
   store: PairStore;
   /** The phone channel's database (`SQUEAK_REMOTE_DATABASE_URL`). */
   databaseUrl: string;
+  /** Where the channel lives now (cloud.json); absent: `databaseUrl`. Catalyst puts `cu` and `ck` in the code and the grant. */
+  location?: () => CloudLocation | null;
   /** The channel and key the Mac already has for the gateway, or null before the first pairing. */
   current(): { channel: string; key: string } | null;
   /** Saves a newly made channel and key (to `.env`). */
@@ -73,7 +76,7 @@ export class GatewayPairing {
 
   start(): { code: string; expiresAt: number } {
     this.close(true);
-    const code = makePairingCode(this.options.databaseUrl, this.now());
+    const code = makePairingCode(this.location() ?? this.options.databaseUrl, this.now());
     const window: Window = { code, state: "waiting", request: null, doneAt: null, stop: () => undefined };
     this.window = window;
     const poll = () => void this.poll(window);
@@ -86,6 +89,16 @@ export class GatewayPairing {
     };
     poll();
     return { code: code.code, expiresAt: code.expiresAt };
+  }
+
+  private location(): CloudLocation | null {
+    return this.options.location?.() ?? null;
+  }
+
+  /** A Catalyst grant carries the relay (`cu`, `ck`); a Firebase one nothing extra, as before. */
+  private grantWhere(): { cu?: string; ck?: string } {
+    const location = this.location();
+    return location?.provider === "catalyst" ? { cu: location.relayUrl, ck: location.relayKey } : {};
   }
 
   view(): PairingView | null {
@@ -136,7 +149,7 @@ export class GatewayPairing {
     try {
       await store.set(
         pairPath(rendezvous, PAIR_GRANT_ID),
-        sealPairGrant(secret, { v: 1, channel, key, at: this.now() }),
+        sealPairGrant(secret, { v: 1, channel, key, at: this.now(), ...this.grantWhere() }),
       );
     } catch {
       return { ok: false, reason: "Could not reach the database. Try again." };

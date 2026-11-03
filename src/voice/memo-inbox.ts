@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import type { ChannelDoc } from "../remote/firestore-rest.js";
-import type { RtdbRest } from "../remote/rtdb-rest.js";
+import type { CloudStore } from "../cloud/store.js";
 import type { ReplyFailureHandler, ReplyOutcome } from "../fleet/session-reply.js";
 import { logger } from "../utils/logger.js";
 import { chunkClips, type Clip } from "./clips.js";
@@ -67,7 +67,7 @@ import {
 } from "./memo-protocol.js";
 import type { Transcriber } from "./transcribe.js";
 
-export type MemoStore = Pick<RtdbRest, "get" | "list" | "set" | "delete" | "watch">;
+export type MemoStore = Pick<CloudStore, "get" | "list" | "set" | "delete" | "watch">;
 
 /** A chat that can take a message right now. */
 export interface MemoTarget {

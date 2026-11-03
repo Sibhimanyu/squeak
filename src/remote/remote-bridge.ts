@@ -59,6 +59,8 @@ import type { FilmCommand, FilmResult } from "../workflows/rasanai/films.js";
 import type { PhoneFilm, WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../workflows/types.js";
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
 import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
+import type { CloudLocation } from "../cloud/location.js";
+import { movePath, sealPhoneMove } from "../cloud/move.js";
 import type { ChannelDoc } from "./firestore-rest.js";
 import type { ChatModel } from "../fleet/chat-models.js";
 import { checkWorkSplit, describeSplit, SPLIT_WORKERS, type SplitWorker, type WorkSplit } from "../fleet/work-split.js";
@@ -809,6 +811,11 @@ export interface RemoteBridgeDependencies {
    * follows without pairing again.
    */
   databaseUrl?: string | null;
+  /**
+   * Where the channel lives now (docs/cloud-layer.md); decides the pairing code's `r` (Firebase) or `cu` + `ck`
+   * (Catalyst). Absent: `databaseUrl` as before.
+   */
+  location?: (() => CloudLocation | null) | null;
   announce?: ChannelStore | null;
   /**
    * A session's current turn with whole steps (`readActivity` with
@@ -1279,14 +1286,36 @@ export class RemoteBridge {
     const payload = Buffer.from(
       JSON.stringify({
         v: 1,
-        p: config.projectId,
+        // No Firebase on a Catalyst Mac: `p` (and `r`) are then absent.
+        ...(this.deps.location?.()?.provider === "catalyst" ? {} : { p: config.projectId }),
         c: config.channelId,
         k: config.key,
         n: this.macName(),
-        ...(this.deps.databaseUrl ? { r: this.deps.databaseUrl } : {}),
+        ...this.locationFields(),
       }),
     ).toString("base64url");
     return { url: `squeak://pair?d=${payload}` };
+  }
+
+  /**
+   * The pairing code's store fields: Firebase `r` = database URL (unchanged); Catalyst `cu` = relay base URL and
+   * `ck` = relay key (the code's `c` is already the channel id).
+   */
+  private locationFields(): Record<string, string> {
+    const location = this.deps.location?.() ?? null;
+    if (location?.provider === "catalyst") return { cu: location.relayUrl, ck: location.relayKey };
+    if (location?.provider === "firebase") return { r: location.databaseUrl };
+    return this.deps.databaseUrl ? { r: this.deps.databaseUrl } : {};
+  }
+
+  /**
+   * Tells the paired phones where the channel moves to (docs/cloud-layer.md, "Moving"): one sealed `state/move`
+   * document on the store they are on now. Throws if it cannot be written, so nothing moves without it.
+   */
+  async announceMove(target: CloudLocation): Promise<void> {
+    const config = this.config;
+    if (!config) return;
+    await this.deps.store.set(movePath(config.channelId), sealPhoneMove(config.key, target, this.now()));
   }
 
   async approve(deviceId: string): Promise<boolean> {

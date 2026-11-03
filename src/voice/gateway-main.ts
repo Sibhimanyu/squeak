@@ -2,12 +2,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { createCloudStore } from "../cloud/config.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
+import { watchAddonMove } from "../cloud/move.js";
+import { SwitchableStore } from "../cloud/switchable-store.js";
 import { readPairingCode, realtimeDatabaseOrigin } from "./pair-protocol.js";
 import {
   codeFingerprint,
+  pairingFor,
   pairWithMac,
   readSavedPairing,
+  savedLocation,
   startStatusReporter,
   writeSavedPairing,
   type PairingStore,
@@ -35,6 +40,7 @@ import { claimWithMac } from "./addon-claim.js";
 import { startPanel } from "./addon-panel.js";
 import { AddonUpdater } from "./addon-update.js";
 import { RENDEZVOUS_DATABASE } from "./claim-protocol.js";
+import type { CloudLocation } from "../cloud/location.js";
 import type { Clip } from "./clips.js";
 
 /** Where Home Assistant puts an add-on's options. */
@@ -115,7 +121,7 @@ export interface CredentialDeps {
   sleep: (ms: number) => Promise<void>;
   log: (line: string) => void;
   /** The store the pairing rendezvous lives in; a test passes a fake. */
-  storeFor: (databaseUrl: string) => PairingStore;
+  storeFor: (databaseUrl: string, location?: CloudLocation) => PairingStore;
   /**
    * The default way to pair when nothing was set: shows a code and waits for the Mac. Absent (tests of the older
    * flow), an unpaired add-on just says so and stays up. Resolves null if the add-on is stopping.
@@ -141,7 +147,7 @@ export async function resolveCredentials(
     };
   }
   const saved = readSavedPairing(deps.pairingFile);
-  if (saved && realtimeDatabaseOrigin(saved.databaseUrl)) return { ...saved, source: "pairing" };
+  if (saved && savedLocation(saved)) return { ...saved, source: "pairing" };
 
   const notPaired =
     "Not paired: open the Squeak Voice panel in Home Assistant's sidebar and type the code it shows in Squeak for Mac (Settings > Phone calls > Add gateway)";
@@ -188,7 +194,7 @@ export async function resolveCredentials(
   let outcome;
   try {
     outcome = await pairWithMac({
-      store: deps.storeFor(code.databaseUrl),
+      store: deps.storeFor(code.databaseUrl, code.location),
       code,
       version: deps.version,
       now: deps.now,
@@ -203,7 +209,13 @@ export async function resolveCredentials(
     deps.log(`${outcome.reason} ${notPaired}`);
     return showCode();
   }
-  const paired = { databaseUrl: code.databaseUrl, channel: outcome.channel, key: outcome.key };
+  const paired: SavedPairing = {
+    databaseUrl: code.databaseUrl,
+    channel: outcome.channel,
+    key: outcome.key,
+    // A Catalyst grant names the relay; the grant's own is the one kept (the code's was only for meeting).
+    ...(outcome.relayUrl && outcome.relayKey ? { relayUrl: outcome.relayUrl, relayKey: outcome.relayKey } : {}),
+  };
   writeSavedPairing(deps.pairingFile, paired);
   deps.log("Paired with your Mac");
   return { ...paired, source: "paired now" };
@@ -423,7 +435,7 @@ export async function runGateway(): Promise<number> {
             "An old pairing code is still set in this add-on's options. It has been used or has run out, so it is ignored; you can empty that option. Use the new code below.";
         }
       },
-      storeFor: (url) => new RtdbRest(url),
+      storeFor: (url, location) => (location ? createCloudStore(location) : new RtdbRest(url)),
     });
   } catch (error) {
     console.error(`Squeak voice gateway cannot start: ${error instanceof Error ? error.message : String(error)}`);
@@ -439,7 +451,7 @@ export async function runGateway(): Promise<number> {
     const paired = credentials;
     env = {
       ...env,
-      SQUEAK_REMOTE_DATABASE_URL: paired.databaseUrl,
+      ...(paired.databaseUrl ? { SQUEAK_REMOTE_DATABASE_URL: paired.databaseUrl } : {}),
       SQUEAK_VOICE_RELAY_CHANNEL: paired.channel,
       SQUEAK_VOICE_RELAY_KEY: paired.key,
     };
@@ -455,7 +467,13 @@ export async function runGateway(): Promise<number> {
       let lastQuality: CallQuality | null = null;
       // Quick and plain: what speaks a line that is missing during a call, so the natural voice never runs then.
       const inlineSpeaker = new EspeakSpeaker();
-      const store = new RtdbRest(databaseUrl(env.SQUEAK_REMOTE_DATABASE_URL));
+      // The store behind a switch, so a `move` from the Mac (cloud/move.ts) changes it without a restart.
+      const startLocation = (credentials && savedLocation(credentials)) ?? {
+        provider: "firebase" as const,
+        databaseUrl: databaseUrl(env.SQUEAK_REMOTE_DATABASE_URL),
+      };
+      const store = new SwitchableStore(createCloudStore(startLocation), startLocation);
+      let movedAt = credentials?.movedAt ?? 0;
       // One phone, registered for as long as the gateway runs: it rings you for questions and answers when you call in.
       const phone = new SipPhone({
         line: voice.line,
@@ -624,6 +642,27 @@ export async function runGateway(): Promise<number> {
       });
       // A changed latestVersion goes out at once; an unchanged status is already what the Mac last read.
       publishStatus = () => status.poke();
+      // The Mac says where the channel lives next: verified, newer than the last, then this add-on follows and
+      // announces itself on the new store.
+      const stopMove = watchAddonMove({
+        store,
+        channel: relay.channel,
+        key: relay.key,
+        lastAt: () => movedAt,
+        onMove: (move) => {
+          movedAt = move.at;
+          store.switchTo(createCloudStore(move.location), move.location);
+          if (credentials) {
+            try {
+              writeSavedPairing(PAIRING_FILE, pairingFor(credentials, move.location, move.at));
+            } catch (error) {
+              logger.warn(`could not save the move: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+          note("info", `Moved to ${move.location.provider === "catalyst" ? "Catalyst" : "Firebase"}`);
+          status.resend();
+        },
+      });
       const logs = startLogPublisher({ store, channel: relay.channel, key: relay.key, log: events });
       let lastRegistration = "";
       phone.onRegistrationChange(() => {
@@ -641,6 +680,7 @@ export async function runGateway(): Promise<number> {
       gateway.start();
       started = {
         stop: () => {
+          stopMove();
           status.stop();
           logs.stop();
           updater.stop();

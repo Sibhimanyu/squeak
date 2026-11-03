@@ -38,6 +38,13 @@ export interface HookIngressOptions {
 const MAX_QUEUE_TEXT = 4000;
 
 export interface IngressControl {
+  /**
+   * `/control/cloud/...` (docs/cloud-layer.md): `route` is the path after `/control/cloud` ("" for the root),
+   * `body` the parsed JSON (null for a GET). Answers with a status and a JSON body; errors are fixed sentences.
+   */
+  cloud?: {
+    handle(method: string, route: string, body: unknown): Promise<{ status: number; body: unknown }>;
+  };
   sessionMessage(replyTarget: string): unknown;
   /** A chat's readable history (user and assistant text only), oldest first. */
   transcript?(replyTarget: string, limit: number, before?: number | null): unknown;
@@ -465,6 +472,56 @@ export class HookIngressServer {
           logger.warn("control remote failed", { error: error instanceof Error ? error.message : String(error) });
           respond(response, 500, "remote failed");
         });
+      return;
+    }
+
+    const cloudRoute = /^\/control\/cloud((?:\/[a-z]+){0,2})$/.exec((request.url ?? "").split("?")[0] ?? "");
+    if (cloudRoute) {
+      const route = cloudRoute[1] ?? "";
+      const cloud = control.cloud;
+      const method = request.method ?? "";
+      if (method !== "GET" && method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!cloud) {
+        request.resume();
+        respond(response, 503, "cloud unavailable");
+        return;
+      }
+      const run = (parsed: unknown): void => {
+        void cloud
+          .handle(method, route, parsed)
+          .then((answer) => respondJson(response, answer.status, answer.body))
+          .catch(() => respondJson(response, 500, { error: "The cloud request failed." }));
+      };
+      if (method === "GET") {
+        request.resume();
+        run(null);
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        run(parsed);
+      });
       return;
     }
 

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 
+import { realtimeDatabaseOrigin, relayBaseUrl, validRelayKey, type CloudLocation } from "../cloud/location.js";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import { openBody, sealBody } from "./relay-protocol.js";
 
@@ -26,27 +27,15 @@ export interface PairingCode {
 }
 
 export interface ReadPairingCode {
+  /** The Firebase database the code names; "" for a Catalyst code, which names `location` instead. */
   databaseUrl: string;
+  /** A Catalyst code only (`cu` + `ck`): where the rendezvous lives. A Firebase code names `databaseUrl`. */
+  location?: CloudLocation;
   secret: string;
   rendezvous: string;
 }
 
-/** An https Firebase Realtime Database, as everywhere else in Squeak; its origin, or null. */
-export function realtimeDatabaseOrigin(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  try {
-    const url = new URL(value);
-    if (
-      url.protocol === "https:" &&
-      (url.hostname.endsWith(".firebasedatabase.app") || url.hostname.endsWith(".firebaseio.com"))
-    ) {
-      return `https://${url.hostname}`;
-    }
-  } catch {
-    // Not a URL.
-  }
-  return null;
-}
+export { realtimeDatabaseOrigin };
 
 function derive(secret: string, info: string, length: number): Buffer {
   return Buffer.from(crypto.hkdfSync("sha256", Buffer.from(secret, "base64url"), Buffer.alloc(0), info, length));
@@ -60,11 +49,22 @@ function keyOf(secret: string): string {
   return derive(secret, "squeak-voice-pair-key", 32).toString("base64");
 }
 
-export function makePairingCode(databaseUrl: string, now: number): PairingCode {
-  const origin = realtimeDatabaseOrigin(databaseUrl);
-  if (!origin) throw new Error("The phone channel's database is not set up.");
+/**
+ * A Firebase database URL (the code carries `u`, as always) or a location: Catalyst puts the relay's `c` and
+ * `ck` in the code instead, since the add-on needs the relay to even meet the Mac.
+ */
+export function makePairingCode(where: string | CloudLocation, now: number): PairingCode {
+  const location: CloudLocation | null =
+    typeof where === "string" ? { provider: "firebase", databaseUrl: where } : where;
+  const origin = location.provider === "firebase" ? realtimeDatabaseOrigin(location.databaseUrl) : null;
+  const relay = location.provider === "catalyst" ? relayBaseUrl(location.relayUrl) : null;
+  if (!origin && !(relay && validRelayKey(location.provider === "catalyst" ? location.relayKey : null))) {
+    throw new Error("The phone channel's database is not set up.");
+  }
   const secret = crypto.randomBytes(16).toString("base64url");
-  const code = PREFIX + Buffer.from(JSON.stringify({ u: origin, s: secret }), "utf8").toString("base64url");
+  const fields =
+    location.provider === "catalyst" ? { cu: relay, ck: location.relayKey, s: secret } : { u: origin, s: secret };
+  const code = PREFIX + Buffer.from(JSON.stringify(fields), "utf8").toString("base64url");
   return { code, secret, rendezvous: rendezvousOf(secret), expiresAt: now + PAIR_TTL_MS };
 }
 
@@ -75,10 +75,23 @@ export function readPairingCode(code: unknown): ReadPairingCode | null {
   try {
     const body = JSON.parse(Buffer.from(trimmed.slice(PREFIX.length), "base64url").toString("utf8")) as {
       u?: unknown;
+      cu?: unknown;
+      ck?: unknown;
       s?: unknown;
     };
+    if (typeof body.s !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(body.s)) return null;
+    if (body.cu !== undefined || body.ck !== undefined) {
+      const relayUrl = relayBaseUrl(body.cu);
+      if (!relayUrl || !validRelayKey(body.ck)) return null;
+      return {
+        databaseUrl: "",
+        location: { provider: "catalyst", relayUrl, relayKey: body.ck },
+        secret: body.s,
+        rendezvous: rendezvousOf(body.s),
+      };
+    }
     const databaseUrl = realtimeDatabaseOrigin(body.u);
-    if (!databaseUrl || typeof body.s !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(body.s)) return null;
+    if (!databaseUrl) return null;
     return { databaseUrl, secret: body.s, rendezvous: rendezvousOf(body.s) };
   } catch {
     return null;
@@ -106,6 +119,9 @@ export interface PairGrant {
   channel: string;
   key: string;
   at: number;
+  /** Catalyst only: the relay base URL (`cu`) and key (`ck`) the channel lives behind (a Firebase grant has neither). */
+  cu?: string;
+  ck?: string;
 }
 
 export function newVerifyCode(): string {
@@ -137,5 +153,10 @@ export function readPairGrant(secret: string, doc: ChannelDoc, now: number): Pai
   if (r.v !== 1 || typeof r.channel !== "string" || typeof r.key !== "string" || typeof r.at !== "number") return null;
   if (!/^[A-Za-z0-9_-]{22,64}$/.test(r.channel) || Buffer.from(r.key, "base64").length !== 32) return null;
   if (Math.abs(now - r.at) > PAIR_TTL_MS) return null;
+  if (r.cu !== undefined || r.ck !== undefined) {
+    const relayUrl = relayBaseUrl(r.cu);
+    if (!relayUrl || !validRelayKey(r.ck)) return null;
+    return { v: 1, channel: r.channel, key: r.key, at: r.at, cu: relayUrl, ck: r.ck };
+  }
   return { v: 1, channel: r.channel, key: r.key, at: r.at };
 }

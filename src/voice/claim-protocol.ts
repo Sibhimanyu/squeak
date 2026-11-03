@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import type { ChannelDoc } from "../remote/firestore-rest.js";
-import { realtimeDatabaseOrigin } from "./pair-protocol.js";
+import { realtimeDatabaseOrigin, relayBaseUrl, validRelayKey } from "../cloud/location.js";
 import { openBody, sealBody } from "./relay-protocol.js";
 import { open, seal } from "../remote/remote-crypto.js";
 
@@ -109,8 +109,15 @@ export function readClaimRequest(code: string, doc: ChannelDoc, now: number): Cl
   return { name: r.name.slice(0, 40), version: r.version.slice(0, 20), publicKey: r.publicKey, at: r.at };
 }
 
+/**
+ * Firebase: `databaseUrl` (the grant's wire field of that name, unchanged). Catalyst: `databaseUrl` is "" and
+ * `relayUrl` / `relayKey` carry the wire fields `cu` (relay base URL) and `ck` (relay key), which then replace
+ * `databaseUrl` in the sealed grant (docs/cloud-layer.md, "Pairing and devices").
+ */
 export interface ClaimGrant {
   databaseUrl: string;
+  relayUrl?: string;
+  relayKey?: string;
   channel: string;
   key: string;
 }
@@ -123,7 +130,9 @@ export function sealClaimGrant(code: string, request: ClaimRequest, grant: Claim
   const macPublic = Buffer.from(mine.publicKey.export({ type: "spki", format: "der" }))
     .subarray(-32)
     .toString("base64url");
-  const inner = seal(sharedKey(mine.privateKey, theirs, code), { v: 1, ...grant, at: now });
+  const { databaseUrl, relayUrl, relayKey, ...rest } = grant;
+  const where = relayUrl ? { cu: relayUrl, ck: relayKey } : { databaseUrl };
+  const inner = seal(sharedKey(mine.privateKey, theirs, code), { v: 1, ...where, ...rest, at: now });
   return sealBody(claimKey(code), "claimgrant", CLAIM_GRANT_ID, { v: 1, macPublic, inner }, now);
 }
 
@@ -147,9 +156,14 @@ export function readClaimGrant(
   }
   if (typeof body !== "object" || body === null) return null;
   const g = body as Record<string, unknown>;
-  const databaseUrl = realtimeDatabaseOrigin(g.databaseUrl);
-  if (g.v !== 1 || !databaseUrl || typeof g.channel !== "string" || typeof g.key !== "string") return null;
+  const catalyst = g.cu !== undefined || g.ck !== undefined;
+  const relayUrl = catalyst ? relayBaseUrl(g.cu) : null;
+  const databaseUrl = catalyst ? "" : realtimeDatabaseOrigin(g.databaseUrl);
+  const where = catalyst ? relayUrl && validRelayKey(g.ck) : databaseUrl;
+  if (g.v !== 1 || !where || typeof g.channel !== "string" || typeof g.key !== "string") return null;
   if (!/^[A-Za-z0-9_-]{22,64}$/.test(g.channel) || Buffer.from(g.key, "base64").length !== 32) return null;
   if (typeof g.at !== "number" || Math.abs(now - g.at) > CLAIM_TTL_MS) return null;
-  return { databaseUrl, channel: g.channel, key: g.key };
+  if (catalyst)
+    return { databaseUrl: "", relayUrl: relayUrl!, relayKey: g.ck as string, channel: g.channel, key: g.key };
+  return { databaseUrl: databaseUrl!, channel: g.channel, key: g.key };
 }
