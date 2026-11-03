@@ -23,7 +23,10 @@ struct UpdateBanner: View {
                 if case .failed = phase {
                     Text(text).font(font).foregroundStyle(Theme.error)
                         .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                    HStack(spacing: 14) { buttons }
+                    HStack(spacing: 14) {
+                        buttons
+                        ReportProblemButton(problem: text, place: "Update", title: "Report")
+                    }
                 } else {
                     HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                         if UpdateFlowCopy.isBusy(phase), updater.flow.phase.progress == nil {

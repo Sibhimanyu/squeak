@@ -88,6 +88,9 @@ struct ConnectStage: View {
                 if row.id == "conductor" {
                     Button("Continue without Conductor") { model.continueWithoutConductor() }.buttonStyle(SecondaryButtonStyle())
                 }
+                if row.id != "service" || model.daemon.failure == nil {
+                    ReportProblemButton(problem: "\(row.title): \(fix)", place: "Setup › Connect")
+                }
                 if row.id == "service", let details = model.daemon.failure?.details {
                     HStack(spacing: Space.s) {
                         Button(copied ? "Copied" : "Copy details") {
@@ -101,6 +104,11 @@ struct ConnectStage: View {
                             NSWorkspace.shared.activateFileViewerSelecting([log])
                         }
                         .buttonStyle(QuietButtonStyle())
+                        ReportProblemButton(problem: "\(row.title): \(fix)", place: "Setup › Connect", details: details)
+                    }
+                    if SqueakMacApp.reportsEnabled {
+                        Text("Report this sends the problem and the details above to a person on the Squeak team. You read it first.")
+                            .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
                     DisclosureGroup("Technical details", isExpanded: $showDetails) {
                         Text(details)

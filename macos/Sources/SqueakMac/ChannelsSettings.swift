@@ -100,6 +100,9 @@ struct TelegramSettings: View {
             } else {
                 StatusLine(dot: nil, text: "Checking")
             }
+            if m.daemonReachable, !m.channelsOutdated, let t = m.channels?.telegram, t.configured, t.polling == .error {
+                ReportProblemButton(problem: "Telegram is not connecting" + (t.lastError.map { ": \($0)" } ?? ""), place: "Settings › Channels › Telegram")
+            }
             if m.restarting {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Restarting the Squeak service…").foregroundStyle(.secondary) }
             }
@@ -187,6 +190,7 @@ struct TelegramSettings: View {
             if let line = BotAvatarText.line(m.avatarState) {
                 Text(line).font(.callout).foregroundStyle(m.avatarState.isError ? Theme.needsYou : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                if m.avatarState.isError { ReportProblemButton(problem: line, place: "Settings › Channels › Telegram › Bot photo") }
             } else if !m.tokenSet {
                 Footnote("Set the bot token first.")
             }
@@ -208,7 +212,10 @@ struct TelegramSettings: View {
                 }
             }
 
-            if let r = m.testResult { Footnote(r) } else if m.telegramDirty { Footnote("Saving restarts the Squeak service for a few seconds.") }
+            if let r = m.testResult {
+                Footnote(r)
+                if r.hasPrefix("Not sent") { ReportProblemButton(problem: r, place: "Settings › Channels › Telegram") }
+            } else if m.telegramDirty { Footnote("Saving restarts the Squeak service for a few seconds.") }
         }
     }
 }
@@ -635,8 +642,11 @@ struct PairSheet: View {
                     .padding(.vertical, 4)
                     approval
                     if let error = m.pairingError {
-                        Text(error).font(.callout).foregroundStyle(Theme.muted)
-                            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(error).font(.callout).foregroundStyle(Theme.muted)
+                            ReportProblemButton(problem: error, place: "Settings › Channels › Pairing")
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12)
                     }
                 }
                 footer

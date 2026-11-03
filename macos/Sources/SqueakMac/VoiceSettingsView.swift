@@ -408,7 +408,10 @@ struct VoiceSettingsPage: View {
                         Text("Playing on this Mac").foregroundStyle(.secondary)
                     }
                 }
-                if let error = preview.error { Footnote(error) }
+                if let error = preview.error {
+                    Footnote(error)
+                    ReportProblemButton(problem: error, place: "Settings › Voice › Sample")
+                }
             }
             readinessLine(n)
             if let error = m.voiceError { Footnote(error) }
@@ -417,6 +420,7 @@ struct VoiceSettingsPage: View {
                 Label(setup.failureLine, systemImage: "exclamationmark.triangle")
                     .font(.callout).foregroundStyle(Theme.error)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                ReportProblemButton(problem: setup.failureLine, place: "Settings › Voice › Realistic voice")
             }
         } header: { Text("Voice") } footer: {
             Footnote("Samples play on this Mac without placing a call. The words never leave it. If speech fails during a call, the plain voice speaks and the call still goes.")
@@ -538,7 +542,10 @@ struct VoiceSettingsPage: View {
                             Text("Playing on this Mac").foregroundStyle(.secondary)
                         }
                     }
-                    if let error = preview.error { Footnote(error) }
+                    if let error = preview.error {
+                    Footnote(error)
+                    ReportProblemButton(problem: error, place: "Settings › Voice › Sample")
+                }
                 }
             } else {
                 naturalInstall(m.naturalSetup)
@@ -572,6 +579,7 @@ struct VoiceSettingsPage: View {
                 Label(setup.failureLine, systemImage: "exclamationmark.triangle")
                     .font(.callout).foregroundStyle(Theme.error)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                ReportProblemButton(problem: setup.failureLine, place: "Settings › Voice › Realistic voice")
             }
             if let note = m.naturalSetupNote { Footnote(note) }
         }

@@ -216,6 +216,7 @@ private struct OwnFlow: View {
             HStack {
                 Button("Retry") { model.retry() }.buttonStyle(PrimaryButtonStyle())
                 handFallback
+                ReportProblemButton(problem: failure.message, place: "Settings › Cloud › Firebase setup")
             }
         }
     }

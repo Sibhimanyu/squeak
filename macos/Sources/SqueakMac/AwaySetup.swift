@@ -156,7 +156,10 @@ private struct PairPanel: View {
                 Text(caption).font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
             ForEach(m.remote?.pending ?? []) { PendingRow(request: $0) }
-            if let e = m.pairingError { Text(e).font(Typo.meta).foregroundStyle(Theme.muted) }
+            if let e = m.pairingError {
+                Text(e).font(Typo.meta).foregroundStyle(Theme.muted)
+                ReportProblemButton(problem: e, place: "Away setup › Pairing")
+            }
             Text("Keep this code private. Anyone who scans it can ask to pair, and you still approve here.")
                 .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
         }

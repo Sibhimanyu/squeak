@@ -39,6 +39,9 @@ struct ConductorRelayCard: View {
                     }
                     if let p = relay.problem {
                         Text(p).font(Typo.body).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                        ReportProblemButton(problem: p, place: "Settings › Conductor")
+                    } else if s.state == .error {
+                        ReportProblemButton(problem: s.message.isEmpty ? fallback(s.state) : s.message, place: "Settings › Conductor")
                     }
                     buttons(s.state)
                 } else {

@@ -103,6 +103,7 @@ struct MessageView: View {
             if status.offersReuse {
                 Button("Edit as new message") { model.reuse(message) }.buttonStyle(.plain)
                     .font(Typo.meta.weight(.medium))
+                ReportProblemButton(problem: status.text, place: "Conversation › Send", title: "Report")
             }
         }
         .accessibilityElement(children: .combine)
@@ -218,6 +219,7 @@ struct EarlierRow: View {
             } else if let error = paging.error {
                 Text(verbatim: error).font(Typo.meta).foregroundStyle(Theme.error)
                 Button("Try again", action: onLoad).buttonStyle(.plain).font(Typo.meta.weight(.medium))
+                ReportProblemButton(problem: error, place: "Conversation › Earlier messages", title: "Report")
             } else if paging.reachedStart {
                 Text("Start of chat").font(Typo.meta).foregroundStyle(Theme.subtle)
             } else {

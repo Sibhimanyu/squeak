@@ -320,7 +320,10 @@ struct QuickContextView: View {
                 AnswerCard(card: card, isEnabled: answering == nil && model.isConnected) { answer(card) }
             }
             if let failure = answerFailure {
-                Text(verbatim: failure).font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Text(verbatim: failure).font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                    ReportProblemButton(problem: failure, place: "Quick message", title: "Report")
+                }
             } else if let letter = answering {
                 Text("Sending \(letter)…").font(.system(size: 11)).foregroundStyle(Theme.muted)
             }

@@ -411,6 +411,7 @@ struct NewChatSheet: View {
                     Lucide(.triangleAlert, size: Metrics.icon, color: Theme.error)
                     Text(e).font(Typo.body).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
                 }
+                ReportProblemButton(problem: e, place: "New chat")
                 if RelayStatus.isRelayProblem(e) {
                     Button("Open Conductor settings") { model.openSettings(.conductor) }
                         .buttonStyle(SecondaryButtonStyle())

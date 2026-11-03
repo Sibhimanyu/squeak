@@ -86,10 +86,12 @@ struct CloudSettings: View {
     @ViewBuilder private func testLine(_ p: CloudProvider, _ t: CloudTest?) -> some View {
         if let e = m.testErrors[p] {
             Footnote("Last test failed: \(e)")
+            ReportProblemButton(problem: "Last test failed: \(e)", place: "Settings › Cloud › \(p.title)")
         } else if let t, t.ok {
             Footnote("Last test: write \(CloudComparisonRow.format(t.writeMs)), read \(CloudComparisonRow.format(t.readMs)), change notice \(CloudComparisonRow.format(t.noticeMs)).")
         } else if let t, let e = t.error {
             Footnote("Last test failed: \(e)")
+            ReportProblemButton(problem: "Last test failed: \(e)", place: "Settings › Cloud › \(p.title)")
         }
     }
 
@@ -224,6 +226,7 @@ private struct CloudStepRow: View {
                 Text(p.title).font(Typo.label).foregroundStyle(Theme.ink)
                 Text(p.instruction).font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 if let d = step.detail, step.state == .error || isUnknown { Text(d).font(Typo.meta).foregroundStyle(Theme.needsYou).fixedSize(horizontal: false, vertical: true) }
+                if let d = step.detail, step.state == .error { ReportProblemButton(problem: d, place: "Settings › Cloud › Catalyst › \(p.title)") }
                 if step.state != .done || p.action == .test { actionBody }
             }
             Spacer(minLength: 0)

@@ -384,7 +384,11 @@ struct SessionDetail: View {
                 if !extras.background.isEmpty { BackgroundStrip(extras: extras, crowded: extras.stalled != nil) }
             }
             if let note = model.chatNote {
-                Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.error).padding(.leading, 4)
+                HStack(spacing: 8) {
+                    Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.error)
+                    ReportProblemButton(problem: note, place: "Conversation", title: "Report")
+                }
+                .padding(.leading, 4)
             }
             if session.source == .conductor {
                 QueueStack(model: model, sessionId: session.key.hostSessionId, isWorking: working,

@@ -68,6 +68,10 @@ struct BackgroundServiceRow: View {
         if let button = buttonTitle {
             Button(button) { daemon.repair() }.disabled(daemon.busy)
         }
+        if case .failed(let reason, _) = daemon.status {
+            ReportProblemButton(problem: "Background service: \(reason)", place: "Settings › About",
+                                details: daemon.failure?.details)
+        }
     }
 
     private var buttonTitle: String? {

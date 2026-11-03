@@ -588,7 +588,10 @@ struct QuickComposerView: View {
             if state.sending {
                 Text("Sending…").foregroundStyle(Theme.muted)
             } else if let r = state.result, let f = SendFeedback(r) {
-                HStack(spacing: 6) { Lucide(f.symbol, size: 14, color: f.color); Text(f.text).foregroundStyle(f.color).lineLimit(1) }
+                HStack(spacing: 6) {
+                    Lucide(f.symbol, size: 14, color: f.color); Text(f.text).foregroundStyle(f.color).lineLimit(1)
+                    if let failure = f.failureText { ReportProblemButton(problem: failure, place: "Quick composer", title: "Report") }
+                }
             } else if !model.isConnected, model.health != nil {
                 Text("Offline").foregroundStyle(Theme.muted)
             } else if reconnecting {

@@ -848,7 +848,7 @@ private struct AboutSettings: View {
                 }
                 if SqueakMacApp.reportsEnabled {
                     SettingsCard(title: "Help make Squeak better", subtitle: "Your feedback reaches a person.", symbol: "bubble.left") {
-                        Button("Report a problem…") { Heresay.present() }
+                        Button("Report a problem…") { ReportRouter.shared.present() }
                         SectionFootnote("Tell us what's broken, confusing or could be better. A person reads every report. Also in Help › Report a problem (⌥⌘R).")
                     }
                 }

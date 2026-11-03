@@ -87,6 +87,7 @@ struct OnboardingView: View {
             .background(Theme.bg)
         }
         .background(Theme.bg)
+        .reportAnchor("setup")
         // Esc must never close the window or quit setup by accident.
         .onExitCommand {}
         .task { await prepare() }

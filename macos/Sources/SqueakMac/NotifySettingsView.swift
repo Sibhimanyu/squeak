@@ -29,7 +29,10 @@ struct NotificationsSection: View {
                     quiet(s.quiet)
                 }
                 .disabled(s.muted)
-                if let e = m.notifyError { Footnote(e) }
+                if let e = m.notifyError {
+                    Footnote(e)
+                    ReportProblemButton(problem: e, place: "Settings › Notifications")
+                }
                 Footnote(m.notifyOutdated ? NotifyText.outdated : NotifyText.footnote)
             }
         } else if m.notifyOutdated, channel == .telegram ? m.tokenSet : m.webhookSet {

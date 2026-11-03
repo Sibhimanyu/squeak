@@ -111,6 +111,7 @@ struct AwakeRow: View {
             }
             if let problem = model.awakeSleepProblem {
                 Text(problem).font(Typo.meta).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                ReportProblemButton(problem: problem, place: "Keep awake")
             }
             if let note = model.awakeNote {
                 Text(note).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
@@ -251,6 +252,7 @@ struct AwakeSettings: View {
             }
             if let problem = model.awakeSleepProblem {
                 StatusLine(dot: Theme.error, text: "Sleep is still turned off", detail: problem)
+                ReportProblemButton(problem: "Sleep is still turned off: \(problem)", place: "Settings › Keep awake")
             }
 
             Footnote(model.awakeLidReady

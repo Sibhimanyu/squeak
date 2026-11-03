@@ -108,6 +108,7 @@ struct PopupAwakeCard: View {
             }
             if let problem = model.awakeSleepProblem {
                 Text(problem).font(.popup(12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
+                ReportProblemButton(problem: problem, place: "Keep awake", title: "Report")
             }
         }
         .padding(14)
@@ -189,6 +190,7 @@ struct PopupNotifyCard: View {
                 finishedRow(s)
                 if let e = m.notifyError {
                     Text(e).font(.popup(12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
+                    ReportProblemButton(problem: e, place: "Notifications", title: "Report").padding(.top, 2)
                 }
             } else {
                 Text(m.notifyOutdated ? NotifyText.outdated : "Set up Telegram or Zoho Cliq in Settings to choose what they push.")
@@ -288,6 +290,7 @@ struct PopupMacCard: View {
                 .frame(minHeight: 40)
                 if let note = model.powerModeNote {
                     Text(note).font(.popup(11.5)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.leading, 36)
+                    ReportProblemButton(problem: note, place: "Energy mode", title: "Report").padding(.leading, 36)
                 }
             }
         }

@@ -213,7 +213,12 @@ struct QuickNewChatView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let error = state.error { Text(error).font(.system(size: 12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true) }
+            if let error = state.error {
+                HStack(spacing: 8) {
+                    Text(error).font(.system(size: 12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                    ReportProblemButton(problem: error, place: "New chat", title: "Report")
+                }
+            }
             HStack(spacing: 10) {
                 if busy {
                     ProgressView().controlSize(.small)

@@ -23,7 +23,7 @@ struct SqueakMacApp: App {
     var body: some Scene {
         Window("Squeak", id: "conversation") {
             ConversationView().environment(model)
-                .heresay()
+                .reportAnchor("conversation")
                 // Once per install, say where reports live; only on the main window, never over Welcome.
                 .onAppear { if Self.reportsEnabled { Heresay.introduce() } }
         }
@@ -31,7 +31,7 @@ struct SqueakMacApp: App {
         .suppressedAtLaunch()
         .commands {
             SqueakCommands(model: model)
-            HeresayCommands()
+            ReportCommands()
         }
     }
 }
