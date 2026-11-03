@@ -158,18 +158,22 @@ export class CloudControl {
       let sinceWrite: number | null = null;
       let noticed: ((ms: number) => void) | null = null;
       const noticeSeen = new Promise<number>((resolve) => (noticed = resolve));
+      // A stream sends its own snapshot when it opens (Firebase's first "put"), sometimes after `onOpen`: that wake
+      // must not count as the notice (it read as 0 ms). Wait for the open, then up to 1.5 s for that first wake.
       let opened: (() => void) | null = null;
       const ready = new Promise<void>((resolve) => (opened = resolve));
+      let firstWake: (() => void) | null = null;
+      const settled = new Promise<void>((resolve) => (firstWake = resolve));
       unwatch = store.watch(
         collection,
         () => {
-          // The first wake is the watch's own (once on connect); only one after the write is its notice.
           if (sinceWrite !== null) noticed?.(this.now() - sinceWrite);
-          else opened?.();
+          else firstWake?.();
         },
         { onOpen: () => opened?.() },
       );
       await Promise.race([ready, delay(5_000)]);
+      await Promise.race([settled, delay(1_500)]);
       const t0 = this.now();
       sinceWrite = t0;
       wrote = true;
