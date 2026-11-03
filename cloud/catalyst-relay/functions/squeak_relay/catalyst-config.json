@@ -4,9 +4,7 @@
     "stack": "node20",
     "type": "advancedio",
     "env_variables": {
-      "CHANNEL_ID": "REPLACE_WITH_DATASTREAMS_CHANNEL_ID",
-      "RELAY_KEY": "REPLACE_WITH_RANDOM_SECRET",
-      "TABLE": "squeak_docs"
+      "RELAY_KEY": "REPLACED_AT_DEPLOY"
     }
   },
   "execution": {

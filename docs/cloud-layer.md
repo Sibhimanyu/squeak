@@ -147,3 +147,10 @@ test's numbers, **Set up** (Firebase: the existing `FirebaseSetupModel` flow mov
 each step's button: Run / Open console / Check), **Test**, **Rename** (Firebase: a name field; Catalyst: the console
 steps), and **Use this** (confirm sheet: "Paired devices will move to Catalyst."). Hidden routes (older daemon) → the tab
 shows only the existing Firebase settings. DESIGN.md applies.
+
+## Setting up Catalyst: what the CLI can and cannot do (verified on CLI 1.29.1)
+
+- `catalyst project:list` and `project:use` are interactive (an org menu) outside a project, so setup does not use them. `catalyst init -ni` with no `-p` fails by design and prints the account's projects as `* name(id)` lines (the CLI calls them "orgs"); that is the project picker. `catalyst init -p <id> -ni` needs no `--org`, writes only a local `.catalystrc` (no cloud change) and holds the project's name and `domain.name` (`<project>-<orgId>.development`). The app URL is `https://<domain.name>.catalystserverless.<tld>`.
+- The CLI never names the data centre; `dc` defaults to `in` and is a setting (`CatalystSetup.setConfig`).
+- Function env vars come only from `deployment.env_variables` in the function's `catalyst-config.json` (a deploy overwrites console-set ones); setup writes `RELAY_KEY` there in its private copy `<support>/catalyst-relay`, never in the repo.
+- Assumed, not run (a deploy changes a real project): `catalyst deploy --only functions:squeak_relay -ni`, and that the CLI ships the function's `node_modules` (setup runs `npm ci --omit=dev` first).

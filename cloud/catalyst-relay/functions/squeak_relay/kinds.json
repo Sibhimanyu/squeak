@@ -1,0 +1,14 @@
+[
+  "state",
+  "pairing",
+  "commands",
+  "results",
+  "live",
+  "media",
+  "voice",
+  "voiceresult",
+  "voicedir",
+  "voiceup",
+  "voicedown",
+  "voicepair"
+]

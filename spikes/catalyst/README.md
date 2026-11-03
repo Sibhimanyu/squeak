@@ -65,6 +65,6 @@ Request budget check: a phone polling nothing, a daemon writing a state doc ever
 
 ## Files
 
-- `relay/squeak_relay/`: Advanced I/O function (`index.js`, `paths.js` + `paths.test.mjs` mirroring the Firebase rule).
+- `relay/` (moved to `cloud/catalyst-relay/`, the hardened relay; see docs/cloud-layer.md).
 - `measure/`: `firebase.mjs`, `catalyst.mjs`, `stats.mjs`.
 - `swift/`: SwiftPM executable `streams`.

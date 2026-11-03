@@ -1,0 +1,6 @@
+{
+  "functions": {
+    "targets": ["squeak_relay"],
+    "source": "functions"
+  }
+}
