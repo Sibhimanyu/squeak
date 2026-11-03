@@ -68,18 +68,21 @@ public struct DaemonFacts: Equatable, Sendable {
     public var portAnswers: Bool
     /// The bundled version an earlier update to failed and was rolled back from.
     public var failedVersion: String?
+    /// Why that version failed, in words, when it was saved.
+    public var failedReason: String?
     /// The person pressed Install or Repair.
     public var userRequested: Bool
     public var supportDaemonRoot: String
 
     public init(plistArguments: [String]? = nil, installedVersion: String? = nil, bundledVersion: String? = nil,
-                portAnswers: Bool = false, failedVersion: String? = nil, userRequested: Bool = false,
-                supportDaemonRoot: String) {
+                portAnswers: Bool = false, failedVersion: String? = nil, failedReason: String? = nil,
+                userRequested: Bool = false, supportDaemonRoot: String) {
         self.plistArguments = plistArguments
         self.installedVersion = installedVersion
         self.bundledVersion = bundledVersion
         self.portAnswers = portAnswers
         self.failedVersion = failedVersion
+        self.failedReason = failedReason
         self.userRequested = userRequested
         self.supportDaemonRoot = supportDaemonRoot
     }
@@ -109,7 +112,12 @@ public enum DaemonInstaller {
         // (b) No agent.
         if f.plistArguments == nil {
             if f.portAnswers { return .nothing(.external) }
-            return f.userRequested ? .install : .nothing(.notInstalled)
+            if f.userRequested { return .install }
+            // A first install that failed earlier: say why again rather than look untouched.
+            if f.failedVersion == bundled.raw {
+                return .nothing(.failed(reason: f.failedReason ?? DaemonDiagnosis.slowStart, running: nil))
+            }
+            return .nothing(.notInstalled)
         }
 
         // (c) Ours.
@@ -121,7 +129,8 @@ public enum DaemonInstaller {
                 }
                 return .update(from: installed.raw)
             }
-            return f.userRequested ? .restart : .nothing(.upToDate(installed.raw))
+            // Silent at launch: the app was quit mid-install, or the service is stuck. Start it again.
+            return f.userRequested || !f.portAnswers ? .restart : .nothing(.upToDate(installed.raw))
         }
         // An agent of ours with no usable installed copy (an early in-app path, or a broken `current`).
         return .update(from: nil)
@@ -192,6 +201,20 @@ public protocol DaemonEffects: Sendable {
     func waitHealthy() async -> Bool
     func prune(keeping: Set<String>)
     func setFailedVersion(_ version: String?)
+    /// Where the log ends now, so a diagnosis reads only what this try wrote.
+    func logMark() -> UInt64
+    /// Looks at the Mac, the installed Node and the log after a start that did not answer.
+    func diagnose(version: String, logFrom: UInt64) async -> DaemonFailure
+    /// Saves (or clears) why the last try failed.
+    func recordFailure(_ failure: DaemonFailure?)
+}
+
+public extension DaemonEffects {
+    func logMark() -> UInt64 { 0 }
+    func diagnose(version: String, logFrom: UInt64) async -> DaemonFailure {
+        DaemonDiagnosis.failure(DaemonEvidence(), version: version)
+    }
+    func recordFailure(_ failure: DaemonFailure?) {}
 }
 
 public struct DaemonInstallerRunner: Sendable {
@@ -214,8 +237,14 @@ public struct DaemonInstallerRunner: Sendable {
         case .restart:
             onStatus(.updating(facts.installedVersion ?? bundled))
             let running = facts.installedVersion ?? bundled
-            let ok = await restartAgent()
-            return ok ? .upToDate(running) : .failed(reason: "The background service did not answer after a restart.", running: running)
+            let mark = effects.logMark()
+            if await restartAgent() {
+                effects.recordFailure(nil)
+                return .upToDate(running)
+            }
+            let failure = await effects.diagnose(version: running, logFrom: mark)
+            effects.recordFailure(failure)
+            return .failed(reason: failure.reason, running: running)
         }
     }
 
@@ -227,6 +256,7 @@ public struct DaemonInstallerRunner: Sendable {
     }
 
     private func install(_ version: String) async -> DaemonStatus {
+        let mark = effects.logMark()
         do {
             try effects.copyBundle(version: version)
             try effects.switchCurrent(to: version)
@@ -239,14 +269,18 @@ public struct DaemonInstallerRunner: Sendable {
             return .failed(reason: "launchd would not load the background service.", running: nil)
         }
         if await effects.waitHealthy() {
+            effects.setFailedVersion(nil)
+            effects.recordFailure(nil)
             effects.prune(keeping: [version])
             return .upToDate(version)
         }
-        // No earlier version to return to; never leave a crash loop behind.
+        // Read why before anything is unloaded, then never leave a crash loop behind (no earlier version to return to).
+        let failure = await effects.diagnose(version: version, logFrom: mark)
         await effects.bootout()
         effects.removePlist()
         effects.setFailedVersion(version)
-        return .failed(reason: "The background service did not start. See ~/Library/Logs/squeak/squeak.log.", running: nil)
+        effects.recordFailure(failure)
+        return .failed(reason: failure.reason, running: nil)
     }
 
     private func update(to version: String, from installed: String?) async -> DaemonStatus {
@@ -261,6 +295,7 @@ public struct DaemonInstallerRunner: Sendable {
         let started = await restartAgent()
         if started {
             effects.setFailedVersion(nil)
+            effects.recordFailure(nil)
             effects.prune(keeping: DaemonInstaller.versionsToKeep(current: version, previous: previous))
             return .upToDate(version)
         }

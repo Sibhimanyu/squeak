@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.44
+
+- Setup says why when the background service won't start, in plain words with what to do (an Intel Mac, security software blocking it, another app on Squeak's port, damaged files, a slow first start), with Copy details and Show log instead of a path to a log file. Setup picks up where you left off: quit or close it halfway and it carries on connecting by itself next time, remembers why the last try failed, and a service left half-installed is started again at launch. Connect has Finish later, and gets 40 seconds for a first start instead of 20.
+
 ## 2.12.43
 
 - Settings has a Cloud tab: choose where your phone and this Mac meet, Firebase or Zoho Catalyst. Each has a card with its status (In use, Ready, Not set up), a Test that shows write, read and change-notice times (side by side once both have been tested), and Use this, which moves paired devices over after you confirm. Firebase setup moved here from the iPhone page, with Rename. Catalyst has a step-by-step checklist (command line tool, project, table, deploy, change notices, test), with every command and value to type in the console one tap to copy. The tab appears once the Squeak service on this Mac supports it.

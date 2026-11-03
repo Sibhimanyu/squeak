@@ -178,6 +178,9 @@ struct OnboardingView: View {
                 }
                     .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
             case .connect:
+                // Progress is kept: setup reopens here, and the menu offers "Finish setting up".
+                Button("Finish later") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted)
+                    .accessibilityLabel("Close setup and finish it later")
                 Spacer()
                 ConnectButton(next: { go(.firstWin) })
             case .firstWin:

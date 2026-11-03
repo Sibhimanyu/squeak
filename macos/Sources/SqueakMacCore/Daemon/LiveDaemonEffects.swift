@@ -26,6 +26,7 @@ public struct LiveDaemonEffects: DaemonEffects {
         public var current: URL { root.appending(path: "current") }
         public var plist: URL { launchAgents.appending(path: "\(DaemonService.label).plist") }
         public var failedMarker: URL { root.appending(path: "failed-version") }
+        public var failureFile: URL { root.appending(path: "failure.json") }
     }
 
     public typealias Health = @Sendable () async -> Bool
@@ -39,7 +40,7 @@ public struct LiveDaemonEffects: DaemonEffects {
     private var fm: FileManager { .default }
 
     public init(paths: Paths = .standard(), uid: UInt32 = getuid(), runner: @escaping DaemonService.Runner = DaemonService.run,
-                health: @escaping Health = LiveDaemonEffects.stateAnswers, healthSeconds: Double = 20,
+                health: @escaping Health = LiveDaemonEffects.stateAnswers, healthSeconds: Double = 40,
                 sleep: @escaping @Sendable (Double) async -> Void = { try? await Task.sleep(for: .seconds($0)) }) {
         self.paths = paths
         self.uid = uid
@@ -62,14 +63,17 @@ public struct LiveDaemonEffects: DaemonEffects {
     // MARK: Reading
 
     public func gatherFacts(userRequested: Bool) async -> DaemonFacts {
-        DaemonFacts(
+        let failedVersion = try? String(contentsOf: paths.failedMarker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let failure = Self.readFailure(paths)
+        return DaemonFacts(
             plistArguments: readPlistArguments(),
             installedVersion: try? String(contentsOf: paths.current.appending(path: "VERSION"), encoding: .utf8)
                 .trimmingCharacters(in: .whitespacesAndNewlines),
             bundledVersion: try? String(contentsOf: paths.bundleDaemon.appending(path: "VERSION"), encoding: .utf8)
                 .trimmingCharacters(in: .whitespacesAndNewlines),
             portAnswers: await health(),
-            failedVersion: try? String(contentsOf: paths.failedMarker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+            failedVersion: failedVersion,
+            failedReason: failure?.version == failedVersion ? failure?.reason : nil,
             userRequested: userRequested,
             supportDaemonRoot: paths.root.path)
     }
@@ -125,7 +129,8 @@ public struct LiveDaemonEffects: DaemonEffects {
 
     public func prune(keeping: Set<String>) {
         guard let names = try? fm.contentsOfDirectory(atPath: paths.root.path) else { return }
-        for name in names where !name.hasPrefix(".") && name != "current" && name != "failed-version" && !keeping.contains(name) {
+        let kept: Set<String> = ["current", "failed-version", "failure.json"]
+        for name in names where !name.hasPrefix(".") && !kept.contains(name) && !keeping.contains(name) {
             try? fm.removeItem(at: paths.root.appending(path: name))
         }
     }
@@ -136,6 +141,76 @@ public struct LiveDaemonEffects: DaemonEffects {
             try? version.write(to: paths.failedMarker, atomically: true, encoding: .utf8)
         } else {
             try? fm.removeItem(at: paths.failedMarker)
+        }
+    }
+
+    // MARK: Why it failed
+
+    public static func readFailure(_ paths: Paths = .standard()) -> DaemonFailure? {
+        guard let data = try? Data(contentsOf: paths.failureFile) else { return nil }
+        return try? JSONDecoder().decode(DaemonFailure.self, from: data)
+    }
+
+    public func recordFailure(_ failure: DaemonFailure?) {
+        guard let failure else { try? fm.removeItem(at: paths.failureFile); return }
+        try? fm.createDirectory(at: paths.root, withIntermediateDirectories: true)
+        try? JSONEncoder().encode(failure).write(to: paths.failureFile, options: .atomic)
+    }
+
+    public func logMark() -> UInt64 {
+        ((try? fm.attributesOfItem(atPath: paths.logFile.path))?[.size] as? NSNumber)?.uint64Value ?? 0
+    }
+
+    public func diagnose(version: String, logFrom: UInt64) async -> DaemonFailure {
+        var e = DaemonEvidence(appleSilicon: Self.isAppleSilicon())
+        let probe = await Self.capture(paths.current.appending(path: "node").path, ["-v"], timeout: 15)
+        e.probeExit = probe.exit; e.probeSignal = probe.signal; e.probeTimedOut = probe.timedOut; e.probeOutput = probe.output
+        e.log = readLog(from: logFrom)
+        return DaemonDiagnosis.failure(e, version: version)
+    }
+
+    /// At most the last 64 KB the service wrote since `offset` (all of it if the log was rotated meanwhile).
+    func readLog(from offset: UInt64) -> String {
+        guard let h = try? FileHandle(forReadingFrom: paths.logFile) else { return "" }
+        defer { try? h.close() }
+        let end = (try? h.seekToEnd()) ?? 0
+        let start = end < offset ? 0 : max(offset, end > 65_536 ? end - 65_536 : 0)
+        try? h.seek(toOffset: start)
+        return String(decoding: (try? h.readToEnd()) ?? Data(), as: UTF8.self)
+    }
+
+    static func isAppleSilicon() -> Bool {
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        return sysctlbyname("hw.optional.arm64", &value, &size, nil, 0) == 0 && value == 1
+    }
+
+    struct Probe: Sendable { var exit: Int32?; var signal: Int32?; var timedOut: Bool; var output: String }
+
+    /// Runs a program, keeps what it prints, and kills it after `timeout` seconds.
+    static func capture(_ path: String, _ args: [String], timeout: Double) async -> Probe {
+        await withCheckedContinuation { cont in
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: path)
+            p.arguments = args
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            p.standardError = pipe
+            let timedOut = LockedFlag()
+            p.terminationHandler = { proc in
+                let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                let signalled = proc.terminationReason == .uncaughtSignal
+                cont.resume(returning: Probe(exit: signalled ? nil : proc.terminationStatus,
+                                             signal: signalled && !timedOut.value ? proc.terminationStatus : nil,
+                                             timedOut: timedOut.value, output: out))
+            }
+            do { try p.run() } catch {
+                cont.resume(returning: Probe(exit: nil, signal: nil, timedOut: false, output: error.localizedDescription))
+                return
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                if p.isRunning { timedOut.value = true; p.terminate() }
+            }
         }
     }
 
@@ -176,5 +251,14 @@ public struct LiveDaemonEffects: DaemonEffects {
             waited += 1
         }
         return false
+    }
+}
+
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    var value: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return flag }
+        set { lock.lock(); flag = newValue; lock.unlock() }
     }
 }

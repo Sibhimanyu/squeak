@@ -12,6 +12,8 @@ final class DaemonManager {
     private(set) var status: DaemonStatus = .unavailable
     private(set) var busy = false
     private(set) var version: String?
+    /// Why the last start failed, for "Copy details"; nil once it runs.
+    private(set) var failure: DaemonFailure?
     @ObservationIgnored private let runner: DaemonInstallerRunner
     @ObservationIgnored private let enabled: Bool
 
@@ -43,6 +45,7 @@ final class DaemonManager {
             case .failed(_, let running): version = running
             default: break
             }
+            failure = { if case .failed = result { LiveDaemonEffects.readFailure() } else { nil } }()
             busy = false
             AppInstall.writeForRunningApp()
             AppLog.info("background service: \(result.label)")
