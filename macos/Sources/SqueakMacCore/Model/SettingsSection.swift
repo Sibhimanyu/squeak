@@ -3,7 +3,7 @@ import Foundation
 /// The pages of Settings, which lives inside the main window. `AppModel.settingsSection` is the
 /// page on screen, or nil while the window shows sessions.
 public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifiable {
-    case setup, general, notifications, awake, conductor, connections, telegram, cliq, iphone, voice, privacy, about
+    case setup, general, notifications, awake, conductor, connections, telegram, cliq, iphone, voice, cloud, privacy, about
 
     public var id: String { rawValue }
 
@@ -19,6 +19,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         case .cliq: "Zoho Cliq"
         case .iphone: "iPhone"
         case .voice: "Phone calls"
+        case .cloud: "Cloud"
         case .privacy: "Privacy"
         case .about: "About"
         }
@@ -28,7 +29,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
     public static let groups: [[SettingsSection]] = [
         [.setup],
         [.general, .notifications, .awake],
-        [.conductor, .connections, .telegram, .cliq, .iphone, .voice],
+        [.conductor, .connections, .telegram, .cliq, .iphone, .voice, .cloud],
         [.privacy, .about],
     ]
 

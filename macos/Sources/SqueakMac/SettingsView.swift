@@ -31,6 +31,7 @@ private extension SettingsSection {
         case .cliq: .messageSquare
         case .iphone: .smartphone
         case .voice: .phone
+        case .cloud: .layers
         case .privacy: .hand
         case .about: .info
         }
@@ -41,7 +42,7 @@ private extension SettingsSection {
         case .setup, .general: Theme.done
         case .notifications, .awake: Theme.needsYou
         case .conductor, .connections: Theme.working
-        case .telegram, .cliq, .iphone, .voice: Color(red: 0.45, green: 0.62, blue: 1.0)
+        case .telegram, .cliq, .iphone, .voice, .cloud: Color(red: 0.45, green: 0.62, blue: 1.0)
         case .privacy: Theme.muted
         case .about: Color(red: 0.72, green: 0.55, blue: 0.95)
         }
@@ -59,6 +60,7 @@ private extension SettingsSection {
         case .cliq: "Send updates and receive replies through Zoho Cliq."
         case .iphone: "Pair a phone to follow sessions and reply on the go."
         case .voice: "Choose where Squeak rings when an agent needs you."
+        case .cloud: "Choose where your phone and this Mac meet: Firebase or Catalyst."
         case .privacy: "Control what Squeak keeps on this Mac."
         case .about: "Version, credits, and project links."
         }
@@ -76,6 +78,7 @@ private extension SettingsSection {
         case .cliq: ["zoho", "channel", "bot"]
         case .iphone: ["phone", "pair", "mobile"]
         case .voice: ["call", "ring", "phone"]
+        case .cloud: ["firebase", "catalyst", "zoho", "server", "database", "relay", "provider"]
         case .privacy: ["cache", "messages", "data", "delete"]
         case .about: ["version", "credits", "updates"]
         }
@@ -128,8 +131,10 @@ struct SettingsSidebar: View {
 
     private var filteredGroups: [[SettingsSection]] {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard !terms.isEmpty else { return SettingsSection.groups }
-        return SettingsSection.groups.compactMap { group in
+        // Cloud is shown only when the daemon has the cloud routes (an older one does not).
+        let groups = SettingsSection.groups.map { $0.filter { $0 != .cloud || model.cloud.available } }
+        guard !terms.isEmpty else { return groups }
+        return groups.compactMap { group in
             let matches = group.filter { section in
                 let haystack = ([section.title, section.subtitle] + section.searchAliases).joined(separator: " ").localizedLowercase
                 return terms.allSatisfy { haystack.contains($0.localizedLowercase) }
@@ -323,6 +328,7 @@ private struct SettingsPage: View {
         case .cliq: CliqSettings()
         case .iphone: IPhoneSettings()
         case .voice: VoiceSettingsPage()
+        case .cloud: CloudSettings()
         case .privacy: PrivacySettings()
         case .about: AboutSettings()
         }

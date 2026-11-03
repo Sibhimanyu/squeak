@@ -36,6 +36,7 @@ final class AppModel {
     let demoMode: Bool
     /// Settings › Channels and › iPhone. Demo and capture runs never touch the real `.env` or daemon.
     @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
+    @ObservationIgnored lazy var cloud = CloudModel(client: client, demo: demoMode || captureMode)
     /// Settings › Conductor and Welcome: the relay's setup and status (AppModel+Relay.swift).
     @ObservationIgnored lazy var relay = RelayModel(client: client, demo: demoMode || captureMode)
     /// The first-run checklist's facts (AppModel+Setup.swift).
@@ -734,7 +735,7 @@ final class AppModel {
             await readAwake()
             // The phone-call add-on's update shows in the popup like the app's own: look once a minute, not only when
             // Settings is open (the daemon itself checks for a newer add-on every 6 hours).
-            if round % 3 == 0, !demoMode { await channels.refreshGateway() }
+            if round % 3 == 0, !demoMode { await channels.refreshGateway(); await cloud.refresh() }
             round += 1
             try? await Task.sleep(for: .seconds(20))
         }
