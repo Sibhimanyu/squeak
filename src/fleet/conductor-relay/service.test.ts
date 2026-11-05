@@ -304,10 +304,10 @@ describe("ConductorRelayService host connection (0.92 diagnostics)", () => {
     };
     run("0.92.0");
     expect(info).toHaveBeenCalledWith(expect.stringContaining("tested against"), { version: "0.92.0" });
-    run("0.93.0");
+    run("9.99.0");
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("newer or older"),
-      expect.objectContaining({ version: "0.93.0" }),
+      expect.objectContaining({ version: "9.99.0" }),
     );
     run(undefined);
     expect(info).toHaveBeenCalledWith(expect.stringContaining("could not read"));

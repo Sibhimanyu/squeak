@@ -19,7 +19,7 @@ import { upgradeToWebSocket, type WsConnection } from "./ws.js";
  */
 
 /**
- * Conductor 0.91.x and 0.92.0 both dial `/desktop-relay/v1/host`. The version segment is matched loosely
+ * Conductor 0.91.x, 0.92.0 and 0.93.0 all dial `/desktop-relay/v1/host`. The version segment is matched loosely
  * so a later `v2` host that still speaks the same envelope is at least seen and logged, not proxied away.
  */
 const RELAY_PATH = /^\/desktop-relay\/v\d+\/host$/;

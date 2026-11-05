@@ -7,7 +7,7 @@ import type { QueueItem } from "../session-reply.js";
 import type { DeviceCredentials, PendingMessagesState, PhoneClient } from "./phone.js";
 
 /** Conductor versions whose relay was read and (0.91.x) run against. A newer one still runs, with a warning. */
-export const TESTED_CONDUCTOR_VERSIONS = ["0.91.1", "0.91.2", "0.92.0"];
+export const TESTED_CONDUCTOR_VERSIONS = ["0.91.1", "0.91.2", "0.92.0", "0.93.0"];
 const CONDUCTOR_INFO_PLIST = "/Applications/Conductor.app/Contents/Info.plist";
 /** Each of the handshake and the authentication gets this long before the connection is dropped. */
 export const HOST_STEP_TIMEOUT_MS = 10_000;
