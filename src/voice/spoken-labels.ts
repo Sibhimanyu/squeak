@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { chatTitle } from "../fleet/radar.js";
 import type { FleetSession } from "../fleet/types.js";
+import { workFolder } from "../fleet/session-folder.js";
 
 /**
  * Names for being read aloud on a call. Unlike the radar's `cardLabel` (which clips from the start with "…" for
@@ -10,7 +11,8 @@ import type { FleetSession } from "../fleet/types.js";
 export const MAX_SPOKEN_CHAT = 40;
 const MAX_SPOKEN_WORKSPACE = 50;
 
-type Named = Pick<FleetSession, "agent" | "cwd" | "repoName" | "branch" | "title">;
+type Named = Pick<FleetSession, "agent" | "cwd" | "repoName" | "branch" | "title"> &
+  Partial<Pick<FleetSession, "workspaceRoot">>;
 
 /** Plain words: no emoji, markdown, links, paths or ellipses; dashes and underscores become spaces. */
 export function speakable(text: string): string {
@@ -53,7 +55,9 @@ const PLAIN_BRANCHES = new Set(["head", "main", "master"]);
  */
 export function spokenWorkspace(session: Named & { baseRef?: string | null }, withBranch = true): string {
   const repo = speakable(session.repoName ?? "");
-  const folder = session.cwd ? speakable(path.basename(session.cwd.replace(/\/+$/, ""))).toLowerCase() : "";
+  // The workspace's folder, not the subfolder the agent cd'd into ("caracas", not "source").
+  const root = workFolder(session);
+  const folder = root ? speakable(path.basename(root.replace(/\/+$/, ""))).toLowerCase() : "";
   const raw = (session.branch ?? "").trim();
   const base = (session.baseRef ?? "")
     .replace(/^origin\//, "")

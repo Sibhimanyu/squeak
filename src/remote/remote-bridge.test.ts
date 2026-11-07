@@ -913,6 +913,17 @@ describe("RemoteBridge diff", () => {
     expect(diff.readFilePatch).not.toHaveBeenCalled();
   });
 
+  it("reads the Conductor workspace, not the subfolder the agent cd'd into", async () => {
+    const diff = reader();
+    const f = fixture({ diff, session: { cwd: "/w/brand/source", workspaceRoot: "/w" } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.diffCommand({ file: 0 }));
+    await f.bridge.tick();
+    // From the subfolder, git names files from the top but looks them up from there: a patch came back empty.
+    expect(diff.readSummary).toHaveBeenCalledWith("/w", null);
+    expect(diff.readFilePatch).toHaveBeenCalledWith("/w", null, file);
+  });
+
   it("adds one file's patch when the phone names its index", async () => {
     const diff = reader();
     const f = fixture({ diff });
@@ -964,6 +975,22 @@ describe("RemoteBridge photos", () => {
     expect(result.status).toBe("sent");
     expect(result.ref).toMatch(/^\.context\/attachments\/[0-9a-f]{8}\/image-1\.jpg$/);
     expect(fs.existsSync(path.join(dir, result.ref!))).toBe(true);
+  });
+
+  it("saves a photo at the workspace's top when the agent has cd'd into a subfolder", async () => {
+    const dir = folder();
+    const sub = path.join(dir, "brand", "source");
+    fs.mkdirSync(sub, { recursive: true });
+    const f = fixture();
+    f.emit([session({ cwd: sub, workspaceRoot: dir })]);
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/p1`, f.attachCommand());
+    await f.bridge.tick();
+    const result = f.result("p1") as { status: string; ref?: string };
+    expect(result.ref).toMatch(/^\.context\/attachments\//);
+    // `.context/` is ignored by git only at the top; under the subfolder the photo could be committed.
+    expect(fs.existsSync(path.join(dir, result.ref!))).toBe(true);
+    expect(fs.existsSync(path.join(sub, ".context"))).toBe(false);
   });
 
   it("saves a photo for a new chat in the workspace's folder, which comes from the Mac's list", async () => {

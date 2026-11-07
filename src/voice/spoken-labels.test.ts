@@ -20,6 +20,11 @@ describe("spoken labels", () => {
     expect(label).not.toContain("…");
   });
 
+  it("compares the branch with the workspace's folder, not the subfolder the agent cd'd into", () => {
+    const root = "/Users/me/conductor/workspaces/squeak/ushuaia";
+    expect(spokenWorkspace(s({ branch: "ushuaia", cwd: `${root}/src/voice`, workspaceRoot: root }))).toBe("squeak");
+  });
+
   it("drops everything up to the last slash of the branch", () => {
     expect(spokenWorkspace(s({ branch: "sibhimanyu/fix-parser" }))).toBe("squeak, fix parser");
     expect(spokenWorkspace(s({ branch: "sibhimanyu/fix-parser" }), false)).toBe("squeak");

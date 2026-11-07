@@ -48,6 +48,7 @@ import { ConductorObserver } from "./observers/conductor.js";
 import { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { WatchSpec } from "./change-watcher.js";
 import type { FleetSession } from "./types.js";
+import { readClaudeSessionFiles } from "./terminal-process.js";
 
 export interface FleetRuntimeOptions {
   conductorDbPath: string;
@@ -115,7 +116,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       claude: new ClaudeTranscriptObserver(observerWindow),
       codex: new CodexRolloutObserver(observerWindow),
       cowork: new ClaudeCoworkObserver(observerWindow),
-      liveness: new ProcessLivenessObserver(),
+      liveness: new ProcessLivenessObserver({ claudeSessions: () => readClaudeSessionFiles() }),
       git: new GitStateReader(),
       codexUsage: new CodexUsageReader(),
       claudeCost: new ClaudeCostReader(),

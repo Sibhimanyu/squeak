@@ -262,6 +262,20 @@ describe("applyLiveness", () => {
     expect(applied[0]?.pid).toBe(4321);
   });
 
+  it("finds a Claude process by its pid file after the agent cd's out of the folder it started in", () => {
+    const sessions = mergeObservations([
+      observed({ key: "k", source: "claude-transcript", agentSessionId: "a1", cwd: "/Users/someone/repo/app" }),
+      observed({ key: "j", source: "claude-transcript", agentSessionId: "b2", cwd: "/Users/someone/repo" }),
+    ]);
+    const applied = applyLiveness(sessions, [
+      // Measured: the process stays in the folder it started in while the transcript follows the cd.
+      { pid: 7, agent: "claude", cwd: "/Users/someone/repo", command: "claude", sessionId: "a1" },
+    ]);
+    expect(applied.find((s) => s.key === "k")).toMatchObject({ alive: true, pid: 7 });
+    // The process names a1, so it is not lent to b2 for sharing its folder.
+    expect(applied.find((s) => s.key === "j")?.alive).not.toBe(true);
+  });
+
   it("does not lend one process to two sessions in the same directory", () => {
     const sessions = mergeObservations([
       observed({

@@ -12,6 +12,7 @@ import { diffPageCount, diffPageSlice, type WorkspaceDiff } from "./diff-view.js
 import { describeGitState } from "./git-state.js";
 import type { FleetSnapshot } from "./fleet-monitor.js";
 import { needsYou, type AttentionItem, type AttentionKind, type FleetSession, type FleetState } from "./types.js";
+import { workFolder } from "./session-folder.js";
 
 const MAX_ACTIVE_ROWS = 8;
 const MAX_ACTION_BUTTONS = 6;
@@ -72,8 +73,9 @@ export function sessionLabel(session: FleetSession, homeDir = os.homedir()): str
   if (session.repoName && branch) {
     return `${session.repoName} · ${branch}`;
   }
-  if (session.cwd) {
-    return shortenPath(session.cwd, homeDir);
+  const folder = workFolder(session);
+  if (folder) {
+    return shortenPath(folder, homeDir);
   }
   if (session.repoName) {
     return session.repoName;
@@ -622,7 +624,7 @@ export function attentionCardKeyboard(
   //
   // Reviewing a diff needs no control channel, so it is offered even for
   // sessions the bot cannot drive.
-  if (item.session.cwd) {
+  if (workFolder(item.session)) {
     rows.push([{ text: "View Diff", callback_data: `fleet:diff:${handle}` }]);
   }
   return rows;

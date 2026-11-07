@@ -8,11 +8,18 @@ export interface LiveAgentProcess {
   agent: "claude" | "codex";
   cwd: string | null;
   command: string;
+  /**
+   * The Claude session this process runs, from Claude Code's own `~/.claude/sessions/<pid>.json`. The process keeps
+   * the folder it started in while its transcript follows every `cd`, so a folder alone loses a session that moved.
+   */
+  sessionId?: string;
 }
 
 export interface ProcessLivenessOptions {
   runPs?: () => Promise<string>;
   runLsof?: (pids: number[]) => Promise<string>;
+  /** Claude Code's pid files: which session each `claude` process runs. */
+  claudeSessions?: () => { pid: number; sessionId: string }[];
 }
 
 /**
@@ -23,10 +30,12 @@ export interface ProcessLivenessOptions {
 export class ProcessLivenessObserver {
   private readonly runPs: () => Promise<string>;
   private readonly runLsof: (pids: number[]) => Promise<string>;
+  private readonly claudeSessions: () => { pid: number; sessionId: string }[];
 
   constructor(options: ProcessLivenessOptions = {}) {
     this.runPs = options.runPs ?? defaultRunPs;
     this.runLsof = options.runLsof ?? defaultRunLsof;
+    this.claudeSessions = options.claudeSessions ?? (() => []);
   }
 
   async observe(): Promise<LiveAgentProcess[]> {
@@ -51,7 +60,16 @@ export class ProcessLivenessObserver {
       // Liveness without a cwd is still worth having.
     }
 
-    return processes.map((entry) => ({ ...entry, cwd: cwdByPid.get(entry.pid) ?? null }));
+    let sessionByPid = new Map<number, string>();
+    try {
+      sessionByPid = new Map(this.claudeSessions().map((file) => [file.pid, file.sessionId]));
+    } catch {
+      // The folder match still works.
+    }
+    return processes.map((entry) => {
+      const sessionId = entry.agent === "claude" ? sessionByPid.get(entry.pid) : undefined;
+      return { ...entry, cwd: cwdByPid.get(entry.pid) ?? null, ...(sessionId ? { sessionId } : {}) };
+    });
   }
 }
 

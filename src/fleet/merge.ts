@@ -173,14 +173,31 @@ export function applyLiveness(sessions: FleetSession[], processes: LiveAgentProc
   const ordered = [...sessions].sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt));
   const assigned = new Map<string, LiveAgentProcess>();
 
+  // A Claude process names its session in its pid file: that match is exact, and holds after the agent `cd`s.
   for (const session of ordered) {
-    if (!session.cwd) {
+    const match = session.agentSessionId
+      ? available.find(
+          (entry) =>
+            !taken.has(entry.pid) && entry.agent === session.agent && entry.sessionId === session.agentSessionId,
+        )
+      : undefined;
+    if (match) {
+      taken.add(match.pid);
+      assigned.set(session.key, match);
+    }
+  }
+  for (const session of ordered) {
+    if (!session.cwd || assigned.has(session.key)) {
       continue;
     }
     const normalizedCwd = path.resolve(session.cwd);
     const match = available.find(
       (entry) =>
-        !taken.has(entry.pid) && entry.agent === session.agent && path.resolve(entry.cwd ?? "") === normalizedCwd,
+        !taken.has(entry.pid) &&
+        entry.agent === session.agent &&
+        // A process that names another session is that one's, whatever folder it shares.
+        (entry.sessionId === undefined || entry.sessionId === session.agentSessionId) &&
+        path.resolve(entry.cwd ?? "") === normalizedCwd,
     );
     if (match) {
       taken.add(match.pid);

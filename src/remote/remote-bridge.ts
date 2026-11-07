@@ -77,6 +77,7 @@ import {
 import { SubagentFeedPublisher, subagentFeedDoc } from "./subagent-feed.js";
 import { TASK_ID_PATTERN, type SubagentActivity } from "../fleet/subagent-activity.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
+import { workFolder } from "../fleet/session-folder.js";
 
 /**
  * Squeak's side of the remote channel (docs/remote-channel.md): publish an
@@ -2163,7 +2164,9 @@ export class RemoteBridge {
     let dir: string | null;
     if (forSession) {
       const session = this.shownSession(command.sessionId as string);
-      dir = session && session.closed !== true ? session.cwd : null;
+      // The workspace's top, where Conductor puts its own attachments and their relative path points: under a subfolder
+      // the agent cd'd into, `.context/` is not ignored by git, and the photo could be committed.
+      dir = session && session.closed !== true ? workFolder(session) : null;
     } else {
       try {
         dir = this.deps.newChat?.workspaces().find((candidate) => candidate.id === command.workspaceId)?.path ?? null;
@@ -2433,12 +2436,13 @@ export class RemoteBridge {
     if (!session) {
       return refuse("That chat isn't on your phone any more.");
     }
-    if (!session.cwd) {
+    const folder = workFolder(session);
+    if (!folder) {
       return refuse("This chat has no folder on the Mac to read.");
     }
     let summary: WorkspaceDiff | null;
     try {
-      summary = await reader.readSummary(session.cwd, session.baseRef);
+      summary = await reader.readSummary(folder, session.baseRef);
     } catch {
       summary = null;
     }
@@ -2453,7 +2457,7 @@ export class RemoteBridge {
       }
       let patch: string | null;
       try {
-        patch = await reader.readFilePatch(session.cwd, session.baseRef, file);
+        patch = await reader.readFilePatch(folder, session.baseRef, file);
       } catch {
         patch = null;
       }
@@ -2625,7 +2629,7 @@ export class RemoteBridge {
     // from elsewhere in its workspace (`.context/…` at the top, most often). A relative path is the agent's own, so it
     // resolves from its current folder.
     const cwd = session.cwd ?? session.workspaceRoot;
-    const root = session.workspaceRoot ?? session.cwd;
+    const root = workFolder(session);
     if (!cwd || !root) {
       return refuse("This chat has no folder on the Mac to read.");
     }

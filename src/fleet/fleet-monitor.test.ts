@@ -491,6 +491,19 @@ describe("git enrichment", () => {
     expect(snapshot.attention[0]?.session.git?.insertions).toBe(312);
   });
 
+  it("reads git in the workspace, not the subfolder the agent cd'd into", async () => {
+    const seen: string[][] = [];
+    const { monitor } = makeMonitorWithGit(
+      [observed({ state: "finished", cwd: "/ws/brand/source", workspaceRoot: "/ws" })],
+      makeGit({ "/ws": { filesChanged: 2 } }, seen),
+    );
+
+    const snapshot = await monitor.refresh();
+
+    expect(seen[0]).toEqual(["/ws"]);
+    expect(snapshot.sessions[0]?.git?.filesChanged).toBe(2);
+  });
+
   it("does not shell out for sessions nobody is going to look at", async () => {
     const seen: string[][] = [];
     const { monitor } = makeMonitorWithGit(

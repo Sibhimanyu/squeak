@@ -63,6 +63,20 @@ describe("ProcessLivenessObserver", () => {
     ]);
   });
 
+  it("names a Claude process's session from Claude Code's pid files", async () => {
+    const observer = new ProcessLivenessObserver({
+      runPs: async () => " 4321 /usr/local/bin/claude\n 99 /usr/local/bin/codex",
+      runLsof: async () => "p4321\nn/Users/someone/repo",
+      claudeSessions: () => [
+        { pid: 4321, sessionId: "s-1" },
+        { pid: 99, sessionId: "not-claude" },
+      ],
+    });
+    const seen = await observer.observe();
+    expect(seen.find((p) => p.pid === 4321)?.sessionId).toBe("s-1");
+    expect(seen.find((p) => p.pid === 99)).not.toHaveProperty("sessionId");
+  });
+
   it("still reports liveness when lsof is unavailable", async () => {
     const observer = new ProcessLivenessObserver({
       runPs: async () => " 4321 /usr/local/bin/claude",

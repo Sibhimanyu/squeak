@@ -25,6 +25,7 @@ import type { ClaudeCostReader } from "./claude-cost.js";
 import type { GitState, GitStateReader } from "./git-state.js";
 import type { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { AttentionItem, FleetSession, HookEvent, ObservedSession } from "./types.js";
+import { workFolder } from "./session-folder.js";
 
 export interface FleetSnapshot {
   /** Everything the observers found, including the long tail of dead work. */
@@ -607,9 +608,10 @@ export class FleetMonitor {
 
     const targets = new Map<string, string | null>();
     for (const session of sessions) {
-      if (wanted.has(session.key) && session.cwd) {
+      const folder = workFolder(session);
+      if (wanted.has(session.key) && folder) {
         // Two sessions in one workspace share a working tree; read it once.
-        targets.set(session.cwd, targets.get(session.cwd) ?? session.baseRef);
+        targets.set(folder, targets.get(folder) ?? session.baseRef);
       }
     }
     if (targets.size === 0) {
@@ -628,7 +630,8 @@ export class FleetMonitor {
 
     const byKey = new Map<string, FleetSession>();
     const next = sessions.map((session) => {
-      const state = wanted.has(session.key) && session.cwd ? (states.get(session.cwd) ?? null) : null;
+      const folder = workFolder(session);
+      const state = wanted.has(session.key) && folder ? (states.get(folder) ?? null) : null;
       const updated = state ? { ...session, git: state } : session;
       byKey.set(session.key, updated);
       return updated;

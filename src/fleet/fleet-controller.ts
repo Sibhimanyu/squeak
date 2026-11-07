@@ -24,6 +24,7 @@ import type { NotifyFilter } from "./notify-settings.js";
 import { replyTargetFor } from "./reply-router.js";
 import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "./session-reply.js";
 import type { AttentionItem, FleetSession } from "./types.js";
+import { workFolder } from "./session-folder.js";
 
 /** Radar edits are cheap but not free; Telegram rate-limits edits per chat. */
 const RADAR_MIN_EDIT_INTERVAL_MS = 8_000;
@@ -569,7 +570,8 @@ export class FleetController {
 
     const session = this.resolveHandle(handleArgument);
     const reader = this.deps.diff;
-    if (!reader || !session?.cwd) {
+    const folder = session ? workFolder(session) : null;
+    if (!reader || !session || !folder) {
       await this.send(location, "That session is no longer being tracked.");
       return;
     }
@@ -584,7 +586,7 @@ export class FleetController {
       return;
     }
 
-    const patch = await reader.readFilePatch(session.cwd, session.baseRef, file);
+    const patch = await reader.readFilePatch(folder, session.baseRef, file);
     const handle = this.deps.store.handleFor(session.key);
     await this.send(location, renderFilePatch(file, patch ?? ""), [
       [{ text: "Back to files", callback_data: `fleet:diff:${handle}` }],
@@ -607,16 +609,17 @@ export class FleetController {
       await this.send(location, "That session is no longer being tracked.");
       return;
     }
-    if (!session.cwd) {
+    const folder = workFolder(session);
+    if (!folder) {
       await this.send(location, "This session has no working directory on record, so there is nothing to diff.");
       return;
     }
 
     const cached = this.diffCache.get(session.key);
     const fresh = cached && this.now() - cached.readAt < DIFF_CACHE_TTL_MS ? cached.diff : null;
-    const diff = fresh ?? (await reader.readSummary(session.cwd, session.baseRef));
+    const diff = fresh ?? (await reader.readSummary(folder, session.baseRef));
     if (!diff) {
-      await this.send(location, `\`${session.cwd}\` is not a git repository, or it no longer exists.`);
+      await this.send(location, `\`${folder}\` is not a git repository, or it no longer exists.`);
       return;
     }
     this.diffCache.set(session.key, { diff, readAt: fresh ? (cached?.readAt ?? this.now()) : this.now() });
@@ -657,7 +660,7 @@ export class FleetController {
         { text: "Full message", callback_data: `fleet:full:${handle}` },
       ]);
     }
-    if (session.cwd) {
+    if (workFolder(session)) {
       rows.push([{ text: "View Diff", callback_data: `fleet:diff:${handle}` }]);
     }
     rows.push([{ text: "Snooze 1h", callback_data: `fleet:snooze:${handle}` }]);
