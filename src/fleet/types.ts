@@ -76,6 +76,11 @@ export interface ObservedSession {
   /** Conductor's workspace for the chat, which is what its sidebar links by. */
   conductorWorkspaceId?: string | null;
   cwd: string | null;
+  /**
+   * Conductor's workspace folder, for a Conductor chat. `cwd` is where the agent is now, which moves when it `cd`s
+   * into a subfolder; this does not.
+   */
+  workspaceRoot?: string | null;
   repoName: string | null;
   branch: string | null;
   title: string | null;

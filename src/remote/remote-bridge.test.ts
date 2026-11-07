@@ -122,7 +122,7 @@ function fixture(
     stopOutcome?: { ok: true } | { ok: false; reason: string } | "none";
     answerer?: Answerer | null;
     diff?: RemoteDiffReader | null;
-    image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
+    image?: ((source: string, cwd: string, root?: string) => Promise<PhoneImageResult>) | null;
     hotspot?: RemoteBridgeDependencies["hotspot"];
     workflow?: RemoteWorkflows | null;
     films?: RemoteBridgeDependencies["films"];
@@ -719,8 +719,18 @@ describe("RemoteBridge image", () => {
     await f.pair();
     await f.store.set(`${f.channel}/commands/c1`, f.imageCommand());
     await f.bridge.tick();
-    expect(image).toHaveBeenCalledWith("/w/.context/shot.png", "/w");
+    expect(image).toHaveBeenCalledWith("/w/.context/shot.png", "/w", "/w");
     expect(f.result("c1")).toEqual({ id: "c1", status: "sent", image: { mime: "image/jpeg", data: "AAAA" } });
+  });
+
+  it("keeps an image inside the Conductor workspace, not the subfolder the agent cd'd into", async () => {
+    const image = vi.fn(ok);
+    const f = fixture({ image, lastText: shown, session: { cwd: "/w/brand/source", workspaceRoot: "/w" } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.imageCommand());
+    await f.bridge.tick();
+    expect(image).toHaveBeenCalledWith("/w/.context/shot.png", "/w/brand/source", "/w");
+    expect(f.result("c1")).toMatchObject({ status: "sent" });
   });
 
   it("refuses a path the chat never named, without reading anything", async () => {

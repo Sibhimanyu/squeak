@@ -79,6 +79,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     repoName: conductor?.repoName ?? base.repoName,
     branch: conductor?.branch ?? base.branch,
     cwd: transcript?.cwd ?? base.cwd,
+    ...(conductor?.cwd ? { workspaceRoot: conductor.cwd } : {}),
     transcriptPath: transcript?.transcriptPath ?? base.transcriptPath,
     state: stateOwner?.state ?? base.state,
     // A pending question's text beats a transcript's "Running <tool>".

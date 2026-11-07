@@ -841,7 +841,8 @@ export interface RemoteBridgeDependencies {
   /** Reads a chat's diff for the phone's "what changed". Absent: refused. */
   diff?: RemoteDiffReader | null;
   /** Reads an image a chat's agent named, for the phone (phone-image.ts). Absent: refused. */
-  image?: ((source: string, cwd: string) => Promise<PhoneImageResult>) | null;
+  /** `root`, when given, is the folder the image must be inside; `cwd` only resolves a relative path. */
+  image?: ((source: string, cwd: string, root?: string) => Promise<PhoneImageResult>) | null;
   /** A workflow's cards and answers (RasanAI). Absent: phones see plain sessions, and answers are refused. */
   workflow?: RemoteWorkflows | null;
   /** RasanAI films independent of chats: the phone's `films`, and its `film` commands. Absent: no films. */
@@ -2620,7 +2621,12 @@ export class RemoteBridge {
     if (!session) {
       return refuse("That chat isn't on your phone any more.");
     }
-    if (!session.cwd) {
+    // Kept inside the workspace, not where the agent is now: an agent that `cd`s into a subfolder still shows images
+    // from elsewhere in its workspace (`.context/…` at the top, most often). A relative path is the agent's own, so it
+    // resolves from its current folder.
+    const cwd = session.cwd ?? session.workspaceRoot;
+    const root = session.workspaceRoot ?? session.cwd;
+    if (!cwd || !root) {
       return refuse("This chat has no folder on the Mac to read.");
     }
     const replier = this.deps.replier;
@@ -2635,7 +2641,7 @@ export class RemoteBridge {
     }
     let outcome: PhoneImageResult;
     try {
-      outcome = await read(command.source, session.cwd);
+      outcome = await read(command.source, cwd, root);
     } catch {
       outcome = { ok: false, reason: "Your Mac couldn't read that image." };
     }

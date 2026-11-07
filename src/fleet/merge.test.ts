@@ -63,6 +63,26 @@ describe("mergeObservations", () => {
     expect(merged[0]?.stateSource).toBe("conductor");
   });
 
+  it("keeps Conductor's workspace folder as the root when the agent cd's into a subfolder", () => {
+    const [merged] = mergeObservations([
+      observed({
+        key: "conductor:c1",
+        source: "conductor",
+        sourceId: "c1",
+        conductorSessionId: "c1",
+        origin: "conductor",
+        cwd: "/Users/someone/ws",
+      }),
+      observed({
+        key: "claude-transcript:agent-1",
+        source: "claude-transcript",
+        cwd: "/Users/someone/ws/brand/source",
+      }),
+    ]);
+    expect(merged?.cwd).toBe("/Users/someone/ws/brand/source");
+    expect(merged?.workspaceRoot).toBe("/Users/someone/ws");
+  });
+
   it("lets a fresher transcript override a stale Conductor status", () => {
     const merged = mergeObservations([
       observed({

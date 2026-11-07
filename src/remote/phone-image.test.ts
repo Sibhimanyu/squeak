@@ -48,6 +48,24 @@ describe("readPhoneImage", () => {
     });
   });
 
+  it("resolves from the agent's folder but bounds by the workspace when they differ", async () => {
+    const { root, ws } = workspace();
+    const sub = path.join(ws, "brand", "source");
+    fs.mkdirSync(sub, { recursive: true });
+    // Refused before: the agent had cd'd into a subfolder, and `.context/` sits at the workspace's top.
+    expect(await readPhoneImage(path.join(ws, ".context", "shot.png"), sub, { shrink: copy })).toMatchObject({
+      ok: false,
+    });
+    expect(await readPhoneImage(path.join(ws, ".context", "shot.png"), sub, { shrink: copy }, ws)).toMatchObject({
+      ok: true,
+    });
+    expect(await readPhoneImage("../../.context/shot.png", sub, { shrink: copy }, ws)).toMatchObject({ ok: true });
+    expect(await readPhoneImage(path.join(root, "secret.png"), sub, { shrink: copy }, ws)).toMatchObject({
+      ok: false,
+      reason: /inside the chat's own workspace/,
+    });
+  });
+
   it("refuses what is not an image, a web address, a missing file, and a sips failure", async () => {
     const { ws } = workspace();
     fs.writeFileSync(path.join(ws, ".env"), "SECRET=1");

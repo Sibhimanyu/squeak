@@ -630,7 +630,7 @@ export class SqueakApp {
             // The phone's "what changed": the same reader Telegram's diff pages use.
             diff: this.runtime.diff,
             // An image a chat's agent showed, for the phone: only inside that chat's workspace.
-            image: (source, cwd) => readPhoneImage(source, cwd),
+            image: (source, cwd, root) => readPhoneImage(source, cwd, {}, root),
             // A film waiting on a call (RasanAI): its card, and the answer.
             workflow: this.rasanai,
             films: this.films,

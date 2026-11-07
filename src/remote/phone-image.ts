@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
  *
  * - the chat itself must name it (the caller checks the chat's own messages);
  * - it must resolve, symlinks followed, to a file inside the chat's own
- *   workspace folder — nothing else on the Mac is reachable by naming it;
+ *   workspace folder (Conductor's workspace, not wherever the agent `cd`'d to) — nothing else on the Mac is reachable by naming it;
  * - only image types, below a size cap;
  * - it leaves shrunk to a JPEG of at most PHONE_IMAGE_MAX_PIXELS on the long
  *   side (macOS's own `sips`), never as the original file.
@@ -61,6 +61,8 @@ export async function readPhoneImage(
   source: string,
   cwd: string,
   options: PhoneImageOptions = {},
+  /** The folder it must be inside; `cwd` when absent. */
+  within: string = cwd,
 ): Promise<PhoneImageResult> {
   const refuse = (reason: string): PhoneImageResult => ({ ok: false, reason });
   const wanted = resolveImagePath(source, cwd);
@@ -73,7 +75,7 @@ export async function readPhoneImage(
   let real: string;
   let root: string;
   try {
-    [real, root] = await Promise.all([fs.realpath(wanted), fs.realpath(cwd)]);
+    [real, root] = await Promise.all([fs.realpath(wanted), fs.realpath(within)]);
   } catch {
     return refuse("That image isn't there any more.");
   }
