@@ -87,6 +87,8 @@ final class AppModel {
     /// The structured question or plan each blocked Conductor chat waits on (the question card).
     private(set) var asks: [SessionKey: PendingAsk] = [:]
     private(set) var answeredAsks: [SessionKey: (ask: PendingAsk, outcome: AnswerOutcome, at: Date)] = [:]
+    /// A card whose question stopped being pending without this Mac answering it: kept, disabled, "Answered elsewhere".
+    private(set) var staleAsks: [SessionKey: (ask: PendingAsk, at: Date)] = [:]
     @ObservationIgnored private var askFetchedAt: [SessionKey: Date?] = [:]
     @ObservationIgnored private var needsYouFetchedAt: [SessionKey: Date?] = [:]
     @ObservationIgnored private var knownMessages: [SessionKey: [ChatMessage]] = [:]
@@ -560,9 +562,21 @@ final class AppModel {
         return nil
     }
 
+    /// The conversation's card, with what it may do (`DecisionPhase`): live while its question is the pending one,
+    /// the result line after this Mac answered, disabled "Answered elsewhere" when someone else did.
+    func askCardDisplay(for key: SessionKey) -> (ask: PendingAsk, outcome: AnswerOutcome?, phase: DecisionPhase)? {
+        let answeredHere = answeredAsks[key].flatMap { Date().timeIntervalSince($0.at) < 90 ? $0 : nil }
+        let card = asks[key] ?? answeredHere?.ask ?? staleAsks[key].flatMap { Date().timeIntervalSince($0.at) < 600 ? $0.ask : nil }
+        guard let card else { return nil }
+        let phase = DecisionPhase.resolve(
+            cardToolUseId: card.toolUseId, pendingToolUseId: asks[key]?.toolUseId, answeredHereToolUseId: answeredHere?.ask.toolUseId)
+        return (card, phase == .answeredHere ? answeredHere?.outcome : nil, phase)
+    }
+
     /// Reads the question card's data for blocked Conductor chats, once per change of the chat.
     private func refreshAsks() async {
         guard !demoMode, !captureMode else { return }
+        let before = asks
         let blocked = sessions.filter { $0.state == .blocked && $0.alive != false && $0.key.provider == "conductor" }
         askFetchedAt = askFetchedAt.filter { k, _ in blocked.contains { $0.key == k } }
         for s in blocked where askFetchedAt[s.key] != .some(s.lastActivityAt) {
@@ -570,7 +584,12 @@ final class AppModel {
             guard let target = s.replyTarget else { continue }
             if let found = try? await client.pendingAsk(conductorSessionId: target) { asks[s.key] = found } else { asks[s.key] = nil }
         }
+        // A question that stops being pending (answered in Conductor, on the phone, or by typing) leaves a disabled card.
         asks = asks.filter { k, _ in blocked.contains { $0.key == k } }
+        for (k, ask) in before where asks[k]?.toolUseId != ask.toolUseId && answeredAsks[k]?.ask.toolUseId != ask.toolUseId {
+            staleAsks[k] = (ask, Date())
+        }
+        staleAsks = staleAsks.filter { k, d in asks[k] == nil && Date().timeIntervalSince(d.at) < 600 }
         answeredAsks = answeredAsks.filter { _, d in Date().timeIntervalSince(d.at) < 90 }
     }
 

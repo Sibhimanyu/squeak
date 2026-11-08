@@ -95,6 +95,8 @@ struct SessionDetail: View {
     @State private var topVisible = false
     /// The long queue/steer explanation shows until the first message sent mid-turn; a short line after.
     @AppStorage("queueSteerExplained") private var queueSteerExplained = false
+    /// While a decision waits the composer is folded to one quiet button; this opens it.
+    @State private var composerExpanded = false
 
     private var agent: String { SessionRowView.agentName(session.agent) ?? "Agent" }
     private var rows: [ChatTimeline.Row] {
@@ -249,7 +251,7 @@ struct SessionDetail: View {
                             case .message(let m, let muted):
                                 MessageView(
                                     message: m, agentName: agent, mark: session.agentMark, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
-                                    layout: !muted && m.id == needsYouMessageID && model.askDisplay(for: session.key) == nil ? ChoiceLayout.make(m.text) : nil,
+                                    layout: !muted && m.id == needsYouMessageID && model.askCardDisplay(for: session.key) == nil ? ChoiceLayout.make(m.text) : nil,
                                     canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
                                     receipt: receipt?.id == m.id ? receipt?.receipt : nil
                                 )
@@ -262,12 +264,15 @@ struct SessionDetail: View {
                                 EmptyView()
                             }
                         }
-                        if let display = model.askDisplay(for: session.key) {
+                        if let display = model.askCardDisplay(for: session.key) {
                             AskCard(
-                                ask: display.ask, framed: true, canSend: sendBlock == nil && model.isConnected,
-                                onSend: { form in await model.answer(form, for: session.key) }, result: display.outcome
+                                ask: display.ask, framed: true, canSend: sendBlock == nil && model.isConnected && display.phase == .live,
+                                onSend: { form in await model.answer(form, for: session.key) }, result: display.outcome,
+                                answeredElsewhere: display.phase == .answeredElsewhere
                             )
                             .id(display.ask.toolUseId)
+                        } else if ApprovalWait.isWaiting(state: session.state, awaitingApproval: session.awaitingApproval, hasQuestionCard: false) {
+                            approvalCard.id("approval")
                         }
                         Color.clear.frame(height: 1).id("bottom")
                             .onAppear { atBottom = true }
@@ -333,6 +338,38 @@ struct SessionDetail: View {
         }
         .frame(maxWidth: 340)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// A tool-permission block: Squeak never approves a tool, so the card points at Conductor.
+    private var approvalCard: some View {
+        HStack(spacing: Space.m) {
+            Lucide(.circleAlert, size: 16, color: Theme.needsYou)
+            Text(ApprovalWait.line).font(Typo.label).foregroundStyle(Theme.ink)
+            Spacer(minLength: 0)
+            if session.capabilities.openInHost.isSupported {
+                Button("Open in Conductor") { model.openInHost() }
+                    .modifier(GlassBorderedButton())
+                    .disabled(model.openURL == nil && !model.demoMode)
+                    .accessibilityLabel("Open in Conductor")
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.surface.opacity(0.7)))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.lineStrong))
+        .accessibilityElement(children: .combine)
+    }
+
+    /// An answer card or lettered options are waiting on the person and can still be answered.
+    private var decisionPending: Bool {
+        if let d = model.askCardDisplay(for: session.key) { return d.phase == .live }
+        guard sendBlock == nil, model.isConnected, let id = needsYouMessageID,
+              let m = model.messages.first(where: { $0.id == id }) else { return false }
+        return ChoiceLayout.make(m.text) != nil
+    }
+
+    private var composerFolded: Bool {
+        ComposerFold.isFolded(decisionPending: decisionPending, expanded: composerExpanded, hasDraft: hasText || images.hasImages)
     }
 
     /// The agent's last message, when it is the last thing in the chat and the chat needs you.
@@ -405,15 +442,27 @@ struct SessionDetail: View {
                 QueueStack(model: model, sessionId: session.key.hostSessionId, isWorking: working,
                            onEdit: { model.setDraft($0) })
             }
-            composer
-            Text(verbatim: destinationNote).font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, 4)
+            if composerFolded {
+                Button { composerExpanded = true; focusToken += 1 } label: {
+                    Text(ComposerFold.foldedTitle).font(Typo.label).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, Space.s).frame(height: Metrics.button).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(ComposerFold.foldedTitle)
+            } else {
+                composer
+            }
+            if !composerFolded {
+              Text(verbatim: destinationNote).font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, 4)
                 .task(id: model.serviceDown(session)) {
                     while model.serviceDown(session), !Task.isCancelled {
                         model.probeService()
                         try? await Task.sleep(for: .seconds(2.5))
                     }
                 }
+            }
         }
+        .onChange(of: decisionPending) { _, pending in if !pending { composerExpanded = false } }
         .frame(maxWidth: 820)
         .padding(.horizontal, 16)
         .padding(.top, 8)

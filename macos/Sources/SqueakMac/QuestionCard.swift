@@ -21,6 +21,8 @@ struct AskCard: View {
     var initial: AskForm?
     /// A result to show from the start: the card was rebuilt after its answer was sent.
     var result: AnswerOutcome?
+    /// The question is no longer pending and this Mac did not answer it: the card is read-only and says so.
+    var answeredElsewhere = false
 
     @State private var form: AskForm
     @State private var sending = false
@@ -29,8 +31,9 @@ struct AskCard: View {
 
     init(ask: PendingAsk, compact: Bool = false, framed: Bool = false, canSend: Bool = true, onOpen: @escaping () -> Void = {},
          onSend: @escaping (AskForm) async -> AnswerOutcome = { _ in .refused(reason: "Nothing is sent here.") },
-         initial: AskForm? = nil, result: AnswerOutcome? = nil) {
+         initial: AskForm? = nil, result: AnswerOutcome? = nil, answeredElsewhere: Bool = false) {
         self.result = result
+        self.answeredElsewhere = answeredElsewhere
         _outcome = State(initialValue: result)
         self.ask = ask; self.compact = compact; self.framed = framed; self.canSend = canSend; self.onOpen = onOpen; self.onSend = onSend
         self.initial = initial
@@ -42,7 +45,16 @@ struct AskCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? Space.s : Space.m) {
             if !answered {
-                if ask.kind == .plan { planBody } else { questionBody }
+                Group { if ask.kind == .plan { planBody } else { questionBody } }
+                    .disabled(answeredElsewhere)
+                    .opacity(answeredElsewhere ? 0.55 : 1)
+            }
+            if answeredElsewhere {
+                HStack(alignment: .top, spacing: 6) {
+                    Lucide(.circleCheck, size: 14, color: Theme.muted).padding(.top, 1)
+                    Text(DecisionPhase.elsewhereLine).font(Typo.meta).foregroundStyle(Theme.muted)
+                }
+                .accessibilityElement(children: .combine)
             }
             if let outcome {
                 HStack(alignment: .top, spacing: 6) {
